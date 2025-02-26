@@ -92,8 +92,15 @@ workflows:
           echo "============================================"
           echo "Deployment completed successfully for ${tenant}-${account}-${environment}"
           
-          # Perform validation checks
+          # Perform validation checks if validation workflow exists
           echo "Running post-deployment validation checks..."
-          atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
+          
+          # Check if validation workflow exists
+          if atmos workflow describe validate &>/dev/null; then
+            atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
+          else
+            echo "Validation workflow not found, skipping validation checks."
+            echo "Consider adding a 'validate' workflow to automate post-deployment validation."
+          fi
         env:
           AWS_SDK_LOAD_CONFIG: 1

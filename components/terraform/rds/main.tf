@@ -24,11 +24,27 @@ resource "aws_security_group" "rds" {
     security_groups = var.allowed_security_groups
   }
 
+  # Use more specific egress rules based on actual requirements
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.vpc_cidr]  # Limit to VPC CIDR
+    description = "Allow all outbound traffic within VPC"
+  }
+
+  # Add specific egress for AWS services if needed
+  dynamic "egress" {
+    for_each = var.additional_egress_rules
+    content {
+      from_port       = egress.value.from_port
+      to_port         = egress.value.to_port
+      protocol        = egress.value.protocol
+      prefix_list_ids = lookup(egress.value, "prefix_list_ids", null)
+      security_groups = lookup(egress.value, "security_groups", null)
+      cidr_blocks     = lookup(egress.value, "cidr_blocks", null)
+      description     = lookup(egress.value, "description", null)
+    }
   }
 
   tags = merge(
@@ -37,6 +53,10 @@ resource "aws_security_group" "rds" {
       Name = "${var.tags["Environment"]}-${var.identifier}-sg"
     }
   )
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_db_parameter_group" "main" {
@@ -88,6 +108,39 @@ resource "aws_secretsmanager_secret_version" "db_password" {
   })
 }
 
+resource "aws_iam_role" "monitoring" {
+  count = var.monitoring_interval > 0 && var.create_monitoring_role ? 1 : 0
+  
+  name = "${var.tags["Environment"]}-${var.identifier}-monitoring-role"
+  
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "monitoring.rds.amazonaws.com"
+        }
+      }
+    ]
+  })
+  
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.tags["Environment"]}-${var.identifier}-monitoring-role"
+    }
+  )
+}
+
+resource "aws_iam_role_policy_attachment" "monitoring" {
+  count = var.monitoring_interval > 0 && var.create_monitoring_role ? 1 : 0
+  
+  role       = aws_iam_role.monitoring[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+}
+
 resource "aws_db_instance" "main" {
   identifier                  = "${var.tags["Environment"]}-${var.identifier}"
   engine                      = var.engine
@@ -117,13 +170,17 @@ resource "aws_db_instance" "main" {
   final_snapshot_identifier   = var.skip_final_snapshot ? null : "${var.tags["Environment"]}-${var.identifier}-final-snapshot"
   copy_tags_to_snapshot       = var.copy_tags_to_snapshot
   monitoring_interval         = var.monitoring_interval
-  monitoring_role_arn         = var.monitoring_interval > 0 ? var.monitoring_role_arn : null
+  monitoring_role_arn         = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
   performance_insights_enabled = var.performance_insights_enabled
   deletion_protection         = var.deletion_protection
 
   lifecycle {
     prevent_destroy = var.prevent_destroy
   }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.monitoring
+  ]
 
   tags = merge(
     var.tags,

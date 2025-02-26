@@ -181,14 +181,39 @@ resource "aws_eks_node_group" "node_groups" {
     }
   )
 
+  # Explicit dependencies to avoid race conditions during creation and destruction
   depends_on = [
     aws_iam_role_policy_attachment.node_AmazonEKSWorkerNodePolicy,
     aws_iam_role_policy_attachment.node_AmazonEKS_CNI_Policy,
     aws_iam_role_policy_attachment.node_AmazonEC2ContainerRegistryReadOnly,
+    aws_eks_cluster.clusters,  # Ensure clusters are fully created before node groups
+    aws_iam_role.node         # Ensure roles are fully created before node groups
   ]
 
   lifecycle {
-    ignore_changes = [scaling_config[0].desired_size]
+    # Prevent replacement of node groups when certain changes occur
+    create_before_destroy = true
+    ignore_changes = [
+      scaling_config[0].desired_size,  # Allow autoscaling to manage desired size
+      
+      # Add other attributes that shouldn't trigger replacement if needed
+      # For example, labels and tags might be updated outside Terraform
+      labels,
+      tags
+    ]
+    
+    # Add precondition to check for required values
+    precondition {
+      condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) > 0
+      error_message = "At least one subnet must be provided for the node group."
+    }
+  }
+  
+  # Add a timeouts block to extend default timeouts for creation/deletion
+  timeouts {
+    create = "30m"
+    update = "30m"
+    delete = "30m"
   }
 }
 

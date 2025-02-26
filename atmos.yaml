@@ -30,6 +30,7 @@ workflows:
   - drift-detection.yaml
   - import.yaml
   - lint.yaml
+  - onboard-environment.yaml
   - plan-environment.yaml
   - validate.yaml
 
@@ -52,8 +53,12 @@ templates:
   gomplate:
     enabled: true
 
-# Added global variables section
+# Global variables section
 vars:
+  # Common variables
   tenant: "fnx"
-  management_account_id: "123456789012"
   region: "eu-west-2"
+  
+  # Environment-specific variables can be overridden in environment-specific stacks
+  # Default management account ID (should be overridden in production)
+  management_account_id: "${env:AWS_MANAGEMENT_ACCOUNT_ID, 123456789012}"

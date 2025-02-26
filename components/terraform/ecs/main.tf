@@ -42,6 +42,16 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
     capacity_provider = var.fargate_only ? "FARGATE" : aws_ecs_capacity_provider.main[0].name
     weight            = 1
   }
+
+  # Explicit dependency to avoid race condition
+  depends_on = [
+    aws_ecs_cluster.main,
+    aws_ecs_capacity_provider.main
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 

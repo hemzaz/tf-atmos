@@ -10,8 +10,8 @@
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::${var.bucket_name}",
-        "arn:aws:s3:::${var.bucket_name}/*"
+        "arn:aws:s3:::${bucket_name}",
+        "arn:aws:s3:::${bucket_name}/*"
       ]
     },
     {
@@ -21,7 +21,7 @@
         "dynamodb:PutItem",
         "dynamodb:DeleteItem"
       ],
-      "Resource": "arn:aws:dynamodb:${var.region}:${data.aws_caller_identity.current.account_id}:table/${var.dynamodb_table_name}"
+      "Resource": "arn:aws:dynamodb:${region}:${account_id}:table/${dynamodb_table_name}"
     }
   ]
 }

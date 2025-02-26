@@ -3,6 +3,18 @@ variable "region" {
   description = "AWS region"
 }
 
+variable "assume_role_arn" {
+  type        = string
+  description = "ARN of the IAM role to assume"
+  default     = null
+}
+
+variable "default_tags" {
+  type        = map(string)
+  description = "Default tags to apply to all resources"
+  default     = {}
+}
+
 variable "clusters" {
   type        = any
   description = "Map of cluster configurations with addons, Helm releases, and Kubernetes manifests"

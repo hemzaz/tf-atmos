@@ -97,7 +97,8 @@ vars:
             - |
               grafana:
                 enabled: true
-                adminPassword: "admin-password-to-change"
+                # Use a reference to a secret in AWS Secrets Manager or similar secure storage
+                adminPassword: "${ssm:/testenv-01/grafana/admin-password}"
               prometheus:
                 prometheusSpec:
                   retention: 15d

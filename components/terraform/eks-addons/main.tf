@@ -46,7 +46,8 @@ resource "time_sleep" "wait_for_cluster" {
     data.aws_eks_cluster.this
   ]
 
-  create_duration = "30s"
+  # Increased wait time to ensure cluster is fully ready
+  create_duration = "120s"
 }
 
 # Create IAM service account roles for addons if needed
@@ -150,15 +151,16 @@ resource "time_sleep" "wait_for_addons" {
   count = length(local.addons) > 0 ? 1 : 0
 
   depends_on = [
-    aws_eks_addon.addons
+    aws_eks_addon.addons,
+    aws_iam_role_policy_attachment.service_account
   ]
 
-  create_duration = "15s"
+  # Allow more time for addons to initialize
+  create_duration = "30s"
 }
 
 # Helm Provider Configuration
 provider "helm" {
-  alias = "default"
   kubernetes {
     host                   = var.host
     cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
@@ -173,8 +175,6 @@ provider "helm" {
 # Helm Releases
 resource "helm_release" "releases" {
   for_each = local.helm_releases
-
-  provider = helm.default
 
   name             = lookup(each.value, "release_name", each.key)
   chart            = each.value.chart
@@ -226,12 +226,12 @@ resource "time_sleep" "wait_for_helm_releases" {
     helm_release.releases
   ]
 
-  create_duration = "15s"
+  # Allow more time for Helm releases to stabilize
+  create_duration = "45s"
 }
 
 # Kubernetes Provider Configuration
 provider "kubernetes" {
-  alias = "default"
   host                   = var.host
   cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
   exec {
@@ -244,8 +244,6 @@ provider "kubernetes" {
 # Kubernetes Manifests
 resource "kubernetes_manifest" "manifests" {
   for_each = local.kubernetes_manifests
-
-  provider = kubernetes.default
 
   manifest = each.value.manifest
 

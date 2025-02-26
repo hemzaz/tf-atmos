@@ -52,7 +52,6 @@ components:
       # Provider configuration
       providers:
         aws:
-          profile: ${aws_profile}
           region: ${region}
 
       # Define common outputs

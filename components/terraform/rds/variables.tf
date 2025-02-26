@@ -8,6 +8,30 @@ variable "vpc_id" {
   description = "VPC ID where RDS instance will be created"
 }
 
+variable "vpc_cidr" {
+  type        = string
+  description = "VPC CIDR block for security group egress rules"
+  
+  validation {
+    condition     = can(cidrhost(var.vpc_cidr, 0))
+    error_message = "Must be a valid IPv4 CIDR block address."
+  }
+}
+
+variable "additional_egress_rules" {
+  type = list(object({
+    from_port       = number
+    to_port         = number
+    protocol        = string
+    prefix_list_ids = optional(list(string))
+    security_groups = optional(list(string))
+    cidr_blocks     = optional(list(string))
+    description     = optional(string)
+  }))
+  description = "List of additional egress rules for the RDS security group"
+  default     = []
+}
+
 variable "subnet_ids" {
   type        = list(string)
   description = "List of subnet IDs for the DB subnet group"
@@ -174,6 +198,12 @@ variable "monitoring_role_arn" {
   type        = string
   description = "ARN of the IAM role for enhanced monitoring"
   default     = null
+}
+
+variable "create_monitoring_role" {
+  type        = bool
+  description = "Create an IAM role for RDS enhanced monitoring"
+  default     = true
 }
 
 variable "performance_insights_enabled" {
