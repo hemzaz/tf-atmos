@@ -1,0 +1,176 @@
+import:
+  - catalog/infrastructure
+
+vars:
+  account: dev
+  environment: testenv-01
+  region: eu-west-2
+
+  # EKS clusters configuration
+  eks.clusters:
+    # Main application cluster
+    main:
+      enabled: true
+      kubernetes_version: "1.28"
+      endpoint_private_access: true
+      endpoint_public_access: true
+      enabled_cluster_log_types: ["api", "audit"]
+      node_groups:
+        workers:
+          enabled: true
+          instance_types: ["t3.medium"]
+          desired_size: 2
+          min_size: 1
+          max_size: 4
+          labels:
+            role: worker
+        monitoring:
+          enabled: true
+          instance_types: ["t3.large"]
+          desired_size: 1
+          min_size: 1
+          max_size: 2
+          labels:
+            role: monitoring
+          taints:
+            - key: dedicated
+              value: monitoring
+              effect: "NO_SCHEDULE"
+      tags:
+        Purpose: "General"
+
+    # Data processing cluster (disabled in dev)
+    data:
+      enabled: false
+      kubernetes_version: "1.28"
+      node_groups:
+        workers:
+          instance_types: ["t3.large"]
+          desired_size: 3
+      tags:
+        Purpose: "DataProcessing"
+
+  # EKS addons configuration
+  eks-addons.clusters:
+    main:
+      # Reference to existing EKS resources
+      host: ${output.eks.cluster_endpoints.main}
+      cluster_ca_certificate: ${output.eks.cluster_ca_data.main}
+      oidc_provider_arn: ${output.eks.oidc_provider_arns.main}
+
+      # AWS EKS addons
+      addons:
+        vpc-cni:
+          name: "vpc-cni"
+          version: "v1.13.2-eksbuild.1"
+          resolve_conflicts: "OVERWRITE"
+
+        coredns:
+          name: "coredns"
+          version: "v1.10.1-eksbuild.1"
+
+        kube-proxy:
+          name: "kube-proxy"
+          version: "v1.27.1-eksbuild.1"
+
+      # Helm releases
+      helm_releases:
+        metrics-server:
+          enabled: true
+          chart: "metrics-server"
+          repository: "https://kubernetes-sigs.github.io/metrics-server/"
+          chart_version: "3.8.2"
+          namespace: "kube-system"
+          set_values:
+            apiService.create: true
+            args:
+              - "--kubelet-preferred-address-types=InternalIP"
+
+        prometheus:
+          enabled: true
+          chart: "kube-prometheus-stack"
+          repository: "https://prometheus-community.github.io/helm-charts"
+          chart_version: "45.7.1"
+          namespace: "monitoring"
+          create_namespace: true
+          values:
+            - |
+              grafana:
+                enabled: true
+                adminPassword: "admin-password-to-change"
+              prometheus:
+                prometheusSpec:
+                  retention: 15d
+                  resources:
+                    requests:
+                      memory: 1Gi
+                      cpu: 500m
+                    limits:
+                      memory: 2Gi
+
+        aws-load-balancer-controller:
+          enabled: true
+          chart: "aws-load-balancer-controller"
+          repository: "https://aws.github.io/eks-charts"
+          chart_version: "1.4.6"
+          namespace: "kube-system"
+          set_values:
+            clusterName: "testenv-01-main"
+            serviceAccount.create: true
+            serviceAccount.name: "aws-load-balancer-controller"
+          create_service_account_role: true
+          service_account_policy: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeLoadBalancers",
+                    "elasticloadbalancing:*",
+                    "ec2:DescribeInstances"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+
+      # Kubernetes manifests
+      kubernetes_manifests:
+        namespace-dev:
+          enabled: true
+          manifest: {
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+              "name": "dev",
+              "labels": {
+                "name": "dev"
+              }
+            }
+          }
+
+        resource-quota:
+          enabled: true
+          manifest: {
+            "apiVersion": "v1",
+            "kind": "ResourceQuota",
+            "metadata": {
+              "name": "dev-quota",
+              "namespace": "dev"
+            },
+            "spec": {
+              "hard": {
+                "pods": "20",
+                "requests.cpu": "4",
+                "requests.memory": "8Gi",
+                "limits.cpu": "8",
+                "limits.memory": "16Gi"
+              }
+            }
+          }
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"

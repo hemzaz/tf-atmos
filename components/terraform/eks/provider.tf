@@ -1,15 +1,17 @@
 provider "aws" {
-  alias  = "default"
-  region = var.aws_region
-  assume_role {
-    role_arn = "arn:aws:iam::${var.shared_account_id}:role/SharedServicesAccessRole"
-  }
+  region = var.region
 }
 
-provider "aws" {
-  alias  = "target_account"
-  region = var.aws_region
-  assume_role {
-    role_arn = "arn:aws:iam::${var.env_account_id}:role/EnvironmentAccessRole"
+terraform {
+  required_version = ">= 1.0.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 }

@@ -1,19 +1,18 @@
 name: infrastructure
-description: "Reusable infrastructure configuration with flexible EC2 instances"
+description: "Reusable infrastructure configuration with EKS clusters"
 
 components:
   terraform:
-    ec2:
+    eks:
       metadata:
-        component: ec2
+        component: eks
         type: abstract
       vars:
         enabled: true
         region: ${region}
-        vpc_id: ${output.vpc.vpc_id}
         subnet_ids: ${output.vpc.private_subnet_ids}
-        # A map that will be overridden in environment-specific configs
-        instances: {}
+        # Map of clusters with dynamic configuration
+        clusters: {}
 
       # Define common tags
       tags:
@@ -28,7 +27,7 @@ components:
           backend:
             s3:
               bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/infrastructure/ec2/terraform.tfstate
+              key: ${account}/${environment}/infrastructure/eks/terraform.tfstate
               region: ${region}
               role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
               dynamodb_table: ${tenant}-terraform-locks
@@ -41,31 +40,64 @@ components:
 
       # Define outputs
       outputs:
-        instance_ids:
-          description: "Map of instance names to instance IDs"
-          value: ${output.instance_ids}
-        instance_private_ips:
-          description: "Map of instance names to private IP addresses"
-          value: ${output.instance_private_ips}
-        security_group_ids:
-          description: "Map of instance names to security group IDs"
-          value: ${output.security_group_ids}
+        cluster_ids:
+          description: "Map of cluster names to cluster IDs"
+          value: ${output.cluster_ids}
+        cluster_endpoints:
+          description: "Map of cluster names to cluster endpoints"
+          value: ${output.cluster_endpoints}
+        cluster_ca_data:
+          description: "Map of cluster names to cluster CA certificate data"
+          value: ${output.cluster_ca_data}
+        oidc_provider_arns:
+          description: "Map of cluster names to OIDC provider ARNs"
+          value: ${output.oidc_provider_arns}
 
-    # Other infrastructure components remain the same
-    ecs:
+    eks-addons:
       metadata:
-        component: ecs
+        component: eks-addons
         type: abstract
       vars:
         enabled: true
         region: ${region}
-        fargate_only: true
-        enable_container_insights: true
+        # Reference to existing EKS resources
+        cluster_name: ""
+        host: ""
+        cluster_ca_certificate: ""
+        oidc_provider_arn: ""
+        oidc_provider_url: ""
+        # Map of clusters with addons, Helm releases, and Kubernetes manifests
+        clusters: {}
 
       # Define common tags
       tags:
         Tenant: ${tenant}
         Account: ${account}
         Environment: ${environment}
-        Component: "ECS"
         ManagedBy: "Terraform"
+
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/infrastructure/eks-addons/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+
+      # Provider configuration
+      providers:
+        aws:
+          profile: ${aws_profile}
+          region: ${region}
+
+      # Define outputs
+      outputs:
+        addon_arns:
+          description: "Map of addon names to addon ARNs"
+          value: ${output.addon_arns}
+        helm_release_statuses:
+          description: "Map of Helm release names to statuses"
+          value: ${output.helm_release_statuses}
