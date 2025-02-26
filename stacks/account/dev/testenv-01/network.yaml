@@ -1,0 +1,25 @@
+import:
+  - catalog/network
+
+vars:
+  account: dev
+  environment: testenv-01
+  region: eu-west-2
+  # Override vpc_cidr for this specific environment
+  vpc_cidr: "10.1.0.0/16"
+  private_subnets:
+    - "10.1.1.0/24"
+    - "10.1.2.0/24"
+    - "10.1.3.0/24"
+  public_subnets:
+    - "10.1.101.0/24"
+    - "10.1.102.0/24"
+    - "10.1.103.0/24"
+  # In dev, we might disable NAT gateway to save costs
+  enable_nat_gateway: false
+  create_vpc_iam_role: true
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"

@@ -1,0 +1,105 @@
+import:
+  - catalog/infrastructure
+
+vars:
+  account: dev
+  environment: testenv-01
+  region: eu-west-2
+
+  # EC2 instances - free to add/remove instances as needed
+  ec2.instances:
+    # K3s server
+    k3s:
+      enabled: true
+      instance_type: "t3.medium"
+      root_volume_size: 30
+      allowed_ingress_rules:
+        - from_port: 6443
+          to_port: 6443
+          protocol: "tcp"
+          cidr_blocks: ["0.0.0.0/0"]
+          description: "Kubernetes API"
+        - from_port: 80
+          to_port: 80
+          protocol: "tcp"
+          cidr_blocks: ["0.0.0.0/0"]
+          description: "HTTP"
+        - from_port: 443
+          to_port: 443
+          protocol: "tcp"
+          cidr_blocks: ["0.0.0.0/0"]
+          description: "HTTPS"
+      user_data: |
+        #!/bin/bash
+        curl -sfL https://get.k3s.io | sh -
+      tags:
+        Role: "Kubernetes"
+
+    # Apache web server
+    apache:
+      enabled: true
+      instance_type: "t3.micro"
+      allowed_ingress_rules:
+        - from_port: 80
+          to_port: 80
+          protocol: "tcp"
+          cidr_blocks: ["0.0.0.0/0"]
+          description: "HTTP"
+        - from_port: 443
+          to_port: 443
+          protocol: "tcp"
+          cidr_blocks: ["0.0.0.0/0"]
+          description: "HTTPS"
+      user_data: |
+        #!/bin/bash
+        yum update -y
+        yum install -y httpd
+        systemctl start httpd
+        systemctl enable httpd
+      tags:
+        Role: "WebServer"
+
+    # Tableau server
+    tableau:
+      enabled: true
+      instance_type: "t3.xlarge"
+      root_volume_size: 100
+      ebs_block_devices:
+        - device_name: "/dev/sdf"
+          volume_size: 200
+      allowed_ingress_rules:
+        - from_port: 80
+          to_port: 80
+          protocol: "tcp"
+          cidr_blocks: ["0.0.0.0/0"]
+          description: "HTTP"
+        - from_port: 443
+          to_port: 443
+          protocol: "tcp"
+          cidr_blocks: ["0.0.0.0/0"]
+          description: "HTTPS"
+      tags:
+        Role: "DataVisualization"
+
+  # Other infrastructure components
+  ecs.enabled: true
+  ecs.fargate_only: true
+  ecs.enable_container_insights: false
+
+  rds.enabled: true
+  rds.identifier: "testdb"
+  rds.instance_class: "db.t3.micro"
+  rds.allocated_storage: 5
+  rds.db_name: "testapp"
+
+  monitoring.enabled: true
+  monitoring.create_dashboard: true
+
+  lambda.enabled: true
+  lambda.function_name: "dev-app-function"
+  lambda.memory_size: 128
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"

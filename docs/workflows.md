@@ -103,6 +103,145 @@ workflows:
 atmos workflow plan-environment tenant=mycompany account=dev environment=testenv-01
 ```
 
+### 4. Apply Environment
+
+**File:** `workflows/apply-environment.yaml`
+
+Enhanced workflow to apply all components in an environment with proper error handling and validation.
+
+```yaml
+name: apply-environment
+description: "Apply changes for all components in an environment with improved error handling"
+
+workflows:
+  apply:
+    steps:
+    - run:
+        command: |
+          # Validate required variables
+          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
+            echo "ERROR: Missing required parameters. Usage: atmos workflow apply-environment tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          # Set exit on error
+          set -e
+          
+          # Function to apply a component with error handling
+          apply_component() {
+            component=$1
+            echo "Applying ${component}..."
+            echo "----------------------------------------"
+            if ! atmos terraform apply ${component} -s ${tenant}-${account}-${environment}; then
+              echo "ERROR: Failed to apply ${component}. Exiting."
+              return 1
+            fi
+            echo "Successfully applied ${component}."
+            echo "----------------------------------------"
+            return 0
+          }
+          
+          # Apply components in dependency order
+          echo "Starting deployment for ${tenant}-${account}-${environment}"
+          echo "============================================"
+          
+          # Apply backend first
+          apply_component "backend" || exit 1
+          
+          # Apply IAM next
+          apply_component "iam" || exit 1
+          
+          # Apply network
+          apply_component "network" || exit 1
+          
+          # Apply infrastructure components
+          apply_component "infrastructure" || exit 1
+          
+          # Apply services last
+          apply_component "services" || exit 1
+          
+          echo "============================================"
+          echo "Deployment completed successfully for ${tenant}-${account}-${environment}"
+          
+          # Perform validation checks
+          echo "Running post-deployment validation checks..."
+          atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
+```
+
+**Usage:**
+```bash
+atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01
+```
+
+### 5. Onboard Environment
+
+**File:** `workflows/onboard-environment.yaml`
+
+New workflow to streamline the creation of new environments by generating all required configurations and optionally deploying the infrastructure.
+
+```yaml
+name: onboard-environment
+description: "Onboard a new environment by creating all necessary configurations and deploying infrastructure"
+
+workflows:
+  onboard:
+    steps:
+    - run:
+        command: |
+          # Validate required variables
+          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ] || [ -z "${vpc_cidr}" ]; then
+            echo "ERROR: Missing required parameters."
+            echo "Usage: atmos workflow onboard-environment tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<vpc_cidr> [region=<region>]"
+            exit 1
+          fi
+          
+          # Create configuration files
+          ENV_DIR="stacks/account/${account}/${environment}"
+          mkdir -p "${ENV_DIR}"
+          
+          # Generate backend, iam, network, infrastructure, and services configurations
+          # ...
+          
+          # Ask for confirmation before deploying
+          read -p "Do you want to deploy the environment now? (y/n): " CONFIRM
+          if [[ ${CONFIRM} == "y" || ${CONFIRM} == "Y" ]]; then
+            echo "Beginning deployment..."
+            atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
+          fi
+```
+
+**Usage:**
+```bash
+atmos workflow onboard-environment tenant=mycompany account=dev environment=testenv-02 vpc_cidr=10.2.0.0/16
+```
+
+### 6. Drift Detection
+
+**File:** `workflows/drift-detection.yaml`
+
+This workflow detects infrastructure drift by comparing the actual state with the desired state.
+
+```yaml
+name: drift-detection
+description: "Detect infrastructure drift in an environment"
+
+workflows:
+  detect:
+    steps:
+    - run:
+        command: |
+          echo "Checking drift for backend..."
+          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode
+          echo "Checking drift for iam..."
+          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode
+          # ...
+```
+
+**Usage:**
+```bash
+atmos workflow drift-detection tenant=mycompany account=dev environment=testenv-01
+```
+
 ## Workflow Design Principles
 
 1. **Idempotency:** Workflows are designed to be idempotent, meaning they can be run multiple times without causing unintended side effects.
@@ -117,17 +256,15 @@ atmos workflow plan-environment tenant=mycompany account=dev environment=testenv
 
 ## Best Practices for Workflow Development
 
-1. **Naming Convention:** Use clear, descriptive names for workflows and their steps.
+1. **Validation:** Always validate required parameters at the beginning of the workflow.
 
-2. **Documentation:** Include a description for each workflow and comment complex commands.
+2. **Error Handling:** Implement proper error handling with informative error messages.
 
-3. **Error Handling:** Implement appropriate error handling and provide meaningful error messages.
+3. **Dependency Order:** Apply components in the correct dependency order (backend → IAM → network → infrastructure → services).
 
-4. **Parameterization:** Use environment variables to make workflows flexible and reusable across different contexts.
+4. **Post-Deployment Validation:** Include validation steps after deployment to ensure everything is working as expected.
 
-5. **Atomicity:** Design workflows to be atomic - they should either complete fully or not at all.
-
-6. **Testing:** Regularly test workflows in a safe environment to ensure they behave as expected.
+5. **Atomic Operations:** Design workflows to be atomic - they should either complete fully or not at all.
 
 ## Extending Workflows
 
@@ -138,20 +275,20 @@ To add a new workflow:
 3. Use existing environment variables or define new ones as needed.
 4. Add the new workflow to the `imports` section of `atmos.yaml`.
 
-Example of adding a new workflow for security scanning:
+Example structure:
 
 ```yaml
-# workflows/security-scan.yaml
-name: security-scan
-description: "Run security scans on infrastructure"
+name: custom-workflow
+description: "Description of your custom workflow"
 
 workflows:
-  scan:
+  main:
     steps:
     - run:
         command: |
-          echo "Running security scan for ${tenant}-${account}-${environment}"
-          # Add your security scanning logic here
+          # Your workflow logic here
+        env:
+          # Environment variables
 ```
 
 Then in `atmos.yaml`:
@@ -159,6 +296,6 @@ Then in `atmos.yaml`:
 ```yaml
 workflows:
   imports:
-    - security-scan.yaml
+    - custom-workflow.yaml
     # ... other workflows
 ```

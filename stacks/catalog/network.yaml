@@ -1,1 +1,68 @@
+name: network
+description: "Reusable network configuration"
 
+components:
+  terraform:
+    vpc:
+      metadata:
+        component: vpc
+        type: abstract
+      vars:
+        enabled: true
+        region: ${region}
+        vpc_cidr: "10.0.0.0/16"
+        azs:
+          - ${region}a
+          - ${region}b
+          - ${region}c
+        private_subnets:
+          - "10.0.1.0/24"
+          - "10.0.2.0/24"
+          - "10.0.3.0/24"
+        public_subnets:
+          - "10.0.101.0/24"
+          - "10.0.102.0/24"
+          - "10.0.103.0/24"
+        enable_nat_gateway: true
+        enable_vpn_gateway: false
+        enable_transit_gateway: false
+        transit_gateway_id: ""
+        ram_resource_share_arn: ""
+        create_vpc_iam_role: true
+
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "Network"
+        ManagedBy: "Terraform"
+
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/network/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+
+      # Provider configuration
+      providers:
+        aws:
+          profile: ${aws_profile}
+          region: ${region}
+
+      # Define common outputs
+      outputs:
+        vpc_id:
+          description: "ID of the VPC"
+          value: ${output.vpc_id}
+        private_subnet_ids:
+          description: "IDs of the private subnets"
+          value: ${output.private_subnet_ids}
+        public_subnet_ids:
+          description: "IDs of the public subnets"
+          value: ${output.public_subnet_ids}

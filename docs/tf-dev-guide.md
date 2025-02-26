@@ -102,6 +102,7 @@ Define outputs that might be useful for other components or for display. In Atmo
 
 - Output resource IDs and ARNs for cross-component references
 - Use `sensitive = true` for outputs containing sensitive information
+- Include descriptive documentation for each output
 
 Example:
 
@@ -185,80 +186,47 @@ data "aws_ami" "amazon_linux_2" {
 }
 ```
 
-### 6. locals.tf
+## New Infrastructure Components
 
-Define local variables for complex computations or to improve readability. In Atmos:
+In addition to the basic component structure, the productized version of this infrastructure includes several new components:
 
-- Use locals to construct resource names consistently
-- Perform data transformations here to keep `main.tf` clean
+### 1. ECS Module
 
-Example:
+The ECS module provides container orchestration capabilities with support for both EC2 and Fargate launch types.
 
-```hcl
-locals {
-  account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.name
+Key features:
+- Cluster creation with container insights
+- Capacity provider management
+- Integration with auto-scaling groups
+- Fargate profiles for serverless containers
 
-  name_prefix = "${var.namespace}-${var.environment}-${var.name}"
+### 2. RDS Module
 
-  vpc_id = var.vpc_id != null ? var.vpc_id : data.aws_vpc.selected[0].id
+The RDS module manages relational databases with:
+- Subnet group and security group creation
+- Parameter group customization
+- Automated backups and snapshots
+- Encryption and performance insights
+- Secrets Manager integration for credentials
 
-  subnet_ids = flatten([
-    for subnet in var.subnet_configuration : [
-      aws_subnet.this[subnet.name].id
-    ]
-  ])
+### 3. Lambda Module
 
-  common_tags = merge(
-    var.tags,
-    {
-      "Namespace"   = var.namespace
-      "Environment" = var.environment
-    }
-  )
-}
-```
+The serverless Lambda module includes:
+- Function deployment with multiple source options (S3, local)
+- IAM role and policy management
+- CloudWatch log group integration
+- VPC connectivity options
+- Event source mappings (API Gateway, S3, CloudWatch Events, SNS)
+- Alias and version management
 
-### 7. iam.tf
+### 4. Monitoring Module
 
-Define IAM roles and policies here. For Atmos:
-
-- Use separate files for complex IAM configurations
-- Leverage `data` sources for managed policies
-- Use policy documents for custom policies
-
-Example:
-
-```hcl
-resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "${local.name_prefix}-ecs-task-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
-  role       = aws_iam_role.ecs_task_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-resource "aws_iam_role_policy" "secrets_access" {
-  name = "${local.name_prefix}-secrets-access-policy"
-  role = aws_iam_role.ecs_task_execution_role.id
-
-  policy = file("${path.module}/policies/secrets-access-policy.json")
-}
-```
+A comprehensive monitoring solution with:
+- CloudWatch dashboards for environment-wide visibility
+- Metric alarms for CPU, memory, and database connections
+- Log groups with retention policies
+- SNS topics for alarm notifications
+- Custom metric filters for log analysis
 
 ## Advanced Techniques
 
@@ -299,16 +267,23 @@ resource "aws_nat_gateway" "this" {
 
 ### 3. Complex Validations
 
-Use `terraform_data` (formerly `null_resource`) for complex validations:
+Use lifecycle preconditions for complex validations:
 
 ```hcl
-resource "terraform_data" "validate_cidr_blocks" {
-  count = length(var.subnet_configuration)
+resource "aws_subnet" "private" {
+  count             = length(var.private_subnets)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = var.private_subnets[count.index]
+  availability_zone = var.azs[count.index]
+
+  tags = merge(var.tags, {
+    Name = "${var.tags["Environment"]}-private-subnet-${count.index + 1}"
+  })
 
   lifecycle {
     precondition {
-      condition     = cidrsubnet(var.vpc_cidr, 8, count.index) == var.subnet_configuration[count.index].cidr_block
-      error_message = "Subnet CIDR ${var.subnet_configuration[count.index].cidr_block} is not within the VPC CIDR ${var.vpc_cidr}"
+      condition     = cidrsubnet(var.vpc_cidr, 8, count.index) == var.private_subnets[count.index]
+      error_message = "Subnet CIDR ${var.private_subnets[count.index]} is not within the VPC CIDR ${var.vpc_cidr}"
     }
   }
 }
@@ -340,21 +315,29 @@ resource "aws_ecs_task_definition" "this" {
 
 ## Best Practices for Atmos Components
 
-1. **Modularity**: Design components to be as modular as possible, allowing for easy composition in Atmos stacks.
+1. **Complete Outputs**: Always provide comprehensive outputs for each component to enable cross-component references.
 
-2. **Consistent Naming**: Use consistent naming conventions across all components. Leverage Atmos's `${tenant}`, `${environment}`, and `${stage}` variables.
+2. **Error Handling**: Implement proper error handling using lifecycle blocks, validations, and preconditions.
 
-3. **Default Tags**: Always include default tags that can be overridden or extended in Atmos stack configurations.
+3. **Security Best Practices**: Follow security best practices for all components:
+   - Encrypt sensitive data at rest and in transit
+   - Use Secrets Manager for credentials
+   - Implement least privilege IAM policies
+   - Enable VPC isolation where appropriate
 
-4. **Use Atmos Variables**: Leverage Atmos's built-in variables in your component configurations.
+4. **Resource Naming**: Use consistent naming conventions that include environment, component, and purpose.
 
-5. **Documentation**: Provide comprehensive README files for each component, detailing usage, inputs, and outputs.
+5. **Tagging Strategy**: Implement a comprehensive tagging strategy for cost allocation and resource management.
 
-6. **Testing**: Implement automated tests for your components using tools like Terratest.
+6. **State Management**: Design components with Atmos's centralized state management in mind, using appropriate backend configurations.
 
-7. **Version Constraints**: Use version constraints for providers and modules to ensure consistency across environments.
+7. **Documentation**: Provide detailed README files for each component with usage examples and variable descriptions.
 
-8. **State Management**: Design components with Atmos's centralized state management in mind.
+8. **Module Versioning**: Use semantic versioning for modules to ensure compatibility across environments.
+
+9. **Conditional Features**: Use feature flags (boolean variables) to enable or disable certain features of a component.
+
+10. **Cross-Account Support**: Design components to work across multiple AWS accounts using assume role functionality.
 
 ## Conclusion
 

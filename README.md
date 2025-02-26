@@ -2,7 +2,7 @@
 
 ## 1. What is this project?
 
-This project is a comprehensive, Atmos-managed infrastructure-as-code solution for deploying and managing multi-account AWS environments. It leverages Terraform for resource provisioning and Atmos for orchestration, providing a scalable and maintainable approach to infrastructure management.
+This project is a comprehensive, turnkey infrastructure-as-code solution for deploying and managing multi-account AWS environments. It leverages Terraform for resource provisioning and Atmos for orchestration, providing a scalable and maintainable approach to infrastructure management.
 
 Key features:
 - Multi-account AWS setup with separate environments (dev, staging, prod, etc.)
@@ -10,6 +10,7 @@ Key features:
 - Modular component structure for easy customization and reuse
 - Workflow automation for common tasks (plan, apply, destroy, drift detection)
 - Consistent naming and tagging conventions across resources
+- Streamlined environment onboarding process
 
 ## 2. Project Structure
 
@@ -21,10 +22,14 @@ Key features:
 │       ├── acm/
 │       ├── backend/
 │       ├── dns/
+│       ├── ecs/               # Container orchestration
 │       ├── eks/
 │       ├── eks-addons/
 │       ├── helm/
 │       ├── iam/
+│       ├── lambda/            # Serverless functions
+│       ├── monitoring/        # CloudWatch dashboards and alarms
+│       ├── rds/               # Database services
 │       ├── security-groups/
 │       └── vpc/
 ├── docs/                      # Project documentation
@@ -36,11 +41,27 @@ Key features:
 │   │   ├── shared-services/
 │   │   └── stg/
 │   ├── catalog/               # Reusable stack configurations
+│   │   ├── backend.yaml       # Backend configuration
+│   │   ├── iam.yaml           # IAM configuration
+│   │   ├── infrastructure.yaml # Infrastructure components
+│   │   ├── network.yaml       # VPC and networking
+│   │   └── services.yaml      # Application services
 │   └── schemas/               # JSON schemas for validation
 └── workflows/                 # Atmos workflow definitions
+    ├── apply-backend.yaml
+    ├── apply-environment.yaml
+    ├── bootstrap-backend.yaml
+    ├── destroy-backend.yaml
+    ├── destroy-environment.yaml
+    ├── drift-detection.yaml
+    ├── import.yaml
+    ├── lint.yaml
+    ├── onboard-environment.yaml # Environment onboarding
+    ├── plan-environment.yaml
+    └── validate.yaml
 ```
 
-## 3. How to Deploy
+## 3. Getting Started
 
 ### Prerequisites
 - AWS CLI configured with appropriate credentials
@@ -59,32 +80,58 @@ Key features:
    atmos workflow apply-backend tenant=mycompany account=management environment=prod
    ```
 
-3. Deploy an environment:
+3. Onboard a new environment:
+   ```
+   atmos workflow onboard-environment tenant=mycompany account=dev environment=testenv-01 vpc_cidr=10.1.0.0/16
+   ```
+
+4. Deploy an existing environment:
    ```
    atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01
    ```
 
-## 4. Development Guide
+## 4. Component Catalog
 
-### Code Conventions
+This infrastructure includes the following core components:
 
-- Use consistent naming conventions:
-  - Resources: `${tenant}-${account}-${environment}-resource-name`
-  - IAM Roles: `${tenant}-${account}-${environment}-RoleName`
-  - S3 Buckets: `${tenant}-${account}-${environment}-bucket-name`
+### Network Layer
+- **VPC** - Virtual private cloud with public and private subnets
+- **NAT Gateway** - For outbound internet access from private subnets
+- **VPN Gateway** - For connectivity to on-premises networks
+- **Transit Gateway** - For connecting multiple VPCs
 
-- Tag all resources with at least:
-  - Tenant
-  - Account
-  - Environment
-  - ManagedBy: "Terraform"
+### Infrastructure Layer
+- **EC2** - Virtual servers with security groups and IAM profiles
+- **ECS** - Container orchestration with Fargate support
+- **RDS** - Managed relational databases with automated backups
+- **Lambda** - Serverless functions with monitoring
+- **Monitoring** - CloudWatch dashboards, alarms, and log groups
 
-### Structure Guidelines
+### Services Layer
+- **API Gateway** - For creating and managing APIs
+- **Load Balancer** - Application load balancers for web traffic
+- **CloudFront** - Content delivery network for global distribution
 
-- Keep Terraform modules in `components/terraform/`
-- Place reusable stack configurations in `stacks/catalog/`
-- Create account and environment-specific configurations in `stacks/account/`
-- Define workflows in the `workflows/` directory
+### Operations Layer
+- **IAM** - Cross-account roles and policies
+- **Backend** - S3 and DynamoDB for Terraform state management
+
+## 5. Workflows
+
+The following workflows are available to manage the infrastructure:
+
+- **bootstrap-backend** - Initialize the Terraform backend
+- **apply-backend** - Apply changes to the backend configuration
+- **onboard-environment** - Create a new environment with baseline infrastructure
+- **apply-environment** - Apply changes to an environment
+- **plan-environment** - Plan changes for an environment
+- **destroy-environment** - Destroy all resources in an environment
+- **drift-detection** - Detect infrastructure drift
+- **validate** - Validate Terraform configurations
+- **lint** - Lint Terraform code and Atmos configurations
+- **import** - Import existing resources into Terraform state
+
+## 6. Development Guide
 
 ### Adding a New Component
 
@@ -94,56 +141,39 @@ Key features:
 
 ### Adding a New Environment
 
-1. Create a new directory under `stacks/account/<account>/`
-2. Create YAML files for each component (backend.yaml, iam.yaml, etc.)
-3. Import and extend catalog configurations as needed
-
-## 5. Examples
-
-### Defining a New VPC
-
-1. In `components/terraform/vpc/main.tf`:
-   ```hcl
-   resource "aws_vpc" "main" {
-     cidr_block = var.vpc_cidr
-     tags = merge(var.tags, {
-       Name = "${var.tenant}-${var.account}-${var.environment}-main-vpc"
-     })
-   }
+1. Use the onboarding workflow:
    ```
-
-2. In `stacks/catalog/network.yaml`:
-   ```yaml
-   components:
-     terraform:
-       vpc:
-         metadata:
-           component: vpc
-           type: abstract
-         vars:
-           vpc_cidr: "10.0.0.0/16"
-         settings:
-           terraform:
-             backend:
-               s3:
-                 key: ${account}/${environment}/network/terraform.tfstate
+   atmos workflow onboard-environment tenant=mycompany account=dev environment=newenv vpc_cidr=10.2.0.0/16
    ```
+2. Customize the generated configurations as needed
 
-3. In `stacks/account/dev/testenv-01/network.yaml`:
-   ```yaml
-   import:
-     - catalog/network
-   
-   vars:
-     account: dev
-     environment: testenv-01
-     vpc_cidr: "10.1.0.0/16"  # Override the default
-   ```
+### Modifying Existing Components
 
-### Applying Changes
+1. Make changes to the component code in `components/terraform/`
+2. Update the corresponding catalog file if necessary
+3. Run `atmos workflow plan-environment` to validate changes
+4. Apply changes with `atmos workflow apply-environment`
 
-To apply the VPC configuration:
+## 7. Best Practices
 
-```bash
-atmos terraform apply vpc -s mycompany-dev-testenv-01
-```
+- Use consistent naming conventions across all resources
+- Follow the principle of least privilege for IAM policies
+- Leverage Atmos variables for environment-specific configurations
+- Use the catalog for reusable stack configurations
+- Implement cost tagging for resource attribution
+- Enable monitoring and alerting for all production environments
+- Use separate state files for different components
+- Regular drift detection to ensure configuration consistency
+
+## 8. Contributing
+
+Please follow these guidelines when contributing to the project:
+
+- Use the included linting workflow before submitting PRs
+- Add documentation for any new components or features
+- Update tests when modifying existing components
+- Follow the established coding style and naming conventions
+
+## 9. Support
+
+For questions or issues, please contact the DevOps team or create an issue in the project repository.

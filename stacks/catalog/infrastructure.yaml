@@ -1,1 +1,71 @@
+name: infrastructure
+description: "Reusable infrastructure configuration with flexible EC2 instances"
 
+components:
+  terraform:
+    ec2:
+      metadata:
+        component: ec2
+        type: abstract
+      vars:
+        enabled: true
+        region: ${region}
+        vpc_id: ${output.vpc.vpc_id}
+        subnet_ids: ${output.vpc.private_subnet_ids}
+        # A map that will be overridden in environment-specific configs
+        instances: {}
+
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        ManagedBy: "Terraform"
+
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/infrastructure/ec2/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+
+      # Provider configuration
+      providers:
+        aws:
+          profile: ${aws_profile}
+          region: ${region}
+
+      # Define outputs
+      outputs:
+        instance_ids:
+          description: "Map of instance names to instance IDs"
+          value: ${output.instance_ids}
+        instance_private_ips:
+          description: "Map of instance names to private IP addresses"
+          value: ${output.instance_private_ips}
+        security_group_ids:
+          description: "Map of instance names to security group IDs"
+          value: ${output.security_group_ids}
+
+    # Other infrastructure components remain the same
+    ecs:
+      metadata:
+        component: ecs
+        type: abstract
+      vars:
+        enabled: true
+        region: ${region}
+        fargate_only: true
+        enable_container_insights: true
+
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "ECS"
+        ManagedBy: "Terraform"

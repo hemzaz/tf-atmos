@@ -1,0 +1,197 @@
+name: onboard-environment
+description: "Onboard a new environment by creating all necessary configurations and deploying infrastructure"
+
+workflows:
+  onboard:
+    steps:
+    - run:
+        command: |
+          # Validate required variables
+          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ] || [ -z "${vpc_cidr}" ]; then
+            echo "ERROR: Missing required parameters."
+            echo "Usage: atmos workflow onboard-environment tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<vpc_cidr> [region=<region>]"
+            exit 1
+          fi
+          
+          # Set defaults for optional parameters
+          REGION=${region:-"eu-west-2"}
+          MANAGEMENT_ACCOUNT_ID=${management_account_id:-"123456789012"}
+          
+          # Set exit on error
+          set -e
+          
+          echo "Starting environment onboarding for ${tenant}-${account}-${environment}"
+          echo "============================================"
+          
+          # Create directory structure
+          ENV_DIR="stacks/account/${account}/${environment}"
+          echo "Creating directory structure at ${ENV_DIR}..."
+          mkdir -p "${ENV_DIR}"
+          
+          # Calculate subnet CIDRs based on VPC CIDR
+          VPC_PREFIX=$(echo ${vpc_cidr} | cut -d'/' -f1 | cut -d'.' -f1-2)
+          
+          # Create configuration files by copying and modifying templates
+          echo "Creating configuration files..."
+          
+          # Backend config
+          cat > "${ENV_DIR}/backend.yaml" << EOF
+import:
+  - catalog/backend
+
+vars:
+  account: ${account}
+  environment: ${environment}
+  region: ${REGION}
+  component: backend
+  bucket_name: "${tenant}-terraform-state"
+  dynamodb_table_name: "${tenant}-terraform-locks"
+  iam_role_name: "${tenant}-terraform-backend-role"
+  iam_role_arn: "arn:aws:iam::${MANAGEMENT_ACCOUNT_ID}:role/${tenant}-terraform-backend-role"
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+EOF
+          
+          # IAM config
+          cat > "${ENV_DIR}/iam.yaml" << EOF
+import:
+  - catalog/iam
+
+vars:
+  account: ${account}
+  environment: ${environment}
+  region: ${REGION}
+  management_account_id: ${MANAGEMENT_ACCOUNT_ID}
+  cross_account_role_name: "${tenant}-${account}-${environment}-CrossAccountRole"
+  policy_name: "${tenant}-${account}-${environment}-CrossAccountPolicy"
+  trusted_account_ids:
+    - ${MANAGEMENT_ACCOUNT_ID}
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+EOF
+          
+          # Network config
+          cat > "${ENV_DIR}/network.yaml" << EOF
+import:
+  - catalog/network
+
+vars:
+  account: ${account}
+  environment: ${environment}
+  region: ${REGION}
+  vpc_cidr: "${vpc_cidr}"
+  private_subnets:
+    - "${VPC_PREFIX}.1.0/24"
+    - "${VPC_PREFIX}.2.0/24"
+    - "${VPC_PREFIX}.3.0/24"
+  public_subnets:
+    - "${VPC_PREFIX}.101.0/24"
+    - "${VPC_PREFIX}.102.0/24"
+    - "${VPC_PREFIX}.103.0/24"
+  enable_nat_gateway: ${account == "prod" ? "true" : "false"}
+  create_vpc_iam_role: true
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+EOF
+          
+          # Infrastructure config
+          cat > "${ENV_DIR}/infrastructure.yaml" << EOF
+import:
+  - catalog/infrastructure
+
+vars:
+  account: ${account}
+  environment: ${environment}
+  region: ${REGION}
+
+  # ECS specific overrides
+  ecs.enabled: true
+  ecs.fargate_only: ${account == "prod" ? "false" : "true"}
+  ecs.enable_container_insights: ${account == "prod" ? "true" : "false"}
+
+  # RDS specific overrides
+  rds.enabled: true
+  rds.identifier: "${environment}db"
+  rds.instance_class: "${account == "prod" ? "db.t3.small" : "db.t3.micro"}"
+  rds.allocated_storage: ${account == "prod" ? "20" : "5"}
+  rds.max_allocated_storage: ${account == "prod" ? "100" : "20"}
+  rds.multi_az: ${account == "prod" ? "true" : "false"}
+  rds.db_name: "${environment}app"
+  rds.skip_final_snapshot: ${account == "prod" ? "false" : "true"}
+  rds.deletion_protection: ${account == "prod" ? "true" : "false"}
+
+  # Monitoring specific overrides
+  monitoring.enabled: true
+  monitoring.create_dashboard: true
+  monitoring.alarm_email_subscriptions:
+    - "devops@example.com"
+
+  # Lambda specific overrides
+  lambda.enabled: true
+  lambda.function_name: "${account}-${environment}-app-function"
+  lambda.memory_size: ${account == "prod" ? "256" : "128"}
+  lambda.timeout: ${account == "prod" ? "30" : "10"}
+  lambda.environment_variables:
+    ENV: "${account}"
+    LOG_LEVEL: "${account == "prod" ? "info" : "debug"}"
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+EOF
+          
+          # Services config
+          cat > "${ENV_DIR}/services.yaml" << EOF
+import:
+  - catalog/services
+
+vars:
+  account: ${account}
+  environment: ${environment}
+  region: ${REGION}
+
+  # API Gateway specific overrides
+  api_gateway.enabled: true
+  api_gateway.name: "${tenant}-${account}-${environment}-api"
+  api_gateway.description: "API Gateway for ${account} environment (${environment})"
+
+  # Load Balancer specific overrides
+  load_balancer.enabled: true
+  load_balancer.name: "${tenant}-${account}-${environment}-alb"
+  load_balancer.internal: false
+
+  # CloudFront specific overrides
+  cloudfront.enabled: ${account == "prod" ? "true" : "false"}
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+EOF
+          
+          echo "Configuration files created successfully."
+          echo "============================================"
+
+          # Ask for confirmation before deploying
+          read -p "Do you want to deploy the environment now? (y/n): " CONFIRM
+          if [[ ${CONFIRM} == "y" || ${CONFIRM} == "Y" ]]; then
+            echo "Beginning deployment..."
+            atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
+          else
+            echo "Skipping deployment. You can deploy later using:"
+            echo "  atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}"
+          fi
+          
+          echo "Environment onboarding complete for ${tenant}-${account}-${environment}"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

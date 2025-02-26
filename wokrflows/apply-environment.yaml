@@ -1,18 +1,65 @@
 name: apply-environment
-description: "Apply changes for all components in an environment"
+description: "Apply changes for all components in an environment with improved error handling"
 
 workflows:
   apply:
     steps:
     - run:
         command: |
-          echo "Applying backend..."
-          atmos terraform apply backend -s ${tenant}-${account}-${environment}
-          echo "Applying iam..."
-          atmos terraform apply iam -s ${tenant}-${account}-${environment}
-          echo "Applying network..."
-          atmos terraform apply network -s ${tenant}-${account}-${environment}
-          echo "Applying infrastructure..."
-          atmos terraform apply infrastructure -s ${tenant}-${account}-${environment}
-          echo "Applying services..."
-          atmos terraform apply services -s ${tenant}-${account}-${environment}
+          # Validate required variables
+          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
+            echo "ERROR: Missing required parameters. Usage: atmos workflow apply-environment tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          # Set exit on error
+          set -e
+          
+          # Function to apply a component with error handling
+          apply_component() {
+            component=$1
+            echo "Applying ${component}..."
+            echo "----------------------------------------"
+            if ! atmos terraform apply ${component} -s ${tenant}-${account}-${environment}; then
+              echo "ERROR: Failed to apply ${component}. Exiting."
+              return 1
+            fi
+            echo "Successfully applied ${component}."
+            echo "----------------------------------------"
+            return 0
+          }
+          
+          # Check if AWS credentials are valid
+          echo "Validating AWS credentials..."
+          if ! aws sts get-caller-identity > /dev/null; then
+            echo "ERROR: Invalid AWS credentials. Please check your credentials and try again."
+            exit 1
+          fi
+          
+          # Apply components in dependency order
+          echo "Starting deployment for ${tenant}-${account}-${environment}"
+          echo "============================================"
+          
+          # Apply backend first
+          apply_component "backend" || exit 1
+          
+          # Apply IAM next
+          apply_component "iam" || exit 1
+          
+          # Apply network
+          apply_component "network" || exit 1
+          
+          # Apply infrastructure components
+          apply_component "infrastructure" || exit 1
+          
+          # Apply services last
+          apply_component "services" || exit 1
+          
+          echo "============================================"
+          echo "Deployment completed successfully for ${tenant}-${account}-${environment}"
+          
+          # Perform validation checks
+          echo "Running post-deployment validation checks..."
+          atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
