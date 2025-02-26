@@ -1,0 +1,22 @@
+name: apply-backend
+description: "Apply changes to the Terraform backend configuration"
+
+workflows:
+  apply:
+    steps:
+    - run:
+        command: |
+          atmos terraform init backend \
+            -backend-config="bucket=${bucket_name}" \
+            -backend-config="key=${state_file_key}" \
+            -backend-config="region=${region}" \
+            -backend-config="dynamodb_table=${dynamodb_table_name}" \
+            -backend-config="role_arn=${iam_role_arn}" \
+            -s ${tenant}-${account}-${environment}
+          atmos terraform apply backend -s ${tenant}-${account}-${environment}
+        env:
+          bucket_name: ${tenant}-terraform-state
+          dynamodb_table_name: ${tenant}-terraform-locks
+          region: ${region}
+          state_file_key: "${account}/${environment}/backend/terraform.tfstate"
+          iam_role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role

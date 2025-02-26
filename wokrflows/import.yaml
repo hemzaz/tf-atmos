@@ -1,0 +1,13 @@
+name: import
+description: "Import existing resources into Terraform state"
+
+workflows:
+  import:
+    steps:
+    - run:
+        command: |
+          if [ -z "$RESOURCE_ADDRESS" ] || [ -z "$RESOURCE_ID" ]; then
+            echo "Usage: atmos workflow import RESOURCE_ADDRESS=<address> RESOURCE_ID=<id> component=<component> env=<environment>"
+            exit 1
+          fi
+          atmos terraform import $component $RESOURCE_ADDRESS $RESOURCE_ID -s ${environment}

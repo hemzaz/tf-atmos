@@ -1,0 +1,18 @@
+name: validate
+description: "Validate Terraform configurations"
+
+workflows:
+  validate:
+    steps:
+    - run:
+        command: |
+          echo "Validating backend..."
+          atmos terraform validate backend -s ${tenant}-${account}-${environment}
+          echo "Validating iam..."
+          atmos terraform validate iam -s ${tenant}-${account}-${environment}
+          echo "Validating network..."
+          atmos terraform validate network -s ${tenant}-${account}-${environment}
+          echo "Validating infrastructure..."
+          atmos terraform validate infrastructure -s ${tenant}-${account}-${environment}
+          echo "Validating services..."
+          atmos terraform validate services -s ${tenant}-${account}-${environment}

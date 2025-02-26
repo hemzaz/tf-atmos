@@ -1,0 +1,18 @@
+name: drift-detection
+description: "Detect infrastructure drift in an environment"
+
+workflows:
+  detect:
+    steps:
+    - run:
+        command: |
+          echo "Checking drift for backend..."
+          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode
+          echo "Checking drift for iam..."
+          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode
+          echo "Checking drift for network..."
+          atmos terraform plan network -s ${tenant}-${account}-${environment} -detailed-exitcode
+          echo "Checking drift for infrastructure..."
+          atmos terraform plan infrastructure -s ${tenant}-${account}-${environment} -detailed-exitcode
+          echo "Checking drift for services..."
+          atmos terraform plan services -s ${tenant}-${account}-${environment} -detailed-exitcode

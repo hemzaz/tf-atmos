@@ -1,0 +1,18 @@
+name: apply-environment
+description: "Apply changes for all components in an environment"
+
+workflows:
+  apply:
+    steps:
+    - run:
+        command: |
+          echo "Applying backend..."
+          atmos terraform apply backend -s ${tenant}-${account}-${environment}
+          echo "Applying iam..."
+          atmos terraform apply iam -s ${tenant}-${account}-${environment}
+          echo "Applying network..."
+          atmos terraform apply network -s ${tenant}-${account}-${environment}
+          echo "Applying infrastructure..."
+          atmos terraform apply infrastructure -s ${tenant}-${account}-${environment}
+          echo "Applying services..."
+          atmos terraform apply services -s ${tenant}-${account}-${environment}

@@ -1,0 +1,59 @@
+# atmos.yaml
+
+base_path: "."
+
+components:
+  terraform:
+    base_path: components/terraform
+    apply_auto_approve: false
+    deploy_run_init: true
+    init_run_reconfigure: true
+    auto_generate_backend_file: false # Changed to false
+
+stacks:
+  base_path: stacks
+  included_paths:
+  - "account/**/**/*.yaml"
+  - "catalog/**/*.yaml"
+  excluded_paths:
+  - "**/_defaults.yaml"
+  name_pattern: "{tenant}-{account}-{environment}"
+
+workflows:
+  base_path: workflows
+  imports:
+  - apply-backend.yaml
+  - apply-environment.yaml
+  - bootstrap-backend.yaml
+  - destroy-backend.yaml
+  - destroy-environment.yaml
+  - drift-detection.yaml
+  - import.yaml
+  - lint.yaml
+  - plan-environment.yaml
+  - validate.yaml
+
+logs:
+  file: "/dev/stderr"
+  level: Info
+
+settings:
+  list_merge_strategy: replace
+
+schemas:
+  atmos:
+    manifest: "stacks/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"
+
+templates:
+  settings:
+    enabled: true
+  sprig:
+    enabled: true
+  gomplate:
+    enabled: true
+
+# Added global variables section
+vars:
+  tenant: "fnx"
+  management_account_id: "123456789012"
+  region: "eu-west-2"

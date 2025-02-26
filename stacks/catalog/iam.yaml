@@ -1,0 +1,54 @@
+name: iam
+description: "Reusable IAM configuration for cross-account access"
+
+components:
+  terraform:
+    iam:
+      metadata:
+        component: iam
+        type: abstract
+      vars:
+        enabled: true
+        region: ${region}
+        management_account_id: ${management_account_id}
+        target_account_id: ${target_account_id}
+        cross_account_role_name: "${tenant}-${account}-${environment}-CrossAccountRole"
+        policy_name: "${tenant}-${account}-${environment}-CrossAccountPolicy"
+
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "IAM"
+        ManagedBy: "Terraform"
+
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/iam/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+
+      # Provider configuration
+      providers:
+        aws:
+          profile: ${aws_profile}
+          region: ${region}
+          assume_role:
+            role_arn: arn:aws:iam::${target_account_id}:role/${tenant}-${account}-${environment}-TerraformExecutionRole
+
+      # Define common outputs
+      outputs:
+        cross_account_role_arn:
+          description: "ARN of the created cross-account IAM role"
+          value: ${output.cross_account_role_arn}
+        cross_accounr_role_name:
+          description: "Name of the created cross-account IAM role"
+          value: ${output.cross_account_role_name}
+
+# You can add more components or configurations as needed

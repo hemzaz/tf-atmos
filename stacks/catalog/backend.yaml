@@ -1,0 +1,45 @@
+name: backend
+description: "Reusable Terraform backend configuration"
+
+components:
+  terraform:
+    backend:
+      metadata:
+        component: backend
+        type: abstract
+      vars:
+        enabled: true
+        region: ${region}
+        bucket_name: "${tenant}-terraform-state"
+        dynamodb_table_name: "${tenant}-terraform-locks"
+        state_file_key: "${environment}/${component}/terraform.tfstate"
+        iam_role_name: "${tenant}-terraform-backend-role"
+        iam_role_arn: "arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role"
+
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        ManagedBy: "Terraform"
+
+      # Backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${bucket_name}
+              key: ${state_file_key}
+              region: ${region}
+              dynamodb_table: ${dynamodb_table_name}
+              role_arn: ${iam_role_arn}
+
+      # Define common outputs
+      outputs:
+        backend_bucket_name:
+          description: "Name of the S3 bucket for Terraform state"
+          value: ${bucket_name}
+        backend_dynamodb_table_name:
+          description: "Name of the DynamoDB table for state locking"
+          value: ${dynamodb_table_name}
+        backend_iam_role_arn:
+          description: "ARN of the IAM role for backend access"
+          value: ${iam_role_arn}

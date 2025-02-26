@@ -1,0 +1,18 @@
+name: plan-environment
+description: "Plan changes for all components in an environment"
+
+workflows:
+  plan:
+    steps:
+    - run:
+        command: |
+          echo "Planning backend..."
+          atmos terraform plan backend -s ${tenant}-${account}-${environment}
+          echo "Planning iam..."
+          atmos terraform plan iam -s ${tenant}-${account}-${environment}
+          echo "Planning network..."
+          atmos terraform plan network -s ${tenant}-${account}-${environment}
+          echo "Planning infrastructure..."
+          atmos terraform plan infrastructure -s ${tenant}-${account}-${environment}
+          echo "Planning services..."
+          atmos terraform plan services -s ${tenant}-${account}-${environment}

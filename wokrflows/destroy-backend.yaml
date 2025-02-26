@@ -1,0 +1,22 @@
+name: destroy-backend
+description: "Destroy the Terraform backend (use with caution)"
+
+workflows:
+  destroy:
+    steps:
+    - run:
+        command: |
+          echo "WARNING: This will destroy the Terraform backend, including all state files."
+          echo "Are you absolutely sure? Type 'yes-destroy-backend' to confirm:"
+          read confirmation
+          if [ "$confirmation" != "yes-destroy-backend" ]; then
+            echo "Destruction cancelled."
+            exit 1
+          fi
+          aws s3 rm s3://${bucket_name} --recursive
+          aws s3api delete-bucket --bucket ${bucket_name}
+          aws dynamodb delete-table --table-name ${dynamodb_table_name}
+        env:
+          bucket_name: ${tenant}-${environment}-terraform-state
+          dynamodb_table_name: ${tenant}-${environment}-terraform-locks
+          region: ${region}

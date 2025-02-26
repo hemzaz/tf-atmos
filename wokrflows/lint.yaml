@@ -1,0 +1,15 @@
+name: lint
+description: "Lint Terraform code and Atmos configurations"
+
+workflows:
+  lint:
+    steps:
+    - run:
+        command: |
+          # Lint Terraform code
+          terraform fmt -check -recursive ./components/terraform
+
+          # Lint Atmos YAML files
+          yamllint .
+
+          # Additional linting steps can be added here

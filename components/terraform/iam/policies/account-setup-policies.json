@@ -1,0 +1,43 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateUser",
+        "iam:DeleteUser",
+        "iam:ListUsers",
+        "iam:CreateGroup",
+        "iam:DeleteGroup",
+        "iam:ListGroups",
+        "iam:AddUserToGroup",
+        "iam:RemoveUserFromGroup",
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:ListPolicies",
+        "iam:AttachUserPolicy",
+        "iam:DetachUserPolicy",
+        "iam:AttachGroupPolicy",
+        "iam:DetachGroupPolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListAllMyBuckets",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketPolicy",
+        "s3:PutBucketPolicy"
+      ],
+      "Resource": "arn:aws:s3:::*"
+    }
+  ]
+}

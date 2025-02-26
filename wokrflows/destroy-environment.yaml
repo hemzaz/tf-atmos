@@ -1,0 +1,24 @@
+name: destroy-environment
+description: "Destroy all resources in an environment"
+
+workflows:
+  destroy:
+    steps:
+    - run:
+        command: |
+          echo "This will destroy all resources in the ${account}/${environment} environment. Are you sure? (yes/no)"
+          read confirmation
+          if [ "$confirmation" != "yes" ]; then
+            echo "Destruction cancelled."
+            exit 1
+          fi
+          echo "Destroying services..."
+          atmos terraform destroy services -s ${tenant}-${account}-${environment}
+          echo "Destroying infrastructure..."
+          atmos terraform destroy infrastructure -s ${tenant}-${account}-${environment}
+          echo "Destroying network..."
+          atmos terraform destroy network -s ${tenant}-${account}-${environment}
+          echo "Destroying iam..."
+          atmos terraform destroy iam -s ${tenant}-${account}-${environment}
+          echo "Destroying backend..."
+          atmos terraform destroy backend -s ${tenant}-${account}-${environment}
