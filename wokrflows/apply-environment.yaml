@@ -1,5 +1,5 @@
 name: apply-environment
-description: "Apply changes for all components in an environment with improved error handling"
+description: "Apply changes for all components in an environment with dynamic discovery and dependency resolution"
 
 workflows:
   apply:
@@ -15,6 +15,45 @@ workflows:
           # Set exit on error
           set -e
           
+          # Check if AWS credentials are valid
+          echo "Validating AWS credentials..."
+          if ! aws sts get-caller-identity > /dev/null; then
+            echo "ERROR: Invalid AWS credentials. Please check your credentials and try again."
+            exit 1
+          fi
+          
+          # Discover available components by looking at stack files
+          ENV_DIR="stacks/account/${account}/${environment}"
+          echo "Discovering components in ${ENV_DIR}..."
+          
+          # Define known dependency order based on imports/references
+          # Components earlier in the array should be applied before ones later in the array
+          ORDERED_COMPONENTS=(
+            "backend"
+            "iam"
+            "network"
+            "eks" 
+            "eks-addons"  # eks-addons depends on eks
+            "ec2"
+            "ecs"
+            "rds"
+            "lambda"
+            "monitoring"
+            "services"
+          )
+          
+          # Discover available components from YAML files
+          AVAILABLE_COMPONENTS=()
+          for file in ${ENV_DIR}/*.yaml; do
+            if [ -f "$file" ]; then
+              # Extract component name from filename (removing path and extension)
+              component=$(basename "$file" .yaml)
+              AVAILABLE_COMPONENTS+=("$component")
+            fi
+          done
+          
+          echo "Discovered components: ${AVAILABLE_COMPONENTS[*]}"
+          
           # Function to apply a component with error handling
           apply_component() {
             component=$1
@@ -29,31 +68,26 @@ workflows:
             return 0
           }
           
-          # Check if AWS credentials are valid
-          echo "Validating AWS credentials..."
-          if ! aws sts get-caller-identity > /dev/null; then
-            echo "ERROR: Invalid AWS credentials. Please check your credentials and try again."
-            exit 1
-          fi
-          
-          # Apply components in dependency order
+          # Start deployment in dependency order, but only apply components that exist
           echo "Starting deployment for ${tenant}-${account}-${environment}"
           echo "============================================"
           
-          # Apply backend first
-          apply_component "backend" || exit 1
+          # First apply components in known dependency order
+          for component in "${ORDERED_COMPONENTS[@]}"; do
+            # Check if this component exists in the available components list
+            if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${component} " ]]; then
+              apply_component "$component" || exit 1
+            fi
+          done
           
-          # Apply IAM next
-          apply_component "iam" || exit 1
-          
-          # Apply network
-          apply_component "network" || exit 1
-          
-          # Apply infrastructure components
-          apply_component "infrastructure" || exit 1
-          
-          # Apply services last
-          apply_component "services" || exit 1
+          # Then apply any components that weren't in our known ordering
+          for component in "${AVAILABLE_COMPONENTS[@]}"; do
+            # Check if this component was already applied in the ordered phase
+            if [[ ! " ${ORDERED_COMPONENTS[*]} " =~ " ${component} " ]]; then
+              echo "Applying unordered component ${component}..."
+              apply_component "$component" || exit 1
+            fi
+          done
           
           echo "============================================"
           echo "Deployment completed successfully for ${tenant}-${account}-${environment}"

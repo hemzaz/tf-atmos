@@ -1,3 +1,4 @@
+# components/terraform/eks-addons/main.tf
 locals {
   clusters = {
     for k, v in var.clusters : k => v if lookup(v, "enabled", true)
@@ -31,123 +32,21 @@ locals {
   ]...)
 }
 
-# AWS EKS Addons
-resource "aws_eks_addon" "addons" {
-  for_each = local.addons
-
-  cluster_name             = each.value.cluster_name
-  addon_name               = each.value.name
-  addon_version            = lookup(each.value, "version", null)
-  resolve_conflicts        = lookup(each.value, "resolve_conflicts", "OVERWRITE")
-  service_account_role_arn = lookup(each.value, "service_account_role_arn", null)
-
-  preserve = lookup(each.value, "preserve", true)
-
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.value.cluster_name}-${each.value.name}"
-    }
-  )
+# Get cluster info to validate it's accessible before proceeding
+data "aws_eks_cluster" "this" {
+  for_each = local.clusters
+  name     = each.key
 }
 
-# Helm Provider Configuration
-provider "helm" {
-  alias = "default"
-  kubernetes {
-    host                   = var.host
-    cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
-      command     = "aws"
-    }
-  }
-}
-
-# Dynamic provider configuration for each cluster
-locals {
-  helm_providers = {
-    for cluster_key, cluster in local.clusters : cluster_key => {
-      host                   = lookup(cluster, "host", var.host)
-      cluster_ca_certificate = lookup(cluster, "cluster_ca_certificate", var.cluster_ca_certificate)
-      cluster_name           = lookup(cluster, "eks_cluster_name", var.cluster_name)
-    }
-  }
-}
-
-# Helm Releases
-resource "helm_release" "releases" {
-  for_each = local.helm_releases
-
-  provider = helm.default # Will be overridden if cluster-specific provider is used
-
-  name             = lookup(each.value, "release_name", each.key)
-  chart            = each.value.chart
-  repository       = lookup(each.value, "repository", null)
-  version          = lookup(each.value, "chart_version", null)
-  namespace        = lookup(each.value, "namespace", "default")
-  create_namespace = lookup(each.value, "create_namespace", true)
-
-  values = lookup(each.value, "values", [])
-
-  set {
-    name  = "clusterName"
-    value = each.value.cluster_name
-  }
-
-  dynamic "set" {
-    for_each = lookup(each.value, "set_values", {})
-    content {
-      name  = set.key
-      value = set.value
-    }
-  }
-
-  dynamic "set_sensitive" {
-    for_each = lookup(each.value, "set_sensitive_values", {})
-    content {
-      name  = set_sensitive.key
-      value = set_sensitive.value
-    }
-  }
-
-  timeout    = lookup(each.value, "timeout", 300)
-  atomic     = lookup(each.value, "atomic", true)
-  wait       = lookup(each.value, "wait", true)
-  depends_on = [aws_eks_addon.addons]
-}
-
-# Kubernetes Provider Configuration
-provider "kubernetes" {
-  alias = "default"
-  host                   = var.host
-  cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
-    command     = "aws"
-  }
-}
-
-# Kubernetes Manifests
-resource "kubernetes_manifest" "manifests" {
-  for_each = local.kubernetes_manifests
-
-  provider = kubernetes.default # Will be overridden if cluster-specific provider is used
-
-  manifest = each.value.manifest
-
-  field_manager {
-    name            = lookup(each.value, "field_manager_name", "${var.tags["Environment"]}-${each.value.cluster_name}")
-    force_conflicts = lookup(each.value, "force_conflicts", true)
-  }
+# Wait for EKS cluster to be fully ready
+resource "time_sleep" "wait_for_cluster" {
+  for_each = local.clusters
 
   depends_on = [
-    aws_eks_addon.addons,
-    helm_release.releases
+    data.aws_eks_cluster.this
   ]
+
+  create_duration = "30s"
 }
 
 # Create IAM service account roles for addons if needed
@@ -215,4 +114,148 @@ resource "aws_iam_role_policy_attachment" "service_account" {
 
   role       = each.value.role_name
   policy_arn = each.value.policy_arn
+}
+
+# AWS EKS Addons
+resource "aws_eks_addon" "addons" {
+  for_each = local.addons
+
+  cluster_name             = each.value.cluster_name
+  addon_name               = each.value.name
+  addon_version            = lookup(each.value, "version", null)
+  resolve_conflicts        = lookup(each.value, "resolve_conflicts", "OVERWRITE")
+  service_account_role_arn = lookup(each.value, "service_account_role_arn",
+                               lookup(each.value, "create_service_account_role", false) ?
+                               aws_iam_role.service_account["${each.value.cluster_name}.${each.value.name}"].arn : null)
+
+  preserve = lookup(each.value, "preserve", true)
+
+  tags = merge(
+    var.tags,
+    lookup(each.value, "tags", {}),
+    {
+      Name = "${var.tags["Environment"]}-${each.value.cluster_name}-${each.value.name}"
+    }
+  )
+
+  # Add dependency on wait_for_cluster
+  depends_on = [
+    time_sleep.wait_for_cluster,
+    aws_iam_role_policy_attachment.service_account
+  ]
+}
+
+# Wait for addons to be ready before proceeding with helm releases
+resource "time_sleep" "wait_for_addons" {
+  count = length(local.addons) > 0 ? 1 : 0
+
+  depends_on = [
+    aws_eks_addon.addons
+  ]
+
+  create_duration = "15s"
+}
+
+# Helm Provider Configuration
+provider "helm" {
+  alias = "default"
+  kubernetes {
+    host                   = var.host
+    cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
+      command     = "aws"
+    }
+  }
+}
+
+# Helm Releases
+resource "helm_release" "releases" {
+  for_each = local.helm_releases
+
+  provider = helm.default
+
+  name             = lookup(each.value, "release_name", each.key)
+  chart            = each.value.chart
+  repository       = lookup(each.value, "repository", null)
+  version          = lookup(each.value, "chart_version", null)
+  namespace        = lookup(each.value, "namespace", "default")
+  create_namespace = lookup(each.value, "create_namespace", true)
+
+  values = lookup(each.value, "values", [])
+
+  set {
+    name  = "clusterName"
+    value = each.value.cluster_name
+  }
+
+  dynamic "set" {
+    for_each = lookup(each.value, "set_values", {})
+    content {
+      name  = set.key
+      value = set.value
+    }
+  }
+
+  dynamic "set_sensitive" {
+    for_each = lookup(each.value, "set_sensitive_values", {})
+    content {
+      name  = set_sensitive.key
+      value = set_sensitive.value
+    }
+  }
+
+  timeout    = lookup(each.value, "timeout", 300)
+  atomic     = lookup(each.value, "atomic", true)
+  wait       = lookup(each.value, "wait", true)
+
+  # Wait for addons and service accounts to be created
+  depends_on = [
+    time_sleep.wait_for_addons,
+    aws_iam_role_policy_attachment.service_account,
+    time_sleep.wait_for_cluster
+  ]
+}
+
+# Wait for helm releases to be ready before proceeding with kubernetes manifests
+resource "time_sleep" "wait_for_helm_releases" {
+  count = length(local.helm_releases) > 0 ? 1 : 0
+
+  depends_on = [
+    helm_release.releases
+  ]
+
+  create_duration = "15s"
+}
+
+# Kubernetes Provider Configuration
+provider "kubernetes" {
+  alias = "default"
+  host                   = var.host
+  cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
+    command     = "aws"
+  }
+}
+
+# Kubernetes Manifests
+resource "kubernetes_manifest" "manifests" {
+  for_each = local.kubernetes_manifests
+
+  provider = kubernetes.default
+
+  manifest = each.value.manifest
+
+  field_manager {
+    name            = lookup(each.value, "field_manager_name", "${var.tags["Environment"]}-${each.value.cluster_name}")
+    force_conflicts = lookup(each.value, "force_conflicts", true)
+  }
+
+  depends_on = [
+    time_sleep.wait_for_cluster,
+    time_sleep.wait_for_helm_releases
+  ]
 }
