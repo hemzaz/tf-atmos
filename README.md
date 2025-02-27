@@ -60,6 +60,8 @@ Key features:
 │       ├── monitoring/        # CloudWatch dashboards and alarms
 │       │   └── templates/     # Dashboard templates
 │       ├── rds/               # Database services
+│       ├── secretsmanager/    # AWS Secrets Manager for secure secret storage
+│       │   └── policies/      # Secret access policy templates
 │       ├── securitygroup/     # Security group management
 │       └── vpc/               # Network infrastructure
 │           └── policies/      # Network policy templates
@@ -196,6 +198,7 @@ This infrastructure includes the following core components:
 - **RDS** - Managed relational databases with automated backups
 - **Lambda** - Serverless functions with monitoring
 - **Monitoring** - CloudWatch dashboards, alarms, and log groups
+- **Secrets Manager** - Secure management of secrets and credentials
 
 ### Services Layer
 - **API Gateway** - For creating and managing REST and HTTP APIs
@@ -266,6 +269,8 @@ The following workflows are available to manage the infrastructure:
 
 - Use consistent naming conventions across all resources (singular form without hyphens for components)
 - Follow the principle of least privilege for IAM policies
+- Use the Secrets Manager component for secure storage of credentials and sensitive data
+- Implement hierarchical secret organization with standardized paths (`context/environment/path/name`)
 - Store sensitive values in SSM Parameter Store or Secrets Manager using `${ssm:/path/to/param}` syntax
 - Use `templatefile()` for policy files instead of variable interpolation in JSON
 - Leverage Atmos variables for environment-specific configurations 
@@ -316,6 +321,7 @@ Detailed documentation can be found in the `/docs` directory:
 - [Terraform Development Guide](docs/tf-dev-guide.md) - Component development best practices
 - [Route53 DNS Management](docs/Route53-Outline.md) - DNS architecture and patterns
 - [API Gateway Integration](docs/api-gateway-integration-guide.md) - API Gateway patterns and integration
+- [Secrets Manager Guide](docs/secrets-manager-guide.md) - Secure secrets management patterns and best practices
 - [Workflows Reference](docs/workflows.md) - Workflow examples and usage
 - [Component Creation Guide](docs/component-creation-guide.md) - Step-by-step guide to adding new components
 - [Architecture Diagrams](docs/diagrams/) - Visual representations of architecture and workflows
