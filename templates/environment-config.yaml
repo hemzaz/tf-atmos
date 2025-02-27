@@ -1,0 +1,50 @@
+# Template: Environment-specific Component Configuration
+# This template follows the best practices outlined in CLAUDE.md
+# Replace placeholder values and comments with your actual implementation
+
+import:
+  - catalog/component-name  # Replace with your component name
+
+vars:
+  account: dev  # Replace with your account name
+  environment: my-environment  # Replace with your environment name
+  region: us-west-2  # Replace with your region
+  tenant: mycompany  # Replace with your tenant name
+
+  # Component-specific configuration
+  name: "${tenant}-${environment}-component-name"  # Replace with your component name
+  description: "Custom description for ${environment} environment"  # Customize as needed
+  
+  # Feature flags
+  enable_logging: true
+  enable_monitoring: true
+  
+  # Environment-specific parameters
+  example_parameter_string: "env-specific-value"
+  example_parameter_number: 20
+  example_parameter_list:
+    - "env-item1"
+    - "env-item2"
+  example_parameter_map:
+    env_key1: "env-value1"
+    env_key2: "env-value2"
+  
+  # Integration with other components
+  example_dependency_id: "${output.dependency_component.id}"
+  example_dependency_arns: ${output.dependency_component.arns}
+  
+  # Security configuration
+  kms_key_id: "${output.kms.key_id}"
+  log_retention_days: 14  # Override default value
+  
+# Dependencies on other components
+dependencies:
+  - dependency_component
+  - kms
+
+# Additional environment-specific tags
+tags:
+  Team: "YourTeam"
+  CostCenter: "YourCostCenter"
+  Project: "YourProject"
+  Environment: "Development"  # or "Production", "Staging", etc.

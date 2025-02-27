@@ -1,5 +1,11 @@
 # Atmos-Managed Multi-Account AWS Infrastructure
 
+![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Terraform](https://img.shields.io/badge/terraform-%3E%3D1.0.0-623CE4.svg)
+![Atmos](https://img.shields.io/badge/atmos-%3E%3D1.5.0-16A394.svg)
+
+_Last Updated: February 27, 2025_
+
 ## 1. What is this project?
 
 This project is a comprehensive, turnkey infrastructure-as-code solution for deploying and managing multi-account AWS environments. It leverages Terraform for resource provisioning and Atmos for orchestration, providing a scalable and maintainable approach to infrastructure management.
@@ -21,6 +27,7 @@ Key features:
 ├── components/                # Reusable Terraform modules
 │   └── terraform/
 │       ├── acm/               # ACM certificate management
+│       ├── apigateway/        # API Gateway (REST and HTTP APIs)
 │       ├── backend/           # Terraform state management infrastructure
 │       │   └── policies/      # IAM policy templates
 │       ├── dns/               # Route53 and DNS configuration
@@ -38,20 +45,24 @@ Key features:
 │       └── vpc/               # Network infrastructure
 │           └── policies/      # Network policy templates
 ├── docs/                      # Project documentation
+│   └── diagrams/              # Architecture and workflow diagrams
+├── examples/                  # Practical implementation examples
 ├── stacks/                    # Stack configurations
 │   ├── account/               # Account-specific configurations
 │   │   ├── dev/
 │   │   ├── management/
 │   │   ├── prod/
 │   │   ├── shared-services/
-│   │   └── stg/
+│   │   └── staging/
 │   ├── catalog/               # Reusable stack configurations
+│   │   ├── apigateway.yaml    # API Gateway configuration
 │   │   ├── backend.yaml       # Backend configuration
 │   │   ├── iam.yaml           # IAM configuration
 │   │   ├── infrastructure.yaml # Infrastructure components
 │   │   ├── network.yaml       # VPC and networking
 │   │   └── services.yaml      # Application services
 │   └── schemas/               # JSON schemas for validation
+├── templates/                 # Reusable templates for new components/configs
 └── workflows/                 # Atmos workflow definitions
     ├── apply-backend.yaml
     ├── apply-environment.yaml
@@ -71,27 +82,54 @@ Key features:
 ### Prerequisites
 - AWS CLI configured with appropriate credentials
 - Terraform (version 1.0.0 or later)
-- Atmos CLI installed
+- Atmos CLI (version 1.5.0 or later)
+
+### Installation
+
+1. Install the AWS CLI:
+   ```bash
+   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+   unzip awscliv2.zip
+   sudo ./aws/install
+   ```
+
+2. Install Terraform:
+   ```bash
+   wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+   echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+   sudo apt update && sudo apt install terraform
+   ```
+
+3. Install Atmos CLI:
+   ```bash
+   curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+   ```
+
+4. Clone this repository:
+   ```bash
+   git clone https://github.com/your-org/tf-atmos.git
+   cd tf-atmos
+   ```
 
 ### Deployment Steps
 
 1. Bootstrap the backend:
-   ```
+   ```bash
    atmos workflow bootstrap-backend tenant=mycompany region=us-west-2
    ```
 
 2. Initialize and apply the backend configuration:
-   ```
+   ```bash
    atmos workflow apply-backend tenant=mycompany account=management environment=prod
    ```
 
 3. Onboard a new environment:
-   ```
+   ```bash
    atmos workflow onboard-environment tenant=mycompany account=dev environment=testenv-01 vpc_cidr=10.1.0.0/16
    ```
 
 4. Deploy an existing environment:
-   ```
+   ```bash
    atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01
    ```
 
@@ -114,7 +152,7 @@ This infrastructure includes the following core components:
 - **Monitoring** - CloudWatch dashboards, alarms, and log groups
 
 ### Services Layer
-- **API Gateway** - For creating and managing APIs
+- **API Gateway** - For creating and managing REST and HTTP APIs
 - **Load Balancer** - Application load balancers for web traffic
 - **CloudFront** - Content delivery network for global distribution
 
@@ -141,17 +179,35 @@ The following workflows are available to manage the infrastructure:
 
 ### Adding a New Component
 
-1. Create a new directory under `components/terraform/`
-2. Include `variables.tf`, `main.tf`, `outputs.tf`, and `provider.tf`
-3. Create a corresponding catalog file in `stacks/catalog/`
+1. Create a new directory under `components/terraform/`:
+   ```bash
+   mkdir -p components/terraform/new-component
+   ```
+
+2. Use the component template from the templates directory:
+   ```bash
+   cp -r templates/terraform-component/* components/terraform/new-component/
+   ```
+
+3. Create a corresponding catalog file in `stacks/catalog/`:
+   ```bash
+   cp templates/catalog-component.yaml stacks/catalog/new-component.yaml
+   ```
+
+4. Customize the files for your specific component.
 
 ### Adding a New Environment
 
 1. Use the onboarding workflow:
-   ```
+   ```bash
    atmos workflow onboard-environment tenant=mycompany account=dev environment=newenv vpc_cidr=10.2.0.0/16
    ```
-2. Customize the generated configurations as needed
+
+2. Customize the generated configurations as needed:
+   ```bash
+   cd stacks/account/dev/newenv
+   # Edit the .yaml files as needed
+   ```
 
 ### Modifying Existing Components
 
@@ -179,11 +235,74 @@ The following workflows are available to manage the infrastructure:
 
 Please follow these guidelines when contributing to the project:
 
-- Use the included linting workflow before submitting PRs
-- Add documentation for any new components or features
-- Update tests when modifying existing components
-- Follow the established coding style and naming conventions
+1. Fork the repository and create a feature branch
+   ```bash
+   git checkout -b feature/my-new-feature
+   ```
 
-## 9. Support
+2. Make your changes and run validation before submitting:
+   ```bash
+   atmos workflow lint
+   atmos workflow validate
+   ```
 
-For questions or issues, please contact the DevOps team or create an issue in the project repository.
+3. Commit your changes with descriptive messages:
+   ```bash
+   git commit -m "Add my new feature with detailed description"
+   ```
+
+4. Push to your branch and create a Pull Request
+   ```bash
+   git push origin feature/my-new-feature
+   ```
+
+5. Include in your PR:
+   - Description of the change
+   - Any related issue numbers
+   - Documentation updates
+   - Test results if applicable
+
+## 9. Documentation
+
+Detailed documentation can be found in the `/docs` directory:
+
+- [Atmos Guide](docs/Atmos.md) - Overview of Atmos architecture and principles
+- [Terraform Development Guide](docs/tf-dev-guide.md) - Component development best practices
+- [Route53 DNS Management](docs/Route53-Outline.md) - DNS architecture and patterns
+- [API Gateway Integration](docs/api-gateway-integration-guide.md) - API Gateway patterns and integration
+- [Workflows Reference](docs/workflows.md) - Workflow examples and usage
+- [Component Creation Guide](docs/component-creation-guide.md) - Step-by-step guide to adding new components
+- [Architecture Diagrams](docs/diagrams/) - Visual representations of architecture and workflows
+- [Migration Guide](docs/migration-guide.md) - Steps for migrating existing infrastructure
+- [Disaster Recovery Guide](docs/disaster-recovery-guide.md) - Backup and recovery procedures
+- [Documentation Style Guide](docs/documentation-style-guide.md) - Standards for documentation
+
+## 10. Support and Troubleshooting
+
+### Common Issues
+
+- **State Locking Issues**: If experiencing DynamoDB locking errors, verify the lock table and check for abandoned locks
+  ```bash
+  aws dynamodb scan --table-name <dynamo-table-name> --attributes-to-get LockID State
+  ```
+
+- **Cross-Account Access**: Ensure the correct assume_role_arn is set in the component variables
+
+- **Missing Variables**: Verify that all required variables are defined in your stack configuration
+
+- **Workflow Failures**: Check the logs with `atmos logs` to identify the specific error
+
+### Getting Help
+
+For questions or issues, please:
+
+1. Check the documentation for guidance
+2. Look at examples for similar configurations
+3. Create an issue in the project repository with:
+   - Description of the problem
+   - Steps to reproduce
+   - Expected vs actual behavior
+
+## 11. License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

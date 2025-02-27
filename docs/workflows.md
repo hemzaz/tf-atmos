@@ -1,399 +1,687 @@
-# Atmos Workflows: Orchestrating Multi-Account AWS Infrastructure
+# Atmos Workflows Guide
+
+_Last Updated: February 27, 2025_
+
+This guide provides comprehensive documentation on using, customizing, and extending workflows in the Atmos framework to automate and standardize infrastructure operations.
+
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Standard Workflows](#standard-workflows)
+- [Workflow Architecture](#workflow-architecture)
+- [Using Workflows](#using-workflows)
+- [Customizing Workflows](#customizing-workflows)
+- [Creating New Workflows](#creating-new-workflows)
+- [CI/CD Integration](#cicd-integration)
+- [Advanced Patterns](#advanced-patterns)
+- [Troubleshooting](#troubleshooting)
+- [Reference](#reference)
 
 ## Introduction
 
-Workflows in our Atmos-managed infrastructure project are essential for automating complex, multi-step processes across our AWS accounts and environments. They provide a consistent, repeatable way to perform operations such as bootstrapping, planning, applying, and destroying infrastructure components.
+Atmos workflows are predefined sequences of commands that automate common infrastructure operations. They provide:
 
-## Key Workflows
+- **Standardization** - Consistent processes across environments
+- **Automation** - Reduced manual operations and human error
+- **Documentation** - Self-documenting infrastructure operations
+- **Guardrails** - Built-in validations and approvals
+- **Flexibility** - Customizable to specific organizational needs
 
-### 1. Bootstrap Backend
+Workflows are defined in YAML files in the `workflows/` directory and can be executed using the `atmos workflow` command.
 
-**File:** `workflows/bootstrap-backend.yaml`
+## Standard Workflows
 
-This workflow initializes the core infrastructure needed to manage Terraform state across all accounts and environments.
+The following standard workflows are included:
+
+### Environment Management
+
+| Workflow | Description | Usage |
+|----------|-------------|-------|
+| `bootstrap-backend` | Initialize backend infrastructure | `atmos workflow bootstrap-backend tenant=mycompany region=us-west-2` |
+| `apply-backend` | Apply backend configuration | `atmos workflow apply-backend tenant=mycompany account=management environment=prod` |
+| `onboard-environment` | Create new environment | `atmos workflow onboard-environment tenant=mycompany account=dev environment=testenv-01 vpc_cidr=10.1.0.0/16` |
+| `apply-environment` | Apply all components | `atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01` |
+| `plan-environment` | Plan all components | `atmos workflow plan-environment tenant=mycompany account=dev environment=testenv-01` |
+| `destroy-environment` | Destroy all components | `atmos workflow destroy-environment tenant=mycompany account=dev environment=testenv-01` |
+
+### Operations
+
+| Workflow | Description | Usage |
+|----------|-------------|-------|
+| `drift-detection` | Detect infrastructure drift | `atmos workflow drift-detection tenant=mycompany account=dev environment=testenv-01` |
+| `import` | Import existing resources | `atmos workflow import tenant=mycompany account=dev environment=testenv-01` |
+| `validate` | Validate configuration | `atmos workflow validate` |
+| `lint` | Lint code and configurations | `atmos workflow lint` |
+
+## Workflow Architecture
+
+Workflows are defined in YAML files with the following structure:
 
 ```yaml
-name: bootstrap-backend
-description: "Initialize the Terraform backend (S3 bucket and DynamoDB table)"
-
-workflows:
-  bootstrap:
-    steps:
-    - run:
-        command: |
-          aws s3api create-bucket --bucket ${bucket_name} --region ${region} --create-bucket-configuration LocationConstraint=${region}
-          aws s3api put-bucket-versioning --bucket ${bucket_name} --versioning-configuration Status=Enabled
-          aws dynamodb create-table --table-name ${dynamodb_table_name} --attribute-definitions AttributeName=LockID,AttributeType=S --key-schema AttributeName=LockID,KeyType=HASH --billing-mode PAY_PER_REQUEST --region ${region}
-        env:
-          bucket_name: ${tenant}-terraform-state
-          dynamodb_table_name: ${tenant}-terraform-locks
-          region: ${region}
+name: workflow-name
+description: "Workflow description"
+args:
+  - name: arg1
+    description: "Argument description"
+    required: true
+  - name: arg2
+    description: "Argument description"
+    required: false
+    default: "default-value"
+steps:
+  - name: step1
+    description: "Step description"
+    command: command-to-execute
+    args:
+      - arg1
+      - arg2
+    interactive: false  # Whether step requires user interaction
+  - name: step2
+    description: "Step description"
+    command: command-to-execute
+    args:
+      - arg1
+      - "{arg2}"  # Reference to workflow argument
 ```
 
-**Usage:**
+### Key Components
+
+- **name** - Unique workflow identifier
+- **description** - Human-readable workflow description
+- **args** - Arguments required or optional for the workflow
+- **steps** - Sequence of commands to execute
+- **command** - Command to execute for each step
+- **args** - Arguments for the command
+- **interactive** - Whether the step requires user interaction
+
+## Using Workflows
+
+### Basic Usage
+
+To execute a workflow:
+
 ```bash
-atmos workflow bootstrap-backend tenant=mycompany region=us-west-2
+atmos workflow <workflow-name> [args]
 ```
 
-### 2. Apply Backend
+Example:
 
-**File:** `workflows/apply-backend.yaml`
-
-This workflow applies changes to the Terraform backend configuration.
-
-```yaml
-name: apply-backend
-description: "Apply changes to the Terraform backend configuration"
-
-workflows:
-  apply:
-    steps:
-    - run:
-        command: |
-          atmos terraform init backend \
-            -backend-config="bucket=${bucket_name}" \
-            -backend-config="key=${state_file_key}" \
-            -backend-config="region=${region}" \
-            -backend-config="dynamodb_table=${dynamodb_table_name}" \
-            -backend-config="role_arn=${iam_role_arn}" \
-            -s ${tenant}-${account}-${environment}
-          atmos terraform apply backend -s ${tenant}-${account}-${environment}
-        env:
-          bucket_name: ${tenant}-terraform-state
-          dynamodb_table_name: ${tenant}-terraform-locks
-          region: ${region}
-          state_file_key: "${account}/${environment}/backend/terraform.tfstate"
-          iam_role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-```
-
-**Usage:**
-```bash
-atmos workflow apply-backend tenant=mycompany account=management environment=prod
-```
-
-### 3. Plan Environment
-
-**File:** `workflows/plan-environment.yaml`
-
-This workflow plans changes for all components in a specific environment.
-
-```yaml
-name: plan-environment
-description: "Plan changes for all components in an environment"
-
-workflows:
-  plan:
-    steps:
-    - run:
-        command: |
-          echo "Planning backend..."
-          atmos terraform plan backend -s ${tenant}-${account}-${environment}
-          echo "Planning iam..."
-          atmos terraform plan iam -s ${tenant}-${account}-${environment}
-          echo "Planning network..."
-          atmos terraform plan network -s ${tenant}-${account}-${environment}
-          echo "Planning infrastructure..."
-          atmos terraform plan infrastructure -s ${tenant}-${account}-${environment}
-          echo "Planning services..."
-          atmos terraform plan services -s ${tenant}-${account}-${environment}
-```
-
-**Usage:**
-```bash
-atmos workflow plan-environment tenant=mycompany account=dev environment=testenv-01
-```
-
-### 4. Apply Environment
-
-**File:** `workflows/apply-environment.yaml`
-
-Enhanced workflow to apply all components in an environment with proper error handling and validation.
-
-```yaml
-name: apply-environment
-description: "Apply changes for all components in an environment with dynamic discovery and dependency resolution"
-
-workflows:
-  apply:
-    steps:
-    - run:
-        command: |
-          # Set CLI version
-          export ATMOS_CLI_VERSION="1.46.0"
-          
-          # Validate required variables
-          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
-            echo "ERROR: Missing required parameters. Usage: atmos workflow apply-environment tenant=<tenant> account=<account> environment=<environment>"
-            exit 1
-          fi
-
-          # Set exit on error
-          set -e
-          
-          # Check if AWS credentials are valid
-          echo "Validating AWS credentials..."
-          if ! aws sts get-caller-identity > /dev/null; then
-            echo "ERROR: Invalid AWS credentials. Please check your credentials and try again."
-            exit 1
-          fi
-          
-          # Discover available components by looking at stack files
-          ENV_DIR="stacks/account/${account}/${environment}"
-          echo "Discovering components in ${ENV_DIR}..."
-          
-          # Define known dependency order based on imports/references
-          # Components earlier in the array should be applied before ones later in the array
-          ORDERED_COMPONENTS=(
-            "backend"
-            "iam"
-            "network"
-            "dns"
-            "eks" 
-            "eks-addons"  # eks-addons depends on eks
-            "ec2"
-            "ecs"
-            "rds"
-            "lambda"
-            "monitoring"
-            "services"
-          )
-          
-          # Discover available components from YAML files
-          AVAILABLE_COMPONENTS=()
-          for file in ${ENV_DIR}/*.yaml; do
-            if [ -f "$file" ]; then
-              # Extract component name from filename (removing path and extension)
-              component=$(basename "$file" .yaml)
-              AVAILABLE_COMPONENTS+=("$component")
-            fi
-          done
-          
-          echo "Discovered components: ${AVAILABLE_COMPONENTS[*]}"
-          
-          # Handle tainting for stateful resources like EKS clusters if needed
-          # This helps with resources that might need recreation
-          handle_taints() {
-            component=$1
-            stack="${tenant}-${account}-${environment}"
-            
-            if [ "$component" == "eks" ]; then
-              echo "Checking if EKS cluster needs to be tainted..."
-              # Attempt to taint EKS cluster if it exists
-              atmos terraform taint -allow-missing aws_eks_cluster.this -s $stack || true
-              echo "Taint completed (if resource exists)"
-            fi
-          }
-          
-          # Function to apply a component with error handling
-          apply_component() {
-            component=$1
-            echo "Applying ${component}..."
-            echo "----------------------------------------"
-            
-            # Handle tainting for certain components before applying
-            handle_taints "$component"
-            
-            if ! atmos terraform apply ${component} -s ${tenant}-${account}-${environment}; then
-              echo "ERROR: Failed to apply ${component}. Exiting."
-              return 1
-            fi
-            echo "Successfully applied ${component}."
-            echo "----------------------------------------"
-            return 0
-          }
-          
-          # Start deployment in dependency order, but only apply components that exist
-          echo "Starting deployment for ${tenant}-${account}-${environment}"
-          echo "============================================"
-          
-          # First apply components in known dependency order
-          for component in "${ORDERED_COMPONENTS[@]}"; do
-            # Check if this component exists in the available components list
-            if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${component} " ]]; then
-              apply_component "$component" || exit 1
-            fi
-          done
-          
-          # Then apply any components that weren't in our known ordering
-          for component in "${AVAILABLE_COMPONENTS[@]}"; do
-            # Check if this component was already applied in the ordered phase
-            if [[ ! " ${ORDERED_COMPONENTS[*]} " =~ " ${component} " ]]; then
-              echo "Applying unordered component ${component}..."
-              apply_component "$component" || exit 1
-            fi
-          done
-          
-          echo "============================================"
-          echo "Deployment completed successfully for ${tenant}-${account}-${environment}"
-          
-          # Perform validation checks if validation workflow exists
-          echo "Running post-deployment validation checks..."
-          
-          # Check if validation workflow exists
-          if atmos workflow describe validate &>/dev/null; then
-            atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
-          else
-            echo "Validation workflow not found, skipping validation checks."
-            echo "Consider adding a 'validate' workflow to automate post-deployment validation."
-          fi
-        env:
-          AWS_SDK_LOAD_CONFIG: 1
-          ATMOS_CLI_VERSION: "1.46.0"
-```
-
-**Usage:**
 ```bash
 atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01
 ```
 
-### 5. Onboard Environment
+### Workflow Argument Handling
 
-**File:** `workflows/onboard-environment.yaml`
+Arguments can be provided in key=value format:
 
-New workflow to streamline the creation of new environments by generating all required configurations and optionally deploying the infrastructure.
-
-```yaml
-name: onboard-environment
-description: "Onboard a new environment by creating all necessary configurations and deploying infrastructure"
-
-workflows:
-  onboard:
-    steps:
-    - run:
-        command: |
-          # Validate required variables
-          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ] || [ -z "${vpc_cidr}" ]; then
-            echo "ERROR: Missing required parameters."
-            echo "Usage: atmos workflow onboard-environment tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<vpc_cidr> [region=<region>]"
-            exit 1
-          fi
-          
-          # Create configuration files
-          ENV_DIR="stacks/account/${account}/${environment}"
-          mkdir -p "${ENV_DIR}"
-          
-          # Generate backend, iam, network, infrastructure, and services configurations
-          # ...
-          
-          # Ask for confirmation before deploying
-          read -p "Do you want to deploy the environment now? (y/n): " CONFIRM
-          if [[ ${CONFIRM} == "y" || ${CONFIRM} == "Y" ]]; then
-            echo "Beginning deployment..."
-            atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
-          fi
-```
-
-**Usage:**
 ```bash
-atmos workflow onboard-environment tenant=mycompany account=dev environment=testenv-02 vpc_cidr=10.2.0.0/16
+atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01
 ```
 
-### 6. Drift Detection
+Or using environment variables:
 
-**File:** `workflows/drift-detection.yaml`
-
-This workflow detects infrastructure drift by comparing the actual state with the desired state.
-
-```yaml
-name: drift-detection
-description: "Detect infrastructure drift in an environment"
-
-workflows:
-  drift-detection:
-    steps:
-    - run:
-        command: |
-          # Set environment variable
-          export ATMOS_CLI_VERSION="1.46.0"
-          
-          echo "Checking drift for backend..."
-          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          # detailed-exitcode returns 0 for no changes, 2 for changes present
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in backend component!"
-          fi
-          
-          echo "Checking drift for iam..."
-          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in iam component!"
-          fi
-          
-          echo "Checking drift for network..."
-          atmos terraform plan network -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in network component!"
-          fi
-          
-          # Check for DNS component drift
-          echo "Checking drift for dns..."
-          atmos terraform plan dns -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in dns component!"
-          fi
-        env:
-          ATMOS_CLI_VERSION: "1.46.0"
-```
-
-**Usage:**
 ```bash
-atmos workflow drift-detection tenant=mycompany account=dev environment=testenv-01
+export ATMOS_TENANT=mycompany
+export ATMOS_ACCOUNT=dev
+export ATMOS_ENVIRONMENT=testenv-01
+atmos workflow apply-environment
 ```
 
-## Workflow Design Principles
+### Interactive Workflows
 
-1. **Idempotency:** Workflows are designed to be idempotent, meaning they can be run multiple times without causing unintended side effects.
-
-2. **Explicit Over Implicit:** We avoid loops and complex logic in workflows, preferring explicit steps for clarity and easier debugging.
-
-3. **Environment Variability:** Workflows use environment variables to adapt to different accounts and environments.
-
-4. **Fail Fast:** Each step in a workflow is designed to fail immediately if there's an error, preventing partial or inconsistent states.
-
-5. **Logging and Visibility:** Workflows include echo statements to provide clear visibility into the progress of each step.
-
-## Best Practices for Workflow Development
-
-1. **Validation:** Always validate required parameters at the beginning of the workflow.
-
-2. **Error Handling:** Implement proper error handling with informative error messages.
-
-3. **Dependency Order:** Apply components in the correct dependency order (backend → IAM → network → infrastructure → services).
-
-4. **Post-Deployment Validation:** Include validation steps after deployment to ensure everything is working as expected.
-
-5. **Atomic Operations:** Design workflows to be atomic - they should either complete fully or not at all.
-
-## Extending Workflows
-
-To add a new workflow:
-
-1. Create a new YAML file in the `workflows/` directory.
-2. Define the workflow structure, including name, description, and steps.
-3. Use existing environment variables or define new ones as needed.
-4. Add the new workflow to the `imports` section of `atmos.yaml`.
-
-Example structure:
+Some workflows may include interactive steps that require user input:
 
 ```yaml
-name: custom-workflow
-description: "Description of your custom workflow"
+steps:
+  - name: confirm-deploy
+    description: "Confirm deployment to production"
+    command: read
+    args:
+      - -p
+      - "Do you want to deploy to production? (y/n): "
+    interactive: true
+```
 
-workflows:
-  main:
+### Viewing Available Workflows
+
+List all available workflows:
+
+```bash
+atmos workflow list
+```
+
+View details about a specific workflow:
+
+```bash
+atmos workflow describe <workflow-name>
+```
+
+## Customizing Workflows
+
+### Modifying Existing Workflows
+
+To customize an existing workflow:
+
+1. Copy the workflow file to a new file
+2. Modify the workflow as needed
+3. Change the workflow name to avoid conflicts
+
+Example:
+
+```bash
+cp workflows/apply-environment.yaml workflows/apply-environment-with-approval.yaml
+# Edit the new file
+```
+
+### Extending Workflows
+
+Add additional steps to existing workflows:
+
+```yaml
+# workflows/apply-environment-extended.yaml
+name: apply-environment-extended
+description: "Apply environment with additional steps"
+args:
+  # Same args as original workflow
+steps:
+  # Original steps from apply-environment
+  # Additional steps:
+  - name: notify-slack
+    description: "Notify Slack channel"
+    command: bash
+    args:
+      - -c
+      - "curl -X POST -H 'Content-type: application/json' --data '{\"text\":\"Environment {environment} deployed\"}' $SLACK_WEBHOOK_URL"
+```
+
+### Environment-Specific Workflows
+
+Create environment-specific workflows:
+
+```yaml
+# workflows/apply-production.yaml
+name: apply-production
+description: "Apply changes to production with approvals"
+args:
+  - name: tenant
+    required: true
+steps:
+  - name: get-approval
+    description: "Get approval for production deployment"
+    command: bash
+    args:
+      - -c
+      - "echo 'Production deployment requires approval' && read -p 'Enter approval code: ' code && [ \"$code\" == \"$PROD_APPROVAL_CODE\" ]"
+    interactive: true
+  
+  # Call standard apply-environment workflow
+  - name: apply
+    description: "Apply environment"
+    command: atmos
+    args:
+      - workflow
+      - apply-environment
+      - tenant={tenant}
+      - account=prod
+      - environment=us-east-1
+```
+
+## Creating New Workflows
+
+### Basic Workflow Structure
+
+Create a new workflow file:
+
+```yaml
+# workflows/my-workflow.yaml
+name: my-workflow
+description: "Custom workflow description"
+args:
+  - name: tenant
+    description: "Tenant name"
+    required: true
+  - name: component
+    description: "Component to deploy"
+    required: true
+steps:
+  - name: validate
+    description: "Validate component"
+    command: atmos
+    args:
+      - terraform
+      - validate
+      - "{component}"
+      - -s
+      - "{tenant}-dev-us-east-1"
+  
+  - name: plan
+    description: "Plan component"
+    command: atmos
+    args:
+      - terraform
+      - plan
+      - "{component}"
+      - -s
+      - "{tenant}-dev-us-east-1"
+  
+  - name: apply
+    description: "Apply component"
+    command: atmos
+    args:
+      - terraform
+      - apply
+      - "{component}"
+      - -s
+      - "{tenant}-dev-us-east-1"
+      - --auto-approve
+```
+
+### Advanced Workflow Features
+
+#### Conditional Execution
+
+Use Bash conditionals for conditional execution:
+
+```yaml
+steps:
+  - name: check-environment
+    description: "Check if production environment"
+    command: bash
+    args:
+      - -c
+      - |
+        if [ "{environment}" == "prod" ]; then
+          echo "Production environment detected"
+          exit 0
+        else
+          echo "Non-production environment, skipping approval"
+          exit 1
+        fi
+    interactive: false
+    
+  - name: production-approval
+    description: "Get approval for production"
+    condition: "check-environment"  # Only execute if previous step exits with 0
+    command: bash
+    args:
+      - -c
+      - "read -p 'Enter approval code: ' code && [ \"$code\" == \"$APPROVAL_CODE\" ]"
+    interactive: true
+```
+
+#### Environment Variables
+
+Pass environment variables to workflow steps:
+
+```yaml
+steps:
+  - name: deploy-with-vars
+    description: "Deploy with environment variables"
+    command: bash
+    args:
+      - -c
+      - "AWS_PROFILE={tenant}-{account} terraform apply -auto-approve"
+    env:
+      - name: TF_VAR_environment
+        value: "{environment}"
+      - name: TF_VAR_region
+        value: "{region}"
+```
+
+#### Error Handling
+
+Add error handling to workflows:
+
+```yaml
+steps:
+  - name: risky-operation
+    description: "Operation that might fail"
+    command: bash
+    args:
+      - -c
+      - "command_that_might_fail || (echo 'Operation failed, running cleanup' && cleanup_command)"
+    on_error:
+      command: bash
+      args:
+        - -c
+        - "echo 'Error occurred, running recovery' && recovery_command"
+```
+
+## CI/CD Integration
+
+### GitHub Actions Integration
+
+```yaml
+# .github/workflows/atmos-deploy.yml
+name: Deploy with Atmos
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
     steps:
-    - run:
-        command: |
-          # Your workflow logic here
-        env:
-          # Environment variables
+      - uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        
+      - name: Install Atmos
+        run: |
+          curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+          
+      - name: Run Atmos Workflow
+        run: |
+          atmos workflow plan-environment tenant=mycompany account=dev environment=testenv-01
 ```
 
-Then in `atmos.yaml`:
+### GitLab CI Integration
 
 ```yaml
-workflows:
-  imports:
-    - custom-workflow.yaml
-    # ... other workflows
+# .gitlab-ci.yml
+stages:
+  - validate
+  - plan
+  - apply
+
+variables:
+  TENANT: mycompany
+  ACCOUNT: dev
+  ENVIRONMENT: testenv-01
+
+validate:
+  stage: validate
+  script:
+    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+    - atmos workflow validate
+
+plan:
+  stage: plan
+  script:
+    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+    - atmos workflow plan-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT
+  artifacts:
+    paths:
+      - plan.tfplan
+
+apply:
+  stage: apply
+  script:
+    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+    - atmos workflow apply-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT
+  when: manual
+  only:
+    - main
 ```
+
+### Jenkins Pipeline
+
+```groovy
+// Jenkinsfile
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'TENANT', defaultValue: 'mycompany')
+        string(name: 'ACCOUNT', defaultValue: 'dev')
+        string(name: 'ENVIRONMENT', defaultValue: 'testenv-01')
+    }
+    
+    stages {
+        stage('Install Atmos') {
+            steps {
+                sh 'curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash'
+            }
+        }
+        
+        stage('Validate') {
+            steps {
+                sh 'atmos workflow validate'
+            }
+        }
+        
+        stage('Plan') {
+            steps {
+                sh "atmos workflow plan-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+            }
+        }
+        
+        stage('Apply') {
+            steps {
+                input message: 'Apply changes?', ok: 'Apply'
+                sh "atmos workflow apply-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+            }
+        }
+    }
+}
+```
+
+## Advanced Patterns
+
+### Multi-Environment Deployments
+
+Deploy to multiple environments sequentially:
+
+```yaml
+# workflows/deploy-all-environments.yaml
+name: deploy-all-environments
+description: "Deploy to all environments sequentially"
+args:
+  - name: tenant
+    required: true
+steps:
+  - name: deploy-dev
+    description: "Deploy to development"
+    command: atmos
+    args:
+      - workflow
+      - apply-environment
+      - tenant={tenant}
+      - account=dev
+      - environment=testenv-01
+      
+  - name: deploy-staging
+    description: "Deploy to staging"
+    command: atmos
+    args:
+      - workflow
+      - apply-environment
+      - tenant={tenant}
+      - account=staging
+      - environment=us-east-1
+    
+  - name: approve-production
+    description: "Approve production deployment"
+    command: bash
+    args:
+      - -c
+      - "read -p 'Deploy to production? (y/n): ' approval && [ \"$approval\" == \"y\" ]"
+    interactive: true
+    
+  - name: deploy-production
+    description: "Deploy to production"
+    command: atmos
+    args:
+      - workflow
+      - apply-environment
+      - tenant={tenant}
+      - account=prod
+      - environment=us-east-1
+```
+
+### Rolling Back Deployments
+
+Create workflows for safe rollbacks:
+
+```yaml
+# workflows/rollback-environment.yaml
+name: rollback-environment
+description: "Rollback environment to previous state"
+args:
+  - name: tenant
+    required: true
+  - name: account
+    required: true
+  - name: environment
+    required: true
+  - name: version
+    description: "Version to rollback to"
+    required: true
+steps:
+  - name: fetch-state
+    description: "Fetch previous state version"
+    command: bash
+    args:
+      - -c
+      - |
+        aws s3 cp s3://{tenant}-terraform-state/{account}/{environment}/terraform.tfstate.{version} \
+          s3://{tenant}-terraform-state/{account}/{environment}/terraform.tfstate
+  
+  - name: apply-environment
+    description: "Apply environment with previous state"
+    command: atmos
+    args:
+      - workflow
+      - apply-environment
+      - tenant={tenant}
+      - account={account}
+      - environment={environment}
+```
+
+### Custom Approval Workflows
+
+Implement custom approval mechanisms:
+
+```yaml
+# workflows/approve-changes.yaml
+name: approve-changes
+description: "Approve changes with multi-person approval"
+args:
+  - name: tenant
+    required: true
+  - name: account
+    required: true
+  - name: environment
+    required: true
+steps:
+  - name: generate-plan
+    description: "Generate Terraform plan"
+    command: atmos
+    args:
+      - workflow
+      - plan-environment
+      - tenant={tenant}
+      - account={account}
+      - environment={environment}
+      - --tf-plan-file=changes.plan
+  
+  - name: upload-plan
+    description: "Upload plan for review"
+    command: bash
+    args:
+      - -c
+      - "aws s3 cp changes.plan s3://{tenant}-approvals/{account}-{environment}-$(date +%Y%m%d%H%M%S).plan"
+  
+  - name: notify-approvers
+    description: "Notify approvers"
+    command: bash
+    args:
+      - -c
+      - "curl -X POST -H 'Content-type: application/json' --data '{\"text\":\"Changes ready for approval: {account}/{environment}\"}' $SLACK_WEBHOOK_URL"
+  
+  - name: wait-for-approval
+    description: "Wait for approval"
+    command: bash
+    args:
+      - -c
+      - "while [ ! -f approval.txt ]; do echo 'Waiting for approval...'; sleep 60; done"
+    interactive: true
+```
+
+## Troubleshooting
+
+### Common Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Workflow not found | Incorrect workflow name or path | Check workflow name and `workflows/` directory |
+| Missing arguments | Required arguments not provided | Provide all required arguments |
+| Command execution failure | Command returns non-zero exit code | Check command output and fix errors |
+| Interactive step hangs in CI | Interactive step in non-interactive environment | Set `interactive: false` or provide input |
+
+### Debugging Workflows
+
+Enable verbose output to debug workflow execution:
+
+```bash
+atmos --verbose workflow <workflow-name> [args]
+```
+
+Check workflow logs:
+
+```bash
+atmos logs
+```
+
+### Common Error Messages
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Workflow '<name>' not found` | Workflow file missing or incorrectly named | Check workflow file exists in `workflows/` directory |
+| `Missing required argument '<arg>'` | Required argument not provided | Provide the required argument |
+| `Command '<command>' not found` | Command doesn't exist or isn't in PATH | Install missing command or correct path |
+| `Step '<step>' failed with exit code <code>` | Command execution failed | Check command output and fix errors |
+
+## Reference
+
+### Workflow YAML Reference
+
+| Field | Description | Required | Example |
+|-------|-------------|----------|---------|
+| `name` | Workflow name | Yes | `apply-environment` |
+| `description` | Workflow description | Yes | `"Apply all components in an environment"` |
+| `args` | Workflow arguments | No | See below |
+| `args[].name` | Argument name | Yes | `tenant` |
+| `args[].description` | Argument description | Yes | `"Tenant name"` |
+| `args[].required` | Whether argument is required | Yes | `true` |
+| `args[].default` | Default value if not provided | No | `"default-value"` |
+| `steps` | Workflow steps | Yes | See below |
+| `steps[].name` | Step name | Yes | `apply-vpc` |
+| `steps[].description` | Step description | Yes | `"Apply VPC component"` |
+| `steps[].command` | Command to execute | Yes | `atmos` |
+| `steps[].args` | Command arguments | Yes | `["terraform", "apply", "vpc"]` |
+| `steps[].interactive` | Whether step requires interaction | No | `false` |
+| `steps[].condition` | Step to condition execution on | No | `check-environment` |
+| `steps[].env` | Environment variables for the step | No | See below |
+| `steps[].env[].name` | Environment variable name | Yes | `TF_VAR_region` |
+| `steps[].env[].value` | Environment variable value | Yes | `"{region}"` |
+
+### Argument Reference
+
+| Placeholder | Description | Example |
+|-------------|-------------|---------|
+| `{tenant}` | Tenant name | `mycompany` |
+| `{account}` | Account name | `dev` |
+| `{environment}` | Environment name | `testenv-01` |
+| `{region}` | AWS region | `us-east-1` |
+| `{component}` | Component name | `vpc` |
+
+### Command Reference
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `atmos workflow list` | List available workflows | `atmos workflow list` |
+| `atmos workflow describe <name>` | Describe workflow | `atmos workflow describe apply-environment` |
+| `atmos workflow <name> [args]` | Execute workflow | `atmos workflow apply-environment tenant=mycompany` |
+| `atmos workflow edit <name>` | Edit workflow (if editor configured) | `atmos workflow edit apply-environment` |

@@ -1,208 +1,329 @@
-# Atmos: Streamlining Infrastructure as Code Management
+# Atmos Framework Overview
+
+_Last Updated: February 27, 2025_
+
+This document provides a comprehensive overview of the Atmos framework, its architecture, and how it's used to manage infrastructure as code with Terraform.
+
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Architecture](#architecture)
+- [Key Concepts](#key-concepts)
+- [Installation](#installation)
+- [Basic Usage](#basic-usage)
+- [Advanced Usage](#advanced-usage)
+- [Debugging and Troubleshooting](#debugging-and-troubleshooting)
+- [Best Practices](#best-practices)
+- [Reference](#reference)
 
 ## Introduction
 
-Atmos is a powerful tool designed to simplify and enhance the management of Infrastructure as Code (IaC) across multiple environments and cloud providers. It provides a layer of abstraction and organization over tools like Terraform, making it easier to manage complex, multi-account, and multi-environment infrastructures.
+Atmos is an orchestration tool designed to manage infrastructure as code across complex multi-account, multi-region environments. It provides a layer of abstraction over Terraform that simplifies management of infrastructure by:
 
-## Why Atmos?
+- Organizing configurations in a hierarchical structure
+- Providing variable inheritance and overrides
+- Supporting cross-component references
+- Enabling workflow automation and standardization
+- Facilitating environment-specific configurations
 
-In the world of modern cloud infrastructure, managing resources across multiple accounts, regions, and environments can quickly become complex and unwieldy. Traditional IaC tools like Terraform are powerful, but they can lead to code duplication, complex state management, and difficulties in maintaining consistency across environments. This is where Atmos comes in.
+Atmos is particularly well-suited for organizations with multiple AWS accounts (e.g., development, staging, production) and teams that need to manage infrastructure consistently across these accounts.
 
-### Key Benefits:
+## Architecture
 
-1. **Centralized Configuration:** Atmos allows you to define your infrastructure components once and reuse them across multiple environments.
+Atmos uses a structured approach to organize infrastructure code:
 
-2. **Simplified Multi-Account Management:** Easily manage resources across multiple AWS accounts from a single codebase.
-
-3. **Environment-Specific Customization:** Override specific variables for different environments while maintaining a common base configuration.
-
-4. **Workflow Automation:** Define and execute complex, multi-step workflows for infrastructure operations.
-
-5. **Improved Collaboration:** Standardized structure and workflows make it easier for teams to work together on infrastructure code.
-
-6. **Reduced Error Potential:** By reducing duplication and providing a clear structure, Atmos helps minimize the potential for errors in your infrastructure code.
-
-7. **Enhanced Security:** Standardized handling of secrets and sensitive data using SSM Parameter Store or Secrets Manager.
-
-8. **Validation and Safeguards:** Built-in validation to prevent misconfigurations and secure resource creation.
-
-9. **Consistent Resource Naming:** Enforce component and resource naming conventions across your organization.
-
-## Atmos Building Blocks
-
-### 1. Components
-
-Components in Atmos are reusable pieces of infrastructure code. They typically correspond to Terraform modules but can also represent other types of resources.
-
-Example component structure:
 ```
-components/
-  terraform/
-    vpc/                # Network infrastructure
-      main.tf           # Primary resource definitions
-      variables.tf      # Input variables with validation blocks
-      outputs.tf        # Output values with descriptions
-      provider.tf       # Provider configuration
-      policies/         # Policy template directory
-        *.json.tpl      # Template files for policies
-    securitygroup/      # Security group management (singular form, no hyphens)
-    dns/                # Route53 DNS management
-    rds/                # Database services
-    acm/                # Certificate management
-    backend/            # S3/DynamoDB Terraform backend
-    eks/                # Kubernetes clusters
-    eks-addons/         # Kubernetes add-ons and extensions
+└── Project Root
+    ├── atmos.yaml              # Atmos configuration
+    ├── components/             # Terraform modules
+    ├── stacks/                 # Stack configurations
+    │   ├── catalog/            # Reusable component configurations
+    │   ├── account/            # Account-specific configurations
+    │   └── schemas/            # JSON schemas for validation
+    └── workflows/              # Custom workflows
 ```
 
-### 2. Stacks
+The architecture follows these principles:
 
-Stacks in Atmos represent a collection of components that make up an environment or a specific infrastructure setup.
+1. **Separation of concerns** - Components (code) are separated from configurations (variables)
+2. **Hierarchical organization** - Configurations cascade from general to specific
+3. **Single source of truth** - All configurations managed in one repository
+4. **Workflow standardization** - Common operations defined as workflows
+5. **Version control** - All code and configurations managed with Git
 
-Example stack structure:
-```
-stacks/
-  dev/
-    network.yaml
-    services.yaml
-  prod/
-    network.yaml
-    services.yaml
-```
+![Atmos Architecture](https://raw.githubusercontent.com/cloudposse/atmos/master/docs/images/architecture.png)
 
-### 3. Workflows
+## Key Concepts
 
-Workflows in Atmos allow you to define complex, multi-step processes for managing your infrastructure.
+### Components
+
+Components are the building blocks of your infrastructure. In Atmos, a component is typically a Terraform module that defines a specific piece of infrastructure (e.g., VPC, EKS cluster, RDS instance).
+
+Components are stored in the `components/terraform/` directory and contain:
+- Terraform code (.tf files)
+- Documentation
+- Tests (optional)
+
+### Stacks
+
+Stacks define configurations for components across different environments. They are organized in a hierarchical structure:
+
+- **Catalog** (`stacks/catalog/`) - Base configurations for components
+- **Account** (`stacks/account/`) - Account and environment-specific configurations
+
+Stacks are defined in YAML files and use a hierarchical inheritance model:
+
+1. Catalog defines base configuration
+2. Account-specific configuration inherits and overrides catalog
+3. Environment-specific configuration inherits and overrides account
+
+### Variables
+
+Atmos provides a powerful variable system that supports:
+
+- **Variable inheritance** - Inherited from more general to more specific configurations
+- **Variable overrides** - More specific configurations override general ones
+- **Context variables** - `tenant`, `account`, `environment`, `region`, etc.
+- **Special expressions** - For advanced variable processing
+
+Example variable reference: `${output.vpc.vpc_id}`
+
+### Workflows
+
+Workflows are predefined sequences of commands that automate common tasks. They are defined in YAML files in the `workflows/` directory.
 
 Example workflow:
 ```yaml
-name: deploy-environment
+name: apply-environment
+description: "Apply all components in an environment"
 steps:
-  - run:
-      command: atmos terraform apply network -s ${stack}
-  - run:
-      command: atmos terraform apply services -s ${stack}
+  - command: atmos
+    args:
+      - terraform
+      - apply
+      - vpc
+      - -s
+      - "{tenant}-{account}-{environment}"
+  # More steps...
 ```
 
-### 4. Catalog
+## Installation
 
-The catalog in Atmos is a collection of reusable stack configurations that can be imported and customized for specific environments.
+### Prerequisites
 
-Example catalog structure:
+- Terraform (v1.0.0 or later)
+- AWS CLI (configured with appropriate credentials)
+- Git
+
+### Install Atmos CLI
+
+#### macOS (with Homebrew)
+
+```bash
+brew tap cloudposse/tap
+brew install atmos
 ```
-stacks/
-  catalog/
-    network.yaml
-    services.yaml
+
+#### Linux/macOS (with curl)
+
+```bash
+curl -fsSL https://atmos.tools/install.sh | bash
 ```
 
-## Atmos Principles
+#### Verify Installation
 
-1. **DRY (Don't Repeat Yourself):** Atmos encourages the reuse of components and configurations across environments.
+```bash
+atmos version
+```
 
-2. **Configuration as Code:** All aspects of your infrastructure, including environment-specific configurations, are defined as code.
+## Basic Usage
 
-3. **Separation of Concerns:** Atmos separates the definition of components from their configuration in different environments.
+### Initialize Project
 
-4. **Hierarchical Configuration:** Atmos uses a hierarchical approach to configuration, allowing for easy overrides at different levels.
+```bash
+atmos init
+```
 
-5. **Workflow Automation:** Complex processes are automated through defined workflows.
+This sets up the basic directory structure and configuration files.
 
-6. **Standardization:** Atmos promotes standardized practices across teams and projects.
+### Configure Atmos
 
-7. **Secure by Default:** Follow security best practices in all components, with proper handling of sensitive data.
+Edit the `atmos.yaml` file to configure Atmos:
 
-8. **Validation First:** Use variable validation and lifecycle preconditions to prevent misconfigurations.
+```yaml
+base:
+  components:
+    terraform:
+      base_path: components/terraform
+      apply_auto_approve: false
+      deploy_run_init: true
+      init_run_reconfigure: true
+      auto_generate_backend_file: true
+  stacks:
+    base_path: stacks
+    included_paths:
+      - "catalog/**/*"
+      - "account/**/*"
+    excluded_paths:
+      - "**/.git/**/*"
+    name_pattern: "{tenant}-{environment}-{stage}"
+# ...additional configuration...
+```
 
-9. **Consistent Naming:** Use singular form without hyphens for component directories and consistent naming patterns for resources.
+### Deploy a Component
 
-## The Atmos Mindset
+```bash
+atmos terraform apply vpc -s mycompany-dev-us-east-1
+```
 
-Adopting Atmos requires a shift in how we think about infrastructure management:
+### Use Workflows
 
-1. **Think in Components:** Design your infrastructure as a collection of reusable components.
+```bash
+atmos workflow apply-environment tenant=mycompany account=dev environment=us-east-1
+```
 
-2. **Embrace Abstraction:** Use Atmos's abstraction layers to manage complexity.
+## Advanced Usage
 
-3. **Configuration-Driven:** Focus on configuration rather than writing custom scripts for different environments.
+### Component Dependencies
 
-4. **Automate Everything:** Leverage Atmos workflows to automate as much as possible.
+Atmos supports explicit component dependencies using the `dependencies` field in stack configurations:
 
-5. **Version Control Everything:** Treat your Atmos configurations with the same rigor as application code.
+```yaml
+# stacks/account/dev/us-east-1/eks.yaml
+import:
+  - catalog/eks
 
-## Getting Started with Atmos
+dependencies:
+  - vpc
+  - iam
 
-To start using Atmos, you'll need to:
+vars:
+  # ... component variables ...
+```
 
-1. Install the Atmos CLI
-2. Set up your project structure
-3. Define your components
-4. Create your stack configurations
-5. Define your workflows
+### Cross-Component References
 
-For detailed installation and setup instructions, refer to the [official Atmos documentation](https://atmos.tools/).
+Reference outputs from other components:
 
-## Use Cases
+```yaml
+vars:
+  vpc_id: ${output.vpc.vpc_id}
+  subnet_ids: ${output.vpc.private_subnet_ids}
+```
 
-Atmos shines in several common scenarios:
+### Custom Variable Processing
 
-1. **Multi-Account AWS Setups:** Manage resources across development, staging, and production AWS accounts.
-2. **Microservices Infrastructure:** Define and manage infrastructure for multiple microservices.
-3. **Multi-Region Deployments:** Deploy and manage resources across multiple AWS regions.
-4. **Consistent Development Environments:** Ensure development, staging, and production environments are consistent.
+Atmos supports advanced variable processing:
+
+```yaml
+vars:
+  cidr_block: ${cidrsubnet("10.0.0.0/16", 8, 10)}
+  combined_config: ${merge(var.default_config, var.override_config)}
+```
+
+### Context Inheritance
+
+Use inheritance to manage configurations across multiple environments:
+
+```yaml
+import:
+  - catalog/base
+  - account/common
+```
+
+## Debugging and Troubleshooting
+
+### Logs
+
+View Atmos logs:
+
+```bash
+atmos logs
+```
+
+### Verbose Output
+
+Enable verbose output:
+
+```bash
+atmos --verbose terraform plan vpc -s tenant-account-environment
+```
+
+### Component Validation
+
+Validate a component:
+
+```bash
+atmos terraform validate vpc -s tenant-account-environment
+```
+
+### Common Issues
+
+1. **Stack not found** - Check stack name and `stacks/` directory
+2. **Component not found** - Check component name and `components/` directory
+3. **Variable resolution errors** - Check variable references and context
+4. **Backend errors** - Check S3/DynamoDB backend configuration
 
 ## Best Practices
 
-1. **Component Naming and Structure**
-   - Use singular form without hyphens for component directories (e.g., `securitygroup` not `security-groups`).
-   - Maintain consistent file structure within components (main.tf, variables.tf, outputs.tf, provider.tf).
-   - Group related resources in separate files for large components (iam.tf, data.tf, locals.tf).
+### Organization Structure
 
-2. **Variable Management**
-   - Add validation blocks to all variables that have potential constraints.
-   - Use variable defaults appropriately, but make required parameters explicit.
-   - Document each variable with a clear description of its purpose and format.
+- Organize stacks by account and environment
+- Use consistent naming conventions
+- Keep component configurations DRY by using catalog
 
-3. **Security Practices**
-   - Use .tpl extension for JSON policy files and use `templatefile()` function to interpolate variables.
-   - Store sensitive values in SSM Parameter Store or Secrets Manager, not in Terraform state.
-   - Reference secrets in Atmos configurations using `${ssm:/path/to/param}` syntax.
-   - Enforce HTTPS-only policies for S3 buckets and API endpoints.
-   - Use KMS encryption for sensitive data at rest.
-   - Implement least privilege IAM policies with explicit allows only.
+### Variables Management
 
-4. **Dependency Management**
-   - Use `depends_on` attribute and `time_sleep` resources to prevent race conditions.
-   - Avoid circular dependencies with careful resource design.
-   - Structure your components with clear dependency chains.
+- Define defaults in catalog
+- Override only what's necessary in account/environment
+- Use context variables where possible
+- Document variable meanings and constraints
 
-5. **Stack Organization**
-   - Leverage the catalog for reusable configurations.
-   - Establish clear dependencies between stack components.
-   - Use consistent naming for environment-specific overrides.
+### Workflow Standardization
 
-6. **Workflow Automation**
-   - Use Atmos workflows for complex, multi-step processes.
-   - Include validation steps in workflows before making changes.
-   - Implement proper error handling in workflow scripts.
+- Create workflows for repetitive tasks
+- Include validation steps
+- Add proper error handling
 
-7. **State Management**
-   - Configure secure, encrypted S3 backends with proper versioning.
-   - Use DynamoDB locks to prevent concurrent modifications.
-   - Implement MFA delete on state buckets for production environments.
+### Documentation
 
-8. **Operational Excellence**
-   - Implement proper version control for your Atmos configurations.
-   - Regularly review and refactor your components and stacks.
-   - Run drift detection regularly to ensure configuration consistency.
-   - Document component interfaces and cross-component dependencies.
-   - Add explicit tagging for resource management and cost allocation.
+- Document component interfaces (inputs/outputs)
+- Document component architecture and design decisions
+- Keep diagrams up-to-date
 
-## Further Reading
+## Reference
 
-- [Atmos Official Documentation](https://atmos.tools/)
-- [Infrastructure as Code Best Practices](https://www.terraform.io/docs/cloud/guides/recommended-practices/index.html)
-- [AWS Multi-Account Strategy](https://aws.amazon.com/blogs/mt/best-practices-for-organizational-units-with-aws-organizations/)
+### Atmos CLI Commands
 
-## Conclusion
+- `atmos terraform <command> <component> -s <stack>` - Run Terraform commands
+- `atmos workflow <workflow> [args]` - Run workflows
+- `atmos describe component <component> -s <stack>` - Describe component
+- `atmos describe stack <stack>` - Describe stack
+- `atmos version` - Show version information
+- `atmos list components` - List available components
+- `atmos list stacks` - List available stacks
 
-Atmos provides a powerful framework for managing complex infrastructure setups. By embracing its principles and leveraging its features, teams can significantly improve their infrastructure management processes, reduce errors, and increase productivity. As with any tool, the key to success with Atmos lies in understanding its capabilities and applying them thoughtfully to your specific use cases.
+### Configuration Reference
+
+| Configuration | Description | Example |
+|--------------|-------------|---------|
+| `base.components.terraform.base_path` | Base path for components | `components/terraform` |
+| `base.stacks.base_path` | Base path for stacks | `stacks` |
+| `base.stacks.name_pattern` | Pattern for stack names | `{tenant}-{environment}-{stage}` |
+| `base.workflows.base_path` | Base path for workflows | `workflows` |
+
+### Variable Reference
+
+| Syntax | Description | Example |
+|--------|-------------|---------|
+| `${var.name}` | Reference variable | `${var.vpc_cidr}` |
+| `${output.component.output}` | Reference component output | `${output.vpc.vpc_id}` |
+| `${environment}` | Context variable | `${environment}` |
+| `${deep_merge(var1, var2)}` | Merge variables | `${deep_merge(var.defaults, var.overrides)}` |
+| `${ssm:/path/to/param}` | SSM parameter | `${ssm:/myapp/database/password}` |
+
+### Additional Resources
+
+- [Atmos GitHub Repository](https://github.com/cloudposse/atmos)
+- [Atmos Documentation](https://atmos.tools/quick-start/)
+- [Cloud Posse SweetOps Community](https://sweetops.com/)
