@@ -3,8 +3,27 @@
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Terraform](https://img.shields.io/badge/terraform-%3E%3D1.0.0-623CE4.svg)
 ![Atmos](https://img.shields.io/badge/atmos-%3E%3D1.5.0-16A394.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=flat&logo=amazon-aws&logoColor=white)
+![Workflow Status](https://img.shields.io/badge/workflows-passing-success.svg)
+![Last Commit](https://img.shields.io/github/last-commit/hemzaz/tf-atmos)
 
 _Last Updated: February 27, 2025_
+
+## Table of Contents
+1. [What is this project?](#1-what-is-this-project)
+2. [Project Structure](#2-project-structure)
+3. [Getting Started](#3-getting-started)
+4. [Component Catalog](#4-component-catalog)
+5. [Workflows](#5-workflows)
+6. [Development Guide](#6-development-guide)
+7. [Best Practices](#7-best-practices)
+8. [Contributing](#8-contributing)
+9. [Documentation](#9-documentation)
+10. [Support and Troubleshooting](#10-support-and-troubleshooting)
+11. [License](#11-license)
+12. [Roadmap](#12-roadmap)
 
 ## 1. What is this project?
 
@@ -86,6 +105,7 @@ Key features:
 
 ### Installation
 
+#### Linux
 1. Install the AWS CLI:
    ```bash
    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -103,6 +123,32 @@ Key features:
 3. Install Atmos CLI:
    ```bash
    curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+   ```
+
+#### macOS
+1. Install the AWS CLI:
+   ```bash
+   curl "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "AWSCLIV2.pkg"
+   sudo installer -pkg AWSCLIV2.pkg -target /
+   ```
+
+2. Install Terraform with Homebrew:
+   ```bash
+   brew tap hashicorp/tap
+   brew install hashicorp/tap/terraform
+   ```
+
+3. Install Atmos CLI (choose one method):
+   
+   Using the install script:
+   ```bash
+   curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+   ```
+   
+   Or using Homebrew:
+   ```bash
+   brew tap cloudposse/tap
+   brew install atmos
    ```
 
 4. Clone this repository:
@@ -276,6 +322,7 @@ Detailed documentation can be found in the `/docs` directory:
 - [Migration Guide](docs/migration-guide.md) - Steps for migrating existing infrastructure
 - [Disaster Recovery Guide](docs/disaster-recovery-guide.md) - Backup and recovery procedures
 - [Documentation Style Guide](docs/documentation-style-guide.md) - Standards for documentation
+- [Project Roadmap](docs/roadmap.md) - Future plans, feature requests, and development goals
 
 ## 10. Support and Troubleshooting
 
@@ -306,3 +353,22 @@ For questions or issues, please:
 ## 11. License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 12. Roadmap
+
+We maintain a detailed roadmap of planned features, enhancements, and future development for this project. The roadmap includes:
+
+- **Current Development Focus**: Active development priorities for upcoming releases
+- **Feature Requests**: Features requested by users and contributors
+- **Technical Debt & Refactoring**: Areas identified for improvement
+- **Documentation Improvements**: Planned documentation enhancements
+- **Release Schedule**: Anticipated release dates and feature targets
+
+For the complete roadmap, see [Project Roadmap](docs/roadmap.md).
+
+To contribute to the roadmap or suggest new features:
+1. Review the existing roadmap
+2. Open an issue with the tag `roadmap-feedback`
+3. Submit a pull request with your proposed changes or additions
+
+We welcome community feedback to help prioritize our development efforts.
