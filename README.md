@@ -41,7 +41,6 @@ Key features:
 
 ```
 .
-├── CLAUDE.md                  # Code style guidelines and reference
 ├── atmos.yaml                 # Atmos configuration file
 ├── components/                # Reusable Terraform modules
 │   └── terraform/
