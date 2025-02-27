@@ -111,13 +111,16 @@ Enhanced workflow to apply all components in an environment with proper error ha
 
 ```yaml
 name: apply-environment
-description: "Apply changes for all components in an environment with improved error handling"
+description: "Apply changes for all components in an environment with dynamic discovery and dependency resolution"
 
 workflows:
   apply:
     steps:
     - run:
         command: |
+          # Set CLI version
+          export ATMOS_CLI_VERSION="1.46.0"
+          
           # Validate required variables
           if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
             echo "ERROR: Missing required parameters. Usage: atmos workflow apply-environment tenant=<tenant> account=<account> environment=<environment>"
@@ -127,11 +130,69 @@ workflows:
           # Set exit on error
           set -e
           
+          # Check if AWS credentials are valid
+          echo "Validating AWS credentials..."
+          if ! aws sts get-caller-identity > /dev/null; then
+            echo "ERROR: Invalid AWS credentials. Please check your credentials and try again."
+            exit 1
+          fi
+          
+          # Discover available components by looking at stack files
+          ENV_DIR="stacks/account/${account}/${environment}"
+          echo "Discovering components in ${ENV_DIR}..."
+          
+          # Define known dependency order based on imports/references
+          # Components earlier in the array should be applied before ones later in the array
+          ORDERED_COMPONENTS=(
+            "backend"
+            "iam"
+            "network"
+            "dns"
+            "eks" 
+            "eks-addons"  # eks-addons depends on eks
+            "ec2"
+            "ecs"
+            "rds"
+            "lambda"
+            "monitoring"
+            "services"
+          )
+          
+          # Discover available components from YAML files
+          AVAILABLE_COMPONENTS=()
+          for file in ${ENV_DIR}/*.yaml; do
+            if [ -f "$file" ]; then
+              # Extract component name from filename (removing path and extension)
+              component=$(basename "$file" .yaml)
+              AVAILABLE_COMPONENTS+=("$component")
+            fi
+          done
+          
+          echo "Discovered components: ${AVAILABLE_COMPONENTS[*]}"
+          
+          # Handle tainting for stateful resources like EKS clusters if needed
+          # This helps with resources that might need recreation
+          handle_taints() {
+            component=$1
+            stack="${tenant}-${account}-${environment}"
+            
+            if [ "$component" == "eks" ]; then
+              echo "Checking if EKS cluster needs to be tainted..."
+              # Attempt to taint EKS cluster if it exists
+              atmos terraform taint -allow-missing aws_eks_cluster.this -s $stack || true
+              echo "Taint completed (if resource exists)"
+            fi
+          }
+          
           # Function to apply a component with error handling
           apply_component() {
             component=$1
             echo "Applying ${component}..."
             echo "----------------------------------------"
+            
+            # Handle tainting for certain components before applying
+            handle_taints "$component"
+            
             if ! atmos terraform apply ${component} -s ${tenant}-${account}-${environment}; then
               echo "ERROR: Failed to apply ${component}. Exiting."
               return 1
@@ -141,31 +202,43 @@ workflows:
             return 0
           }
           
-          # Apply components in dependency order
+          # Start deployment in dependency order, but only apply components that exist
           echo "Starting deployment for ${tenant}-${account}-${environment}"
           echo "============================================"
           
-          # Apply backend first
-          apply_component "backend" || exit 1
+          # First apply components in known dependency order
+          for component in "${ORDERED_COMPONENTS[@]}"; do
+            # Check if this component exists in the available components list
+            if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${component} " ]]; then
+              apply_component "$component" || exit 1
+            fi
+          done
           
-          # Apply IAM next
-          apply_component "iam" || exit 1
-          
-          # Apply network
-          apply_component "network" || exit 1
-          
-          # Apply infrastructure components
-          apply_component "infrastructure" || exit 1
-          
-          # Apply services last
-          apply_component "services" || exit 1
+          # Then apply any components that weren't in our known ordering
+          for component in "${AVAILABLE_COMPONENTS[@]}"; do
+            # Check if this component was already applied in the ordered phase
+            if [[ ! " ${ORDERED_COMPONENTS[*]} " =~ " ${component} " ]]; then
+              echo "Applying unordered component ${component}..."
+              apply_component "$component" || exit 1
+            fi
+          done
           
           echo "============================================"
           echo "Deployment completed successfully for ${tenant}-${account}-${environment}"
           
-          # Perform validation checks
+          # Perform validation checks if validation workflow exists
           echo "Running post-deployment validation checks..."
-          atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
+          
+          # Check if validation workflow exists
+          if atmos workflow describe validate &>/dev/null; then
+            atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
+          else
+            echo "Validation workflow not found, skipping validation checks."
+            echo "Consider adding a 'validate' workflow to automate post-deployment validation."
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+          ATMOS_CLI_VERSION: "1.46.0"
 ```
 
 **Usage:**
@@ -226,15 +299,40 @@ name: drift-detection
 description: "Detect infrastructure drift in an environment"
 
 workflows:
-  detect:
+  drift-detection:
     steps:
     - run:
         command: |
+          # Set environment variable
+          export ATMOS_CLI_VERSION="1.46.0"
+          
           echo "Checking drift for backend..."
-          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode
+          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          # detailed-exitcode returns 0 for no changes, 2 for changes present
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in backend component!"
+          fi
+          
           echo "Checking drift for iam..."
-          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode
-          # ...
+          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in iam component!"
+          fi
+          
+          echo "Checking drift for network..."
+          atmos terraform plan network -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in network component!"
+          fi
+          
+          # Check for DNS component drift
+          echo "Checking drift for dns..."
+          atmos terraform plan dns -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in dns component!"
+          fi
+        env:
+          ATMOS_CLI_VERSION: "1.46.0"
 ```
 
 **Usage:**

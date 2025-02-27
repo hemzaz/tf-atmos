@@ -5,6 +5,11 @@ vars:
   account: dev
   environment: testenv-01
   region: eu-west-2
+  tenant: fnx
+  
+dependencies:
+  - network
+  - iam
 
   # EKS clusters configuration
   eks.clusters:

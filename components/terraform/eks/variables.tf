@@ -20,6 +20,12 @@ variable "default_kubernetes_version" {
   default     = "1.28"
 }
 
+variable "oidc_provider_arn" {
+  type        = string
+  description = "ARN of the OIDC provider for the EKS cluster"
+  default     = ""
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags to apply to all resources"

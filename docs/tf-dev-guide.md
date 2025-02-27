@@ -9,17 +9,17 @@ This guide is designed for experienced DevOps engineers and infrastructure devel
 In Atmos, a Terraform component typically consists of the following files:
 
 ```
-components/terraform/my-component/
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── providers.tf
-├── data.tf
-├── locals.tf
-├── iam.tf
-├── policies/
-│   └── custom-policy.json
-└── README.md
+components/terraform/mycomponent/  # Note: Use singular form without hyphens
+├── main.tf                        # Primary resource definitions
+├── variables.tf                   # Input variables with validation
+├── outputs.tf                     # Output values for cross-component references
+├── provider.tf                    # Provider configuration
+├── data.tf                        # Data sources
+├── locals.tf                      # Local computations and constants
+├── iam.tf                         # IAM-related resources
+├── policies/                      # Policy template files
+│   └── custom-policy.json.tpl     # Use .tpl extension for templates
+└── README.md                      # Component documentation
 ```
 
 Let's break down each file's purpose and provide examples of advanced usage.
@@ -117,8 +117,13 @@ output "private_subnet_ids" {
   value       = aws_subnet.private[*].id
 }
 
+output "database_credentials_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing database credentials"
+  value       = aws_secretsmanager_secret.db_credentials.arn
+}
+
 output "database_password" {
-  description = "The password for the database"
+  description = "The password for the database (if not using Secrets Manager)"
   value       = aws_db_instance.this.password
   sensitive   = true
 }
@@ -219,7 +224,18 @@ The serverless Lambda module includes:
 - Event source mappings (API Gateway, S3, CloudWatch Events, SNS)
 - Alias and version management
 
-### 4. Monitoring Module
+### 4. DNS Module
+
+The Route53 DNS module provides flexible and robust DNS management:
+- Support for public and private hosted zones
+- Cross-account DNS management with delegation
+- Health checks with CloudWatch integration
+- Advanced routing policies (weighted, latency, failover, geolocation)
+- Query logging to CloudWatch
+- VPC associations for private zones
+- Traffic flow management for complex routing scenarios
+
+### 5. Monitoring Module
 
 A comprehensive monitoring solution with:
 - CloudWatch dashboards for environment-wide visibility
@@ -291,9 +307,10 @@ resource "aws_subnet" "private" {
 
 ### 4. Using `templatefile` Function
 
-Leverage the `templatefile` function for complex configurations:
+Leverage the `templatefile` function for complex configurations and policy documents:
 
 ```hcl
+# For task definitions
 resource "aws_ecs_task_definition" "this" {
   family                   = local.task_family
   requires_compatibilities = ["FARGATE"]
@@ -311,6 +328,19 @@ resource "aws_ecs_task_definition" "this" {
     region         = data.aws_region.current.name
   })
 }
+
+# For IAM policies
+resource "aws_iam_policy" "s3_access" {
+  name        = "${var.tags["Environment"]}-${var.component_name}-s3-access"
+  description = "Policy for S3 access"
+  
+  # Using templatefile instead of direct variable interpolation in JSON
+  policy = templatefile("${path.module}/policies/s3-access-policy.json.tpl", {
+    bucket_name = var.bucket_name
+    account_id  = data.aws_caller_identity.current.account_id
+    region      = var.region
+  })
+}
 ```
 
 ## Best Practices for Atmos Components
@@ -321,9 +351,13 @@ resource "aws_ecs_task_definition" "this" {
 
 3. **Security Best Practices**: Follow security best practices for all components:
    - Encrypt sensitive data at rest and in transit
-   - Use Secrets Manager for credentials
-   - Implement least privilege IAM policies
+   - Store secrets in AWS Secrets Manager or SSM Parameter Store instead of Terraform state
+   - Use `${ssm:/path/to/param}` syntax for referencing secrets in Atmos configurations
+   - Convert JSON policy files to .tpl templates and use `templatefile()` function
+   - Implement least privilege IAM policies with explicit allows only
+   - Create security groups with minimal ingress/egress rules (avoid 0.0.0.0/0)
    - Enable VPC isolation where appropriate
+   - Add validation blocks to variables to prevent misconfigurations
 
 4. **Resource Naming**: Use consistent naming conventions that include environment, component, and purpose.
 
@@ -338,6 +372,12 @@ resource "aws_ecs_task_definition" "this" {
 9. **Conditional Features**: Use feature flags (boolean variables) to enable or disable certain features of a component.
 
 10. **Cross-Account Support**: Design components to work across multiple AWS accounts using assume role functionality.
+
+11. **Component Naming**: Follow singular form without hyphens for component directories (e.g., `securitygroup` not `security-groups`).
+
+12. **Race Condition Prevention**: Add appropriate wait times between dependent resources with `time_sleep` resource.
+
+13. **Dynamic Blocks**: Use dynamic blocks for repetitive resource configurations to improve readability and maintainability.
 
 ## Conclusion
 

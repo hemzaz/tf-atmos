@@ -5,6 +5,11 @@ vars:
   account: dev
   environment: testenv-01
   region: eu-west-2
+  tenant: fnx
+  
+dependencies:
+  - eks
+  - network
 
   # API Gateway specific overrides
   api_gateway.enabled: true

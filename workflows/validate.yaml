@@ -6,6 +6,17 @@ workflows:
     steps:
     - run:
         command: |
+          # Set CLI version
+          export ATMOS_CLI_VERSION="1.46.0"
+          
+          # Run terraform fmt check first
+          echo "Running terraform format check..."
+          atmos terraform fmt -check components/terraform
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Terraform format check failed. Please run 'atmos terraform fmt' to fix formatting issues."
+            exit 1
+          fi
+          
           echo "Validating backend..."
           atmos terraform validate backend -s ${tenant}-${account}-${environment}
           echo "Validating iam..."
@@ -16,3 +27,5 @@ workflows:
           atmos terraform validate infrastructure -s ${tenant}-${account}-${environment}
           echo "Validating services..."
           atmos terraform validate services -s ${tenant}-${account}-${environment}
+        env:
+          ATMOS_CLI_VERSION: "1.46.0"

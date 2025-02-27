@@ -5,11 +5,16 @@ vars:
   account: dev
   environment: testenv-01
   region: eu-west-2
+  tenant: fnx
   component: backend
   bucket_name: "fnx-terraform-state"
   dynamodb_table_name: "fnx-terraform-locks"
   iam_role_name: "fnx-terraform-backend-role"
-  iam_role_arn: "arn:aws:iam::123456789012:role/fnx-terraform-backend-role"
+  management_account_id: "${env:AWS_MANAGEMENT_ACCOUNT_ID, 123456789012}"
+  iam_role_arn: "arn:aws:iam::${management_account_id}:role/fnx-terraform-backend-role"
+  state_file_key: "${environment}/${component}/terraform.tfstate"
+  workspace: "default"
+  account_id: "234567890123"
 
 tags:
   Team: "DevOps"

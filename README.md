@@ -16,22 +16,27 @@ Key features:
 
 ```
 .
+├── CLAUDE.md                  # Code style guidelines and reference
 ├── atmos.yaml                 # Atmos configuration file
 ├── components/                # Reusable Terraform modules
 │   └── terraform/
-│       ├── acm/
-│       ├── backend/
-│       ├── dns/
+│       ├── acm/               # ACM certificate management
+│       ├── backend/           # Terraform state management infrastructure
+│       │   └── policies/      # IAM policy templates
+│       ├── dns/               # Route53 and DNS configuration
+│       ├── ec2/               # EC2 instances and related resources
 │       ├── ecs/               # Container orchestration
-│       ├── eks/
-│       ├── eks-addons/
-│       ├── helm/
-│       ├── iam/
+│       ├── eks/               # Kubernetes clusters
+│       ├── eks-addons/        # Kubernetes add-ons and operators
+│       ├── iam/               # Identity and Access Management
+│       │   └── policies/      # IAM policy templates
 │       ├── lambda/            # Serverless functions
 │       ├── monitoring/        # CloudWatch dashboards and alarms
+│       │   └── templates/     # Dashboard templates
 │       ├── rds/               # Database services
-│       ├── security-groups/
-│       └── vpc/
+│       ├── securitygroup/     # Security group management
+│       └── vpc/               # Network infrastructure
+│           └── policies/      # Network policy templates
 ├── docs/                      # Project documentation
 ├── stacks/                    # Stack configurations
 │   ├── account/               # Account-specific configurations
@@ -54,11 +59,11 @@ Key features:
     ├── destroy-backend.yaml
     ├── destroy-environment.yaml
     ├── drift-detection.yaml
-    ├── import.yaml
-    ├── lint.yaml
+    ├── import.yaml            # Import existing resources
+    ├── lint.yaml              # Code quality
     ├── onboard-environment.yaml # Environment onboarding
     ├── plan-environment.yaml
-    └── validate.yaml
+    └── validate.yaml          # Configuration validation
 ```
 
 ## 3. Getting Started
@@ -99,6 +104,7 @@ This infrastructure includes the following core components:
 - **NAT Gateway** - For outbound internet access from private subnets
 - **VPN Gateway** - For connectivity to on-premises networks
 - **Transit Gateway** - For connecting multiple VPCs
+- **DNS** - Route53 hosted zones, records, and health checks
 
 ### Infrastructure Layer
 - **EC2** - Virtual servers with security groups and IAM profiles
@@ -156,14 +162,18 @@ The following workflows are available to manage the infrastructure:
 
 ## 7. Best Practices
 
-- Use consistent naming conventions across all resources
+- Use consistent naming conventions across all resources (singular form without hyphens for components)
 - Follow the principle of least privilege for IAM policies
-- Leverage Atmos variables for environment-specific configurations
-- Use the catalog for reusable stack configurations
+- Store sensitive values in SSM Parameter Store or Secrets Manager using `${ssm:/path/to/param}` syntax
+- Use `templatefile()` for policy files instead of variable interpolation in JSON
+- Leverage Atmos variables for environment-specific configurations 
+- Use validation blocks to enforce proper input values
+- Implement proper dependency management with `depends_on` and adequate wait times
+- Use dynamic blocks for repetitive resource configurations
 - Implement cost tagging for resource attribution
-- Enable monitoring and alerting for all production environments
+- Enable monitoring and alerting for all production environments 
 - Use separate state files for different components
-- Regular drift detection to ensure configuration consistency
+- Run regular drift detection to ensure configuration consistency
 
 ## 8. Contributing
 

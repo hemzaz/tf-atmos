@@ -22,6 +22,12 @@ In the world of modern cloud infrastructure, managing resources across multiple 
 
 6. **Reduced Error Potential:** By reducing duplication and providing a clear structure, Atmos helps minimize the potential for errors in your infrastructure code.
 
+7. **Enhanced Security:** Standardized handling of secrets and sensitive data using SSM Parameter Store or Secrets Manager.
+
+8. **Validation and Safeguards:** Built-in validation to prevent misconfigurations and secure resource creation.
+
+9. **Consistent Resource Naming:** Enforce component and resource naming conventions across your organization.
+
 ## Atmos Building Blocks
 
 ### 1. Components
@@ -32,10 +38,20 @@ Example component structure:
 ```
 components/
   terraform/
-    vpc/
-      main.tf
-      variables.tf
-      outputs.tf
+    vpc/                # Network infrastructure
+      main.tf           # Primary resource definitions
+      variables.tf      # Input variables with validation blocks
+      outputs.tf        # Output values with descriptions
+      provider.tf       # Provider configuration
+      policies/         # Policy template directory
+        *.json.tpl      # Template files for policies
+    securitygroup/      # Security group management (singular form, no hyphens)
+    dns/                # Route53 DNS management
+    rds/                # Database services
+    acm/                # Certificate management
+    backend/            # S3/DynamoDB Terraform backend
+    eks/                # Kubernetes clusters
+    eks-addons/         # Kubernetes add-ons and extensions
 ```
 
 ### 2. Stacks
@@ -93,6 +109,12 @@ stacks/
 
 6. **Standardization:** Atmos promotes standardized practices across teams and projects.
 
+7. **Secure by Default:** Follow security best practices in all components, with proper handling of sensitive data.
+
+8. **Validation First:** Use variable validation and lifecycle preconditions to prevent misconfigurations.
+
+9. **Consistent Naming:** Use singular form without hyphens for component directories and consistent naming patterns for resources.
+
 ## The Atmos Mindset
 
 Adopting Atmos requires a shift in how we think about infrastructure management:
@@ -130,11 +152,50 @@ Atmos shines in several common scenarios:
 
 ## Best Practices
 
-1. Use a consistent naming convention for components and stacks.
-2. Leverage the catalog for reusable configurations.
-3. Use Atmos workflows for complex, multi-step processes.
-4. Implement proper version control for your Atmos configurations.
-5. Regularly review and refactor your components and stacks.
+1. **Component Naming and Structure**
+   - Use singular form without hyphens for component directories (e.g., `securitygroup` not `security-groups`).
+   - Maintain consistent file structure within components (main.tf, variables.tf, outputs.tf, provider.tf).
+   - Group related resources in separate files for large components (iam.tf, data.tf, locals.tf).
+
+2. **Variable Management**
+   - Add validation blocks to all variables that have potential constraints.
+   - Use variable defaults appropriately, but make required parameters explicit.
+   - Document each variable with a clear description of its purpose and format.
+
+3. **Security Practices**
+   - Use .tpl extension for JSON policy files and use `templatefile()` function to interpolate variables.
+   - Store sensitive values in SSM Parameter Store or Secrets Manager, not in Terraform state.
+   - Reference secrets in Atmos configurations using `${ssm:/path/to/param}` syntax.
+   - Enforce HTTPS-only policies for S3 buckets and API endpoints.
+   - Use KMS encryption for sensitive data at rest.
+   - Implement least privilege IAM policies with explicit allows only.
+
+4. **Dependency Management**
+   - Use `depends_on` attribute and `time_sleep` resources to prevent race conditions.
+   - Avoid circular dependencies with careful resource design.
+   - Structure your components with clear dependency chains.
+
+5. **Stack Organization**
+   - Leverage the catalog for reusable configurations.
+   - Establish clear dependencies between stack components.
+   - Use consistent naming for environment-specific overrides.
+
+6. **Workflow Automation**
+   - Use Atmos workflows for complex, multi-step processes.
+   - Include validation steps in workflows before making changes.
+   - Implement proper error handling in workflow scripts.
+
+7. **State Management**
+   - Configure secure, encrypted S3 backends with proper versioning.
+   - Use DynamoDB locks to prevent concurrent modifications.
+   - Implement MFA delete on state buckets for production environments.
+
+8. **Operational Excellence**
+   - Implement proper version control for your Atmos configurations.
+   - Regularly review and refactor your components and stacks.
+   - Run drift detection regularly to ensure configuration consistency.
+   - Document component interfaces and cross-component dependencies.
+   - Add explicit tagging for resource management and cost allocation.
 
 ## Further Reading
 

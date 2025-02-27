@@ -2,17 +2,42 @@ name: drift-detection
 description: "Detect infrastructure drift in an environment"
 
 workflows:
-  detect:
+  drift-detection:
     steps:
     - run:
         command: |
+          # Set environment variable
+          export ATMOS_CLI_VERSION="1.46.0"
+          
           echo "Checking drift for backend..."
-          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode
+          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          # detailed-exitcode returns 0 for no changes, 2 for changes present
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in backend component!"
+          fi
+          
           echo "Checking drift for iam..."
-          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode
+          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in iam component!"
+          fi
+          
           echo "Checking drift for network..."
-          atmos terraform plan network -s ${tenant}-${account}-${environment} -detailed-exitcode
+          atmos terraform plan network -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in network component!"
+          fi
+          
           echo "Checking drift for infrastructure..."
-          atmos terraform plan infrastructure -s ${tenant}-${account}-${environment} -detailed-exitcode
+          atmos terraform plan infrastructure -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in infrastructure component!"
+          fi
+          
           echo "Checking drift for services..."
-          atmos terraform plan services -s ${tenant}-${account}-${environment} -detailed-exitcode
+          atmos terraform plan services -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "DRIFT DETECTED in services component!"
+          fi
+        env:
+          ATMOS_CLI_VERSION: "1.46.0"

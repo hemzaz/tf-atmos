@@ -8,7 +8,10 @@ components:
     apply_auto_approve: false
     deploy_run_init: true
     init_run_reconfigure: true
-    auto_generate_backend_file: false # Changed to false
+    auto_generate_backend_file: false
+    backend_type: "s3"
+    terraform_version: "1.5.7"
+    terragrunt_version: "0.45.0"
 
 stacks:
   base_path: stacks
@@ -40,6 +43,7 @@ logs:
 
 settings:
   list_merge_strategy: replace
+  atmos_cli_version: "1.46.0"
 
 schemas:
   atmos:
@@ -58,6 +62,8 @@ vars:
   # Common variables
   tenant: "fnx"
   region: "eu-west-2"
+  workspace: "default"
+  account_id: "${env:AWS_ACCOUNT_ID, 234567890123}"
   
   # Environment-specific variables can be overridden in environment-specific stacks
   # Default management account ID (should be overridden in production)

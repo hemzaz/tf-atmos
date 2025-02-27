@@ -5,7 +5,9 @@ vars:
   account: dev
   environment: testenv-01
   region: eu-west-2
-  # Override vpc_cidr for this specific environment
+  tenant: fnx
+  
+  # VPC settings - override defaults for this specific environment
   vpc_cidr: "10.1.0.0/16"
   private_subnets:
     - "10.1.1.0/24"
@@ -18,8 +20,65 @@ vars:
   # In dev, we might disable NAT gateway to save costs
   enable_nat_gateway: false
   create_vpc_iam_role: true
-
+  
+  # DNS settings for this environment
+  dns_create_root_zone: false
+  dns_multi_account: false
+  
+  # Define zones for this environment
+  dns_zones:
+    main:
+      name: "testenv-01.fnx.com"
+      comment: "Main zone for testenv-01 environment"
+      force_destroy: true  # Allowing force destroy in dev environments
+      enable_query_logging: true
+      vpc_associations: []
+    internal:
+      name: "internal.testenv-01.fnx.com"
+      comment: "Internal DNS for testenv-01 environment"
+      force_destroy: true
+    dev-api:
+      name: "api.testenv-01.fnx.com"
+      comment: "API subdomain for testenv-01"
+      force_destroy: true
+  
+  # Define some example records for the environment
+  dns_records:
+    www_main:
+      zone_name: "main"
+      name: "www.testenv-01.fnx.com"
+      type: "A"
+      ttl: 300
+      records:
+        - "10.1.101.100"
+    api_main:
+      zone_name: "dev-api"
+      name: "api.testenv-01.fnx.com"
+      type: "CNAME"
+      ttl: 300
+      records:
+        - "api-internal.testenv-01.fnx.com"
+    db_internal:
+      zone_name: "internal"
+      name: "db.internal.testenv-01.fnx.com"
+      type: "A"
+      ttl: 60
+      records:
+        - "10.1.1.50"
+  
+  # Define health checks
+  dns_health_checks:
+    api_check:
+      name: "api-health-testenv-01"
+      fqdn: "api.testenv-01.fnx.com"
+      port: 443
+      type: "HTTPS"
+      resource_path: "/health"
+      request_interval: 30
+      failure_threshold: 2
+      
 tags:
   Team: "DevOps"
   CostCenter: "IT"
   Project: "Infrastructure"
+  Environment: "Development"

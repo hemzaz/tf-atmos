@@ -121,13 +121,14 @@ resource "aws_iam_role_policy_attachment" "service_account" {
 resource "aws_eks_addon" "addons" {
   for_each = local.addons
 
-  cluster_name             = each.value.cluster_name
-  addon_name               = each.value.name
-  addon_version            = lookup(each.value, "version", null)
-  resolve_conflicts        = lookup(each.value, "resolve_conflicts", "OVERWRITE")
-  service_account_role_arn = lookup(each.value, "service_account_role_arn",
-                               lookup(each.value, "create_service_account_role", false) ?
-                               aws_iam_role.service_account["${each.value.cluster_name}.${each.value.name}"].arn : null)
+  cluster_name      = each.value.cluster_name
+  addon_name        = each.value.name
+  addon_version     = lookup(each.value, "version", null)
+  resolve_conflicts = lookup(each.value, "resolve_conflicts", "OVERWRITE")
+  
+  # Fix circular dependency by directly using service_account_role_arn if provided,
+  # otherwise set to null and establish depends_on relationship
+  service_account_role_arn = lookup(each.value, "service_account_role_arn", null)
 
   preserve = lookup(each.value, "preserve", true)
 
@@ -139,11 +140,12 @@ resource "aws_eks_addon" "addons" {
     }
   )
 
-  # Add dependency on wait_for_cluster
-  depends_on = [
-    time_sleep.wait_for_cluster,
-    aws_iam_role_policy_attachment.service_account
-  ]
+  # Add dependency on wait_for_cluster and conditionally on service account role
+  depends_on = concat(
+    [time_sleep.wait_for_cluster],
+    lookup(each.value, "create_service_account_role", false) ? 
+      [aws_iam_role_policy_attachment.service_account["${each.value.cluster_name}.${each.value.name}"]] : []
+  )
 }
 
 # Wait for addons to be ready before proceeding with helm releases
