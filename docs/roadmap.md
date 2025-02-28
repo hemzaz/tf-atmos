@@ -72,15 +72,18 @@ These features have been requested by users and are under consideration for impl
   - Visual workflow designer
 
 ### Under Consideration
-- [ ] **Multi-cloud Support**
-  - Abstract components for multi-cloud deployment
-  - Cloud-agnostic networking layer
-  - Migration utilities between cloud providers
-
-- [ ] **Edge Computing**
+- [ ] **Advanced Edge Computing**
   - CloudFront with Lambda@Edge components
   - IoT integration framework
   - Edge location optimization
+  - AWS Global Accelerator integration
+
+- [ ] **AWS-Specific Optimizations**
+  - AWS Graviton processor optimization
+  - AWS PrivateLink for service connectivity
+  - AWS Control Tower integration
+
+Note: This codebase is designed to support AWS only. There are currently no plans to implement multi-cloud support.
 
 ## 3. Technical Debt & Refactoring
 
@@ -100,6 +103,21 @@ Areas that need improvement or refactoring:
   - Add static analysis tools integration
   - Implement infrastructure validation tests
   - Enhance linting and formatting consistency
+
+- [ ] **🟠 Security Refinements** (Moderate Priority)
+  - Replace hardcoded IAM policies with templated versions using principle of least privilege
+  - Review and restrict overly permissive security group rules (especially 0.0.0.0/0 egress rules)
+  - Implement comprehensive security scanning in CI/CD pipeline
+
+- [ ] **🟡 Error Handling Improvements** (Low Priority)
+  - Enhance error handling and reporting in workflows
+  - Add more robust retry mechanisms for AWS API calls
+  - Implement better logging for troubleshooting failed operations
+
+- [ ] **🟠 Testing Coverage** (Moderate Priority)
+  - Add more comprehensive test cases for each component
+  - Create integration tests for component interactions
+  - Implement infrastructure validation checks
 
 ## 4. Documentation Improvements
 
