@@ -66,6 +66,12 @@ variable "nat_gateway_strategy" {
   }
 }
 
+variable "nat_gateway_azs" {
+  type        = list(string)
+  description = "List of AZs to place NAT gateways in, must match the number of gateways. If not specified, will use available AZs."
+  default     = null
+}
+
 variable "enable_vpn_gateway" {
   type        = bool
   description = "Enable VPN Gateway"

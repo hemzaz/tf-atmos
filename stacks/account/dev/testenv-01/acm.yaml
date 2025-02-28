@@ -1,0 +1,33 @@
+import:
+  - catalog/infrastructure
+
+vars:
+  account: dev
+  environment: testenv-01
+  region: eu-west-2
+  tenant: fnx
+  
+dependencies:
+  - network
+
+# ACM certificate configuration  
+acm:
+  enabled: true
+  vars:
+    region: ${region}
+    zone_id: ${var.hosted_zone_id}
+    
+    # Define certificates
+    dns_domains:
+      main_wildcard:
+        domain_name: "*.${var.domain_name}"
+        subject_alternative_names: 
+          - "${var.domain_name}"
+        validation_method: "DNS"
+        wait_for_validation: true
+    
+    tags:
+      Environment: "${environment}"
+      Terraform: "true"
+      Project: "Cloud Infrastructure"
+      Purpose: "Istio Service Mesh"

@@ -1,12 +1,12 @@
-# AWS Secrets Manager Integration Guide
+# AWS Secrets Manager and Certificate Management Guide
 
-_Last Updated: February 27, 2025_
+_Last Updated: February 28, 2025_
 
-This guide provides comprehensive information about using the AWS Secrets Manager component in the Atmos framework to securely manage and access secrets across your infrastructure.
+This guide provides comprehensive information about using AWS Secrets Manager and certificate management in the Atmos framework to securely manage secrets and TLS certificates across your infrastructure.
 
 ## 1. Overview
 
-AWS Secrets Manager helps you protect access to your applications, services, and IT resources without the upfront cost and complexity of deploying and maintaining a specialized secrets management infrastructure. This integration allows you to:
+AWS Secrets Manager helps you protect access to your applications, services, and IT resources without the upfront cost and complexity of deploying and maintaining a specialized secrets management infrastructure. Combined with External Secrets for Kubernetes integration and AWS Certificate Manager for TLS certificates, this solution allows you to:
 
 - Store and manage secrets with hierarchical organization
 - Generate and rotate secrets automatically
@@ -236,7 +236,73 @@ public class SecretsManagerExample {
 }
 ```
 
-## 7. Common Patterns and Examples
+## 7. Certificate Management with External Secrets
+
+### Overview of Certificate Management
+
+TLS certificates are critical security components that require special handling. This framework provides a comprehensive approach to certificate management using:
+
+1. **AWS Certificate Manager (ACM)** for certificate issuance and automatic renewal
+2. **AWS Secrets Manager** for secure storage of certificate references
+3. **External Secrets Operator** for syncing certificates to Kubernetes
+4. **Monitoring** for tracking certificate expiry and status
+
+### External Secrets Component
+
+A dedicated `external-secrets` component has been created to improve certificate management:
+
+```yaml
+external-secrets:
+  vars:
+    enabled: true
+    cluster_name: ${eks.outputs.cluster_name}
+    host: ${eks.outputs.cluster_endpoint}
+    cluster_ca_certificate: ${eks.outputs.cluster_certificate_authority_data}
+    oidc_provider_arn: ${eks.outputs.oidc_provider_arn}
+    oidc_provider_url: ${eks.outputs.oidc_provider_url}
+    create_certificate_secret_store: true
+```
+
+This component:
+- Deploys the External Secrets Operator via Helm
+- Creates necessary IAM roles and policies
+- Sets up a dedicated ClusterSecretStore for certificates
+- Enables automatic certificate rotation
+
+### Certificate Rotation Process
+
+1. Certificate is created or renewed in AWS ACM
+2. Certificate reference is stored in AWS Secrets Manager
+3. External Secrets syncs the reference to Kubernetes
+4. Istio or other services use the Kubernetes secret
+
+### Helper Scripts
+
+Two helper scripts are provided to facilitate certificate management:
+
+1. **export-cert.sh**: Exports certificate metadata and creates templates
+   ```bash
+   ./export-cert.sh -a <acm_certificate_arn> -r <aws_region> -o <output_directory>
+   ```
+
+2. **rotate-cert.sh**: Automates certificate rotation using External Secrets
+   ```bash
+   ./rotate-cert.sh -a <acm_certificate_arn> -r <aws_region> -k <k8s_namespace>/<k8s_secret_name> -e
+   ```
+
+### Certificate Monitoring
+
+CloudWatch dashboards are provided to monitor certificate expiry:
+
+```yaml
+monitoring:
+  vars:
+    enable_certificate_monitoring: true
+    certificate_arns: ${acm.outputs.certificate_arns}
+    certificate_expiry_threshold: 30
+```
+
+## 8. Common Patterns and Examples
 
 ### Database Credentials Management
 
@@ -272,35 +338,59 @@ public class SecretsManagerExample {
          }
    ```
 
-### API Integration Credentials
+### TLS Certificate Management with Istio
 
-1. Create API key secret:
+1. Create ACM certificate:
    ```yaml
-   secrets:
-     api_key:
-       name: "external-api-key"
-       path: "integration"
-       secret_data: "your-api-key-value"
-   ```
-
-2. Reference in Lambda function:
-   ```yaml
-   lambda:
+   acm:
      vars:
-       environment_variables:
-         API_KEY_SECRET_ARN: "${output.secretsmanager.secret_arns.api_key}"
+       dns_domains:
+         main_wildcard:
+           domain_name: "*.example.com"
+           validation_method: "DNS"
    ```
 
-3. Access in the Lambda:
-   ```javascript
-   const secretsManager = new AWS.SecretsManager();
-   const response = await secretsManager.getSecretValue({
-     SecretId: process.env.API_KEY_SECRET_ARN
-   }).promise();
-   const apiKey = response.SecretString;
+2. Store reference in Secrets Manager:
+   ```yaml
+   secretsmanager:
+     vars:
+       secrets:
+         istio_cert:
+           name: "wildcard-example-com-cert"
+           path: "certificates"
+           secret_data: |
+             {
+               "certificate": "ACM_PLACEHOLDER",
+               "private_key": "ACM_PLACEHOLDER",
+               "acm_arn": "${acm.outputs.certificate_arns.main_wildcard}"
+             }
    ```
 
-## 8. Troubleshooting
+3. Create ExternalSecret in Kubernetes:
+   ```yaml
+   apiVersion: external-secrets.io/v1beta1
+   kind: ExternalSecret
+   metadata:
+     name: wildcard-example-com-tls
+     namespace: istio-ingress
+   spec:
+     refreshInterval: "1h"
+     secretStoreRef:
+       name: aws-certificate-store
+       kind: ClusterSecretStore
+     target:
+       name: wildcard-example-com-tls
+     data:
+     - secretKey: tls.crt
+       remoteRef:
+         key: "certificates/wildcard-example-com-cert"
+         property: certificate
+     - secretKey: tls.key
+       remoteRef:
+         key: "certificates/wildcard-example-com-cert"
+         property: private_key
+   ```
+## 9. Troubleshooting
 
 ### Common Issues
 

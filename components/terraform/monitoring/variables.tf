@@ -132,3 +132,58 @@ variable "tags" {
   description = "Tags to apply to resources"
   default     = {}
 }
+
+# Certificate monitoring variables
+variable "enable_certificate_monitoring" {
+  type        = bool
+  description = "Whether to enable certificate monitoring dashboard and alarms"
+  default     = false
+}
+
+variable "eks_cluster_name" {
+  type        = string
+  description = "EKS cluster name for certificate management monitoring"
+  default     = ""
+}
+
+variable "certificate_arns" {
+  type        = list(string)
+  description = "List of certificate ARNs to monitor"
+  default     = []
+}
+
+variable "certificate_names" {
+  type        = list(string)
+  description = "List of certificate names corresponding to the ARNs"
+  default     = []
+}
+
+variable "certificate_domains" {
+  type        = list(string)
+  description = "List of certificate domain names"
+  default     = []
+}
+
+variable "certificate_statuses" {
+  type        = list(string)
+  description = "List of certificate statuses"
+  default     = []
+}
+
+variable "certificate_expiry_dates" {
+  type        = list(string)
+  description = "List of certificate expiry dates in human-readable format"
+  default     = []
+}
+
+variable "certificate_alarm_arns" {
+  type        = list(string)
+  description = "List of certificate alarm ARNs to display in dashboard"
+  default     = []
+}
+
+variable "certificate_expiry_threshold" {
+  type        = number
+  description = "Threshold in days for certificate expiry alarms"
+  default     = 30
+}

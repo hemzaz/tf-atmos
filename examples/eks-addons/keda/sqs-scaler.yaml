@@ -1,0 +1,57 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: sqs-queue-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: sqs-consumer
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 30
+  triggers:
+    - type: aws-sqs-queue
+      metadata:
+        queueURL: https://sqs.eu-west-2.amazonaws.com/123456789012/my-sample-queue
+        queueLength: "5"
+        awsRegion: "eu-west-2"
+        identityOwner: "operator"
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqs-consumer
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sqs-consumer
+  template:
+    metadata:
+      labels:
+        app: sqs-consumer
+    spec:
+      containers:
+        - name: sqs-consumer
+          image: public.ecr.aws/amazon-ecr-public/amazonlinux:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting SQS consumer..."
+              while true; do
+                echo "Processing messages..."
+                sleep 10
+              done
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi

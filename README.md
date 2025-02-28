@@ -194,6 +194,7 @@ This infrastructure includes the following core components:
 ### Infrastructure Layer
 - **EC2** - Virtual servers with security groups and IAM profiles
 - **ECS** - Container orchestration with Fargate support
+- **EKS** - Managed Kubernetes with Karpenter and KEDA autoscaling
 - **RDS** - Managed relational databases with automated backups
 - **Lambda** - Serverless functions with monitoring
 - **Monitoring** - CloudWatch dashboards, alarms, and log groups
@@ -203,6 +204,7 @@ This infrastructure includes the following core components:
 - **API Gateway** - For creating and managing REST and HTTP APIs
 - **Load Balancer** - Application load balancers for web traffic
 - **CloudFront** - Content delivery network for global distribution
+- **Istio** - Service mesh for microservice communication and management
 
 ### Operations Layer
 - **IAM** - Cross-account roles and policies
@@ -276,6 +278,8 @@ The following workflows are available to manage the infrastructure:
 - Use validation blocks to enforce proper input values
 - Implement proper dependency management with `depends_on` and adequate wait times
 - Use dynamic blocks for repetitive resource configurations
+- Implement Karpenter for efficient node provisioning in EKS clusters
+- Use KEDA for event-driven pod autoscaling based on custom metrics
 - Implement cost tagging for resource attribution
 - Enable monitoring and alerting for all production environments 
 - Use separate state files for different components
@@ -320,6 +324,9 @@ Detailed documentation can be found in the `/docs` directory:
 - [Terraform Development Guide](docs/tf-dev-guide.md) - Component development best practices
 - [Route53 DNS Management](docs/Route53-Outline.md) - DNS architecture and patterns
 - [API Gateway Integration](docs/api-gateway-integration-guide.md) - API Gateway patterns and integration
+- [EKS Autoscaling Guide](docs/eks-autoscaling-guide.md) - Karpenter and KEDA implementation for Kubernetes
+- [EKS Addons Reference](docs/eks-addons-reference.md) - Complete reference for all EKS addons
+- [Istio Service Mesh Guide](docs/istio-service-mesh-guide.md) - Service mesh implementation with Istio
 - [Secrets Manager Guide](docs/secrets-manager-guide.md) - Secure secrets management patterns and best practices
 - [Workflows Reference](docs/workflows.md) - Workflow examples and usage
 - [Component Creation Guide](docs/component-creation-guide.md) - Step-by-step guide to adding new components

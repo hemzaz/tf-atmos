@@ -23,6 +23,12 @@ output "secret_versions" {
   sensitive   = true
 }
 
+output "secret_values" {
+  description = "Map of secret names to their values - USE WITH CAUTION. DO NOT output these values to logs."
+  value       = { for k, v in aws_secretsmanager_secret_version.this : k => v.secret_string }
+  sensitive   = true
+}
+
 output "generated_passwords" {
   description = "Map of secret names to their generated random passwords (only for secrets with generate_random_password = true)"
   value       = { for k, v in random_password.this : k => v.result }

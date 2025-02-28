@@ -7,6 +7,12 @@ This document outlines the planned development roadmap, feature requests, and en
 ## 1. Current Development Focus
 
 ### Q1-Q2 2025 Priorities
+- **Service Mesh Implementation**
+  - [x] Implement Istio service mesh for secure microservice communication
+  - [ ] Develop standard service mesh patterns with mTLS and traffic management
+  - [ ] Create service mesh observability dashboards
+  - [ ] Add service-to-service authorization policies
+
 - **State Management Enhancements**
   - [ ] Implement state locking improvements and deadlock detection
   - [ ] Add automatic state backup mechanism before operations
@@ -162,6 +168,10 @@ Current limitations in the project and how to work around them:
 4. **Resource quotas**
    - *Limitation*: AWS enforces service quotas that vary by account
    - *Workaround*: Use the quota-request component to automate quota increase requests
+
+5. **Service Mesh Complexity**
+   - *Limitation*: Istio increases operational complexity and resource consumption
+   - *Workaround*: Implement gradually, starting with core services and critical paths
 
 ## 8. Feedback & Suggestions
 

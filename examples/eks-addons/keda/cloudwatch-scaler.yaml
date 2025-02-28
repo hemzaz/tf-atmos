@@ -1,0 +1,66 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: cloudwatch-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: api-service
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  pollingInterval: 30
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+          - type: Percent
+            value: 50
+            periodSeconds: 60
+  triggers:
+    - type: aws-cloudwatch
+      metadata:
+        namespace: "AWS/SQS"
+        dimensionName: QueueName
+        dimensionValue: api-request-queue
+        metricName: ApproximateNumberOfMessagesVisible
+        targetMetricValue: "10"
+        minMetricValue: "0"
+        metricCollectionTime: "300"
+        metricStatistics: Average
+        metricUnit: Count
+        awsRegion: "eu-west-2"
+        identityOwner: "operator"
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-service
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-service
+  template:
+    metadata:
+      labels:
+        app: api-service
+    spec:
+      containers:
+        - name: api-service
+          image: public.ecr.aws/bitnami/nginx:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi

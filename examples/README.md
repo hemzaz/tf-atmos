@@ -4,13 +4,21 @@ This directory contains practical examples and code snippets to help you impleme
 
 ## Contents
 
-### Component Examples
+### Available Component Examples
 
 - `vpc/` - VPC configuration with public and private subnets
-- `eks/` - EKS cluster with add-ons and node groups
-- `rds/` - RDS database with Multi-AZ and security best practices
 - `apigateway/` - API Gateway with Lambda integrations
-- `serverless/` - Serverless application with Lambda, API Gateway, and DynamoDB
+- `eks-addons/` - EKS add-ons with Karpenter and KEDA scaling configurations
+
+### Upcoming Component Examples (In Development)
+
+These examples are being developed and will be available soon:
+
+- RDS configurations 
+- EKS cluster setup
+- Lambda functions
+- Serverless applications
+- Networking patterns
 
 ### Configuration Examples
 

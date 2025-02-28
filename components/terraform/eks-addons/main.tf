@@ -1,10 +1,33 @@
-# components/terraform/eks-addons/main.tf
+# ============================================================================
+# EKS Addons Component - Main Configuration
+# ============================================================================
+# This component deploys AWS EKS addons, Helm charts, and Kubernetes manifests
+# to EKS clusters. It supports multiple clusters concurrently.
+# ============================================================================
+
 locals {
+  # -------------------------------------------------------------
+  # Step 1: Filter enabled clusters
+  # -------------------------------------------------------------
+  # Only process clusters where enabled=true (or not specified)
   clusters = {
     for k, v in var.clusters : k => v if lookup(v, "enabled", true)
   }
 
+  # -------------------------------------------------------------
+  # Step 2: Create flattened maps for addons, Helm releases, and
+  # Kubernetes manifests, preserving cluster context
+  # -------------------------------------------------------------
+  # For each resource type, we:
+  # 1. Loop through each cluster
+  # 2. Extract all resources of that type from the cluster
+  # 3. Add the cluster_name to each resource for context
+  # 4. Create a composite key (cluster_key.resource_key) to ensure uniqueness
+  # 5. Skip any resources with enabled=false
+  # -------------------------------------------------------------
+  
   # Flatten addons across all clusters
+  # Result: { "cluster1.addon1" => {name: "addon1", cluster_name: "cluster1", ...}, ... }
   addons = merge([
     for cluster_key, cluster in local.clusters : {
       for addon_key, addon in lookup(cluster, "addons", {}) :
@@ -13,7 +36,8 @@ locals {
     }
   ]...)
 
-  # Flatten Helm releases across all clusters
+  # Flatten Helm releases across all clusters 
+  # Same pattern as addons - composite keys with cluster context added to each release
   helm_releases = merge([
     for cluster_key, cluster in local.clusters : {
       for release_key, release in lookup(cluster, "helm_releases", {}) :
@@ -23,6 +47,7 @@ locals {
   ]...)
 
   # Flatten Kubernetes manifests across all clusters
+  # Same pattern as above - consistent approach for all resource types
   kubernetes_manifests = merge([
     for cluster_key, cluster in local.clusters : {
       for manifest_key, manifest in lookup(cluster, "kubernetes_manifests", {}) :
@@ -30,6 +55,19 @@ locals {
       if lookup(manifest, "enabled", true)
     }
   ]...)
+
+# Certificate handling: ACM certificates are integrated with Istio
+# The certificate is either:
+# 1. Loaded directly (legacy mode using acm_certificate_key/acm_certificate_crt)
+# 2. Managed by External Secrets (recommended approach using Secrets Manager)
+  
+  # Template for Istio gateway configurations
+  istio_gateway_template = templatefile(
+    "${path.module}/kubernetes_manifests/istio-gateway.yaml",
+    {
+      domain_name = var.domain_name
+    }
+  )
 }
 
 # Get cluster info to validate it's accessible before proceeding
@@ -47,7 +85,7 @@ resource "time_sleep" "wait_for_cluster" {
   ]
 
   # Increased wait time to ensure cluster is fully ready
-  create_duration = "120s"
+  create_duration = "180s"
 }
 
 # Create IAM service account roles for addons if needed
@@ -143,7 +181,8 @@ resource "aws_eks_addon" "addons" {
   # Add dependency on wait_for_cluster and conditionally on service account role
   depends_on = concat(
     [time_sleep.wait_for_cluster],
-    lookup(each.value, "create_service_account_role", false) ? 
+    lookup(each.value, "create_service_account_role", false) && 
+    contains(keys(aws_iam_role_policy_attachment.service_account), "${each.value.cluster_name}.${each.value.name}") ? 
       [aws_iam_role_policy_attachment.service_account["${each.value.cluster_name}.${each.value.name}"]] : []
   )
 }
@@ -158,7 +197,15 @@ resource "time_sleep" "wait_for_addons" {
   ]
 
   # Allow more time for addons to initialize
-  create_duration = "30s"
+  create_duration = "90s"
+  
+  # Apply precondition checks to validate addons were actually created
+  lifecycle {
+    postcondition {
+      condition     = length(aws_eks_addon.addons) > 0
+      error_message = "No EKS addons were created. Check that the addons configuration is correct."
+    }
+  }
 }
 
 # Helm Provider Configuration
@@ -257,5 +304,117 @@ resource "kubernetes_manifest" "manifests" {
   depends_on = [
     time_sleep.wait_for_cluster,
     time_sleep.wait_for_helm_releases
+  ]
+}
+
+# Apply Istio gateway configuration
+resource "kubectl_manifest" "istio_gateway" {
+  count = var.domain_name != "" && var.istio_enabled ? 1 : 0
+  yaml_body = local.istio_gateway_template
+  wait = true
+  server_side_apply = true
+  force_conflicts = true
+  wait_for_rollout = true
+
+  depends_on = [
+    helm_release.releases,
+    time_sleep.wait_for_helm_releases
+  ]
+  
+  # Add timeout to ensure adequate time for manifest creation
+  timeouts {
+    create = "5m"
+    update = "5m"
+    delete = "3m"
+  }
+}
+
+# Wait for istio-ingress namespace to be ready before proceeding with certificate-related resources
+resource "time_sleep" "wait_for_istio_namespace" {
+  count = var.istio_enabled ? 1 : 0
+
+  depends_on = [
+    time_sleep.wait_for_helm_releases,
+    kubectl_manifest.istio_gateway
+  ]
+  
+  # Increase wait time to ensure namespace is fully ready with all resources
+  create_duration = "45s"
+}
+
+# Create a Kubernetes secret from ACM certificate content
+resource "kubernetes_secret" "istio_certs" {
+  count = var.istio_enabled && !var.use_external_secrets && var.acm_certificate_crt != "" && var.acm_certificate_key != "" ? 1 : 0
+  
+  metadata {
+    name      = "istio-gateway-cert"
+    namespace = "istio-ingress"
+  }
+
+  data = {
+    "tls.crt" = var.acm_certificate_crt
+    "tls.key" = var.acm_certificate_key
+  }
+
+  type = "kubernetes.io/tls"
+
+  depends_on = [
+    time_sleep.wait_for_istio_namespace
+  ]
+}
+
+# External Secrets Integration
+#
+# IMPORTANT: The external-secrets operator is deployed via a separate component (external-secrets)
+# This just creates the ExternalSecret resource that connects to that operator
+#
+# When using this approach, make sure to:
+# 1. Deploy the external-secrets component first (it's a dependency)
+# 2. Store your certificates in AWS Secrets Manager using the scripts in /scripts/certificates
+# 3. Set use_external_secrets: true in your configuration
+
+resource "kubernetes_manifest" "istio_certificate_external_secret" {
+  count = var.istio_enabled && var.use_external_secrets && var.secrets_manager_secret_path != "" ? 1 : 0
+
+  manifest = {
+    apiVersion = "external-secrets.io/v1beta1"
+    kind       = "ExternalSecret"
+    metadata = {
+      name      = "istio-certificate"
+      namespace = "istio-ingress"
+    }
+    spec = {
+      refreshInterval = "1h"
+      secretStoreRef = {
+        name = "aws-certificate-store"
+        kind = "ClusterSecretStore"
+      }
+      target = {
+        name = "istio-gateway-cert"
+        template = {
+          type = "kubernetes.io/tls"
+        }
+      }
+      data = [
+        {
+          secretKey = "tls.crt"
+          remoteRef = {
+            key      = var.secrets_manager_secret_path
+            property = "tls.crt"
+          }
+        },
+        {
+          secretKey = "tls.key"
+          remoteRef = {
+            key      = var.secrets_manager_secret_path
+            property = "tls.key"
+          }
+        }
+      ]
+    }
+  }
+
+  depends_on = [
+    time_sleep.wait_for_istio_namespace
   ]
 }

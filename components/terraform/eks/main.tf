@@ -13,6 +13,23 @@ locals {
   ]...)
 }
 
+resource "aws_cloudwatch_log_group" "eks" {
+  for_each = local.clusters
+
+  name              = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
+  retention_in_days = var.default_cluster_log_retention_days
+
+  tags = merge(
+    var.tags,
+    {
+      Name        = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
+      Environment = var.tags["Environment"]
+      Component   = "eks"
+      ClusterName = "${var.tags["Environment"]}-${each.key}"
+    }
+  )
+}
+
 resource "aws_eks_cluster" "clusters" {
   for_each = local.clusters
 
@@ -36,11 +53,22 @@ resource "aws_eks_cluster" "clusters" {
 
   enabled_cluster_log_types = lookup(each.value, "enabled_cluster_log_types", ["api", "audit", "authenticator", "controllerManager", "scheduler"])
 
+  # Add timeouts to allow for longer cluster creation/update
+  timeouts {
+    create = "45m"
+    update = "60m"
+    delete = "30m"
+  }
+
   tags = merge(
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.key}"
+      Name        = "${var.tags["Environment"]}-${each.key}"
+      Environment = var.tags["Environment"]
+      Component   = "eks"
+      ClusterName = "${var.tags["Environment"]}-${each.key}"
+      CreatedBy   = "terraform"
     }
   )
 
@@ -49,6 +77,27 @@ resource "aws_eks_cluster" "clusters" {
     aws_iam_role_policy_attachment.cluster_AmazonEKSVPCResourceController,
     aws_cloudwatch_log_group.eks
   ]
+  
+  lifecycle {
+    # Prevent changes that would recreate the cluster
+    prevent_destroy = true
+    
+    # Add preconditions for various cluster requirements
+    precondition {
+      condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) >= 2
+      error_message = "At least 2 subnet IDs are required for the EKS cluster ${each.key} to ensure high availability."
+    }
+    
+    precondition {
+      condition     = can(regex("^1\\.(2[0-9])$", lookup(each.value, "kubernetes_version", var.default_kubernetes_version)))
+      error_message = "Kubernetes version for cluster ${each.key} must be in the format '1.XX' (e.g., 1.28)."
+    }
+    
+    precondition {
+      condition     = length(lookup(each.value, "enabled_cluster_log_types", [])) > 0
+      error_message = "At least one cluster log type must be enabled for cluster ${each.key}."
+    }
+  }
 }
 
 resource "aws_kms_key" "eks" {

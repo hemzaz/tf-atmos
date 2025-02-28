@@ -1,0 +1,59 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "KedaScalerReadAccess",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:GetMetricData",
+        "sqs:GetQueueAttributes",
+        "sqs:ListQueues",
+        "sqs:ListQueueTags",
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeTimeToLive",
+        "elasticache:DescribeReplicationGroups",
+        "elasticache:DescribeCacheClusters"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "KedaSQSAccess",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:GetQueueUrl",
+        "sqs:ListDeadLetterSourceQueues",
+        "sqs:ReceiveMessage"
+      ],
+      "Resource": "arn:aws:sqs:*:*:*"
+    },
+    {
+      "Sid": "KedaCWAccess",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:DescribeAlarmHistory",
+        "cloudwatch:GetMetricStatistics"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "KedaEventBridgeAccess",
+      "Effect": "Allow",
+      "Action": [
+        "events:ListRules",
+        "events:DescribeRule"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "KedaCloudwatchLogsAccess",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:FilterLogEvents"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

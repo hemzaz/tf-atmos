@@ -1,0 +1,458 @@
+##################################################
+# Catalog Configuration for EKS Addons
+##################################################
+
+# Common EKS addon configurations
+eks-addons:
+  vars:
+    region: ${region}
+    enabled: true
+    
+    # Default addons settings
+    clusters:
+      # AWS EKS native addons
+      aws_addons:
+        enabled: ${vars.aws_addons_enabled | true}
+        vpc-cni:
+          name: "vpc-cni"
+          version: "v1.13.4-eksbuild.1"
+          resolve_conflicts: "OVERWRITE"
+          
+        coredns:
+          name: "coredns"
+          version: "v1.10.1-eksbuild.1"
+          
+        kube-proxy:
+          name: "kube-proxy"
+          version: "v1.28.2-eksbuild.1"
+          
+        aws-ebs-csi-driver:
+          name: "aws-ebs-csi-driver"
+          version: "v1.24.0-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-ebs-csi-driver-policy.json}"
+          
+        aws-efs-csi-driver:
+          name: "aws-efs-csi-driver"
+          version: "v1.7.0-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-efs-csi-driver-policy.json}"
+          
+        aws-fsx-csi-driver:
+          name: "aws-fsx-csi-driver"
+          version: "v1.7.0-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-fsx-csi-driver-policy.json}"
+          
+        adot:
+          name: "adot"
+          version: "v0.90.0-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/adot-policy.json}"
+          
+        aws-guardduty-agent:
+          name: "aws-guardduty-agent"
+          version: "v1.5.0-eksbuild.1"
+          
+        aws-cloudwatch-metrics:
+          name: "aws-cloudwatch-metrics"
+          version: "v1.1.1-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-cloudwatch-metrics-policy.json}"
+          
+        aws-for-fluentbit:
+          name: "aws-for-fluentbit"
+          version: "v2.35.0-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-for-fluentbit-policy.json}"
+          
+        aws-gateway-api-controller:
+          name: "aws-gateway-api-controller"
+          version: "v1.0.2-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-gateway-api-controller-policy.json}"
+          
+        aws-node-termination-handler:
+          name: "aws-node-termination-handler"
+          version: "v1.19.0-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-node-termination-handler-policy.json}"
+          
+        aws-privateca-issuer:
+          name: "aws-privateca-issuer"
+          version: "v1.2.2-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/aws-private-ca-issuer-policy.json}"
+          
+        bottlerocket:
+          name: "bottlerocket-shadow"
+          version: "v1.0.0-eksbuild.1"
+          
+        secrets-store-csi-driver-provider-aws:
+          name: "aws-secrets-manager-csi-driver"
+          version: "v1.1.0-eksbuild.1"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/secrets-store-csi-driver-provider-aws-policy.json}"
+      
+      # Istio Service Mesh
+      istio:
+        enabled: ${vars.istio_enabled | false}
+        istio-base:
+          enabled: true
+          chart: "base"
+          repository: "https://istio-release.storage.googleapis.com/charts"
+          chart_version: "1.19.3"
+          namespace: "istio-system"
+          create_namespace: true
+        
+        istiod:
+          enabled: true
+          chart: "istiod"
+          repository: "https://istio-release.storage.googleapis.com/charts"
+          chart_version: "1.19.3"
+          namespace: "istio-system"
+          set_values:
+            pilot.resources.requests.cpu: "500m"
+            pilot.resources.requests.memory: "2Gi"
+            global.proxy.resources.requests.cpu: "100m"
+            global.proxy.resources.requests.memory: "128Mi"
+            global.proxy.resources.limits.cpu: "2000m"
+            global.proxy.resources.limits.memory: "1024Mi"
+            meshConfig.accessLogFile: "/dev/stdout"
+            meshConfig.enableTracing: ${vars.istio_enable_tracing | true}
+          depends_on:
+            - "istio-base"
+        
+        istio-ingress:
+          enabled: true
+          chart: "gateway"
+          repository: "https://istio-release.storage.googleapis.com/charts"
+          chart_version: "1.19.3"
+          namespace: "istio-ingress"
+          create_namespace: true
+          set_values:
+            service.type: LoadBalancer
+            service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type": "nlb"
+            autoscaling.enabled: true
+            autoscaling.minReplicas: ${vars.istio_gateway_min_replicas | 2}
+            autoscaling.maxReplicas: ${vars.istio_gateway_max_replicas | 5}
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/istio-policy.json}"
+          depends_on:
+            - "istiod"
+
+        kiali:
+          enabled: ${vars.kiali_enabled | false}
+          chart: "kiali-server"
+          repository: "https://kiali.org/helm-charts"
+          chart_version: "1.73.0"
+          namespace: "istio-system"
+          set_values:
+            auth.strategy: "anonymous"
+            deployment.ingress.enabled: true
+            external_services.prometheus.url: "http://prometheus-operated.monitoring:9090"
+          depends_on:
+            - "istiod"
+            - "prometheus"
+
+        jaeger:
+          enabled: ${vars.jaeger_enabled | false}
+          chart: "jaeger"
+          repository: "https://jaegertracing.github.io/helm-charts"
+          chart_version: "0.71.8"
+          namespace: "istio-system"
+          set_values:
+            allInOne.enabled: true
+            provisionDataStore.cassandra: false
+            storage.type: ${vars.jaeger_storage_type | "memory"}
+            allInOne.resources.limits.memory: "1Gi"
+          depends_on:
+            - "istiod"
+
+      # Common Helm releases
+      common_helm_releases:
+        enabled: ${vars.common_helm_releases_enabled | true}
+        metrics-server:
+          enabled: true
+          chart: "metrics-server"
+          repository: "https://kubernetes-sigs.github.io/metrics-server/"
+          chart_version: "3.10.0"
+          namespace: "kube-system"
+          set_values:
+            apiService.create: true
+            args:
+              - "--kubelet-preferred-address-types=InternalIP"
+              
+        cluster-autoscaler:
+          enabled: ${vars.cluster_autoscaler_enabled | false}
+          chart: "cluster-autoscaler"
+          repository: "https://kubernetes.github.io/autoscaler"
+          chart_version: "9.29.1"
+          namespace: "kube-system"
+          set_values:
+            autoDiscovery.clusterName: "${vars.cluster_name}"
+            rbac.serviceAccount.annotations."eks\.amazonaws\.com/role-arn": "${vars.cluster_autoscaler_role_arn | ""}"
+            awsRegion: "${vars.region}"
+            extraArgs.balance-similar-node-groups: true
+            extraArgs.expander: least-waste
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/cluster-autoscaler-policy.json}"
+          
+        vertical-pod-autoscaler:
+          enabled: ${vars.vertical_pod_autoscaler_enabled | false}
+          chart: "vpa"
+          repository: "https://charts.fairwinds.com/stable"
+          chart_version: "1.4.0"
+          namespace: "vpa"
+          create_namespace: true
+          
+        cluster-proportional-autoscaler:
+          enabled: ${vars.cluster_proportional_autoscaler_enabled | false}
+          chart: "cluster-proportional-autoscaler"
+          repository: "https://kubernetes-sigs.github.io/cluster-proportional-autoscaler"
+          chart_version: "1.1.0"
+          namespace: "kube-system"
+          
+        cert-manager:
+          enabled: ${vars.cert_manager_enabled | false}
+          chart: "cert-manager"
+          repository: "https://charts.jetstack.io"
+          chart_version: "v1.13.2"
+          namespace: "cert-manager"
+          create_namespace: true
+          set_values:
+            installCRDs: true
+            
+        external-dns:
+          enabled: ${vars.external_dns_enabled | false}
+          chart: "external-dns"
+          repository: "https://kubernetes-sigs.github.io/external-dns"
+          chart_version: "1.13.1"
+          namespace: "external-dns"
+          create_namespace: true
+          set_values:
+            provider: aws
+            aws.region: "${vars.region}"
+            domainFilters: ${vars.external_dns_domain_filters | []}
+            policy: "sync"
+            registry: "txt"
+            txtOwnerId: "${vars.cluster_name}"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/external-dns-policy.json}"
+            
+        external-secrets:
+          enabled: ${vars.external_secrets_enabled | false}
+          chart: "external-secrets"
+          repository: "https://charts.external-secrets.io"
+          chart_version: "0.9.9"
+          namespace: "external-secrets"
+          create_namespace: true
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/external-secrets-policy.json}"
+          
+        ingress-nginx:
+          enabled: ${vars.ingress_nginx_enabled | false}
+          chart: "ingress-nginx"
+          repository: "https://kubernetes.github.io/ingress-nginx"
+          chart_version: "4.8.3"
+          namespace: "ingress-nginx"
+          create_namespace: true
+          set_values:
+            controller.service.type: LoadBalancer
+            controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type": "nlb"
+            
+        opa-gatekeeper:
+          enabled: ${vars.opa_gatekeeper_enabled | false}
+          chart: "gatekeeper"
+          repository: "https://open-policy-agent.github.io/gatekeeper/charts"
+          chart_version: "3.14.0"
+          namespace: "gatekeeper-system"
+          create_namespace: true
+          
+        velero:
+          enabled: ${vars.velero_enabled | false}
+          chart: "velero"
+          repository: "https://vmware-tanzu.github.io/helm-charts"
+          chart_version: "5.1.4"
+          namespace: "velero"
+          create_namespace: true
+          set_values:
+            initContainers[0].name: "velero-plugin-for-aws"
+            initContainers[0].image: "velero/velero-plugin-for-aws:v1.7.1"
+            initContainers[0].volumeMounts[0].mountPath: "/target"
+            initContainers[0].volumeMounts[0].name: "plugins"
+            configuration.provider: "aws"
+            configuration.backupStorageLocation.bucket: "${vars.velero_bucket_name | ""}"
+            configuration.backupStorageLocation.config.region: "${vars.region}"
+            configuration.volumeSnapshotLocation.config.region: "${vars.region}"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/velero-policy.json}"
+          
+        argocd:
+          enabled: ${vars.argocd_enabled | false}
+          chart: "argo-cd"
+          repository: "https://argoproj.github.io/argo-helm"
+          chart_version: "5.51.4"
+          namespace: "argocd"
+          create_namespace: true
+          values:
+            - |
+              server:
+                extraArgs:
+                  - --insecure
+                config:
+                  repositories: |
+                    - type: git
+                      url: ${vars.argocd_repo_url | ""}
+                  resource.customizations: |
+                    networking.k8s.io/Ingress:
+                      health.lua: |
+                        hs = {}
+                        hs.status = "Healthy"
+                        return hs
+              
+        argo-workflows:
+          enabled: ${vars.argo_workflows_enabled | false}
+          chart: "argo-workflows"
+          repository: "https://argoproj.github.io/argo-helm"
+          chart_version: "0.39.0"
+          namespace: "argo"
+          create_namespace: true
+          set_values:
+            controller.clusterWorkflowTemplates.enabled: true
+            controller.workflowNamespaces: "argo,default"
+            
+        argo-events:
+          enabled: ${vars.argo_events_enabled | false}
+          chart: "argo-events"
+          repository: "https://argoproj.github.io/argo-helm"
+          chart_version: "2.4.0"
+          namespace: "argo-events"
+          create_namespace: true
+          
+        argo-rollouts:
+          enabled: ${vars.argo_rollouts_enabled | false}
+          chart: "argo-rollouts"
+          repository: "https://argoproj.github.io/argo-helm"
+          chart_version: "2.32.5"
+          namespace: "argo-rollouts"
+          create_namespace: true
+          set_values:
+            dashboard.enabled: true
+        
+        prometheus:
+          enabled: true
+          chart: "kube-prometheus-stack"
+          repository: "https://prometheus-community.github.io/helm-charts"
+          chart_version: "48.3.1"
+          namespace: "monitoring"
+          create_namespace: true
+          values:
+            - |
+              grafana:
+                enabled: true
+                adminPassword: "${vars.grafana_admin_password | "${ssm:/common/grafana/admin-password}"}"
+              prometheus:
+                prometheusSpec:
+                  retention: 15d
+                  resources:
+                    requests:
+                      memory: 1Gi
+                      cpu: 500m
+                    limits:
+                      memory: 2Gi
+        
+        aws-load-balancer-controller:
+          enabled: true
+          chart: "aws-load-balancer-controller"
+          repository: "https://aws.github.io/eks-charts"
+          chart_version: "1.6.1"
+          namespace: "kube-system"
+          set_values:
+            serviceAccount.create: true
+            serviceAccount.name: "aws-load-balancer-controller"
+          create_service_account_role: true
+          service_account_policy: |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeLoadBalancers",
+                    "elasticloadbalancing:*",
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeNetworkInterfaces",
+                    "ec2:DescribeSecurityGroups",
+                    "ec2:DescribeSubnets",
+                    "ec2:DescribeVpcs"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+      
+      # Autoscaling solutions
+      autoscaling:
+        enabled: ${vars.autoscaling_enabled | false}
+        karpenter:
+          enabled: ${vars.karpenter_enabled | false}
+          chart: "karpenter"
+          repository: "oci://public.ecr.aws/karpenter/karpenter"
+          chart_version: "v0.32.1"
+          namespace: "karpenter"
+          create_namespace: true
+          set_values:
+            serviceAccount.create: true
+            serviceAccount.name: "karpenter"
+            serviceAccount.annotations."eks\.amazonaws\.com/role-arn": "${vars.karpenter_role_arn | ""}"
+            settings.aws.clusterName: "${vars.cluster_name}"
+            settings.aws.clusterEndpoint: "${vars.cluster_endpoint}"
+            settings.aws.defaultInstanceProfile: "${vars.karpenter_instance_profile}"
+            settings.aws.interruptionQueueName: "${vars.karpenter_interruption_queue_name | ""}"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/karpenter-policy.json}"
+          
+        keda:
+          enabled: ${vars.keda_enabled | false}
+          chart: "keda"
+          repository: "https://kedacore.github.io/charts"
+          chart_version: "2.12.0"
+          namespace: "keda"
+          create_namespace: true
+          set_values:
+            serviceAccount.create: true
+            serviceAccount.name: "keda-operator"
+            podIdentity.awsIamRole: "${vars.keda_role_arn | ""}"
+          create_service_account_role: true
+          service_account_policy: "${file:/components/terraform/eks-addons/policies/keda-policy.json}"
+      
+      # Developer tools
+      developer_tools:
+        enabled: ${vars.developer_tools_enabled | false}
+        argocd:
+          enabled: ${vars.argocd_enabled | false}
+          chart: "argo-cd"
+          repository: "https://argoproj.github.io/argo-helm"
+          chart_version: "5.51.4"
+          namespace: "argocd"
+          create_namespace: true
+          values:
+            - |
+              server:
+                extraArgs:
+                  - --insecure
+                service:
+                  type: LoadBalancer
+              redis:
+                resources:
+                  limits:
+                    memory: 128Mi
+                  requests:
+                    memory: 64Mi
+              controller:
+                resources:
+                  limits:
+                    memory: 512Mi
+                  requests:
+                    memory: 256Mi

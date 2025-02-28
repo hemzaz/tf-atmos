@@ -1,11 +1,19 @@
 variable "region" {
   type        = string
   description = "AWS region"
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
 }
 
 variable "vpc_id" {
   type        = string
   description = "VPC ID where RDS instance will be created"
+  validation {
+    condition     = can(regex("^vpc-[a-f0-9]+$", var.vpc_id))
+    error_message = "VPC ID must be a valid format (e.g., vpc-abc123)."
+  }
 }
 
 variable "vpc_cidr" {
@@ -100,6 +108,11 @@ variable "kms_key_id" {
   type        = string
   description = "KMS key ID for storage encryption"
   default     = null
+  
+  validation {
+    condition     = var.kms_key_id == null || var.kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.kms_key_id))
+    error_message = "KMS key ID must be a valid ARN format."
+  }
 }
 
 variable "username" {
@@ -192,6 +205,11 @@ variable "monitoring_interval" {
   type        = number
   description = "Enhanced monitoring interval in seconds (0 to disable)"
   default     = 60
+  
+  validation {
+    condition     = contains([0, 1, 5, 10, 15, 30, 60], var.monitoring_interval)
+    error_message = "Monitoring interval must be one of: 0, 1, 5, 10, 15, 30, 60."
+  }
 }
 
 variable "monitoring_role_arn" {
