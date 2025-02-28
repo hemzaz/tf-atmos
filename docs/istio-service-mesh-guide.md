@@ -189,14 +189,14 @@ Limitations:
 
 1. **AWS Certificate Manager (ACM)**: Provisions and manages certificates with automatic renewal
 2. **AWS Secrets Manager**: Securely stores certificate material
-3. **external-secrets-operator**: Synchronizes certificates to Kubernetes
-4. **Route53 & external-dns**: Handle DNS validation and records
+3. **External Secrets Operator**: Synchronizes certificates to Kubernetes
+4. **Route53 & External DNS**: Handle DNS validation and records
 
 Steps for implementation:
-1. Deploy external-secrets operator as a separate component
+1. Deploy External Secrets Operator as a separate component
 2. Certificate is created in ACM with Route53 validation
 3. Certificate content is stored in AWS Secrets Manager
-4. external-secrets syncs the certificate to a Kubernetes TLS secret
+4. External Secrets syncs the certificate to a Kubernetes TLS secret
 5. Istio gateway mounts this TLS secret for secure traffic
 
 Advantages:
@@ -207,9 +207,9 @@ Advantages:
 Limitations:
 - More complex setup requiring additional components
 - Potential race conditions or circular dependencies
-- Requires separate deployment of external-secrets operator
+- Requires separate deployment of External Secrets Operator
 
-To simplify initial setup, we use the direct injection method by default.
+While both methods are supported, the External Secrets approach is recommended for production environments due to its automated certificate rotation capabilities.
 
 ## Resource Requirements
 
@@ -253,11 +253,11 @@ kubectl get secret istio-gateway-cert -n istio-ingress -o jsonpath='{.data.tls\.
 
 ### Option 2: External Secrets Certificate Rotation
 
-When using the external-secrets integration, certificate rotation is automatic:
+When using the External Secrets integration, certificate rotation is automatic:
 
 1. ACM automatically renews the certificate (typically 60 days before expiration)
 2. The renewed certificate is stored in AWS Secrets Manager
-3. The external-secrets operator detects the change and updates the Kubernetes secret
+3. The External Secrets Operator detects the change and updates the Kubernetes secret
 4. Istio immediately begins using the new certificate
 
 If you need to manually trigger a refresh:
@@ -297,7 +297,7 @@ istioctl analyze -n <namespace>
 # Check certificate secret
 kubectl get secret istio-gateway-cert -n istio-ingress -o yaml
 
-# Check external secrets status
+# Check External Secrets status
 kubectl get externalsecret istio-certificate -n istio-ingress
 kubectl describe externalsecret istio-certificate -n istio-ingress
 ```

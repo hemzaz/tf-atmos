@@ -66,6 +66,8 @@ karpenter:
     settings.aws.clusterName: "testenv-01-main"
     settings.aws.clusterEndpoint: ${output.eks.cluster_endpoints.main}
     settings.aws.defaultInstanceProfile: "testenv-01-karpenter-node-profile"
+  create_service_account_role: true  
+  service_account_policy: "${file:/components/terraform/eks-addons/policies/karpenter-policy.json}"
 ```
 
 ### Configuration Examples
@@ -210,6 +212,8 @@ keda:
     serviceAccount.create: true
     serviceAccount.name: "keda-operator"
     metricsServer.useHostNetwork: false
+  create_service_account_role: true
+  service_account_policy: "${file:/components/terraform/eks-addons/policies/keda-policy.json}"
 ```
 
 ### Configuration Examples
@@ -357,6 +361,7 @@ Monitor these metrics to ensure proper autoscaling:
 3. **Resource utilization**: Track CPU, memory, and custom metrics
 4. **Scaling latency**: Measure time between scaling triggers and completion
 5. **Unschedulable pods**: Track pods that can't be scheduled
+6. **Certificate expiration**: Monitor TLS certificate expiration for Istio gateways
 
 ### Common Issues and Solutions
 

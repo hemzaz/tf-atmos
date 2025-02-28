@@ -358,8 +358,8 @@ In addition to the AWS native addons, this framework provides several additional
 | `vertical-pod-autoscaler` | Resource request autoscaling | No | 1.4.0 |
 | `cluster-proportional-autoscaler` | Replicas based on cluster size | No | 1.1.0 |
 | `cert-manager` | Certificate management | No | v1.13.2 |
-| `external-dns` | DNS record management | Yes | 1.13.1 |
-| `external-secrets` | External secret management | Yes | 0.9.9 |
+| `External DNS` | DNS record management | Yes | 1.13.1 |
+| `External Secrets` | External secret management | Yes | 0.9.9 |
 | `ingress-nginx` | NGINX Ingress Controller | No | 4.8.3 |
 | `opa-gatekeeper` | Policy enforcement | No | 3.14.0 |
 | `velero` | Backup and restore | Yes | 5.1.4 |
@@ -632,7 +632,7 @@ External DNS synchronizes exposed Kubernetes services and ingresses with DNS pro
 
 **Configuration Example:**
 ```yaml
-external-dns:
+External DNS:
   enabled: true
   chart: "external-dns"
   repository: "https://kubernetes-sigs.github.io/external-dns"
@@ -665,7 +665,7 @@ External Secrets synchronizes external secret management systems with Kubernetes
 
 **Configuration Example:**
 ```yaml
-external-secrets:
+External Secrets:
   enabled: true
   chart: "external-secrets"
   repository: "https://charts.external-secrets.io"

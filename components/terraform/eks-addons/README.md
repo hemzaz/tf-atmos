@@ -133,9 +133,11 @@ The Istio implementation will:
 5. Create the necessary IAM roles for AWS integration
 6. Apply TLS certificates for secure traffic
 
+For detailed information on Istio architecture, configuration options, and operational guidance, see the [Istio Service Mesh Guide](../../../docs/istio-service-mesh-guide.md).
+
 #### Certificate Management - Important Changes
 
-⚠️ **Important**: The preferred method for certificate management is now using the External Secrets operator (separate component).
+⚠️ **Important**: The preferred method for certificate management is now using the External Secrets Operator (separate component).
 
 Due to AWS limitations, ACM private keys and certificates cannot be accessed via the API. To make certificate management more reliable, we've made these changes:
 
@@ -165,7 +167,7 @@ Due to AWS limitations, ACM private keys and certificates cannot be accessed via
 | **Certificate Rotation** | Automatic | Manual |
 | **Implementation Complexity** | Higher (requires additional component) | Lower (all-in-one) |
 | **Security** | Better (keys managed by AWS) | Lower (keys in Terraform state) |
-| **Dependencies** | External Secrets operator | None |
+| **Dependencies** | External Secrets Operator | None |
 | **Maintenance** | Low (automatic) | High (manual rotation) |
 | **Setup** | `use_external_secrets: true` | Set `acm_certificate_crt` and `acm_certificate_key` directly |
 
@@ -176,7 +178,7 @@ Due to AWS limitations, ACM private keys and certificates cannot be accessed via
 external-secrets:
   vars:
     enabled: true
-    # Configuration for external-secrets operator
+    # Configuration for External Secrets Operator
 
 # Then configure eks-addons to use it
 eks-addons:
@@ -290,7 +292,7 @@ The following inputs are deprecated and will be removed in a future version. Use
 | host | EKS cluster endpoint (deprecated) | string | `""` | no |
 | cluster_ca_certificate | EKS cluster CA certificate (deprecated) | string | `""` | no |
 | oidc_provider_arn | EKS OIDC provider ARN (deprecated) | string | `""` | no |
-| use_external_secrets | Whether to use External Secrets operator (deprecated) | bool | `false` | no |
+| use_external_secrets | Whether to use External Secrets Operator (deprecated) | bool | `false` | no |
 | domain_name | Domain name for certificate setup (deprecated) | string | `"example.com"` | no |
 | acm_certificate_arn | ARN of the ACM certificate (deprecated) | string | `""` | no |
 | acm_certificate_crt | Certificate content (for direct injection) (deprecated) | string | `""` | no |
