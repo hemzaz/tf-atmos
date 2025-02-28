@@ -1,6 +1,21 @@
 # Terraform-Atmos Infrastructure Documentation
 
+_Last Updated: February 28, 2025_
+
 This documentation provides comprehensive information on using and extending the Terraform-Atmos infrastructure framework. The framework is designed to be robust, resilient to human error, and provide clear guidance on best practices.
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Documentation By Topic](#documentation-by-topic)
+  - [Development Resources](#development-resources)
+  - [Architecture Documentation](#architecture-documentation)
+  - [Component Guides](#component-guides)
+  - [Operations Guides](#operations-guides)
+  - [Integration Guides](#integration-guides)
+  - [Security Documentation](#security-documentation)
+- [Roadmap](#roadmap)
+- [Safety Features](#safety-features)
 
 ## Quick Start
 
@@ -12,6 +27,7 @@ This documentation provides comprehensive information on using and extending the
 | Set up Kubernetes workloads | [EKS Addons Reference](eks-addons-reference.md) |
 | Secure your infrastructure | [Secrets Manager Guide](secrets-manager-guide.md) |
 | Recover from failures | [Disaster Recovery Guide](disaster-recovery-guide.md) |
+| Automate with CI/CD | [CI/CD Integrations](../integrations/README.md) |
 
 ## Documentation By Topic
 
@@ -21,6 +37,7 @@ This documentation provides comprehensive information on using and extending the
 - [Component Creation Guide](component-creation-guide.md) - Step-by-step guide to create components
 - [Troubleshooting Guide](troubleshooting-guide.md) - Solutions for common issues
 - [Documentation Style Guide](documentation-style-guide.md) - How to document your work
+- [PR-Driven Workflow](pr-driven-workflow.md) - Infrastructure changes via pull requests
 
 ### Architecture Documentation
 
@@ -28,6 +45,7 @@ This documentation provides comprehensive information on using and extending the
 - [Atmos Architecture](diagrams/atmos-architecture.md) - Atmos component relationships
 - [Component Workflows](diagrams/component-workflows.md) - Standard development workflows
 - [EKS Autoscaling Architecture](diagrams/eks-autoscaling-architecture.md) - Kubernetes scaling patterns
+- [Secrets Manager Architecture](diagrams/secrets-manager-architecture.md) - Secrets management design
 
 ### Component Guides
 
@@ -36,11 +54,26 @@ This documentation provides comprehensive information on using and extending the
 - [Istio Service Mesh Guide](istio-service-mesh-guide.md) - Service mesh deployment
 - [Secrets Manager Guide](secrets-manager-guide.md) - Secret management best practices
 - [API Gateway Integration Guide](api-gateway-integration-guide.md) - API Gateway patterns
+- [Certificate Management](certificate-management.md) - SSL/TLS certificate management
 
 ### Operations Guides
 
 - [Disaster Recovery Guide](disaster-recovery-guide.md) - Backup and recovery procedures
 - [Migration Guide](migration-guide.md) - Resource migration between environments
+- [AWS Authentication](aws-authentication.md) - Cross-account authentication patterns
+- [CI/CD Best Practices](cicd-best-practices.md) - Best practices for CI/CD implementation
+
+### Integration Guides
+
+- [CI/CD Integrations Overview](../integrations/README.md) - Available CI/CD integrations
+- [Jenkins Integration](../integrations/jenkins/README.md) - Automated pipelines with Jenkins
+- [Atlantis Integration](../integrations/atlantis/README.md) - PR automation with Atlantis
+
+### Security Documentation
+
+- [Security Best Practices](security-best-practices.md) - Security standards for infrastructure
+- [IAM Role Patterns](iam-role-patterns.md) - IAM role patterns for different use cases
+- [Secrets Management Strategy](secrets-manager-guide.md) - End-to-end secrets management
 
 ## Roadmap
 
@@ -82,3 +115,4 @@ The codebase includes numerous safeguards to prevent common errors:
    - Scripts include built-in validation before execution
    - Certificate management has robust error handling
    - Secrets handling includes permissions verification
+   - CI/CD integrations with built-in security checks and approvals

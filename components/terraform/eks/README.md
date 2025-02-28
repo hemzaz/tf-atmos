@@ -1,136 +1,449 @@
 # EKS (Elastic Kubernetes Service) Component
 
-This component creates and manages EKS clusters with comprehensive validation, security best practices, and detailed logging.
+_Last Updated: February 28, 2025_
 
-## Features
+A comprehensive AWS EKS infrastructure component that creates and manages production-ready Kubernetes clusters with multiple node groups, advanced security features, and extensive validation.
 
-- Creates and manages EKS clusters with configurable settings
-- Supports multiple clusters with different configurations
-- Implements strong validation to prevent common errors
-- Includes KMS encryption for cluster secrets
-- Configures CloudWatch logging with customizable retention
-- Sets up proper IAM roles and policies for cluster operation
-- Implements prevent_destroy to protect against accidental deletion
-- Enforces high availability with subnet validation
+## Overview
+
+This component creates and manages EKS clusters with the following features:
+
+- Multi-cluster support with different configurations
+- Managed node groups with flexible scaling options
+- KMS encryption for cluster secrets
+- IAM roles for service accounts (IRSA) with OIDC provider
+- CloudWatch logging with configurable retention periods
+- Strong validation and safety measures to prevent misconfigurations
+- High availability with multi-AZ deployment
+- Integration with other AWS services through IAM roles
+
+## Architecture
+
+The EKS component creates a comprehensive Kubernetes infrastructure on AWS:
+
+```
+                           +--------------------+
+                           |                    |
+                           |  AWS EKS Control   |
+                           |     Plane          |
+                           |                    |
+                           +---------+----------+
+                                     |
+                                     | (Control plane to data plane)
+                                     |
+    +-------------------------------+--------------------------------+
+    |                               |                                |
++---v---+                       +---v---+                        +---v---+
+|       |                       |       |                        |       |
+| Node  |                       | Node  |                        | Node  |
+| Group |                       | Group |                        | Group |
+| (AZ1) |                       | (AZ2) |                        | (AZ3) |
+|       |                       |       |                        |       |
++---+---+                       +---+---+                        +---+---+
+    |                               |                                |
+    +-------------------------------+--------------------------------+
+                                    |
+                      +-------------v--------------+
+                      |                            |
+                      |      Cluster Security      |
+                      |         Group              |
+                      |                            |
+                      +-------------+--------------+
+                                    |
+                                    |
+    +---------------+---------------+----------------+----------------+
+    |               |               |                |                |
++---v---+       +---v---+       +---v---+        +---v---+        +---v---+
+|       |       |       |       |       |        |       |        |       |
+| KMS   |       | IAM   |       | Cloud |        | OIDC  |        | VPC   |
+| Key   |       | Roles |       | Watch |        | Prov- |        | Config|
+|       |       |       |       | Logs  |        | ider  |        |       |
++-------+       +-------+       +-------+        +-------+        +-------+
+```
 
 ## Usage
 
-```hcl
-component "eks" {
-  instance = "main"
-  
-  vars = {
-    region     = "us-west-2"
-    subnet_ids = ["subnet-12345678", "subnet-23456789", "subnet-34567890"]
-    
-    clusters = {
-      "primary" = {
-        kubernetes_version      = "1.28"
-        endpoint_private_access = true
-        endpoint_public_access  = false
-        enabled_cluster_log_types = ["api", "audit", "authenticator"]
-        node_groups = {
-          "system" = {
-            instance_types = ["m5.large"]
-            desired_size  = 3
-            min_size      = 3
-            max_size      = 5
-            disk_size     = 50
-          }
-        }
-      }
-    }
-    
-    tags = {
-      Environment = "dev"
-      Owner       = "platform-team"
-    }
-  }
-}
+### Basic Usage
+
+```yaml
+# catalog/eks.yaml
+components:
+  terraform:
+    eks:
+      vars:
+        region: ${region}
+        subnet_ids: ${output.vpc.private_subnet_ids}
+        
+        clusters:
+          primary:
+            kubernetes_version: "1.28"
+            endpoint_private_access: true
+            endpoint_public_access: false
+            enabled_cluster_log_types: ["api", "audit", "authenticator"]
+            
+            # Node groups
+            node_groups:
+              system:
+                instance_types: ["m5.large"]
+                desired_size: 3
+                min_size: 3
+                max_size: 5
+                disk_size: 50
+        
+        tags:
+          Environment: ${environment}
+          Owner: "Platform Team"
 ```
 
-## Validation and Safety Features
+### Environment-specific Configuration
 
-This component includes extensive validation to prevent misconfigurations:
+```yaml
+# account/dev/us-east-1/eks.yaml
+import:
+  - catalog/eks
 
-1. **Kubernetes Version Validation**: Ensures valid Kubernetes versions in the correct format
-2. **Subnet Validation**: Requires at least 2 subnets for high availability
-3. **Prevent Destroy**: Protects clusters from accidental deletion
-4. **Log Group Configuration**: Ensures proper logging is enabled
-5. **Resource Tagging**: Enforces consistent tagging across all resources
-6. **Timeouts**: Extends default timeouts to account for EKS operations
+vars:
+  environment: us-east-1
+  region: us-east-1
+  tenant: mycompany
+  
+  # Override catalog settings
+  clusters:
+    primary:
+      kubernetes_version: "1.28"
+      endpoint_public_access: true # Enable public access for dev environment
+      
+      # Override node group configuration
+      node_groups:
+        system:
+          instance_types: ["t3.large"] # Use smaller instances for dev
+          desired_size: 2
+          min_size: 2
+          max_size: 4
+        
+        # Add application node group
+        application:
+          instance_types: ["c5.large"]
+          desired_size: 2
+          min_size: 1
+          max_size: 6
+          labels:
+            workload-type: "application"
 
-## Requirements
+tags:
+  Environment: "Development"
+  Team: "Platform"
+  CostCenter: "Platform-1234"
+```
 
-| Name | Version |
-|------|---------|
-| terraform | >= 1.0.0 |
-| aws | >= 4.0.0 |
-| kubernetes | >= 2.10.0 |
-
-## Inputs
+## Input Variables
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| region | AWS region | `string` | n/a | yes |
-| clusters | Map of EKS cluster configurations | `map(object)` | `{}` | no |
-| subnet_ids | List of subnet IDs for EKS clusters | `list(string)` | n/a | yes |
-| default_kubernetes_version | Default Kubernetes version | `string` | `"1.28"` | no |
-| default_cluster_log_retention_days | Number of days to retain logs | `number` | `90` | no |
-| tags | Common tags to apply to resources | `map(string)` | `{}` | no |
+| `region` | AWS region | `string` | - | Yes |
+| `clusters` | Map of EKS cluster configurations | `map(object)` | `{}` | Yes |
+| `subnet_ids` | List of subnet IDs for EKS clusters | `list(string)` | - | Yes |
+| `default_kubernetes_version` | Default Kubernetes version | `string` | `"1.28"` | No |
+| `default_cluster_log_retention_days` | Number of days to retain logs | `number` | `90` | No |
+| `tags` | Common tags to apply to resources | `map(string)` | `{}` | Yes |
 
 ### clusters Object Structure
 
-```hcl
-{
-  enabled                  = optional(bool, true)
-  kubernetes_version       = optional(string)
-  endpoint_private_access  = optional(bool, true)
-  endpoint_public_access   = optional(bool, false)
-  subnet_ids               = optional(list(string))
-  security_group_ids       = optional(list(string), [])
-  kms_key_arn              = optional(string)
-  enabled_cluster_log_types = optional(list(string), ["api", "audit", "authenticator", "controllerManager", "scheduler"])
-  node_groups              = optional(map(any), {})
-  tags                     = optional(map(string), {})
-}
+```yaml
+clusters:
+  cluster_name:
+    enabled: bool                       # Optional: Whether to create this cluster, defaults to true
+    kubernetes_version: string          # Optional: Kubernetes version, defaults to default_kubernetes_version
+    endpoint_private_access: bool       # Optional: Whether to enable private API endpoint, defaults to true
+    endpoint_public_access: bool        # Optional: Whether to enable public API endpoint, defaults to false
+    subnet_ids: list(string)            # Optional: Override default subnet_ids
+    security_group_ids: list(string)    # Optional: Additional security groups to attach
+    kms_key_arn: string                 # Optional: KMS key ARN for encryption
+    enabled_cluster_log_types: list(string) # Optional: Log types to enable, defaults to all types
+    node_groups: map(object)            # Optional: Node groups configuration
+    tags: map(string)                   # Optional: Additional tags for this cluster
+```
+
+### node_groups Object Structure
+
+```yaml
+node_groups:
+  node_group_name:
+    instance_types: list(string)        # Optional: EC2 instance types, defaults to ["t3.medium"]
+    ami_type: string                    # Optional: AMI type, defaults to AL2_x86_64
+    capacity_type: string               # Optional: ON_DEMAND or SPOT, defaults to ON_DEMAND
+    disk_size: number                   # Optional: Disk size in GB, defaults to 50
+    desired_size: number                # Optional: Desired node count, defaults to 2
+    min_size: number                    # Optional: Minimum node count, defaults to 1
+    max_size: number                    # Optional: Maximum node count, defaults to 4
+    taints: list(object)                # Optional: Kubernetes taints for nodes
+    labels: map(string)                 # Optional: Kubernetes labels for nodes
+    tags: map(string)                   # Optional: Additional tags for this node group
 ```
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| cluster_arns | Map of EKS cluster ARNs |
-| cluster_endpoints | Map of EKS cluster endpoint URLs |
-| cluster_security_group_ids | Map of EKS cluster security group IDs |
-| cluster_certificate_authorities | Map of EKS cluster certificate authorities |
-| node_group_arns | Map of EKS node group ARNs |
-| oidc_providers | Map of OIDC providers for EKS clusters |
+| `cluster_ids` | Map of cluster names to cluster IDs |
+| `cluster_arns` | Map of cluster names to cluster ARNs |
+| `cluster_endpoints` | Map of cluster names to cluster endpoints |
+| `cluster_ca_data` | Map of cluster names to cluster CA certificate data |
+| `node_group_arns` | Map of node group names to node group ARNs |
+| `oidc_provider_arns` | Map of cluster names to OIDC provider ARNs |
+| `cluster_security_group_ids` | Map of cluster names to cluster security group IDs |
+| `node_role_arns` | Map of cluster names to node IAM role ARNs |
 
-## Common Errors and Solutions
+## Features
 
-### Subnet Configuration
+### Multi-Cluster Management
 
-Error: `At least 2 subnet IDs are required for the EKS cluster to ensure high availability.`
+Create multiple EKS clusters in a single component:
 
-Solution: Provide at least 2 subnet IDs across different availability zones.
+```yaml
+clusters:
+  prod:
+    kubernetes_version: "1.28"
+    endpoint_private_access: true
+    endpoint_public_access: false
+  
+  staging:
+    kubernetes_version: "1.27"
+    endpoint_private_access: true
+    endpoint_public_access: true
+```
 
-### Kubernetes Version
+### Advanced Node Group Configuration
 
-Error: `Kubernetes version must be in the format '1.XX'`
+Configure specialized node groups for different workloads:
 
-Solution: Use a valid Kubernetes version like "1.28" or "1.29".
+```yaml
+clusters:
+  primary:
+    node_groups:
+      # System nodes for cluster-critical components
+      system:
+        instance_types: ["m5.large"]
+        desired_size: 3
+        min_size: 3
+        max_size: 5
+        taints:
+          - key: "dedicated"
+            value: "system"
+            effect: "NoSchedule"
+        labels:
+          role: "system"
+      
+      # Application nodes for general workloads
+      application:
+        instance_types: ["c5.xlarge"]
+        desired_size: 3
+        min_size: 1
+        max_size: 10
+        labels:
+          role: "application"
+      
+      # Spot instances for cost optimization
+      spot:
+        instance_types: ["c5.large", "c5a.large", "m5.large"]
+        capacity_type: "SPOT"
+        desired_size: 2
+        min_size: 0
+        max_size: 10
+        labels:
+          lifecycle: "spot"
+```
 
-### Log Configuration
+### IAM Roles for Service Accounts
 
-Error: `At least one cluster log type must be enabled`
+The component automatically creates an OIDC provider for each cluster, enabling IAM roles for service accounts (IRSA). This allows Kubernetes service accounts to assume IAM roles for secure AWS API access:
 
-Solution: Enable at least one log type from: `api`, `audit`, `authenticator`, `controllerManager`, `scheduler`.
+```yaml
+# Example usage with outputs from this component
+output "oidc_provider_arns.primary"  # Use this in eks-addons component
+```
 
-## Notes
+### CloudWatch Logging
 
-- Cluster creation typically takes 15-20 minutes
-- Node group creation may take an additional 5-10 minutes
-- Changes to existing clusters may require careful planning
-- The component uses prevent_destroy to protect against accidental deletion
-- For updates to node groups, the component will try to perform rolling updates where possible
+Configure CloudWatch logging for EKS clusters:
+
+```yaml
+clusters:
+  primary:
+    enabled_cluster_log_types: ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+```
+
+## Examples
+
+### Production Cluster
+
+```yaml
+vars:
+  clusters:
+    production:
+      kubernetes_version: "1.28"
+      endpoint_private_access: true
+      endpoint_public_access: false
+      
+      node_groups:
+        system:
+          instance_types: ["m5.large"]
+          desired_size: 3
+          min_size: 3
+          max_size: 5
+          labels:
+            role: "system"
+        
+        application:
+          instance_types: ["c5.2xlarge"]
+          desired_size: 5
+          min_size: 3
+          max_size: 20
+          labels:
+            role: "application"
+```
+
+### Cost-Optimized Development Cluster
+
+```yaml
+vars:
+  clusters:
+    development:
+      kubernetes_version: "1.28"
+      endpoint_private_access: true
+      endpoint_public_access: true
+      
+      node_groups:
+        system:
+          instance_types: ["t3.medium"]
+          desired_size: 2
+          min_size: 1
+          max_size: 3
+        
+        spot:
+          instance_types: ["t3.large", "t3a.large", "m5.large"]
+          capacity_type: "SPOT"
+          desired_size: 2
+          min_size: 0
+          max_size: 10
+```
+
+### Multi-Tenant Cluster
+
+```yaml
+vars:
+  clusters:
+    multi_tenant:
+      kubernetes_version: "1.28"
+      
+      node_groups:
+        system:
+          instance_types: ["m5.large"]
+          desired_size: 3
+          min_size: 3
+          max_size: 5
+          taints:
+            - key: "dedicated"
+              value: "system"
+              effect: "NoSchedule"
+        
+        tenant_a:
+          instance_types: ["c5.large"]
+          desired_size: 3
+          min_size: 1
+          max_size: 10
+          taints:
+            - key: "tenant"
+              value: "a"
+              effect: "NoSchedule"
+          labels:
+            tenant: "a"
+        
+        tenant_b:
+          instance_types: ["c5.large"]
+          desired_size: 3
+          min_size: 1
+          max_size: 10
+          taints:
+            - key: "tenant"
+              value: "b"
+              effect: "NoSchedule"
+          labels:
+            tenant: "b"
+```
+
+## Related Components
+
+- [**vpc**](../vpc/README.md) - For creating the VPC and subnets required by EKS
+- [**eks-addons**](../eks-addons/README.md) - For installing Kubernetes add-ons and applications
+- [**iam**](../iam/README.md) - For additional IAM roles needed for EKS operations
+- [**secretsmanager**](../secretsmanager/README.md) - For managing Kubernetes secrets
+- [**acm**](../acm/README.md) - For TLS certificates used with Kubernetes ingress
+
+## Best Practices
+
+- Always deploy EKS clusters across multiple Availability Zones for high availability
+- Enable cluster logging for security and troubleshooting purposes
+- Use KMS encryption for Kubernetes secrets
+- Always use private endpoints in production environments
+- Implement node group autoscaling with appropriate min/max values
+- Use node selectors and taints to control workload placement
+- Keep Kubernetes version current (no more than 2 versions behind latest)
+- Consider using Spot instances for non-critical workloads to reduce costs
+- Implement proper IAM roles and RBAC for access control
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Cluster Creation Fails**
+   - Check IAM permissions for the service account creating the cluster
+   - Ensure subnets span at least two Availability Zones
+
+   ```bash
+   # Check subnet AZ distribution
+   aws ec2 describe-subnets --subnet-ids subnet-123 subnet-456 --query 'Subnets[*].AvailabilityZone'
+   ```
+
+2. **Node Group Scaling Issues**
+   - Verify EC2 service quotas in the account
+   - Check for proper IAM role permissions
+
+   ```bash
+   # Check autoscaling activity
+   aws autoscaling describe-scaling-activities --auto-scaling-group-name <asg-name>
+   ```
+
+3. **API Endpoint Connectivity Problems**
+   - Check security group rules
+   - Verify VPC DNS settings
+
+   ```bash
+   # Test API server connectivity
+   curl -k <cluster-endpoint>
+   ```
+
+4. **Kubernetes Version Upgrade Failures**
+   - First update control plane, then node groups
+   - Check for deprecated API usage in workloads
+   - Ensure add-ons are compatible with the new version
+
+5. **IAM Authentication Issues**
+   - Check aws-auth ConfigMap configuration
+   - Verify OIDC provider is correctly configured
+
+### Validation Commands
+
+```bash
+# Validate component configuration
+atmos terraform validate eks -s mycompany-dev-us-east-1
+
+# Check component outputs after deployment
+atmos terraform output eks -s mycompany-dev-us-east-1
+
+# Get cluster information
+aws eks describe-cluster --name <cluster-name> --region <region>
+
+# Check node group status
+aws eks describe-nodegroup --cluster-name <cluster-name> --nodegroup-name <nodegroup-name> --region <region>
+```

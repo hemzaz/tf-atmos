@@ -1,519 +1,357 @@
-# ECS Component
+# Amazon ECS Component
 
-This component creates and manages Amazon Elastic Container Service (ECS) resources, including clusters, services, task definitions, and capacity providers.
+_Last Updated: February 28, 2025_
+
+## Overview
+
+A comprehensive Amazon Elastic Container Service (ECS) component for Atmos that creates and manages ECS clusters, services, task definitions, and capacity providers.
+
+This component creates a complete ECS infrastructure including:
+
+- ECS clusters with customizable settings
+- Support for both Fargate and EC2 launch types
+- Capacity providers and capacity provider strategies
+- Container Insights for monitoring
+- Auto-scaling group integration for EC2 launch type
+- Managed scaling configuration
+
+## Architecture
+
+The diagram below illustrates the architecture created by this component:
+
+```
+                              +-------------------+
+                              |   Load Balancer   |
+                              +--------+----------+
+                                       |
+                                       v
+          +--------------------------------------------------+
+          |                   ECS Cluster                    |
+          |                                                  |
+          |  +----------------+       +------------------+   |
+          |  |                |       |                  |   |
+          |  | Fargate Tasks  |       |   EC2 Instances  |   |
+          |  |                |       |                  |   |
+          |  +----------------+       +------------------+   |
+          |                                  ^               |
+          |                                  |               |
+          |                           +------+----------+    |
+          |                           | Auto Scaling    |    |
+          |                           | Group           |    |
+          |                           +-----------------+    |
+          |                                                  |
+          |  +---------------------------------------+       |
+          |  |          Capacity Providers           |       |
+          |  | - FARGATE                            |       |
+          |  | - FARGATE_SPOT                       |       |
+          |  | - Custom EC2 Capacity Provider       |       |
+          |  +---------------------------------------+       |
+          |                                                  |
+          |  +---------------------------------------+       |
+          |  |       Container Insights (Optional)   |       |
+          |  +---------------------------------------+       |
+          +--------------------------------------------------+
+```
 
 ## Features
 
-- Create and manage ECS clusters with Fargate and EC2 launch types
-- Deploy ECS services with auto-scaling
-- Define task definitions with container configurations
-- Support for service discovery
-- Capacity provider strategies
-- Load balancer integration
-- CloudWatch logging
-- EFS volume mounts
-- Blue/green deployments with CodeDeploy
-- Task execution and task IAM roles
+- **Cluster Management**: Create and manage ECS clusters with configurable settings
+- **Flexible Launch Options**: Support for Fargate, Fargate Spot, and EC2 launch types
+- **Capacity Provider Management**: Create and configure capacity providers
+- **Capacity Provider Strategies**: Define default capacity provider strategies
+- **Autoscaling Integration**: Connect ECS with EC2 Auto Scaling Groups
+- **Managed Scaling**: Configure managed scaling parameters for capacity providers
+- **Container Insights**: Enable/disable Container Insights for monitoring
+- **Resource Tagging**: Comprehensive tagging for all created resources
 
 ## Usage
 
-```hcl
-module "ecs" {
-  source = "git::https://github.com/example/tf-atmos.git//components/terraform/ecs"
-  
-  region = var.region
-  
-  # ECS Cluster
-  cluster_name = "app-cluster"
-  
-  # Capacity Providers
-  capacity_providers = ["FARGATE"]
-  default_capacity_provider_strategy = [
-    {
-      capacity_provider = "FARGATE"
-      weight            = 1
-      base              = 1
-    }
-  ]
-  
-  # Task Definition
-  task_definition = {
-    family                   = "app-service"
-    requires_compatibilities = ["FARGATE"]
-    network_mode             = "awsvpc"
-    cpu                      = 1024
-    memory                   = 2048
-    execution_role_arn       = aws_iam_role.ecs_execution_role.arn
-    task_role_arn            = aws_iam_role.ecs_task_role.arn
-    
-    container_definitions = jsonencode([
-      {
-        name              = "app"
-        image             = "123456789012.dkr.ecr.us-west-2.amazonaws.com/app:latest"
-        essential         = true
-        cpu               = 1024
-        memory            = 2048
-        logConfiguration  = {
-          logDriver = "awslogs"
-          options   = {
-            "awslogs-group"         = "/ecs/app-service"
-            "awslogs-region"        = "us-west-2"
-            "awslogs-stream-prefix" = "app"
-          }
-        }
-        portMappings     = [
-          {
-            containerPort = 8080
-            hostPort      = 8080
-            protocol      = "tcp"
-          }
-        ]
-        environment = [
-          {
-            name  = "ENVIRONMENT"
-            value = "production"
-          }
-        ]
-        secrets = [
-          {
-            name      = "DATABASE_PASSWORD"
-            valueFrom = "arn:aws:secretsmanager:us-west-2:123456789012:secret:db-password:password::"
-          }
-        ]
-      }
-    ])
-  }
-  
-  # ECS Service
-  service = {
-    name            = "app-service"
-    desired_count   = 2
-    launch_type     = ""  # Empty for capacity provider
-    propagate_tags  = "SERVICE"
-    enable_execute_command = true
-    
-    capacity_provider_strategy = [
-      {
-        capacity_provider = "FARGATE"
-        weight            = 1
-        base              = 1
-      }
-    ]
-    
-    network_configuration = {
-      subnets          = ["subnet-12345678", "subnet-87654321"]
-      security_groups  = ["sg-12345678"]
-      assign_public_ip = false
-    }
-    
-    load_balancer = {
-      target_group_arn = "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/app-tg/abcdef0123456789"
-      container_name   = "app"
-      container_port   = 8080
-    }
-    
-    service_registries = {
-      registry_arn = "arn:aws:servicediscovery:us-west-2:123456789012:service/srv-abcdef0123456789"
-    }
-    
-    deployment_circuit_breaker = {
-      enable   = true
-      rollback = true
-    }
-    
-    deployment_controller = {
-      type = "ECS"  # Can be ECS, CODE_DEPLOY, or EXTERNAL
-    }
-    
-    auto_scaling = {
-      max_capacity       = 10
-      min_capacity       = 2
-      target_cpu_value   = 70
-      target_memory_value = 0
-      scale_in_cooldown  = 300
-      scale_out_cooldown = 60
-    }
-  }
-  
-  # Global Tags
-  tags = {
-    Environment = "production"
-    Project     = "example"
-  }
-}
+### Basic Fargate Cluster
+
+```yaml
+components:
+  terraform:
+    ecs/web:
+      vars:
+        region: us-west-2
+        fargate_only: true
+        enable_container_insights: true
+        tags:
+          Environment: production
+          Application: web
 ```
 
-## Inputs
+### EC2 and Fargate Hybrid Cluster
+
+```yaml
+components:
+  terraform:
+    ecs/hybrid:
+      vars:
+        region: us-west-2
+        fargate_only: false
+        autoscaling_group_arn: ${dependency.autoscaling.outputs.autoscaling_group_arn}
+        max_scaling_step_size: 5
+        min_scaling_step_size: 1
+        target_capacity: 80
+        enable_container_insights: true
+        tags:
+          Environment: production
+          Application: backend
+```
+
+## Input Variables
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| region | AWS region | `string` | n/a | yes |
-| cluster_name | Name of the ECS cluster | `string` | n/a | yes |
-| capacity_providers | List of capacity providers | `list(string)` | `["FARGATE", "FARGATE_SPOT"]` | no |
-| default_capacity_provider_strategy | Default capacity provider strategy for the cluster | `list(map(any))` | `[]` | no |
-| task_definition | Task definition configuration | `any` | n/a | yes |
-| service | Service configuration | `any` | n/a | yes |
-| create_task_execution_role | Whether to create task execution IAM role | `bool` | `false` | no |
-| create_task_role | Whether to create task IAM role | `bool` | `false` | no |
-| cloudwatch_log_group_name | Name of the CloudWatch log group | `string` | `""` | no |
-| cloudwatch_log_retention_days | Number of days to retain CloudWatch logs | `number` | `30` | no |
-| tags | Tags to apply to resources | `map(string)` | `{}` | no |
+| `region` | AWS region | `string` | - | Yes |
+| `fargate_only` | Whether to use only Fargate for the ECS cluster | `bool` | `true` | No |
+| `autoscaling_group_arn` | ARN of the Auto Scaling Group to use with the cluster | `string` | `""` | No |
+| `max_scaling_step_size` | Maximum step size for ECS managed scaling | `number` | `10` | No |
+| `min_scaling_step_size` | Minimum step size for ECS managed scaling | `number` | `1` | No |
+| `target_capacity` | Target capacity for ECS managed scaling (percentage) | `number` | `100` | No |
+| `enable_container_insights` | Enable Container Insights for the ECS cluster | `bool` | `true` | No |
+| `tags` | Tags to apply to resources | `map(string)` | `{}` | No |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| cluster_id | The Amazon Resource Name (ARN) of the ECS cluster |
-| cluster_name | The name of the ECS cluster |
-| service_id | The Amazon Resource Name (ARN) of the ECS service |
-| service_name | The name of the ECS service |
-| task_definition_arn | The full ARN of the task definition |
-| task_definition_family | The family of the task definition |
-| task_execution_role_arn | The ARN of the task execution IAM role |
-| task_role_arn | The ARN of the task IAM role |
+| `cluster_id` | The ID of the ECS cluster |
+| `cluster_arn` | The ARN of the ECS cluster |
+| `cluster_name` | The name of the ECS cluster |
+| `capacity_providers` | List of capacity providers in the cluster |
+
+## How It Works
+
+### Cluster Creation
+
+The component creates an ECS cluster with the provided configuration:
+
+```hcl
+resource "aws_ecs_cluster" "main" {
+  name = "${var.tags["Environment"]}-cluster"
+
+  setting {
+    name  = "containerInsights"
+    value = var.enable_container_insights ? "enabled" : "disabled"
+  }
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.tags["Environment"]}-ecs-cluster"
+    }
+  )
+}
+```
+
+### Capacity Provider Configuration
+
+For clusters that use EC2 instances, a capacity provider is created and linked to the specified Auto Scaling Group:
+
+```hcl
+resource "aws_ecs_capacity_provider" "main" {
+  count = var.fargate_only ? 0 : 1
+  name  = "${var.tags["Environment"]}-capacity-provider"
+
+  auto_scaling_group_provider {
+    auto_scaling_group_arn = var.autoscaling_group_arn
+
+    managed_scaling {
+      maximum_scaling_step_size = var.max_scaling_step_size
+      minimum_scaling_step_size = var.min_scaling_step_size
+      status                    = "ENABLED"
+      target_capacity           = var.target_capacity
+    }
+  }
+}
+```
+
+### Default Capacity Provider Strategy
+
+The component configures a default capacity provider strategy for the cluster:
+
+```hcl
+resource "aws_ecs_cluster_capacity_providers" "main" {
+  cluster_name = aws_ecs_cluster.main.name
+
+  capacity_providers = concat(
+    var.fargate_only ? [] : [aws_ecs_capacity_provider.main[0].name],
+    ["FARGATE", "FARGATE_SPOT"]
+  )
+
+  default_capacity_provider_strategy {
+    capacity_provider = var.fargate_only ? "FARGATE" : aws_ecs_capacity_provider.main[0].name
+    weight            = 1
+  }
+}
+```
+
+## Best Practices
+
+### Fargate vs EC2 Launch Type
+
+- **Fargate**: Best for applications where you don't want to manage the underlying infrastructure
+  - Lower operational overhead
+  - Good for predictable workloads
+  - Higher per-task cost
+
+- **EC2**: Best for applications with specific hardware requirements or cost optimization
+  - Lower per-task cost for high utilization
+  - More control over the underlying infrastructure
+  - Higher operational overhead
+
+### Container Insights
+
+Enable Container Insights in production environments for comprehensive monitoring:
+
+```yaml
+enable_container_insights: true
+```
+
+### Capacity Provider Strategy
+
+- Use FARGATE_SPOT for non-critical workloads to reduce costs
+- For production workloads requiring high availability, use a combination of FARGATE and EC2 instances
+- Configure appropriate target capacity to optimize resource utilization
+
+### Autoscaling Configuration
+
+- Set reasonable `min_scaling_step_size` and `max_scaling_step_size` based on your workload patterns
+- Configure `target_capacity` based on your application's resource utilization patterns (typically 70-80% is a good balance)
 
 ## Examples
 
-### Basic Fargate Service
+### Production Fargate Cluster
 
 ```yaml
-# Stack configuration (environment.yaml)
 components:
   terraform:
-    ecs/app-service:
+    ecs/production:
       vars:
-        region: us-west-2
-        
-        # ECS Cluster
-        cluster_name: "app-cluster"
-        
-        # Capacity Providers
-        capacity_providers: ["FARGATE"]
-        default_capacity_provider_strategy:
-          - capacity_provider: "FARGATE"
-            weight: 1
-            base: 1
-        
-        # Task Definition
-        task_definition:
-          family: "app-service"
-          requires_compatibilities: ["FARGATE"]
-          network_mode: "awsvpc"
-          cpu: 1024
-          memory: 2048
-          execution_role_arn: ${dep.iam.outputs.ecs_execution_role_arn}
-          task_role_arn: ${dep.iam.outputs.ecs_task_role_arn}
-          
-          container_definitions: |
-            [
-              {
-                "name": "app",
-                "image": "${dep.ecr.outputs.repository_url}:latest",
-                "essential": true,
-                "cpu": 1024,
-                "memory": 2048,
-                "logConfiguration": {
-                  "logDriver": "awslogs",
-                  "options": {
-                    "awslogs-group": "/ecs/app-service",
-                    "awslogs-region": "us-west-2",
-                    "awslogs-stream-prefix": "app"
-                  }
-                },
-                "portMappings": [
-                  {
-                    "containerPort": 8080,
-                    "hostPort": 8080,
-                    "protocol": "tcp"
-                  }
-                ],
-                "environment": [
-                  {
-                    "name": "ENVIRONMENT",
-                    "value": "production"
-                  }
-                ],
-                "secrets": [
-                  {
-                    "name": "DATABASE_URL",
-                    "valueFrom": "${dep.secretsmanager.outputs.db_url_secret_arn}"
-                  }
-                ]
-              }
-            ]
-        
-        # CloudWatch Logs
-        cloudwatch_log_group_name: "/ecs/app-service"
-        cloudwatch_log_retention_days: 30
-        
-        # ECS Service
-        service:
-          name: "app-service"
-          desired_count: 2
-          launch_type: ""  # Empty for capacity provider
-          propagate_tags: "SERVICE"
-          enable_execute_command: true
-          
-          capacity_provider_strategy:
-            - capacity_provider: "FARGATE"
-              weight: 1
-              base: 1
-          
-          network_configuration:
-            subnets: ${dep.vpc.outputs.private_subnet_ids}
-            security_groups: ["${dep.securitygroup.outputs.app_security_group_id}"]
-            assign_public_ip: false
-          
-          load_balancer:
-            target_group_arn: ${dep.apigateway.outputs.target_group_arn}
-            container_name: "app"
-            container_port: 8080
-          
-          service_registries:
-            registry_arn: ${dep.servicediscovery.outputs.service_arn}
-          
-          deployment_circuit_breaker:
-            enable: true
-            rollback: true
-          
-          deployment_controller:
-            type: "ECS"
-          
-          auto_scaling:
-            max_capacity: 10
-            min_capacity: 2
-            target_cpu_value: 70
-            target_memory_value: 0
-            scale_in_cooldown: 300
-            scale_out_cooldown: 60
-        
-        # Tags
+        region: us-east-1
+        fargate_only: true
+        enable_container_insights: true
         tags:
           Environment: production
-          Project: app-service
+          Team: platform
+          CostCenter: platform-123
 ```
 
-### ECS with EC2 Launch Type
+### Development Hybrid Cluster
 
 ```yaml
-# Stack configuration (environment.yaml)
 components:
   terraform:
-    ecs/ec2-service:
+    ecs/development:
       vars:
         region: us-west-2
-        
-        # ECS Cluster
-        cluster_name: "ec2-cluster"
-        
-        # Task Definition
-        task_definition:
-          family: "batch-processor"
-          requires_compatibilities: ["EC2"]
-          network_mode: "bridge"
-          cpu: 1024
-          memory: 2048
-          execution_role_arn: ${dep.iam.outputs.ecs_execution_role_arn}
-          task_role_arn: ${dep.iam.outputs.ecs_task_role_arn}
-          
-          container_definitions: |
-            [
-              {
-                "name": "processor",
-                "image": "${dep.ecr.outputs.repository_url}:latest",
-                "essential": true,
-                "cpu": 1024,
-                "memory": 2048,
-                "logConfiguration": {
-                  "logDriver": "awslogs",
-                  "options": {
-                    "awslogs-group": "/ecs/batch-processor",
-                    "awslogs-region": "us-west-2",
-                    "awslogs-stream-prefix": "processor"
-                  }
-                },
-                "environment": [
-                  {
-                    "name": "ENVIRONMENT",
-                    "value": "production"
-                  }
-                ],
-                "mountPoints": [
-                  {
-                    "sourceVolume": "data",
-                    "containerPath": "/data",
-                    "readOnly": false
-                  }
-                ]
-              }
-            ]
-          
-          volumes:
-            - name: "data"
-              efs_volume_configuration:
-                file_system_id: ${dep.efs.outputs.file_system_id}
-                root_directory: "/"
-        
-        # CloudWatch Logs
-        cloudwatch_log_group_name: "/ecs/batch-processor"
-        cloudwatch_log_retention_days: 14
-        
-        # ECS Service
-        service:
-          name: "batch-processor"
-          desired_count: 2
-          launch_type: "EC2"
-          
-          placement_constraints:
-            - type: "memberOf"
-              expression: "attribute:ecs.instance-type =~ t3.*"
-          
-          ordered_placement_strategy:
-            - type: "spread"
-              field: "attribute:ecs.availability-zone"
-            - type: "binpack"
-              field: "memory"
-          
-          deployment_circuit_breaker:
-            enable: true
-            rollback: true
-          
-          deployment_controller:
-            type: "ECS"
-          
-          auto_scaling:
-            max_capacity: 5
-            min_capacity: 1
-            target_cpu_value: 70
-            scale_in_cooldown: 300
-            scale_out_cooldown: 60
-        
-        # Tags
+        fargate_only: false
+        autoscaling_group_arn: ${dependency.autoscaling.outputs.autoscaling_group_arn}
+        max_scaling_step_size: 2
+        min_scaling_step_size: 1
+        target_capacity: 70
+        enable_container_insights: false
         tags:
-          Environment: production
-          Project: batch-processor
+          Environment: development
+          Team: development
+          CostCenter: dev-456
 ```
 
-### Blue/Green Deployment with CodeDeploy
+## Extending with ECS Services and Tasks
+
+This component creates the ECS cluster infrastructure. To deploy services and tasks, you should:
+
+1. Create the ECS cluster using this component
+2. Define task definitions for your applications
+3. Create ECS services that reference the cluster created by this component
+4. Configure service auto-scaling, load balancers, and service discovery as needed
+
+Example service configuration:
 
 ```yaml
-# Stack configuration (environment.yaml)
 components:
   terraform:
-    ecs/blue-green-service:
+    ecs-service/web-app:
       vars:
-        region: us-west-2
-        
-        # ECS Cluster
-        cluster_name: "app-cluster"
-        
-        # Capacity Providers
-        capacity_providers: ["FARGATE"]
-        default_capacity_provider_strategy:
-          - capacity_provider: "FARGATE"
-            weight: 1
-            base: 1
-        
-        # Task Definition
+        cluster_id: ${dependency.ecs.outputs.cluster_id}
         task_definition:
           family: "web-app"
           requires_compatibilities: ["FARGATE"]
           network_mode: "awsvpc"
           cpu: 1024
           memory: 2048
-          execution_role_arn: ${dep.iam.outputs.ecs_execution_role_arn}
-          task_role_arn: ${dep.iam.outputs.ecs_task_role_arn}
-          
+          execution_role_arn: ${dependency.iam.outputs.ecs_execution_role_arn}
           container_definitions: |
             [
               {
                 "name": "web",
-                "image": "${dep.ecr.outputs.repository_url}:latest",
+                "image": "${dependency.ecr.outputs.repository_url}:latest",
                 "essential": true,
-                "cpu": 1024,
-                "memory": 2048,
-                "logConfiguration": {
-                  "logDriver": "awslogs",
-                  "options": {
-                    "awslogs-group": "/ecs/web-app",
-                    "awslogs-region": "us-west-2",
-                    "awslogs-stream-prefix": "web"
-                  }
-                },
                 "portMappings": [
                   {
                     "containerPort": 80,
-                    "hostPort": 80,
-                    "protocol": "tcp"
+                    "hostPort": 80
                   }
                 ]
               }
             ]
-        
-        # CloudWatch Logs
-        cloudwatch_log_group_name: "/ecs/web-app"
-        cloudwatch_log_retention_days: 30
-        
-        # ECS Service
-        service:
-          name: "web-app"
-          desired_count: 2
-          launch_type: ""  # Empty for capacity provider
-          propagate_tags: "SERVICE"
-          
-          capacity_provider_strategy:
-            - capacity_provider: "FARGATE"
-              weight: 1
-              base: 1
-          
-          network_configuration:
-            subnets: ${dep.vpc.outputs.private_subnet_ids}
-            security_groups: ["${dep.securitygroup.outputs.web_security_group_id}"]
-            assign_public_ip: false
-          
-          load_balancer:
-            target_group_arn: ${dep.alb.outputs.blue_target_group_arn}
-            container_name: "web"
-            container_port: 80
-          
-          deployment_controller:
-            type: "CODE_DEPLOY"
-          
-          # CodeDeploy configuration must be set up separately
-        
-        # Tags
-        tags:
-          Environment: production
-          Project: web-app
 ```
 
-## Implementation Best Practices
+## Troubleshooting
 
-1. **Security**:
-   - Use IAM roles with least privilege permissions
-   - Store sensitive information in Secrets Manager or SSM Parameter Store
-   - Run containers in private subnets
-   - Use security groups to restrict network access
-   - Enable execution command with appropriate controls
-   - Encrypt data at rest and in transit
+### Common Issues
 
-2. **Reliability**:
-   - Use deployment circuit breakers to detect and roll back failed deployments
-   - Configure health checks for your services
-   - Implement auto-scaling based on CPU/memory utilization
-   - Use service discovery for inter-service communication
-   - Implement retry logic and idempotent operations in your applications
+1. **Missing Auto Scaling Group ARN**: When `fargate_only` is set to `false`, an Auto Scaling Group ARN must be provided.
 
-3. **Performance**:
-   - Choose appropriate CPU and memory for your tasks
-   - Optimize container images for size and startup time
-   - Use placement strategies for EC2 launch type to optimize resource utilization
-   - Consider using Service Connect for service mesh capabilities
-   - Implement task burst capabilities for handling traffic spikes
+   **Solution**: Create an Auto Scaling Group first and reference its ARN:
+   ```yaml
+   autoscaling_group_arn: ${dependency.autoscaling.outputs.autoscaling_group_arn}
+   ```
 
-4. **Cost Optimization**:
-   - Implement auto-scaling to match capacity with demand
-   - Choose appropriate task sizes to avoid over-provisioning
-   - Monitor resource utilization and adjust allocation
-   - Consider using Compute Savings Plans for predictable workloads
-   - Use appropriate storage for container images
+2. **Capacity Provider Creation Failure**: Ensure the Auto Scaling Group exists and has the correct configuration.
+
+   **Validation Command**:
+   ```bash
+   aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names your-asg-name
+   ```
+
+3. **Container Insights Not Showing Data**: It takes some time for metrics to appear after enabling Container Insights.
+
+   **Solution**: Wait 5-10 minutes for data to start appearing. Verify CloudWatch Logs agent is working:
+   ```bash
+   aws logs describe-log-groups --log-group-name-prefix /aws/ecs/containerinsights
+   ```
+
+4. **Cluster Not Appearing in Console**: It can take a few moments for a new cluster to appear in the AWS console.
+
+   **Validation Command**:
+   ```bash
+   aws ecs list-clusters
+   ```
+
+### Validation Commands
+
+```bash
+# Validate ECS component configuration
+atmos terraform validate ecs -s tenant-account-environment
+
+# Plan ECS deployment
+atmos terraform plan ecs -s tenant-account-environment
+
+# Check ECS cluster after deployment
+atmos terraform output ecs -s tenant-account-environment
+
+# List ECS clusters in AWS account
+aws ecs list-clusters --region us-west-2
+```
+
+## Related Components
+
+- **autoscaling** - For creating Auto Scaling Groups to use with ECS
+- **iam** - For creating IAM roles and policies for ECS tasks and services
+- **vpc** - For networking configuration used by ECS tasks
+- **securitygroup** - For setting up security groups for ECS tasks
+- **alb** - For setting up load balancing for ECS services
+- **ecr** - For managing container images used by ECS

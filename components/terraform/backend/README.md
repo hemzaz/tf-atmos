@@ -1,293 +1,265 @@
 # Backend Component
 
-This component sets up and manages Terraform state backends using AWS S3 and DynamoDB, providing a secure and centralized location for storing Terraform state files.
+_Last Updated: February 28, 2025_
+
+## Overview
+
+The Backend component provisions and manages AWS infrastructure for secure and scalable Terraform state management, including S3 buckets for state storage and DynamoDB tables for state locking.
+
+This component establishes a robust and secure backend infrastructure for Terraform state management in AWS. It creates an S3 bucket for state storage with proper encryption, versioning, and access controls, as well as a DynamoDB table for state locking to prevent concurrent operations conflicts. The component also sets up appropriate IAM roles and policies for secure access.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Terraform Backend                       │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│  ┌─────────────────┐      ┌─────────────────────────┐   │
+│  │  DynamoDB Table │      │     S3 Bucket           │   │
+│  │  (State Locking)│◄────►│  (State Storage)        │   │
+│  └─────────────────┘      └─────────────────────────┘   │
+│                                      │                   │
+│                                      ▼                   │
+│                           ┌─────────────────────────┐   │
+│                           │ KMS Key                 │   │
+│                           │ (Encryption)            │   │
+│                           └─────────────────────────┘   │
+│                                      │                   │
+│                            ┌─────────┴─────────┐        │
+│                            ▼                   ▼        │
+│         ┌─────────────────────────┐ ┌─────────────────┐ │
+│         │ Access Logs Bucket      │ │ S3 Bucket Logs  │ │
+│         └─────────────────────────┘ └─────────────────┘ │
+│                                                         │
+│  ┌────────────────────────────────────────────────┐     │
+│  │               IAM Role                         │     │
+│  │  (Backend Access with Least Privilege Policy)  │     │
+│  └────────────────────────────────────────────────┘     │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## Features
 
-- S3 bucket for Terraform state files with versioning and encryption
-- DynamoDB table for state locking
-- Cross-account access policies
-- Backend management IAM roles
-- CORS configuration for web console access
-- Bucket lifecycle rules for state file management
-- Secure bucket policies preventing public access
-- Access logging for state operations
+- S3 bucket for Terraform state storage with versioning enabled
+- DynamoDB table for state locking to prevent concurrent modifications
+- KMS-managed encryption for state files at rest
+- IAM role with least-privilege policies for backend access
+- Server-side encryption for all state files
+- Bucket policies to enforce HTTPS connections
+- Complete blocking of public access
+- Access logging for audit and compliance
+- Lifecycle policies for managing state file versions
+- MFA delete protection for state files
+- Separate logging buckets to avoid circular dependencies
 
 ## Usage
 
-```hcl
-module "backend" {
-  source = "git::https://github.com/example/tf-atmos.git//components/terraform/backend"
-  
-  region = var.region
-  
-  # S3 State Bucket Configuration
-  state_bucket = {
-    name                    = "my-terraform-state-bucket"
-    versioning_enabled      = true
-    enable_encryption       = true
-    kms_key_id              = var.kms_key_id # Optional - uses default KMS key if not specified
-    block_public_access     = true
-    force_destroy           = false
-    enable_access_logging   = true
-    access_log_bucket_name  = "my-tfstate-access-logs"
-    access_log_prefix       = "tfstate-logs"
-    
-    # Lifecycle Rules
-    lifecycle_rules = [{
-      id                     = "expire-old-versions"
-      status                 = "Enabled"
-      noncurrent_version_expiration = {
-        days = 90
-      }
-    }]
-    
-    # CORS Configuration
-    cors_rule = {
-      allowed_headers = ["*"]
-      allowed_methods = ["GET", "PUT", "POST"]
-      allowed_origins = ["https://console.aws.amazon.com"]
-      expose_headers  = ["ETag"]
-      max_age_seconds = 3000
-    }
-  }
-  
-  # DynamoDB Lock Table Configuration
-  lock_table = {
-    name           = "my-terraform-lock-table"
-    billing_mode   = "PAY_PER_REQUEST"
-    hash_key       = "LockID"
-    attribute_name = "LockID"
-    attribute_type = "S"
-  }
-  
-  # IAM Configuration
-  create_backend_role = true
-  backend_role_name   = "terraform-backend-role"
-  account_ids_with_access = ["123456789012", "210987654321"]
-  
-  # Tags
-  tags = {
-    Environment = "management"
-    Terraform   = "true"
-  }
-}
+### Basic Usage
+
+```yaml
+components:
+  terraform:
+    backend:
+      vars:
+        tenant: "mycompany"
+        bucket_name: "mycompany-terraform-state"
+        dynamodb_table_name: "mycompany-terraform-locks"
+        region: "us-east-1"
+        iam_role_name: "terraform-backend-role"
 ```
 
-## Inputs
+### Multi-Account Setup
+
+```yaml
+components:
+  terraform:
+    backend:
+      vars:
+        tenant: "mycompany"
+        bucket_name: "mycompany-terraform-state-central"
+        dynamodb_table_name: "mycompany-terraform-locks"
+        region: "us-east-1"
+        iam_role_name: "terraform-backend-role"
+        account_id: "123456789012"  # Management account
+        tags:
+          Environment: "management"
+          Project: "infrastructure"
+          ManagedBy: "terraform"
+```
+
+## Input Variables
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| region | AWS region | `string` | n/a | yes |
-| state_bucket | Configuration for the Terraform state S3 bucket | `any` | n/a | yes |
-| lock_table | Configuration for the Terraform state lock DynamoDB table | `any` | n/a | yes |
-| create_backend_role | Whether to create an IAM role for backend access | `bool` | `true` | no |
-| backend_role_name | Name of the backend access IAM role | `string` | `"terraform-backend-role"` | no |
-| account_ids_with_access | List of AWS account IDs that can access the backend | `list(string)` | `[]` | no |
-| tags | Tags to apply to all resources | `map(string)` | `{}` | no |
+| `tenant` | Tenant name for resource naming | `string` | `""` | Yes |
+| `account_id` | AWS Account ID for resource policies | `string` | `""` | Yes |
+| `bucket_name` | Name of the S3 bucket for Terraform state | `string` | `""` | Yes |
+| `dynamodb_table_name` | Name of the DynamoDB table for Terraform state locking | `string` | `""` | Yes |
+| `region` | AWS region | `string` | `""` | Yes |
+| `state_file_key` | Key for the state file in S3 bucket | `string` | `"terraform.tfstate"` | No |
+| `iam_role_name` | Name of the IAM role to assume for Terraform execution | `string` | `""` | Yes |
+| `iam_role_arn` | ARN of the IAM role to assume for Terraform execution | `string` | `""` | No |
+| `tags` | Common tags to apply to all resources | `map(string)` | `{}` | No |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| state_bucket_name | Name of the S3 bucket for Terraform state |
-| state_bucket_arn | ARN of the S3 bucket for Terraform state |
-| lock_table_name | Name of the DynamoDB table for state locking |
-| lock_table_arn | ARN of the DynamoDB table for state locking |
-| backend_role_arn | ARN of the IAM role for backend access |
-| backend_role_name | Name of the IAM role for backend access |
-| backend_configuration | Backend configuration for use in other components |
+| `backend_bucket` | The S3 bucket used for storing Terraform state |
+| `backend_bucket_arn` | The ARN of the S3 bucket used for storing Terraform state |
+| `dynamodb_table` | The DynamoDB table used for Terraform state locking |
+| `dynamodb_table_arn` | The ARN of the DynamoDB table used for Terraform state locking |
+| `backend_role_arn` | The ARN of the IAM role for backend access |
 
 ## Examples
 
-### Basic Backend Configuration
+### Basic Backend Setup
 
 ```yaml
 # Stack configuration (environment.yaml)
 components:
   terraform:
-    backend/main:
+    backend:
       vars:
-        region: us-west-2
+        tenant: "mycompany"
+        bucket_name: "mycompany-terraform-state-${vars.environment}"
+        dynamodb_table_name: "mycompany-terraform-locks-${vars.environment}"
+        region: ${vars.region}
+        iam_role_name: "terraform-backend-role-${vars.environment}"
         
-        # S3 State Bucket
-        state_bucket:
-          name: "company-terraform-state-${var.environment}"
-          versioning_enabled: true
-          enable_encryption: true
-          block_public_access: true
-          force_destroy: false
-          
-          lifecycle_rules:
-            - id: "expire-old-versions"
-              status: "Enabled"
-              noncurrent_version_expiration:
-                days: 90
-        
-        # DynamoDB Lock Table
-        lock_table:
-          name: "company-terraform-lock-${var.environment}"
-          billing_mode: "PAY_PER_REQUEST"
-          hash_key: "LockID"
-          attribute_name: "LockID"
-          attribute_type: "S"
-        
-        # IAM Configuration
-        create_backend_role: true
-        backend_role_name: "terraform-backend-role-${var.environment}"
-        
-        # Tags
         tags:
-          Environment: ${var.environment}
-          Terraform: "true"
+          Environment: ${vars.environment}
           Project: "infrastructure"
+          ManagedBy: "terraform"
 ```
 
-### Multi-Environment, Multi-Account Setup
+### Production Environment with Enhanced Security
 
 ```yaml
-# Stack configuration (environment.yaml)
+# Stack configuration (production.yaml)
 components:
   terraform:
-    backend/multi-account:
+    backend:
       vars:
-        region: us-west-2
+        tenant: "mycompany"
+        bucket_name: "mycompany-terraform-state-prod"
+        dynamodb_table_name: "mycompany-terraform-locks-prod"
+        region: "us-east-1"
+        iam_role_name: "terraform-backend-role-prod"
         
-        # S3 State Bucket
-        state_bucket:
-          name: "company-terraform-state-central"
-          versioning_enabled: true
-          enable_encryption: true
-          block_public_access: true
-          force_destroy: false
-          enable_access_logging: true
-          access_log_bucket_name: "company-terraform-logs"
-          access_log_prefix: "state-bucket-logs"
-          
-          lifecycle_rules:
-            - id: "expire-old-versions"
-              status: "Enabled"
-              noncurrent_version_expiration:
-                days: 90
-            - id: "archive-old-versions"
-              status: "Enabled"
-              transition:
-                days: 30
-                storage_class: "STANDARD_IA"
+        # Enable strict configurations for production
+        # These are handled internally by the component
+        # and just shown here for documentation
+        # - MFA delete is enabled
+        # - KMS encryption is applied
+        # - Versioning is enabled
+        # - Lifecycle rules apply for version management
+        # - Access logging is enabled
+        # - Public access is blocked
         
-        # DynamoDB Lock Table
-        lock_table:
-          name: "company-terraform-lock"
-          billing_mode: "PAY_PER_REQUEST"
-          hash_key: "LockID"
-          attribute_name: "LockID"
-          attribute_type: "S"
-        
-        # Cross-Account Access
-        create_backend_role: true
-        backend_role_name: "terraform-backend-role"
-        account_ids_with_access:
-          - "111111111111"  # Development account
-          - "222222222222"  # Staging account
-          - "333333333333"  # Production account
-          - "444444444444"  # Security account
-        
-        # Tags
-        tags:
-          Environment: "management"
-          Terraform: "true"
-          Project: "infrastructure"
-```
-
-### Secure Production Configuration
-
-```yaml
-# Stack configuration (environment.yaml)
-components:
-  terraform:
-    backend/production:
-      vars:
-        region: us-west-2
-        
-        # S3 State Bucket with Enhanced Security
-        state_bucket:
-          name: "company-terraform-state-production"
-          versioning_enabled: true
-          enable_encryption: true
-          kms_key_id: ${dep.kms.outputs.terraform_state_key_arn}
-          block_public_access: true
-          force_destroy: false
-          enable_access_logging: true
-          access_log_bucket_name: "company-logs-production"
-          access_log_prefix: "tfstate-logs"
-          
-          lifecycle_rules:
-            - id: "expire-old-versions"
-              status: "Enabled"
-              noncurrent_version_expiration:
-                days: 365
-            
-          object_lock_configuration:
-            object_lock_enabled: "Enabled"
-            rule:
-              default_retention:
-                mode: "GOVERNANCE"
-                days: 7
-        
-        # DynamoDB Lock Table
-        lock_table:
-          name: "company-terraform-lock-production"
-          billing_mode: "PROVISIONED"
-          read_capacity: 5
-          write_capacity: 5
-          hash_key: "LockID"
-          attribute_name: "LockID"
-          attribute_type: "S"
-          point_in_time_recovery_enabled: true
-        
-        # IAM Configuration with Strict Permissions
-        create_backend_role: true
-        backend_role_name: "terraform-backend-role-production"
-        require_mfa: true
-        max_session_duration: 3600
-        account_ids_with_access: ["444444444444"]  # Only CI/CD account
-        
-        # Tags
         tags:
           Environment: "production"
-          Terraform: "true"
           Project: "infrastructure"
+          ManagedBy: "terraform"
           DataClassification: "restricted"
+```
+
+### Multi-Account Access Configuration
+
+```yaml
+# Stack configuration (management.yaml)
+components:
+  terraform:
+    backend:
+      vars:
+        tenant: "mycompany"
+        bucket_name: "mycompany-terraform-state-mgmt"
+        dynamodb_table_name: "mycompany-terraform-locks-mgmt"
+        region: "us-east-1"
+        iam_role_name: "terraform-backend-central-role"
+        account_id: "123456789012"  # Management account
+        
+        # Cross-account access would be configured in assume role policies
+        # These are handled at the IAM level and reference data source
+        
+        tags:
+          Environment: "management"
+          Project: "infrastructure"
+          ManagedBy: "terraform"
 ```
 
 ## Implementation Best Practices
 
 1. **Security**:
    - Always enable versioning to prevent state file loss
-   - Enable encryption for state files at rest
-   - Use KMS-managed keys for sensitive environments
-   - Configure strict bucket policies to prevent unauthorized access
+   - Use KMS-managed keys for encryption of state files
+   - Enforce HTTPS-only access to state buckets
+   - Implement MFA delete for critical state files
+   - Block all public access to state buckets
    - Enable access logging for audit purposes
-   - Consider using Object Lock for critical environments
-   - Implement MFA Delete for production buckets
 
-2. **State Management**:
-   - Set appropriate lifecycle rules to manage old state versions
-   - Consider moving old state versions to cheaper storage classes
-   - Enable point-in-time recovery for DynamoDB lock tables
-   - Use separate state buckets for different security domains
-   - For large organizations, consider a central management account for state
+2. **Naming Conventions**:
+   - Use consistent naming patterns for buckets and tables
+   - Include tenant and environment in resource names
+   - Use separate state files for different environments
 
-3. **Access Control**:
-   - Implement least privilege IAM policies
-   - Consider requiring MFA for production state access
-   - Use separate IAM roles for different environments
-   - Clearly tag all backend resources for better auditing
-   - Regularly review and rotate access credentials
+3. **State Management**:
+   - Implement appropriate lifecycle rules for state version management
+   - Consider transitioning old state versions to cheaper storage classes
+   - Regularly clean up or archive old state versions
 
-4. **Operational Excellence**:
-   - Regularly backup state files to separate storage
-   - Document backend configuration in a central location
-   - Set up monitoring for backend access and operations
-   - Consider implementing state file validation in CI/CD pipelines
-   - Establish processes for state migration when needed
+4. **Access Control**:
+   - Use least-privilege IAM policies for backend access
+   - Consider separating read and write access with different IAM roles
+   - Review and update access policies regularly
+
+## Troubleshooting
+
+### State Locking Issues
+
+If you encounter state locking errors:
+
+1. Check for abandoned locks in the DynamoDB table:
+   ```bash
+   aws dynamodb scan --table-name your-dynamodb-table-name --attributes-to-get LockID State
+   ```
+
+2. Manually release a lock if necessary (use with caution):
+   ```bash
+   aws dynamodb delete-item --table-name your-dynamodb-table-name --key '{"LockID": {"S": "your-state-file-path"}}'
+   ```
+
+### Access Denied Errors
+
+1. Verify that your IAM user or role has the necessary permissions
+2. Check that the backend role trust relationships are properly configured
+3. Ensure you're using the correct AWS profile or credentials
+4. Verify that the bucket and table exist in the region you're targeting
+
+### State File Corruption or Loss
+
+1. Restore from a previous S3 bucket version:
+   ```bash
+   aws s3api list-object-versions --bucket your-bucket-name --prefix your-state-file-path
+   aws s3api get-object --bucket your-bucket-name --key your-state-file-path --version-id VERSION_ID state-backup.tf
+   ```
+
+2. Check access logs to determine what changes were made and by whom
+
+## Related Components
+
+- [IAM](../iam/README.md) - For additional IAM roles and policies
+- [KMS](../kms/README.md) - For custom KMS keys if required
+
+## Additional Resources
+
+- [Terraform Backend Configuration](https://www.terraform.io/language/settings/backends/s3)
+- [AWS S3 Documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html)
+- [AWS DynamoDB Documentation](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html)
+- [Atmos Workflow Documentation](../../docs/workflows.md)
+- [Atmos Development Guide](../../docs/tf-dev-guide.md)

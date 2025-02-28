@@ -1,6 +1,45 @@
 # Security Group Component
 
-This component manages AWS security groups and rules for controlling inbound and outbound network traffic.
+_Last Updated: February 28, 2025_
+
+## Overview
+
+This component manages AWS security groups and rules for controlling inbound and outbound network traffic to AWS resources.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Security Group Component                    │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  ┌─────────────────┐     ┌─────────────────┐    ┌────────┐  │
+│  │                 │     │                 │    │        │  │
+│  │   Web Tier SG   │────►│   App Tier SG   │───►│  DB SG │  │
+│  │                 │     │                 │    │        │  │
+│  └─────┬───────────┘     └─────┬───────────┘    └────┬───┘  │
+│        │                       │                     │      │
+│        ▼                       ▼                     ▼      │
+│  ┌─────────────────┐     ┌─────────────────┐    ┌────────┐  │
+│  │   Ingress:      │     │   Ingress:      │    │Ingress:│  │
+│  │   HTTP/HTTPS    │     │   App port      │    │DB port │  │
+│  │   from Internet │     │   from Web SG   │    │from App│  │
+│  └─────────────────┘     └─────────────────┘    └────────┘  │
+│        │                       │                     │      │
+│        ▼                       ▼                     ▼      │
+│  ┌─────────────────┐     ┌─────────────────┐    ┌────────┐  │
+│  │   Egress:       │     │   Egress:       │    │Egress: │  │
+│  │   All Traffic   │     │   All Traffic   │    │All     │  │
+│  │                 │     │                 │    │Traffic │  │
+│  └─────────────────┘     └─────────────────┘    └────────┘  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+The security group component enables you to create and manage multiple AWS security groups with their associated ingress and egress rules. It supports referential security group rules, where one security group can reference another security group as a source or destination.
 
 ## Features
 
@@ -12,168 +51,23 @@ This component manages AWS security groups and rules for controlling inbound and
 - IPv4 and IPv6 support
 - Dynamic rule generation
 - VPC peering support
+- Resource tagging
 
 ## Usage
 
-```hcl
-module "security_group" {
-  source = "git::https://github.com/example/tf-atmos.git//components/terraform/securitygroup"
-  
-  region = var.region
-  
-  # Security Groups
-  security_groups = {
-    "web" = {
-      name        = "web-sg"
-      description = "Security group for web servers"
-      vpc_id      = var.vpc_id
-      
-      ingress_rules = [
-        {
-          description      = "HTTPS from anywhere"
-          from_port        = 443
-          to_port          = 443
-          protocol         = "tcp"
-          cidr_blocks      = ["0.0.0.0/0"]
-          ipv6_cidr_blocks = ["::/0"]
-        },
-        {
-          description      = "HTTP from anywhere"
-          from_port        = 80
-          to_port          = 80
-          protocol         = "tcp"
-          cidr_blocks      = ["0.0.0.0/0"]
-          ipv6_cidr_blocks = ["::/0"]
-        }
-      ]
-      
-      egress_rules = [
-        {
-          description      = "Allow all outbound traffic"
-          from_port        = 0
-          to_port          = 0
-          protocol         = "-1"
-          cidr_blocks      = ["0.0.0.0/0"]
-          ipv6_cidr_blocks = ["::/0"]
-        }
-      ]
-      
-      tags = {
-        Name        = "web-sg"
-        Environment = "production"
-      }
-    },
-    
-    "app" = {
-      name        = "app-sg"
-      description = "Security group for application servers"
-      vpc_id      = var.vpc_id
-      
-      ingress_rules = [
-        {
-          description     = "Traffic from web tier"
-          from_port       = 8080
-          to_port         = 8080
-          protocol        = "tcp"
-          security_groups = ["${module.security_group.security_group_ids["web"]}"]
-        }
-      ]
-      
-      egress_rules = [
-        {
-          description = "Allow all outbound traffic"
-          from_port   = 0
-          to_port     = 0
-          protocol    = "-1"
-          cidr_blocks = ["0.0.0.0/0"]
-        }
-      ]
-      
-      tags = {
-        Name        = "app-sg"
-        Environment = "production"
-      }
-    },
-    
-    "db" = {
-      name        = "db-sg"
-      description = "Security group for database servers"
-      vpc_id      = var.vpc_id
-      
-      ingress_rules = [
-        {
-          description     = "PostgreSQL from app tier"
-          from_port       = 5432
-          to_port         = 5432
-          protocol        = "tcp"
-          security_groups = ["${module.security_group.security_group_ids["app"]}"]
-        }
-      ]
-      
-      egress_rules = [
-        {
-          description = "Allow all outbound traffic"
-          from_port   = 0
-          to_port     = 0
-          protocol    = "-1"
-          cidr_blocks = ["0.0.0.0/0"]
-        }
-      ]
-      
-      tags = {
-        Name        = "db-sg"
-        Environment = "production"
-      }
-    }
-  }
-  
-  # Global Tags
-  tags = {
-    Project   = "example"
-    ManagedBy = "terraform"
-  }
-}
-```
-
-## Inputs
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| region | AWS region | `string` | n/a | yes |
-| security_groups | Map of security group configurations | `map(any)` | `{}` | no |
-| default_egress | Default egress rule to add to all security groups | `map(any)` | `{}` | no |
-| prefix_list_ids | Map of prefix list IDs for use in security group rules | `map(string)` | `{}` | no |
-| create_default_rules | Whether to create default egress rules | `bool` | `true` | no |
-| tags | Tags to apply to all resources | `map(string)` | `{}` | no |
-
-## Outputs
-
-| Name | Description |
-|------|-------------|
-| security_group_ids | Map of security group names to their IDs |
-| security_group_arns | Map of security group names to their ARNs |
-| security_group_names | Map of security group names to their names |
-| security_group_vpc_ids | Map of security group names to their VPC IDs |
-
-## Examples
-
-### Three-Tier Web Application
+The component is designed to be used with Atmos stacks:
 
 ```yaml
-# Stack configuration (environment.yaml)
 components:
   terraform:
-    securitygroup/web-app:
+    securitygroup/application:
       vars:
         region: us-west-2
+        vpc_id: ${dep.vpc.outputs.vpc_id}
         
-        # Security Groups
         security_groups:
           web:
-            name: "web-sg"
             description: "Security group for web servers"
-            vpc_id: ${dep.vpc.outputs.vpc_id}
-            
             ingress_rules:
               - description: "HTTPS from anywhere"
                 from_port: 443
@@ -195,10 +89,110 @@ components:
                 cidr_blocks: ["0.0.0.0/0"]
           
           app:
-            name: "app-sg"
             description: "Security group for application servers"
-            vpc_id: ${dep.vpc.outputs.vpc_id}
+            ingress_rules:
+              - description: "App traffic from web tier"
+                from_port: 8080
+                to_port: 8080
+                protocol: "tcp"
+                security_groups: ["$${module.security_group.security_group_ids[\"web\"]}"]
             
+            egress_rules:
+              - description: "Allow all outbound traffic"
+                from_port: 0
+                to_port: 0
+                protocol: "-1"
+                cidr_blocks: ["0.0.0.0/0"]
+        
+        tags:
+          Environment: production
+          Project: example
+          ManagedBy: atmos
+```
+
+## Inputs
+
+| Name | Description | Type | Default | Required |
+|------|-------------|------|---------|:--------:|
+| region | AWS region | `string` | n/a | yes |
+| vpc_id | VPC ID where security groups will be created | `string` | n/a | yes |
+| security_groups | Map of security groups to create with their configuration | `map(any)` | `{}` | no |
+| tags | Tags to apply to all resources | `map(string)` | `{}` | no |
+
+### Security Group Configuration
+
+Each security group in the `security_groups` map can have the following attributes:
+
+| Name | Description | Type | Default |
+|------|-------------|------|---------|
+| description | Description of the security group | `string` | Security group for `<n>` |
+| ingress_rules | List of ingress rules | `list(map(any))` | `[]` |
+| egress_rules | List of egress rules | `list(map(any))` | `[]` |
+| tags | Additional tags for this security group | `map(string)` | `{}` |
+
+### Rule Configuration
+
+Each ingress or egress rule can have the following attributes:
+
+| Name | Description | Type | Default |
+|------|-------------|------|---------|
+| from_port | Start port range | `number` | n/a |
+| to_port | End port range | `number` | n/a |
+| protocol | Protocol (tcp, udp, icmp, or -1 for all) | `string` | n/a |
+| cidr_blocks | List of CIDR blocks to allow | `list(string)` | `null` |
+| ipv6_cidr_blocks | List of IPv6 CIDR blocks to allow | `list(string)` | `null` |
+| prefix_list_ids | List of prefix list IDs to allow | `list(string)` | `null` |
+| security_groups | List of security group IDs to allow | `list(string)` | `null` |
+| self | Allow the security group itself as source | `bool` | `null` |
+| description | Description of the rule | `string` | `null` |
+
+## Outputs
+
+| Name | Description |
+|------|-------------|
+| security_group_ids | Map of security group names to their IDs |
+| security_group_arns | Map of security group names to their ARNs |
+| security_group_vpc_id | VPC ID used for security groups |
+
+## Examples
+
+### Three-Tier Web Application
+
+```yaml
+# Stack configuration (environment.yaml)
+components:
+  terraform:
+    securitygroup/web-app:
+      vars:
+        region: us-west-2
+        vpc_id: ${dep.vpc.outputs.vpc_id}
+        
+        # Security Groups
+        security_groups:
+          web:
+            description: "Security group for web servers"
+            ingress_rules:
+              - description: "HTTPS from anywhere"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+              
+              - description: "HTTP from anywhere"
+                from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+            
+            egress_rules:
+              - description: "Allow all outbound traffic"
+                from_port: 0
+                to_port: 0
+                protocol: "-1"
+                cidr_blocks: ["0.0.0.0/0"]
+          
+          app:
+            description: "Security group for application servers"
             ingress_rules:
               - description: "App traffic from web tier"
                 from_port: 8080
@@ -220,10 +214,7 @@ components:
                 cidr_blocks: ["0.0.0.0/0"]
           
           db:
-            name: "db-sg"
             description: "Security group for database servers"
-            vpc_id: ${dep.vpc.outputs.vpc_id}
-            
             ingress_rules:
               - description: "PostgreSQL from app tier"
                 from_port: 5432
@@ -242,6 +233,7 @@ components:
         tags:
           Environment: production
           Project: web-application
+          ManagedBy: atmos
 ```
 
 ### Container Services Security Groups
@@ -253,14 +245,12 @@ components:
     securitygroup/container-services:
       vars:
         region: us-west-2
+        vpc_id: ${dep.vpc.outputs.vpc_id}
         
         # Security Groups
         security_groups:
           ecs_service:
-            name: "ecs-service-sg"
             description: "Security group for ECS services"
-            vpc_id: ${dep.vpc.outputs.vpc_id}
-            
             ingress_rules:
               - description: "HTTPS from ALB"
                 from_port: 443
@@ -282,10 +272,7 @@ components:
                 cidr_blocks: ["0.0.0.0/0"]
           
           redis:
-            name: "redis-sg"
             description: "Security group for Redis cache"
-            vpc_id: ${dep.vpc.outputs.vpc_id}
-            
             ingress_rules:
               - description: "Redis from ECS services"
                 from_port: 6379
@@ -304,9 +291,10 @@ components:
         tags:
           Environment: production
           Project: container-services
+          ManagedBy: atmos
 ```
 
-### Security Groups with Prefix Lists
+### VPC Endpoint Security Groups
 
 ```yaml
 # Stack configuration (environment.yaml)
@@ -315,14 +303,12 @@ components:
     securitygroup/vpc-endpoints:
       vars:
         region: us-west-2
+        vpc_id: ${dep.vpc.outputs.vpc_id}
         
         # Security Groups
         security_groups:
           vpc_endpoints:
-            name: "vpc-endpoints-sg"
             description: "Security group for VPC endpoints"
-            vpc_id: ${dep.vpc.outputs.vpc_id}
-            
             ingress_rules:
               - description: "HTTPS from VPC CIDR"
                 from_port: 443
@@ -337,41 +323,81 @@ components:
                 protocol: "-1"
                 cidr_blocks: ["0.0.0.0/0"]
         
-        # Prefix lists
-        prefix_list_ids:
-          s3: "pl-123456abcdef"
-          dynamodb: "pl-abcdef123456"
-        
         # Global Tags
         tags:
           Environment: production
           Project: vpc-endpoints
+          ManagedBy: atmos
 ```
 
-## Implementation Best Practices
+## Security Best Practices
 
-1. **Security**:
-   - Apply the principle of least privilege: only open necessary ports
-   - Use specific CIDR blocks instead of 0.0.0.0/0 when possible
-   - For public-facing services, restrict to web ports only (80/443)
+1. **Principle of Least Privilege**:
+   - Only open the ports necessary for your application to function
+   - Restrict ingress rules to specific CIDR blocks or security groups
    - Use security groups as sources instead of CIDR blocks for internal traffic
-   - Document security group rules with descriptive names
-   - Use prefix lists for AWS services where appropriate
 
-2. **Organization**:
-   - Use a consistent naming convention for security groups
-   - Group related security groups together
-   - Use tags to identify environment, purpose, and ownership
-   - Document the purpose and relationships between security groups
+2. **Avoid Overly Permissive Rules**:
+   - Don't use `0.0.0.0/0` for ingress rules except for public-facing web services (HTTP/HTTPS)
+   - Restrict SSH access to specific IP ranges or VPN/bastion security groups
+   - Document the purpose of each rule with descriptive names
 
-3. **Maintenance**:
-   - Regularly audit security group rules
-   - Remove unused rules and groups
-   - Monitor security group changes
-   - Use version control to track changes
+3. **Security Group References**:
+   - Use security group references instead of CIDR blocks for internal traffic flows
+   - This ensures traffic is only allowed from specific resources, not IP ranges that could change
 
-4. **Performance and Scalability**:
-   - Be aware of AWS limits on security groups and rules
+4. **Documentation and Tagging**:
+   - Tag all security groups with relevant information
+   - Document the purpose of each security group and its rules
+   - Use descriptive rule descriptions to aid in auditing
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Rule Changes Not Applied**:
+   - Security group rules may take a short time to propagate across AWS regions
+   - Check for conflicting rules or configuration errors in the Atmos stack
+   - Verify that resource references have been properly resolved
+
+2. **Access Denied**:
+   - Check IAM permissions for creating and managing security groups
+   - Ensure the IAM role has the necessary permissions: ec2:CreateSecurityGroup, ec2:AuthorizeSecurityGroupIngress, etc.
+
+3. **Rule Limit Exceeded**:
+   - AWS has a limit on the number of rules per security group (typically 60 inbound, 60 outbound)
    - Consider using prefix lists for large sets of IPs
-   - Use rule descriptions to document the purpose of each rule
-   - Reference security groups instead of IP ranges when possible
+   - Consolidate redundant rules where possible
+
+4. **Circular Dependencies**:
+   - A common issue is circular references between security groups
+   - Restructure your security groups to avoid circular dependencies
+   - Consider using a separate Terraform run for different layers of security groups
+
+### Debug Commands
+
+When troubleshooting security group issues, these commands can be helpful:
+
+```bash
+# List security groups for a specific VPC
+aws ec2 describe-security-groups --filters Name=vpc-id,Values=vpc-12345678
+
+# Check rules for a specific security group
+aws ec2 describe-security-groups --group-ids sg-12345678
+
+# Test connectivity between instances
+aws ec2 describe-network-insights-analyses --network-insights-analysis-id nia-12345678
+```
+
+## Related Resources
+
+- [VPC Component](/components/terraform/vpc/README.md) - Configure VPCs that will contain security groups
+- [RDS Component](/components/terraform/rds/README.md) - Database instances that use security groups
+- [EC2 Component](/components/terraform/ec2/README.md) - EC2 instances that use security groups
+- [ECS Component](/components/terraform/ecs/README.md) - Container services that use security groups
+
+## AWS Documentation
+
+- [AWS Security Groups Documentation](https://docs.aws.amazon.com/vpc/latest/userguide/VPC_SecurityGroups.html)
+- [Security Group Rules Reference](https://docs.aws.amazon.com/vpc/latest/userguide/security-group-rules-reference.html)
+- [VPC Endpoint Security Group Best Practices](https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints-access.html)

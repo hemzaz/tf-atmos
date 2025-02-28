@@ -64,10 +64,13 @@ This style guide establishes standards for documentation in the Atmos project to
 │       │   ├── README.md
 │       │   └── policies/      # Optional for policy templates
 ├── docs/                      # Documentation
-│   ├── component-guides/      # Component-specific guides
 │   ├── diagrams/              # Architecture diagrams
 │   └── *.md                   # General guide documents
 ├── examples/                  # Example implementations
+├── integrations/              # CI/CD and external tool integrations
+│   ├── jenkins/               # Jenkins integration files
+│   ├── atlantis/              # Atlantis integration files
+│   └── README.md              # Integration documentation
 ├── stacks/                    # Stack configurations
 ├── templates/                 # Reusable templates
 └── workflows/                 # Workflow definitions
@@ -248,6 +251,10 @@ Brief introduction and purpose of the document.
 - [Section 2](#section-2)
 - [Section 3](#section-3)
 
+## Overview
+
+High-level summary of the document's content and why it's important.
+
 ## Section 1
 
 Content for section 1.
@@ -264,10 +271,23 @@ Content for section 2.
 
 Content for section 3.
 
+## Best Practices
+
+Recommended approaches and patterns related to this topic.
+
+## Troubleshooting
+
+Common issues and their solutions related to this topic.
+
 ## Related Resources
 
-- [Related Resource 1](./related-resource-1.md)
-- [Related Resource 2](./related-resource-2.md)
+- [Related Resource 1](./related-resource-1.md) - Brief description
+- [Related Resource 2](./related-resource-2.md) - Brief description
+- [External Reference](https://external-link.com) - Brief description
+
+## Appendix
+
+Additional reference information, if applicable.
 ```
 
 ### Component README Template
@@ -283,18 +303,41 @@ Brief description of the component and its purpose.
 
 Detailed description of what the component creates and its main features.
 
+## Architecture
+
+[Include architecture diagram if applicable]
+
+Explain the architecture of the component, including the resources it creates and their relationships.
+
+## Features
+
+- Feature 1: Brief description
+- Feature 2: Brief description
+- Feature 3: Brief description
+
 ## Usage
 
 ### Basic Usage
 
 ```yaml
-# Basic usage example
+components:
+  terraform:
+    component-name:
+      vars:
+        key: value
+        # Basic usage example
 ```
 
 ### Advanced Configuration
 
 ```yaml
-# Advanced configuration example
+components:
+  terraform:
+    component-name:
+      vars:
+        # Advanced configuration example with comments
+        key1: value1  # Description of this setting
+        key2: value2  # Description of this setting
 ```
 
 ## Input Variables
@@ -311,11 +354,9 @@ Detailed description of what the component creates and its main features.
 | `output1` | Description of output1 |
 | `output2` | Description of output2 |
 
-## Features
-
-Description of key features.
-
 ## Examples
+
+See the [examples directory](../../../examples/component-name/) for working examples.
 
 ### Example 1: Basic Implementation
 
@@ -331,8 +372,24 @@ Description of key features.
 
 ## Related Components
 
-- [Component 1](../component1/README.md)
-- [Component 2](../component2/README.md)
+- [Component 1](../component1/README.md) - Brief description of relationship
+- [Component 2](../component2/README.md) - Brief description of relationship
+
+## Troubleshooting
+
+### Common Issue 1
+
+Description of the issue and its solution.
+
+### Common Issue 2
+
+Description of the issue and its solution.
+
+## Resources
+
+- [AWS Documentation](link-to-aws-docs)
+- [Terraform Registry](link-to-terraform-registry)
+- [Related Guide](../../docs/related-guide.md)
 ```
 
 ---

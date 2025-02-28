@@ -1,143 +1,263 @@
-# Monitoring Component
+# AWS CloudWatch Monitoring Component
 
-This component creates and manages AWS CloudWatch resources for monitoring, including dashboards, alarms, log groups, and metric filters.
+_Last Updated: February 28, 2025_
+
+## Overview
+
+This component creates and manages AWS CloudWatch resources for comprehensive monitoring, including dashboards, alarms, log groups, metric filters, and certificate monitoring.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  CloudWatch Monitoring                      │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  ┌─────────────────┐     ┌─────────────────┐                │
+│  │                 │     │                 │                │
+│  │   Dashboards    │     │     Alarms      │                │
+│  │                 │     │                 │                │
+│  └────────┬────────┘     └────────┬────────┘                │
+│           │                       │                         │
+│           ▼                       ▼                         │
+│  ┌─────────────────┐     ┌─────────────────┐                │
+│  │  • System       │     │  • CPU          │     ┌─────┐    │
+│  │  • Certificate  │     │  • Memory       │     │     │    │
+│  │  • Custom       │     │  • DB Conn      │────►│ SNS │    │
+│  │                 │     │  • Lambda Error │     │     │    │
+│  └─────────────────┘     │  • Certificate  │     └──┬──┘    │
+│                          └─────────────────┘        │       │
+│                                                     │       │
+│                                                     ▼       │
+│                                           ┌──────────────┐  │
+│                                           │ Notification │  │
+│                                           │ Subscribers  │  │
+│                                           └──────────────┘  │
+│                                                             │
+│  ┌─────────────────┐     ┌─────────────────┐                │
+│  │                 │     │                 │                │
+│  │   Log Groups    │────►│ Metric Filters  │                │
+│  │                 │     │                 │                │
+│  └─────────────────┘     └────────┬────────┘                │
+│                                   │                         │
+│                                   ▼                         │
+│                          ┌─────────────────┐                │
+│                          │  Custom Metrics │                │
+│                          │  and Alarms     │                │
+│                          └─────────────────┘                │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## Features
 
-- Create and manage CloudWatch dashboards
-- Define comprehensive alarm sets for common AWS services
-- Create CloudWatch log groups with retention policies
-- Configure metric filters for log pattern alerting
-- Set up composite alarms for complex conditions
-- Configure SNS topics for alarm notifications
-- Support for anomaly detection alarms
-- Define custom metrics and dimensions
+- **CloudWatch Dashboards**: Create customizable dashboards for system and certificate monitoring
+- **Multi-Resource Alarms**: Create alarms for EC2, RDS, Lambda, ECS, and other AWS resources
+- **Log Management**: Establish log groups with retention policies and metric filters
+- **Certificate Monitoring**: Track SSL/TLS certificate expiration and status
+- **Notification System**: Configure SNS topics and subscriptions for alarm notifications
+- **Custom Metrics**: Extract and analyze custom metrics from log data
 
 ## Usage
 
-```hcl
-module "monitoring" {
-  source = "git::https://github.com/example/tf-atmos.git//components/terraform/monitoring"
-  
-  region = var.region
-  
-  # CloudWatch Dashboard
-  create_dashboard = true
-  dashboard_name   = "system-overview"
-  dashboard_body   = templatefile("./templates/dashboard.json.tpl", {
-    region      = var.region
-    instance_id = module.ec2.instance_id
-    rds_id      = module.rds.db_instance_id
-  })
-  
-  # SNS Topic for Alerts
-  create_sns_topic = true
-  sns_topic_name   = "monitoring-alerts"
-  sns_subscriptions = [
-    {
-      protocol = "email"
-      endpoint = "alerts@example.com"
-    },
-    {
-      protocol = "https"
-      endpoint = "https://api.pagerduty.com/integration/abc123"
-    }
-  ]
-  
-  # EC2 Alarms
-  ec2_alarms = {
-    cpu_high = {
-      instance_id         = module.ec2.instance_id
-      comparison_operator = "GreaterThanThreshold"
-      evaluation_periods  = 2
-      metric_name         = "CPUUtilization"
-      namespace           = "AWS/EC2"
-      period              = 300
-      statistic           = "Average"
-      threshold           = 80
-      alarm_description   = "EC2 CPU utilization is too high"
-      alarm_actions       = ["${module.monitoring.sns_topic_arn}"]
-    }
-  }
-  
-  # RDS Alarms
-  rds_alarms = {
-    high_cpu = {
-      db_instance_identifier = module.rds.db_instance_id
-      comparison_operator    = "GreaterThanThreshold"
-      evaluation_periods     = 2
-      metric_name            = "CPUUtilization"
-      namespace              = "AWS/RDS"
-      period                 = 300
-      statistic              = "Average"
-      threshold              = 80
-      alarm_description      = "RDS CPU utilization is too high"
-      alarm_actions          = ["${module.monitoring.sns_topic_arn}"]
-    },
-    storage_low = {
-      db_instance_identifier = module.rds.db_instance_id
-      comparison_operator    = "LessThanThreshold"
-      evaluation_periods     = 1
-      metric_name            = "FreeStorageSpace"
-      namespace              = "AWS/RDS"
-      period                 = 300
-      statistic              = "Average"
-      threshold              = 10737418240  # 10 GB in bytes
-      alarm_description      = "RDS free storage space is too low"
-      alarm_actions          = ["${module.monitoring.sns_topic_arn}"]
-    }
-  }
-  
-  # Lambda Alarms
-  lambda_alarms = {
-    errors = {
-      function_name       = module.lambda.function_name
-      comparison_operator = "GreaterThanThreshold"
-      evaluation_periods  = 1
-      metric_name         = "Errors"
-      namespace           = "AWS/Lambda"
-      period              = 300
-      statistic           = "Sum"
-      threshold           = 1
-      alarm_description   = "Lambda function has errors"
-      alarm_actions       = ["${module.monitoring.sns_topic_arn}"]
-    }
-  }
-  
-  # CloudWatch Log Groups
-  log_groups = {
-    application = {
-      name              = "/app/production"
-      retention_in_days = 90
-      metric_filters = [
-        {
-          name           = "ErrorFilter"
-          pattern        = "ERROR"
-          metric_name    = "ApplicationErrors"
-          metric_namespace = "CustomMetrics"
-          metric_value   = "1"
-          default_value  = "0"
-        }
-      ]
-    }
-  }
-  
-  # Composite Alarms
-  composite_alarms = {
-    system_critical = {
-      alarm_name        = "SystemCriticalState"
-      alarm_description = "Multiple critical alarms are in ALARM state"
-      alarm_rule        = "ALARM(${aws_cloudwatch_metric_alarm.ec2_alarms.cpu_high.alarm_name}) AND (ALARM(${aws_cloudwatch_metric_alarm.rds_alarms.high_cpu.alarm_name}) OR ALARM(${aws_cloudwatch_metric_alarm.lambda_alarms.errors.alarm_name}))"
-      alarm_actions     = ["${module.monitoring.sns_topic_arn}"]
-    }
-  }
-  
-  # Global Tags
-  tags = {
-    Environment = "production"
-    Project     = "example"
-  }
-}
+### Basic Monitoring Configuration
+
+```yaml
+components:
+  terraform:
+    monitoring:
+      vars:
+        region: us-west-2
+        
+        # Basic configuration
+        create_dashboard: true
+        create_sns_topic: true
+        alarm_email_subscriptions:
+          - "alerts@example.com"
+        
+        # Resources to monitor
+        vpc_id: ${dependency.vpc.outputs.vpc_id}
+        rds_instances:
+          - ${dependency.rds.outputs.db_instance_id}
+        lambda_functions:
+          - ${dependency.lambda.outputs.function_name}
+        
+        # Log groups
+        log_groups:
+          application:
+            retention_days: 30
+          security:
+            retention_days: 90
+        
+        # Tags
+        tags:
+          Environment: dev
+          Name: monitoring
+```
+
+### Complete Production Monitoring
+
+```yaml
+components:
+  terraform:
+    monitoring:
+      vars:
+        region: us-west-2
+        
+        # Dashboard
+        create_dashboard: true
+        vpc_id: ${dependency.vpc.outputs.vpc_id}
+        rds_instances:
+          - ${dependency.rds.outputs.db_instance_id}
+        ecs_clusters:
+          - ${dependency.ecs.outputs.cluster_name}
+        lambda_functions:
+          - ${dependency.lambda.outputs.function_name}
+        load_balancers:
+          - ${dependency.alb.outputs.lb_id}
+        elasticache_clusters:
+          - ${dependency.elasticache.outputs.cluster_id}
+        
+        # Notifications
+        create_sns_topic: true
+        alarm_email_subscriptions:
+          - "oncall@example.com"
+          - "devops@example.com"
+        
+        # CPU Alarms
+        cpu_alarms:
+          ec2_instance:
+            namespace: "AWS/EC2"
+            evaluation_periods: 2
+            period: 300
+            threshold: 80
+            dimensions:
+              InstanceId: ${dependency.ec2.outputs.instance_id}
+          
+          ecs_service:
+            namespace: "AWS/ECS"
+            evaluation_periods: 2
+            period: 300
+            threshold: 75
+            dimensions:
+              ClusterName: ${dependency.ecs.outputs.cluster_name}
+              ServiceName: ${dependency.ecs.outputs.service_name}
+        
+        # Memory Alarms
+        memory_alarms:
+          ecs_service:
+            namespace: "AWS/ECS"
+            evaluation_periods: 2
+            period: 300
+            threshold: 80
+            dimensions:
+              ClusterName: ${dependency.ecs.outputs.cluster_name}
+              ServiceName: ${dependency.ecs.outputs.service_name}
+        
+        # DB Connection Alarms
+        db_connection_alarms:
+          ${dependency.rds.outputs.db_instance_id}:
+            evaluation_periods: 3
+            period: 300
+            threshold: 80
+        
+        # Lambda Error Alarms
+        lambda_error_alarms:
+          ${dependency.lambda.outputs.function_name}:
+            evaluation_periods: 1
+            period: 60
+            threshold: 1
+        
+        # Log Groups and Metric Filters
+        log_groups:
+          application:
+            retention_days: 30
+          api:
+            retention_days: 90
+          database:
+            retention_days: 90
+        
+        log_metric_filters:
+          api_error:
+            log_group_name: "api"
+            pattern: "ERROR"
+            evaluation_periods: 1
+            period: 60
+            threshold: 5
+          security_alert:
+            log_group_name: "security"
+            pattern: "ALERT"
+            evaluation_periods: 1
+            period: 60
+            threshold: 1
+        
+        # Certificate Monitoring
+        enable_certificate_monitoring: true
+        eks_cluster_name: ${dependency.eks.outputs.cluster_name}
+        certificate_arns:
+          - ${dependency.acm.outputs.certificate_arn}
+        certificate_names:
+          - "example.com"
+        certificate_domains:
+          - "example.com"
+        certificate_statuses:
+          - "ISSUED"
+        certificate_expiry_dates:
+          - "2025-01-01"
+        certificate_expiry_threshold: 30
+        
+        # Tags
+        tags:
+          Environment: production
+          Name: monitoring
+          Project: core-infrastructure
+          Owner: devops
+          ManagedBy: atmos
+```
+
+### Certificate Monitoring Dashboard
+
+```yaml
+components:
+  terraform:
+    monitoring/certificates:
+      vars:
+        region: us-west-2
+        
+        # Enable certificate monitoring
+        enable_certificate_monitoring: true
+        eks_cluster_name: ${dependency.eks.outputs.cluster_name}
+        
+        # Certificate details
+        certificate_arns:
+          - ${dependency.acm.outputs.api_certificate_arn}
+          - ${dependency.acm.outputs.website_certificate_arn}
+        certificate_names:
+          - "api.example.com"
+          - "www.example.com"
+        certificate_domains:
+          - "api.example.com"
+          - "www.example.com"
+        certificate_statuses:
+          - "ISSUED" 
+          - "ISSUED"
+        certificate_expiry_dates:
+          - "2024-06-01"
+          - "2024-08-15"
+        certificate_expiry_threshold: 45
+        
+        # Notifications
+        create_sns_topic: true
+        alarm_email_subscriptions:
+          - "security@example.com"
+        
+        # Tags
+        tags:
+          Environment: production
+          Name: certificate-monitoring
 ```
 
 ## Inputs
@@ -145,436 +265,155 @@ module "monitoring" {
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | region | AWS region | `string` | n/a | yes |
-| create_dashboard | Whether to create a CloudWatch dashboard | `bool` | `false` | no |
-| dashboard_name | Name of the CloudWatch dashboard | `string` | `"system-overview"` | no |
-| dashboard_body | JSON body of the CloudWatch dashboard | `string` | `null` | no |
-| create_sns_topic | Whether to create an SNS topic for alarms | `bool` | `false` | no |
-| sns_topic_name | Name of the SNS topic | `string` | `"monitoring-alerts"` | no |
-| sns_subscriptions | List of SNS subscriptions | `list(map(string))` | `[]` | no |
-| ec2_alarms | Map of EC2 alarms to create | `map(any)` | `{}` | no |
-| rds_alarms | Map of RDS alarms to create | `map(any)` | `{}` | no |
-| lambda_alarms | Map of Lambda alarms to create | `map(any)` | `{}` | no |
-| api_gateway_alarms | Map of API Gateway alarms to create | `map(any)` | `{}` | no |
-| elb_alarms | Map of ELB alarms to create | `map(any)` | `{}` | no |
-| log_groups | Map of CloudWatch log groups to create | `map(any)` | `{}` | no |
-| composite_alarms | Map of composite alarms to create | `map(any)` | `{}` | no |
+| log_groups | Map of log groups to create | `map(object({ retention_days = number }))` | `{}` | no |
+| kms_key_id | KMS key ID for log encryption | `string` | `null` | no |
+| create_dashboard | Whether to create CloudWatch dashboard | `bool` | `false` | no |
+| vpc_id | VPC ID for dashboard metrics | `string` | `""` | no |
+| rds_instances | List of RDS instances to monitor | `list(string)` | `[]` | no |
+| ecs_clusters | List of ECS clusters to monitor | `list(string)` | `[]` | no |
+| lambda_functions | List of Lambda functions to monitor | `list(string)` | `[]` | no |
+| load_balancers | List of load balancers to monitor | `list(string)` | `[]` | no |
+| elasticache_clusters | List of ElastiCache clusters to monitor | `list(string)` | `[]` | no |
+| create_sns_topic | Whether to create an SNS topic for alarms | `bool` | `true` | no |
+| alarm_email_subscriptions | List of email addresses to notify for alarms | `list(string)` | `[]` | no |
+| cpu_alarms | Map of CPU alarms to create | `map(object)` | `{}` | no |
+| memory_alarms | Map of memory alarms to create | `map(object)` | `{}` | no |
+| db_connection_alarms | Map of database connection alarms to create | `map(object)` | `{}` | no |
+| lambda_error_alarms | Map of Lambda error alarms to create | `map(object)` | `{}` | no |
+| log_metric_filters | Map of log metric filters to create | `map(object)` | `{}` | no |
 | tags | Tags to apply to resources | `map(string)` | `{}` | no |
+| enable_certificate_monitoring | Whether to enable certificate monitoring dashboard and alarms | `bool` | `false` | no |
+| eks_cluster_name | EKS cluster name for certificate management monitoring | `string` | `""` | no |
+| certificate_arns | List of certificate ARNs to monitor | `list(string)` | `[]` | no |
+| certificate_names | List of certificate names corresponding to the ARNs | `list(string)` | `[]` | no |
+| certificate_domains | List of certificate domain names | `list(string)` | `[]` | no |
+| certificate_statuses | List of certificate statuses | `list(string)` | `[]` | no |
+| certificate_expiry_dates | List of certificate expiry dates in human-readable format | `list(string)` | `[]` | no |
+| certificate_alarm_arns | List of certificate alarm ARNs to display in dashboard | `list(string)` | `[]` | no |
+| certificate_expiry_threshold | Threshold in days for certificate expiry alarms | `number` | `30` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| dashboard_arn | ARN of the CloudWatch dashboard |
+| log_group_names | Map of log group names |
+| log_group_arns | Map of log group ARNs |
+| dashboard_name | Name of the CloudWatch dashboard |
 | sns_topic_arn | ARN of the SNS topic for alarms |
-| ec2_alarms | Map of EC2 alarm names to their ARNs |
-| rds_alarms | Map of RDS alarm names to their ARNs |
-| lambda_alarms | Map of Lambda alarm names to their ARNs |
-| api_gateway_alarms | Map of API Gateway alarm names to their ARNs |
-| elb_alarms | Map of ELB alarm names to their ARNs |
-| log_group_arns | Map of CloudWatch log group names to their ARNs |
-| composite_alarm_arns | Map of composite alarm names to their ARNs |
+| cpu_alarm_names | Map of CPU alarm names |
+| memory_alarm_names | Map of memory alarm names |
+| db_connection_alarm_names | Map of database connection alarm names |
+| lambda_error_alarm_names | Map of Lambda error alarm names |
 
-## Examples
+## Best Practices
 
-### Basic CloudWatch Dashboard
+### Dashboard Design
 
-```yaml
-# Stack configuration (environment.yaml)
-components:
-  terraform:
-    monitoring/basic:
-      vars:
-        region: us-west-2
-        
-        # Dashboard
-        create_dashboard: true
-        dashboard_name: "system-overview"
-        dashboard_body: |
-          {
-            "widgets": [
-              {
-                "type": "text",
-                "x": 0,
-                "y": 0,
-                "width": 24,
-                "height": 1,
-                "properties": {
-                  "markdown": "# System Overview Dashboard"
-                }
-              },
-              {
-                "type": "metric",
-                "x": 0,
-                "y": 1,
-                "width": 12,
-                "height": 6,
-                "properties": {
-                  "metrics": [
-                    [ "AWS/EC2", "CPUUtilization", "InstanceId", "${dep.ec2.outputs.instance_id}" ]
-                  ],
-                  "view": "timeSeries",
-                  "stacked": false,
-                  "region": "us-west-2",
-                  "title": "EC2 CPU Utilization",
-                  "period": 300,
-                  "stat": "Average"
-                }
-              },
-              {
-                "type": "metric",
-                "x": 12,
-                "y": 1,
-                "width": 12,
-                "height": 6,
-                "properties": {
-                  "metrics": [
-                    [ "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${dep.rds.outputs.db_instance_id}" ]
-                  ],
-                  "view": "timeSeries",
-                  "stacked": false,
-                  "region": "us-west-2",
-                  "title": "RDS CPU Utilization",
-                  "period": 300,
-                  "stat": "Average"
-                }
-              }
-            ]
-          }
-        
-        # Tags
-        tags:
-          Environment: dev
-          Project: monitoring
+- Group related metrics together for better visualization
+- Use the template files for consistent dashboard layouts
+- Include both high-level overviews and detailed metrics when needed
+- Use appropriate visualization types (time series, single value, bar charts) for different metrics
+- Consider using dashboard variables for dynamic filtering when applicable
+
+### Alarm Configuration
+
+- Set appropriate thresholds based on baseline metrics for your workloads
+- Use multiple evaluation periods to avoid false positives from transient spikes
+- Configure different severity levels for critical resources
+- Include clear alarm descriptions that provide context and troubleshooting guidance
+- Test alarms by manually triggering them or simulating conditions
+
+### Log Management
+
+- Set appropriate retention periods based on regulatory requirements and cost considerations
+- Create metric filters that extract actionable insights from your logs
+- Standardize log formats across applications to simplify metric extraction
+- Consider using CloudWatch Logs Insights for ad-hoc query and analysis
+- Monitor log storage usage to avoid unexpected costs
+
+### Certificate Management
+
+- Set appropriate expiry thresholds (30+ days) to provide sufficient time for renewal
+- Use different threshold levels (warning, critical) for graduated alerts
+- Include certificate details in dashboard for easy reference
+- Integrate with existing certificate management workflows
+- Implement automated certificate renewal where possible
+
+## Troubleshooting
+
+### Common Issues
+
+#### Dashboard Not Showing Data
+
+- Verify IAM permissions for the CloudWatch service
+- Check if the resources being monitored exist and are correctly specified
+- Ensure the region is correctly specified and matches the resources
+- Verify the time range in the dashboard view is appropriate for the data
+
+#### Alarms Not Triggering
+
+- Verify the SNS topic exists and has correct access policies
+- Check if alarm actions are enabled (`actions_enabled = true`)
+- Confirm the metric being monitored is emitting data
+- Verify the threshold and evaluation periods are appropriate
+- Test the SNS subscription with a test message
+
+#### Log Group Issues
+
+- Check IAM permissions for creating and managing log groups
+- Verify KMS key permissions if using encrypted logs
+- Ensure log retention policies comply with organization requirements
+- Review metric filter patterns for accuracy
+
+#### Missing Certificate Data
+
+- Verify the certificate ARNs are valid and accessible
+- Check if the certificates exist in the specified region
+- Ensure the EKS cluster has External Secrets configured for certificate monitoring
+- Verify CloudWatch permissions to access certificate metrics
+
+### CloudWatch Logs Insights Queries
+
+#### Finding Error Patterns
+
+```
+fields @timestamp, @message
+| filter @message like /ERROR/
+| sort @timestamp desc
+| limit 20
 ```
 
-### Comprehensive Production Monitoring
+#### Analyzing API Response Times
 
-```yaml
-# Stack configuration (environment.yaml)
-components:
-  terraform:
-    monitoring/production:
-      vars:
-        region: us-west-2
-        
-        # SNS Topic for Alerts
-        create_sns_topic: true
-        sns_topic_name: "production-alerts"
-        sns_subscriptions:
-          - protocol: "email"
-            endpoint: "oncall@example.com"
-          - protocol: "sms"
-            endpoint: "+15551234567"
-        
-        # EC2 Alarms
-        ec2_alarms:
-          cpu_high:
-            instance_id: ${dep.ec2.outputs.instance_id}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "CPUUtilization"
-            namespace: "AWS/EC2"
-            period: 300
-            statistic: "Average"
-            threshold: 80
-            alarm_description: "EC2 CPU utilization is too high"
-            actions_enabled: true
-            
-          cpu_critical:
-            instance_id: ${dep.ec2.outputs.instance_id}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "CPUUtilization"
-            namespace: "AWS/EC2"
-            period: 300
-            statistic: "Average"
-            threshold: 90
-            alarm_description: "EC2 CPU utilization is critically high"
-            actions_enabled: true
-            
-          memory_high:
-            instance_id: ${dep.ec2.outputs.instance_id}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "mem_used_percent"
-            namespace: "CWAgent"
-            period: 300
-            statistic: "Average"
-            threshold: 80
-            alarm_description: "EC2 memory utilization is high"
-            actions_enabled: true
-        
-        # RDS Alarms
-        rds_alarms:
-          high_cpu:
-            db_instance_identifier: ${dep.rds.outputs.db_instance_id}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "CPUUtilization"
-            namespace: "AWS/RDS"
-            period: 300
-            statistic: "Average"
-            threshold: 80
-            alarm_description: "RDS CPU utilization is high"
-            actions_enabled: true
-            
-          storage_low:
-            db_instance_identifier: ${dep.rds.outputs.db_instance_id}
-            comparison_operator: "LessThanThreshold"
-            evaluation_periods: 1
-            metric_name: "FreeStorageSpace"
-            namespace: "AWS/RDS"
-            period: 300
-            statistic: "Average"
-            threshold: 10737418240  # 10 GB in bytes
-            alarm_description: "RDS free storage space is low"
-            actions_enabled: true
-            
-          connections_high:
-            db_instance_identifier: ${dep.rds.outputs.db_instance_id}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "DatabaseConnections"
-            namespace: "AWS/RDS"
-            period: 300
-            statistic: "Average"
-            threshold: 100
-            alarm_description: "RDS database connections are high"
-            actions_enabled: true
-        
-        # Lambda Alarms
-        lambda_alarms:
-          errors:
-            function_name: ${dep.lambda.outputs.function_name}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 1
-            metric_name: "Errors"
-            namespace: "AWS/Lambda"
-            period: 300
-            statistic: "Sum"
-            threshold: 1
-            alarm_description: "Lambda function has errors"
-            actions_enabled: true
-            
-          throttles:
-            function_name: ${dep.lambda.outputs.function_name}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 1
-            metric_name: "Throttles"
-            namespace: "AWS/Lambda"
-            period: 300
-            statistic: "Sum"
-            threshold: 1
-            alarm_description: "Lambda function is being throttled"
-            actions_enabled: true
-            
-          duration_high:
-            function_name: ${dep.lambda.outputs.function_name}
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "Duration"
-            namespace: "AWS/Lambda"
-            period: 300
-            statistic: "Average"
-            threshold: 5000  # 5 seconds in milliseconds
-            alarm_description: "Lambda function duration is high"
-            actions_enabled: true
-        
-        # API Gateway Alarms
-        api_gateway_alarms:
-          high_latency:
-            api_name: ${dep.apigateway.outputs.api_name}
-            stage_name: "prod"
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "Latency"
-            namespace: "AWS/ApiGateway"
-            period: 300
-            statistic: "Average"
-            threshold: 1000  # 1 second in milliseconds
-            alarm_description: "API Gateway latency is high"
-            actions_enabled: true
-            
-          error_rate:
-            api_name: ${dep.apigateway.outputs.api_name}
-            stage_name: "prod"
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "5XXError"
-            namespace: "AWS/ApiGateway"
-            period: 300
-            statistic: "Average"
-            threshold: 0.05  # 5% error rate
-            alarm_description: "API Gateway 5XX error rate is high"
-            actions_enabled: true
-        
-        # Log Groups and Metric Filters
-        log_groups:
-          application:
-            name: "/app/production"
-            retention_in_days: 90
-            metric_filters:
-              - name: "ErrorFilter"
-                pattern: "ERROR"
-                metric_name: "ApplicationErrors"
-                metric_namespace: "CustomMetrics"
-                metric_value: "1"
-                default_value: "0"
-                
-              - name: "WarningFilter"
-                pattern: "WARN"
-                metric_name: "ApplicationWarnings"
-                metric_namespace: "CustomMetrics"
-                metric_value: "1"
-                default_value: "0"
-                
-              - name: "LatencyFilter"
-                pattern: "LATENCY: * ms"
-                metric_name: "ApplicationLatency"
-                metric_namespace: "CustomMetrics"
-                metric_value: "$1"
-                default_value: "0"
-          
-          security:
-            name: "/security/audit"
-            retention_in_days: 365
-            metric_filters:
-              - name: "AuthFailureFilter"
-                pattern: "Authentication failure"
-                metric_name: "AuthFailures"
-                metric_namespace: "SecurityMetrics"
-                metric_value: "1"
-                default_value: "0"
-        
-        # Composite Alarms
-        composite_alarms:
-          system_critical:
-            alarm_name: "SystemCriticalState"
-            alarm_description: "Multiple critical alarms are in ALARM state"
-            alarm_rule: "ALARM(${module.monitoring.ec2_alarms.cpu_critical}) AND (ALARM(${module.monitoring.rds_alarms.high_cpu}) OR ALARM(${module.monitoring.api_gateway_alarms.error_rate}))"
-            actions_enabled: true
-        
-        # Tags
-        tags:
-          Environment: production
-          Project: core-services
+```
+fields @timestamp, @message
+| parse @message "responseTime: * ms" as responseTime
+| stats avg(responseTime) as avgResponseTime by bin(5m)
+| sort avgResponseTime desc
 ```
 
-### CloudWatch Logs and Custom Metrics
+#### Identifying Authentication Failures
 
-```yaml
-# Stack configuration (environment.yaml)
-components:
-  terraform:
-    monitoring/logs:
-      vars:
-        region: us-west-2
-        
-        # Log Groups and Metric Filters
-        log_groups:
-          api_logs:
-            name: "/api/gateway/logs"
-            retention_in_days: 90
-            metric_filters:
-              - name: "ResponseTimeFilter"
-                pattern: "[timestamp, requestId, method, status, uri, responseTime]"
-                metric_name: "ResponseTime"
-                metric_namespace: "ApiMetrics"
-                metric_value: "$responseTime"
-                default_value: "0"
-                dimensions:
-                  - name: "Method"
-                    value: "$method"
-                  - name: "Status"
-                    value: "$status"
-                  - name: "Uri"
-                    value: "$uri"
-                
-              - name: "ErrorFilter"
-                pattern: "[timestamp, requestId, method, status=4*, uri, responseTime]"
-                metric_name: "ClientErrors"
-                metric_namespace: "ApiMetrics"
-                metric_value: "1"
-                default_value: "0"
-                dimensions:
-                  - name: "Method"
-                    value: "$method"
-                  - name: "Uri"
-                    value: "$uri"
-                
-              - name: "ServerErrorFilter"
-                pattern: "[timestamp, requestId, method, status=5*, uri, responseTime]"
-                metric_name: "ServerErrors"
-                metric_namespace: "ApiMetrics"
-                metric_value: "1"
-                default_value: "0"
-                dimensions:
-                  - name: "Method"
-                    value: "$method"
-                  - name: "Uri"
-                    value: "$uri"
-        
-        # Custom Alarms based on Metric Filters
-        custom_metric_alarms:
-          high_response_time:
-            alarm_name: "HighResponseTime"
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            metric_name: "ResponseTime"
-            namespace: "ApiMetrics"
-            period: 300
-            statistic: "Average"
-            threshold: 500
-            alarm_description: "API response time is high"
-            dimensions:
-              Method: "POST"
-              Uri: "/api/v1/checkout"
-            actions_enabled: true
-            
-          high_server_errors:
-            alarm_name: "HighServerErrors"
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 1
-            metric_name: "ServerErrors"
-            namespace: "ApiMetrics"
-            period: 60
-            statistic: "Sum"
-            threshold: 5
-            alarm_description: "High number of server errors"
-            actions_enabled: true
-        
-        # Tags
-        tags:
-          Environment: production
-          Project: api-monitoring
+```
+fields @timestamp, @message
+| filter @message like /Authentication failure/ or @message like /access denied/
+| stats count() as authFailures by bin(1h)
+| sort authFailures desc
 ```
 
-## Implementation Best Practices
+## Related Resources
 
-1. **Dashboard Design**:
-   - Group related metrics together
-   - Use a consistent layout and organization
-   - Include both high-level overview and detailed metrics
-   - Use appropriate visualization types for different metrics
-   - Consider using dashboard variables for dynamic filtering
+- [AWS CloudWatch User Guide](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html)
+- [CloudWatch Logs Insights Syntax](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_QuerySyntax.html)
+- [CloudWatch Dashboard JSON Syntax](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/CloudWatch-Dashboard-Body-Structure.html)
+- [AWS Certificate Manager User Guide](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)
+- [External Secrets Operator Documentation](https://external-secrets.io/latest/)
 
-2. **Alarm Configuration**:
-   - Set appropriate thresholds based on baseline metrics
-   - Use multiple evaluation periods to avoid false alarms
-   - Configure different severity levels for the same metric
-   - Include clear alarm descriptions with troubleshooting steps
-   - Test alarms by triggering them manually
+## Security Considerations
 
-3. **Log Management**:
-   - Set appropriate retention periods based on compliance requirements
-   - Use metric filters to extract valuable insights from logs
-   - Define structured logging patterns in your applications
-   - Consider using CloudWatch Logs Insights for ad-hoc analysis
-   - Monitor log group storage usage
-
-4. **Cost Optimization**:
-   - Be mindful of high-resolution metrics that can increase costs
-   - Use composite alarms instead of duplicating alarm logic
-   - Set appropriate log retention periods
-   - Delete unused dashboards, alarms, and log groups
-   - Consider using Contributor Insights instead of custom parsing
+- Ensure that sensitive log data is encrypted with KMS
+- Implement appropriate IAM policies for CloudWatch access
+- Limit access to alarm actions to prevent unauthorized changes
+- Consider using AWS organizations for centralized monitoring across accounts
+- Use encrypted SNS topics for sensitive notifications
+- Implement CloudWatch Logs Insights with appropriate permissions

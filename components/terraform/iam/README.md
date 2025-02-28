@@ -1,96 +1,74 @@
 # IAM Component
 
-This component manages AWS Identity and Access Management (IAM) resources including roles, policies, users, and groups.
+_Last Updated: February 28, 2025_
+
+## Overview
+
+This component manages AWS Identity and Access Management (IAM) resources, with a focus on cross-account roles and policies for resource management in multi-account environments.
+
+## Architecture
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                       IAM Component                         │
+└───────────────────────────┬────────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────────┐
+│                                                            │
+│  ┌─────────────────────┐     ┌───────────────────────────┐ │
+│  │                     │     │                           │ │
+│  │  Cross-Account      │     │    Trust                  │ │
+│  │  IAM Roles          │────►│    Relationships          │ │
+│  │                     │     │                           │ │
+│  └─────────────────────┘     └───────────────────────────┘ │
+│            │                                               │
+│            │                                               │
+│            ▼                                               │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                   IAM Policies                       │   │
+│  │                                                      │   │
+│  │  ┌─────────────────┐      ┌────────────────────┐    │   │
+│  │  │ Account Setup   │      │ Resource           │    │   │
+│  │  │ Policy          │      │ Management Policy  │    │   │
+│  │  └─────────────────┘      └────────────────────┘    │   │
+│  │                                                      │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+The IAM component creates cross-account roles and policies that allow trusted entities from specified AWS accounts to assume roles and perform actions in the target account. The component establishes:
+
+1. A cross-account IAM role with a trust policy that allows specified AWS accounts to assume the role
+2. A main IAM policy with account setup permissions (user/group/policy management)
+3. A resource management policy for EC2, S3, RDS, and other AWS services
 
 ## Features
 
-- Create and manage IAM roles with trust relationships
-- Define IAM policies with least privilege permissions
-- Manage IAM users and groups
-- Support for cross-account access
-- Configure SAML federation for identity providers
-- Set up service-linked roles for AWS services
+- Create cross-account IAM roles with customizable trust relationships
+- Define IAM policies for account setup and resource management
+- Apply consistent tagging to IAM resources
+- Enforce least privilege with granular permissions
+- Support multi-account AWS environments
 
 ## Usage
 
-```hcl
-module "iam" {
-  source = "git::https://github.com/example/tf-atmos.git//components/terraform/iam"
-  
-  region = var.region
-  
-  # IAM Roles
-  roles = {
-    "app-server" = {
-      name               = "AppServerRole"
-      assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
-      managed_policy_arns = [
-        "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
-        "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-      ]
-      inline_policies = {
-        "s3-access" = data.aws_iam_policy_document.s3_app_access.json
-      }
-      tags = {
-        Environment = "production"
-      }
-    },
-    "lambda-execution" = {
-      name               = "LambdaExecutionRole"
-      assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
-      managed_policy_arns = [
-        "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      ]
-      inline_policies = {
-        "dynamodb-access" = data.aws_iam_policy_document.dynamodb_lambda_access.json
-      }
-      tags = {
-        Environment = "production"
-      }
-    }
-  }
-  
-  # Cross-Account Roles
-  cross_account_roles = {
-    "devops-access" = {
-      name                = "DevOpsAccessRole"
-      source_account_ids  = ["123456789012"]  # Account IDs allowed to assume this role
-      role_policy_arns    = ["arn:aws:iam::aws:policy/AdministratorAccess"]
-      max_session_duration = 3600
-      tags = {
-        Environment = "all"
-      }
-    }
-  }
-  
-  # IAM Policies
-  policies = {
-    "app-s3-access" = {
-      name        = "AppS3Access"
-      description = "Allows access to application S3 buckets"
-      policy      = data.aws_iam_policy_document.s3_app_access.json
-      tags = {
-        Environment = "production"
-      }
-    }
-  }
-  
-  # IAM Groups
-  groups = {
-    "developers" = {
-      name       = "Developers"
-      policies   = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-      users      = ["dev1", "dev2"]
-      path       = "/"
-    }
-  }
-  
-  # Global Tags
-  tags = {
-    Project     = "example"
-    ManagedBy   = "terraform"
-  }
-}
+```yaml
+components:
+  terraform:
+    iam:
+      vars:
+        region: us-east-1
+        cross_account_role_name: "CrossAccountAccessRole"
+        trusted_account_ids: 
+          - "123456789012"
+          - "987654321098"
+        policy_name: "CrossAccountAccessPolicy"
+        tags:
+          Environment: "production"
+          Project: "infrastructure"
+          Owner: "platform-team"
 ```
 
 ## Inputs
@@ -98,222 +76,78 @@ module "iam" {
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | region | AWS region | `string` | n/a | yes |
-| roles | Map of IAM roles to create | `map(any)` | `{}` | no |
-| cross_account_roles | Map of cross-account roles to create | `map(any)` | `{}` | no |
-| policies | Map of IAM policies to create | `map(any)` | `{}` | no |
-| groups | Map of IAM groups to create | `map(any)` | `{}` | no |
-| users | Map of IAM users to create | `map(any)` | `{}` | no |
-| tags | Tags to apply to all resources | `map(string)` | `{}` | no |
+| cross_account_role_name | Name of the cross-account IAM role | `string` | n/a | yes |
+| trusted_account_ids | List of AWS account IDs that are allowed to assume the cross-account role | `list(string)` | n/a | yes |
+| policy_name | Name of the IAM policy to be attached to the cross-account role | `string` | n/a | yes |
+| tags | Tags to apply to the IAM resources | `map(string)` | `{}` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| role_arns | Map of role names to ARNs |
-| role_names | Map of role names to their names |
-| policy_arns | Map of policy names to ARNs |
-| group_arns | Map of group names to ARNs |
-| user_arns | Map of user names to ARNs |
-| instance_profiles | Map of instance profile names to ARNs |
+| cross_account_role_arn | ARN of the cross-account IAM role |
+| cross_account_role_name | Name of the cross-account IAM role |
+| cross_account_policy_arn | ARN of the cross-account IAM policy |
+| cross_account_policy_name | Name of the cross-account IAM policy |
 
 ## Examples
 
-### Basic IAM Roles and Policies
+### Basic Cross-Account Role
 
 ```yaml
 # Stack configuration (environment.yaml)
 components:
   terraform:
-    iam/base:
+    iam/basic:
       vars:
         region: us-west-2
-        
-        # IAM Roles
-        roles:
-          app-server:
-            name: "AppServerRole"
-            assume_role_policy: |
-              {
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Action": "sts:AssumeRole",
-                    "Principal": {
-                      "Service": "ec2.amazonaws.com"
-                    },
-                    "Effect": "Allow",
-                    "Sid": ""
-                  }
-                ]
-              }
-            managed_policy_arns:
-              - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-              - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-            inline_policies:
-              s3-access: |
-                {
-                  "Version": "2012-10-17",
-                  "Statement": [
-                    {
-                      "Action": [
-                        "s3:GetObject",
-                        "s3:ListBucket"
-                      ],
-                      "Resource": [
-                        "arn:aws:s3:::example-app-configs",
-                        "arn:aws:s3:::example-app-configs/*"
-                      ],
-                      "Effect": "Allow"
-                    }
-                  ]
-                }
-            create_instance_profile: true
-            tags:
-              Environment: dev
-        
-        # Policies
-        policies:
-          app-dynamodb-access:
-            name: "AppDynamoDBAccess"
-            description: "Allow access to application DynamoDB tables"
-            policy: |
-              {
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Action": [
-                      "dynamodb:GetItem",
-                      "dynamodb:Query",
-                      "dynamodb:Scan"
-                    ],
-                    "Resource": [
-                      "arn:aws:dynamodb:us-west-2:*:table/app-*"
-                    ],
-                    "Effect": "Allow"
-                  }
-                ]
-              }
-            tags:
-              Environment: dev
+        cross_account_role_name: "DevOpsAccessRole"
+        trusted_account_ids: 
+          - "123456789012"
+        policy_name: "DevOpsAccessPolicy"
+        tags:
+          Environment: "dev"
+          ManagedBy: "terraform"
 ```
 
-### Cross-Account Access
+### Multiple Trusted Accounts
 
 ```yaml
 # Stack configuration (environment.yaml)
 components:
   terraform:
-    iam/cross-account:
+    iam/multi-account:
       vars:
-        region: us-west-2
-        
-        # Cross-Account Roles
-        cross_account_roles:
-          devops-access:
-            name: "DevOpsAccessRole"
-            source_account_ids: ["123456789012"]  # Account IDs allowed to assume this role
-            role_policy_arns:
-              - "arn:aws:iam::aws:policy/ReadOnlyAccess"
-            inline_policies:
-              custom-permissions: |
-                {
-                  "Version": "2012-10-17",
-                  "Statement": [
-                    {
-                      "Action": [
-                        "s3:ListBucket",
-                        "s3:GetObject"
-                      ],
-                      "Resource": [
-                        "arn:aws:s3:::example-logs",
-                        "arn:aws:s3:::example-logs/*"
-                      ],
-                      "Effect": "Allow"
-                    }
-                  ]
-                }
-            max_session_duration: 7200
-            tags:
-              Environment: production
-          
-          ci-cd-access:
-            name: "CICDPipelineRole"
-            source_account_ids: ["987654321098"]
-            role_policy_arns:
-              - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-              - "arn:aws:iam::aws:policy/AmazonECR-FullAccess"
-            max_session_duration: 3600
-            tags:
-              Environment: production
+        region: us-east-1
+        cross_account_role_name: "CrossEnvAccessRole"
+        trusted_account_ids: 
+          - "123456789012"  # Development account
+          - "234567890123"  # Staging account
+          - "345678901234"  # Security audit account
+        policy_name: "CrossEnvironmentAccessPolicy"
+        tags:
+          Environment: "production"
+          ManagedBy: "terraform"
+          Purpose: "cross-environment-access"
 ```
 
-### Identity Federation with SAML
+### Production CI/CD Access
 
 ```yaml
 # Stack configuration (environment.yaml)
 components:
   terraform:
-    iam/federation:
+    iam/cicd:
       vars:
-        region: us-west-2
-        
-        # SAML Identity Provider
-        identity_providers:
-          okta:
-            name: "OktaIdentityProvider"
-            saml_metadata_document: "${file("./saml-metadata.xml")}"
-        
-        # Federation Roles
-        roles:
-          developers:
-            name: "FederatedDevelopers"
-            assume_role_policy: |
-              {
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Effect": "Allow",
-                    "Principal": {
-                      "Federated": "arn:aws:iam::${var.account_id}:saml-provider/OktaIdentityProvider"
-                    },
-                    "Action": "sts:AssumeRoleWithSAML",
-                    "Condition": {
-                      "StringEquals": {
-                        "SAML:aud": "https://signin.aws.amazon.com/saml"
-                      }
-                    }
-                  }
-                ]
-              }
-            managed_policy_arns:
-              - "arn:aws:iam::aws:policy/ReadOnlyAccess"
-            tags:
-              Environment: production
-          
-          administrators:
-            name: "FederatedAdministrators"
-            assume_role_policy: |
-              {
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Effect": "Allow",
-                    "Principal": {
-                      "Federated": "arn:aws:iam::${var.account_id}:saml-provider/OktaIdentityProvider"
-                    },
-                    "Action": "sts:AssumeRoleWithSAML",
-                    "Condition": {
-                      "StringEquals": {
-                        "SAML:aud": "https://signin.aws.amazon.com/saml"
-                      }
-                    }
-                  }
-                ]
-              }
-            managed_policy_arns:
-              - "arn:aws:iam::aws:policy/AdministratorAccess"
-            tags:
-              Environment: production
+        region: us-east-1
+        cross_account_role_name: "CICDDeploymentRole"
+        trusted_account_ids: 
+          - "987654321098"  # CI/CD account
+        policy_name: "DeploymentAccessPolicy"
+        tags:
+          Environment: "production"
+          ManagedBy: "terraform" 
+          Purpose: "continuous-deployment"
 ```
 
 ## Implementation Best Practices
@@ -324,7 +158,6 @@ components:
    - Regularly audit and rotate credentials
    - Use roles instead of long-term access keys
    - Implement MFA for critical operations
-   - Never hardcode credentials in your code
 
 2. **Organization**:
    - Use consistent naming conventions for all IAM resources
@@ -333,19 +166,39 @@ components:
    - Document the purpose of each role and policy
 
 3. **Cross-Account Access**:
-   - Use roles for cross-account access instead of users
    - Limit the session duration for assumed roles
    - Implement strict conditions in trust relationships
    - Audit cross-account access regularly
+   - Consider implementing IP-based restrictions
 
-4. **Federation**:
-   - Use identity federation for enterprise integration
-   - Map SAML attributes to IAM roles
-   - Implement role-based access control using groups
-   - Use attribute-based access control for fine-grained permissions
+## Troubleshooting
 
-5. **Rotation and Monitoring**:
-   - Implement credential rotation policies
-   - Monitor for unused IAM users and roles
-   - Set up CloudTrail logging for IAM actions
-   - Use AWS Config rules to enforce IAM best practices
+### Common Issues
+
+1. **Access Denied When Assuming Role**:
+   - Verify that the trust relationship is correctly configured
+   - Check that the trusted account IDs are correct
+   - Ensure the user has permission to call `sts:AssumeRole`
+   - Verify that any conditional elements (like MFA) are satisfied
+
+2. **Policy Too Permissive**:
+   - Review the policy statements to ensure they follow least privilege
+   - Use IAM Access Analyzer to identify overly permissive policies
+   - Consider using more specific resource ARNs instead of wildcards
+
+3. **Role Not Visible**:
+   - Ensure you're looking in the correct AWS account
+   - Verify that the role was created successfully
+   - Check for naming conflicts or policy errors during deployment
+
+4. **Policy Changes Not Taking Effect**:
+   - Remember that IAM changes can take time to propagate globally
+   - Verify the policy document is valid JSON and doesn't exceed size limits
+   - Check CloudTrail for any errors during policy application
+
+## Related Resources
+
+- [AWS IAM Documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html)
+- [IAM Best Practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
+- [Cross-Account Access](https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html)
+- [AWS STS Documentation](https://docs.aws.amazon.com/STS/latest/APIReference/welcome.html)
