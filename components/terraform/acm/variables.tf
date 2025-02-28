@@ -17,7 +17,7 @@ variable "dns_domains" {
   }))
   description = "Map of domain configurations to create ACM certificates for"
   default     = {}
-  
+
   validation {
     condition = alltrue([
       for k, v in var.dns_domains : can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}$", v.domain_name))
@@ -31,7 +31,7 @@ variable "dns_domains" {
     ])
     error_message = "The validation_method must be either DNS or EMAIL."
   }
-  
+
   validation {
     condition = alltrue([
       for k, v in var.dns_domains : alltrue([
@@ -45,7 +45,7 @@ variable "dns_domains" {
 variable "zone_id" {
   type        = string
   description = "Route53 zone ID to create validation records in"
-  
+
   validation {
     condition     = can(regex("^Z[A-Z0-9]{1,32}$", var.zone_id))
     error_message = "The zone_id must be a valid Route53 Zone ID (e.g., Z00000000000000000000)."
@@ -62,7 +62,7 @@ variable "tags" {
   type        = map(string)
   description = "Tags to apply to resources"
   default     = {}
-  
+
   validation {
     condition     = contains(keys(var.tags), "Environment")
     error_message = "The tags map must contain an 'Environment' key."

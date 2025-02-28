@@ -7,10 +7,10 @@ resource "aws_security_group" "default" {
   dynamic "ingress" {
     for_each = var.default_sg_ingress_self_only ? [1] : []
     content {
-      from_port = "0"
-      to_port   = "0"
-      protocol  = "-1"
-      self      = true
+      from_port   = "0"
+      to_port     = "0"
+      protocol    = "-1"
+      self        = true
       description = "Allow all inbound traffic within this security group"
     }
   }
@@ -33,10 +33,10 @@ resource "aws_security_group" "default" {
   dynamic "egress" {
     for_each = var.default_sg_egress_self_only ? [1] : []
     content {
-      from_port = "0"
-      to_port   = "0"
-      protocol  = "-1"
-      self      = true
+      from_port   = "0"
+      to_port     = "0"
+      protocol    = "-1"
+      self        = true
       description = "Allow all outbound traffic within this security group"
     }
   }

@@ -74,19 +74,19 @@ resource "aws_security_group" "lambda" {
 }
 
 resource "aws_lambda_function" "main" {
-  function_name    = "${var.tags["Environment"]}-${var.function_name}"
-  role             = aws_iam_role.lambda.arn
-  handler          = var.handler
-  runtime          = var.runtime
-  filename         = var.filename
-  source_code_hash = var.source_code_hash
-  s3_bucket        = var.s3_bucket
-  s3_key           = var.s3_key
+  function_name     = "${var.tags["Environment"]}-${var.function_name}"
+  role              = aws_iam_role.lambda.arn
+  handler           = var.handler
+  runtime           = var.runtime
+  filename          = var.filename
+  source_code_hash  = var.source_code_hash
+  s3_bucket         = var.s3_bucket
+  s3_key            = var.s3_key
   s3_object_version = var.s3_object_version
-  layers           = var.layers
-  memory_size      = var.memory_size
-  timeout          = var.timeout
-  publish          = var.publish
+  layers            = var.layers
+  memory_size       = var.memory_size
+  timeout           = var.timeout
+  publish           = var.publish
 
   dynamic "environment" {
     for_each = length(var.environment_variables) > 0 ? [1] : []
@@ -162,9 +162,9 @@ resource "aws_lambda_permission" "sns" {
 }
 
 resource "aws_lambda_function_event_invoke_config" "main" {
-  count                  = var.configure_event_invoke ? 1 : 0
-  function_name          = aws_lambda_function.main.function_name
-  maximum_retry_attempts = var.maximum_retry_attempts
+  count                        = var.configure_event_invoke ? 1 : 0
+  function_name                = aws_lambda_function.main.function_name
+  maximum_retry_attempts       = var.maximum_retry_attempts
   maximum_event_age_in_seconds = var.maximum_event_age_in_seconds
 
   dynamic "destination_config" {

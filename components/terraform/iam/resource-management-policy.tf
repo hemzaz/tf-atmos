@@ -7,8 +7,8 @@ resource "aws_iam_policy" "resource_management" {
     Version = "2012-10-17",
     Statement = [
       {
-        Effect   = "Allow",
-        Action   = [
+        Effect = "Allow",
+        Action = [
           "ec2:*",
           "s3:*",
           "rds:*",

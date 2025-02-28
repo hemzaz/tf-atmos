@@ -1,6 +1,6 @@
 # Atmos Workflows Guide
 
-_Last Updated: February 27, 2025_
+_Last Updated: February 28, 2025_
 
 This guide provides comprehensive documentation on using, customizing, and extending workflows in the Atmos framework to automate and standardize infrastructure operations.
 
@@ -37,21 +37,21 @@ The following standard workflows are included:
 
 | Workflow | Description | Usage |
 |----------|-------------|-------|
-| `bootstrap-backend` | Initialize backend infrastructure | `atmos workflow bootstrap-backend tenant=mycompany region=us-west-2` |
+| `bootstrap-backend` | Initialize backend infrastructure with enhanced security | `atmos workflow bootstrap-backend tenant=mycompany region=us-west-2 [bucket_suffix=custom-suffix]` |
 | `apply-backend` | Apply backend configuration | `atmos workflow apply-backend tenant=mycompany account=management environment=prod` |
-| `onboard-environment` | Create new environment | `atmos workflow onboard-environment tenant=mycompany account=dev environment=testenv-01 vpc_cidr=10.1.0.0/16` |
-| `apply-environment` | Apply all components | `atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01` |
-| `plan-environment` | Plan all components | `atmos workflow plan-environment tenant=mycompany account=dev environment=testenv-01` |
+| `onboard-environment` | Create new environment | `atmos workflow onboard-environment tenant=mycompany account=dev environment=testenv-01 vpc_cidr=10.1.0.0/16 management_account_id=123456789012 [auto_deploy=true] [force_overwrite=true]` |
+| `apply-environment` | Apply all components with auto-discovery | `atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01` |
+| `plan-environment` | Plan all components with auto-discovery | `atmos workflow plan-environment tenant=mycompany account=dev environment=testenv-01` |
 | `destroy-environment` | Destroy all components | `atmos workflow destroy-environment tenant=mycompany account=dev environment=testenv-01` |
 
 ### Operations
 
 | Workflow | Description | Usage |
 |----------|-------------|-------|
-| `drift-detection` | Detect infrastructure drift | `atmos workflow drift-detection tenant=mycompany account=dev environment=testenv-01` |
+| `drift-detection` | Detect infrastructure drift with detailed reporting | `atmos workflow drift-detection tenant=mycompany account=dev environment=testenv-01` |
 | `import` | Import existing resources | `atmos workflow import tenant=mycompany account=dev environment=testenv-01` |
-| `validate` | Validate configuration | `atmos workflow validate` |
-| `lint` | Lint code and configurations | `atmos workflow lint` |
+| `validate` | Validate configuration with component auto-discovery | `atmos workflow validate tenant=mycompany account=dev environment=testenv-01` |
+| `lint` | Comprehensive linting with support for multiple tools | `atmos workflow lint` |
 
 ## Workflow Architecture
 
@@ -400,16 +400,25 @@ variables:
   ACCOUNT: dev
   ENVIRONMENT: testenv-01
 
+# Install dependencies
+.install_deps: &install_deps
+  before_script:
+    # Install Atmos
+    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+    # Install additional dependencies
+    - apt-get update && apt-get install -y yamllint jq
+    
 validate:
   stage: validate
+  <<: *install_deps
   script:
-    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
-    - atmos workflow validate
+    - atmos workflow validate tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT
+    - atmos workflow lint
 
 plan:
   stage: plan
+  <<: *install_deps
   script:
-    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
     - atmos workflow plan-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT
   artifacts:
     paths:
@@ -417,8 +426,9 @@ plan:
 
 apply:
   stage: apply
+  <<: *install_deps
   script:
-    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+    # Use auto_deploy=true for non-interactive environments
     - atmos workflow apply-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT
   when: manual
   only:
@@ -430,24 +440,49 @@ apply:
 ```groovy
 // Jenkinsfile
 pipeline {
-    agent any
+    agent {
+        // Use a Jenkins agent with needed tools
+        docker {
+            image 'hashicorp/terraform:latest'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
     
     parameters {
         string(name: 'TENANT', defaultValue: 'mycompany')
         string(name: 'ACCOUNT', defaultValue: 'dev')
         string(name: 'ENVIRONMENT', defaultValue: 'testenv-01')
+        // Optional parameters
+        booleanParam(name: 'AUTO_DEPLOY', defaultValue: false, description: 'Automatically deploy after planning')
+        booleanParam(name: 'FORCE_OVERWRITE', defaultValue: false, description: 'Force overwrite existing configurations')
+    }
+    
+    environment {
+        // Pass environment variables to workflows
+        AUTO_DEPLOY = "${params.AUTO_DEPLOY}"
+        FORCE_OVERWRITE = "${params.FORCE_OVERWRITE}"
     }
     
     stages {
-        stage('Install Atmos') {
+        stage('Install Dependencies') {
             steps {
-                sh 'curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash'
+                // Install Atmos and dependencies
+                sh '''
+                    curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+                    
+                    # Install additional tools
+                    apt-get update && apt-get install -y jq yamllint curl
+                    
+                    # Set the PATH to include the Atmos binary
+                    export PATH=$PATH:$HOME/.atmos/bin
+                '''
             }
         }
         
         stage('Validate') {
             steps {
-                sh 'atmos workflow validate'
+                sh "atmos workflow validate tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                sh "atmos workflow lint"
             }
         }
         
@@ -458,10 +493,23 @@ pipeline {
         }
         
         stage('Apply') {
+            when {
+                anyOf {
+                    expression { return params.AUTO_DEPLOY }
+                    expression { return env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' }
+                }
+            }
             steps {
                 input message: 'Apply changes?', ok: 'Apply'
-                sh "atmos workflow apply-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                sh "atmos workflow apply-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT} auto_deploy=true"
             }
+        }
+    }
+    
+    post {
+        always {
+            // Archive Terraform plans and logs
+            archiveArtifacts artifacts: '**/plan.out, **/terraform.log', allowEmptyArchive: true
         }
     }
 }
@@ -618,7 +666,20 @@ steps:
 | Workflow not found | Incorrect workflow name or path | Check workflow name and `workflows/` directory |
 | Missing arguments | Required arguments not provided | Provide all required arguments |
 | Command execution failure | Command returns non-zero exit code | Check command output and fix errors |
-| Interactive step hangs in CI | Interactive step in non-interactive environment | Set `interactive: false` or provide input |
+| Interactive step hangs in CI | Interactive step in non-interactive environment | Set `interactive: false` or use `auto_deploy=true` |
+| Permission denied | Insufficient permissions | Check AWS credentials and IAM roles |
+| Component dependencies | Components deployed in wrong order | The workflows now use automatic dependency detection based on imports and output references |
+| Region-specific errors | Issues with specific AWS regions | Check region compatibility and validation |
+
+### CI/CD-Specific Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Non-interactive prompts | CI environment can't handle prompts | Use `auto_deploy=true` and `force_overwrite=true` parameters |
+| Missing dependencies | Required tools not installed | Install yamllint, jq, and other dependencies in CI |
+| Path issues | Atmos not in PATH | Export PATH to include Atmos binary location |
+| Permission denied on clipboard | CI doesn't have clipboard access | This is expected in CI; output is shown in logs instead |
+| Missing AWS credentials | Credentials not configured | Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables |
 
 ### Debugging Workflows
 
@@ -634,14 +695,24 @@ Check workflow logs:
 atmos logs
 ```
 
+Debug component discovery:
+
+```bash
+atmos workflow apply-environment tenant=mycompany account=dev environment=testenv-01 --debug
+```
+
 ### Common Error Messages
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `Workflow '<name>' not found` | Workflow file missing or incorrectly named | Check workflow file exists in `workflows/` directory |
+| `Workflow '<n>' not found` | Workflow file missing or incorrectly named | Check workflow file exists in `workflows/` directory |
 | `Missing required argument '<arg>'` | Required argument not provided | Provide the required argument |
 | `Command '<command>' not found` | Command doesn't exist or isn't in PATH | Install missing command or correct path |
 | `Step '<step>' failed with exit code <code>` | Command execution failed | Check command output and fix errors |
+| `Directory does not exist` | Environment directory not found | Check path and create directory structure |
+| `No components found` | No YAML files in environment directory | Create component YAML files first |
+| `DRIFT DETECTED` | Infrastructure drift detected | Review and reconcile differences |
+| `Terraform plan failed` | Issues with Terraform configuration | Check Terraform code for errors |
 
 ## Reference
 
@@ -682,6 +753,6 @@ atmos logs
 | Command | Description | Example |
 |---------|-------------|---------|
 | `atmos workflow list` | List available workflows | `atmos workflow list` |
-| `atmos workflow describe <name>` | Describe workflow | `atmos workflow describe apply-environment` |
-| `atmos workflow <name> [args]` | Execute workflow | `atmos workflow apply-environment tenant=mycompany` |
-| `atmos workflow edit <name>` | Edit workflow (if editor configured) | `atmos workflow edit apply-environment` |
+| `atmos workflow describe <n>` | Describe workflow | `atmos workflow describe apply-environment` |
+| `atmos workflow <n> [args]` | Execute workflow | `atmos workflow apply-environment tenant=mycompany` |
+| `atmos workflow edit <n>` | Edit workflow (if editor configured) | `atmos workflow edit apply-environment` |

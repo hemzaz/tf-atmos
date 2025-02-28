@@ -14,5 +14,5 @@ output "security_group_arns" {
 
 output "security_group_vpc_id" {
   description = "VPC ID used for security groups"
-  value = var.vpc_id
+  value       = var.vpc_id
 }

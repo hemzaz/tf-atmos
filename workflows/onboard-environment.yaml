@@ -6,6 +6,10 @@ workflows:
     steps:
     - run:
         command: |
+          # Get CLI version automatically (in a cross-platform way)
+          ATMOS_CLI_VERSION=$(atmos version | sed -n 's/.*Atmos \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          echo "Using Atmos CLI version: ${ATMOS_CLI_VERSION}"
+          
           # Validate required variables
           if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ] || [ -z "${vpc_cidr}" ]; then
             echo "ERROR: Missing required parameters."
@@ -19,8 +23,23 @@ workflows:
             exit 1
           fi
           
-          # Set defaults for optional parameters
-          REGION=${region:-"eu-west-2"}
+          # Auto-detect region from AWS config if not provided
+          if [ -z "${region}" ]; then
+            # Try to get the default region from AWS config
+            if [ -n "$AWS_REGION" ]; then
+              REGION="$AWS_REGION"
+            elif [ -n "$AWS_DEFAULT_REGION" ]; then
+              REGION="$AWS_DEFAULT_REGION"
+            elif command -v aws >/dev/null && aws configure get region >/dev/null 2>&1; then
+              REGION=$(aws configure get region)
+            else
+              # Default to eu-west-2 if we can't detect it
+              REGION="eu-west-2"
+            fi
+            echo "Auto-detected AWS region: ${REGION}"
+          else
+            REGION="${region}"
+          fi
           
           # Validate management account ID is provided
           if [ -z "${management_account_id}" ]; then
@@ -53,6 +72,28 @@ workflows:
           
           # Create configuration files by copying and modifying templates
           echo "Creating configuration files..."
+          
+          # Check if directory already exists and has files
+          if [ -d "${ENV_DIR}" ] && [ "$(ls -A ${ENV_DIR} 2>/dev/null)" ]; then
+            echo "WARNING: Directory ${ENV_DIR} already exists and contains files."
+            if [ -t 0 ]; then
+              # If in interactive mode, ask for confirmation
+              echo -n "Do you want to overwrite existing configuration? (y/n): "
+              read CONFIRM
+              if [[ ! ${CONFIRM} =~ ^[Yy]$ ]]; then
+                echo "Aborting environment creation."
+                exit 0
+              fi
+            elif [ "${force_overwrite:-false}" != "true" ]; then
+              echo "Aborting to prevent overwriting existing configuration."
+              echo "Use 'force_overwrite=true' to bypass this check in non-interactive mode."
+              exit 0
+            fi
+            echo "Proceeding with overwrite..."
+          fi
+          
+          # Ensure directory exists
+          mkdir -p "${ENV_DIR}"
           
           # Backend config
           cat > "${ENV_DIR}/backend.yaml" << EOF
@@ -202,14 +243,31 @@ EOF
           echo "Configuration files created successfully."
           echo "============================================"
 
-          # Ask for confirmation before deploying
-          read -p "Do you want to deploy the environment now? (y/n): " CONFIRM
-          if [[ ${CONFIRM} == "y" || ${CONFIRM} == "Y" ]]; then
-            echo "Beginning deployment..."
-            atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
+          # Check if running in interactive mode
+          if [ -t 0 ]; then
+            # Terminal is interactive, ask for confirmation
+            echo -n "Do you want to deploy the environment now? (y/n): "
+            read CONFIRM
+            if [[ ${CONFIRM} == "y" || ${CONFIRM} == "Y" ]]; then
+              echo "Beginning deployment..."
+              atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
+            else
+              echo "Skipping deployment. You can deploy later using:"
+              echo "  atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}"
+            fi
           else
-            echo "Skipping deployment. You can deploy later using:"
-            echo "  atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}"
+            # Running in non-interactive mode (CI/CD pipeline)
+            if [ "${auto_deploy:-false}" == "true" ]; then
+              echo "Auto-deploy is enabled. Beginning deployment..."
+              atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
+            else
+              echo "Skipping automatic deployment in non-interactive mode."
+              echo "To deploy this environment:"
+              echo "  atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}"
+              echo ""
+              echo "To enable auto-deploy in non-interactive environments, use:"
+              echo "  atmos workflow onboard-environment tenant=${tenant} account=${account} environment=${environment} vpc_cidr=${vpc_cidr} management_account_id=${management_account_id} auto_deploy=true"
+            fi
           fi
           
           echo "Environment onboarding complete for ${tenant}-${account}-${environment}"

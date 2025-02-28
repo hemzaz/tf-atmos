@@ -111,16 +111,16 @@ output "api_key_value" {
 
 output "rest_api_authorizer_id" {
   description = "ID of the REST API authorizer"
-  value       = local.create_rest_api && var.authorizer_type == "COGNITO_USER_POOLS" ? aws_api_gateway_authorizer.rest_cognito[0].id : (
-                local.create_rest_api && var.authorizer_type == "TOKEN" ? aws_api_gateway_authorizer.rest_lambda[0].id : null
-              )
+  value = local.create_rest_api && var.authorizer_type == "COGNITO_USER_POOLS" ? aws_api_gateway_authorizer.rest_cognito[0].id : (
+    local.create_rest_api && var.authorizer_type == "TOKEN" ? aws_api_gateway_authorizer.rest_lambda[0].id : null
+  )
 }
 
 output "http_api_authorizer_id" {
   description = "ID of the HTTP API authorizer"
-  value       = local.create_http_api && var.authorizer_type == "JWT" ? aws_apigatewayv2_authorizer.http_jwt[0].id : (
-                local.create_http_api && var.authorizer_type == "REQUEST" ? aws_apigatewayv2_authorizer.http_lambda[0].id : null
-              )
+  value = local.create_http_api && var.authorizer_type == "JWT" ? aws_apigatewayv2_authorizer.http_jwt[0].id : (
+    local.create_http_api && var.authorizer_type == "REQUEST" ? aws_apigatewayv2_authorizer.http_lambda[0].id : null
+  )
 }
 
 output "log_group_name" {

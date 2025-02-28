@@ -57,7 +57,7 @@ output "domain_validation_options" {
   value = {
     for k, zone in aws_route53_zone.zones : k => {
       zone_id = zone.zone_id
-      name = zone.name
+      name    = zone.name
     }
   }
 }

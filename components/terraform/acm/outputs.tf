@@ -47,7 +47,7 @@ output "certificate_crts" {
 
 output "export_instructions" {
   description = "Instructions for exporting certificates from ACM"
-  value = <<-EOT
+  value       = <<-EOT
     CERTIFICATE EXPORT INSTRUCTIONS:
     
     AWS ACM does not allow certificate export through the API. To export your certificates:

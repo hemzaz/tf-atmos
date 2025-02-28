@@ -193,19 +193,19 @@ resource "aws_cloudwatch_metric_alarm" "log_errors" {
 # Certificate Monitoring Resources
 locals {
   name_prefix = "${var.tags["Environment"]}-${var.tags["Name"] != null ? var.tags["Name"] : "monitoring"}"
-  
+
   # Process certificate ARNs for dashboard
-  certificate_arns = var.certificate_arns
-  certificate_names = var.certificate_names
-  certificate_domains = var.certificate_domains
-  certificate_statuses = var.certificate_statuses
+  certificate_arns         = var.certificate_arns
+  certificate_names        = var.certificate_names
+  certificate_domains      = var.certificate_domains
+  certificate_statuses     = var.certificate_statuses
   certificate_expiry_dates = var.certificate_expiry_dates
-  
+
   # Default values if not provided
-  default_cert_arns = length(local.certificate_arns) > 0 ? local.certificate_arns : ["placeholder"]
-  default_cert_names = length(local.certificate_names) > 0 ? local.certificate_names : ["No certificates found"]
-  default_cert_domains = length(local.certificate_domains) > 0 ? local.certificate_domains : ["example.com"]
-  default_cert_statuses = length(local.certificate_statuses) > 0 ? local.certificate_statuses : ["UNKNOWN"]
+  default_cert_arns         = length(local.certificate_arns) > 0 ? local.certificate_arns : ["placeholder"]
+  default_cert_names        = length(local.certificate_names) > 0 ? local.certificate_names : ["No certificates found"]
+  default_cert_domains      = length(local.certificate_domains) > 0 ? local.certificate_domains : ["example.com"]
+  default_cert_statuses     = length(local.certificate_statuses) > 0 ? local.certificate_statuses : ["UNKNOWN"]
   default_cert_expiry_dates = length(local.certificate_expiry_dates) > 0 ? local.certificate_expiry_dates : ["Not available"]
 }
 
@@ -217,14 +217,14 @@ resource "aws_cloudwatch_dashboard" "certificates" {
   dashboard_body = templatefile(
     "${path.module}/templates/certificate-dashboard.json.tpl",
     {
-      region           = var.region
-      cluster_name     = var.eks_cluster_name
-      cert_arns        = local.default_cert_arns
-      cert_names       = local.default_cert_names
-      cert_domains     = local.default_cert_domains
-      cert_statuses    = local.default_cert_statuses
+      region            = var.region
+      cluster_name      = var.eks_cluster_name
+      cert_arns         = local.default_cert_arns
+      cert_names        = local.default_cert_names
+      cert_domains      = local.default_cert_domains
+      cert_statuses     = local.default_cert_statuses
       cert_expiry_dates = local.default_cert_expiry_dates
-      cert_alarm_arns  = var.certificate_alarm_arns
+      cert_alarm_arns   = var.certificate_alarm_arns
     }
   )
 }
@@ -250,7 +250,7 @@ resource "aws_cloudwatch_metric_alarm" "certificate_expiry" {
   alarm_description   = "Certificate ${each.key} is approaching expiry"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
   ok_actions          = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
-  
+
   dimensions = {
     CertificateArn = each.value.arn
   }

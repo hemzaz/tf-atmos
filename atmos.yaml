@@ -10,7 +10,7 @@ components:
     init_run_reconfigure: true
     auto_generate_backend_file: false
     backend_type: "s3"
-    terraform_version: "1.5.7"
+    terraform_version: "1.11.0"
     terragrunt_version: "0.45.0"
 
 stacks:
@@ -43,7 +43,7 @@ logs:
 
 settings:
   list_merge_strategy: replace
-  atmos_cli_version: "1.46.0"
+  atmos_cli_version: "1.163.0"
 
 schemas:
   atmos:

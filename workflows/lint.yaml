@@ -1,15 +1,138 @@
 name: lint
-description: "Lint Terraform code and Atmos configurations"
+description: "Lint Terraform code and Atmos configurations with comprehensive checks"
 
 workflows:
   lint:
     steps:
     - run:
         command: |
-          # Lint Terraform code
-          terraform fmt -check -recursive ./components/terraform
+          # Get CLI version automatically (in a cross-platform way)
+          ATMOS_CLI_VERSION=$(atmos version | sed -n 's/.*Atmos \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          echo "Using Atmos CLI version: ${ATMOS_CLI_VERSION}"
+          
+          # Set exit status variable
+          EXIT_STATUS=0
 
-          # Lint Atmos YAML files
-          yamllint .
+          echo "Running Terraform formatting check..."
+          if ! terraform fmt -check -recursive ./components/terraform; then
+            echo "❌ Terraform formatting issues found. Run 'terraform fmt -recursive ./components/terraform' to fix."
+            EXIT_STATUS=1
+          else
+            echo "✅ Terraform formatting check passed"
+          fi
 
-          # Additional linting steps can be added here
+          echo ""
+          echo "Running Atmos YAML linting..."
+          if command -v yamllint >/dev/null 2>&1; then
+            # Check if .yamllint.yml exists, otherwise use default config
+            if [ -f .yamllint.yml ]; then
+              if ! yamllint -c .yamllint.yml .; then
+                echo "❌ YAML lint issues found"
+                EXIT_STATUS=1
+              else
+                echo "✅ YAML lint check passed"
+              fi
+            else
+              # Create a basic config inline for environments without .yamllint.yml
+              if ! yamllint -d "{extends: default, rules: {line-length: {max: 120}}}" .; then
+                echo "❌ YAML lint issues found"
+                EXIT_STATUS=1
+              else
+                echo "✅ YAML lint check passed"
+              fi
+              echo "ℹ️  No .yamllint.yml found. Using default config."
+              echo "   Consider adding a .yamllint.yml file for customized linting rules."
+            fi
+          else
+            echo "⚠️  yamllint not installed. Skipping YAML lint check."
+            if command -v apt-get >/dev/null 2>&1; then
+              echo "Install with: sudo apt-get install yamllint"
+            elif command -v yum >/dev/null 2>&1; then
+              echo "Install with: sudo yum install yamllint"
+            elif command -v pip >/dev/null 2>&1; then
+              echo "Install with: pip install yamllint"
+            else
+              echo "Install yamllint through your package manager"
+            fi
+          fi
+          
+          echo ""
+          echo "Running Atmos stacks validation..."
+          if ! atmos validate stacks; then
+            echo "❌ Atmos stacks validation failed"
+            EXIT_STATUS=1
+          else
+            echo "✅ Atmos stacks validation passed"
+          fi
+          
+          # Run additional checks if tfsec is installed
+          if command -v tfsec >/dev/null 2>&1; then
+            echo ""
+            echo "Running tfsec security scan..."
+            if ! tfsec ./components/terraform --soft-fail --concise-output; then
+              echo "⚠️  Security issues found in Terraform code"
+              # Don't fail for security warnings, but flag them
+            else
+              echo "✅ Security scan passed"
+            fi
+          else
+            echo ""
+            echo "⚠️  tfsec not installed. Skipping security scan."
+            if command -v apt-get >/dev/null 2>&1; then
+              echo "Install with: curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash"
+            elif command -v yum >/dev/null 2>&1; then
+              echo "Install with: curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash"
+            elif command -v brew >/dev/null 2>&1; then
+              echo "Install with: brew install tfsec"
+            elif command -v go >/dev/null 2>&1; then
+              echo "Install with: go install github.com/aquasecurity/tfsec/cmd/tfsec@latest"
+            else
+              echo "Install from: https://github.com/aquasecurity/tfsec/releases"
+            fi
+          fi
+          
+          # Check for terraform-docs if documentation validation is needed
+          if command -v terraform-docs >/dev/null 2>&1; then
+            echo ""
+            echo "Checking Terraform documentation..."
+            
+            # Find components with missing or outdated documentation
+            MISSING_DOCS=0
+            for dir in ./components/terraform/*/; do
+              if [ -f "${dir}main.tf" ]; then
+                if [ ! -f "${dir}README.md" ]; then
+                  echo "❌ Missing README.md in ${dir}"
+                  MISSING_DOCS=1
+                fi
+              fi
+            done
+            
+            if [ $MISSING_DOCS -eq 1 ]; then
+              echo "⚠️  Some components are missing documentation"
+              # Don't fail for missing docs, but flag them
+            else
+              echo "✅ Documentation check passed"
+            fi
+          else
+            echo ""
+            echo "⚠️  terraform-docs not installed. Skipping documentation checks."
+            if command -v apt-get >/dev/null 2>&1; then
+              echo "Install with: curl -sSLo ./terraform-docs.tar.gz https://terraform-docs.io/dl/v0.16.0/terraform-docs-v0.16.0-$(uname)-amd64.tar.gz && tar -xzf terraform-docs.tar.gz && chmod +x terraform-docs && mv terraform-docs /usr/local/bin/"
+            elif command -v yum >/dev/null 2>&1; then
+              echo "Install with: curl -sSLo ./terraform-docs.tar.gz https://terraform-docs.io/dl/v0.16.0/terraform-docs-v0.16.0-$(uname)-amd64.tar.gz && tar -xzf terraform-docs.tar.gz && chmod +x terraform-docs && mv terraform-docs /usr/local/bin/"
+            elif command -v brew >/dev/null 2>&1; then
+              echo "Install with: brew install terraform-docs"
+            else
+              echo "Install from: https://terraform-docs.io/user-guide/installation/"
+            fi
+          fi
+          
+          # Exit with accumulated status
+          if [ $EXIT_STATUS -ne 0 ]; then
+            echo ""
+            echo "❌ Lint checks failed"
+            exit $EXIT_STATUS
+          else
+            echo ""
+            echo "✅ All lint checks passed"
+          fi

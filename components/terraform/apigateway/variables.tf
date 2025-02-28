@@ -257,10 +257,10 @@ variable "api_resources" {
 
 variable "api_methods" {
   type = list(object({
-    resource_id      = string
-    http_method      = string
-    authorization    = string
-    api_key_required = optional(bool, false)
+    resource_id        = string
+    http_method        = string
+    authorization      = string
+    api_key_required   = optional(bool, false)
     request_parameters = optional(map(bool), {})
   }))
   description = "List of methods for the REST API"
@@ -269,16 +269,16 @@ variable "api_methods" {
 
 variable "api_integrations" {
   type = list(object({
-    resource_id           = string
-    http_method           = string
+    resource_id             = string
+    http_method             = string
     integration_http_method = string
-    type                  = string
-    uri                   = string
-    connection_type       = optional(string)
-    connection_id         = optional(string)
-    timeout_milliseconds  = optional(number, 29000)
-    request_parameters    = optional(map(string), {})
-    request_templates     = optional(map(string), {})
+    type                    = string
+    uri                     = string
+    connection_type         = optional(string)
+    connection_id           = optional(string)
+    timeout_milliseconds    = optional(number, 29000)
+    request_parameters      = optional(map(string), {})
+    request_templates       = optional(map(string), {})
   }))
   description = "List of integrations for the REST API"
   default     = []

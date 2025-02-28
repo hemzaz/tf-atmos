@@ -29,7 +29,7 @@ resource "aws_security_group" "rds" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = [var.vpc_cidr]  # Limit to VPC CIDR
+    cidr_blocks = [var.vpc_cidr] # Limit to VPC CIDR
     description = "Allow all outbound traffic within VPC"
   }
 
@@ -97,7 +97,7 @@ resource "aws_secretsmanager_secret" "db_password" {
 }
 
 resource "aws_secretsmanager_secret_version" "db_password" {
-  secret_id     = aws_secretsmanager_secret.db_password.id
+  secret_id = aws_secretsmanager_secret.db_password.id
   secret_string = jsonencode({
     username = var.username
     password = random_password.password.result
@@ -110,9 +110,9 @@ resource "aws_secretsmanager_secret_version" "db_password" {
 
 resource "aws_iam_role" "monitoring" {
   count = var.monitoring_interval > 0 && var.create_monitoring_role ? 1 : 0
-  
+
   name = "${var.tags["Environment"]}-${var.identifier}-monitoring-role"
-  
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -125,7 +125,7 @@ resource "aws_iam_role" "monitoring" {
       }
     ]
   })
-  
+
   tags = merge(
     var.tags,
     {
@@ -136,43 +136,43 @@ resource "aws_iam_role" "monitoring" {
 
 resource "aws_iam_role_policy_attachment" "monitoring" {
   count = var.monitoring_interval > 0 && var.create_monitoring_role ? 1 : 0
-  
+
   role       = aws_iam_role.monitoring[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
 resource "aws_db_instance" "main" {
-  identifier                  = "${var.tags["Environment"]}-${var.identifier}"
-  engine                      = var.engine
-  engine_version              = var.engine_version
-  instance_class              = var.instance_class
-  allocated_storage           = var.allocated_storage
-  max_allocated_storage       = var.max_allocated_storage
-  storage_type                = var.storage_type
-  storage_encrypted           = var.storage_encrypted
-  kms_key_id                  = var.kms_key_id
-  username                    = var.username
-  password                    = random_password.password.result
-  port                        = var.port
-  db_name                     = var.db_name
-  parameter_group_name        = aws_db_parameter_group.main.name
-  db_subnet_group_name        = aws_db_subnet_group.main.name
-  vpc_security_group_ids      = [aws_security_group.rds.id]
-  availability_zone           = var.availability_zone
-  multi_az                    = var.multi_az
-  publicly_accessible         = var.publicly_accessible
-  allow_major_version_upgrade = var.allow_major_version_upgrade
-  auto_minor_version_upgrade  = var.auto_minor_version_upgrade
-  backup_retention_period     = var.backup_retention_period
-  backup_window               = var.backup_window
-  maintenance_window          = var.maintenance_window
-  skip_final_snapshot         = var.skip_final_snapshot
-  final_snapshot_identifier   = var.skip_final_snapshot ? null : "${var.tags["Environment"]}-${var.identifier}-final-snapshot"
-  copy_tags_to_snapshot       = var.copy_tags_to_snapshot
-  monitoring_interval         = var.monitoring_interval
-  monitoring_role_arn         = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
+  identifier                   = "${var.tags["Environment"]}-${var.identifier}"
+  engine                       = var.engine
+  engine_version               = var.engine_version
+  instance_class               = var.instance_class
+  allocated_storage            = var.allocated_storage
+  max_allocated_storage        = var.max_allocated_storage
+  storage_type                 = var.storage_type
+  storage_encrypted            = var.storage_encrypted
+  kms_key_id                   = var.kms_key_id
+  username                     = var.username
+  password                     = random_password.password.result
+  port                         = var.port
+  db_name                      = var.db_name
+  parameter_group_name         = aws_db_parameter_group.main.name
+  db_subnet_group_name         = aws_db_subnet_group.main.name
+  vpc_security_group_ids       = [aws_security_group.rds.id]
+  availability_zone            = var.availability_zone
+  multi_az                     = var.multi_az
+  publicly_accessible          = var.publicly_accessible
+  allow_major_version_upgrade  = var.allow_major_version_upgrade
+  auto_minor_version_upgrade   = var.auto_minor_version_upgrade
+  backup_retention_period      = var.backup_retention_period
+  backup_window                = var.backup_window
+  maintenance_window           = var.maintenance_window
+  skip_final_snapshot          = var.skip_final_snapshot
+  final_snapshot_identifier    = var.skip_final_snapshot ? null : "${var.tags["Environment"]}-${var.identifier}-final-snapshot"
+  copy_tags_to_snapshot        = var.copy_tags_to_snapshot
+  monitoring_interval          = var.monitoring_interval
+  monitoring_role_arn          = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
   performance_insights_enabled = var.performance_insights_enabled
-  deletion_protection         = var.deletion_protection
+  deletion_protection          = var.deletion_protection
 
   lifecycle {
     prevent_destroy = var.prevent_destroy

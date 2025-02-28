@@ -11,7 +11,7 @@ resource "aws_s3_bucket" "terraform_state" {
 resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
   versioning_configuration {
-    status = "Enabled"
+    status     = "Enabled"
     mfa_delete = "Enabled"
   }
 }
@@ -21,7 +21,7 @@ resource "aws_kms_key" "terraform_state_key" {
   description             = "KMS key for Terraform state encryption"
   deletion_window_in_days = 30
   enable_key_rotation     = true
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -30,12 +30,12 @@ resource "aws_kms_key" "terraform_state_key" {
         Principal = {
           AWS = "arn:aws:iam::${var.account_id}:root"
         }
-        Action = "kms:*"
+        Action   = "kms:*"
         Resource = "*"
       }
     ]
   })
-  
+
   tags = var.tags
 }
 

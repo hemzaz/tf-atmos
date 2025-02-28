@@ -1,0 +1,231 @@
+pipeline {
+    agent {
+        docker {
+            image 'cloudposse/atmos-terraform:latest'
+            args '-v $HOME/.aws:/root/.aws'
+        }
+    }
+    
+    parameters {
+        string(name: 'TENANT', defaultValue: '', description: 'Tenant name')
+        string(name: 'ACCOUNT', defaultValue: '', description: 'AWS account name')
+        string(name: 'ENVIRONMENT', defaultValue: '', description: 'Environment name')
+        choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Terraform action to execute')
+        string(name: 'COMPONENT', defaultValue: '', description: 'Specific component to target (leave empty for all)')
+        booleanParam(name: 'REQUIRE_APPROVAL', defaultValue: true, description: 'Require approval for production environments')
+        choice(name: 'AWS_ROLE_SESSION_NAME', choices: ['atmos-jenkins-automation', 'atmos-jenkins-prod', 'atmos-jenkins-dev'], description: 'AWS role session name for cross-account access')
+    }
+    
+    environment {
+        ATMOS_VERSION = '1.44.0'
+        MAX_RETRIES = 3
+        STACK_NAME = "${params.TENANT}-${params.ACCOUNT}-${params.ENVIRONMENT}"
+        IS_PRODUCTION = "${params.ACCOUNT == 'prod' || params.ENVIRONMENT == 'prod' ? 'true' : 'false'}"
+    }
+    
+    stages {
+        stage('Setup') {
+            steps {
+                script {
+                    try {
+                        // Verify Atmos is installed or install if missing
+                        def atmosInstalled = sh(script: 'command -v atmos || echo "not installed"', returnStdout: true).trim()
+                        if (atmosInstalled == "not installed") {
+                            sh """
+                                curl -L -o /tmp/atmos.tar.gz https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_linux_amd64.tar.gz
+                                tar -xf /tmp/atmos.tar.gz -C /tmp
+                                mv /tmp/atmos /usr/local/bin/atmos
+                                chmod +x /usr/local/bin/atmos
+                            """
+                        }
+                        sh 'atmos --version'
+                        
+                        // Set up AWS credentials for cross-account access if needed
+                        if (params.ACCOUNT != 'dev') {
+                            withCredentials([string(credentialsId: "${params.ACCOUNT}-role-arn", variable: 'AWS_ROLE_ARN')]) {
+                                sh """
+                                    export AWS_ROLE_ARN=${AWS_ROLE_ARN}
+                                    export AWS_ROLE_SESSION_NAME=${params.AWS_ROLE_SESSION_NAME}
+                                    aws sts get-caller-identity
+                                """
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "Setup failed: ${e.message}"
+                        error "Failed to set up environment. See logs for details."
+                    }
+                }
+            }
+        }
+        
+        stage('Repository Structure Detection') {
+            steps {
+                script {
+                    try {
+                        // Auto-detect repository structure
+                        def repoStructure = sh(script: 'find . -type d -name "components" | head -1', returnStdout: true).trim()
+                        if (!repoStructure) {
+                            error "Could not detect Atmos repository structure"
+                        }
+                        
+                        // Verify component exists if specified
+                        if (params.COMPONENT) {
+                            def componentExists = sh(script: "find ./components -name ${params.COMPONENT} -type d | wc -l", returnStdout: true).trim()
+                            if (componentExists == "0") {
+                                error "Component ${params.COMPONENT} not found in repository"
+                            }
+                        }
+                        
+                        // Verify stack exists
+                        def stackExists = sh(script: "find ./stacks -name \"*.yaml\" -exec grep -l \"${STACK_NAME}\" {} \\; | wc -l", returnStdout: true).trim()
+                        if (stackExists == "0") {
+                            error "Stack ${STACK_NAME} not found in repository"
+                        }
+                    } catch (Exception e) {
+                        echo "Repository detection failed: ${e.message}"
+                        error "Failed to validate repository structure. See logs for details."
+                    }
+                }
+            }
+        }
+        
+        stage('Lint and Validate') {
+            steps {
+                script {
+                    try {
+                        retry(MAX_RETRIES) {
+                            sh 'atmos workflow lint'
+                            sh 'atmos workflow validate'
+                        }
+                    } catch (Exception e) {
+                        echo "Validation failed: ${e.message}"
+                        error "Failed to validate code. Please fix linting or validation issues."
+                    }
+                }
+            }
+        }
+        
+        stage('Plan') {
+            when {
+                expression { params.ACTION == 'plan' || params.ACTION == 'apply' }
+            }
+            steps {
+                script {
+                    try {
+                        retry(MAX_RETRIES) {
+                            if (params.COMPONENT == '') {
+                                sh "atmos workflow plan-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                            } else {
+                                sh "atmos terraform plan ${params.COMPONENT} -s ${STACK_NAME}"
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "Planning failed: ${e.message}"
+                        error "Failed to create plan. See logs for details."
+                    }
+                    
+                    // Archive the plan output for later reference
+                    sh "mkdir -p plans"
+                    if (params.COMPONENT == '') {
+                        sh "cp terraform.tfplan plans/${STACK_NAME}-all.tfplan || true"
+                    } else {
+                        sh "cp terraform.tfplan plans/${STACK_NAME}-${params.COMPONENT}.tfplan || true"
+                    }
+                    archiveArtifacts artifacts: 'plans/*.tfplan', allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Approval') {
+            when {
+                allOf {
+                    expression { params.ACTION == 'apply' || params.ACTION == 'destroy' }
+                    expression { params.REQUIRE_APPROVAL == true }
+                    expression { env.IS_PRODUCTION == 'true' }
+                }
+            }
+            steps {
+                timeout(time: 24, unit: 'HOURS') {
+                    input message: "Approve ${params.ACTION} for ${STACK_NAME}?", ok: 'Approve'
+                }
+            }
+        }
+        
+        stage('Apply') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                script {
+                    try {
+                        retry(MAX_RETRIES) {
+                            if (params.COMPONENT == '') {
+                                sh "atmos workflow apply-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                            } else {
+                                sh "atmos terraform apply ${params.COMPONENT} -s ${STACK_NAME}"
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "Apply failed: ${e.message}"
+                        error "Failed to apply changes. See logs for details."
+                    }
+                }
+            }
+        }
+        
+        stage('Destroy') {
+            when {
+                expression { params.ACTION == 'destroy' }
+            }
+            steps {
+                script {
+                    try {
+                        retry(MAX_RETRIES) {
+                            if (params.COMPONENT == '') {
+                                sh "atmos workflow destroy-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                            } else {
+                                sh "atmos terraform destroy ${params.COMPONENT} -s ${STACK_NAME}"
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "Destroy failed: ${e.message}"
+                        error "Failed to destroy resources. See logs for details."
+                    }
+                }
+            }
+        }
+        
+        stage('Validation Tests') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                script {
+                    try {
+                        // Run post-apply validation to ensure resources are properly deployed
+                        if (params.COMPONENT == '') {
+                            sh "atmos workflow drift-detection tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT} || true"
+                        } else {
+                            sh "atmos terraform plan ${params.COMPONENT} -s ${STACK_NAME} || true"
+                        }
+                    } catch (Exception e) {
+                        echo "Post-apply validation returned warnings: ${e.message}"
+                        // Don't fail the build, just warn
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo "Pipeline completed successfully"
+        }
+        failure {
+            echo "Pipeline failed. Review logs for details."
+        }
+    }
+}

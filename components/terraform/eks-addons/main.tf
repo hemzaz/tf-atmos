@@ -25,13 +25,13 @@ locals {
   # 4. Create a composite key (cluster_key.resource_key) to ensure uniqueness
   # 5. Skip any resources with enabled=false
   # -------------------------------------------------------------
-  
+
   # Flatten addons across all clusters
   # Result: { "cluster1.addon1" => {name: "addon1", cluster_name: "cluster1", ...}, ... }
   addons = merge([
     for cluster_key, cluster in local.clusters : {
       for addon_key, addon in lookup(cluster, "addons", {}) :
-        "${cluster_key}.${addon_key}" => merge(addon, { cluster_name = cluster_key })
+      "${cluster_key}.${addon_key}" => merge(addon, { cluster_name = cluster_key })
       if lookup(addon, "enabled", true)
     }
   ]...)
@@ -41,7 +41,7 @@ locals {
   helm_releases = merge([
     for cluster_key, cluster in local.clusters : {
       for release_key, release in lookup(cluster, "helm_releases", {}) :
-        "${cluster_key}.${release_key}" => merge(release, { cluster_name = cluster_key })
+      "${cluster_key}.${release_key}" => merge(release, { cluster_name = cluster_key })
       if lookup(release, "enabled", true)
     }
   ]...)
@@ -51,16 +51,16 @@ locals {
   kubernetes_manifests = merge([
     for cluster_key, cluster in local.clusters : {
       for manifest_key, manifest in lookup(cluster, "kubernetes_manifests", {}) :
-        "${cluster_key}.${manifest_key}" => merge(manifest, { cluster_name = cluster_key })
+      "${cluster_key}.${manifest_key}" => merge(manifest, { cluster_name = cluster_key })
       if lookup(manifest, "enabled", true)
     }
   ]...)
 
-# Certificate handling: ACM certificates are integrated with Istio
-# The certificate is either:
-# 1. Loaded directly (legacy mode using acm_certificate_key/acm_certificate_crt)
-# 2. Managed by External Secrets (recommended approach using Secrets Manager)
-  
+  # Certificate handling: ACM certificates are integrated with Istio
+  # The certificate is either:
+  # 1. Loaded directly (legacy mode using acm_certificate_key/acm_certificate_crt)
+  # 2. Managed by External Secrets (recommended approach using Secrets Manager)
+
   # Template for Istio gateway configurations
   istio_gateway_template = templatefile(
     "${path.module}/kubernetes_manifests/istio-gateway.yaml",
@@ -146,7 +146,7 @@ resource "aws_iam_policy" "service_account" {
 resource "aws_iam_role_policy_attachment" "service_account" {
   for_each = {
     for k, v in aws_iam_policy.service_account : k => {
-      role_name = aws_iam_role.service_account[k].name
+      role_name  = aws_iam_role.service_account[k].name
       policy_arn = v.arn
     }
   }
@@ -163,7 +163,7 @@ resource "aws_eks_addon" "addons" {
   addon_name        = each.value.name
   addon_version     = lookup(each.value, "version", null)
   resolve_conflicts = lookup(each.value, "resolve_conflicts", "OVERWRITE")
-  
+
   # Fix circular dependency by directly using service_account_role_arn if provided,
   # otherwise set to null and establish depends_on relationship
   service_account_role_arn = lookup(each.value, "service_account_role_arn", null)
@@ -181,9 +181,9 @@ resource "aws_eks_addon" "addons" {
   # Add dependency on wait_for_cluster and conditionally on service account role
   depends_on = concat(
     [time_sleep.wait_for_cluster],
-    lookup(each.value, "create_service_account_role", false) && 
-    contains(keys(aws_iam_role_policy_attachment.service_account), "${each.value.cluster_name}.${each.value.name}") ? 
-      [aws_iam_role_policy_attachment.service_account["${each.value.cluster_name}.${each.value.name}"]] : []
+    lookup(each.value, "create_service_account_role", false) &&
+    contains(keys(aws_iam_role_policy_attachment.service_account), "${each.value.cluster_name}.${each.value.name}") ?
+    [aws_iam_role_policy_attachment.service_account["${each.value.cluster_name}.${each.value.name}"]] : []
   )
 }
 
@@ -198,7 +198,7 @@ resource "time_sleep" "wait_for_addons" {
 
   # Allow more time for addons to initialize
   create_duration = "90s"
-  
+
   # Apply precondition checks to validate addons were actually created
   lifecycle {
     postcondition {
@@ -255,9 +255,9 @@ resource "helm_release" "releases" {
     }
   }
 
-  timeout    = lookup(each.value, "timeout", 300)
-  atomic     = lookup(each.value, "atomic", true)
-  wait       = lookup(each.value, "wait", true)
+  timeout = lookup(each.value, "timeout", 300)
+  atomic  = lookup(each.value, "atomic", true)
+  wait    = lookup(each.value, "wait", true)
 
   # Wait for addons and service accounts to be created
   depends_on = [
@@ -309,18 +309,18 @@ resource "kubernetes_manifest" "manifests" {
 
 # Apply Istio gateway configuration
 resource "kubectl_manifest" "istio_gateway" {
-  count = var.domain_name != "" && var.istio_enabled ? 1 : 0
-  yaml_body = local.istio_gateway_template
-  wait = true
+  count             = var.domain_name != "" && var.istio_enabled ? 1 : 0
+  yaml_body         = local.istio_gateway_template
+  wait              = true
   server_side_apply = true
-  force_conflicts = true
-  wait_for_rollout = true
+  force_conflicts   = true
+  wait_for_rollout  = true
 
   depends_on = [
     helm_release.releases,
     time_sleep.wait_for_helm_releases
   ]
-  
+
   # Add timeout to ensure adequate time for manifest creation
   timeouts {
     create = "5m"
@@ -337,7 +337,7 @@ resource "time_sleep" "wait_for_istio_namespace" {
     time_sleep.wait_for_helm_releases,
     kubectl_manifest.istio_gateway
   ]
-  
+
   # Increase wait time to ensure namespace is fully ready with all resources
   create_duration = "45s"
 }
@@ -345,7 +345,7 @@ resource "time_sleep" "wait_for_istio_namespace" {
 # Create a Kubernetes secret from ACM certificate content
 resource "kubernetes_secret" "istio_certs" {
   count = var.istio_enabled && !var.use_external_secrets && var.acm_certificate_crt != "" && var.acm_certificate_key != "" ? 1 : 0
-  
+
   metadata {
     name      = "istio-gateway-cert"
     namespace = "istio-ingress"

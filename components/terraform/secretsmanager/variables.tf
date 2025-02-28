@@ -30,7 +30,7 @@ variable "secrets" {
       - generate_random_password: Whether to generate a random password for this secret (defaults to false)
   EOT
   default     = {}
-  
+
   validation {
     condition = alltrue([
       for k, v in var.secrets :
@@ -50,7 +50,7 @@ variable "default_rotation_days" {
   type        = number
   description = "Default number of days between automatic rotation if not specified at the secret level"
   default     = 30
-  
+
   validation {
     condition     = var.default_rotation_days >= 1 && var.default_rotation_days <= 365
     error_message = "default_rotation_days must be between 1 and 365."
@@ -67,7 +67,7 @@ variable "default_recovery_window_in_days" {
   type        = number
   description = "Default recovery window in days before permanent deletion if not specified at the secret level"
   default     = 30
-  
+
   validation {
     condition     = var.default_recovery_window_in_days >= 0 && var.default_recovery_window_in_days <= 30
     error_message = "default_recovery_window_in_days must be between 0 and 30."
@@ -79,7 +79,7 @@ variable "random_password_length" {
   type        = number
   description = "Length of generated random passwords"
   default     = 32
-  
+
   validation {
     condition     = var.random_password_length >= 8
     error_message = "random_password_length must be at least 8 characters."

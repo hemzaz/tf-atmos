@@ -53,7 +53,7 @@ provider "kubectl" {
     "kubernetes_host",
     var.host
   ) : var.host
-  
+
   cluster_ca_certificate = length(var.clusters) > 0 ? base64decode(
     lookup(
       var.clusters[keys(var.clusters)[0]],
@@ -61,19 +61,19 @@ provider "kubectl" {
       var.cluster_ca_certificate
     )
   ) : base64decode(var.cluster_ca_certificate)
-  
+
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     args = [
-      "eks", 
-      "get-token", 
+      "eks",
+      "get-token",
       "--cluster-name",
       length(var.clusters) > 0 ? lookup(
         var.clusters[keys(var.clusters)[0]],
         "cluster_name",
         var.cluster_name
       ) : var.cluster_name,
-      "--region", 
+      "--region",
       var.region
     ]
     command = "aws"

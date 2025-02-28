@@ -6,8 +6,9 @@ workflows:
     steps:
     - run:
         command: |
-          # Set CLI version
-          export ATMOS_CLI_VERSION="1.46.0"
+          # Get CLI version automatically (in a cross-platform way)
+          ATMOS_CLI_VERSION=$(atmos version | sed -n 's/.*Atmos \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          echo "Using Atmos CLI version: ${ATMOS_CLI_VERSION}"
           
           # Validate required variables
           if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
@@ -29,33 +30,160 @@ workflows:
           ENV_DIR="stacks/account/${account}/${environment}"
           echo "Discovering components in ${ENV_DIR}..."
           
-          # Define known dependency order based on imports/references
-          # Components earlier in the array should be applied before ones later in the array
-          ORDERED_COMPONENTS=(
-            "backend"
-            "iam"
-            "network"
-            "eks" 
-            "eks-addons"  # eks-addons depends on eks
-            "ec2"
-            "ecs"
-            "rds"
-            "lambda"
-            "monitoring"
-            "services"
-          )
+          # Auto-discover component dependencies by analyzing YAML imports and output references
+          echo "Auto-detecting component dependencies..."
           
-          # Discover available components from YAML files
+          # Ensure environment directory exists
+          if [ ! -d "${ENV_DIR}" ]; then
+            echo "ERROR: Environment directory ${ENV_DIR} does not exist."
+            exit 1
+          fi
+          
+          # Discover all components first
           AVAILABLE_COMPONENTS=()
           for file in ${ENV_DIR}/*.yaml; do
             if [ -f "$file" ]; then
-              # Extract component name from filename (removing path and extension)
               component=$(basename "$file" .yaml)
               AVAILABLE_COMPONENTS+=("$component")
             fi
           done
           
-          echo "Discovered components: ${AVAILABLE_COMPONENTS[*]}"
+          # Check if any components were found
+          if [ ${#AVAILABLE_COMPONENTS[@]} -eq 0 ]; then
+            echo "ERROR: No components found in ${ENV_DIR}"
+            exit 1
+          fi
+          
+          # Base dependency detection logic - analyze imports and outputs references
+          # This builds a dependency graph automatically
+          declare -A DEPENDENCIES
+          
+          # Function to extract imports from a YAML file
+          extract_imports() {
+            local file=$1
+            local imports=()
+            
+            # Extract imports section if it exists
+            if grep -q "^import:" "$file" || grep -q "^imports:" "$file"; then
+              # Extract lines after import: until the next section
+              imports=($(grep -A20 "^import:" "$file" | grep -v "^import:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+              if [ ${#imports[@]} -eq 0 ]; then
+                imports=($(grep -A20 "^imports:" "$file" | grep -v "^imports:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+              fi
+            fi
+            
+            echo "${imports[@]}"
+          }
+          
+          # Function to detect output references
+          detect_references() {
+            local file=$1
+            local references=()
+            
+            # Look for ${output.XXX} patterns which indicate dependencies
+            if grep -q "\${output\." "$file"; then
+              references=($(grep -o '\${output\.[^.]*' "$file" | sort | uniq | sed 's/\${output\.//' 2>/dev/null))
+            fi
+            
+            echo "${references[@]}"
+          }
+          
+          # Build dependency map for each component
+          for component in "${AVAILABLE_COMPONENTS[@]}"; do
+            DEPENDENCIES[$component]=""
+            
+            # Get the component's YAML file
+            component_file="${ENV_DIR}/${component}.yaml"
+            
+            # Extract imports and references
+            imports=($(extract_imports "$component_file"))
+            references=($(detect_references "$component_file"))
+            
+            # Add all dependencies
+            for dep in "${imports[@]}" "${references[@]}"; do
+              # Skip non-component dependencies
+              if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${dep} " ]]; then
+                DEPENDENCIES[$component]="${DEPENDENCIES[$component]} $dep"
+              fi
+            done
+            
+            # Trim and remove duplicates
+            DEPENDENCIES[$component]=$(echo "${DEPENDENCIES[$component]}" | tr ' ' '\n' | sort | uniq | tr '\n' ' ' | xargs)
+          done
+          
+          # Topological sort function to order components based on dependencies
+          topological_sort() {
+            local -a visited=()
+            local -a temp=()
+            local -a order=()
+            
+            # DFS-based topological sort
+            visit() {
+              local node=$1
+              
+              # Check if already in result
+              if [[ " ${order[*]} " =~ " ${node} " ]]; then
+                return
+              fi
+              
+              # Check for cycles
+              if [[ " ${temp[*]} " =~ " ${node} " ]]; then
+                echo "WARNING: Circular dependency detected involving $node"
+                return
+              fi
+              
+              # Mark as being visited
+              temp+=("$node")
+              
+              # Visit dependencies first
+              local deps=(${DEPENDENCIES[$node]})
+              for dep in "${deps[@]}"; do
+                visit "$dep"
+              done
+              
+              # Add to result
+              order+=("$node")
+            }
+            
+            # Visit each node
+            for component in "${AVAILABLE_COMPONENTS[@]}"; do
+              visit "$component"
+            done
+            
+            echo "${order[@]}"
+          }
+          
+          # Generate ordered component list
+          ORDERED_COMPONENTS=($(topological_sort))
+          
+          # Always ensure these core components come first if they exist
+          CORE_COMPONENTS=("backend" "iam" "network")
+          FINAL_ORDER=()
+          
+          # First add core components in the specified order
+          for core in "${CORE_COMPONENTS[@]}"; do
+            if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${core} " ]]; then
+              if [[ ! " ${FINAL_ORDER[*]} " =~ " ${core} " ]]; then
+                FINAL_ORDER+=("$core")
+              fi
+            fi
+          done
+          
+          # Then add the rest from our sorted order
+          for component in "${ORDERED_COMPONENTS[@]}"; do
+            if [[ ! " ${FINAL_ORDER[*]} " =~ " ${component} " ]]; then
+              FINAL_ORDER+=("$component")
+            fi
+          done
+          
+          # Log the automatically determined dependency order
+          echo "Detected component order: ${FINAL_ORDER[*]}"
+          
+          # Use our final order
+          ORDERED_COMPONENTS=("${FINAL_ORDER[@]}")
+          
+          # We already discovered components during dependency analysis
+          echo "Found ${#AVAILABLE_COMPONENTS[@]} components: ${AVAILABLE_COMPONENTS[*]}"
           
           # Handle tainting for stateful resources like EKS clusters if needed
           # This helps with resources that might need recreation
@@ -125,4 +253,3 @@ workflows:
           fi
         env:
           AWS_SDK_LOAD_CONFIG: 1
-          ATMOS_CLI_VERSION: "1.46.0"

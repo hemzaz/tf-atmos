@@ -1,6 +1,6 @@
 locals {
   dns_domains = var.dns_domains
-  
+
   # Validate that if tags contains an Environment key, we can use it
   environment = try(var.tags["Environment"], "unknown")
 }
@@ -19,13 +19,13 @@ resource "aws_acm_certificate" "main" {
 
   lifecycle {
     create_before_destroy = true
-    
+
     # Add precondition checks to ensure domain and validation method are valid
     precondition {
       condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}$", each.value.domain_name))
       error_message = "Domain name ${each.value.domain_name} is not valid. It must be a valid DNS domain name."
     }
-    
+
     precondition {
       condition     = contains(["DNS", "EMAIL"], each.value.validation_method)
       error_message = "Validation method must be either DNS or EMAIL."
@@ -36,10 +36,10 @@ resource "aws_acm_certificate" "main" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name        = "${local.environment}-${replace(each.value.domain_name, ".", "-")}"
-      DomainName  = each.value.domain_name
-      CreatedBy   = "terraform"
-      Component   = "acm"
+      Name       = "${local.environment}-${replace(each.value.domain_name, ".", "-")}"
+      DomainName = each.value.domain_name
+      CreatedBy  = "terraform"
+      Component  = "acm"
     }
   )
 }
@@ -62,7 +62,7 @@ resource "aws_route53_record" "validation" {
   ttl             = 60
   records         = [each.value.dvo.resource_record_value]
   allow_overwrite = true
-  
+
   lifecycle {
     precondition {
       condition     = var.zone_id != ""
@@ -86,7 +86,7 @@ resource "aws_acm_certificate_validation" "main" {
   }
 
   depends_on = [aws_route53_record.validation]
-  
+
   lifecycle {
     precondition {
       condition     = length([for dvo in aws_acm_certificate.main[each.key].domain_validation_options : dvo.resource_record_name]) > 0

@@ -1,43 +1,214 @@
 name: drift-detection
-description: "Detect infrastructure drift in an environment"
+description: "Detect infrastructure drift in an environment with automatic component discovery"
 
 workflows:
   drift-detection:
     steps:
     - run:
         command: |
-          # Set environment variable
-          export ATMOS_CLI_VERSION="1.46.0"
+          # Get CLI version automatically (in a cross-platform way)
+          ATMOS_CLI_VERSION=$(atmos version | sed -n 's/.*Atmos \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          echo "Using Atmos CLI version: ${ATMOS_CLI_VERSION}"
           
-          echo "Checking drift for backend..."
-          atmos terraform plan backend -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          # detailed-exitcode returns 0 for no changes, 2 for changes present
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in backend component!"
+          # Validate required variables
+          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
+            echo "ERROR: Missing required parameters. Usage: atmos workflow drift-detection tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
           fi
           
-          echo "Checking drift for iam..."
-          atmos terraform plan iam -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in iam component!"
+          # Set stack name
+          STACK="${tenant}-${account}-${environment}"
+          
+          # Discover available components by looking at stack files
+          ENV_DIR="stacks/account/${account}/${environment}"
+          echo "Discovering components in ${ENV_DIR}..."
+          
+          # Check if directory exists
+          if [ ! -d "${ENV_DIR}" ]; then
+            echo "ERROR: Environment directory ${ENV_DIR} does not exist."
+            exit 1
           fi
           
-          echo "Checking drift for network..."
-          atmos terraform plan network -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in network component!"
+          # Auto-discover component dependencies by analyzing YAML imports and output references
+          echo "Auto-detecting component dependencies..."
+
+          # Find all component configuration files
+          COMPONENTS=()
+          for file in ${ENV_DIR}/*.yaml; do
+            if [ -f "$file" ]; then
+              # Extract component name from filename (removing path and extension)
+              component=$(basename "$file" .yaml)
+              COMPONENTS+=("$component")
+            fi
+          done
+          
+          if [ ${#COMPONENTS[@]} -eq 0 ]; then
+            echo "WARNING: No components found in ${ENV_DIR}"
+            exit 0
           fi
           
-          echo "Checking drift for infrastructure..."
-          atmos terraform plan infrastructure -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in infrastructure component!"
-          fi
+          # Base dependency detection logic - analyze imports and outputs references
+          # This builds a dependency graph automatically
+          declare -A DEPENDENCIES
           
-          echo "Checking drift for services..."
-          atmos terraform plan services -s ${tenant}-${account}-${environment} -detailed-exitcode || EXIT_CODE=$?
-          if [ "$EXIT_CODE" == "2" ]; then
-            echo "DRIFT DETECTED in services component!"
+          # Function to extract imports from a YAML file
+          extract_imports() {
+            local file=$1
+            local imports=()
+            
+            # Extract imports section if it exists
+            if grep -q "^import:" "$file" || grep -q "^imports:" "$file"; then
+              # Extract lines after import: until the next section
+              imports=($(grep -A20 "^import:" "$file" | grep -v "^import:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+              if [ ${#imports[@]} -eq 0 ]; then
+                imports=($(grep -A20 "^imports:" "$file" | grep -v "^imports:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+              fi
+            fi
+            
+            echo "${imports[@]}"
+          }
+          
+          # Function to detect output references
+          detect_references() {
+            local file=$1
+            local references=()
+            
+            # Look for ${output.XXX} patterns which indicate dependencies
+            if grep -q "\${output\." "$file"; then
+              references=($(grep -o '\${output\.[^.]*' "$file" | sort | uniq | sed 's/\${output\.//' 2>/dev/null))
+            fi
+            
+            echo "${references[@]}"
+          }
+          
+          # Build dependency map for each component
+          for component in "${COMPONENTS[@]}"; do
+            DEPENDENCIES[$component]=""
+            
+            # Get the component's YAML file
+            component_file="${ENV_DIR}/${component}.yaml"
+            
+            # Extract imports and references
+            imports=($(extract_imports "$component_file"))
+            references=($(detect_references "$component_file"))
+            
+            # Add all dependencies
+            for dep in "${imports[@]}" "${references[@]}"; do
+              # Skip non-component dependencies
+              if [[ " ${COMPONENTS[*]} " =~ " ${dep} " ]]; then
+                DEPENDENCIES[$component]="${DEPENDENCIES[$component]} $dep"
+              fi
+            done
+            
+            # Trim and remove duplicates
+            DEPENDENCIES[$component]=$(echo "${DEPENDENCIES[$component]}" | tr ' ' '\n' | sort | uniq | tr '\n' ' ' | xargs)
+          done
+          
+          # Topological sort function to order components based on dependencies
+          topological_sort() {
+            local -a visited=()
+            local -a temp=()
+            local -a order=()
+            
+            # DFS-based topological sort
+            visit() {
+              local node=$1
+              
+              # Check if already in result
+              if [[ " ${order[*]} " =~ " ${node} " ]]; then
+                return
+              fi
+              
+              # Check for cycles
+              if [[ " ${temp[*]} " =~ " ${node} " ]]; then
+                echo "WARNING: Circular dependency detected involving $node"
+                return
+              fi
+              
+              # Mark as being visited
+              temp+=("$node")
+              
+              # Visit dependencies first
+              local deps=(${DEPENDENCIES[$node]})
+              for dep in "${deps[@]}"; do
+                visit "$dep"
+              done
+              
+              # Add to result
+              order+=("$node")
+            }
+            
+            # Visit each node
+            for component in "${COMPONENTS[@]}"; do
+              visit "$component"
+            done
+            
+            echo "${order[@]}"
+          }
+          
+          # Generate ordered component list
+          SORTED_COMPONENTS=($(topological_sort))
+          
+          # Always ensure these core components come first if they exist
+          CORE_COMPONENTS=("backend" "iam" "network")
+          FINAL_ORDER=()
+          
+          # First add core components in the specified order
+          for core in "${CORE_COMPONENTS[@]}"; do
+            if [[ " ${COMPONENTS[*]} " =~ " ${core} " ]]; then
+              if [[ ! " ${FINAL_ORDER[*]} " =~ " ${core} " ]]; then
+                FINAL_ORDER+=("$core")
+              fi
+            fi
+          done
+          
+          # Then add the rest from our sorted order
+          for component in "${SORTED_COMPONENTS[@]}"; do
+            if [[ ! " ${FINAL_ORDER[*]} " =~ " ${component} " ]]; then
+              FINAL_ORDER+=("$component")
+            fi
+          done
+          
+          # Log the automatically determined dependency order
+          echo "Detected component order: ${FINAL_ORDER[*]}"
+          
+          # Use our final order
+          COMPONENTS=("${FINAL_ORDER[@]}")
+          
+          echo "============================================"
+          
+          # Check for drift in each component
+          DRIFT_DETECTED=0
+          for component in "${COMPONENTS[@]}"; do
+            echo "Checking drift for ${component}..."
+            EXIT_CODE=0
+            
+            # Use detailed-exitcode to detect changes
+            # Exit code 0 = no changes, 1 = error, 2 = changes detected
+            # Redirect stderr to a file so we can check for errors
+            ERROR_LOG=$(mktemp)
+            atmos terraform plan ${component} -s ${STACK} -detailed-exitcode 2>"${ERROR_LOG}" || EXIT_CODE=$?
+            
+            if [ "${EXIT_CODE}" == "2" ]; then
+              echo "🚨 DRIFT DETECTED in ${component} component! 🚨"
+              DRIFT_DETECTED=1
+            elif [ "${EXIT_CODE}" == "1" ]; then
+              # Show error message for better debugging
+              ERROR_MESSAGE=$(cat "${ERROR_LOG}")
+              echo "⚠️  ERROR during drift detection for ${component} ⚠️"
+              echo "Error details: $(echo "${ERROR_MESSAGE}" | head -n 1)"
+            else
+              echo "✅ No drift detected in ${component}"
+            fi
+            # Clean up temporary file
+            rm -f "${ERROR_LOG}"
+          done
+          
+          echo "============================================"
+          if [ $DRIFT_DETECTED -eq 1 ]; then
+            echo "🚨 DRIFT DETECTED in one or more components! 🚨"
+            echo "Run 'atmos workflow plan-environment tenant=${tenant} account=${account} environment=${environment}' to see details."
+            exit 1
+          else
+            echo "✅ No drift detected in any components"
           fi
-        env:
-          ATMOS_CLI_VERSION: "1.46.0"

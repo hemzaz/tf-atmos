@@ -19,7 +19,7 @@ variable "vpc_id" {
 variable "vpc_cidr" {
   type        = string
   description = "VPC CIDR block for security group egress rules"
-  
+
   validation {
     condition     = can(cidrhost(var.vpc_cidr, 0))
     error_message = "Must be a valid IPv4 CIDR block address."
@@ -108,7 +108,7 @@ variable "kms_key_id" {
   type        = string
   description = "KMS key ID for storage encryption"
   default     = null
-  
+
   validation {
     condition     = var.kms_key_id == null || var.kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.kms_key_id))
     error_message = "KMS key ID must be a valid ARN format."
@@ -205,7 +205,7 @@ variable "monitoring_interval" {
   type        = number
   description = "Enhanced monitoring interval in seconds (0 to disable)"
   default     = 60
-  
+
   validation {
     condition     = contains([0, 1, 5, 10, 15, 30, 60], var.monitoring_interval)
     error_message = "Monitoring interval must be one of: 0, 1, 5, 10, 15, 30, 60."

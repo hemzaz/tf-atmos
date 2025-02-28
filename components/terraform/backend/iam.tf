@@ -6,8 +6,8 @@ resource "aws_iam_role" "terraform_backend" {
 data "aws_caller_identity" "current" {}
 
 resource "aws_iam_role_policy" "terraform_backend" {
-  name   = "TerraformBackendPolicy"
-  role   = aws_iam_role.terraform_backend.id
+  name = "TerraformBackendPolicy"
+  role = aws_iam_role.terraform_backend.id
   policy = templatefile("${path.module}/policies/backend.json.tpl", {
     bucket_name         = var.bucket_name
     region              = var.region

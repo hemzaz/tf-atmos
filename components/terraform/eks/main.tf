@@ -7,7 +7,7 @@ locals {
   node_groups = merge([
     for cluster_key, cluster in local.clusters : {
       for ng_key, ng in lookup(cluster, "node_groups", {}) :
-        "${cluster_key}.${ng_key}" => merge(ng, { cluster_name = cluster_key })
+      "${cluster_key}.${ng_key}" => merge(ng, { cluster_name = cluster_key })
       if lookup(ng, "enabled", true)
     }
   ]...)
@@ -77,22 +77,22 @@ resource "aws_eks_cluster" "clusters" {
     aws_iam_role_policy_attachment.cluster_AmazonEKSVPCResourceController,
     aws_cloudwatch_log_group.eks
   ]
-  
+
   lifecycle {
     # Prevent changes that would recreate the cluster
     prevent_destroy = true
-    
+
     # Add preconditions for various cluster requirements
     precondition {
       condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) >= 2
       error_message = "At least 2 subnet IDs are required for the EKS cluster ${each.key} to ensure high availability."
     }
-    
+
     precondition {
       condition     = can(regex("^1\\.(2[0-9])$", lookup(each.value, "kubernetes_version", var.default_kubernetes_version)))
       error_message = "Kubernetes version for cluster ${each.key} must be in the format '1.XX' (e.g., 1.28)."
     }
-    
+
     precondition {
       condition     = length(lookup(each.value, "enabled_cluster_log_types", [])) > 0
       error_message = "At least one cluster log type must be enabled for cluster ${each.key}."
@@ -183,10 +183,10 @@ resource "aws_eks_node_group" "node_groups" {
   node_role_arn   = aws_iam_role.node[each.value.cluster_name].arn
   subnet_ids      = lookup(each.value, "subnet_ids", var.subnet_ids)
 
-  instance_types  = lookup(each.value, "instance_types", ["t3.medium"])
-  ami_type        = lookup(each.value, "ami_type", "AL2_x86_64")
-  capacity_type   = lookup(each.value, "capacity_type", "ON_DEMAND")
-  disk_size       = lookup(each.value, "disk_size", 50)
+  instance_types = lookup(each.value, "instance_types", ["t3.medium"])
+  ami_type       = lookup(each.value, "ami_type", "AL2_x86_64")
+  capacity_type  = lookup(each.value, "capacity_type", "ON_DEMAND")
+  disk_size      = lookup(each.value, "disk_size", 50)
 
   scaling_config {
     desired_size = lookup(each.value, "desired_size", 2)
@@ -235,7 +235,7 @@ resource "aws_eks_node_group" "node_groups" {
     aws_iam_role_policy_attachment.node_AmazonEKSWorkerNodePolicy,
     aws_iam_role_policy_attachment.node_AmazonEKS_CNI_Policy,
     aws_iam_role_policy_attachment.node_AmazonEC2ContainerRegistryReadOnly,
-    aws_eks_cluster.clusters,  # Ensure clusters are fully created before node groups
+    aws_eks_cluster.clusters, # Ensure clusters are fully created before node groups
     aws_iam_role.node         # Ensure roles are fully created before node groups
   ]
 
@@ -243,21 +243,21 @@ resource "aws_eks_node_group" "node_groups" {
     # Prevent replacement of node groups when certain changes occur
     create_before_destroy = true
     ignore_changes = [
-      scaling_config[0].desired_size,  # Allow autoscaling to manage desired size
-      
+      scaling_config[0].desired_size, # Allow autoscaling to manage desired size
+
       # Add other attributes that shouldn't trigger replacement if needed
       # For example, labels and tags might be updated outside Terraform
       labels,
       tags
     ]
-    
+
     # Add precondition to check for required values
     precondition {
       condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) > 0
       error_message = "At least one subnet must be provided for the node group."
     }
   }
-  
+
   # Add a timeouts block to extend default timeouts for creation/deletion
   timeouts {
     create = "30m"

@@ -1,5 +1,5 @@
 locals {
-  enabled = var.enabled
+  enabled     = var.enabled
   name_prefix = "${var.tags["Environment"]}-${var.cluster_name}"
 }
 
@@ -63,11 +63,11 @@ resource "aws_iam_role_policy_attachment" "external_secrets" {
 resource "helm_release" "external_secrets" {
   count = local.enabled ? 1 : 0
 
-  name       = "external-secrets"
-  repository = "https://charts.external-secrets.io"
-  chart      = "external-secrets"
-  version    = var.chart_version
-  namespace  = var.namespace
+  name             = "external-secrets"
+  repository       = "https://charts.external-secrets.io"
+  chart            = "external-secrets"
+  version          = var.chart_version
+  namespace        = var.namespace
   create_namespace = var.create_namespace
 
   set {
@@ -98,7 +98,7 @@ resource "helm_release" "external_secrets" {
 resource "time_sleep" "wait_for_crds" {
   count = local.enabled && (var.create_default_cluster_secret_store || var.create_certificate_secret_store) ? 1 : 0
 
-  depends_on = [helm_release.external_secrets]
+  depends_on      = [helm_release.external_secrets]
   create_duration = "30s"
 }
 

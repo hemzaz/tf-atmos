@@ -42,8 +42,8 @@ output "secret_policies" {
 
 output "rotation_enabled_secrets" {
   description = "Map of secret names with rotation enabled"
-  value       = { for k, v in aws_secretsmanager_secret_rotation.this : k => {
-    rotation_lambda_arn = v.rotation_lambda_arn
+  value = { for k, v in aws_secretsmanager_secret_rotation.this : k => {
+    rotation_lambda_arn      = v.rotation_lambda_arn
     automatically_after_days = v.rotation_rules[0].automatically_after_days
-  }}
+  } }
 }

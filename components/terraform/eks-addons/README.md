@@ -16,6 +16,7 @@ This component provides a secure, flexible, and error-resistant way to deploy an
 - Error prevention with extensive validation blocks
 - Clear deprecation warnings for legacy configuration patterns
 - Fail-safe defaults to prevent common operational issues
+- Advanced autoscaling with Karpenter and KEDA
 
 ## Architecture
 
