@@ -104,6 +104,7 @@ The [Atlantis integration](../integrations/atlantis/README.md) handles cross-acc
 4. Automatic detection of which account to use based on stack name
 
 ```bash
+#!/usr/bin/env bash
 # Example from integrations/atlantis/scripts/assume-role.sh
 ACCOUNT_ID=$(jq -r ".$ACCOUNT // empty" /atlantis/accounts.json)
 ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
@@ -145,6 +146,7 @@ mfa_serial = arn:aws:iam::123456789012:mfa/user@example.com
 ### Using Profiles with Atmos
 
 ```bash
+#!/usr/bin/env bash
 # Specify AWS profile when running Atmos commands
 export AWS_PROFILE=dev
 atmos terraform plan vpc -s tenant-dev-us-west-2
@@ -212,7 +214,7 @@ AWS_PROFILE=prod atmos terraform plan vpc -s tenant-prod-us-west-2
 ## Related Resources
 
 - [AWS IAM Documentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html)
-- [IAM Role Patterns](iam-role-patterns.md)
-- [Security Best Practices](security-best-practices.md)
+- [IAM Role Patterns](iam-role-patterns-guide.md)
+- [Security Best Practices](security-best-practices-guide.md)
 - [Jenkins Integration Guide](../integrations/jenkins/README.md)
 - [Atlantis Integration Guide](../integrations/atlantis/README.md)

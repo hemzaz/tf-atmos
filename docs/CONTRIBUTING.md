@@ -34,10 +34,17 @@ There are many ways to contribute to this project:
 3. **Set up the development environment**
 
    Follow the [installation guide](installation.md) to set up all required tools.
+   
+   The project uses a `.env` file in the root directory to define tool versions:
+   ```bash
+   # Review the .env file content to understand required tool versions
+   cat .env
+   ```
 
 4. **Create a branch for your changes**
 
    ```bash
+   #!/usr/bin/env bash
    git checkout -b feature/your-feature-name
    ```
 
@@ -45,7 +52,7 @@ There are many ways to contribute to this project:
 
 ### Adding a New Component
 
-1. Follow the [component creation guide](component-creation-guide.md)
+1. Follow the [component creation guide](terraform-component-creation-guide.md)
 2. Create necessary component files following our [code style guidelines](../CLAUDE.md)
 3. Add documentation in README.md
 4. Create examples in the examples directory
@@ -145,6 +152,12 @@ There are many ways to contribute to this project:
   - Use 2 spaces for indentation
   - Use descriptive key names
   - Organize configuration logically
+  
+- Follow Shell script guidelines:
+  - Use `#!/usr/bin/env bash` shebang for portability
+  - Source the `.env` file for tool version information
+  - Use environment variables with defaults for configurable values
+  - Implement platform detection for cross-platform compatibility
 
 ## Documentation Guidelines
 

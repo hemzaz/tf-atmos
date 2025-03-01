@@ -18,13 +18,15 @@ Before starting deployment, ensure you have:
 
 - Completed the [installation guide](installation.md)
 - AWS credentials with administrator access
-- Atmos CLI properly configured
+- Atmos CLI properly configured (version specified in `.env`)
+- Reviewed the tool versions in the `.env` file at project root
 
 ## Step 1: Bootstrap Backend Infrastructure
 
 The backend stores Terraform state and provides locking to prevent concurrent modifications.
 
 ```bash
+#!/usr/bin/env bash
 # Bootstrap the Terraform backend
 atmos workflow bootstrap-backend tenant=mycompany region=us-west-2
 
@@ -36,6 +38,7 @@ aws dynamodb list-tables --region us-west-2
 ## Step 2: Deploy Backend Component
 
 ```bash
+#!/usr/bin/env bash
 # Initialize and apply the backend configuration
 atmos workflow apply-backend tenant=mycompany account=management environment=prod
 ```
@@ -50,6 +53,7 @@ This creates:
 The onboarding workflow sets up a new environment with all core infrastructure.
 
 ```bash
+#!/usr/bin/env bash
 # Create a new environment
 atmos workflow onboard-environment tenant=mycompany account=dev environment=test vpc_cidr=10.1.0.0/16
 ```
@@ -86,6 +90,7 @@ vim stacks/account/dev/test/network.yaml
 ## Step 6: Plan and Apply Changes
 
 ```bash
+#!/usr/bin/env bash
 # Plan changes to validate configuration
 atmos workflow plan-environment tenant=mycompany account=dev environment=test
 
@@ -98,6 +103,7 @@ atmos workflow apply-environment tenant=mycompany account=dev environment=test
 To add individual components:
 
 ```bash
+#!/usr/bin/env bash
 # Example: Add RDS database
 cp templates/catalog-component.yaml stacks/account/dev/test/rds.yaml
 vim stacks/account/dev/test/rds.yaml
@@ -109,6 +115,7 @@ atmos terraform apply rds -s mycompany-dev-test
 ## Step 8: Verify Deployment
 
 ```bash
+#!/usr/bin/env bash
 # List deployed AWS resources
 atmos terraform output vpc -s mycompany-dev-test
 aws ec2 describe-vpcs --region us-west-2 --filter "Name=tag:Name,Values=*test*"
@@ -146,6 +153,7 @@ atmos workflow onboard-environment tenant=mycompany account=prod environment=pro
 ### EKS Deployment with Add-ons
 
 ```bash
+#!/usr/bin/env bash
 # Deploy EKS cluster
 atmos terraform apply eks -s mycompany-dev-test
 
@@ -156,6 +164,7 @@ atmos terraform apply eks-addons -s mycompany-dev-test
 ### Database Deployment
 
 ```bash
+#!/usr/bin/env bash
 # Create secrets first
 atmos terraform apply secretsmanager -s mycompany-dev-test
 
@@ -175,6 +184,7 @@ If a deployment fails:
 For state locking issues:
 
 ```bash
+#!/usr/bin/env bash
 # View current locks
 aws dynamodb scan --table-name mycompany-tfstate-locks-us-west-2 --attributes-to-get LockID Info
 

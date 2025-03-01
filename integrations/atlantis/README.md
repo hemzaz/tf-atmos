@@ -293,5 +293,5 @@ This integration has been tested with:
 - [Atmos Documentation](https://atmos.tools/)
 - [GitHub Webhook Documentation](https://docs.github.com/en/developers/webhooks-and-events/webhooks/about-webhooks)
 - [AWS STS Documentation](https://docs.aws.amazon.com/STS/latest/APIReference/welcome.html)
-- [Terraform PR-Driven Workflow Guide](../../docs/pr-driven-workflow.md)
+- [Terraform PR-Driven Workflow Guide](../../docs/pull-request-workflow-guide.md)
 - [Multi-Account Architecture Guide](../../docs/multi-account-architecture.md)

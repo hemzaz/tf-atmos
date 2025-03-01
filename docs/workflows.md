@@ -403,8 +403,22 @@ variables:
 # Install dependencies
 .install_deps: &install_deps
   before_script:
-    # Install Atmos
-    - curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+    # Install dependencies from .env file
+    - |
+      #!/usr/bin/env bash
+      # Create .env file with versions if needed
+      if [ ! -f .env ]; then
+        cat > .env << EOF
+        TERRAFORM_VERSION="1.5.7"
+        ATMOS_VERSION="1.38.0"
+        KUBECTL_VERSION="1.28.3"
+        HELM_VERSION="3.13.1"
+        EOF
+      fi
+      
+      # Run installation script
+      ./scripts/install-dependencies.sh
+    
     # Install additional dependencies
     - apt-get update && apt-get install -y yamllint jq
     
@@ -468,12 +482,24 @@ pipeline {
             steps {
                 // Install Atmos and dependencies
                 sh '''
-                    curl -s https://raw.githubusercontent.com/cloudposse/atmos/master/scripts/install.sh | bash
+                    #!/usr/bin/env bash
+                    # Create .env file with tool versions if needed
+                    if [ ! -f .env ]; then
+                        cat > .env << 'EOF'
+                        TERRAFORM_VERSION="1.5.7"
+                        ATMOS_VERSION="1.38.0"
+                        KUBECTL_VERSION="1.28.3"
+                        HELM_VERSION="3.13.1"
+                        EOF
+                    fi
+                    
+                    # Run installation script which handles cross-platform installation
+                    ./scripts/install-dependencies.sh
                     
                     # Install additional tools
                     apt-get update && apt-get install -y jq yamllint curl
                     
-                    # Set the PATH to include the Atmos binary
+                    # Set the PATH to include the required binaries
                     export PATH=$PATH:$HOME/.atmos/bin
                 '''
             }

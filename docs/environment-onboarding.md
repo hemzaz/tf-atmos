@@ -536,7 +536,7 @@ If you encounter issues, please refer to:
 - **Project Documentation**:
   - [Certificate Management Guide](../docs/secrets-manager-guide.md)
   - [EKS Addons Reference](../docs/eks-addons-reference.md)
-  - [Component Creation Guide](../docs/component-creation-guide.md)
+  - [Component Creation Guide](../docs/terraform-component-creation-guide.md)
 
 - **AWS Documentation**:
   - [AWS EKS Documentation](https://docs.aws.amazon.com/eks)

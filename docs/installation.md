@@ -15,11 +15,31 @@ You need AWS accounts with administrative access for:
 | Tool | Version | Purpose |
 |------|---------|---------|
 | AWS CLI | 2.x | Interact with AWS services |
-| Terraform | ≥ 1.0.0 | Infrastructure provisioning |
-| Atmos CLI | ≥ 1.5.0 | Workflow orchestration |
+| Terraform | ≥ 1.5.7 | Infrastructure provisioning |
+| Atmos CLI | ≥ 1.38.0 | Workflow orchestration |
+| Kubectl | ≥ 1.28.3 | Kubernetes CLI |
+| Helm | ≥ 3.13.1 | Kubernetes package manager |
 | Git | Any recent | Version control |
 
-## Installation Instructions
+> Note: Version numbers are defined in the `.env` file at the project root and can be customized as needed.
+
+## Automated Installation
+
+We provide a cross-platform installation script that automatically detects your operating system and installs the required dependencies:
+
+```bash
+#!/usr/bin/env bash
+# Run the automated installation script
+./scripts/install-dependencies.sh
+```
+
+The script uses version information from the `.env` file in the project root. You can override specific versions by setting environment variables:
+
+```bash
+TERRAFORM_VERSION="1.6.0" ./scripts/install-dependencies.sh
+```
+
+## Manual Installation Instructions
 
 ### Linux (Debian/Ubuntu)
 
@@ -94,19 +114,21 @@ You need AWS accounts with administrative access for:
 
 ### Windows
 
+> Note: The automated installation script also works on Windows when using Git Bash or Windows Subsystem for Linux (WSL).
+
 1. **Install AWS CLI**
    - Download the [AWS CLI MSI installer](https://awscli.amazonaws.com/AWSCLIV2.msi)
    - Run the installer
    - Verify installation: `aws --version`
 
 2. **Install Terraform**
-   - Download the [Terraform ZIP file](https://www.terraform.io/downloads.html)
+   - Download the [Terraform ZIP file](https://www.terraform.io/downloads.html) for the version specified in `.env`
    - Extract to a directory (e.g., `C:\terraform`)
    - Add to PATH: `setx PATH "%PATH%;C:\terraform"`
    - Verify installation: `terraform -version`
 
 3. **Install Atmos CLI**
-   - Download the [Atmos release](https://github.com/cloudposse/atmos/releases)
+   - Download the [Atmos release](https://github.com/cloudposse/atmos/releases) for the version specified in `.env`
    - Extract to a directory (e.g., `C:\atmos`)
    - Add to PATH: `setx PATH "%PATH%;C:\atmos"`
    - Verify installation: `atmos --version`
@@ -140,7 +162,19 @@ You need AWS accounts with administrative access for:
    cd tf-atmos
    ```
 
-2. **Initialize Git hooks (optional)**
+2. **Review and configure the .env file**
+   ```bash
+   # The .env file contains version configurations for all tools
+   cat .env
+   
+   # Edit if needed to match your requirements
+   # TERRAFORM_VERSION="1.5.7"
+   # ATMOS_VERSION="1.38.0"
+   # KUBECTL_VERSION="1.28.3"
+   # HELM_VERSION="3.13.1"
+   ```
+
+3. **Initialize Git hooks (optional)**
    ```bash
    # If using pre-commit
    pre-commit install

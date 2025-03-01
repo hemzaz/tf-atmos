@@ -237,7 +237,7 @@ tf-atmos/
 
 ## For More Information
 
-- [Component Catalog](component-catalog.md) - Detailed descriptions of components
+- [Component Catalog](terraform-component-catalog.md) - Detailed descriptions of components
 - [Workflow Reference](workflows.md) - Available workflows and usage
-- [Security Architecture](security-best-practices.md) - Security design and best practices
+- [Security Architecture](security-best-practices-guide.md) - Security design and best practices
 - [Environment Onboarding](environment-onboarding.md) - Adding new environments

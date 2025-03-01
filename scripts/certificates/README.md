@@ -11,6 +11,8 @@ The scripts in this directory help with:
 3. Exporting SSH keys from AWS Secrets Manager for secure access to EC2 instances
 4. Integrating with External Secrets Operator for automated secret management
 
+All scripts use the portable shebang `#!/usr/bin/env bash` for cross-platform compatibility and work on Linux, macOS, and Windows (with Git Bash or WSL).
+
 ## Scripts
 
 ### export-cert.sh
@@ -23,6 +25,7 @@ Exports certificates from AWS ACM and prepares them for use with Kubernetes secr
 - jq installed
 - openssl installed
 - Valid permissions to access ACM certificates
+- Tool versions defined in the project's `.env` file
 
 #### Options
 
@@ -38,6 +41,7 @@ Exports certificates from AWS ACM and prepares them for use with Kubernetes secr
 #### Example Usage
 
 ```bash
+#!/usr/bin/env bash
 # Basic usage
 ./export-cert.sh -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234-abcd-1234-abcd-1234abcd5678
 
@@ -55,9 +59,10 @@ Helps with rotation of certificates in AWS ACM and updates Kubernetes secrets us
 #### Requirements
 
 - AWS CLI installed and configured
-- kubectl installed and configured
+- kubectl installed and configured (version from `.env` file)
 - jq installed
 - Valid permissions to access ACM and Secrets Manager
+- Tool versions defined in the project's `.env` file
 
 #### Options
 
@@ -75,6 +80,7 @@ Helps with rotation of certificates in AWS ACM and updates Kubernetes secrets us
 #### Example Usage
 
 ```bash
+#!/usr/bin/env bash
 # Rotate certificate with a new ACM certificate
 ./rotate-cert.sh -s certificates/example-com -n istio-system -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234
 
@@ -94,6 +100,7 @@ Downloads SSH keys from AWS Secrets Manager for secure access to EC2 instances.
 - AWS CLI installed and configured
 - jq installed
 - Valid permissions to access Secrets Manager
+- Tool versions defined in the project's `.env` file
 
 #### Options
 
@@ -110,6 +117,7 @@ Downloads SSH keys from AWS Secrets Manager for secure access to EC2 instances.
 #### Example Usage
 
 ```bash
+#!/usr/bin/env bash
 # Basic usage
 ./export-ssh-key.sh -s dev/ec2/ssh-keys -o ~/.ssh/my_key
 
@@ -145,5 +153,7 @@ These scripts are designed to work with the External Secrets Operator, which sho
 - AWS ACM does not allow direct export of private keys for certificates managed by ACM
 - For ACM-managed certificates, External Secrets is the recommended approach
 - For imported certificates, the scripts provide a structured export process
-- These scripts require the AWS CLI, jq, and kubectl to be installed and configured
+- These scripts require the AWS CLI, jq, and kubectl to be installed and configured (versions specified in the `.env` file)
+- All scripts are cross-platform compatible with Linux, macOS, and Windows (Git Bash/WSL)
 - SSH keys stored in Secrets Manager can be structured for environment-wide access or instance-specific access
+- Version information for required tools is centralized in the `.env` file in the project root

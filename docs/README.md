@@ -21,8 +21,8 @@ This documentation provides comprehensive information on using and extending the
 
 | If you want to... | Read this documentation |
 |-------------------|-------------------------|
-| Understand what Atmos is | [Atmos Overview](Atmos.md) |
-| Create a new component | [Component Creation Guide](component-creation-guide.md) |
+| Understand what Atmos is | [Atmos Overview](atmos-guide.md) |
+| Create a new component | [Component Creation Guide](terraform-component-creation-guide.md) |
 | Debug common issues | [Troubleshooting Guide](troubleshooting-guide.md) |
 | Set up Kubernetes workloads | [EKS Addons Reference](eks-addons-reference.md) |
 | Secure your infrastructure | [Secrets Manager Guide](secrets-manager-guide.md) |
@@ -33,11 +33,11 @@ This documentation provides comprehensive information on using and extending the
 
 ### Development Resources
 
-- [Terraform Development Guide](tf-dev-guide.md) - Best practices for developing components
-- [Component Creation Guide](component-creation-guide.md) - Step-by-step guide to create components
+- [Terraform Development Guide](terraform-development-guide.md) - Best practices for developing components
+- [Component Creation Guide](terraform-component-creation-guide.md) - Step-by-step guide to create components
 - [Troubleshooting Guide](troubleshooting-guide.md) - Solutions for common issues
 - [Documentation Style Guide](documentation-style-guide.md) - How to document your work
-- [PR-Driven Workflow](pr-driven-workflow.md) - Infrastructure changes via pull requests
+- [PR-Driven Workflow](pull-request-workflow-guide.md) - Infrastructure changes via pull requests
 
 ### Architecture Documentation
 
@@ -54,14 +54,14 @@ This documentation provides comprehensive information on using and extending the
 - [Istio Service Mesh Guide](istio-service-mesh-guide.md) - Service mesh deployment
 - [Secrets Manager Guide](secrets-manager-guide.md) - Secret management best practices
 - [API Gateway Integration Guide](api-gateway-integration-guide.md) - API Gateway patterns
-- [Certificate Management](certificate-management.md) - SSL/TLS certificate management
+- [Certificate Management](certificate-management-guide.md) - SSL/TLS certificate management
 
 ### Operations Guides
 
 - [Disaster Recovery Guide](disaster-recovery-guide.md) - Backup and recovery procedures
 - [Migration Guide](migration-guide.md) - Resource migration between environments
 - [AWS Authentication](aws-authentication.md) - Cross-account authentication patterns
-- [CI/CD Best Practices](cicd-best-practices.md) - Best practices for CI/CD implementation
+- [CI/CD Best Practices](cicd-integration-guide.md) - Best practices for CI/CD implementation
 
 ### Integration Guides
 
@@ -71,13 +71,13 @@ This documentation provides comprehensive information on using and extending the
 
 ### Security Documentation
 
-- [Security Best Practices](security-best-practices.md) - Security standards for infrastructure
-- [IAM Role Patterns](iam-role-patterns.md) - IAM role patterns for different use cases
+- [Security Best Practices](security-best-practices-guide.md) - Security standards for infrastructure
+- [IAM Role Patterns](iam-role-patterns-guide.md) - IAM role patterns for different use cases
 - [Secrets Management Strategy](secrets-manager-guide.md) - End-to-end secrets management
 
 ## Roadmap
 
-See the [Project Roadmap](roadmap.md) for planned improvements and new features.
+See the [Project Roadmap](project-roadmap.md) for planned improvements and new features.
 
 ## Safety Features
 

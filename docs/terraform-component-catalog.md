@@ -75,4 +75,4 @@ VPC → EKS → EKS-Addons → External-Secrets → Secrets Manager
 
 ## Adding Custom Components
 
-See the [Component Creation Guide](component-creation-guide.md) for instructions on developing your own components.
+See the [Component Creation Guide](terraform-component-creation-guide.md) for instructions on developing your own components.

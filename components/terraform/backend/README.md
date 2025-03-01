@@ -262,4 +262,4 @@ If you encounter state locking errors:
 - [AWS S3 Documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html)
 - [AWS DynamoDB Documentation](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html)
 - [Atmos Workflow Documentation](../../docs/workflows.md)
-- [Atmos Development Guide](../../docs/tf-dev-guide.md)
+- [Atmos Development Guide](../../docs/terraform-development-guide.md)

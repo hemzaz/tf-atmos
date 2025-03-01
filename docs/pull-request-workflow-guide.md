@@ -181,6 +181,6 @@ This PR adds Karpenter autoscaling to our development EKS cluster to improve sca
 ## Related Resources
 
 - [Atlantis Integration Guide](../integrations/atlantis/README.md)
-- [CI/CD Best Practices](cicd-best-practices.md)
-- [Component Creation Guide](component-creation-guide.md)
+- [CI/CD Best Practices](cicd-integration-guide.md)
+- [Component Creation Guide](terraform-component-creation-guide.md)
 - [AWS Authentication Guide](aws-authentication.md)
