@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 # Script to install all dependencies for the Atmos IaC platform
@@ -12,6 +12,11 @@ GREEN="\033[32m"
 YELLOW="\033[33m"
 BLUE="\033[34m"
 RESET="\033[0m"
+
+# Load environment variables from .env file if it exists
+if [[ -f "$(dirname "$0")/../.env" ]]; then
+  source "$(dirname "$0")/../.env"
+fi
 
 # Default configuration
 INSTALL_TERRAFORM=true
@@ -27,10 +32,10 @@ INSTALL_KUBECTL=true
 INSTALL_YAMLLINT=true
 INSTALL_TFSEC=true
 INSTALL_TFLINT=true
-TERRAFORM_VERSION="1.5.7"
-ATMOS_VERSION="1.38.0"
-KUBECTL_VERSION="1.28.3"
-HELM_VERSION="3.13.1"
+TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.5.7}"
+ATMOS_VERSION="${ATMOS_VERSION:-1.38.0}"
+KUBECTL_VERSION="${KUBECTL_VERSION:-1.28.3}"
+HELM_VERSION="${HELM_VERSION:-3.13.1}"
 INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="$HOME/.local/bin"
 SYSTEM_INSTALL=false
