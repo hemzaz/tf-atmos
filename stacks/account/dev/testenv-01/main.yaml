@@ -1,0 +1,42 @@
+##################################################
+# Main Environment Configuration
+##################################################
+
+import:
+  - network       # Base network resources (VPC, subnets, etc.)
+  - infrastructure # Core infrastructure
+  - secretsmanager # Secret management resources
+  - external-secrets # Kubernetes secret management
+  - ec2           # EC2 instances configuration (NEW!)
+  - eks           # Kubernetes clusters
+  - iam           # IAM roles, policies, and groups
+  - acm           # Certificate management
+  - services      # Application services
+  - apigateway    # API gateway configuration
+  - backend       # Terraform backend
+  - monitoring    # CloudWatch monitoring and dashboards
+
+##################################################
+# Global Variables
+##################################################
+
+vars:
+  account: dev
+  environment: testenv-01
+  region: eu-west-2
+  tenant: fnx
+  
+  # Other global variables can be added here
+  domain_name: "example.com"
+  hosted_zone_id: "Z1234567890EXAMPLE"
+  account_id: "123456789012" # Replace with actual AWS account ID
+  aws_profile: "dev" # AWS profile to use for deployment
+  management_account_id: "123456789012" # AWS management account ID
+  
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+  Environment: "testenv-01"
+  ManagedBy: "Terraform"
+  Tenant: "fnx"

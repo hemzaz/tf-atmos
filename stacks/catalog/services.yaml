@@ -121,3 +121,54 @@ components:
         aws:
           profile: ${aws_profile}
           region: ${region}
+          
+    ec2:
+      metadata:
+        component: ec2
+        type: abstract
+      vars:
+        enabled: true
+        region: ${region}
+        vpc_id: ${output.vpc.vpc_id}
+        subnet_ids: ${output.vpc.private_subnet_ids}
+        
+        # SSH Key Management Configuration
+        create_ssh_keys: true
+        store_ssh_keys_in_secrets_manager: true
+        ssh_key_algorithm: "RSA"
+        ssh_key_rsa_bits: 4096
+        
+        # Optional: Define a global key for the environment
+        # global_key_name: "${environment}-shared-key" # Uncomment to use a global key
+        
+        # Optional: Use an existing key as default
+        # default_key_name: "existing-key-name" # Uncomment to use an existing key
+        
+        # Default configuration for a secure EC2 deployment
+        default_ami_id: ""  # Will be selected based on data source if not specified
+        instances: {}  # Will be defined in environment-specific configuration
+      
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "EC2"
+        ManagedBy: "Terraform"
+
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/services/ec2/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+
+      # Provider configuration
+      providers:
+        aws:
+          profile: ${aws_profile}
+          region: ${region}

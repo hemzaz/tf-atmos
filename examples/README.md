@@ -9,6 +9,7 @@ This directory contains practical examples and code snippets to help you impleme
 - `vpc/` - VPC configuration with public and private subnets
 - `apigateway/` - API Gateway with Lambda integrations
 - `eks-addons/` - EKS add-ons with Karpenter and KEDA scaling configurations
+- `ec2-with-ssh-keys/` - EC2 instances with flexible SSH key management (global, individual, and existing keys)
 
 ### Upcoming Component Examples (In Development)
 

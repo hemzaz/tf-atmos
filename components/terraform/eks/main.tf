@@ -17,10 +17,12 @@ resource "aws_cloudwatch_log_group" "eks" {
   for_each = local.clusters
 
   name              = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
-  retention_in_days = var.default_cluster_log_retention_days
+  retention_in_days = lookup(each.value, "log_retention_days", var.default_cluster_log_retention_days)
+  kms_key_id        = lookup(each.value, "log_kms_key_id", null)
 
   tags = merge(
     var.tags,
+    lookup(each.value, "tags", {}),
     {
       Name        = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
       Environment = var.tags["Environment"]
@@ -116,21 +118,7 @@ resource "aws_kms_key" "eks" {
   )
 }
 
-resource "aws_cloudwatch_log_group" "eks" {
-  for_each = local.clusters
-
-  name              = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
-  retention_in_days = lookup(each.value, "log_retention_days", 30)
-  kms_key_id        = lookup(each.value, "log_kms_key_id", null)
-
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-logs"
-    }
-  )
-}
+// Duplicate log group removed
 
 # IAM Role for EKS Cluster
 resource "aws_iam_role" "cluster" {
@@ -226,7 +214,8 @@ resource "aws_eks_node_group" "node_groups" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.key}"
+      Name = "${var.tags["Environment"]}-${each.key}",
+      ClusterName = aws_eks_cluster.clusters[each.value.cluster_name].name
     }
   )
 
@@ -328,8 +317,13 @@ resource "aws_iam_openid_connect_provider" "oidc_provider" {
     lookup(each.value, "tags", {}),
     {
       Name = "${var.tags["Environment"]}-${each.key}-oidc"
+      ClusterName = "${var.tags["Environment"]}-${each.key}"
     }
   )
+  
+  lifecycle {
+    ignore_changes = [thumbprint_list]
+  }
 }
 
 data "tls_certificate" "eks" {

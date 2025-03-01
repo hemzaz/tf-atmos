@@ -1,0 +1,218 @@
+import:
+  - catalog/services
+
+vars:
+  account: dev
+  environment: testenv-01
+  region: eu-west-2
+  tenant: fnx
+  
+dependencies:
+  - network
+
+components:
+  terraform:
+    ec2:
+      vars:
+        enabled: true
+        region: ${region}
+        vpc_id: ${output.vpc.vpc_id}
+        subnet_ids: ${output.vpc.private_subnet_ids}
+        
+        # SSH key configuration
+        create_ssh_keys: true
+        store_ssh_keys_in_secrets_manager: true
+        ssh_key_algorithm: "RSA"
+        ssh_key_rsa_bits: 4096
+        
+        # Global SSH key for environment-wide use
+        # All instances without a specific key_name will use this key
+        global_key_name: "testenv-ssh-key"
+        
+        # If you want to use an existing key as default instead:
+        # default_key_name: "existing-key-name"
+        
+        instances:
+          # Bastion host for secure access
+          # Using global key (no key_name specified)
+          bastion:
+            instance_type: "t3.small"
+            subnet_id: "${output.vpc.public_subnet_ids[0]}"
+            # No key_name specified - will use global environment key
+            allowed_ingress_rules:
+              - from_port: 22
+                to_port: 22
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"] # Company VPN CIDR
+                description: "SSH access from company VPN"
+            allowed_egress_rules:
+              - from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "HTTPS outbound access"
+              - from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "HTTP outbound access"
+            tags:
+              Role: "Bastion"
+              
+          # Application server
+          # Using global key (no key_name specified)
+          app_server:
+            instance_type: "t3.medium"
+            subnet_id: "${output.vpc.private_subnet_ids[0]}"
+            # No key_name specified - will use global environment key
+            root_volume_size: 50
+            allowed_ingress_rules:
+              - from_port: 8080
+                to_port: 8080 
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "Application access"
+            tags:
+              Role: "Application"
+          
+          # Additional servers from infrastructure.yaml
+          k3s:
+            instance_type: "t3.medium"
+            subnet_id: "${output.vpc.private_subnet_ids[1]}"
+            root_volume_size: 30
+            # INDIVIDUAL KEY APPROACH:
+            # This instance will create its own individual SSH key
+            # instead of using the global environment key.
+            # This can be useful for privileged servers where
+            # access should be restricted or audited separately.
+            key_name: null  # Force creation of an individual key
+            allowed_ingress_rules:
+              - from_port: 6443
+                to_port: 6443
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "Kubernetes API"
+              - from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "HTTP"
+              - from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "HTTPS"
+            user_data: |
+              #!/bin/bash
+              curl -sfL https://get.k3s.io | sh -
+            tags:
+              Role: "Kubernetes"
+
+          apache:
+            instance_type: "t3.micro"
+            subnet_id: "${output.vpc.private_subnet_ids[0]}"
+            allowed_ingress_rules:
+              - from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "HTTP"
+              - from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "HTTPS"
+            user_data: |
+              #!/bin/bash
+              yum update -y
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+            tags:
+              Role: "WebServer"
+
+          tableau:
+            instance_type: "t3.xlarge"
+            subnet_id: "${output.vpc.private_subnet_ids[1]}"
+            # EXISTING KEY APPROACH:
+            # Reference an existing key pair for this instance
+            # This is useful for migrating existing instances or when
+            # you already have keys managed outside Terraform.
+            # IMPORTANT: Verify that this key exists in AWS before deployment
+            # For production use, you should use a data source to verify key existence:
+            # 
+            # In EC2 component, main.tf, add:
+            # ```
+            # # Verify existing key pairs exist
+            # data "aws_key_pair" "existing" {
+            #   for_each = { for k, v in local.instances_with_normalized_key_names : k => v
+            #     if v.normalized_key_name != null && !contains(keys(aws_key_pair.generated), k)
+            #   }
+            #   key_name = each.value.normalized_key_name
+            # }
+            # ```
+            key_name: "existing-key-pair"  # Will use this existing key instead of global or creating new
+            root_volume_size: 100
+            ebs_block_devices:
+              - device_name: "/dev/sdf"
+                volume_size: 200
+            allowed_ingress_rules:
+              - from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "HTTP"
+              - from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "HTTPS"
+            tags:
+              Role: "DataVisualization"
+              
+          # GLOBAL KEY APPROACH:
+          # Database server will use the global key (by not specifying a key_name)
+          # This is the default approach when global_key_name is set and
+          # no specific key_name is provided for the instance.
+          # All instances using this approach will share the same SSH key
+          # which simplifies key management for non-critical instances.
+          database:
+            instance_type: "t3.large"
+            subnet_id: "${output.vpc.private_subnet_ids[1]}"
+            # No key_name specified, so will use the global key
+            root_volume_size: 100
+            allowed_ingress_rules:
+              - from_port: 5432
+                to_port: 5432
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "PostgreSQL"
+            tags:
+              Role: "Database"
+      
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "EC2"
+        ManagedBy: "Terraform"
+        Team: "DevOps"
+        CostCenter: "IT"
+        Project: "Infrastructure"
+
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/services/ec2/terraform.tfstate
+              region: ${region}
+              role_arn: "arn:aws:iam::${account_id}:role/${tenant}-terraform-backend-role"
+              dynamodb_table: ${tenant}-terraform-locks
+
+      # Provider configuration
+      providers:
+        aws:
+          region: ${region}

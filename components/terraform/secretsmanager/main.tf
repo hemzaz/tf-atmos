@@ -39,6 +39,14 @@ resource "random_password" "this" {
   min_upper        = var.random_password_min_upper
   min_numeric      = var.random_password_min_numeric
   min_special      = var.random_password_min_special
+  
+  lifecycle {
+    # Ensure passwords are treated as sensitive values
+    precondition {
+      condition     = var.random_password_length >= 8
+      error_message = "Password length must be at least 8 characters for security."
+    }
+  }
 }
 
 # Create the AWS secrets

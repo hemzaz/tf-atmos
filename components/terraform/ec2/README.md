@@ -1,6 +1,6 @@
 # EC2 Component
 
-_Last Updated: February 28, 2025_
+_Last Updated: March 1, 2025_
 
 ## Overview
 
@@ -14,6 +14,7 @@ This component provides a flexible way to deploy and manage AWS EC2 resources in
 - EBS volumes with customizable sizes and types
 - System Manager integration for secure instance management
 - Detailed resource tagging and naming conventions
+- **SSH key pair generation and management** (with AWS Secrets Manager integration)
 
 ## Architecture
 
@@ -166,6 +167,11 @@ components:
 | `subnet_ids` | List of subnet IDs to launch the instances in | `list(string)` | - | Yes |
 | `default_ami_id` | Default AMI ID to use if not specified per instance | `string` | `""` | No |
 | `default_key_name` | Default key pair name for SSH access if not specified per instance | `string` | `null` | No |
+| `global_key_name` | Name for a global SSH key that will be used by instances not specifying their own key | `string` | `null` | No |
+| `create_ssh_keys` | Whether to create SSH key pairs when not specified | `bool` | `false` | No |
+| `store_ssh_keys_in_secrets_manager` | Whether to store generated SSH keys in AWS Secrets Manager | `bool` | `true` | No |
+| `ssh_key_algorithm` | Algorithm for SSH key generation (RSA, ED25519) | `string` | `"RSA"` | No |
+| `ssh_key_rsa_bits` | Bit size for RSA keys | `number` | `4096` | No |
 | `instances` | Map of EC2 instance configurations | `map(any)` | `{}` | No |
 | `tags` | Common tags to apply to all resources | `map(string)` | `{}` | No |
 
@@ -208,6 +214,12 @@ Each instance in the `instances` map supports the following options:
 | `iam_role_names` | Map of instance names to their IAM role names |
 | `iam_instance_profile_arns` | Map of instance names to their IAM instance profile ARNs |
 | `iam_instance_profile_names` | Map of instance names to their IAM instance profile names |
+| `generated_key_names` | Map of instance names (including "global") to their generated SSH key names |
+| `ssh_key_secret_arns` | Map of instance names (including "global") to Secret Manager ARNs containing SSH keys |
+| `global_key_name` | Name of the generated global SSH key, if created |
+| `global_key_secret_arn` | ARN of the Secret Manager secret containing the global SSH key, if created |
+| `instances_using_global_key` | List of instance names using the global SSH key |
+| `instances_using_individual_keys` | List of instance names using individually generated SSH keys |
 
 ## Features
 
@@ -283,6 +295,142 @@ instances:
       }
 ```
 
+### SSH Key Management
+
+The component supports three flexible approaches to SSH key management:
+
+1. **Global SSH Key**: One key shared by multiple instances in an environment
+2. **Individual SSH Keys**: Unique key for each instance
+3. **Existing SSH Keys**: Reference existing AWS key pairs
+
+#### Configuration Options
+
+```yaml
+# Component configuration
+ec2:
+  vars:
+    # ... other configuration ...
+    create_ssh_keys: true
+    store_ssh_keys_in_secrets_manager: true
+    ssh_key_algorithm: "RSA"  # Supports RSA or ED25519
+    ssh_key_rsa_bits: 4096    # For RSA keys
+    
+    # Use a global key for instances that don't specify their own key
+    global_key_name: "myenv-shared-key"
+    
+    # OR use an existing key as the default
+    # default_key_name: "existing-key-pair"
+    
+    instances:
+      webserver:
+        # Will use the global key as no key_name is specified
+        instance_type: "t3.micro"
+        
+      database:
+        # Use an existing key pair
+        key_name: "existing-key-pair"
+        instance_type: "t3.small"
+        
+      app_server:
+        # Force creation of an individual key by explicitly setting to null
+        key_name: null
+        instance_type: "t3.medium"
+```
+
+#### Key Selection Logic
+
+The component uses the following logic to determine which SSH key to use for each instance:
+
+1. If the instance has an explicit `key_name` specified (not null):
+   - Use the specified existing key pair
+2. If the instance has `key_name: null` specified explicitly:
+   - Generate an individual key for this instance
+3. If no `key_name` is specified and `global_key_name` is defined:
+   - Use the shared global key for the environment
+4. If no `key_name` is specified and `default_key_name` is defined:
+   - Use the specified default key pair
+5. If no `key_name` is specified and neither `global_key_name` nor `default_key_name` are defined:
+   - Generate an individual key for this instance
+
+#### Secure Storage in Secrets Manager
+
+Generated keys are stored in AWS Secrets Manager with the following path structures:
+
+- **Individual Keys**: `ssh-key/{environment}/{instance-name}`
+- **Global Key**: `ssh-key/{environment}/global-keys/{global-key-name}`
+
+The secret values are stored in JSON format:
+
+```json
+// Individual key format - initial creation
+{
+  "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n...",
+  "public_key_openssh": "ssh-rsa AAAAB3NzaC1yc2EAAA...",
+  "key_name": "env-instance-key",
+  "instance_name": "instance-name"
+}
+
+// Individual key format - after instance creation
+{
+  "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n...",
+  "public_key_openssh": "ssh-rsa AAAAB3NzaC1yc2EAAA...",
+  "key_name": "env-instance-key",
+  "instance_name": "instance-name",
+  "instance_id": "i-0123456789abcdef0"  // Added after instance creation
+}
+
+// Global key format - initial creation
+{
+  "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n...",
+  "public_key_openssh": "ssh-rsa AAAAB3NzaC1yc2EAAA...",
+  "key_name": "env-global-key-name",
+  "environment": "environment-name",
+  "used_by_instances": ["instance1", "instance2", "instance3"]
+}
+
+// Global key format - after instances creation
+{
+  "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----\n...",
+  "public_key_openssh": "ssh-rsa AAAAB3NzaC1yc2EAAA...",
+  "key_name": "env-global-key-name",
+  "environment": "environment-name",
+  "used_by_instances": ["instance1", "instance2", "instance3"],
+  "instance_details": {  // Added after instances creation
+    "instance1": "i-0123456789abcdef0",
+    "instance2": "i-0123456789abcdef1",
+    "instance3": "i-0123456789abcdef2"
+  }
+}
+```
+
+#### Retrieving SSH Keys
+
+To retrieve an individual key for an instance:
+
+```bash
+# Get individual SSH key
+aws secretsmanager get-secret-value \
+  --secret-id ssh-key/environment-name/instance-name \
+  --query SecretString --output text | jq -r '.private_key_pem' > instance_key.pem
+
+chmod 400 instance_key.pem
+ssh -i instance_key.pem ec2-user@instance-ip-address
+```
+
+To retrieve a global key used by multiple instances:
+
+```bash
+# Get global SSH key
+aws secretsmanager get-secret-value \
+  --secret-id ssh-key/environment-name/global-keys/global-key-name \
+  --query SecretString --output text | jq -r '.private_key_pem' > global_key.pem
+
+chmod 400 global_key.pem
+ssh -i global_key.pem ec2-user@instance-ip-address
+```
+
+> **Note**: The commands above require [jq](https://stedolan.github.io/jq/) to be installed. If you don't have jq, you can store the JSON in a file and extract the key manually.
+
 ## Best Practices
 
 ### Security
@@ -292,7 +440,29 @@ instances:
 3. **Encryption**: Enable encryption for all EBS volumes
 4. **IAM Roles**: Use instance profiles with minimal permissions
 5. **Patching**: Keep instances updated with security patches through SSM Patch Manager
-6. **Systems Manager**: Use SSM instead of SSH key pairs for secure instance access
+6. **Systems Manager**: Use SSM instead of SSH key pairs for secure instance access when possible
+7. **SSH Keys**: When SSH keys are needed, let the component generate them and store in Secrets Manager
+8. **Global Keys**: Use a global key for environments where key management is simpler, with individual keys for privileged instances
+9. **Key Access Control**: Use IAM policies to restrict access to SSH keys in Secrets Manager:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": [
+           "secretsmanager:GetSecretValue"
+         ],
+         "Resource": [
+           "arn:aws:secretsmanager:*:*:secret:ssh-key/production/bastion-*"
+         ]
+       }
+     ]
+   }
+   ```
+
+10. **Key Rotation**: Implement periodic rotation of SSH keys through Secrets Manager rotation policies or scheduled updates
 
 ### Cost Optimization
 
@@ -308,6 +478,37 @@ instances:
 2. **Instance Placement**: Use placement groups for high-performance workloads
 3. **Network Performance**: Choose instances with appropriate network performance
 4. **Volume IOPS**: Configure appropriate IOPS for your workload needs
+
+## Advanced Topics
+
+### SSH Key Rotation
+
+While the component is designed to create stable, persistent SSH keys, you may want to rotate keys periodically for security reasons. Here are some approaches:
+
+1. **Manual Key Rotation**:
+   - Set `create_ssh_keys = false` temporarily
+   - Run `terraform apply` to disable key creation
+   - Delete the secret from AWS Secrets Manager
+   - Delete the key pair from AWS
+   - Set `create_ssh_keys = true` again
+   - Run `terraform apply` to create new keys
+
+2. **Automated Rotation Using Lambda**:
+   - Create a Lambda function for key rotation
+   - Configure Secrets Manager rotation
+   - Update instance userdata to retrieve the latest key
+
+### Key Recovery
+
+If you accidentally delete a SSH key secret:
+
+1. **For Individual Keys**:
+   - If the key pair still exists in AWS, create a new secret manually with the same name path
+   - If the key pair is gone, you'll need to recreate it by temporarily removing the `prevent_destroy` lifecycle rule and running `terraform apply`
+
+2. **For Global Keys**:
+   - Follow the same process as individual keys
+   - Update all instances that use the global key
 
 ## Troubleshooting
 
