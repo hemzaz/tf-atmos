@@ -55,6 +55,13 @@ These features have been requested by users and are under consideration for impl
   - Approval workflows for infrastructure changes
   - Service catalog component templates
 
+- [ ] **Web Management Interface**
+  - Dockerized web dashboard for infrastructure management
+  - Visual SSH key and certificate management
+  - User-friendly interface for non-technical stakeholders
+  - Integration with automation frameworks like Rundeck
+  - Real-time status monitoring of certificates and keys
+
 ### Medium Priority
 - [ ] **Advanced Monitoring**
   - Enhanced CloudWatch dashboard templates
@@ -72,6 +79,12 @@ These features have been requested by users and are under consideration for impl
   - Visual workflow designer
 
 ### Under Consideration
+- [ ] **Certificate and SSH Key Management**
+  - Automated lifecycle management for keys and certificates
+  - Integration with certificate authorities
+  - Bulk rotation/renewal capabilities
+  - Integration with service mesh for certificate distribution
+
 - [ ] **Advanced Edge Computing**
   - CloudFront with Lambda@Edge components
   - IoT integration framework
@@ -170,9 +183,34 @@ git push origin feature/your-feature-name
 | 1.1.0   | Q2 2025     | Security enhancements, advanced monitoring |
 | 1.2.0   | Q3 2025     | Cost management, CI/CD pipeline components |
 | 1.3.0   | Q4 2025     | Service catalog, enhanced data services |
-| 2.0.0   | Q1 2026     | Multi-cloud support, edge computing |
+| 1.4.0   | Q1 2026     | Web Management Interface, certificate/SSH key lifecycle management |
+| 2.0.0   | Q2 2026     | Multi-cloud support, edge computing |
 
 *Note: This roadmap is subject to change based on community feedback and evolving priorities.*
+
+### Web Management Interface Research Plan
+
+As part of the 1.4.0 release, we plan to research and implement a web-based management interface:
+
+1. **Framework Evaluation** (Q3 2025)
+   - Evaluate lightweight frameworks like Flask, FastAPI, or Express.js
+   - Research containerization approaches for local deployment
+   - Assess frontend frameworks (React, Vue, or Svelte)
+
+2. **Rundeck Integration Assessment** (Q3-Q4 2025)
+   - Investigate Rundeck integration for workflow automation
+   - Compare with custom-built workflow engine
+   - Evaluate security implications of different approaches
+
+3. **Prototype Development** (Q4 2025)
+   - Develop proof-of-concept for key management workflows
+   - Create containerized deployment model
+   - Test local and server deployment scenarios
+
+4. **MVP Implementation** (Q1 2026)
+   - Implement first version with core functionality
+   - Focus on certificate/SSH key management
+   - Develop deployment patterns for team environments
 
 ## 7. Known Limitations & Workarounds
 
