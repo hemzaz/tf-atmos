@@ -283,7 +283,7 @@ aws acm list-certificates --query 'CertificateSummaryList[?DomainName==`*.exampl
 
 Export your certificate to AWS Secrets Manager:
 
-> **Note**: This step requires you to have the certificate's private key file if it was imported into ACM. For ACM-issued certificates, this step may be more complex - see the [Secrets Manager Guide](docs/secrets-manager-guide.md) for details.
+> **Note**: This step requires you to have the certificate's private key file if it was imported into ACM. For ACM-issued certificates, this step may be more complex - see the [Secrets Manager Guide](secrets-manager-guide.md) for details.
 
 ```bash
 # Make sure the script is executable
@@ -534,9 +534,10 @@ kubectl get clustersecretstore aws-certificate-store -o yaml
 If you encounter issues, please refer to:
 
 - **Project Documentation**:
-  - [Certificate Management Guide](../docs/secrets-manager-guide.md)
-  - [EKS Addons Reference](../docs/eks-addons-reference.md)
-  - [Component Creation Guide](../docs/terraform-component-creation-guide.md)
+  - [Certificate Management Guide](certificate-management-guide.md)
+  - [Secrets Manager Guide](secrets-manager-guide.md)
+  - [EKS Addons Reference](eks-addons-reference.md)
+  - [Component Creation Guide](terraform-component-creation-guide.md)
 
 - **AWS Documentation**:
   - [AWS EKS Documentation](https://docs.aws.amazon.com/eks)

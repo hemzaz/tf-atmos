@@ -55,6 +55,14 @@ These features have been requested by users and are under consideration for impl
   - Approval workflows for infrastructure changes
   - Service catalog component templates
 
+- [ ] 🔵 **Environment VPN Access**
+  - Per-environment VPN solution
+  - Integration with AWS IAM for authentication
+  - Support for both EC2-based (WireGuard/OpenVPN) and AWS native Client VPN
+  - Automatic client configuration generation
+  - VPN traffic monitoring dashboard
+  - MFA integration options
+  
 - [ ] **Web Management Interface**
   - Dockerized web dashboard for infrastructure management
   - Visual SSH key and certificate management

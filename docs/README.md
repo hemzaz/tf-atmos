@@ -26,6 +26,9 @@ This documentation provides comprehensive information on using and extending the
 | Debug common issues | [Troubleshooting Guide](troubleshooting-guide.md) |
 | Set up Kubernetes workloads | [EKS Addons Reference](eks-addons-reference.md) |
 | Secure your infrastructure | [Secrets Manager Guide](secrets-manager-guide.md) |
+| Manage TLS certificates | [Certificate Management Guide](certificate-management-guide.md) |
+| Monitor certificate expiration | [Certificate Monitoring](certificate-management-guide.md#automated-certificate-monitoring) |
+| Manage SSH keys | [SSH Key Management](../scripts/certificates/README.md) |
 | Recover from failures | [Disaster Recovery Guide](disaster-recovery-guide.md) |
 | Automate with CI/CD | [CI/CD Integrations](../integrations/README.md) |
 
@@ -54,7 +57,7 @@ This documentation provides comprehensive information on using and extending the
 - [Istio Service Mesh Guide](istio-service-mesh-guide.md) - Service mesh deployment
 - [Secrets Manager Guide](secrets-manager-guide.md) - Secret management best practices
 - [API Gateway Integration Guide](api-gateway-integration-guide.md) - API Gateway patterns
-- [Certificate Management](certificate-management-guide.md) - SSL/TLS certificate management
+- [Certificate Management Guide](certificate-management-guide.md) - SSL/TLS certificate management
 
 ### Operations Guides
 
@@ -74,6 +77,8 @@ This documentation provides comprehensive information on using and extending the
 - [Security Best Practices](security-best-practices-guide.md) - Security standards for infrastructure
 - [IAM Role Patterns](iam-role-patterns-guide.md) - IAM role patterns for different use cases
 - [Secrets Management Strategy](secrets-manager-guide.md) - End-to-end secrets management
+- [Certificate Management](certificate-management-guide.md) - SSL/TLS certificate management
+- [SSH Key Management](../scripts/certificates/README.md) - SSH key generation, rotation, and monitoring
 
 ## Roadmap
 

@@ -351,14 +351,60 @@ module "certificate_dashboard" {
 }
 ```
 
+### Automated Certificate Monitoring
+
+The framework includes a comprehensive script for monitoring certificates and SSH keys:
+
+```bash
+# Basic usage monitoring all certificates and SSH keys
+./scripts/certificates/monitor-certificates.sh -r us-west-2
+
+# Set custom thresholds (warning at 45 days, critical at 14 days)
+./scripts/certificates/monitor-certificates.sh -w 45 -c 14
+
+# Send notifications to Slack
+./scripts/certificates/monitor-certificates.sh --slack https://hooks.slack.com/services/XXX/YYY/ZZZ
+
+# Generate JSON report and send to SNS
+./scripts/certificates/monitor-certificates.sh --output json -f certificates-report.json --sns arn:aws:sns:us-west-2:123456789012:CertAlerts
+
+# Skip checking SSH keys and only monitor certificates
+./scripts/certificates/monitor-certificates.sh --no-ssh
+```
+
+The script provides these key features:
+- Monitors ACM certificates, certificate secrets in Secrets Manager, and SSH keys
+- Configurable warning and critical thresholds (defaults: 30 and 14 days)
+- Multiple output formats: text, JSON, and HTML
+- Notification options: Slack, SNS, Email, and Jira tickets
+- Automatic detection of certificates in various formats
+
 ### Alerting Framework
 
 Implement a complete alerting framework:
 
 1. **CloudWatch Metrics**: Track certificate-related metrics
 2. **CloudWatch Alarms**: Set thresholds for expiration windows
-3. **SNS Notifications**: Send alerts to appropriate channels
+3. **SNS Notifications**: Send alerts to appropriate channels (see monitor-certificates.sh)
 4. **Automated Remediation**: Trigger automated renewal where possible
+5. **Scheduled Monitoring**: Run the monitoring script on a schedule using CloudWatch Events/EventBridge
+
+#### Setting Up Scheduled Monitoring
+
+Create a scheduled task to run the certificate monitor:
+
+```bash
+# Create an EventBridge rule that runs daily
+aws events put-rule \
+  --name "DailyCertificateMonitoring" \
+  --schedule-expression "cron(0 8 * * ? *)" \
+  --description "Runs certificate monitoring daily at 8:00 AM UTC"
+
+# Configure the target (Lambda function, ECS task, etc.)
+aws events put-targets \
+  --rule "DailyCertificateMonitoring" \
+  --targets file://certificate-monitor-target.json
+```
 
 ## Integration with AWS Services
 
@@ -474,24 +520,62 @@ dig +short ${VALIDATION_RECORD_NAME} TXT
 
 ## Scripts and Automation
 
-### Certificate Export Script
+### Certificate Management Scripts
 
-The Atmos framework includes scripts for certificate management:
+The Atmos framework includes a comprehensive set of scripts for certificate and SSH key management:
+
+#### Certificate Export Script
+
+Export certificates from ACM to Secrets Manager:
 
 ```bash
-#!/usr/bin/env bash
-# Export an ACM certificate to Secrets Manager for use in Kubernetes
+# Export certificate to Secrets Manager
 ./scripts/certificates/export-cert.sh -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234-abcd-1234-abcd-1234abcd5678 -u
+
+# Export with custom output directory and secret name
+./scripts/certificates/export-cert.sh -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234 -o ./certs -s certificates/wildcard-example-com
 ```
 
-### Certificate Rotation Script
+#### Certificate Rotation Script
 
 For rotating certificates in Kubernetes:
 
 ```bash
-#!/usr/bin/env bash
-# Rotate a certificate in Kubernetes
+# Rotate certificate with a new ACM certificate
 ./scripts/certificates/rotate-cert.sh -s certificates/example-com -n istio-system -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234
+
+# Force refresh of ExternalSecret without changing certificate
+./scripts/certificates/rotate-cert.sh -s certificates/example-com -n istio-system
+```
+
+#### SSH Key Management Scripts
+
+The framework also includes scripts for SSH key management that follow similar security practices:
+
+```bash
+# Generate a new SSH key and store in Secrets Manager
+./scripts/certificates/generate-ssh-key.sh -n myapp-ssh-key -e 'user@example.com' -s dev/ssh-keys/myapp
+
+# Export an SSH key from Secrets Manager
+./scripts/certificates/export-ssh-key.sh -s dev/ssh-keys/myapp -o ~/.ssh/myapp_key
+
+# Rotate an SSH key
+./scripts/certificates/rotate-ssh-key.sh -s dev/ssh-keys/myapp -e 'user@example.com'
+```
+
+#### Certificate Monitoring Script
+
+Monitor certificates and SSH keys for expiration:
+
+```bash
+# Monitor all certificates and SSH keys
+./scripts/certificates/monitor-certificates.sh -r us-west-2
+
+# Create HTML report with expiration warnings
+./scripts/certificates/monitor-certificates.sh -o html -f certificate-report.html
+
+# Send Slack notifications for expiring certificates
+./scripts/certificates/monitor-certificates.sh --slack https://hooks.slack.com/services/XXX/YYY/ZZZ
 ```
 
 ## Best Practices
@@ -516,3 +600,5 @@ For rotating certificates in Kubernetes:
 - [Security Best Practices Guide](security-best-practices-guide.md)
 - [Istio Service Mesh Guide](istio-service-mesh-guide.md)
 - [Secrets Manager Guide](secrets-manager-guide.md)
+- [Environment Onboarding Guide](environment-onboarding.md)
+- [SSH Key Management Scripts](../scripts/certificates/README.md)
