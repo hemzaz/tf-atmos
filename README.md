@@ -118,6 +118,14 @@ cd tf-atmos
 
 # View or modify tool versions in the .env file
 cat .env
+
+# Update tool versions in .env (examples)
+./scripts/update-versions.sh --all                           # View all tools and their versions
+./scripts/update-versions.sh --check --group all             # Check for updates for all tools
+./scripts/update-versions.sh TERRAFORM_VERSION               # Update Terraform to latest
+./scripts/update-versions.sh --version 1.11.0 TERRAFORM_VERSION # Set specific version
+./scripts/update-versions.sh --group core                    # Update all core tools to latest
+
 # After updating .env, reinstall dependencies
 ./scripts/install-dependencies.sh
 

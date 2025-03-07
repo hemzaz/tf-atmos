@@ -155,6 +155,7 @@
 - **Dependency Management**:
   - Use the `.env` file at the root of the repository for all tool version pins
   - Use the install-dependencies.sh script to ensure all required tools are available
+  - Use the update-versions.sh script to check for and update tool versions
   - Install optional tools with specific flags (e.g., `--install-checkov`)
 
 ## Troubleshooting Guide
