@@ -53,7 +53,7 @@ There are many ways to contribute to this project:
 ### Adding a New Component
 
 1. Follow the [component creation guide](terraform-component-creation-guide.md)
-2. Create necessary component files following our [code style guidelines](../CLAUDE.md)
+2. Create necessary component files following our [code style guidelines](../GUIDELINES.md)
 3. Add documentation in README.md
 4. Create examples in the examples directory
 5. Update the component catalog

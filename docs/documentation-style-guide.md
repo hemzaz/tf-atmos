@@ -52,7 +52,7 @@ This style guide establishes standards for documentation in the Atmos project to
 
 ```
 .
-├── CLAUDE.md                  # Code style guidelines
+├── GUIDELINES.md              # Code style guidelines
 ├── atmos.yaml                 # Atmos configuration
 ├── components/                # Terraform components
 │   └── terraform/

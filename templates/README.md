@@ -62,7 +62,7 @@ This directory contains reusable templates for quickly implementing common patte
 
 All templates follow these principles:
 
-1. **Consistency** - Adhere to established code style guidelines in CLAUDE.md
+1. **Consistency** - Adhere to established code style guidelines in GUIDELINES.md
 2. **Best Practices** - Implement security, tagging, and error handling patterns
 3. **Documentation** - Include comprehensive comments explaining usage
 4. **Modularity** - Focus on reusability and clear separation of concerns

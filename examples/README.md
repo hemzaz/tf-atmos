@@ -60,7 +60,7 @@ When adapting examples, consider:
 
 ## Best Practices Applied
 
-All examples adhere to the best practices outlined in the CLAUDE.md file, including:
+All examples adhere to the best practices outlined in the GUIDELINES.md file, including:
 
 - Proper variable validation
 - Comprehensive error handling

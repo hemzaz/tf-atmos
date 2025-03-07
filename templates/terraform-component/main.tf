@@ -1,5 +1,5 @@
 # Template: Terraform Component Main File
-# This template follows the best practices outlined in CLAUDE.md
+# This template follows the best practices outlined in GUIDELINES.md
 # Replace placeholder values and comments with your actual implementation
 
 locals {

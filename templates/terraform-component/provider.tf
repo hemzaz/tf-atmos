@@ -1,5 +1,5 @@
 # Template: Terraform Component Provider File
-# This template follows the best practices outlined in CLAUDE.md
+# This template follows the best practices outlined in GUIDELINES.md
 
 provider "aws" {
   region = var.region
