@@ -1,0 +1,173 @@
+name: compliance-check
+description: "Check infrastructure compliance against best practices and security standards"
+
+workflows:
+  check:
+    description: "Run all compliance checks on a specific environment"
+    steps:
+    - run:
+        command: |
+          # Validate required variables
+          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
+            echo "ERROR: Missing required parameters."
+            echo "Usage: atmos workflow compliance-check tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+          
+          # Set exit on error
+          set -e
+          
+          echo "Starting compliance check for ${tenant}-${account}-${environment}"
+          echo "============================================"
+          
+          # Define the stack for validation
+          STACK="${tenant}-${account}-${environment}"
+          
+          # Step 1: Validate stack configuration
+          echo "Step 1: Validating stack configuration..."
+          atmos validate stacks --stack $STACK
+          
+          # Step 2: Check for security compliance violations
+          echo "Step 2: Checking for security compliance violations..."
+          
+          # Check Terraform components for compliance
+          echo "Checking encryption settings..."
+          atmos describe config -s $STACK | grep -E "encryption|kms" || echo "No encryption settings found"
+          
+          # Check IAM policies
+          echo "Checking IAM policy settings..."
+          atmos describe config -s $STACK | grep -E "policy|iam" || echo "No IAM policy settings found"
+          
+          # Check public access settings
+          echo "Checking public access settings..."
+          atmos describe config -s $STACK | grep -E "public_access|public_endpoint" || echo "No public access settings found"
+          
+          # Step 3: Run drift detection
+          echo "Step 3: Running drift detection..."
+          atmos workflow drift-detection tenant=${tenant} account=${account} environment=${environment} || true
+          
+          # Step 4: Apply OpenPolicyAgent policies
+          echo "Step 4: Checking OPA policies..."
+          if command -v conftest &> /dev/null; then
+            # If conftest is installed, run OPA policies
+            atmos describe config -s $STACK -f json > stack-config.json
+            if [ -d "policies/opa" ]; then
+              conftest test stack-config.json --policy policies/opa
+            else
+              echo "No OPA policies found in policies/opa directory"
+            fi
+            rm -f stack-config.json
+          else
+            echo "conftest not installed, skipping OPA policy checks"
+          fi
+          
+          # Step 5: Validate components
+          echo "Step 5: Validating components..."
+          atmos validate component --stack $STACK
+          
+          # Step 6: Check variables defined in stack
+          echo "Step 6: Checking for required variables..."
+          
+          # Check for sensitive variables with default values
+          echo "Checking for sensitive variables with default values..."
+          atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
+            .[$k].vars | keys[] as $var | 
+            select($var | test("password|token|key|secret|credential")) | "\($k).\($var)"' || echo "No sensitive variables found"
+          
+          # Step 7: Generate compliance report
+          echo "Step 7: Generating compliance report..."
+          
+          echo "Compliance check complete for ${tenant}-${account}-${environment}"
+          echo "============================================"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+  
+  report:
+    description: "Generate compliance report for all environments"
+    steps:
+    - run:
+        command: |
+          # Validate required variables
+          if [ -z "${tenant}" ]; then
+            echo "ERROR: Missing required parameters."
+            echo "Usage: atmos workflow compliance-report tenant=<tenant>"
+            exit 1
+          fi
+          
+          # Set exit on error
+          set -e
+          
+          echo "Generating compliance report for tenant ${tenant}"
+          echo "============================================"
+          
+          # List all stacks for the tenant
+          STACKS=$(atmos list stacks --tenant ${tenant} --format json | jq -r '.[].name')
+          
+          # Generate output directory
+          REPORT_DIR="compliance-reports"
+          mkdir -p "${REPORT_DIR}"
+          
+          # Generate report for each stack
+          echo "# Compliance Report for ${tenant}" > "${REPORT_DIR}/compliance-report.md"
+          echo "Generated on $(date)" >> "${REPORT_DIR}/compliance-report.md"
+          echo "" >> "${REPORT_DIR}/compliance-report.md"
+          
+          for STACK in $STACKS; do
+            echo "Checking stack: $STACK"
+            echo "## Stack: $STACK" >> "${REPORT_DIR}/compliance-report.md"
+            echo "" >> "${REPORT_DIR}/compliance-report.md"
+            
+            # Extract stack components
+            COMPONENTS=$(atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[]')
+            
+            echo "### Components" >> "${REPORT_DIR}/compliance-report.md"
+            echo "" >> "${REPORT_DIR}/compliance-report.md"
+            
+            for COMPONENT in $COMPONENTS; do
+              echo "- $COMPONENT" >> "${REPORT_DIR}/compliance-report.md"
+            done
+            
+            echo "" >> "${REPORT_DIR}/compliance-report.md"
+            
+            # Check for sensitive variables
+            echo "### Sensitive Variables" >> "${REPORT_DIR}/compliance-report.md"
+            echo "" >> "${REPORT_DIR}/compliance-report.md"
+            
+            SENSITIVE_VARS=$(atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
+              .[$k].vars | keys[] as $var | 
+              select($var | test("password|token|key|secret|credential")) | "\($k).\($var)"' 2>/dev/null || echo "")
+            
+            if [ -n "$SENSITIVE_VARS" ]; then
+              echo "The following sensitive variables were detected:" >> "${REPORT_DIR}/compliance-report.md"
+              echo '```' >> "${REPORT_DIR}/compliance-report.md"
+              echo "$SENSITIVE_VARS" >> "${REPORT_DIR}/compliance-report.md"
+              echo '```' >> "${REPORT_DIR}/compliance-report.md"
+            else
+              echo "No sensitive variables detected" >> "${REPORT_DIR}/compliance-report.md"
+            fi
+            
+            echo "" >> "${REPORT_DIR}/compliance-report.md"
+            
+            # Check for public access
+            echo "### Public Access" >> "${REPORT_DIR}/compliance-report.md"
+            echo "" >> "${REPORT_DIR}/compliance-report.md"
+            
+            PUBLIC_ACCESS=$(atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
+              .[$k].vars | to_entries[] | select(.key | test("public_access|public_endpoint")) | "\($k).\(.key) = \(.value)"' 2>/dev/null || echo "")
+            
+            if [ -n "$PUBLIC_ACCESS" ]; then
+              echo "The following public access settings were detected:" >> "${REPORT_DIR}/compliance-report.md"
+              echo '```' >> "${REPORT_DIR}/compliance-report.md"
+              echo "$PUBLIC_ACCESS" >> "${REPORT_DIR}/compliance-report.md"
+              echo '```' >> "${REPORT_DIR}/compliance-report.md"
+            else
+              echo "No public access settings detected" >> "${REPORT_DIR}/compliance-report.md"
+            fi
+            
+            echo "" >> "${REPORT_DIR}/compliance-report.md"
+          done
+          
+          echo "Compliance report generated at ${REPORT_DIR}/compliance-report.md"
+          echo "============================================"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

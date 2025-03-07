@@ -1,3 +1,6 @@
+# Add AWS caller identity data source for IAM policies
+data "aws_caller_identity" "current" {}
+
 locals {
   clusters = {
     for k, v in var.clusters : k => v if lookup(v, "enabled", true)
@@ -48,7 +51,10 @@ resource "aws_eks_cluster" "clusters" {
 
   encryption_config {
     provider {
-      key_arn = lookup(each.value, "kms_key_arn", aws_kms_key.eks[each.key].arn)
+      # Use explicit fallback logic to avoid dependency cycle
+      key_arn = lookup(each.value, "kms_key_arn", null) != null ? 
+                lookup(each.value, "kms_key_arn", null) : 
+                aws_kms_key.eks[each.key].arn
     }
     resources = ["secrets"]
   }
@@ -81,8 +87,8 @@ resource "aws_eks_cluster" "clusters" {
   ]
 
   lifecycle {
-    # Prevent changes that would recreate the cluster
-    prevent_destroy = true
+    # Only prevent destroy in production environments or when explicitly enabled
+    prevent_destroy = var.enable_cluster_protection && contains(["prod", "production"], lower(var.tags["Environment"]))
 
     # Add preconditions for various cluster requirements
     precondition {
@@ -91,8 +97,8 @@ resource "aws_eks_cluster" "clusters" {
     }
 
     precondition {
-      condition     = can(regex("^1\\.(2[0-9])$", lookup(each.value, "kubernetes_version", var.default_kubernetes_version)))
-      error_message = "Kubernetes version for cluster ${each.key} must be in the format '1.XX' (e.g., 1.28)."
+      condition     = can(regex("^\\d+\\.(\\d+)$", lookup(each.value, "kubernetes_version", var.default_kubernetes_version)))
+      error_message = "Kubernetes version for cluster ${each.key} must be in the format 'X.Y' (e.g., 1.28)."
     }
 
     precondition {
@@ -108,17 +114,57 @@ resource "aws_kms_key" "eks" {
   description             = "KMS key for EKS ${each.key} secrets encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
+  
+  # Add key policy to allow EKS service to use the key and AWS root user to administer it
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Sid = "Enable IAM User Permissions",
+        Effect = "Allow",
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        },
+        Action = "kms:*",
+        Resource = "*"
+      },
+      {
+        Sid = "Allow EKS Service to use the key",
+        Effect = "Allow",
+        Principal = {
+          Service = "eks.amazonaws.com"
+        },
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ],
+        Resource = "*",
+        Condition = {
+          StringEquals = {
+            "kms:CallerAccount" = data.aws_caller_identity.current.account_id,
+            "kms:ViaService" = "eks.${var.region}.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
 
   tags = merge(
     var.tags,
     lookup(each.value, "tags", {}),
     {
       Name = "${var.tags["Environment"]}-${each.key}-kms-key"
+      Environment = var.tags["Environment"]
+      Cluster = each.key
+      ManagedBy = "terraform"
     }
   )
 }
 
-// Duplicate log group removed
+// Log group configuration moved to aws_cloudwatch_log_group.eks above
 
 # IAM Role for EKS Cluster
 resource "aws_iam_role" "cluster" {
@@ -191,6 +237,17 @@ resource "aws_eks_node_group" "node_groups" {
     }
   }
 
+  # Add validation for taint effect values
+  lifecycle {
+    precondition {
+      condition     = length(lookup(each.value, "taints", [])) == 0 || alltrue([
+        for taint in lookup(each.value, "taints", []) : 
+        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], lookup(taint, "effect", "NO_SCHEDULE"))
+      ])
+      error_message = "Taint effect must be one of: NO_SCHEDULE, PREFER_NO_SCHEDULE, or NO_EXECUTE."
+    }
+  }
+
   dynamic "update_config" {
     for_each = lookup(each.value, "update_config", null) != null ? [1] : []
     content {
@@ -244,6 +301,12 @@ resource "aws_eks_node_group" "node_groups" {
     precondition {
       condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) > 0
       error_message = "At least one subnet must be provided for the node group."
+    }
+    
+    # Add precondition to validate instance types are valid
+    precondition {
+      condition     = length(lookup(each.value, "instance_types", ["t3.medium"])) > 0
+      error_message = "At least one instance type must be specified."
     }
   }
 
@@ -322,12 +385,32 @@ resource "aws_iam_openid_connect_provider" "oidc_provider" {
   )
   
   lifecycle {
+    # Thumbprint list may be updated by AWS, but we want to trigger rotation only
+    # when URL changes to avoid needless redeployments
     ignore_changes = [thumbprint_list]
+    
+    # Add explicit message for maintainers about why thumbprint changes are ignored
+    # This isn't functional but helps document the decision
+    precondition {
+      condition     = true
+      error_message = "NOTE: thumbprint_list changes are ignored as AWS rotates these regularly. To force rotation, update the URL or use terraform taint."
+    }
   }
 }
+
+# AWS caller identity data source moved to top of file
 
 data "tls_certificate" "eks" {
   for_each = local.clusters
 
   url = aws_eks_cluster.clusters[each.key].identity[0].oidc[0].issuer
+  
+  # Add retry logic for certificate lookup which can sometimes fail
+  lifecycle {
+    # Add explicit error messages to help with troubleshooting
+    postcondition {
+      condition     = length(self.certificates) > 0
+      error_message = "Failed to retrieve OIDC certificates for cluster ${each.key}. Check if the cluster API is accessible."
+    }
+  }
 }

@@ -1,14 +1,15 @@
 # Atmos Framework Overview
 
-_Last Updated: February 27, 2025_
+_Last Updated: March 7, 2025_
 
-This document provides a comprehensive overview of the Atmos framework, its architecture, and how it's used to manage infrastructure as code with Terraform.
+This document provides a comprehensive overview of the Atmos framework, its architecture, latest design patterns, and how it's used to manage infrastructure as code with Terraform.
 
 ## Table of Contents
 
 - [Introduction](#introduction)
 - [Architecture](#architecture)
 - [Key Concepts](#key-concepts)
+- [Design Patterns](#design-patterns)
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
 - [Advanced Usage](#advanced-usage)
@@ -25,6 +26,7 @@ Atmos is an orchestration tool designed to manage infrastructure as code across 
 - Supporting cross-component references
 - Enabling workflow automation and standardization
 - Facilitating environment-specific configurations
+- Implementing component dependencies and validation
 
 Atmos is particularly well-suited for organizations with multiple AWS accounts (e.g., development, staging, production) and teams that need to manage infrastructure consistently across these accounts.
 
@@ -35,11 +37,14 @@ Atmos uses a structured approach to organize infrastructure code:
 ```
 └── Project Root
     ├── atmos.yaml              # Atmos configuration
-    ├── components/             # Terraform modules
+    ├── components/             # Terraform components
+    │   └── terraform/          # Terraform modules
     ├── stacks/                 # Stack configurations
     │   ├── catalog/            # Reusable component configurations
     │   ├── account/            # Account-specific configurations
+    │   ├── mixins/             # Reusable configuration fragments
     │   └── schemas/            # JSON schemas for validation
+    ├── templates/              # Component templates
     └── workflows/              # Custom workflows
 ```
 
@@ -50,8 +55,7 @@ The architecture follows these principles:
 3. **Single source of truth** - All configurations managed in one repository
 4. **Workflow standardization** - Common operations defined as workflows
 5. **Version control** - All code and configurations managed with Git
-
-![Atmos Architecture](https://raw.githubusercontent.com/cloudposse/atmos/master/docs/images/architecture.png)
+6. **Validation and compliance** - Schema validation for configurations
 
 ## Key Concepts
 
@@ -61,8 +65,15 @@ Components are the building blocks of your infrastructure. In Atmos, a component
 
 Components are stored in the `components/terraform/` directory and contain:
 - Terraform code (.tf files)
-- Documentation
+- Documentation (README.md)
+- IAM policies (in the policies/ directory)
 - Tests (optional)
+
+Each component should include:
+- Detailed metadata (component name, type, version, description)
+- Clear dependency information
+- Comprehensive variable validation
+- Well-documented outputs
 
 ### Stacks
 
@@ -70,12 +81,43 @@ Stacks define configurations for components across different environments. They 
 
 - **Catalog** (`stacks/catalog/`) - Base configurations for components
 - **Account** (`stacks/account/`) - Account and environment-specific configurations
+- **Mixins** (`stacks/mixins/`) - Reusable configuration fragments
 
-Stacks are defined in YAML files and use a hierarchical inheritance model:
+Stacks use a hierarchical inheritance model:
 
-1. Catalog defines base configuration
-2. Account-specific configuration inherits and overrides catalog
-3. Environment-specific configuration inherits and overrides account
+1. Mixins provide environment-type configurations (e.g., production, development)
+2. Catalog defines base component configurations
+3. Account-specific configuration inherits and overrides catalog, with environment-specific settings
+
+### Stack Metadata
+
+Stacks can include metadata to provide additional context:
+
+```yaml
+metadata:
+  description: "Development environment in EU region"
+  owner: "DevOps Team"
+  version: "1.0.0"
+  stage: "dev"
+  compliance:
+    hipaa: false
+    pci: false
+    gdpr: true
+```
+
+### Component Metadata
+
+Components should include rich metadata:
+
+```yaml
+metadata:
+  component: "eks"
+  type: "abstract"
+  version: "1.2.0"
+  description: "EKS Kubernetes cluster configuration"
+  category: "container-orchestration"
+  namespace: "k8s"
+```
 
 ### Variables
 
@@ -85,6 +127,7 @@ Atmos provides a powerful variable system that supports:
 - **Variable overrides** - More specific configurations override general ones
 - **Context variables** - `tenant`, `account`, `environment`, `region`, etc.
 - **Special expressions** - For advanced variable processing
+- **Default values with fallbacks** - `${variable_name | default("default_value")}`
 
 Example variable reference: `${output.vpc.vpc_id}`
 
@@ -94,24 +137,115 @@ Workflows are predefined sequences of commands that automate common tasks. They 
 
 Example workflow:
 ```yaml
-name: apply-environment
-description: "Apply all components in an environment"
-steps:
-  - command: atmos
-    args:
-      - terraform
-      - apply
-      - vpc
-      - -s
-      - "{tenant}-{account}-{environment}"
-  # More steps...
+name: compliance-check
+description: "Check infrastructure compliance"
+workflows:
+  check:
+    description: "Run compliance checks on a specific environment"
+    steps:
+    - run:
+        command: |
+          echo "Running compliance checks for ${tenant}-${account}-${environment}"
+          atmos validate stacks --stack ${tenant}-${account}-${environment}
+```
+
+## Design Patterns
+
+Atmos supports several design patterns for effectively managing infrastructure:
+
+### Abstract Component Pattern
+
+Define abstract components in the catalog that are customized for specific environments:
+
+```yaml
+# In catalog
+components:
+  terraform:
+    vpc:
+      metadata:
+        component: vpc
+        type: abstract
+      vars:
+        enabled: true
+        region: ${region}
+```
+
+### Component Dependencies
+
+Define explicit dependencies between components:
+
+```yaml
+components:
+  terraform:
+    eks:
+      depends_on:
+        - vpc
+        - securitygroup
+```
+
+### Configuration Mixins
+
+Create reusable configuration fragments for environment types:
+
+```yaml
+# In stacks/mixins/production.yaml
+vars:
+  environment_type: "production"
+  high_availability: true
+  multi_az: true
+  deletion_protection: true
+
+# In environment stack
+import:
+  - mixins/production
+  - catalog/network
+```
+
+### Variable Validation
+
+Add validation rules to components:
+
+```yaml
+settings:
+  terraform:
+    vars:
+      validation:
+        rules:
+          validate_k8s_version:
+            rule: kubernetes_version =~ /^[0-9]+\.[0-9]+$/
+            message: "Kubernetes version must be in format X.Y"
+```
+
+### Schema Validation
+
+Use JSON Schema to validate stack configurations:
+
+```yaml
+# In atmos.yaml
+schemas:
+  atmos:
+    manifest: "stacks/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"
+```
+
+### Component Hooks
+
+Add pre/post-hooks for component operations:
+
+```yaml
+# In atmos.yaml
+components:
+  terraform:
+    hooks:
+      pre_plan:
+        - run:
+            command: terraform fmt -check -recursive
 ```
 
 ## Installation
 
 ### Prerequisites
 
-- Terraform (v1.0.0 or later)
+- Terraform (v1.11.0 or later)
 - AWS CLI (configured with appropriate credentials)
 - Git
 
@@ -138,67 +272,86 @@ atmos version
 
 ## Basic Usage
 
-### Initialize Project
-
-```bash
-atmos init
-```
-
-This sets up the basic directory structure and configuration files.
-
 ### Configure Atmos
 
 Edit the `atmos.yaml` file to configure Atmos:
 
 ```yaml
-base:
-  components:
-    terraform:
-      base_path: components/terraform
-      apply_auto_approve: false
-      deploy_run_init: true
-      init_run_reconfigure: true
-      auto_generate_backend_file: true
-  stacks:
-    base_path: stacks
-    included_paths:
-      - "catalog/**/*"
-      - "account/**/*"
-    excluded_paths:
-      - "**/.git/**/*"
-    name_pattern: "{tenant}-{environment}-{stage}"
-# ...additional configuration...
+base_path: "."
+
+components:
+  terraform:
+    base_path: components/terraform
+    apply_auto_approve: false
+    deploy_run_init: true
+    init_run_reconfigure: true
+    auto_generate_backend_file: false
+    terraform_version: "1.11.0"
+    hooks:
+      pre_plan:
+        - run:
+            command: terraform fmt -check -recursive
+
+stacks:
+  base_path: stacks
+  included_paths:
+  - "account/**/**/*.yaml"
+  - "catalog/**/*.yaml"
+  - "mixins/**/*.yaml"
+  excluded_paths:
+  - "**/_defaults.yaml"
+  name_template: "{{.tenant}}-{{.account}}-{{.environment}}"
+
+workflows:
+  base_path: workflows
+  imports:
+  - apply-environment.yaml
+  - bootstrap-backend.yaml
+  - compliance-check.yaml
+  # Other workflows...
+
+settings:
+  component:
+    deps:
+      enabled: true
+    version:
+      enabled: true
 ```
 
 ### Deploy a Component
 
 ```bash
-atmos terraform apply vpc -s mycompany-dev-us-east-1
+atmos terraform apply vpc -s mycompany-dev-eu-west-2
 ```
 
 ### Use Workflows
 
 ```bash
-atmos workflow apply-environment tenant=mycompany account=dev environment=us-east-1
+atmos workflow apply-environment tenant=mycompany account=dev environment=eu-west-2
+```
+
+### Stack Validation
+
+```bash
+atmos validate stacks --stack mycompany-dev-eu-west-2
 ```
 
 ## Advanced Usage
 
 ### Component Dependencies
 
-Atmos supports explicit component dependencies using the `dependencies` field in stack configurations:
+Define explicit component dependencies in stack files:
 
 ```yaml
-# stacks/account/dev/us-east-1/eks.yaml
-import:
-  - catalog/eks
-
-dependencies:
-  - vpc
-  - iam
-
-vars:
-  # ... component variables ...
+# stacks/catalog/infrastructure.yaml
+components:
+  terraform:
+    eks:
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        # ... component variables ...
 ```
 
 ### Cross-Component References
@@ -209,36 +362,61 @@ Reference outputs from other components:
 vars:
   vpc_id: ${output.vpc.vpc_id}
   subnet_ids: ${output.vpc.private_subnet_ids}
+  oidc_provider_arn: ${output.eks.oidc_provider_arn}
 ```
 
-### Custom Variable Processing
+### Conditional Variable Processing
 
-Atmos supports advanced variable processing:
+Use advanced variable processing with conditions:
 
 ```yaml
 vars:
-  cidr_block: ${cidrsubnet("10.0.0.0/16", 8, 10)}
-  combined_config: ${merge(var.default_config, var.override_config)}
+  multi_az: ${is_production | default(false)}
+  backup_retention_period: ${is_production ? 30 : 7}
+  deletion_protection: ${is_production | default(false)}
 ```
 
-### Context Inheritance
+### Environment-Type Mixins
 
-Use inheritance to manage configurations across multiple environments:
+Use mixins to define common environment types:
 
 ```yaml
+# Import environment type first, then specific components
 import:
-  - catalog/base
-  - account/common
+  - mixins/development
+  - catalog/network
+  - catalog/infrastructure
+```
+
+### Default Values with Fallbacks
+
+Use default values with fallbacks to ensure variables are always defined:
+
+```yaml
+vars:
+  eks_node_groups: ${eks_node_groups | default({
+    default: {
+      name: "default-ng",
+      instance_types: ["t3.medium"],
+      min_size: 2,
+      max_size: 5,
+      desired_size: 2
+    }
+  })}
 ```
 
 ## Debugging and Troubleshooting
 
 ### Logs
 
-View Atmos logs:
+View Atmos logs with color:
 
 ```bash
-atmos logs
+# In atmos.yaml
+logs:
+  file: "/dev/stderr"
+  level: Info
+  color: true
 ```
 
 ### Verbose Output
@@ -249,40 +427,59 @@ Enable verbose output:
 atmos --verbose terraform plan vpc -s tenant-account-environment
 ```
 
-### Component Validation
+### Describe Configuration
 
-Validate a component:
+Describe the merged configuration:
 
 ```bash
-atmos terraform validate vpc -s tenant-account-environment
+atmos describe config -s tenant-account-environment
+```
+
+### Compliance Checks
+
+Run compliance checks:
+
+```bash
+atmos workflow compliance-check tenant=mycompany account=dev environment=eu-west-2
 ```
 
 ### Common Issues
 
-1. **Stack not found** - Check stack name and `stacks/` directory
+1. **Stack not found** - Check stack name, name_template, and `stacks/` directory
 2. **Component not found** - Check component name and `components/` directory
 3. **Variable resolution errors** - Check variable references and context
 4. **Backend errors** - Check S3/DynamoDB backend configuration
+5. **Schema validation errors** - Check stack definitions against JSON schema
 
 ## Best Practices
 
 ### Organization Structure
 
 - Organize stacks by account and environment
+- Use mixins for environment types (production, development, staging)
 - Use consistent naming conventions
 - Keep component configurations DRY by using catalog
 
+### Component Design
+
+- Include comprehensive metadata
+- Define explicit dependencies
+- Implement variable validation
+- Document component interface
+- Follow standard file structure
+- Provide sensible defaults
+
 ### Variables Management
 
-- Define defaults in catalog
+- Define environment defaults in mixins
+- Set reasonable defaults in catalog
 - Override only what's necessary in account/environment
-- Use context variables where possible
 - Document variable meanings and constraints
 
 ### Workflow Standardization
 
 - Create workflows for repetitive tasks
-- Include validation steps
+- Include validation and compliance checks
 - Add proper error handling
 
 ### Documentation
@@ -298,7 +495,9 @@ atmos terraform validate vpc -s tenant-account-environment
 - `atmos terraform <command> <component> -s <stack>` - Run Terraform commands
 - `atmos workflow <workflow> [args]` - Run workflows
 - `atmos describe component <component> -s <stack>` - Describe component
-- `atmos describe stack <stack>` - Describe stack
+- `atmos describe config -s <stack>` - Describe stack configuration
+- `atmos validate stacks --stack <stack>` - Validate stack configuration
+- `atmos validate component --stack <stack>` - Validate component configuration
 - `atmos version` - Show version information
 - `atmos list components` - List available components
 - `atmos list stacks` - List available stacks
@@ -307,10 +506,11 @@ atmos terraform validate vpc -s tenant-account-environment
 
 | Configuration | Description | Example |
 |--------------|-------------|---------|
-| `base.components.terraform.base_path` | Base path for components | `components/terraform` |
-| `base.stacks.base_path` | Base path for stacks | `stacks` |
-| `base.stacks.name_pattern` | Pattern for stack names | `{tenant}-{environment}-{stage}` |
-| `base.workflows.base_path` | Base path for workflows | `workflows` |
+| `components.terraform.base_path` | Base path for components | `components/terraform` |
+| `stacks.base_path` | Base path for stacks | `stacks` |
+| `stacks.name_template` | Template for stack names | `{{.tenant}}-{{.account}}-{{.environment}}` |
+| `workflows.base_path` | Base path for workflows | `workflows` |
+| `settings.component.deps.enabled` | Enable component dependencies | `true` |
 
 ### Variable Reference
 
@@ -318,12 +518,15 @@ atmos terraform validate vpc -s tenant-account-environment
 |--------|-------------|---------|
 | `${var.name}` | Reference variable | `${var.vpc_cidr}` |
 | `${output.component.output}` | Reference component output | `${output.vpc.vpc_id}` |
+| `${variable \| default("value")}` | Variable with default | `${region \| default("eu-west-2")}` |
 | `${environment}` | Context variable | `${environment}` |
+| `${condition ? value1 : value2}` | Conditional expression | `${is_prod ? 30 : 7}` |
 | `${deep_merge(var1, var2)}` | Merge variables | `${deep_merge(var.defaults, var.overrides)}` |
 | `${ssm:/path/to/param}` | SSM parameter | `${ssm:/myapp/database/password}` |
 
 ### Additional Resources
 
 - [Atmos GitHub Repository](https://github.com/cloudposse/atmos)
-- [Atmos Documentation](https://atmos.tools/quick-start/)
+- [Atmos Documentation](https://atmos.tools/)
+- [Atmos Design Patterns](https://atmos.tools/design-patterns/)
 - [Cloud Posse SweetOps Community](https://sweetops.com/)

@@ -1,0 +1,29 @@
+name: production
+description: "Production environment settings mixin"
+
+# Global vars for production environments
+vars:
+  # Production-specific variables
+  environment_type: "production"
+  high_availability: true
+  monitoring_enabled: true
+  is_production: true
+  backup_retention_days: 30
+  
+  # Security settings for production
+  security:
+    enable_waf: true
+    encryption_at_rest: true
+    require_mfa: true
+    cloudtrail_enabled: true
+    vpc_flow_logs: true
+    guardrails_enabled: true
+
+# Production-specific defaults for terraform components
+terraform:
+  vars:
+    environment_type: "production"
+    multi_az: true
+    deletion_protection: true
+    automatic_backup_retention: 30
+    create_alarms: true

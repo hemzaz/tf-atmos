@@ -51,31 +51,59 @@ workflows:
           # This builds a dependency graph automatically
           declare -A DEPENDENCIES
           
-          # Function to extract imports from a YAML file
+          # Function to extract imports from a YAML file using proper YAML parsing
           extract_imports() {
             local file=$1
             local imports=()
             
-            # Extract imports section if it exists
-            if grep -q "^import:" "$file" || grep -q "^imports:" "$file"; then
-              # Extract lines after import: until the next section
-              imports=($(grep -A20 "^import:" "$file" | grep -v "^import:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+            # Check if yq is available (preferred YAML parser)
+            if command -v yq >/dev/null 2>&1; then
+              # Use yq for proper YAML parsing
+              imports=($(yq eval '.import[]' "$file" 2>/dev/null))
               if [ ${#imports[@]} -eq 0 ]; then
-                imports=($(grep -A20 "^imports:" "$file" | grep -v "^imports:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+                imports=($(yq eval '.imports[]' "$file" 2>/dev/null))
+              fi
+            else
+              # Fallback to grep but warn about it
+              echo "⚠️ yq not found, falling back to grep-based parsing. Consider installing yq for more reliable YAML parsing."
+              
+              # Extract imports section if it exists
+              if grep -q "^import:" "$file" || grep -q "^imports:" "$file"; then
+                # Extract lines after import: until the next section
+                imports=($(grep -A20 "^import:" "$file" | grep -v "^import:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+                if [ ${#imports[@]} -eq 0 ]; then
+                  imports=($(grep -A20 "^imports:" "$file" | grep -v "^imports:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
+                fi
               fi
             fi
             
             echo "${imports[@]}"
           }
           
-          # Function to detect output references
+          # Function to detect output references using proper YAML parsing
           detect_references() {
             local file=$1
             local references=()
             
-            # Look for ${output.XXX} patterns which indicate dependencies
-            if grep -q "\${output\." "$file"; then
-              references=($(grep -o '\${output\.[^.]*' "$file" | sort | uniq | sed 's/\${output\.//' 2>/dev/null))
+            # Check if yq is available (preferred YAML parser)
+            if command -v yq >/dev/null 2>&1; then
+              # Use a more reliable approach with yq to find all output references
+              # This complex expression finds all values containing "${output." pattern and extracts the component name
+              references=($(yq eval 'recurse | select(. == "*${output.*") | capture("\\${output\\.([^.}]*)").0' "$file" 2>/dev/null | sort | uniq))
+              
+              # If that didn't work (older versions of yq), fall back to grep but notify
+              if [ ${#references[@]} -eq 0 ]; then
+                echo "⚠️ Advanced yq parsing didn't find references, falling back to grep"
+                if grep -q "\${output\." "$file"; then
+                  references=($(grep -o '\${output\.[^.]*' "$file" | sort | uniq | sed 's/\${output\.//' 2>/dev/null))
+                fi
+              fi
+            else
+              # Fallback to grep since yq isn't available
+              echo "⚠️ yq not found, falling back to grep-based reference detection. Consider installing yq for more reliable parsing."
+              if grep -q "\${output\." "$file"; then
+                references=($(grep -o '\${output\.[^.]*' "$file" | sort | uniq | sed 's/\${output\.//' 2>/dev/null))
+              fi
             fi
             
             echo "${references[@]}"
@@ -110,9 +138,10 @@ workflows:
             local -a temp=()
             local -a order=()
             
-            # DFS-based topological sort
+            # DFS-based topological sort with improved cycle detection
             visit() {
               local node=$1
+              local cycle_path="${2:-$node}"
               
               # Check if already in result
               if [[ " ${order[*]} " =~ " ${node} " ]]; then
@@ -121,7 +150,19 @@ workflows:
               
               # Check for cycles
               if [[ " ${temp[*]} " =~ " ${node} " ]]; then
-                echo "WARNING: Circular dependency detected involving $node"
+                # Extract the cycle path for better reporting
+                local cycle_start=$(echo "$cycle_path" | grep -o "${node}.*${node}" || echo "$cycle_path")
+                echo "WARNING: Circular dependency detected: $cycle_start"
+                
+                # Add debugging information to help resolve the circular dependency
+                echo "Components in the cycle:"
+                local cycle_components=($(echo "$cycle_start" | tr ' ' '\n' | sort -u))
+                for component in "${cycle_components[@]}"; do
+                  local component_deps="${DEPENDENCIES[$component]}"
+                  echo "  - $component depends on: $component_deps"
+                done
+                
+                # Return without adding to order to break the cycle
                 return
               fi
               
@@ -131,11 +172,16 @@ workflows:
               # Visit dependencies first
               local deps=(${DEPENDENCIES[$node]})
               for dep in "${deps[@]}"; do
-                visit "$dep"
+                visit "$dep" "$cycle_path $dep"
               done
               
-              # Add to result
-              order+=("$node")
+              # Remove from temporary list
+              temp=(${temp[@]/$node/})
+              
+              # Add to result only if not already added (could happen with cycles)
+              if [[ ! " ${order[*]} " =~ " ${node} " ]]; then
+                order+=("$node")
+              fi
             }
             
             # Visit each node

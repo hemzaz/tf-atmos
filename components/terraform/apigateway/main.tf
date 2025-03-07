@@ -1,8 +1,9 @@
 locals {
   enabled = var.enabled
-
-  # Name prefix for resources
-  name_prefix = var.api_name
+  
+  # Environment-based name prefix for consistent naming across all components
+  environment = try(var.tags["Environment"], "default")
+  name_prefix = "${local.environment}-${var.api_name}"
 
   # Determine which API type to create based on var.api_type
   create_rest_api = local.enabled && var.api_type == "REST"
@@ -10,10 +11,11 @@ locals {
 
   # Default tags
   default_tags = {
-    Name      = local.name_prefix
-    ApiType   = var.api_type
-    Component = "ApiGateway"
-    ManagedBy = "Terraform"
+    Name        = local.name_prefix
+    ApiType     = var.api_type
+    Component   = "ApiGateway"
+    ManagedBy   = "Terraform"
+    Environment = local.environment
   }
 
   tags = merge(var.tags, local.default_tags)
@@ -23,6 +25,9 @@ locals {
 
   # Logging configuration 
   logs_enabled = var.enable_logging
+  
+  # CORS configuration
+  enable_cors = var.cors_configuration != null && lookup(var.cors_configuration, "enabled", false)
 }
 
 # REST API
@@ -89,13 +94,17 @@ resource "aws_apigatewayv2_api" "http_api" {
   protocol_type = "HTTP"
   description   = var.description
 
-  cors_configuration {
-    allow_origins     = var.cors_configuration.allow_origins
-    allow_methods     = var.cors_configuration.allow_methods
-    allow_headers     = var.cors_configuration.allow_headers
-    expose_headers    = var.cors_configuration.expose_headers
-    max_age           = var.cors_configuration.max_age
-    allow_credentials = var.cors_configuration.allow_credentials
+  # Only add CORS configuration if enabled
+  dynamic "cors_configuration" {
+    for_each = local.enable_cors ? [1] : []
+    content {
+      allow_origins     = var.cors_configuration.allow_origins
+      allow_methods     = var.cors_configuration.allow_methods
+      allow_headers     = var.cors_configuration.allow_headers
+      expose_headers    = var.cors_configuration.expose_headers
+      max_age           = var.cors_configuration.max_age
+      allow_credentials = var.cors_configuration.allow_credentials
+    }
   }
 
   tags = local.tags

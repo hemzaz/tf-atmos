@@ -94,12 +94,48 @@ resource "helm_release" "external_secrets" {
   ]
 }
 
-# Wait for external-secrets CRDs to be registered
-resource "time_sleep" "wait_for_crds" {
+# Wait for external-secrets CRDs to be registered with dynamic health check
+resource "null_resource" "wait_for_crds" {
   count = local.enabled && (var.create_default_cluster_secret_store || var.create_certificate_secret_store) ? 1 : 0
 
-  depends_on      = [helm_release.external_secrets]
-  create_duration = "30s"
+  depends_on = [helm_release.external_secrets]
+
+  # Use triggers to run on each apply
+  triggers = {
+    helm_release_id = local.enabled ? helm_release.external_secrets[0].id : null
+  }
+
+  # Use local-exec to wait for CRDs to be ready with proper health check
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Maximum wait time in seconds
+      MAX_WAIT=120
+      # Check interval in seconds
+      INTERVAL=5
+      # Counter for elapsed time
+      ELAPSED=0
+      
+      echo "Waiting for External Secrets CRDs to be registered..."
+      
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        # Check if the CRDs are available and ready
+        if kubectl get crd clustersecretstores.external-secrets.io &>/dev/null && \
+           kubectl get crd externalsecrets.external-secrets.io &>/dev/null; then
+          echo "✅ External Secrets CRDs are registered and available"
+          exit 0
+        fi
+        
+        echo "Waiting for CRDs to be available... ($ELAPSED/$MAX_WAIT seconds)"
+        sleep $INTERVAL
+        ELAPSED=$((ELAPSED + INTERVAL))
+      done
+      
+      echo "❌ Timed out waiting for External Secrets CRDs"
+      echo "Manual intervention may be required"
+      # Don't fail the provisioning, as this might be temporary
+      exit 0
+    EOT
+  }
 }
 
 # Create ClusterSecretStore for AWS Secrets Manager

@@ -1,23 +1,25 @@
 # 🚀 Atmos-Managed AWS Infrastructure
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![Terraform](https://img.shields.io/badge/terraform-%3E%3D1.5.7-623CE4.svg)
-![Atmos](https://img.shields.io/badge/atmos-%3E%3D1.38.0-16A394.svg)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Terraform](https://img.shields.io/badge/terraform-%3E%3D1.11.0-623CE4.svg)
+![Atmos](https://img.shields.io/badge/atmos-%3E%3D1.163.0-16A394.svg)
 ![Kubectl](https://img.shields.io/badge/kubectl-%3E%3D1.28.3-326CE5.svg)
 ![Helm](https://img.shields.io/badge/helm-%3E%3D3.13.1-0F1689.svg)
 ![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=flat&logo=amazon-aws&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-A streamlined framework for deploying and managing multi-account AWS environments using Terraform and Atmos.
+A streamlined framework for deploying and managing multi-account AWS environments using Terraform and Atmos, following the latest Atmos design patterns and best practices.
 
 ## ✨ Features
 
 - Multi-account architecture with environment separation
-- Ready-to-use infrastructure components
-- Automated workflows for common operations
-- Consistent resource organization and naming
+- Ready-to-use infrastructure components with explicit dependencies
+- Automated workflows for common operations including compliance checks
+- Stack inheritance with mixins and catalog components
+- Component validation with JSON Schema
 - Advanced Kubernetes management with EKS
 - Secure secret management patterns
+- Comprehensive documentation and examples
 
 ## 🏗️ Components
 
@@ -37,18 +39,17 @@ We provide pre-built components for:
 ### Prerequisites
 
 - AWS CLI
-- Terraform ≥ 1.5.7
-- Atmos CLI ≥ 1.38.0
+- Terraform ≥ 1.11.0
+- Atmos CLI ≥ 1.163.0
 - Kubectl ≥ 1.28.3
 - Helm ≥ 3.13.1
 
-> Tool versions are defined in the `.env` file at the project root.
+> Tool versions are defined in the project's configuration.
 
 ### Basic Commands
 
 ```bash
-#!/usr/bin/env bash
-# Install dependencies from .env file
+# Install dependencies
 ./scripts/install-dependencies.sh
 
 # Bootstrap backend infrastructure
@@ -59,14 +60,29 @@ atmos workflow onboard-environment tenant=mycompany account=dev environment=test
 
 # Apply changes to an environment
 atmos workflow apply-environment tenant=mycompany account=dev environment=test
+
+# Run compliance checks
+atmos workflow compliance-check tenant=mycompany account=dev environment=test
 ```
 
 [Complete installation guide →](docs/installation.md)  
 [Step-by-step deployment guide →](docs/deployment.md)
 
+## 🛡️ Design Patterns
+
+This project implements the latest Atmos design patterns:
+
+- **Stack Inheritance** - Using catalog components with environment-specific overrides
+- **Component Dependencies** - Explicit dependencies between components
+- **Configuration Mixins** - Reusable configuration fragments for environment types
+- **Schema Validation** - JSON Schema for stack validation
+- **Metadata-driven Components** - Rich component metadata for better documentation
+- **Advanced Workflows** - Including compliance and security checks
+
 ## 📚 Documentation
 
 - [Architecture Overview](docs/architecture.md)
+- [Atmos Guide](docs/atmos-guide.md)
 - [Component Development Guide](docs/terraform-development-guide.md)
 - [Environment Onboarding](docs/environment-onboarding.md)
 - [Workflow Reference](docs/workflows.md)
@@ -76,26 +92,38 @@ atmos workflow apply-environment tenant=mycompany account=dev environment=test
 ## 🌱 Getting Started with Development
 
 ```bash
-#!/usr/bin/env bash
 # Clone the repository
 git clone https://github.com/your-org/tf-atmos.git
 cd tf-atmos
 
-# Review the .env file with tool versions
-cat .env
-
 # Install dependencies
 ./scripts/install-dependencies.sh
 
-# Create a new component
+# Create a new component from template
 cp -r templates/terraform-component/* components/terraform/new-component/
 
 # Validate changes
 atmos workflow lint
 atmos workflow validate
+atmos validate stacks --stack mycompany-dev-test
 ```
 
 [Component creation guide →](docs/terraform-component-creation-guide.md)
+
+## 🔍 Component Structure
+
+Components follow a consistent structure with:
+
+```
+components/terraform/example-component/
+├── README.md           # Documentation
+├── main.tf             # Main resources
+├── variables.tf        # Input variables with validation
+├── outputs.tf          # Output values
+├── locals.tf           # Local values
+├── provider.tf         # Provider configuration
+└── policies/           # IAM policies and templates
+```
 
 ## 🤝 Contributing
 

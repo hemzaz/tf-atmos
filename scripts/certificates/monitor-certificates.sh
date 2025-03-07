@@ -166,22 +166,81 @@ function validate_aws_credentials {
   fi
 }
 
-# Function to calculate days until expiration
+# Function to calculate days until expiration using a cross-platform approach
 function days_until_expiration {
   local EXPIRY_DATE="$1"
   
-  # Handle different date formats
-  if [[ "$EXPIRY_DATE" == *"T"* ]]; then
-    # ISO format with T
-    EXPIRY_SECONDS=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$(echo "$EXPIRY_DATE" | cut -d. -f1)" +%s 2>/dev/null || date -d "$(echo "$EXPIRY_DATE" | cut -d. -f1)" +%s)
-  else
-    # Other formats
-    EXPIRY_SECONDS=$(date -j -f "%Y-%m-%d %H:%M:%S" "$EXPIRY_DATE" +%s 2>/dev/null || date -d "$EXPIRY_DATE" +%s)
+  # First try to use jq for date calculation if available (most reliable cross-platform solution)
+  if command -v jq &>/dev/null; then
+    # Normalize the date format first
+    local NORMALIZED_DATE
+    if [[ "$EXPIRY_DATE" == *"T"* ]]; then
+      # ISO format with T
+      NORMALIZED_DATE=$(echo "$EXPIRY_DATE" | cut -d. -f1)
+    else
+      # Convert other formats to ISO format
+      NORMALIZED_DATE="$EXPIRY_DATE"
+    fi
+    
+    # Use jq for date calculation
+    local NOW=$(date +%s)
+    local EXPIRY_SECONDS=$(echo "{\"expiry\":\"$NORMALIZED_DATE\", \"now\":$NOW}" | \
+      jq -r 'try ((.expiry | fromdateiso8601) - .now) // empty')
+    
+    # If jq calculation succeeded
+    if [[ -n "$EXPIRY_SECONDS" ]]; then
+      local DAYS_REMAINING=$(( $EXPIRY_SECONDS / 86400 ))
+      echo "$DAYS_REMAINING"
+      return
+    fi
   fi
   
-  NOW_SECONDS=$(date +%s)
-  DAYS_REMAINING=$(( ($EXPIRY_SECONDS - $NOW_SECONDS) / 86400 ))
+  # Fallback to using platform-specific date commands
+  local EXPIRY_SECONDS
+  local NOW_SECONDS=$(date +%s)
   
+  # Handle different date formats and platforms
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS approach
+    if [[ "$EXPIRY_DATE" == *"T"* ]]; then
+      # ISO format with T
+      EXPIRY_SECONDS=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$(echo "$EXPIRY_DATE" | cut -d. -f1)" +%s 2>/dev/null)
+    else
+      # Other formats
+      EXPIRY_SECONDS=$(date -j -f "%Y-%m-%d %H:%M:%S" "$EXPIRY_DATE" +%s 2>/dev/null)
+    fi
+  elif [[ "$OSTYPE" == "linux"* ]] || [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux approach
+    if [[ "$EXPIRY_DATE" == *"T"* ]]; then
+      # ISO format with T
+      EXPIRY_SECONDS=$(date -d "$(echo "$EXPIRY_DATE" | cut -d. -f1)" +%s 2>/dev/null)
+    else
+      # Other formats
+      EXPIRY_SECONDS=$(date -d "$EXPIRY_DATE" +%s 2>/dev/null)
+    fi
+  else
+    # Generic fallback for other platforms - try various approaches
+    # Try Linux style
+    EXPIRY_SECONDS=$(date -d "$EXPIRY_DATE" +%s 2>/dev/null)
+    
+    # If that fails, try macOS style
+    if [[ -z "$EXPIRY_SECONDS" ]]; then
+      if [[ "$EXPIRY_DATE" == *"T"* ]]; then
+        EXPIRY_SECONDS=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$(echo "$EXPIRY_DATE" | cut -d. -f1)" +%s 2>/dev/null)
+      else
+        EXPIRY_SECONDS=$(date -j -f "%Y-%m-%d %H:%M:%S" "$EXPIRY_DATE" +%s 2>/dev/null)
+      fi
+    fi
+    
+    # If all else fails, log an error but don't crash
+    if [[ -z "$EXPIRY_SECONDS" ]]; then
+      echo "Error: Could not parse date format on this platform. Using default of 30 days." >&2
+      echo "30"
+      return
+    fi
+  fi
+  
+  local DAYS_REMAINING=$(( ($EXPIRY_SECONDS - $NOW_SECONDS) / 86400 ))
   echo "$DAYS_REMAINING"
 }
 

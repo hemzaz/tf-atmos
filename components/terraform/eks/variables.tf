@@ -27,9 +27,9 @@ variable "clusters" {
     condition = alltrue([
       for k, v in var.clusters :
       lookup(v, "kubernetes_version", "") == "" ||
-      can(regex("^1\\.(2[0-9])$", lookup(v, "kubernetes_version", var.default_kubernetes_version)))
+      can(regex("^\\d+\\.(\\d+)$", lookup(v, "kubernetes_version", var.default_kubernetes_version)))
     ])
-    error_message = "Kubernetes version must be valid and in the format '1.XX' (e.g., 1.28)."
+    error_message = "Kubernetes version must be valid and in the format 'X.Y' (e.g., 1.28)."
   }
 
   validation {
@@ -89,8 +89,8 @@ variable "default_kubernetes_version" {
   default     = "1.28"
 
   validation {
-    condition     = can(regex("^1\\.(2[0-9])$", var.default_kubernetes_version))
-    error_message = "Default Kubernetes version must be in the format '1.XX' (e.g., 1.28)."
+    condition     = can(regex("^\\d+\\.(\\d+)$", var.default_kubernetes_version))
+    error_message = "Default Kubernetes version must be in the format 'X.Y' (e.g., 1.28)."
   }
 }
 
@@ -105,15 +105,32 @@ variable "oidc_provider_arn" {
   }
 }
 
+variable "enable_cluster_protection" {
+  type        = bool
+  description = "Enable prevent_destroy lifecycle for EKS clusters in production environments"
+  default     = true
+}
+
 variable "default_cluster_log_retention_days" {
   type        = number
   description = "Number of days to retain cluster logs"
   default     = 90
 
+  # Use more maintainable validation pattern based on CloudWatch allowed values
   validation {
-    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.default_cluster_log_retention_days)
-    error_message = "Log retention days must be one of the following values: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653."
+    # Allowed values according to CloudWatch: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653
+    condition = (
+      # Check if value is in standard retention periods (1-180 days)
+      contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180], var.default_cluster_log_retention_days) ||
+      # Or check if it's in extended periods (>180 days)
+      contains([365, 400, 545, 731, 1827, 3653], var.default_cluster_log_retention_days)
+    )
+    error_message = "Log retention days must be a CloudWatch allowed value: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, or 3653 days."
   }
+  
+  # We can't reference var.tags here as it creates a circular reference,
+  # so we'll provide guidance in the description instead
+  # Better practice is to enforce this in module logic or via CI/CD validation
 }
 
 variable "tags" {

@@ -39,8 +39,9 @@ resource "aws_iam_role_policy" "lambda_custom" {
   policy = var.custom_policy
 }
 
+# Create log group before the Lambda function to avoid circular dependencies
 resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${aws_lambda_function.main.function_name}"
+  name              = "/aws/lambda/${var.tags["Environment"]}-${var.function_name}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_id
 
@@ -88,6 +89,9 @@ resource "aws_lambda_function" "main" {
   timeout           = var.timeout
   publish           = var.publish
 
+  # Ensure log group exists before Lambda is created
+  depends_on = [aws_cloudwatch_log_group.lambda]
+
   dynamic "environment" {
     for_each = length(var.environment_variables) > 0 ? [1] : []
     content {
@@ -123,6 +127,21 @@ resource "aws_lambda_function" "main" {
       Name = "${var.tags["Environment"]}-${var.function_name}"
     }
   )
+
+  # Add reliability preconditions
+  lifecycle {
+    # Verify role has been created and has necessary permissions
+    precondition {
+      condition     = aws_iam_role_policy_attachment.lambda_basic.id != ""
+      error_message = "Lambda basic execution role policy must be attached before creating the function."
+    }
+    
+    # Ensure handler is valid format (function_file.function_name)
+    precondition {
+      condition     = can(regex("^[a-zA-Z0-9_\\.]+$", var.handler)) && length(split(".", var.handler)) >= 2
+      error_message = "Handler must be in the format 'file_name.function_name'."
+    }
+  }
 }
 
 resource "aws_lambda_permission" "api_gateway" {

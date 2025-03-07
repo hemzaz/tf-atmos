@@ -130,6 +130,11 @@ vars:
   policy_name: "${tenant}-${account}-${environment}-CrossAccountPolicy"
   trusted_account_ids:
     - ${MANAGEMENT_ACCOUNT_ID}
+  policy_resources:
+    - "arn:aws:s3:::${tenant}*"
+    - "arn:aws:s3:::${tenant}*/*"
+    - "arn:aws:ec2:*:${MANAGEMENT_ACCOUNT_ID}:*"
+    - "arn:aws:dynamodb:*:${MANAGEMENT_ACCOUNT_ID}:table/${tenant}*"
 
 tags:
   Team: "DevOps"
@@ -157,6 +162,45 @@ vars:
     - "${VPC_PREFIX}.103.0/24"
   enable_nat_gateway: ${account == "prod" ? "true" : "false"}
   create_vpc_iam_role: true
+
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+EOF
+
+# Certificate management config
+cat > "${ENV_DIR}/certificates.yaml" << EOF
+import:
+  - catalog/certificates
+
+vars:
+  account: ${account}
+  environment: ${environment}
+  region: ${REGION}
+  
+  # ACM Certificate configuration
+  acm.enabled: true
+  acm.dns_domains:
+    main:
+      domain_name: "api.${account}.${tenant}.com"
+      validation_method: "DNS"
+      wait_for_validation: true
+      subject_alternative_names:
+        - "*.${account}.${tenant}.com"
+  
+  # External Secrets configuration for certificate management
+  external_secrets.enabled: true
+  external_secrets.create_certificate_secret_store: true
+  external_secrets.namespace: "cert-manager"
+  external_secrets.create_namespace: true
+  
+  # Certificate monitoring configuration
+  certificate_monitoring.enabled: true
+  certificate_monitoring.warning_days: 30
+  certificate_monitoring.critical_days: 14
+  certificate_monitoring.notification_emails:
+    - "\${alarm_email:-ops@example.com}"
 
 tags:
   Team: "DevOps"
@@ -204,6 +248,9 @@ vars:
   lambda.environment_variables:
     ENV: "${account}"
     LOG_LEVEL: "${account == "prod" ? "info" : "debug"}"
+    
+  # EKS Cluster Protection (prevent_destroy lifecycle)
+  eks.enable_cluster_protection: ${account == "prod" ? "true" : "false"}
 
 tags:
   Team: "DevOps"
@@ -225,6 +272,14 @@ vars:
   api_gateway.enabled: true
   api_gateway.name: "${tenant}-${account}-${environment}-api"
   api_gateway.description: "API Gateway for ${account} environment (${environment})"
+  api_gateway.cors_configuration:
+    enabled: ${account != "prod" ? "true" : "false"}  # Enable CORS for non-prod environments
+    allow_origins: ["*"]
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers: ["*"]
+    expose_headers: []
+    max_age: 7200
+    allow_credentials: true
 
   # Load Balancer specific overrides
   load_balancer.enabled: true

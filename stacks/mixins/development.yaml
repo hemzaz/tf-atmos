@@ -1,0 +1,29 @@
+name: development
+description: "Development environment settings mixin"
+
+# Global vars for development environments
+vars:
+  # Development-specific variables
+  environment_type: "development"
+  high_availability: false
+  monitoring_enabled: false
+  is_production: false
+  backup_retention_days: 7
+  
+  # Security settings for development
+  security:
+    enable_waf: false
+    encryption_at_rest: true
+    require_mfa: false
+    cloudtrail_enabled: true
+    vpc_flow_logs: false
+    guardrails_enabled: false
+
+# Development-specific defaults for terraform components
+terraform:
+  vars:
+    environment_type: "development"
+    multi_az: false
+    deletion_protection: false
+    automatic_backup_retention: 7
+    create_alarms: false

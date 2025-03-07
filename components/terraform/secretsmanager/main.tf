@@ -60,9 +60,22 @@ resource "aws_secretsmanager_secret" "this" {
   tags                    = module.this.tags
 
   lifecycle {
+    # Validate encryption key is specified
     precondition {
       condition     = each.value.kms_key_id != null || var.default_kms_key_id != null
       error_message = "Either default_kms_key_id or individual secret kms_key_id must be set to ensure encryption."
+    }
+    
+    # Validate recovery window is reasonable
+    precondition {
+      condition     = each.value.recovery_window_in_days >= 7 || each.value.recovery_window_in_days == 0
+      error_message = "Recovery window should be either 0 (force delete with no window) or at least 7 days for security (recommended: 7-30 days)."
+    }
+    
+    # Add explicit protection for production secrets
+    precondition {
+      condition     = !contains(["prod", "production"], lower(module.this.environment)) || each.value.recovery_window_in_days >= 7
+      error_message = "Production secrets must have a recovery window of at least 7 days for protection against accidental deletion."
     }
   }
 }
@@ -73,6 +86,35 @@ resource "aws_secretsmanager_secret_version" "this" {
 
   secret_id     = aws_secretsmanager_secret.this[each.key].id
   secret_string = each.value.generate_random_password ? random_password.this[each.key].result : each.value.secret_data
+
+  lifecycle {
+    # Add validation to ensure secret data is not empty
+    precondition {
+      condition     = each.value.generate_random_password || (each.value.secret_data != null && length(each.value.secret_data) > 0)
+      error_message = "Secret data must not be empty. For secret ${each.key}, either provide non-empty secret_data or set generate_random_password=true."
+    }
+
+    # Add validation for JSON-formatted secrets with strict checking
+    precondition {
+      # More robust JSON validation for secret data
+      # First check if random password is being generated or if secret data is null (both are valid)
+      # Then check if it doesn't look like JSON (starts with '{') - if not JSON, no validation needed
+      # Finally, if it looks like JSON, validate it can be decoded and is not empty
+      condition     = each.value.generate_random_password || 
+                     (each.value.secret_data == null) || 
+                     (!can(regex("^\\s*\\{", each.value.secret_data))) || 
+                     (can(jsondecode(each.value.secret_data)) && length(jsondecode(each.value.secret_data)) > 0)
+      error_message = "Secret data for ${each.key} appears to be JSON but is not valid or is empty. Ensure the JSON is well-formed and contains data."
+    }
+    
+    # Add validation for sensitive data patterns
+    precondition {
+      # Check that secrets don't contain obviously hardcoded credentials in dev/test patterns
+      condition     = each.value.generate_random_password || each.value.secret_data == null ||
+                      !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|test-only)", each.value.secret_data))
+      error_message = "Secret data for ${each.key} appears to contain a weak, test, or default password pattern. Use generate_random_password or provide a strong password."
+    }
+  }
 }
 
 # Attach resource policies to secrets if specified
@@ -92,5 +134,18 @@ resource "aws_secretsmanager_secret_rotation" "this" {
 
   rotation_rules {
     automatically_after_days = each.value.rotation_days
+  }
+  
+  # Add validation for Lambda ARN format and rotation days
+  lifecycle {
+    precondition {
+      condition     = can(regex("^arn:aws:lambda:[a-z0-9-]+:[0-9]{12}:function:.+$", each.value.rotation_lambda_arn))
+      error_message = "The rotation_lambda_arn must be a valid Lambda function ARN (e.g., arn:aws:lambda:region:account-id:function:function-name)."
+    }
+    
+    precondition {
+      condition     = each.value.rotation_days >= 1 && each.value.rotation_days <= 365
+      error_message = "The rotation_days value must be between 1 and 365."
+    }
   }
 }

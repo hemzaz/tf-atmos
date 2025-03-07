@@ -76,7 +76,9 @@ data "aws_eks_cluster" "this" {
   name     = each.key
 }
 
-# Wait for EKS cluster to be fully ready
+# Wait for EKS cluster to be fully ready with health check
+# Create a dynamic wait using time_sleep resource instead of null_resource with local-exec
+# This removes dependency on local tools and shell scripting
 resource "time_sleep" "wait_for_cluster" {
   for_each = local.clusters
 
@@ -84,8 +86,24 @@ resource "time_sleep" "wait_for_cluster" {
     data.aws_eks_cluster.this
   ]
 
-  # Increased wait time to ensure cluster is fully ready
-  create_duration = "180s"
+  # Ensure this always runs by using triggers
+  triggers = {
+    cluster_name     = each.key
+    cluster_endpoint = data.aws_eks_cluster.this[each.key].endpoint
+    # Add hash of cluster status to detect changes
+    cluster_status   = data.aws_eks_cluster.this[each.key].status
+  }
+
+  # Set a base wait time that can be overridden per cluster
+  create_duration = lookup(each.value, "wait_for_cluster_duration", "45s")
+
+  # Add validation to ensure cluster is actually ACTIVE
+  lifecycle {
+    postcondition {
+      condition     = data.aws_eks_cluster.this[each.key].status == "ACTIVE"
+      error_message = "EKS cluster ${each.key} is not in ACTIVE state after waiting. Current status: ${data.aws_eks_cluster.this[each.key].status}"
+    }
+  }
 }
 
 # Create IAM service account roles for addons if needed
@@ -188,6 +206,7 @@ resource "aws_eks_addon" "addons" {
 }
 
 # Wait for addons to be ready before proceeding with helm releases
+# Replace complex null_resource with proper Terraform time_sleep resource
 resource "time_sleep" "wait_for_addons" {
   count = length(local.addons) > 0 ? 1 : 0
 
@@ -196,10 +215,21 @@ resource "time_sleep" "wait_for_addons" {
     aws_iam_role_policy_attachment.service_account
   ]
 
-  # Allow more time for addons to initialize
-  create_duration = "90s"
+  # Generate a hash of all addon attributes to detect changes
+  triggers = {
+    addon_hash = sha256(jsonencode([
+      for k, v in aws_eks_addon.addons : {
+        id = v.id
+        status = v.status
+        addon_version = v.addon_version
+      }
+    ]))
+  }
 
-  # Apply precondition checks to validate addons were actually created
+  # Set reasonable wait time for addons to be ready
+  create_duration = "3m"
+
+  # Add validation to catch addon creation issues
   lifecycle {
     postcondition {
       condition     = length(aws_eks_addon.addons) > 0
@@ -234,9 +264,13 @@ resource "helm_release" "releases" {
 
   values = lookup(each.value, "values", [])
 
-  set {
-    name  = "clusterName"
-    value = each.value.cluster_name
+  # Only set clusterName if not provided by user
+  dynamic "set" {
+    for_each = contains(keys(lookup(each.value, "set_values", {})), "clusterName") ? [] : [1]
+    content {
+      name  = "clusterName"
+      value = each.value.cluster_name
+    }
   }
 
   dynamic "set" {
@@ -268,6 +302,7 @@ resource "helm_release" "releases" {
 }
 
 # Wait for helm releases to be ready before proceeding with kubernetes manifests
+# Replace complicated null_resource with simpler time_sleep approach
 resource "time_sleep" "wait_for_helm_releases" {
   count = length(local.helm_releases) > 0 ? 1 : 0
 
@@ -275,8 +310,33 @@ resource "time_sleep" "wait_for_helm_releases" {
     helm_release.releases
   ]
 
-  # Allow more time for Helm releases to stabilize
-  create_duration = "45s"
+  # Generate a detailed hash of all helm releases with relevant attributes to detect changes
+  triggers = {
+    # Include version, values hash, and status to ensure sensitivity to real changes
+    releases_hash = sha256(jsonencode([
+      for k, v in helm_release.releases : {
+        id = v.id
+        name = v.name
+        version = v.version
+        namespace = v.namespace
+        values_hash = v.metadata[0].values_hash
+        status = v.status
+      }
+    ]))
+    releases_count = length(helm_release.releases)
+  }
+
+  # Set a reasonable wait time for Helm releases to stabilize
+  # Use a dynamic duration based on the number of releases (min 2m, max 5m)
+  create_duration = "${min(max(2 * length(local.helm_releases), 120), 300)}s"
+  
+  # Add validation for helm releases
+  lifecycle {
+    postcondition {
+      condition     = length(helm_release.releases) > 0
+      error_message = "No Helm releases were created. Check the helm_releases configuration."
+    }
+  }
 }
 
 # Kubernetes Provider Configuration

@@ -108,14 +108,14 @@ resource "tls_private_key" "global_ssh_key" {
 # Create individual key pairs for instances
 resource "aws_key_pair" "generated" {
   for_each   = local.instances_requiring_keys
-  key_name   = "${var.tags["Environment"]}-${each.key}-key"
+  key_name   = "${var.tags["Environment"]}-${each.key}-ec2-ssh-key"
   public_key = tls_private_key.ssh_key[each.key].public_key_openssh
 
   tags = merge(
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.key}-key"
+      Name = "${var.tags["Environment"]}-${each.key}-ec2-ssh-key"
     }
   )
 }
@@ -156,67 +156,38 @@ resource "aws_secretsmanager_secret" "ssh_key" {
 resource "aws_secretsmanager_secret_version" "ssh_key" {
   for_each      = var.store_ssh_keys_in_secrets_manager ? local.instances_requiring_keys : {}
   secret_id     = aws_secretsmanager_secret.ssh_key[each.key].id
+  
+  # Include all metadata directly in the secret value, including instance_id
+  # This eliminates the need for local-exec provisioner
   secret_string = jsonencode({
-    private_key_pem = tls_private_key.ssh_key[each.key].private_key_pem
-    public_key_openssh = tls_private_key.ssh_key[each.key].public_key_openssh
-    key_name = aws_key_pair.generated[each.key].key_name
-    instance_name = each.key
+    private_key_pem     = tls_private_key.ssh_key[each.key].private_key_pem
+    public_key_openssh  = tls_private_key.ssh_key[each.key].public_key_openssh
+    key_name            = aws_key_pair.generated[each.key].key_name
+    instance_name       = each.key
+    instance_id         = aws_instance.instances[each.key].id
+    instance_private_ip = aws_instance.instances[each.key].private_ip
+    instance_public_ip  = aws_instance.instances[each.key].public_ip
+    vpc_id              = var.vpc_id
+    subnet_id           = aws_instance.instances[each.key].subnet_id
+    security_group_id   = aws_security_group.instances[each.key].id
+    environment         = var.tags["Environment"]
+    created_at          = timestamp()
   })
-}
-
-# Update secrets with instance IDs after instances are created
-resource "null_resource" "update_secret_with_instance_id" {
-  for_each = var.store_ssh_keys_in_secrets_manager ? local.instances_requiring_keys : {}
   
-  triggers = {
-    instance_id = aws_instance.instances[each.key].id
-    # Use constant string for the version to avoid circular dependencies
-    secret_name = aws_secretsmanager_secret.ssh_key[each.key].name
-  }
-  
-  provisioner "local-exec" {
-    command = <<EOT
-      # Exit on errors and echo commands
-      set -e
-      
-      # Get current secret value
-      echo "Retrieving secret value for ${aws_secretsmanager_secret.ssh_key[each.key].name}..."
-      if ! SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id ${aws_secretsmanager_secret.ssh_key[each.key].id} --query 'SecretString' --output text); then
-        echo "Failed to retrieve secret value"
-        exit 1
-      fi
-      
-      # Check if jq is installed
-      if ! command -v jq &> /dev/null; then
-        echo "jq is required but not installed. Please install jq to continue."
-        exit 1
-      fi
-      
-      # Add instance_id to the JSON
-      echo "Adding instance ID to secret..."
-      if ! UPDATED_VALUE=$(echo $SECRET_VALUE | jq '. + {"instance_id": "${aws_instance.instances[each.key].id}"}'); then
-        echo "Failed to update JSON with instance ID"
-        exit 1
-      fi
-      
-      # Update the secret
-      echo "Updating secret with instance ID..."
-      if ! aws secretsmanager update-secret --secret-id ${aws_secretsmanager_secret.ssh_key[each.key].id} --secret-string "$UPDATED_VALUE"; then
-        echo "Failed to update secret"
-        exit 1
-      fi
-      
-      echo "Successfully updated secret with instance ID"
-    EOT
-  }
-  
-  depends_on = [aws_instance.instances, aws_secretsmanager_secret_version.ssh_key]
+  depends_on = [aws_instance.instances]
   
   lifecycle {
-    # Ignore changes to secret_name to prevent recreation when secret metadata changes
-    ignore_changes = [triggers.secret_name]
+    # Add validation to ensure all required information is available
+    precondition {
+      condition     = aws_instance.instances[each.key].id != ""
+      error_message = "Instance ID must be available before creating secret version."
+    }
   }
 }
+
+# The update secret functionality has been moved directly into the aws_secretsmanager_secret_version resource
+# We no longer need this null_resource since we include the instance_id directly in the secret
+# No need for local-exec provisioners or AWS CLI commands
 
 # Store global SSH key in Secrets Manager
 resource "aws_secretsmanager_secret" "global_ssh_key" {
@@ -362,7 +333,9 @@ resource "aws_instance" "instances" {
   )
 
   lifecycle {
-    ignore_changes = [ami]
+    # Use more specific configuration for handling AMIs
+    # Only ignore AMI changes if explicitly configured
+    ignore_changes = lookup(each.value, "enable_ami_updates", false) ? [] : [ami]
     
     # Check that we have a valid key_name
     precondition {

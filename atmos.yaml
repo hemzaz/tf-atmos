@@ -1,4 +1,6 @@
 # atmos.yaml
+# Configuration file for Atmos - Infrastructure as Code framework
+# https://atmos.tools/
 
 base_path: "."
 
@@ -12,14 +14,29 @@ components:
     backend_type: "s3"
     terraform_version: "1.11.0"
     terragrunt_version: "0.45.0"
+    # Add component hooks for standardized behaviors
+    hooks:
+      pre_plan:
+        - run:
+            command: terraform fmt -check -recursive
+      pre_apply:
+        - run:
+            command: terraform validate
+      post_apply:
+        - run:
+            command: terraform output -json > "${TF_DATA_DIR}/outputs.json"
 
 stacks:
   base_path: stacks
   included_paths:
   - "account/**/**/*.yaml"
   - "catalog/**/*.yaml"
+  - "mixins/**/*.yaml"
   excluded_paths:
   - "**/_defaults.yaml"
+  # Updated to use name_template instead of name_pattern for more flexibility
+  name_template: "{{.tenant}}-{{.account}}-{{.environment}}"
+  # Fallback to maintain backward compatibility
   name_pattern: "{tenant}-{account}-{environment}"
 
 workflows:
@@ -28,6 +45,7 @@ workflows:
   - apply-backend.yaml
   - apply-environment.yaml
   - bootstrap-backend.yaml
+  - compliance-check.yaml
   - destroy-backend.yaml
   - destroy-environment.yaml
   - drift-detection.yaml
@@ -40,10 +58,18 @@ workflows:
 logs:
   file: "/dev/stderr"
   level: Info
+  color: true
 
 settings:
   list_merge_strategy: replace
   atmos_cli_version: "1.163.0"
+  component:
+    # Enable component dependency resolution
+    deps:
+      enabled: true
+    # Set component versioning
+    version:
+      enabled: true
 
 schemas:
   atmos:
@@ -63,8 +89,11 @@ vars:
   tenant: "fnx"
   region: "eu-west-2"
   workspace: "default"
-  account_id: "${env:AWS_ACCOUNT_ID, 234567890123}"
   
-  # Environment-specific variables can be overridden in environment-specific stacks
-  # Default management account ID (should be overridden in production)
-  management_account_id: "${env:AWS_MANAGEMENT_ACCOUNT_ID, 123456789012}"
+  # Account configurations - these MUST be overridden in environment stacks
+  # The placeholder values are designed to fail validation if not properly set
+  account_id: "${env:AWS_ACCOUNT_ID, REQUIRED_ACCOUNT_ID}"
+  
+  # Management account configuration - must be set explicitly
+  # The placeholder value will fail validation if not properly set
+  management_account_id: "${env:AWS_MANAGEMENT_ACCOUNT_ID, REQUIRED_MANAGEMENT_ACCOUNT_ID}"

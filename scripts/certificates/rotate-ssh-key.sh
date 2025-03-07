@@ -437,9 +437,145 @@ function update_authorized_keys {
   if [[ -n "$INSTANCE_ID" && "$USE_SSM" == "true" ]]; then
     echo -e "${BLUE}Using SSM Session Manager to update authorized_keys...${RESET}"
     
-    # Create a temporary script to run on the instance
+    # Create a temporary script to run on the instance that tests the key before fully deploying
     local TEMP_SCRIPT=$(mktemp)
     cat > "$TEMP_SCRIPT" << EOF
+#!/bin/bash
+set -e
+SSH_DIR=~/.ssh
+AUTH_KEYS=\$SSH_DIR/authorized_keys
+AUTH_KEYS_TEMP=\$SSH_DIR/authorized_keys.new
+mkdir -p \$SSH_DIR
+chmod 700 \$SSH_DIR
+touch \$AUTH_KEYS
+chmod 600 \$AUTH_KEYS
+
+# First, add the new key to a separate temporary authorized_keys file for validation
+cp \$AUTH_KEYS \$AUTH_KEYS_TEMP
+echo "$NEW_KEY_PUB" >> \$AUTH_KEYS_TEMP
+sort -u \$AUTH_KEYS_TEMP -o \$AUTH_KEYS_TEMP
+chmod 600 \$AUTH_KEYS_TEMP
+
+# Create a test script that will be used to validate the key
+cat > /tmp/validate_key.sh << 'TEST_EOF'
+#!/bin/bash
+echo "KEY_VALIDATION_SUCCESS"
+TEST_EOF
+chmod +x /tmp/validate_key.sh
+
+# Create marker file to indicate test in progress
+touch /tmp/ssh_key_test_in_progress
+
+echo "Temporary authorized_keys file created for validation"
+EOF
+    
+    # Execute the setup script via SSM
+    if ! aws ssm send-command \
+      --instance-ids "$INSTANCE_ID" \
+      --document-name "AWS-RunShellScript" \
+      --parameters "commands=[cat > /tmp/update_keys_setup.sh << 'EOFMARKER'
+$(cat $TEMP_SCRIPT)
+EOFMARKER
+chmod +x /tmp/update_keys_setup.sh
+sudo -u $USER /tmp/update_keys_setup.sh
+rm /tmp/update_keys_setup.sh]" \
+      --region "$REGION" \
+      --profile "$PROFILE" \
+      --output text > /dev/null; then
+      echo -e "${RED}✘ Failed to setup key validation via SSM.${RESET}"
+      if [[ "$FORCE" != "true" ]]; then
+        echo -e "${RED}Use --force to proceed anyway.${RESET}"
+        exit 1
+      else
+        echo -e "${YELLOW}Proceeding despite setup failure due to --force option.${RESET}"
+      fi
+    else
+      echo -e "${GREEN}✓ Key validation setup completed${RESET}"
+      
+      # Create the commit script that will be executed after validation
+      local COMMIT_SCRIPT=$(mktemp)
+      cat > "$COMMIT_SCRIPT" << EOF
+#!/bin/bash
+set -e
+SSH_DIR=~/.ssh
+AUTH_KEYS=\$SSH_DIR/authorized_keys
+AUTH_KEYS_TEMP=\$SSH_DIR/authorized_keys.new
+
+# Check if validation was successful
+if [ -f /tmp/ssh_key_validation_success ]; then
+  # Validation succeeded, commit the changes
+  mv \$AUTH_KEYS_TEMP \$AUTH_KEYS
+  chmod 600 \$AUTH_KEYS
+  echo "New key successfully committed to authorized_keys"
+else
+  # Validation failed or didn't happen
+  echo "Key validation failed or was not completed"
+  rm -f \$AUTH_KEYS_TEMP
+fi
+
+# Clean up
+rm -f /tmp/validate_key.sh
+rm -f /tmp/ssh_key_test_in_progress
+rm -f /tmp/ssh_key_validation_success
+EOF
+      
+      # Now we need to try to connect with the new key to validate it works
+      echo -e "${BLUE}Validating new key before committing...${RESET}"
+      # Wait a moment for SSM to complete setup
+      sleep 2
+      
+      # Check if we have a host to connect to for validation
+      if [[ -n "$HOST" ]]; then
+        # Try to connect with the new key to execute the validation script
+        if ssh $SSH_OPTIONS -i "$NEW_KEY_FILE" "${USER}@${HOST}" "DISPLAY=:0 TERM=xterm-256color SSH_AUTH_SOCK= ~/.ssh/authorized_keys.new bash /tmp/validate_key.sh" | grep -q "KEY_VALIDATION_SUCCESS"; then
+          echo -e "${GREEN}✓ New key validation successful${RESET}"
+          
+          # Mark validation as successful
+          ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "touch /tmp/ssh_key_validation_success"
+          
+          # Execute the commit script
+          if ! aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[cat > /tmp/commit_keys.sh << 'EOFMARKER'
+$(cat $COMMIT_SCRIPT)
+EOFMARKER
+chmod +x /tmp/commit_keys.sh
+sudo -u $USER /tmp/commit_keys.sh
+rm /tmp/commit_keys.sh]" \
+            --region "$REGION" \
+            --profile "$PROFILE" \
+            --output text > /dev/null; then
+            echo -e "${RED}✘ Failed to commit new key.${RESET}"
+            exit 1
+          else
+            echo -e "${GREEN}✓ New key committed successfully${RESET}"
+          fi
+        else
+          echo -e "${RED}✘ Failed to validate new key.${RESET}"
+          if [[ "$FORCE" != "true" ]]; then
+            echo -e "${RED}Use --force to proceed anyway.${RESET}"
+            exit 1
+          else
+            echo -e "${YELLOW}Forcing key update despite validation failure...${RESET}"
+            
+            # Force direct update of authorized_keys
+            if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "echo '$NEW_KEY_PUB' >> ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"; then
+              echo -e "${RED}✘ Failed to force update authorized_keys.${RESET}"
+              exit 1
+            else
+              echo -e "${GREEN}✓ Forced key update completed${RESET}"
+            fi
+          fi
+        fi
+      else
+        echo -e "${YELLOW}No host available for key validation. Proceeding with direct update...${RESET}"
+        
+        # Execute direct update via SSM
+        if ! aws ssm send-command \
+          --instance-ids "$INSTANCE_ID" \
+          --document-name "AWS-RunShellScript" \
+          --parameters "commands=[cat > /tmp/direct_update.sh << 'EOFMARKER'
 #!/bin/bash
 set -e
 SSH_DIR=~/.ssh
@@ -448,51 +584,81 @@ mkdir -p \$SSH_DIR
 chmod 700 \$SSH_DIR
 touch \$AUTH_KEYS
 chmod 600 \$AUTH_KEYS
-echo "$NEW_KEY_PUB" >> \$AUTH_KEYS
+echo \"$NEW_KEY_PUB\" >> \$AUTH_KEYS
 sort -u \$AUTH_KEYS -o \$AUTH_KEYS
-echo "Authorized keys updated successfully"
-EOF
-    
-    # Execute the script via SSM
-    if ! aws ssm send-command \
-      --instance-ids "$INSTANCE_ID" \
-      --document-name "AWS-RunShellScript" \
-      --parameters "commands=[cat > /tmp/update_keys.sh << 'EOFMARKER'
-$(cat $TEMP_SCRIPT)
+echo \"Direct key update completed\"
 EOFMARKER
-chmod +x /tmp/update_keys.sh
-sudo -u $USER /tmp/update_keys.sh
-rm /tmp/update_keys.sh]" \
-      --region "$REGION" \
-      --profile "$PROFILE" \
-      --output text > /dev/null; then
-      echo -e "${RED}✘ Failed to update authorized_keys via SSM.${RESET}"
-      if [[ "$FORCE" != "true" ]]; then
-        echo -e "${RED}Use --force to proceed anyway.${RESET}"
-        exit 1
-      else
-        echo -e "${YELLOW}Proceeding despite update failure due to --force option.${RESET}"
+chmod +x /tmp/direct_update.sh
+sudo -u $USER /tmp/direct_update.sh
+rm /tmp/direct_update.sh]" \
+          --region "$REGION" \
+          --profile "$PROFILE" \
+          --output text > /dev/null; then
+          echo -e "${RED}✘ Failed to update authorized_keys via SSM.${RESET}"
+          if [[ "$FORCE" != "true" ]]; then
+            echo -e "${RED}Use --force to proceed anyway.${RESET}"
+            exit 1
+          else
+            echo -e "${YELLOW}Proceeding despite update failure due to --force option.${RESET}"
+          fi
+        else
+          echo -e "${GREEN}✓ Authorized keys updated via SSM${RESET}"
+        fi
       fi
-    else
-      echo -e "${GREEN}✓ Authorized keys updated via SSM${RESET}"
     fi
     
-    # Clean up temp file
-    rm -f "$TEMP_SCRIPT"
+    # Clean up temp files
+    rm -f "$TEMP_SCRIPT" "$COMMIT_SCRIPT" 2>/dev/null || true
   elif [[ -n "$HOST" ]]; then
     # Use SSH with existing key to update authorized_keys
     echo -e "${BLUE}Using SSH to update authorized_keys on ${HOST}...${RESET}"
     
-    if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$NEW_KEY_PUB' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"; then
-      echo -e "${RED}✘ Failed to update authorized_keys via SSH.${RESET}"
+    # First create a temporary authorized_keys file with the new key for validation
+    if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cp ~/.ssh/authorized_keys ~/.ssh/authorized_keys.new 2>/dev/null || touch ~/.ssh/authorized_keys.new && echo '$NEW_KEY_PUB' >> ~/.ssh/authorized_keys.new && chmod 600 ~/.ssh/authorized_keys.new"; then
+      echo -e "${RED}✘ Failed to create temporary authorized_keys file.${RESET}"
       if [[ "$FORCE" != "true" ]]; then
         echo -e "${RED}Use --force to proceed anyway.${RESET}"
         exit 1
       else
-        echo -e "${YELLOW}Proceeding despite update failure due to --force option.${RESET}"
+        echo -e "${YELLOW}Proceeding with direct update due to --force option.${RESET}"
+        if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$NEW_KEY_PUB' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"; then
+          echo -e "${RED}✘ Failed to update authorized_keys via SSH.${RESET}"
+          exit 1
+        else
+          echo -e "${GREEN}✓ Authorized keys directly updated via SSH${RESET}"
+          return
+        fi
+      fi
+    fi
+    
+    # Now try to connect with the new key to validate it works
+    echo -e "${BLUE}Validating new key before committing...${RESET}"
+    if ssh $SSH_OPTIONS -i "$NEW_KEY_FILE" -o "AuthorizedKeysFile=.ssh/authorized_keys.new" "${USER}@${HOST}" "echo 'KEY_VALIDATION_SUCCESS'" | grep -q "KEY_VALIDATION_SUCCESS"; then
+      echo -e "${GREEN}✓ New key validation successful${RESET}"
+      
+      # Commit the new authorized_keys file
+      if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mv ~/.ssh/authorized_keys.new ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"; then
+        echo -e "${RED}✘ Failed to commit new authorized_keys file.${RESET}"
+        exit 1
+      else
+        echo -e "${GREEN}✓ New key committed to authorized_keys${RESET}"
       fi
     else
-      echo -e "${GREEN}✓ Authorized keys updated via SSH${RESET}"
+      echo -e "${RED}✘ Failed to validate new key.${RESET}"
+      if [[ "$FORCE" != "true" ]]; then
+        echo -e "${RED}Use --force to proceed anyway.${RESET}"
+        exit 1
+      else
+        echo -e "${YELLOW}Forcing key update despite validation failure...${RESET}"
+        
+        # Force direct update of authorized_keys
+        if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mv ~/.ssh/authorized_keys.new ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
+          echo -e "${RED}✘ Failed to force update authorized_keys.${RESET}"
+          exit 1
+        else
+          echo -e "${GREEN}✓ Forced key update completed${RESET}"
+        fi
+      fi
     fi
   else
     echo -e "${YELLOW}⚠ No method available to update authorized_keys automatically.${RESET}"

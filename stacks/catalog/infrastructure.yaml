@@ -7,18 +7,54 @@ components:
       metadata:
         component: eks
         type: abstract
+        version: "1.0.0"
+        description: "EKS Kubernetes cluster configuration"
+        category: "container-orchestration"
+        namespace: "k8s"
+      depends_on:
+        - vpc
+        - securitygroup
       vars:
         enabled: true
         region: ${region}
         subnet_ids: ${output.vpc.private_subnet_ids}
+        cluster_name: "${tenant}-${account}-${environment}-eks"
+        kubernetes_version: "${eks_kubernetes_version | default("1.28")}"
+        cluster_endpoint_public_access: ${eks_public_access | default(false)}
+        cluster_endpoint_private_access: true
+        vpc_id: ${output.vpc.vpc_id}
+        vpc_cidr: ${vpc_cidr}
+        
+        # Security settings
+        encrypt_secrets: true
+        enable_kms_key: true
+        create_cluster_security_group: true
+        cluster_security_group_name: "${tenant}-${account}-${environment}-eks-cluster-sg"
+        
+        # Node group configuration (using variables with defaults for flexibility)
+        managed_node_groups: ${eks_node_groups | default({
+          default: {
+            name: "default-ng",
+            instance_types: ["t3.medium"],
+            min_size: 2,
+            max_size: 5,
+            desired_size: 2,
+            disk_size: 50
+          }
+        })}
+        
+        # Cluster protection settings based on environment type
+        enable_cluster_protection: ${is_production | default(false)}
+        
         # Map of clusters with dynamic configuration
-        clusters: {}
+        clusters: ${eks_clusters | default({})}
 
       # Define common tags
       tags:
         Tenant: ${tenant}
         Account: ${account}
         Environment: ${environment}
+        Component: "EKS"
         ManagedBy: "Terraform"
 
       # Terraform backend configuration
@@ -31,49 +67,80 @@ components:
               region: ${region}
               role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
               dynamodb_table: ${tenant}-terraform-locks
+          vars:
+            validation:
+              rules:
+                validate_k8s_version:
+                  rule: kubernetes_version =~ /^[0-9]+\.[0-9]+$/
+                  message: "Kubernetes version must be in the format of X.Y (e.g., 1.28)"
+                validate_protection:
+                  rule: !is_production || enable_cluster_protection
+                  message: "Production clusters must have protection enabled"
 
       # Provider configuration
       providers:
         aws:
-          profile: ${aws_profile}
           region: ${region}
 
-      # Define outputs
+      # Define outputs with improved descriptions
       outputs:
         cluster_ids:
-          description: "Map of cluster names to cluster IDs"
+          description: "Map of cluster names to cluster IDs for EKS clusters"
           value: ${output.cluster_ids}
         cluster_endpoints:
-          description: "Map of cluster names to cluster endpoints"
+          description: "Map of cluster names to Kubernetes API server endpoints"
           value: ${output.cluster_endpoints}
         cluster_ca_data:
-          description: "Map of cluster names to cluster CA certificate data"
+          description: "Map of cluster names to base64-encoded certificate authority data for the cluster"
           value: ${output.cluster_ca_data}
         oidc_provider_arns:
-          description: "Map of cluster names to OIDC provider ARNs"
+          description: "Map of cluster names to IAM OIDC provider ARNs for service account integration"
           value: ${output.oidc_provider_arns}
+        node_security_group_id:
+          description: "Security group ID attached to the EKS worker nodes"
+          value: ${output.node_security_group_id}
 
     eks-addons:
       metadata:
         component: eks-addons
         type: abstract
+        version: "1.0.0"
+        description: "EKS cluster addons and Kubernetes resources"
+        category: "container-orchestration"
+        namespace: "k8s"
+      depends_on:
+        - eks
       vars:
         enabled: true
         region: ${region}
-        # Reference to existing EKS resources
-        cluster_name: ""
-        host: ""
-        cluster_ca_certificate: ""
-        oidc_provider_arn: ""
-        oidc_provider_url: ""
+        # Reference to existing EKS resources with proper validation
+        cluster_name: ${eks_cluster_name | default("")}
+        host: ${eks_host | default("")}
+        cluster_ca_certificate: ${eks_ca_cert | default("")}
+        oidc_provider_arn: ${eks_oidc_provider_arn | default("")}
+        oidc_provider_url: ${eks_oidc_provider_url | default("")}
+        
+        # Enable specific addons based on variables with defaults for flexibility
+        enable_metrics_server: ${eks_enable_metrics_server | default(true)}
+        enable_cluster_autoscaler: ${eks_enable_cluster_autoscaler | default(true)}
+        enable_aws_load_balancer_controller: ${eks_enable_alb | default(true)}
+        enable_external_dns: ${eks_enable_external_dns | default(true)}
+        enable_cert_manager: ${eks_enable_cert_manager | default(true)}
+        enable_external_secrets: ${eks_enable_external_secrets | default(true)}
+        
         # Map of clusters with addons, Helm releases, and Kubernetes manifests
-        clusters: {}
+        clusters: ${eks_addon_clusters | default({})}
+        
+        # Service account configuration
+        create_service_accounts: true
+        service_account_namespace: "kube-system"
 
       # Define common tags
       tags:
         Tenant: ${tenant}
         Account: ${account}
         Environment: ${environment}
+        Component: "EKS-Addons"
         ManagedBy: "Terraform"
 
       # Terraform backend configuration
@@ -86,18 +153,125 @@ components:
               region: ${region}
               role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
               dynamodb_table: ${tenant}-terraform-locks
+          vars:
+            validation:
+              rules:
+                validate_cluster_name:
+                  rule: cluster_name != ""
+                  message: "Cluster name must be provided"
+                validate_host:
+                  rule: host != ""
+                  message: "Kubernetes host endpoint must be provided"
 
       # Provider configuration
       providers:
         aws:
-          profile: ${aws_profile}
           region: ${region}
+        kubernetes:
+          host: ${eks_host | default("")}
+          cluster_ca_certificate: ${eks_ca_cert | default("")}
+          token: ${eks_token | default("")}
 
-      # Define outputs
+      # Improved output descriptions
       outputs:
         addon_arns:
-          description: "Map of addon names to addon ARNs"
+          description: "Map of EKS addon names to their ARNs"
           value: ${output.addon_arns}
         helm_release_statuses:
-          description: "Map of Helm release names to statuses"
+          description: "Map of Helm release names to their installation status"
           value: ${output.helm_release_statuses}
+        service_account_roles:
+          description: "Map of service account names to their IAM role ARNs"
+          value: ${output.service_account_roles}
+        load_balancer_controller_webhook:
+          description: "Webhook endpoint for the AWS Load Balancer Controller"
+          value: ${output.load_balancer_controller_webhook}
+          
+    rds:
+      metadata:
+        component: rds
+        type: abstract
+        version: "1.0.0"
+        description: "RDS database instances configuration"
+        category: "databases"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: ${rds_enabled | default(true)}
+        region: ${region}
+        identifier: "${tenant}-${account}-${environment}-db"
+        engine: "${rds_engine | default("postgres")}"
+        engine_version: "${rds_engine_version | default("14")}"
+        instance_class: "${rds_instance_class | default("db.t3.micro")}"
+        allocated_storage: ${rds_allocated_storage | default(20)}
+        max_allocated_storage: ${rds_max_allocated_storage | default(100)}
+        db_name: "${rds_db_name | default("app")}"
+        username: "${rds_username | default("dbadmin")}"
+        port: ${rds_port | default(5432)}
+        
+        # High availability settings based on environment type
+        multi_az: ${multi_az | default(false)}
+        backup_retention_period: ${automatic_backup_retention | default(7)}
+        backup_window: "03:00-04:00"
+        maintenance_window: "sun:04:30-sun:05:30"
+        
+        # Security settings
+        deletion_protection: ${deletion_protection | default(false)}
+        skip_final_snapshot: ${!is_production | default(true)}
+        final_snapshot_identifier: "${tenant}-${account}-${environment}-db-final"
+        storage_encrypted: true
+        
+        # Network settings
+        subnet_ids: ${output.vpc.database_subnet_ids | default(output.vpc.private_subnet_ids)}
+        vpc_security_group_ids: ["${output.securitygroup.database_security_group_id}"]
+
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "RDS"
+        ManagedBy: "Terraform"
+        
+      # Terraform backend configuration  
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/infrastructure/rds/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+          vars:
+            validation:
+              rules:
+                validate_engine:
+                  rule: contains(["mysql", "postgres", "oracle", "sqlserver"], engine)
+                  message: "Database engine must be one of: mysql, postgres, oracle, sqlserver"
+                validate_production_backups:
+                  rule: !is_production || backup_retention_period >= 7
+                  message: "Production databases must have at least 7 days of backups"
+          
+      # Provider configuration
+      providers:
+        aws:
+          region: ${region}
+          
+      # Define outputs with improved descriptions 
+      outputs:
+        db_instance_address:
+          description: "The address of the RDS instance"
+          value: ${output.db_instance_address}
+        db_instance_arn:
+          description: "The ARN of the RDS instance"
+          value: ${output.db_instance_arn}
+        db_instance_endpoint:
+          description: "The connection endpoint of the RDS instance"
+          value: ${output.db_instance_endpoint}
+        db_instance_id:
+          description: "The ID of the RDS instance"
+          value: ${output.db_instance_id}
+        db_subnet_group_name:
+          description: "The name of the DB subnet group"
+          value: ${output.db_subnet_group_name}

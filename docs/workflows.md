@@ -1,8 +1,8 @@
 # Atmos Workflows Guide
 
-_Last Updated: February 28, 2025_
+_Last Updated: March 7, 2025_
 
-This guide provides comprehensive documentation on using, customizing, and extending workflows in the Atmos framework to automate and standardize infrastructure operations.
+This guide provides comprehensive documentation on using, customizing, and extending workflows in the Atmos framework to automate and standardize infrastructure operations. This documentation reflects the latest Atmos features and design patterns.
 
 ## Table of Contents
 
@@ -14,6 +14,7 @@ This guide provides comprehensive documentation on using, customizing, and exten
 - [Creating New Workflows](#creating-new-workflows)
 - [CI/CD Integration](#cicd-integration)
 - [Advanced Patterns](#advanced-patterns)
+- [Compliance and Security](#compliance-and-security)
 - [Troubleshooting](#troubleshooting)
 - [Reference](#reference)
 
@@ -52,6 +53,7 @@ The following standard workflows are included:
 | `import` | Import existing resources | `atmos workflow import tenant=mycompany account=dev environment=testenv-01` |
 | `validate` | Validate configuration with component auto-discovery | `atmos workflow validate tenant=mycompany account=dev environment=testenv-01` |
 | `lint` | Comprehensive linting with support for multiple tools | `atmos workflow lint` |
+| `compliance-check` | Run security and compliance checks against environment | `atmos workflow compliance-check tenant=mycompany account=dev environment=testenv-01` |
 
 ## Workflow Architecture
 
@@ -681,6 +683,109 @@ steps:
       - -c
       - "while [ ! -f approval.txt ]; do echo 'Waiting for approval...'; sleep 60; done"
     interactive: true
+```
+
+## Compliance and Security
+
+Atmos provides built-in workflows and features for ensuring compliance and security of your infrastructure.
+
+### Compliance Check Workflow
+
+The `compliance-check` workflow automates security and compliance checks for your environments:
+
+```yaml
+name: compliance-check
+description: "Check infrastructure compliance against best practices and security standards"
+
+workflows:
+  check:
+    description: "Run all compliance checks on a specific environment"
+    steps:
+    - run:
+        command: |
+          # Define the stack for validation
+          STACK="${tenant}-${account}-${environment}"
+          
+          # Step 1: Validate stack configuration
+          echo "Step 1: Validating stack configuration..."
+          atmos validate stacks --stack $STACK
+          
+          # Step 2: Check for security compliance violations
+          echo "Step 2: Checking for security compliance violations..."
+          
+          # Check Terraform components for compliance
+          echo "Checking encryption settings..."
+          atmos describe config -s $STACK | grep -E "encryption|kms" || echo "No encryption settings found"
+          
+          # Check IAM policies, public access, etc.
+          ...
+          
+          # Step 3: Run drift detection
+          echo "Step 3: Running drift detection..."
+          atmos workflow drift-detection tenant=${tenant} account=${account} environment=${environment}
+          
+          # Step 4: Apply OpenPolicyAgent policies
+          echo "Step 4: Checking OPA policies..."
+          # ... OPA policy validation ...
+          
+          # Step 5: Generate compliance report
+          echo "Step 5: Generating compliance report..."
+```
+
+### Security Features
+
+#### Stack Validation with JSON Schema
+
+Atmos supports JSON Schema validation for stack configurations:
+
+```yaml
+# In atmos.yaml
+schemas:
+  atmos:
+    manifest: "stacks/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"
+```
+
+The schema enforces correct stack structure, required fields, and appropriate data types.
+
+#### Variable Validation Rules
+
+Components can include validation rules for variables:
+
+```yaml
+settings:
+  terraform:
+    vars:
+      validation:
+        rules:
+          validate_k8s_version:
+            rule: kubernetes_version =~ /^[0-9]+\.[0-9]+$/
+            message: "Kubernetes version must be in format X.Y"
+          validate_protection:
+            rule: !is_production || enable_cluster_protection
+            message: "Production clusters must have protection enabled"
+```
+
+#### Reporting and Documentation
+
+The compliance workflow can generate reports for auditing and documentation:
+
+```yaml
+workflows:
+  report:
+    description: "Generate compliance report for all environments"
+    steps:
+    - run:
+        command: |
+          # Generate output directory
+          REPORT_DIR="compliance-reports"
+          mkdir -p "${REPORT_DIR}"
+          
+          # Generate report for each stack
+          echo "# Compliance Report for ${tenant}" > "${REPORT_DIR}/compliance-report.md"
+          echo "Generated on $(date)" >> "${REPORT_DIR}/compliance-report.md"
+          
+          # Check each stack for compliance issues
+          # ...detailed report generation...
 ```
 
 ## Troubleshooting
