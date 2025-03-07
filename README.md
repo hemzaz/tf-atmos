@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 ![Terraform](https://img.shields.io/badge/terraform-%3E%3D1.11.0-623CE4.svg)
 ![Atmos](https://img.shields.io/badge/atmos-%3E%3D1.163.0-16A394.svg)
-![Kubectl](https://img.shields.io/badge/kubectl-%3E%3D1.28.3-326CE5.svg)
+![Kubectl](https://img.shields.io/badge/kubectl-%3E%3D1.32.0-326CE5.svg)
 ![Helm](https://img.shields.io/badge/helm-%3E%3D3.13.1-0F1689.svg)
 ![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=flat&logo=amazon-aws&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
@@ -41,10 +41,27 @@ We provide pre-built components for:
 - AWS CLI
 - Terraform ≥ 1.11.0
 - Atmos CLI ≥ 1.163.0
-- Kubectl ≥ 1.28.3
+- Kubectl ≥ 1.32.0
 - Helm ≥ 3.13.1
 
-> Tool versions are defined in the project's configuration.
+> Tool versions are defined in the .env file at the root of this repository.
+
+### Version Management
+
+The project uses a `.env` file to manage tool and dependency versions. This file:
+- Defines required versions for Terraform, Atmos, Kubectl, and other tools
+- Is used by installation scripts and CI/CD pipelines
+- Should be updated when upgrading dependencies
+
+Example `.env` file:
+```bash
+TERRAFORM_VERSION=1.11.0
+ATMOS_VERSION=1.163.0
+KUBECTL_VERSION=1.32.0
+HELM_VERSION=3.13.1
+TFSEC_VERSION=1.28.13
+TFLINT_VERSION=0.55.1
+```
 
 ### Basic Commands
 
@@ -97,6 +114,11 @@ git clone https://github.com/your-org/tf-atmos.git
 cd tf-atmos
 
 # Install dependencies
+./scripts/install-dependencies.sh
+
+# View or modify tool versions in the .env file
+cat .env
+# After updating .env, reinstall dependencies
 ./scripts/install-dependencies.sh
 
 # Create a new component from template

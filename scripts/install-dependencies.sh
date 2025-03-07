@@ -15,7 +15,10 @@ RESET="\033[0m"
 
 # Load environment variables from .env file if it exists
 if [[ -f "$(dirname "$0")/../.env" ]]; then
+  echo -e "${BLUE}Loading tool versions from .env file...${RESET}"
   source "$(dirname "$0")/../.env"
+else
+  echo -e "${YELLOW}No .env file found. Using default versions.${RESET}"
 fi
 
 # Default configuration
@@ -32,10 +35,14 @@ INSTALL_KUBECTL=true
 INSTALL_YAMLLINT=true
 INSTALL_TFSEC=true
 INSTALL_TFLINT=true
+INSTALL_CHECKOV=false
 TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.5.7}"
 ATMOS_VERSION="${ATMOS_VERSION:-1.38.0}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-1.28.3}"
 HELM_VERSION="${HELM_VERSION:-3.13.1}"
+TFSEC_VERSION="${TFSEC_VERSION:-1.28.13}"
+TFLINT_VERSION="${TFLINT_VERSION:-0.55.1}"
+CHECKOV_VERSION="${CHECKOV_VERSION:-3.2.382}"
 INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="$HOME/.local/bin"
 SYSTEM_INSTALL=false
@@ -49,6 +56,10 @@ show_help() {
   echo
   echo -e "${BOLD}Usage:${RESET}"
   echo "  $0 [options]"
+  echo
+  echo -e "${BOLD}Version Management:${RESET}"
+  echo "  Tool versions are managed in the .env file at the root of the repository."
+  echo "  You can override versions using the command line options below."
   echo
   echo -e "${BOLD}Options:${RESET}"
   echo "  --skip-terraform        Skip Terraform installation"
@@ -64,10 +75,14 @@ show_help() {
   echo "  --skip-yamllint         Skip yamllint installation"
   echo "  --skip-tfsec            Skip tfsec installation"
   echo "  --skip-tflint           Skip tflint installation"
+  echo "  --install-checkov       Install checkov (not installed by default)"
   echo "  --terraform-version VER Set Terraform version (default: $TERRAFORM_VERSION)"
   echo "  --atmos-version VER     Set Atmos version (default: $ATMOS_VERSION)"
   echo "  --kubectl-version VER   Set kubectl version (default: $KUBECTL_VERSION)"
   echo "  --helm-version VER      Set Helm version (default: $HELM_VERSION)"
+  echo "  --tfsec-version VER     Set TFSec version (default: $TFSEC_VERSION)"
+  echo "  --tflint-version VER    Set TFLint version (default: $TFLINT_VERSION)"
+  echo "  --checkov-version VER   Set Checkov version (default: $CHECKOV_VERSION)"
   echo "  --system                Install tools system-wide (requires sudo)"
   echo "  --user                  Install tools in user's home directory"
   echo "  --ci                    Install in CI mode (non-interactive, minimal deps)"
@@ -77,6 +92,7 @@ show_help() {
   echo -e "${BOLD}Examples:${RESET}"
   echo "  $0 --skip-aws-cli --terraform-version 1.6.0"
   echo "  $0 --system --ci"
+  echo "  $0 --install-checkov --tfsec-version 1.28.13 --checkov-version 3.2.382"
   echo
 }
 
@@ -647,30 +663,45 @@ install_tfsec() {
   fi
   
   if command -v tfsec &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
-    echo -e "${GREEN}tfsec is already installed: $(tfsec --version)${RESET}"
-    return
+    local TFSEC_INSTALLED_VERSION=$(tfsec --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+    if [[ "$TFSEC_INSTALLED_VERSION" == "$TFSEC_VERSION" ]]; then
+      echo -e "${GREEN}tfsec $TFSEC_VERSION is already installed${RESET}"
+      return
+    else
+      echo -e "${YELLOW}Updating tfsec from $TFSEC_INSTALLED_VERSION to $TFSEC_VERSION${RESET}"
+    fi
+  else
+    echo -e "${BLUE}Installing tfsec $TFSEC_VERSION...${RESET}"
   fi
-  
-  echo -e "${BLUE}Installing tfsec...${RESET}"
   
   # Install tfsec
   if [[ "$OS" == "darwin" ]]; then
-    brew install tfsec
+    if command -v brew &>/dev/null; then
+      brew install tfsec
+    else
+      # Download specific version if Homebrew is not available
+      install_tfsec_binary
+    fi
   else
     # Download and install tfsec
-    local TFSEC_URL="https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-${OS}-${ARCH}"
-    local TFSEC_BIN="$INSTALL_TARGET_DIR/tfsec"
-    
-    if curl -sSL "$TFSEC_URL" -o "$TFSEC_BIN"; then
-      if [[ "$SYSTEM_INSTALL" == "true" ]]; then
-        sudo chmod +x "$TFSEC_BIN"
-      else
-        chmod +x "$TFSEC_BIN"
-      fi
-      echo -e "${GREEN}tfsec installed: $(tfsec --version)${RESET}"
+    install_tfsec_binary
+  fi
+}
+
+# Helper function to install tfsec binary
+install_tfsec_binary() {
+  local TFSEC_URL="https://github.com/aquasecurity/tfsec/releases/download/v${TFSEC_VERSION}/tfsec-${OS}-${ARCH}"
+  local TFSEC_BIN="$INSTALL_TARGET_DIR/tfsec"
+  
+  if curl -sSL "$TFSEC_URL" -o "$TFSEC_BIN"; then
+    if [[ "$SYSTEM_INSTALL" == "true" ]]; then
+      sudo chmod +x "$TFSEC_BIN"
     else
-      echo -e "${RED}Failed to install tfsec${RESET}"
+      chmod +x "$TFSEC_BIN"
     fi
+    echo -e "${GREEN}tfsec $TFSEC_VERSION installed: $(tfsec --version)${RESET}"
+  else
+    echo -e "${RED}Failed to install tfsec $TFSEC_VERSION${RESET}"
   fi
 }
 
@@ -681,35 +712,99 @@ install_tflint() {
   fi
   
   if command -v tflint &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
-    echo -e "${GREEN}tflint is already installed: $(tflint --version)${RESET}"
-    return
+    local TFLINT_INSTALLED_VERSION=$(tflint --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
+    if [[ "$TFLINT_INSTALLED_VERSION" == "$TFLINT_VERSION" ]]; then
+      echo -e "${GREEN}tflint $TFLINT_VERSION is already installed${RESET}"
+      return
+    else
+      echo -e "${YELLOW}Updating tflint from $TFLINT_INSTALLED_VERSION to $TFLINT_VERSION${RESET}"
+    fi
+  else
+    echo -e "${BLUE}Installing tflint $TFLINT_VERSION...${RESET}"
   fi
-  
-  echo -e "${BLUE}Installing tflint...${RESET}"
   
   # Install tflint
   if [[ "$OS" == "darwin" ]]; then
-    brew install tflint
+    if command -v brew &>/dev/null; then
+      brew install tflint
+    else
+      # Download specific version if Homebrew is not available
+      install_tflint_binary
+    fi
   else
     # Download and install tflint
-    local TFLINT_URL="https://github.com/terraform-linters/tflint/releases/latest/download/tflint_${OS}_${ARCH}.zip"
-    local TFLINT_ZIP="/tmp/tflint.zip"
+    install_tflint_binary
+  fi
+}
+
+# Helper function to install tflint binary
+install_tflint_binary() {
+  local TFLINT_URL="https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_${OS}_${ARCH}.zip"
+  local TFLINT_ZIP="/tmp/tflint.zip"
+  
+  if curl -sSL "$TFLINT_URL" -o "$TFLINT_ZIP"; then
+    unzip -o "$TFLINT_ZIP" -d /tmp
     
-    if curl -sSL "$TFLINT_URL" -o "$TFLINT_ZIP"; then
-      unzip -o "$TFLINT_ZIP" -d /tmp
-      
-      if [[ "$SYSTEM_INSTALL" == "true" ]]; then
-        sudo mv /tmp/tflint "$INSTALL_TARGET_DIR/tflint"
-        sudo chmod +x "$INSTALL_TARGET_DIR/tflint"
-      else
-        mv /tmp/tflint "$INSTALL_TARGET_DIR/tflint"
-        chmod +x "$INSTALL_TARGET_DIR/tflint"
-      fi
-      
-      rm "$TFLINT_ZIP"
-      echo -e "${GREEN}tflint installed: $(tflint --version)${RESET}"
+    if [[ "$SYSTEM_INSTALL" == "true" ]]; then
+      sudo mv /tmp/tflint "$INSTALL_TARGET_DIR/tflint"
+      sudo chmod +x "$INSTALL_TARGET_DIR/tflint"
     else
-      echo -e "${RED}Failed to install tflint${RESET}"
+      mv /tmp/tflint "$INSTALL_TARGET_DIR/tflint"
+      chmod +x "$INSTALL_TARGET_DIR/tflint"
+    fi
+    
+    rm "$TFLINT_ZIP"
+    echo -e "${GREEN}tflint $TFLINT_VERSION installed: $(tflint --version)${RESET}"
+  else
+    echo -e "${RED}Failed to install tflint $TFLINT_VERSION${RESET}"
+  fi
+}
+
+# Install checkov
+install_checkov() {
+  if [[ "$INSTALL_CHECKOV" != "true" ]]; then
+    return
+  fi
+  
+  if command -v checkov &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
+    local CHECKOV_INSTALLED_VERSION=$(checkov --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    if [[ "$CHECKOV_INSTALLED_VERSION" == "$CHECKOV_VERSION" ]]; then
+      echo -e "${GREEN}checkov $CHECKOV_VERSION is already installed${RESET}"
+      return
+    else
+      echo -e "${YELLOW}Updating checkov from $CHECKOV_INSTALLED_VERSION to $CHECKOV_VERSION${RESET}"
+    fi
+  else
+    echo -e "${BLUE}Installing checkov $CHECKOV_VERSION...${RESET}"
+  fi
+  
+  # Install checkov via pip
+  if command -v pip3 &>/dev/null; then
+    if [[ "$SYSTEM_INSTALL" == "true" ]]; then
+      sudo pip3 install checkov==$CHECKOV_VERSION
+    else
+      pip3 install --user checkov==$CHECKOV_VERSION
+    fi
+    echo -e "${GREEN}checkov $CHECKOV_VERSION installed: $(checkov --version)${RESET}"
+  else
+    echo -e "${YELLOW}pip3 not found. Installing pip3...${RESET}"
+    if [[ "$OS" == "darwin" ]]; then
+      brew install python3
+    elif [[ "$SYSTEM_INSTALL" == "true" ]]; then
+      sudo $PKG_INSTALL python3-pip
+    else
+      $PKG_INSTALL python3-pip
+    fi
+    
+    if command -v pip3 &>/dev/null; then
+      if [[ "$SYSTEM_INSTALL" == "true" ]]; then
+        sudo pip3 install checkov==$CHECKOV_VERSION
+      else
+        pip3 install --user checkov==$CHECKOV_VERSION
+      fi
+      echo -e "${GREEN}checkov $CHECKOV_VERSION installed: $(checkov --version)${RESET}"
+    else
+      echo -e "${RED}Failed to install pip3, which is required for checkov${RESET}"
     fi
   fi
 }
@@ -769,6 +864,10 @@ while [[ $# -gt 0 ]]; do
       INSTALL_TFLINT=false
       shift
       ;;
+    --install-checkov)
+      INSTALL_CHECKOV=true
+      shift
+      ;;
     --terraform-version)
       TERRAFORM_VERSION="$2"
       shift 2
@@ -783,6 +882,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --helm-version)
       HELM_VERSION="$2"
+      shift 2
+      ;;
+    --tfsec-version)
+      TFSEC_VERSION="$2"
+      shift 2
+      ;;
+    --tflint-version)
+      TFLINT_VERSION="$2"
+      shift 2
+      ;;
+    --checkov-version)
+      CHECKOV_VERSION="$2"
       shift 2
       ;;
     --system)
@@ -837,6 +948,7 @@ install_kubectl
 install_helm
 install_tfsec
 install_tflint
+install_checkov
 
 # Print summary
 echo
@@ -876,6 +988,10 @@ fi
 
 if [[ "$INSTALL_TFLINT" == "true" ]]; then
   echo -e "  • ${GREEN}$(tflint --version)${RESET}" 2>/dev/null || echo -e "  • ${RED}tflint not installed${RESET}"
+fi
+
+if [[ "$INSTALL_CHECKOV" == "true" ]]; then
+  echo -e "  • ${GREEN}checkov $(checkov --version)${RESET}" 2>/dev/null || echo -e "  • ${RED}checkov not installed${RESET}"
 fi
 
 echo
