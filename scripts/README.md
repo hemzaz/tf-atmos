@@ -10,7 +10,7 @@ This directory contains scripts that supplement the Python-based Atmos CLI imple
 
 ## Migration Status
 
-Most functionality has been migrated to the Python-based implementation in the `atmos_cli/` directory:
+Most functionality has been migrated to the Python-based implementation in the `gaia/` directory:
 
 | Category | Status | Python Implementation |
 |----------|--------|----------------------|
@@ -27,7 +27,7 @@ The bash scripts in this directory are maintained for backward compatibility and
 
 ```bash
 # Preferred approach (Python)
-atmos-cli workflow apply-environment --tenant acme --account prod --environment use1
+gaia workflow apply-environment --tenant acme --account prod --environment use1
 
 # Backward compatible approach (Bash)
 ./scripts/compatibility/component-operations.sh apply

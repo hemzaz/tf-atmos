@@ -1,18 +1,18 @@
-# Gaia
+# Terraform Atmos Toolchain
 
-A Python-based CLI for managing Terraform deployments with Atmos.
-
-> **IMPORTANT**: This project has been renamed from `atmos-cli` to `gaia` to avoid confusion with the primary Atmos tool. The `atmos-cli` command continues to work as an alias but is deprecated. Please use `gaia` in all new scripts.
+This project provides enterprise-grade tools for deploying and managing infrastructure with Terraform and Atmos.
 
 ## Overview
 
-This project provides tools for deploying and managing infrastructure with Terraform and Atmos, including:
+The toolchain includes:
 
-- Component discovery and dependency management
-- Environment onboarding and configuration
-- Drift detection and remediation
-- State lock management
-- Certificate handling
+- High-performance component discovery with intelligent caching
+- Dependency resolution and management with cycle detection
+- Environment onboarding and configuration with templates
+- Advanced drift detection and remediation
+- State lock management with safety mechanisms
+- Secure certificate handling and rotation
+- Thread-safe operations for concurrent tasks
 
 ## Installation
 
@@ -23,113 +23,98 @@ This project provides tools for deploying and managing infrastructure with Terra
 git clone https://github.com/example/tf-atmos.git
 cd tf-atmos
 
-# Install the package
+# Install the package with dependencies
 pip install -e .
 
-# Start Redis (for async operations)
+# Optional: Start Redis for async operations (recommended for production)
+# Redis connection is automatically validated - falls back to local execution if unavailable
 brew install redis  # or apt-get install redis-server
 brew services start redis
 ```
 
 ### Requirements
 
-- Python 3.8+
-- Terraform
-- Atmos CLI
+- Python 3.11+
+- Terraform 1.11.0
+- Atmos CLI 1.163.0+
 
-See `requirements.txt` for Python dependencies.
+See `requirements.txt` for complete Python dependencies.
 
 ## Usage
 
-### Python CLI (Recommended)
+Use the Atmos workflows to manage your infrastructure. For detailed documentation on Gaia (the Python implementation), see [gaia/README.md](./gaia/README.md).
 
 ```bash
-# Get help
-gaia --help
-
 # Apply an environment
-gaia workflow apply-environment --tenant acme --account prod --environment use1
+atmos workflow apply-environment tenant=acme account=prod environment=use1
 
-# Plan an environment
-gaia workflow plan-environment --stack acme-prod-use1
+# Plan an environment with drift detection
+atmos workflow plan-environment tenant=acme account=prod environment=use1 detect_drift=true
 
-# Use async mode for long-running operations
-gaia --async workflow apply-environment --tenant acme --account prod --environment use1
-```
-
-### Simplified Operations Script
-
-For common operations, use the simplified `atmos-ops` script:
-
-```bash
-# Apply components
-atmos-ops apply
-
-# Detect drift
-atmos-ops drift 
-
-# Manage state
-atmos-ops state list
-```
-
-### Legacy Bash Scripts
-
-Bash scripts are maintained for backward compatibility in `scripts/compatibility/`:
-
-```bash
-# Apply components
-./scripts/compatibility/component-operations.sh apply
+# Validate components
+atmos workflow validate tenant=acme account=prod environment=use1
 ```
 
 ## Directory Structure
 
-- **gaia/**: Python implementation
+- **gaia/**: Python implementation for Atmos workflows
 - **bin/**: Executable scripts
 - **scripts/**: Utility scripts
-  - **certificates/**: Certificate management (bash)
-  - **compatibility/**: Legacy bash scripts
+  - **certificates/**: Certificate management
   - **templates/**: Template files
 - **workflows/**: Atmos workflow definitions
+- **components/**: Terraform components
+- **stacks/**: Atmos stack configurations
 
-## Features
+## Key Features
 
-### Asynchronous Tasks
+### Atmos Workflows
 
-Gaia supports asynchronous task processing with Celery:
-
-```bash
-# Start the Celery worker
-python scripts/celery-worker.py
-
-# Run commands asynchronously
-gaia --async workflow apply-environment -t acme -a prod -e use1
-
-# Manage tasks
-gaia task status <task-id>
-gaia task list
-gaia task revoke <task-id>
-```
-
-### Environment Templating
-
-Create and update environment configurations with Copier:
+The toolchain provides pre-defined Atmos workflows for common operations:
 
 ```bash
-# Create a new environment
-gaia template create-environment -t acme -a prod -e use1 --vpc-cidr 10.0.0.0/16
+# Apply a complete environment
+atmos workflow apply-environment tenant=acme account=prod environment=use1
 
-# Update an existing environment
-gaia template update-environment -t acme -a prod -e use1
+# Plan changes with drift detection
+atmos workflow plan-environment tenant=acme account=prod environment=use1 detect_drift=true
+
+# Validate components
+atmos workflow validate tenant=acme account=prod environment=use1
+
+# Onboard a new environment
+atmos workflow onboard-environment tenant=acme account=prod environment=use1 vpc_cidr=10.0.0.0/16
+
+# Detect infrastructure drift
+atmos workflow drift-detection tenant=acme account=prod environment=use1
 ```
 
-## Maintenance
+### Environment Management
 
-The codebase is transitioning from bash to Python for better maintainability:
+Create and manage environments using standard workflows:
 
-- All new features are implemented in Python
-- Bash scripts are maintained for backward compatibility
-- Certificate management scripts will be migrated to Python in a future release
-- The project has been renamed from `atmos-cli` to `gaia`
+```bash
+# Onboard a new environment
+atmos workflow onboard-environment tenant=acme account=prod environment=use1 vpc_cidr=10.0.0.0/16
+
+# Update an existing environment configuration
+atmos workflow update-environment-template tenant=acme account=prod environment=use1
+```
+
+### Configuration
+
+The toolchain can be configured through environment variables or configuration files:
+- `.atmos.env` in project root
+- `.env` in project root
+- `~/.atmos/config`
+
+## Recent Improvements
+
+- **Performance**: Implemented intelligent caching, memory limits, and optimized dependencies
+- **Security**: Fixed all critical security vulnerabilities including command injection issues
+- **Reliability**: Added proper error handling, retry mechanisms, and validation
+- **Usability**: Improved workflow interface and configuration
+- **Maintainability**: Standardized interfaces and consolidated utilities
 
 ## License
 

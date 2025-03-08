@@ -16,7 +16,7 @@ RESET='\033[0m'
 
 # Print deprecation notice
 echo -e "${YELLOW}NOTE: This script uses the Python implementation but provides a simplified interface.${RESET}"
-echo -e "${YELLOW}For complete functionality, use: atmos-cli <command> [options]${RESET}"
+echo -e "${YELLOW}For complete functionality, use: gaia <command> [options]${RESET}"
 echo ""
 
 # Show usage information
@@ -43,7 +43,7 @@ usage() {
 
 # Check for Python CLI installation
 check_cli() {
-  if ! command -v "${REPO_ROOT}/bin/atmos-cli" &> /dev/null; then
+  if ! command -v "${REPO_ROOT}/bin/gaia" &> /dev/null; then
     echo -e "${YELLOW}Python CLI not installed or not found.${RESET}"
     echo "Would you like to set it up now? [y/N] "
     read -r response
@@ -109,7 +109,7 @@ main() {
     apply)
       get_env_vars
       echo -e "${BLUE}Applying components for ${STACK}...${RESET}"
-      "${REPO_ROOT}/bin/atmos-cli" workflow apply-environment \
+      "${REPO_ROOT}/bin/gaia" workflow apply-environment \
         --tenant "$TENANT" \
         --account "$ACCOUNT" \
         --environment "$ENVIRONMENT" \
@@ -120,7 +120,7 @@ main() {
     plan)
       get_env_vars
       echo -e "${BLUE}Planning components for ${STACK}...${RESET}"
-      "${REPO_ROOT}/bin/atmos-cli" workflow plan-environment \
+      "${REPO_ROOT}/bin/gaia" workflow plan-environment \
         --tenant "$TENANT" \
         --account "$ACCOUNT" \
         --environment "$ENVIRONMENT" \
@@ -131,7 +131,7 @@ main() {
     validate)
       get_env_vars
       echo -e "${BLUE}Validating components for ${STACK}...${RESET}"
-      "${REPO_ROOT}/bin/atmos-cli" workflow validate \
+      "${REPO_ROOT}/bin/gaia" workflow validate \
         --tenant "$TENANT" \
         --account "$ACCOUNT" \
         --environment "$ENVIRONMENT" \
@@ -141,7 +141,7 @@ main() {
     drift)
       get_env_vars
       echo -e "${BLUE}Detecting drift for ${STACK}...${RESET}"
-      "${REPO_ROOT}/bin/atmos-cli" workflow drift-detection \
+      "${REPO_ROOT}/bin/gaia" workflow drift-detection \
         --tenant "$TENANT" \
         --account "$ACCOUNT" \
         --environment "$ENVIRONMENT" \
@@ -158,7 +158,7 @@ main() {
         exit 0
       fi
       
-      "${REPO_ROOT}/bin/atmos-cli" workflow destroy-environment \
+      "${REPO_ROOT}/bin/gaia" workflow destroy-environment \
         --tenant "$TENANT" \
         --account "$ACCOUNT" \
         --environment "$ENVIRONMENT" \
@@ -173,13 +173,13 @@ main() {
       
       case "$STATE_CMD" in
         list)
-          "${REPO_ROOT}/bin/atmos-cli" state list-locks "$STACK"
+          "${REPO_ROOT}/bin/gaia" state list-locks "$STACK"
           ;;
         detect)
-          "${REPO_ROOT}/bin/atmos-cli" state detect-abandoned-locks "$STACK" --older-than "${older_than:-120}"
+          "${REPO_ROOT}/bin/gaia" state detect-abandoned-locks "$STACK" --older-than "${older_than:-120}"
           ;;
         clean)
-          "${REPO_ROOT}/bin/atmos-cli" state clean-abandoned-locks "$STACK" --older-than "${older_than:-120}" --force "${force:-false}"
+          "${REPO_ROOT}/bin/gaia" state clean-abandoned-locks "$STACK" --older-than "${older_than:-120}" --force "${force:-false}"
           ;;
         *)
           echo -e "${RED}Unknown state command: ${STATE_CMD}${RESET}"

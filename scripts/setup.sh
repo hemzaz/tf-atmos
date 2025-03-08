@@ -69,7 +69,7 @@ install_package() {
 # Create convenience symlink
 create_symlink() {
   local bin_dir="${REPO_ROOT}/bin"
-  local symlink="${bin_dir}/atmos-cli"
+  local symlink="${bin_dir}/gaia"
   
   mkdir -p "${bin_dir}"
   
@@ -77,7 +77,7 @@ create_symlink() {
     rm "${symlink}"
   fi
   
-  ln -s "${REPO_ROOT}/.venv/bin/atmos-cli" "${symlink}"
+  ln -s "${REPO_ROOT}/.venv/bin/gaia" "${symlink}"
   chmod +x "${symlink}"
   
   echo -e "${GREEN}✓${RESET} Created symlink at ${symlink}"
@@ -98,11 +98,11 @@ main() {
   print_section "Installation Complete"
   echo -e "To use Atmos CLI, you can:"
   echo -e "1. Add ${YELLOW}${REPO_ROOT}/bin${RESET} to your PATH"
-  echo -e "2. Use the full path: ${YELLOW}${REPO_ROOT}/bin/atmos-cli${RESET}"
+  echo -e "2. Use the full path: ${YELLOW}${REPO_ROOT}/bin/gaia${RESET}"
   echo -e "3. Activate the virtual environment: ${YELLOW}source ${REPO_ROOT}/.venv/bin/activate${RESET}"
   
   echo -e "\nTo verify the installation:"
-  echo -e "${YELLOW}${REPO_ROOT}/bin/atmos-cli --version${RESET}"
+  echo -e "${YELLOW}${REPO_ROOT}/bin/gaia --version${RESET}"
 }
 
 # Run main function

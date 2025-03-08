@@ -13,52 +13,6 @@ echo "⚠️  This script is deprecated and will be removed in a future release.
 echo "Please use 'gaia certificate rotate' instead."
 echo "For more information, run 'gaia certificate rotate --help'"
 echo "Redirecting to new command..."
-
-# Extract parameters
-SECRET_NAME=""
-NAMESPACE=""
-ACM_ARN=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --secret|-s)
-      SECRET_NAME="$2"
-      shift 2
-      ;;
-    --namespace|-n)
-      NAMESPACE="$2"
-      shift 2
-      ;;
-    --acm-arn|-a)
-      ACM_ARN="$2"
-      shift 2
-      ;;
-    *)
-      echo "Warning: Unrecognized parameter: $1"
-      shift
-      ;;
-  esac
-done
-
-# Redirect to gaia command with parameters
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-
-# Check if parameters were provided
-if [[ -n "$SECRET_NAME" && -n "$NAMESPACE" ]]; then
-  CMD="${REPO_ROOT}/bin/gaia certificate rotate --secret $SECRET_NAME --namespace $NAMESPACE"
-  
-  # Add optional ACM ARN if provided
-  if [[ -n "$ACM_ARN" ]]; then
-    CMD="$CMD --acm-arn $ACM_ARN"
-  fi
-  
-  echo "Executing: $CMD"
-  exec $CMD
-else
-  # No parameters, just show help
-  exec "${REPO_ROOT}/bin/gaia" certificate rotate --help
-fi
 echo ""
 
 set -euo pipefail

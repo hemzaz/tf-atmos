@@ -1,6 +1,18 @@
 # Gaia - Python CLI for Terraform Atmos
 
-Gaia is a Python-based CLI for Terraform Atmos that provides enhanced functionality and async task processing.
+Gaia is a secure, performant Python-based CLI for managing Terraform deployments with the Atmos toolchain. It powers all Atmos workflows.
+
+## Overview
+
+Gaia provides enterprise-grade tools for deploying and managing infrastructure with Terraform and Atmos, including:
+
+- High-performance component discovery with intelligent caching
+- Dependency resolution and management with cycle detection
+- Environment onboarding and configuration with templates
+- Advanced drift detection and remediation
+- State lock management with safety mechanisms
+- Secure certificate handling and rotation
+- Thread-safe operations for concurrent tasks
 
 ## Features
 
@@ -20,6 +32,11 @@ pip install -r requirements.txt
 
 # Install the package
 pip install -e .
+
+# Optional: Start Redis for async operations (recommended for production)
+# Redis connection is automatically validated - falls back to local execution if unavailable
+brew install redis  # or apt-get install redis-server
+brew services start redis
 ```
 
 ## Configuration
@@ -36,18 +53,33 @@ export COMPONENTS_DIR=components/terraform
 export STACKS_BASE_DIR=stacks
 ```
 
-## Celery Worker
+Gaia can also be configured through these configuration files:
+- `.atmos.env` in project root
+- `.env` in project root
+- `~/.atmos/config`
 
-For asynchronous task processing:
+Key configuration options:
+- `REDIS_URL`: URL for Redis (defaults to localhost)
+- `CELERY_WORKERS`: Number of concurrent workers (defaults to 4)
+- `ASYNC_MODE`: Enable async mode by default (true/false)
+
+## Asynchronous Tasks
+
+Gaia supports robust asynchronous task processing with Celery:
 
 ```bash
-# Start Redis (if not already running)
-redis-server
-
-# Start Celery worker
+# Start the Celery worker
 python scripts/celery-worker.py
 
-# Optional: Start Flower dashboard
+# Run commands asynchronously
+gaia --async workflow apply-environment -t acme -a prod -e use1
+
+# List and manage tasks directly from CLI
+gaia task list --days 3 --status SUCCESS
+gaia task status <task-id>
+gaia task revoke <task-id> --terminate
+
+# Optional: Start Flower dashboard for monitoring
 celery -A gaia.cli.celery_app flower --port=5555
 ```
 
@@ -57,13 +89,26 @@ celery -A gaia.cli.celery_app flower --port=5555
 # Get help
 gaia --help
 
-# Run operations asynchronously
+# Apply an environment
+gaia workflow apply-environment --tenant acme --account prod --environment use1
+
+# Plan an environment with drift detection
+gaia workflow plan-environment --tenant acme --account prod --environment use1 --detect-drift
+
+# Validate components
+gaia workflow validate --tenant acme --account prod --environment use1
+
+# Use async mode for long-running operations
 gaia --async workflow apply-environment -t acme -a prod -e use1
 
 # Manage tasks
 gaia task status <task-id>
 gaia task list
 gaia task revoke <task-id>
+
+# Environment Templating
+gaia template create-environment -t acme -a prod -e use1 --vpc-cidr 10.0.0.0/16 --validate
+gaia template update-environment -t acme -a prod -e use1
 
 # Certificate Management
 gaia certificate rotate --secret example-com-cert --namespace istio-system --acm-arn arn:aws:acm:us-west-2:123456789012:certificate/xxxxx
@@ -97,3 +142,33 @@ Key improvements over shell implementation:
 - AWS SDK integration with proper retry handling
 
 For more details on usage, see the project documentation.
+
+## High-Performance Component Operations
+
+Gaia includes optimized performance for operations on large codebases:
+
+- Efficient component discovery with class-level caching
+- Thread-safe operations with proper locking
+- Memory limits to prevent resource exhaustion
+- Consolidated dependency handling in Terraform
+
+## Secure Operations
+
+Enhanced security features have been implemented across the codebase:
+
+- Secure temporary file handling with proper permissions
+- Script verification with checksum validation
+- Command injection prevention
+- Proper credential and key management
+- Enhanced logging and error handling
+
+## Directory Structure
+
+- **discovery.py**: Component discovery with caching
+- **operations.py**: Core operations with memory protections
+- **certificates.py**: Secure certificate management
+- **utils.py**: Utility functions with security enhancements
+- **cli.py**: Command line interface
+- **config.py**: Configuration management
+- **tasks.py**: Asynchronous task handling
+- **templating.py**: Template processing logic

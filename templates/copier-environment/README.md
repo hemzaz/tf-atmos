@@ -10,13 +10,13 @@ The template can be used in two ways:
 
 ```bash
 # Create a new environment
-atmos-cli template create-environment --tenant acme --account dev --environment us-east-1 --vpc-cidr 10.0.0.0/16
+gaia template create-environment --tenant acme --account dev --environment us-east-1 --vpc-cidr 10.0.0.0/16
 
 # Update an existing environment with template changes
-atmos-cli template update-environment --tenant acme --account dev --environment us-east-1
+gaia template update-environment --tenant acme --account dev --environment us-east-1
 
 # List available templates
-atmos-cli template list
+gaia template list
 ```
 
 ### 2. Using Atmos Workflows

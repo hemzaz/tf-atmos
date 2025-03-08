@@ -1,13 +1,1 @@
-#!/bin/bash
-# Entry point for Gaia operations
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-# Show a deprecation notice for atmos-ops
-if [[ "$(basename "$0")" == "atmos-ops" ]]; then
-  echo "⚠️  Warning: 'atmos-ops' is deprecated. Please use 'gaia-ops' instead."
-  echo ""
-fi
-
-exec "${REPO_ROOT}/scripts/gaia-ops.sh" "$@"
+../scripts/gaia-ops.sh
