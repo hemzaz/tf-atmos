@@ -1,4 +1,4 @@
-# Gaia (formerly atmos-cli)
+# Gaia
 
 A Python-based CLI for managing Terraform deployments with Atmos.
 
