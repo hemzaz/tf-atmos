@@ -49,11 +49,13 @@ if [[ "$COMMAND" == "terraform" ]]; then
     
     # Check if stack is specified
     STACK=""
+    idx=0
     for i in "$@"; do
         if [[ "$i" == "-s" || "$i" == "--stack" ]]; then
             STACK_IDX=$((idx+1))
             if [ $STACK_IDX -lt $# ]; then
-                STACK="${!STACK_IDX}"
+                # Use array element syntax correctly
+                STACK="${@:$STACK_IDX:1}"
                 break
             fi
         fi
@@ -67,6 +69,13 @@ if [[ "$COMMAND" == "terraform" ]]; then
     
     # Extract account from stack name
     ACCOUNT=$(echo "$STACK" | cut -d'-' -f2)
+    
+    # Validate that we got a valid account from the stack name
+    if [[ -z "$ACCOUNT" ]]; then
+        log "ERROR: Could not extract account name from stack: $STACK"
+        log "Stack name should be in format: tenant-account-environment"
+        exit 1
+    fi
     
     # Handle AWS credentials for cross-account access if needed
     if [[ "$ACCOUNT" != "dev" && -n "$ACCOUNT" ]]; then

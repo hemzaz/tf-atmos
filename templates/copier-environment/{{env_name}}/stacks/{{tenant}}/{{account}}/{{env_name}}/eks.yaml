@@ -1,0 +1,89 @@
+# EKS configuration for {{ env_name }} environment
+components:
+  terraform:
+    eks:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-cluster"
+        region: "{{ aws_region }}"
+        kubernetes_version: "1.32"
+        cluster_log_retention_period: {{ retention_days }}
+        
+        # Node group configuration
+        node_groups_defaults:
+          instance_types: ["{{ eks_node_instance_type }}"]
+          desired_capacity: {{ eks_node_min_count }}
+          min_capacity: {{ eks_node_min_count }}
+          max_capacity: {{ eks_node_max_count }}
+          capacity_type: "ON_DEMAND"
+        
+        # Cluster-level settings
+        cluster_encryption_config_enabled: {% if env_type == "production" %}true{% else %}false{% endif %}
+        enabled_cluster_log_types: ["api", "audit"{% if env_type == "production" %}, "authenticator", "controllerManager", "scheduler"{% endif %}]
+        
+        # Security settings
+{% if env_type == "production" %}
+        # Production security settings
+        endpoint_private_access: true
+        endpoint_public_access: false
+        public_access_cidrs: []
+        security_group_rules:
+          ingress_cluster_internal:
+            description: "Allow pods to communicate within cluster"
+            protocol: "-1"
+            from_port: 0
+            to_port: 65535
+            cidr_blocks: ["{{ vpc_cidr }}"]
+{% elif env_type == "staging" %}
+        # Staging security settings
+        endpoint_private_access: true
+        endpoint_public_access: true
+        public_access_cidrs: ["10.0.0.0/8"]
+        security_group_rules:
+          ingress_cluster_internal:
+            description: "Allow pods to communicate within cluster"
+            protocol: "-1"
+            from_port: 0
+            to_port: 65535
+            cidr_blocks: ["{{ vpc_cidr }}"]
+{% else %}
+        # Development security settings
+        endpoint_private_access: true
+        endpoint_public_access: true
+        public_access_cidrs: ["0.0.0.0/0"]
+        security_group_rules:
+          ingress_cluster_internal:
+            description: "Allow pods to communicate within cluster"
+            protocol: "-1"
+            from_port: 0
+            to_port: 65535
+            cidr_blocks: ["{{ vpc_cidr }}"]
+{% endif %}
+
+    eks-addons:
+      vars:
+        enabled: true
+        cluster_name: "${eks.outputs.eks_cluster_id}"
+        aws_load_balancer_controller_enabled: true
+        cert_manager_enabled: true
+        external_dns_enabled: true
+{% if env_type == "production" %}
+        # Production add-ons
+        metrics_server_enabled: true
+        aws_for_fluentbit_enabled: true
+        cluster_autoscaler_enabled: true
+        external_secrets_enabled: true
+        istio_enabled: true
+        keda_enabled: true
+        karpenter_enabled: true
+{% elif env_type == "staging" %}
+        # Staging add-ons
+        metrics_server_enabled: true
+        aws_for_fluentbit_enabled: true
+        cluster_autoscaler_enabled: true
+        external_secrets_enabled: true
+{% else %}
+        # Development add-ons
+        metrics_server_enabled: true
+        cluster_autoscaler_enabled: false
+{% endif %}

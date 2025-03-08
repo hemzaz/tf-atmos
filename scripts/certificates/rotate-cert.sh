@@ -1,8 +1,39 @@
 #!/usr/bin/env bash
-# Certificate Rotation Script
-# This script helps with rotation of certificates in AWS ACM and updates Kubernetes secrets
+# DEPRECATED: This script has been replaced by the Python implementation in Gaia CLI.
+# Please use "gaia certificate rotate" instead.
+# See README in /gaia directory for usage details.
+#
+# Example:
+#   gaia certificate rotate --secret <secret_name> --namespace <namespace> --acm-arn <acm_cert_arn>
+#
+# Or use the workflow:
+#   gaia workflow rotate-certificate secret_name=<secret> namespace=<namespace> acm_arn=<acm_cert_arn>
+
+echo "⚠️  This script is deprecated and will be removed in a future release."
+echo "Please use 'gaia certificate rotate' instead."
+echo "For more information, run 'gaia certificate rotate --help'"
+echo "Redirecting to new command..."
+echo ""
 
 set -euo pipefail
+
+# Import utility functions with AWS retry mechanism
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+source "${REPO_ROOT}/scripts/utils.sh"
+
+# This script utilizes the aws_with_retry function from utils.sh to ensure robust handling
+# of AWS API calls. All AWS CLI operations have been updated to use this retry mechanism
+# with exponential backoff to handle transient errors including:
+# - API rate limiting (Throttling)
+# - Service unavailability
+# - Network issues
+# - Internal AWS errors
+#
+# Each AWS operation uses appropriate retry settings based on its criticality:
+# - 3 attempts with 1s initial delay for standard operations
+# - 4 attempts with 1-2s initial delay for certificate operations
+# - 5 attempts with 2s initial delay for critical operations like secret updates
 
 # Function to display usage information
 usage() {
@@ -43,7 +74,8 @@ fi
 
 # Set default region if not provided
 if [ -z "${AWS_REGION:-}" ]; then
-    AWS_REGION=$(aws configure get region)
+    # Get region using retry mechanism
+    AWS_REGION=$(aws_with_retry 3 1 aws configure get region)
     if [ -z "$AWS_REGION" ]; then
         echo "Error: AWS region not specified and not found in AWS CLI config"
         exit 1
@@ -73,13 +105,19 @@ echo "Region: $AWS_REGION"
 echo "Kubernetes Namespace: $NAMESPACE"
 echo "Kubernetes Secret: $K8S_SECRET"
 
-# Check if the AWS secret exists
+# Check if the AWS secret exists with retry mechanism
 echo "Checking if secret exists in AWS Secrets Manager..."
-if ! aws secretsmanager describe-secret \
-    --secret-id "$SECRET_NAME" \
-    --region "$AWS_REGION" \
-    $PROFILE_OPT &>/dev/null; then
-    echo "Error: Secret $SECRET_NAME not found in AWS Secrets Manager"
+# Build command array for aws_with_retry
+CHECK_SECRET_CMD=(aws secretsmanager describe-secret
+    --secret-id "$SECRET_NAME"
+    --region "$AWS_REGION")
+
+# Add profile option if specified
+[ -n "$PROFILE_OPT" ] && CHECK_SECRET_CMD+=($PROFILE_OPT)
+
+# Execute with retry - 3 attempts, starting with 1 second delay
+if ! aws_with_retry 3 1 "${CHECK_SECRET_CMD[@]}" &>/dev/null; then
+    echo "Error: Secret $SECRET_NAME not found in AWS Secrets Manager after multiple attempts"
     exit 1
 fi
 
@@ -89,10 +127,16 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
     
     # Get certificate details from AWS ACM
     echo "Fetching certificate details from ACM..."
-    CERT_DETAILS=$(aws acm describe-certificate \
-        --certificate-arn "$ACM_CERT_ARN" \
-        --region "$AWS_REGION" \
-        $PROFILE_OPT)
+    # Build command array for aws_with_retry
+    DESCRIBE_CERT_CMD=(aws acm describe-certificate
+        --certificate-arn "$ACM_CERT_ARN"
+        --region "$AWS_REGION")
+    
+    # Add profile option if specified
+    [ -n "$PROFILE_OPT" ] && DESCRIBE_CERT_CMD+=($PROFILE_OPT)
+    
+    # Execute with retry - 4 attempts, starting with 1 second delay
+    CERT_DETAILS=$(aws_with_retry 4 1 "${DESCRIBE_CERT_CMD[@]}")
     
     # Extract domain name and other details
     DOMAIN_NAME=$(echo "$CERT_DETAILS" | jq -r '.Certificate.DomainName')
@@ -133,11 +177,17 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
     echo "Type: $CERT_TYPE"
     echo "Expires: $EXPIRY_DATE_HUMAN"
     
-    # Get certificate from ACM
-    CERT_DATA=$(aws acm get-certificate \
-        --certificate-arn "$ACM_CERT_ARN" \
-        --region "$AWS_REGION" \
-        $PROFILE_OPT)
+    # Get certificate from ACM with retry mechanism
+    # Build command array for aws_with_retry
+    GET_CERT_CMD=(aws acm get-certificate
+        --certificate-arn "$ACM_CERT_ARN"
+        --region "$AWS_REGION")
+        
+    # Add profile option if specified
+    [ -n "$PROFILE_OPT" ] && GET_CERT_CMD+=($PROFILE_OPT)
+    
+    # Execute with retry - 4 attempts, starting with 1 second delay
+    CERT_DATA=$(aws_with_retry 4 1 "${GET_CERT_CMD[@]}")
         
     # Validate that we received certificate data
     if [ -z "$CERT_DATA" ]; then
@@ -171,9 +221,19 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
     # Secure the temp directory with strict permissions
     chmod 700 "$TEMP_DIR"
     
-    # Set up multiple trap handlers to ensure cleanup in various exit scenarios
-    trap 'rm -rf "$TEMP_DIR"; exit 1' HUP INT QUIT TERM
-    trap 'rm -rf "$TEMP_DIR"' EXIT
+    # Set up comprehensive trap handlers to ensure cleanup in all exit scenarios
+    # This ensures temp files are removed even with forced terminations
+    cleanup() {
+        echo "Cleaning up temporary files in $TEMP_DIR"
+        rm -rf "$TEMP_DIR"
+    }
+    
+    # Handle normal exit
+    trap cleanup EXIT
+    
+    # Handle other signals (INT = Ctrl+C, TERM = termination, HUP = terminal closed, 
+    # QUIT = quit signal, ABRT = abort, SEGV = segmentation fault, PIPE = broken pipe)
+    trap 'cleanup; echo "Caught signal - exiting"; exit 1' HUP INT QUIT TERM ABRT SEGV PIPE
     
     # Save certificate to file and ensure proper certificate chain order (leaf → intermediate → root)
     echo "$CERTIFICATE" > "$TEMP_DIR/tls.crt"
@@ -267,28 +327,34 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
                         # Copy the private key
                         cp "$KEY_PATH" "$TEMP_DIR/tls.key"
                     else
-            echo "Using existing private key from the secret..."
-            
-            # Get existing secret
-            SECRET_VALUE=$(aws secretsmanager get-secret-value \
-                --secret-id "$SECRET_NAME" \
-                --region "$AWS_REGION" \
-                $PROFILE_OPT \
-                --query 'SecretString' \
-                --output text)
-            
-            # Extract private key
-            echo "$SECRET_VALUE" | jq -r '.["tls.key"] // empty' > "$TEMP_DIR/tls.key"
-            
-            if [ ! -s "$TEMP_DIR/tls.key" ]; then
-                echo "Error: Could not extract private key from existing secret."
-                exit 1
-            fi
-        fi
-    fi
-    
-    # Create JSON for the updated secret
-    cat > "$TEMP_DIR/secret.json" << EOF
+                        echo "Using existing private key from the secret..."
+                        
+                        # Get existing secret with retry mechanism
+                        # Build command array for aws_with_retry
+                        GET_SECRET_CMD=(aws secretsmanager get-secret-value
+                            --secret-id "$SECRET_NAME"
+                            --region "$AWS_REGION"
+                            --query 'SecretString'
+                            --output text)
+                        
+                        # Add profile option if specified
+                        [ -n "$PROFILE_OPT" ] && GET_SECRET_CMD+=($PROFILE_OPT)
+                        
+                        # Execute with retry - 4 attempts, starting with 2 second delay
+                        SECRET_VALUE=$(aws_with_retry 4 2 "${GET_SECRET_CMD[@]}")
+                        
+                        # Extract private key
+                        echo "$SECRET_VALUE" | jq -r '.["tls.key"] // empty' > "$TEMP_DIR/tls.key"
+                        
+                        if [ ! -s "$TEMP_DIR/tls.key" ]; then
+                            echo "Error: Could not extract private key from existing secret."
+                            exit 1
+                        fi
+                    fi
+                fi
+                
+                # Create JSON for the updated secret
+                cat > "$TEMP_DIR/secret.json" << EOF
 {
   "tls.crt": $(cat "$TEMP_DIR/fullchain.crt" | jq -sR .),
   "tls.key": $(cat "$TEMP_DIR/tls.key" | jq -sR .),
@@ -298,29 +364,40 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
   "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 EOF
-    
-    # Update the secret in AWS Secrets Manager
+                
+                # Update the secret in AWS Secrets Manager
     echo "Updating secret in AWS Secrets Manager: $SECRET_NAME"
     
+    # Use aws_with_retry for reliable AWS API calls with retries
+    # Using 5 attempts with 2-second initial delay
+    UPDATE_CMD=(aws secretsmanager update-secret
+        --secret-id "$SECRET_NAME"
+        --secret-string "$(cat "$TEMP_DIR/secret.json")"
+        --region "$AWS_REGION")
+    
+    # Add profile option if specified
+    [ -n "$PROFILE_OPT" ] && UPDATE_CMD+=($PROFILE_OPT)
+    
     # Capture the output of the update command to validate success
-    UPDATE_RESULT=$(aws secretsmanager update-secret \
-        --secret-id "$SECRET_NAME" \
-        --secret-string "$(cat "$TEMP_DIR/secret.json")" \
-        --region "$AWS_REGION" \
-        $PROFILE_OPT 2>&1)
+    UPDATE_RESULT=$(aws_with_retry 5 2 "${UPDATE_CMD[@]}" 2>&1)
     
     # Check if the update was successful
     if [ $? -ne 0 ]; then
-        echo "❌ Failed to update secret in AWS Secrets Manager:"
+        echo "❌ Failed to update secret in AWS Secrets Manager after multiple attempts:"
         echo "$UPDATE_RESULT"
         exit 1
     fi
     
     # Verify the secret was actually updated by checking its metadata
-    VERIFY_RESULT=$(aws secretsmanager describe-secret \
-        --secret-id "$SECRET_NAME" \
-        --region "$AWS_REGION" \
-        $PROFILE_OPT 2>&1)
+    # Using 3 attempts with 1-second initial delay for verification
+    VERIFY_CMD=(aws secretsmanager describe-secret
+        --secret-id "$SECRET_NAME"
+        --region "$AWS_REGION")
+    
+    # Add profile option if specified
+    [ -n "$PROFILE_OPT" ] && VERIFY_CMD+=($PROFILE_OPT)
+    
+    VERIFY_RESULT=$(aws_with_retry 3 1 "${VERIFY_CMD[@]}" 2>&1)
     
     if [ $? -ne 0 ]; then
         echo "⚠️ Secret was updated but verification failed:"
@@ -498,4 +575,25 @@ else
     echo "No pods found that directly mount this secret."
 fi
 
-echo "Certificate rotation process completed successfully!"
+# Pass control to the new Python implementation
+if command -v gaia >/dev/null 2>&1; then
+  echo "Using Gaia CLI for certificate rotation..."
+  
+  # Convert arguments to gaia format
+  GAIA_ARGS=()
+  [[ -n "${SECRET_NAME:-}" ]] && GAIA_ARGS+=(--secret "$SECRET_NAME")
+  [[ -n "${NAMESPACE:-}" ]] && GAIA_ARGS+=(--namespace "$NAMESPACE")
+  [[ -n "${ACM_CERT_ARN:-}" ]] && GAIA_ARGS+=(--acm-arn "$ACM_CERT_ARN")
+  [[ -n "${AWS_REGION:-}" ]] && GAIA_ARGS+=(--region "$AWS_REGION")
+  [[ -n "${KUBE_CONTEXT:-}" ]] && GAIA_ARGS+=(--context "$KUBE_CONTEXT")
+  [[ -n "${K8S_SECRET:-}" ]] && GAIA_ARGS+=(--k8s-secret "$K8S_SECRET")
+  [[ -n "${AWS_PROFILE:-}" ]] && GAIA_ARGS+=(--profile "$AWS_PROFILE")
+  [[ -n "${PRIVATE_KEY_FILE:-}" ]] && GAIA_ARGS+=(--key-path "$PRIVATE_KEY_FILE")
+  [[ "${AUTO_RESTART_PODS:-false}" == "true" ]] && GAIA_ARGS+=(--restart-pods)
+  
+  # Execute gaia command
+  exec gaia certificate rotate "${GAIA_ARGS[@]}"
+else
+  echo "⚠️  Gaia CLI not found. Please install it to use the new certificate rotation functionality."
+  echo "Certificate rotation completed with legacy script. This script will be removed in a future release."
+fi

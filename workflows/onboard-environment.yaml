@@ -1,330 +1,51 @@
 name: onboard-environment
-description: "Onboard a new environment by creating all necessary configurations and deploying infrastructure"
+description: "Onboard a new environment with infrastructure"
 
 workflows:
   onboard:
     steps:
     - run:
         command: |
-          # Get CLI version automatically (in a cross-platform way)
-          ATMOS_CLI_VERSION=$(atmos version | sed -n 's/.*Atmos \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-          echo "Using Atmos CLI version: ${ATMOS_CLI_VERSION}"
+          # First create the environment template
+          TENANT="${tenant}" \
+          ACCOUNT="${account}" \
+          ENVIRONMENT="${environment}" \
+          VPC_CIDR="${vpc_cidr}" \
+          REGION="${region:-}" \
+          ENV_TYPE="${env_type:-}" \
+          gaia template create-environment \
+            --tenant ${tenant} \
+            --account ${account} \
+            --environment ${environment} \
+            --vpc-cidr ${vpc_cidr} \
+            ${region:+--region ${region}} \
+            ${env_type:+--env-type ${env_type}}
           
-          # Validate required variables
-          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ] || [ -z "${vpc_cidr}" ]; then
-            echo "ERROR: Missing required parameters."
-            echo "Usage: atmos workflow onboard-environment tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<vpc_cidr> management_account_id=<management_account_id> [region=<region>] [alarm_email=<alarm_email>]"
+          if [ $? -ne 0 ]; then
+            echo "Failed to create environment template."
             exit 1
           fi
           
-          # Validate vpc_cidr format
-          if ! [[ "${vpc_cidr}" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-            echo "ERROR: vpc_cidr must be in CIDR format (e.g., 10.0.0.0/16)"
-            exit 1
-          fi
-          
-          # Auto-detect region from AWS config if not provided
-          if [ -z "${region}" ]; then
-            # Try to get the default region from AWS config
-            if [ -n "$AWS_REGION" ]; then
-              REGION="$AWS_REGION"
-            elif [ -n "$AWS_DEFAULT_REGION" ]; then
-              REGION="$AWS_DEFAULT_REGION"
-            elif command -v aws >/dev/null && aws configure get region >/dev/null 2>&1; then
-              REGION=$(aws configure get region)
-            else
-              # Default to eu-west-2 if we can't detect it
-              REGION="eu-west-2"
+          # Deploy the environment if auto-deploy is enabled
+          if [ "${auto_deploy:-false}" == "true" ]; then
+            echo "Auto-deploying environment..."
+            
+            gaia workflow apply-environment \
+              --tenant ${tenant} \
+              --account ${account} \
+              --environment ${environment} \
+              --auto-approve true
+            
+            if [ $? -ne 0 ]; then
+              echo "Environment deployment failed."
+              exit 1
             fi
-            echo "Auto-detected AWS region: ${REGION}"
+            
+            echo "Environment successfully onboarded and deployed!"
           else
-            REGION="${region}"
+            echo "Environment template created. Run 'gaia workflow apply-environment' to deploy."
           fi
-          
-          # Validate management account ID is provided
-          if [ -z "${management_account_id}" ]; then
-            echo "ERROR: management_account_id parameter is required"
-            echo "Usage: atmos workflow onboard-environment tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<vpc_cidr> management_account_id=<management_account_id> [region=<region>] [alarm_email=<alarm_email>]"
-            exit 1
-          fi
-          
-          # Validate management account ID format
-          if ! [[ "${management_account_id}" =~ ^[0-9]{12}$ ]]; then
-            echo "ERROR: management_account_id must be a valid 12-digit AWS account ID"
-            exit 1
-          fi
-          
-          MANAGEMENT_ACCOUNT_ID=${management_account_id}
-          
-          # Set exit on error
-          set -e
-          
-          echo "Starting environment onboarding for ${tenant}-${account}-${environment}"
-          echo "============================================"
-          
-          # Create directory structure
-          ENV_DIR="stacks/account/${account}/${environment}"
-          echo "Creating directory structure at ${ENV_DIR}..."
-          mkdir -p "${ENV_DIR}"
-          
-          # Calculate subnet CIDRs based on VPC CIDR
-          VPC_PREFIX=$(echo ${vpc_cidr} | cut -d'/' -f1 | cut -d'.' -f1-2)
-          
-          # Create configuration files by copying and modifying templates
-          echo "Creating configuration files..."
-          
-          # Check if directory already exists and has files
-          if [ -d "${ENV_DIR}" ] && [ "$(ls -A ${ENV_DIR} 2>/dev/null)" ]; then
-            echo "WARNING: Directory ${ENV_DIR} already exists and contains files."
-            if [ -t 0 ]; then
-              # If in interactive mode, ask for confirmation
-              echo -n "Do you want to overwrite existing configuration? (y/n): "
-              read CONFIRM
-              if [[ ! ${CONFIRM} =~ ^[Yy]$ ]]; then
-                echo "Aborting environment creation."
-                exit 0
-              fi
-            elif [ "${force_overwrite:-false}" != "true" ]; then
-              echo "Aborting to prevent overwriting existing configuration."
-              echo "Use 'force_overwrite=true' to bypass this check in non-interactive mode."
-              exit 0
-            fi
-            echo "Proceeding with overwrite..."
-          fi
-          
-          # Ensure directory exists
-          mkdir -p "${ENV_DIR}"
-          
-          # Backend config
-          cat > "${ENV_DIR}/backend.yaml" << EOF
-import:
-  - catalog/backend
-
-vars:
-  account: ${account}
-  environment: ${environment}
-  region: ${REGION}
-  component: backend
-  bucket_name: "${tenant}-terraform-state"
-  dynamodb_table_name: "${tenant}-terraform-locks"
-  iam_role_name: "${tenant}-terraform-backend-role"
-  iam_role_arn: "arn:aws:iam::${MANAGEMENT_ACCOUNT_ID}:role/${tenant}-terraform-backend-role"
-
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-EOF
-          
-          # IAM config
-          cat > "${ENV_DIR}/iam.yaml" << EOF
-import:
-  - catalog/iam
-
-vars:
-  account: ${account}
-  environment: ${environment}
-  region: ${REGION}
-  management_account_id: ${MANAGEMENT_ACCOUNT_ID}
-  cross_account_role_name: "${tenant}-${account}-${environment}-CrossAccountRole"
-  policy_name: "${tenant}-${account}-${environment}-CrossAccountPolicy"
-  trusted_account_ids:
-    - ${MANAGEMENT_ACCOUNT_ID}
-  policy_resources:
-    - "arn:aws:s3:::${tenant}*"
-    - "arn:aws:s3:::${tenant}*/*"
-    - "arn:aws:ec2:*:${MANAGEMENT_ACCOUNT_ID}:*"
-    - "arn:aws:dynamodb:*:${MANAGEMENT_ACCOUNT_ID}:table/${tenant}*"
-
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-EOF
-          
-          # Network config
-          cat > "${ENV_DIR}/network.yaml" << EOF
-import:
-  - catalog/network
-
-vars:
-  account: ${account}
-  environment: ${environment}
-  region: ${REGION}
-  vpc_cidr: "${vpc_cidr}"
-  private_subnets:
-    - "${VPC_PREFIX}.1.0/24"
-    - "${VPC_PREFIX}.2.0/24"
-    - "${VPC_PREFIX}.3.0/24"
-  public_subnets:
-    - "${VPC_PREFIX}.101.0/24"
-    - "${VPC_PREFIX}.102.0/24"
-    - "${VPC_PREFIX}.103.0/24"
-  enable_nat_gateway: ${account == "prod" ? "true" : "false"}
-  create_vpc_iam_role: true
-
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-EOF
-
-# Certificate management config
-cat > "${ENV_DIR}/certificates.yaml" << EOF
-import:
-  - catalog/certificates
-
-vars:
-  account: ${account}
-  environment: ${environment}
-  region: ${REGION}
-  
-  # ACM Certificate configuration
-  acm.enabled: true
-  acm.dns_domains:
-    main:
-      domain_name: "api.${account}.${tenant}.com"
-      validation_method: "DNS"
-      wait_for_validation: true
-      subject_alternative_names:
-        - "*.${account}.${tenant}.com"
-  
-  # External Secrets configuration for certificate management
-  external_secrets.enabled: true
-  external_secrets.create_certificate_secret_store: true
-  external_secrets.namespace: "cert-manager"
-  external_secrets.create_namespace: true
-  
-  # Certificate monitoring configuration
-  certificate_monitoring.enabled: true
-  certificate_monitoring.warning_days: 30
-  certificate_monitoring.critical_days: 14
-  certificate_monitoring.notification_emails:
-    - "\${alarm_email:-ops@example.com}"
-
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-EOF
-          
-          # Infrastructure config
-          cat > "${ENV_DIR}/infrastructure.yaml" << EOF
-import:
-  - catalog/infrastructure
-
-vars:
-  account: ${account}
-  environment: ${environment}
-  region: ${REGION}
-
-  # ECS specific overrides
-  ecs.enabled: true
-  ecs.fargate_only: ${account == "prod" ? "false" : "true"}
-  ecs.enable_container_insights: ${account == "prod" ? "true" : "false"}
-
-  # RDS specific overrides
-  rds.enabled: true
-  rds.identifier: "${environment}db"
-  rds.instance_class: "${account == "prod" ? "db.t3.small" : "db.t3.micro"}"
-  rds.allocated_storage: ${account == "prod" ? "20" : "5"}
-  rds.max_allocated_storage: ${account == "prod" ? "100" : "20"}
-  rds.multi_az: ${account == "prod" ? "true" : "false"}
-  rds.db_name: "${environment}app"
-  rds.skip_final_snapshot: ${account == "prod" ? "false" : "true"}
-  rds.deletion_protection: ${account == "prod" ? "true" : "false"}
-
-  # Monitoring specific overrides
-  monitoring.enabled: true
-  monitoring.create_dashboard: true
-  monitoring.alarm_email_subscriptions:
-    - "\${alarm_email:-ops@example.com}"  # Uses parameter or default
-
-  # Lambda specific overrides
-  lambda.enabled: true
-  lambda.function_name: "${account}-${environment}-app-function"
-  lambda.memory_size: ${account == "prod" ? "256" : "128"}
-  lambda.timeout: ${account == "prod" ? "30" : "10"}
-  lambda.environment_variables:
-    ENV: "${account}"
-    LOG_LEVEL: "${account == "prod" ? "info" : "debug"}"
-    
-  # EKS Cluster Protection (prevent_destroy lifecycle)
-  eks.enable_cluster_protection: ${account == "prod" ? "true" : "false"}
-
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-EOF
-          
-          # Services config
-          cat > "${ENV_DIR}/services.yaml" << EOF
-import:
-  - catalog/services
-
-vars:
-  account: ${account}
-  environment: ${environment}
-  region: ${REGION}
-
-  # API Gateway specific overrides
-  api_gateway.enabled: true
-  api_gateway.name: "${tenant}-${account}-${environment}-api"
-  api_gateway.description: "API Gateway for ${account} environment (${environment})"
-  api_gateway.cors_configuration:
-    enabled: ${account != "prod" ? "true" : "false"}  # Enable CORS for non-prod environments
-    allow_origins: ["*"]
-    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    allow_headers: ["*"]
-    expose_headers: []
-    max_age: 7200
-    allow_credentials: true
-
-  # Load Balancer specific overrides
-  load_balancer.enabled: true
-  load_balancer.name: "${tenant}-${account}-${environment}-alb"
-  load_balancer.internal: false
-
-  # CloudFront specific overrides
-  cloudfront.enabled: ${account == "prod" ? "true" : "false"}
-
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-EOF
-          
-          echo "Configuration files created successfully."
-          echo "============================================"
-
-          # Check if running in interactive mode
-          if [ -t 0 ]; then
-            # Terminal is interactive, ask for confirmation
-            echo -n "Do you want to deploy the environment now? (y/n): "
-            read CONFIRM
-            if [[ ${CONFIRM} == "y" || ${CONFIRM} == "Y" ]]; then
-              echo "Beginning deployment..."
-              atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
-            else
-              echo "Skipping deployment. You can deploy later using:"
-              echo "  atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}"
-            fi
-          else
-            # Running in non-interactive mode (CI/CD pipeline)
-            if [ "${auto_deploy:-false}" == "true" ]; then
-              echo "Auto-deploy is enabled. Beginning deployment..."
-              atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}
-            else
-              echo "Skipping automatic deployment in non-interactive mode."
-              echo "To deploy this environment:"
-              echo "  atmos workflow apply-environment tenant=${tenant} account=${account} environment=${environment}"
-              echo ""
-              echo "To enable auto-deploy in non-interactive environments, use:"
-              echo "  atmos workflow onboard-environment tenant=${tenant} account=${account} environment=${environment} vpc_cidr=${vpc_cidr} management_account_id=${management_account_id} auto_deploy=true"
-            fi
-          fi
-          
-          echo "Environment onboarding complete for ${tenant}-${account}-${environment}"
         env:
           AWS_SDK_LOAD_CONFIG: 1
+          MANAGEMENT_ACCOUNT_ID: ${management_account_id}
+          ALARM_EMAIL: ${alarm_email}

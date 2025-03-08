@@ -16,6 +16,18 @@ ROLE_NAME="$2"
 SESSION_NAME="$3"
 DURATION="${4:-3600}"  # Default to 1 hour
 
+# Check for required tools
+if ! command -v aws >/dev/null 2>&1; then
+    echo "Error: AWS CLI is not installed. Please install it first."
+    exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq is not installed. This tool is required for JSON parsing."
+    echo "Please install jq: https://stedolan.github.io/jq/download/"
+    exit 1
+fi
+
 # Validate input parameters
 if [[ ! "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
     echo "Error: Account ID must be a 12-digit number"

@@ -1,0 +1,11 @@
+{
+  "label": "terraform",
+  "position": 8,
+  "className": "command",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "doc",
+    "id": "usage"
+  }
+}

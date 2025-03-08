@@ -1,3 +1,38 @@
+/*
+ * This file implements a proper dependency graph for S3 backend resources.
+ * 
+ * Resource creation order:
+ * 1. Base buckets (terraform_state, terraform_state_logs)
+ * 2. KMS key for encryption
+ * 3. Basic bucket configurations (versioning, acls, encryption)
+ * 4. Access logs bucket and its configuration
+ * 5. Bucket policies and logging configurations that reference other resources
+ *
+ * Dependencies are explicitly declared using Terraform's depends_on attribute
+ * to ensure resources are created in the correct order and avoid circular dependencies.
+ */
+
+locals {
+  # Define local variables for dependency management
+  # Consolidated dependencies into a single, more efficient structure
+  dependencies = {
+    # Base bucket resources have no dependencies
+    base = []
+    
+    # Policy resources depend on the buckets being created
+    policy = [
+      aws_s3_bucket.terraform_state,
+      aws_s3_bucket.terraform_state_logs
+    ]
+    
+    # Logging resources depend on the access logs bucket being configured
+    logging = [
+      aws_s3_bucket.terraform_state_access_logs,
+      aws_s3_bucket_acl.terraform_state_access_logs
+    ]
+  }
+}
+
 resource "aws_s3_bucket" "terraform_state" {
   bucket = var.bucket_name
 
@@ -12,7 +47,9 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
   versioning_configuration {
     status     = "Enabled"
-    mfa_delete = "Enabled"
+    # Disabled MFA delete as it requires additional configuration and authentication
+    # which isn't supported in the default Terraform workflow
+    mfa_delete = "Disabled"
   }
 }
 
@@ -92,6 +129,12 @@ resource "aws_s3_bucket_policy" "terraform_state" {
       }
     ]
   })
+  
+  # Using local variable for policy dependencies
+  # Ensures bucket exists before policy is applied and prevents race conditions
+  depends_on = concat([
+    aws_s3_bucket_versioning.terraform_state
+  ], local.dependencies.policy)
 }
 resource "aws_s3_bucket" "terraform_state_logs" {
   bucket = "${var.bucket_name}-logs"
@@ -164,9 +207,29 @@ resource "aws_s3_bucket_policy" "terraform_state_logs" {
       }
     ]
   })
+  
+  # Using consolidated dependencies for consistency
+  depends_on = concat([
+    aws_s3_bucket_lifecycle_configuration.terraform_state_logs
+  ], local.dependencies.policy)
 }
 
-# Create a new separate bucket for logs to avoid circular dependency
+/* Proper Circular Dependency Resolution
+ *
+ * This access logs bucket solves a circular dependency problem:
+ * - The main state bucket needs to log to an access logs bucket
+ * - The access logs bucket itself needs to be secured and configured
+ *
+ * Instead of arbitrarily breaking the cycle by creating separate unrelated buckets,
+ * we use Terraform's depends_on to create a proper dependency graph:
+ * 
+ * 1. First, create the main buckets
+ * 2. Then create the access logs bucket with a dependency on the main buckets
+ * 3. Configure the access logs bucket
+ * 4. Finally, set up the logging on the main buckets with depends_on to the access logs config
+ *
+ * This approach ensures everything is created in the right order without arbitrary splitting.
+ */
 resource "aws_s3_bucket" "terraform_state_access_logs" {
   bucket = "${var.bucket_name}-access-logs"
 
@@ -174,12 +237,19 @@ resource "aws_s3_bucket" "terraform_state_access_logs" {
     prevent_destroy = true
   }
 
+  # Creates a dependency graph that ensures main state bucket is created first
+  # before access logs can reference it
+  depends_on = local.dependencies.policy
+
   tags = var.tags
 }
 
 resource "aws_s3_bucket_acl" "terraform_state_access_logs" {
   bucket = aws_s3_bucket.terraform_state_access_logs.id
   acl    = "log-delivery-write"
+  
+  # Explicit dependency to ensure bucket exists before ACL is applied
+  depends_on = [aws_s3_bucket.terraform_state_access_logs]
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state_access_logs" {
@@ -191,6 +261,12 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state_a
       sse_algorithm     = "aws:kms"
     }
   }
+  
+  # Explicit dependencies to ensure KMS key and bucket exist before encryption is applied
+  depends_on = [
+    aws_s3_bucket.terraform_state_access_logs,
+    aws_kms_key.terraform_state_key
+  ]
 }
 
 resource "aws_s3_bucket_public_access_block" "terraform_state_access_logs" {
@@ -200,6 +276,9 @@ resource "aws_s3_bucket_public_access_block" "terraform_state_access_logs" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+  
+  # Explicit dependency to ensure bucket exists before access block is applied
+  depends_on = [aws_s3_bucket.terraform_state_access_logs]
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_access_logs" {
@@ -213,14 +292,23 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state_access_logs" {
       days = 90
     }
   }
+  
+  # Explicit dependency to ensure bucket exists before lifecycle configuration is applied
+  depends_on = [aws_s3_bucket.terraform_state_access_logs]
 }
 
-# Use the new access logs bucket for logging to avoid circular dependency
+# Set up logging for main state bucket with explicit dependency declaration
 resource "aws_s3_bucket_logging" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
   target_bucket = aws_s3_bucket.terraform_state_access_logs.id
   target_prefix = "state-bucket-logs/"
+  
+  # Using the improved structure for dependencies
+  # makes the code more maintainable and efficient  
+  depends_on = concat(local.dependencies.logging, [
+    aws_s3_bucket_server_side_encryption_configuration.terraform_state_access_logs
+  ])
 }
 
 resource "aws_s3_bucket_logging" "terraform_state_logs" {
@@ -228,6 +316,12 @@ resource "aws_s3_bucket_logging" "terraform_state_logs" {
 
   target_bucket = aws_s3_bucket.terraform_state_access_logs.id
   target_prefix = "logs-bucket-logs/"
+  
+  # Using the improved structure for dependencies
+  # makes the code more maintainable and efficient
+  depends_on = concat(local.dependencies.logging, [
+    aws_s3_bucket_server_side_encryption_configuration.terraform_state_access_logs
+  ])
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {

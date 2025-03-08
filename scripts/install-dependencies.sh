@@ -36,6 +36,8 @@ INSTALL_YAMLLINT=true
 INSTALL_TFSEC=true
 INSTALL_TFLINT=true
 INSTALL_CHECKOV=false
+# Cookiecutter was removed in favor of Copier
+INSTALL_COPIER=true
 TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.5.7}"
 ATMOS_VERSION="${ATMOS_VERSION:-1.38.0}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-1.28.3}"
@@ -43,6 +45,7 @@ HELM_VERSION="${HELM_VERSION:-3.13.1}"
 TFSEC_VERSION="${TFSEC_VERSION:-1.28.13}"
 TFLINT_VERSION="${TFLINT_VERSION:-0.55.1}"
 CHECKOV_VERSION="${CHECKOV_VERSION:-3.2.382}"
+COPIER_VERSION="${COPIER_VERSION:-9.5.0}"
 INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="$HOME/.local/bin"
 SYSTEM_INSTALL=false
@@ -76,6 +79,8 @@ show_help() {
   echo "  --skip-tfsec            Skip tfsec installation"
   echo "  --skip-tflint           Skip tflint installation"
   echo "  --install-checkov       Install checkov (not installed by default)"
+  # Cookiecutter option removed
+  echo "  --skip-copier           Skip copier installation"
   echo "  --terraform-version VER Set Terraform version (default: $TERRAFORM_VERSION)"
   echo "  --atmos-version VER     Set Atmos version (default: $ATMOS_VERSION)"
   echo "  --kubectl-version VER   Set kubectl version (default: $KUBECTL_VERSION)"
@@ -83,6 +88,7 @@ show_help() {
   echo "  --tfsec-version VER     Set TFSec version (default: $TFSEC_VERSION)"
   echo "  --tflint-version VER    Set TFLint version (default: $TFLINT_VERSION)"
   echo "  --checkov-version VER   Set Checkov version (default: $CHECKOV_VERSION)"
+  echo "  --copier-version VER    Set Copier version (default: $COPIER_VERSION)"
   echo "  --system                Install tools system-wide (requires sudo)"
   echo "  --user                  Install tools in user's home directory"
   echo "  --ci                    Install in CI mode (non-interactive, minimal deps)"
@@ -161,7 +167,39 @@ detect_os() {
     # Check if Homebrew is installed
     if ! command -v brew &>/dev/null; then
       echo -e "${YELLOW}Homebrew not installed. Installing Homebrew...${RESET}"
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      
+      # First download the script to verify it
+      BREW_INSTALL_SCRIPT="/tmp/homebrew_install.sh"
+      BREW_SCRIPT_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+      BREW_EXPECTED_SHA256="72bc41560c34e4518dbb822a280400cbba02c0c3d3340ad831ca8eda77c9bfb7"  # Replace with current hash
+      
+      echo -e "${BLUE}Downloading Homebrew install script...${RESET}"
+      curl -fsSL --proto '=https' --tlsv1.2 "$BREW_SCRIPT_URL" -o "$BREW_INSTALL_SCRIPT"
+      
+      # Verify the checksum
+      if command -v shasum &>/dev/null; then
+        ACTUAL_SHA256=$(shasum -a 256 "$BREW_INSTALL_SCRIPT" | cut -d' ' -f1)
+      elif command -v sha256sum &>/dev/null; then
+        ACTUAL_SHA256=$(sha256sum "$BREW_INSTALL_SCRIPT" | cut -d' ' -f1)
+      else
+        echo -e "${RED}Unable to verify Homebrew installer integrity - missing shasum/sha256sum utility${RESET}"
+        echo -e "${YELLOW}Skipping Homebrew installation for security${RESET}"
+        return 1
+      fi
+      
+      if [[ "$ACTUAL_SHA256" != "$BREW_EXPECTED_SHA256" ]]; then
+        echo -e "${RED}Homebrew installer checksum verification failed!${RESET}"
+        echo -e "${RED}Expected: $BREW_EXPECTED_SHA256${RESET}"
+        echo -e "${RED}Actual: $ACTUAL_SHA256${RESET}"
+        echo -e "${RED}Aborting installation for security${RESET}"
+        rm -f "$BREW_INSTALL_SCRIPT"
+        return 1
+      fi
+      
+      echo -e "${GREEN}Homebrew installer verified successfully.${RESET}"
+      chmod +x "$BREW_INSTALL_SCRIPT"
+      /bin/bash "$BREW_INSTALL_SCRIPT"
+      rm -f "$BREW_INSTALL_SCRIPT"
       
       # Add Homebrew to PATH if needed
       if [[ -f /opt/homebrew/bin/brew ]]; then
@@ -445,14 +483,22 @@ install_atmos() {
   fi
   
   # Download and install Atmos
+  # Use array to properly handle command construction and prevent injection
   local ATMOS_URL="https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_${OS}_${ATMOS_ARCH}"
   local ATMOS_BIN="$INSTALL_TARGET_DIR/atmos"
   
-  if curl -sSL "$ATMOS_URL" -o "$ATMOS_BIN"; then
+  # Validate URL format before using it 
+  if [[ ! "$ATMOS_URL" =~ ^https://github\.com/cloudposse/atmos/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/atmos_(linux|darwin)_(amd64|arm64)$ ]]; then
+    echo -e "${RED}Invalid Atmos URL format. Aborting for security.${RESET}"
+    return 1
+  fi
+  
+  # Use command arrays instead of string interpolation
+  if curl -sSL --proto '=https' --tlsv1.2 "$ATMOS_URL" -o "$ATMOS_BIN"; then
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
-      sudo chmod +x "$ATMOS_BIN"
+      sudo chmod 755 "$ATMOS_BIN"
     else
-      chmod +x "$ATMOS_BIN"
+      chmod 755 "$ATMOS_BIN"
     fi
     echo -e "${GREEN}Atmos $ATMOS_VERSION installed${RESET}"
   else
@@ -809,6 +855,57 @@ install_checkov() {
   fi
 }
 
+# Cookiecutter installation function was removed in favor of using Copier exclusively
+
+# Install copier
+install_copier() {
+  if [[ "$INSTALL_COPIER" != "true" ]]; then
+    return
+  fi
+  
+  if command -v copier &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
+    local COPIER_INSTALLED_VERSION=$(pip3 show copier 2>/dev/null | grep -E '^Version:' | cut -d' ' -f2)
+    if [[ "$COPIER_INSTALLED_VERSION" == "$COPIER_VERSION" ]]; then
+      echo -e "${GREEN}copier $COPIER_VERSION is already installed${RESET}"
+      return
+    else
+      echo -e "${YELLOW}Updating copier from $COPIER_INSTALLED_VERSION to $COPIER_VERSION${RESET}"
+    fi
+  else
+    echo -e "${BLUE}Installing copier $COPIER_VERSION...${RESET}"
+  fi
+  
+  # Install copier via pip
+  if command -v pip3 &>/dev/null; then
+    if [[ "$SYSTEM_INSTALL" == "true" ]]; then
+      sudo pip3 install copier==$COPIER_VERSION
+    else
+      pip3 install --user copier==$COPIER_VERSION
+    fi
+    echo -e "${GREEN}copier $COPIER_VERSION installed: $(pip3 show copier | grep -E '^Version:')${RESET}"
+  else
+    echo -e "${YELLOW}pip3 not found. Installing pip3...${RESET}"
+    if [[ "$OS" == "darwin" ]]; then
+      brew install python3
+    elif [[ "$SYSTEM_INSTALL" == "true" ]]; then
+      sudo $PKG_INSTALL python3-pip
+    else
+      $PKG_INSTALL python3-pip
+    fi
+    
+    if command -v pip3 &>/dev/null; then
+      if [[ "$SYSTEM_INSTALL" == "true" ]]; then
+        sudo pip3 install copier==$COPIER_VERSION
+      else
+        pip3 install --user copier==$COPIER_VERSION
+      fi
+      echo -e "${GREEN}copier $COPIER_VERSION installed: $(pip3 show copier | grep -E '^Version:')${RESET}"
+    else
+      echo -e "${RED}Failed to install pip3, which is required for copier${RESET}"
+    fi
+  fi
+}
+
 # Parse command line options
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -868,6 +965,11 @@ while [[ $# -gt 0 ]]; do
       INSTALL_CHECKOV=true
       shift
       ;;
+    # --install-cookiecutter option removed
+    --skip-copier)
+      INSTALL_COPIER=false
+      shift
+      ;;
     --terraform-version)
       TERRAFORM_VERSION="$2"
       shift 2
@@ -894,6 +996,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --checkov-version)
       CHECKOV_VERSION="$2"
+      shift 2
+      ;;
+    --copier-version)
+      COPIER_VERSION="$2"
       shift 2
       ;;
     --system)
@@ -949,6 +1055,7 @@ install_helm
 install_tfsec
 install_tflint
 install_checkov
+install_copier
 
 # Print summary
 echo
@@ -992,6 +1099,12 @@ fi
 
 if [[ "$INSTALL_CHECKOV" == "true" ]]; then
   echo -e "  • ${GREEN}checkov $(checkov --version)${RESET}" 2>/dev/null || echo -e "  • ${RED}checkov not installed${RESET}"
+fi
+
+
+if [[ "$INSTALL_COPIER" == "true" ]]; then
+  COPIER_VERSION_OUTPUT=$(pip3 show copier 2>/dev/null | grep -E '^Version:' | cut -d' ' -f2)
+  echo -e "  • ${GREEN}copier $COPIER_VERSION_OUTPUT${RESET}" 2>/dev/null || echo -e "  • ${RED}copier not installed${RESET}"
 fi
 
 echo

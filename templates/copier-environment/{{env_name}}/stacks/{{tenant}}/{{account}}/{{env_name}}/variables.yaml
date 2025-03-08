@@ -1,0 +1,29 @@
+# Variables for {{ env_name }} environment
+import:
+  - catalog/variables
+
+vars:
+  # Environment information
+  tenant: {{ tenant }}
+  account: {{ account }}
+  environment: {{ env_name }}
+  environment_type: {{ env_type }}
+  region: {{ aws_region }}
+  
+  # Network configuration
+  vpc_cidr: {{ vpc_cidr }}
+  
+  # Component enablement
+  eks_enabled: {{ eks_cluster }}
+  rds_enabled: {{ rds_instances }}
+  logging_enabled: {{ enable_logging }}
+  monitoring_enabled: {{ enable_monitoring }}
+  
+  # Compliance and security
+  compliance_level: {{ compliance_level }}
+  
+  # Contact information
+  team_email: {{ team_email }}
+  
+  # Environment creation metadata
+  create_date: {{ create_date }}

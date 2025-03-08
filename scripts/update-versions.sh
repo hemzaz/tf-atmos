@@ -30,7 +30,8 @@ TOOL_CATEGORIES[security]="TFSEC_VERSION TFLINT_VERSION CHECKOV_VERSION"
 TOOL_CATEGORIES[aws]="AWS_CLI_VERSION SESSION_MANAGER_VERSION"
 TOOL_CATEGORIES[providers]="TF_PROVIDER_AWS_VERSION TF_PROVIDER_KUBERNETES_VERSION TF_PROVIDER_HELM_VERSION TF_PROVIDER_TLS_VERSION TF_PROVIDER_TIME_VERSION TF_PROVIDER_KUBECTL_VERSION"
 TOOL_CATEGORIES[cicd]="YAMLLINT_VERSION PRECOMMIT_VERSION TERRAFORM_DOCS_VERSION"
-TOOL_CATEGORIES[all]=$(echo "${TOOL_CATEGORIES[core]} ${TOOL_CATEGORIES[security]} ${TOOL_CATEGORIES[aws]} ${TOOL_CATEGORIES[providers]} ${TOOL_CATEGORIES[cicd]}" | tr ' ' '\n' | sort | uniq | tr '\n' ' ')
+TOOL_CATEGORIES[templating]="COPIER_VERSION"
+TOOL_CATEGORIES[all]=$(echo "${TOOL_CATEGORIES[core]} ${TOOL_CATEGORIES[security]} ${TOOL_CATEGORIES[aws]} ${TOOL_CATEGORIES[providers]} ${TOOL_CATEGORIES[cicd]} ${TOOL_CATEGORIES[templating]}" | tr ' ' '\n' | sort | uniq | tr '\n' ' ')
 
 # API endpoints and patterns for version lookups
 declare -A VERSION_APIS
@@ -50,6 +51,7 @@ VERSION_APIS[SESSION_MANAGER_VERSION]="https://docs.aws.amazon.com/systems-manag
 VERSION_APIS[YAMLLINT_VERSION]="https://api.github.com/repos/adrienverge/yamllint/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
 VERSION_APIS[PRECOMMIT_VERSION]="https://api.github.com/repos/pre-commit/pre-commit/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
 VERSION_APIS[TERRAFORM_DOCS_VERSION]="https://api.github.com/repos/terraform-docs/terraform-docs/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
+VERSION_APIS[COPIER_VERSION]="curl -s https://pypi.org/pypi/copier/json | jq -r '.info.version'|([0-9]+\\.[0-9]+\\.[0-9]+)"
 VERSION_APIS[TF_PROVIDER_AWS_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-aws/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
 VERSION_APIS[TF_PROVIDER_KUBERNETES_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-kubernetes/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
 VERSION_APIS[TF_PROVIDER_HELM_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-helm/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
@@ -73,7 +75,7 @@ show_help() {
   echo "  -c, --check           Check for updates without modifying .env"
   echo "  -a, --all             Show all available tools and their current versions"
   echo "  -g, --group GROUP     Update all tools in the specified group:"
-  echo "                        (core, security, aws, providers, cicd, all)"
+  echo "                        (core, security, aws, providers, cicd, templating, all)"
   echo
   echo -e "${BOLD}Examples:${RESET}"
   echo "  $0 TERRAFORM_VERSION                     # Update Terraform to latest"
@@ -106,12 +108,27 @@ fetch_latest_version() {
     return 1
   fi
   
-  local api_url=$(echo "${VERSION_APIS[$tool_key]}" | cut -d'|' -f1)
+  local api_info=$(echo "${VERSION_APIS[$tool_key]}" | cut -d'|' -f1)
   local pattern=$(echo "${VERSION_APIS[$tool_key]}" | cut -d'|' -f2)
   
-  echo -e "${BLUE}Fetching latest version for $tool from $api_url...${RESET}" >&2
+  # Special handling for Copier which uses a direct command rather than a URL
+  if [[ "$tool" == "COPIER_VERSION" ]]; then
+    echo -e "${BLUE}Fetching latest version for $tool from PyPI...${RESET}" >&2
+    local result=$(eval "$api_info")
+    
+    if [[ -z "$result" ]]; then
+      echo -e "${YELLOW}Could not determine latest version for $tool${RESET}" >&2
+      return 1
+    fi
+    
+    echo "$result"
+    return 0
+  fi
   
-  local result=$(curl -s "$api_url" | grep -Eo "$pattern" | head -1 | sed -E 's/.*([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
+  # Standard handling for other tools
+  echo -e "${BLUE}Fetching latest version for $tool from $api_info...${RESET}" >&2
+  
+  local result=$(curl -s "$api_info" | grep -Eo "$pattern" | head -1 | sed -E 's/.*([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
   
   if [[ -z "$result" ]]; then
     echo -e "${YELLOW}Could not determine latest version for $tool${RESET}" >&2
@@ -226,6 +243,12 @@ show_all_tools() {
   echo
   echo -e "${BOLD}CI/CD Tools:${RESET}"
   for tool in ${TOOL_CATEGORIES[cicd]}; do
+    echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
+  done
+  
+  echo
+  echo -e "${BOLD}Templating Tools:${RESET}"
+  for tool in ${TOOL_CATEGORIES[templating]}; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
   

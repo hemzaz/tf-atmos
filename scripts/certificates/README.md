@@ -52,43 +52,57 @@ Exports certificates from AWS ACM and prepares them for use with Kubernetes secr
 ./export-cert.sh -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234 -s custom/secret/path -u
 ```
 
-### rotate-cert.sh
+### Certificate Rotation
 
-Helps with rotation of certificates in AWS ACM and updates Kubernetes secrets using External Secrets Operator.
+#### ⚠️ DEPRECATED: The shell script `rotate-cert.sh` has been replaced by the Python implementation in Gaia CLI.
+
+Please use `gaia certificate rotate` instead. The shell script is still available for backward compatibility but will be removed in a future release.
 
 #### Requirements
 
-- AWS CLI installed and configured
-- kubectl installed and configured (version from `.env` file)
-- jq installed
+- Gaia CLI installed and configured
+- kubectl installed and configured
 - Valid permissions to access ACM and Secrets Manager
-- Tool versions defined in the project's `.env` file
 
 #### Options
 
 | Option | Description |
 |--------|-------------|
-| `-s SECRET_NAME` | AWS Secret name in Secrets Manager (required) |
-| `-n NAMESPACE` | Kubernetes namespace for the secret (required) |
-| `-a ARN` | New AWS ACM Certificate ARN (optional) |
-| `-r REGION` | AWS Region (default: current region) |
-| `-c CONTEXT` | Kubernetes context (optional) |
-| `-k K8S_SECRET` | Kubernetes secret name (default: derived from secret name) |
-| `-p PROFILE` | AWS CLI profile (optional) |
-| `-h` | Display help message |
+| `--secret, -s SECRET_NAME` | AWS Secret name in Secrets Manager (required) |
+| `--namespace, -n NAMESPACE` | Kubernetes namespace for the secret (required) |
+| `--acm-arn, -a ARN` | New AWS ACM Certificate ARN (optional) |
+| `--region, -r REGION` | AWS Region (default: current region) |
+| `--context, -c CONTEXT` | Kubernetes context (optional) |
+| `--k8s-secret, -k SECRET` | Kubernetes secret name (default: derived from secret name) |
+| `--profile, -p PROFILE` | AWS Profile (optional) |
+| `--key-path PATH` | Path to private key file (optional) |
+| `--restart-pods` | Automatically restart pods using the secret |
+| `--debug, -d` | Enable debug output |
 
 #### Example Usage
 
 ```bash
-#!/usr/bin/env bash
 # Rotate certificate with a new ACM certificate
-./rotate-cert.sh -s certificates/example-com -n istio-system -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234
+gaia certificate rotate \
+  --secret certificates/example-com \
+  --namespace istio-system \
+  --acm-arn arn:aws:acm:us-west-2:123456789012:certificate/abcd1234
 
 # Rotate certificate with custom Kubernetes secret name
-./rotate-cert.sh -s certificates/example-com -n istio-system -k example-com-tls -a arn:aws:acm:us-west-2:123456789012:certificate/abcd1234
+gaia certificate rotate \
+  --secret certificates/example-com \
+  --namespace istio-system \
+  --k8s-secret example-com-tls \
+  --acm-arn arn:aws:acm:us-west-2:123456789012:certificate/abcd1234
 
 # Force refresh of ExternalSecret without changing certificate
-./rotate-cert.sh -s certificates/example-com -n istio-system
+gaia certificate rotate --secret certificates/example-com --namespace istio-system
+
+# Using the workflow
+gaia workflow rotate-certificate \
+  secret_name=certificates/example-com \
+  namespace=istio-system \
+  acm_arn=arn:aws:acm:us-west-2:123456789012:certificate/abcd1234
 ```
 
 ### export-ssh-key.sh

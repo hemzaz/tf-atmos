@@ -107,12 +107,17 @@ resource "aws_secretsmanager_secret_version" "this" {
       error_message = "Secret data for ${each.key} appears to be JSON but is not valid or is empty. Ensure the JSON is well-formed and contains data."
     }
     
-    # Add validation for sensitive data patterns
+    # Add comprehensive validation for sensitive data patterns
     precondition {
       # Check that secrets don't contain obviously hardcoded credentials in dev/test patterns
+      # More comprehensive regex pattern to catch various forms of weak or test credentials
       condition     = each.value.generate_random_password || each.value.secret_data == null ||
-                      !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|test-only)", each.value.secret_data))
-      error_message = "Secret data for ${each.key} appears to contain a weak, test, or default password pattern. Use generate_random_password or provide a strong password."
+                      !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", each.value.secret_data)) &&
+                      !can(regex("(?i)(AKIA[0-9A-Z]{16})", each.value.secret_data)) &&  # AWS Access Key pattern
+                      !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", each.value.secret_data)) &&  # Stripe secret key pattern
+                      !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", each.value.secret_data)) && # GitHub PAT
+                      !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", each.value.secret_data))  # Generic API key patterns
+      error_message = "Secret data for ${each.key} appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without using predictable patterns."
     }
   }
 }

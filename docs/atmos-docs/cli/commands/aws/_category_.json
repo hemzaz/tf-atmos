@@ -1,0 +1,11 @@
+{
+  "label": "aws",
+  "position": 3,
+  "className": "command",
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "doc",
+    "id": "usage"
+  }
+}

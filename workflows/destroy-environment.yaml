@@ -1,24 +1,27 @@
 name: destroy-environment
-description: "Destroy all resources in an environment"
+description: "Destroy all components in an environment"
 
 workflows:
   destroy:
     steps:
     - run:
         command: |
-          echo "This will destroy all resources in the ${account}/${environment} environment. Are you sure? (yes/no)"
-          read confirmation
-          if [ "$confirmation" != "yes" ]; then
-            echo "Destruction cancelled."
-            exit 1
+          # Use Python-based CLI for safer and more reliable destroy operations
+          gaia workflow destroy-environment \
+            --tenant ${tenant} \
+            --account ${account} \
+            --environment ${environment} \
+            --auto-approve ${auto_approve:-false} \
+            --safe-destroy ${safe_destroy:-true}
+            
+          EXIT_CODE=$?
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "Environment destruction completed successfully."
+          else
+            echo "Environment destruction failed or was partially completed."
+            echo "Review logs for details on any remaining resources."
+            exit $EXIT_CODE
           fi
-          echo "Destroying services..."
-          atmos terraform destroy services -s ${tenant}-${account}-${environment}
-          echo "Destroying infrastructure..."
-          atmos terraform destroy infrastructure -s ${tenant}-${account}-${environment}
-          echo "Destroying network..."
-          atmos terraform destroy network -s ${tenant}-${account}-${environment}
-          echo "Destroying iam..."
-          atmos terraform destroy iam -s ${tenant}-${account}-${environment}
-          echo "Destroying backend..."
-          atmos terraform destroy backend -s ${tenant}-${account}-${environment}
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

@@ -1,0 +1,98 @@
+# Staging Environment Template Variables
+# These defaults are applied when creating a new staging environment
+
+# VPC Configuration
+vpc:
+  cidr_block: "10.0.0.0/16"
+  max_subnet_count: 3
+  single_nat_gateway: false
+  nat_gateway_count: 2
+  vpc_flow_logs_enabled: true
+  flow_logs_traffic_type: "REJECT"
+  flow_logs_retention_days: 30
+  network_acls_enabled: true
+
+# Compute Resources
+compute:
+  # EC2
+  ec2_instance_type: "m5.large"
+  enable_spot_instances: true
+  spot_instance_types: ["m5.large", "m5a.large", "m5n.large"]
+  spot_allocation_strategy: "price-capacity-optimized"
+  
+  # EKS
+  eks_enabled: true
+  eks_version: "1.32"
+  eks_endpoint_private_access: true
+  eks_endpoint_public_access: true
+  eks_public_access_cidrs: ["10.0.0.0/8"]
+  eks_node_instance_type: "m5.large"
+  eks_node_min_count: 2
+  eks_node_max_count: 6
+  eks_node_disk_size: 100
+  eks_cluster_log_types: ["api", "audit", "authenticator"]
+  eks_cluster_encryption_enabled: true
+  
+  # Autoscaling
+  autoscaling_metrics_enabled: true
+  autoscaling_default_cooldown: 300
+
+# Security
+security:
+  compliance_level: "soc2"
+  log_retention_days: 30
+  cloudtrail_enabled: true
+  guardduty_enabled: true
+  security_hub_enabled: true
+  aws_config_enabled: true
+  macie_enabled: false
+  iam_password_policy_min_length: 14
+  
+  # Access
+  public_access_cidrs: ["10.0.0.0/8"]
+  ssh_allowed: false
+  
+# Database
+database:
+  rds_enabled: true
+  rds_instance_type: "db.t3.large"
+  rds_multi_az: true
+  rds_backup_retention_period: 14
+  rds_storage_encrypted: true
+  rds_deletion_protection: true
+  
+# Monitoring
+monitoring:
+  detailed_monitoring_enabled: true
+  dashboard_enabled: true
+  enhanced_monitoring_enabled: true
+  alarm_notification_enabled: true
+  alarm_notification_channel: "email+slack"
+  
+# Tagging
+tags:
+  Environment: "staging"
+  CostCenter: "staging"
+  Project: "infrastructure"
+  ManagedBy: "atmos"
+  Compliance: "soc2"
+
+# Add-ons
+addons:
+  cert_manager_enabled: true
+  external_dns_enabled: true
+  load_balancer_controller_enabled: true
+  metrics_server_enabled: true
+  cluster_autoscaler_enabled: true
+  external_secrets_enabled: true
+  istio_enabled: true
+  keda_enabled: true
+  karpenter_enabled: false
+  aws_for_fluentbit_enabled: true
+
+# Staging specific
+staging:
+  performance_testing_enabled: true
+  feature_flags_enabled: true
+  sanitized_data_enabled: true
+  blue_green_deployment_enabled: true

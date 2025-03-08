@@ -7,19 +7,19 @@ workflows:
     - run:
         command: |
           # Get CLI version automatically (in a cross-platform way)
-          ATMOS_CLI_VERSION=$(atmos version | sed -n 's/.*Atmos \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-          echo "Using Atmos CLI version: ${ATMOS_CLI_VERSION}"
+          GAIA_CLI_VERSION=$(gaia version | sed -n 's/.*Gaia \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          echo "Using Gaia CLI version: ${GAIA_CLI_VERSION}"
           
           # Validate required parameters
           if [ -z "${tenant}" ]; then
             echo "ERROR: Missing required parameter 'tenant'"
-            echo "Usage: atmos workflow bootstrap-backend tenant=<tenant> region=<region> [bucket_suffix=<suffix>]"
+            echo "Usage: gaia workflow bootstrap-backend tenant=<tenant> region=<region> [bucket_suffix=<suffix>]"
             exit 1
           fi
           
           if [ -z "${region}" ]; then
             echo "ERROR: Missing required parameter 'region'"
-            echo "Usage: atmos workflow bootstrap-backend tenant=<tenant> region=<region> [bucket_suffix=<suffix>]"
+            echo "Usage: gaia workflow bootstrap-backend tenant=<tenant> region=<region> [bucket_suffix=<suffix>]"
             exit 1
           fi
           
@@ -82,13 +82,13 @@ workflows:
           
           # Add tags to resources
           echo "Adding tags to resources..."
-          TAGS='[{"Key":"ManagedBy","Value":"Atmos"},{"Key":"Environment","Value":"Terraform"},{"Key":"CreatedBy","Value":"bootstrap-workflow"}]'
+          TAGS='[{"Key":"ManagedBy","Value":"Gaia"},{"Key":"Environment","Value":"Terraform"},{"Key":"CreatedBy","Value":"bootstrap-workflow"}]'
           
           # Tag S3 bucket
           aws s3api put-bucket-tagging --bucket ${BUCKET_NAME} --tagging "TagSet=${TAGS}"
           
           # Tag DynamoDB table
-          aws dynamodb tag-resource --resource-arn "arn:aws:dynamodb:${region}:$(aws sts get-caller-identity --query 'Account' --output text):table/${DYNAMODB_TABLE_NAME}" --tags "Key=ManagedBy,Value=Atmos" "Key=Environment,Value=Terraform" "Key=CreatedBy,Value=bootstrap-workflow"
+          aws dynamodb tag-resource --resource-arn "arn:aws:dynamodb:${region}:$(aws sts get-caller-identity --query 'Account' --output text):table/${DYNAMODB_TABLE_NAME}" --tags "Key=ManagedBy,Value=Gaia" "Key=Environment,Value=Terraform" "Key=CreatedBy,Value=bootstrap-workflow"
           
           echo "=========================================================="
           echo "Backend infrastructure successfully created:"

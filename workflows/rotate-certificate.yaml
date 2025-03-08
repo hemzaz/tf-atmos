@@ -1,0 +1,29 @@
+name: rotate-certificate
+description: "Rotate certificates in AWS and Kubernetes"
+
+workflows:
+  rotate:
+    steps:
+    - run:
+        command: |
+          # Use Python-based CLI for certificate rotation with better security
+          gaia certificate rotate \
+            --secret ${secret_name} \
+            --namespace ${namespace} \
+            ${acm_arn:+"--acm-arn ${acm_arn}"} \
+            ${region:+"--region ${region}"} \
+            ${context:+"--context ${context}"} \
+            ${k8s_secret:+"--k8s-secret ${k8s_secret}"} \
+            ${profile:+"--profile ${profile}"} \
+            ${key_path:+"--key-path ${key_path}"} \
+            ${restart_pods:+"--restart-pods"} \
+            ${debug:+"--debug"}
+          
+          EXIT_CODE=$?
+          
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Certificate rotation failed."
+            exit $EXIT_CODE
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

@@ -1,0 +1,46 @@
+# Networking configuration for {{ env_name }} environment
+components:
+  terraform:
+    vpc:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-vpc"
+        cidr_block: "{{ vpc_cidr }}"
+        availability_zones: {{ availability_zones|tojson }}
+        
+        # Create private and public subnets
+        max_subnet_count: 3
+        nat_gateway_enabled: true
+        vpc_flow_logs_enabled: {% if env_type == "production" %}true{% else %}false{% endif %}
+        
+{% if env_type == "production" %}
+        # Production-specific settings
+        dns_hostnames_enabled: true
+        dns_support_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+        vpc_flow_logs_retention_in_days: 90
+        private_subnets_additional_tags:
+          Tier: "private"
+        public_subnets_additional_tags:
+          Tier: "public"
+{% elif env_type == "staging" %}
+        # Staging-specific settings
+        dns_hostnames_enabled: true
+        dns_support_enabled: true
+        vpc_flow_logs_traffic_type: "REJECT"
+        vpc_flow_logs_retention_in_days: 30
+        private_subnets_additional_tags:
+          Tier: "private"
+        public_subnets_additional_tags:
+          Tier: "public"
+{% else %}
+        # Development-specific settings
+        dns_hostnames_enabled: true
+        dns_support_enabled: true
+        vpc_flow_logs_traffic_type: "REJECT"
+        vpc_flow_logs_retention_in_days: 14
+        private_subnets_additional_tags:
+          Tier: "private"
+        public_subnets_additional_tags:
+          Tier: "public"
+{% endif %}

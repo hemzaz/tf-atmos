@@ -6,8 +6,14 @@ workflows:
     steps:
     - run:
         command: |
-          if [ -z "$RESOURCE_ADDRESS" ] || [ -z "$RESOURCE_ID" ]; then
-            echo "Usage: atmos workflow import RESOURCE_ADDRESS=<address> RESOURCE_ID=<id> component=<component> env=<environment>"
-            exit 1
-          fi
-          atmos terraform import $component $RESOURCE_ADDRESS $RESOURCE_ID -s ${environment}
+          # Create stack name from tenant, account, and environment
+          STACK_NAME="${tenant}-${account}-${environment}"
+          
+          # Use Python-based CLI for import operation with better validation
+          gaia workflow import \
+            --address "${RESOURCE_ADDRESS}" \
+            --id "${RESOURCE_ID}" \
+            --component "${component}" \
+            --stack "${STACK_NAME}"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

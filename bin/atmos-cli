@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""
+Entry point script for atmos-cli
+
+DEPRECATED: This command has been renamed to 'gaia'. Please use that instead.
+This command will be removed in a future version.
+"""
+
+import warnings
+import sys
+import os
+
+# Display deprecation warning
+warnings.warn(
+    "The 'atmos-cli' command is deprecated and will be removed in a future version. "
+    "Please use 'gaia' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
+try:
+    # Try to import and run the new CLI
+    from gaia.cli import app
+    sys.stderr.write(
+        "\nWarning: 'atmos-cli' is deprecated. Please use 'gaia' instead.\n\n"
+    )
+    app()
+except ImportError:
+    sys.stderr.write(
+        "\nError: The 'gaia' package is not installed. Please install it with:\n"
+        "pip install -e .\n\n"
+    )
+    sys.exit(1)

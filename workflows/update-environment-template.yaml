@@ -1,0 +1,19 @@
+name: update-environment-template
+description: "Update an existing environment with the latest template changes using Copier's two-way updates"
+
+workflows:
+  update:
+    steps:
+    - run:
+        command: |
+          # Execute external script with environment variables
+          TENANT="${tenant}" \
+          ACCOUNT="${account}" \
+          ENVIRONMENT="${environment}" \
+          CONFLICT_MODE="${conflict_mode}" \
+          AUTO_VALIDATE="${auto_validate:-false}" \
+          AUTO_PLAN="${auto_plan:-false}" \
+          AUTO_APPLY="${auto_apply:-false}" \
+          ${ATMOS_COMPONENT_PATH:-$(git rev-parse --show-toplevel)}/scripts/workflows/update-environment-template.sh
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

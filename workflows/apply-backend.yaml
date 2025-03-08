@@ -6,14 +6,14 @@ workflows:
     steps:
     - run:
         command: |
-          atmos terraform init backend \
+          gaia terraform init backend \
             -backend-config="bucket=${bucket_name}" \
             -backend-config="key=${state_file_key}" \
             -backend-config="region=${region}" \
             -backend-config="dynamodb_table=${dynamodb_table_name}" \
             -backend-config="role_arn=${iam_role_arn}" \
             -s ${tenant}-${account}-${environment}
-          atmos terraform apply backend -s ${tenant}-${account}-${environment}
+          gaia terraform apply backend -s ${tenant}-${account}-${environment}
         env:
           bucket_name: ${tenant}-terraform-state
           dynamodb_table_name: ${tenant}-terraform-locks

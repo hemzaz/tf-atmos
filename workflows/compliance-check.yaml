@@ -10,7 +10,7 @@ workflows:
           # Validate required variables
           if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
             echo "ERROR: Missing required parameters."
-            echo "Usage: atmos workflow compliance-check tenant=<tenant> account=<account> environment=<environment>"
+            echo "Usage: gaia workflow compliance-check tenant=<tenant> account=<account> environment=<environment>"
             exit 1
           fi
           
@@ -25,32 +25,32 @@ workflows:
           
           # Step 1: Validate stack configuration
           echo "Step 1: Validating stack configuration..."
-          atmos validate stacks --stack $STACK
+          gaia validate stacks --stack $STACK
           
           # Step 2: Check for security compliance violations
           echo "Step 2: Checking for security compliance violations..."
           
           # Check Terraform components for compliance
           echo "Checking encryption settings..."
-          atmos describe config -s $STACK | grep -E "encryption|kms" || echo "No encryption settings found"
+          gaia describe config -s $STACK | grep -E "encryption|kms" || echo "No encryption settings found"
           
           # Check IAM policies
           echo "Checking IAM policy settings..."
-          atmos describe config -s $STACK | grep -E "policy|iam" || echo "No IAM policy settings found"
+          gaia describe config -s $STACK | grep -E "policy|iam" || echo "No IAM policy settings found"
           
           # Check public access settings
           echo "Checking public access settings..."
-          atmos describe config -s $STACK | grep -E "public_access|public_endpoint" || echo "No public access settings found"
+          gaia describe config -s $STACK | grep -E "public_access|public_endpoint" || echo "No public access settings found"
           
           # Step 3: Run drift detection
           echo "Step 3: Running drift detection..."
-          atmos workflow drift-detection tenant=${tenant} account=${account} environment=${environment} || true
+          gaia workflow drift-detection tenant=${tenant} account=${account} environment=${environment} || true
           
           # Step 4: Apply OpenPolicyAgent policies
           echo "Step 4: Checking OPA policies..."
           if command -v conftest &> /dev/null; then
             # If conftest is installed, run OPA policies
-            atmos describe config -s $STACK -f json > stack-config.json
+            gaia describe config -s $STACK -f json > stack-config.json
             if [ -d "policies/opa" ]; then
               conftest test stack-config.json --policy policies/opa
             else
@@ -63,14 +63,14 @@ workflows:
           
           # Step 5: Validate components
           echo "Step 5: Validating components..."
-          atmos validate component --stack $STACK
+          gaia validate component --stack $STACK
           
           # Step 6: Check variables defined in stack
           echo "Step 6: Checking for required variables..."
           
           # Check for sensitive variables with default values
           echo "Checking for sensitive variables with default values..."
-          atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
+          gaia describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
             .[$k].vars | keys[] as $var | 
             select($var | test("password|token|key|secret|credential")) | "\($k).\($var)"' || echo "No sensitive variables found"
           
@@ -90,7 +90,7 @@ workflows:
           # Validate required variables
           if [ -z "${tenant}" ]; then
             echo "ERROR: Missing required parameters."
-            echo "Usage: atmos workflow compliance-report tenant=<tenant>"
+            echo "Usage: gaia workflow compliance-report tenant=<tenant>"
             exit 1
           fi
           
@@ -101,7 +101,7 @@ workflows:
           echo "============================================"
           
           # List all stacks for the tenant
-          STACKS=$(atmos list stacks --tenant ${tenant} --format json | jq -r '.[].name')
+          STACKS=$(gaia list stacks --tenant ${tenant} --format json | jq -r '.[].name')
           
           # Generate output directory
           REPORT_DIR="compliance-reports"
@@ -118,7 +118,7 @@ workflows:
             echo "" >> "${REPORT_DIR}/compliance-report.md"
             
             # Extract stack components
-            COMPONENTS=$(atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[]')
+            COMPONENTS=$(gaia describe config -s $STACK -f json | jq -r '.components.terraform | keys[]')
             
             echo "### Components" >> "${REPORT_DIR}/compliance-report.md"
             echo "" >> "${REPORT_DIR}/compliance-report.md"
@@ -133,7 +133,7 @@ workflows:
             echo "### Sensitive Variables" >> "${REPORT_DIR}/compliance-report.md"
             echo "" >> "${REPORT_DIR}/compliance-report.md"
             
-            SENSITIVE_VARS=$(atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
+            SENSITIVE_VARS=$(gaia describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
               .[$k].vars | keys[] as $var | 
               select($var | test("password|token|key|secret|credential")) | "\($k).\($var)"' 2>/dev/null || echo "")
             
@@ -152,7 +152,7 @@ workflows:
             echo "### Public Access" >> "${REPORT_DIR}/compliance-report.md"
             echo "" >> "${REPORT_DIR}/compliance-report.md"
             
-            PUBLIC_ACCESS=$(atmos describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
+            PUBLIC_ACCESS=$(gaia describe config -s $STACK -f json | jq -r '.components.terraform | keys[] as $k | 
               .[$k].vars | to_entries[] | select(.key | test("public_access|public_endpoint")) | "\($k).\(.key) = \(.value)"' 2>/dev/null || echo "")
             
             if [ -n "$PUBLIC_ACCESS" ]; then

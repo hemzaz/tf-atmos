@@ -1,255 +1,32 @@
 name: apply-environment
-description: "Apply changes for all components in an environment with dynamic discovery and dependency resolution"
+description: "Apply changes for all components in an environment"
 
 workflows:
   apply:
     steps:
     - run:
         command: |
-          # Get CLI version automatically (in a cross-platform way)
-          ATMOS_CLI_VERSION=$(atmos version | sed -n 's/.*Atmos \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-          echo "Using Atmos CLI version: ${ATMOS_CLI_VERSION}"
-          
-          # Validate required variables
-          if [ -z "${tenant}" ] || [ -z "${account}" ] || [ -z "${environment}" ]; then
-            echo "ERROR: Missing required parameters. Usage: atmos workflow apply-environment tenant=<tenant> account=<account> environment=<environment>"
-            exit 1
-          fi
-
-          # Set exit on error
-          set -e
-          
-          # Check if AWS credentials are valid
-          echo "Validating AWS credentials..."
-          if ! aws sts get-caller-identity > /dev/null; then
-            echo "ERROR: Invalid AWS credentials. Please check your credentials and try again."
-            exit 1
-          fi
-          
-          # Discover available components by looking at stack files
-          ENV_DIR="stacks/account/${account}/${environment}"
-          echo "Discovering components in ${ENV_DIR}..."
-          
-          # Auto-discover component dependencies by analyzing YAML imports and output references
-          echo "Auto-detecting component dependencies..."
-          
-          # Ensure environment directory exists
-          if [ ! -d "${ENV_DIR}" ]; then
-            echo "ERROR: Environment directory ${ENV_DIR} does not exist."
-            exit 1
-          fi
-          
-          # Discover all components first
-          AVAILABLE_COMPONENTS=()
-          for file in ${ENV_DIR}/*.yaml; do
-            if [ -f "$file" ]; then
-              component=$(basename "$file" .yaml)
-              AVAILABLE_COMPONENTS+=("$component")
-            fi
-          done
-          
-          # Check if any components were found
-          if [ ${#AVAILABLE_COMPONENTS[@]} -eq 0 ]; then
-            echo "ERROR: No components found in ${ENV_DIR}"
-            exit 1
-          fi
-          
-          # Base dependency detection logic - analyze imports and outputs references
-          # This builds a dependency graph automatically
-          declare -A DEPENDENCIES
-          
-          # Function to extract imports from a YAML file
-          extract_imports() {
-            local file=$1
-            local imports=()
+          # Use Python-based CLI to apply all components
+          gaia workflow apply-environment \
+            --tenant ${tenant} \
+            --account ${account} \
+            --environment ${environment} \
+            --auto-approve ${auto_approve:-false} \
+            --parallel ${parallel:-false}
             
-            # Extract imports section if it exists
-            if grep -q "^import:" "$file" || grep -q "^imports:" "$file"; then
-              # Extract lines after import: until the next section
-              imports=($(grep -A20 "^import:" "$file" | grep -v "^import:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
-              if [ ${#imports[@]} -eq 0 ]; then
-                imports=($(grep -A20 "^imports:" "$file" | grep -v "^imports:" | grep -v "^---" | grep -v "^$" | grep -v "^vars:" | sed 's/^\s*-\s*//' | sed 's/catalog\///' 2>/dev/null))
-              fi
-            fi
+          # Perform validation checks if successful
+          if [ $? -eq 0 ]; then
+            echo "Deployment completed successfully."
             
-            echo "${imports[@]}"
-          }
-          
-          # Function to detect output references
-          detect_references() {
-            local file=$1
-            local references=()
-            
-            # Look for ${output.XXX} patterns which indicate dependencies
-            if grep -q "\${output\." "$file"; then
-              references=($(grep -o '\${output\.[^.]*' "$file" | sort | uniq | sed 's/\${output\.//' 2>/dev/null))
-            fi
-            
-            echo "${references[@]}"
-          }
-          
-          # Build dependency map for each component
-          for component in "${AVAILABLE_COMPONENTS[@]}"; do
-            DEPENDENCIES[$component]=""
-            
-            # Get the component's YAML file
-            component_file="${ENV_DIR}/${component}.yaml"
-            
-            # Extract imports and references
-            imports=($(extract_imports "$component_file"))
-            references=($(detect_references "$component_file"))
-            
-            # Add all dependencies
-            for dep in "${imports[@]}" "${references[@]}"; do
-              # Skip non-component dependencies
-              if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${dep} " ]]; then
-                DEPENDENCIES[$component]="${DEPENDENCIES[$component]} $dep"
-              fi
-            done
-            
-            # Trim and remove duplicates
-            DEPENDENCIES[$component]=$(echo "${DEPENDENCIES[$component]}" | tr ' ' '\n' | sort | uniq | tr '\n' ' ' | xargs)
-          done
-          
-          # Topological sort function to order components based on dependencies
-          topological_sort() {
-            local -a visited=()
-            local -a temp=()
-            local -a order=()
-            
-            # DFS-based topological sort
-            visit() {
-              local node=$1
-              
-              # Check if already in result
-              if [[ " ${order[*]} " =~ " ${node} " ]]; then
-                return
-              fi
-              
-              # Check for cycles
-              if [[ " ${temp[*]} " =~ " ${node} " ]]; then
-                echo "WARNING: Circular dependency detected involving $node"
-                return
-              fi
-              
-              # Mark as being visited
-              temp+=("$node")
-              
-              # Visit dependencies first
-              local deps=(${DEPENDENCIES[$node]})
-              for dep in "${deps[@]}"; do
-                visit "$dep"
-              done
-              
-              # Add to result
-              order+=("$node")
-            }
-            
-            # Visit each node
-            for component in "${AVAILABLE_COMPONENTS[@]}"; do
-              visit "$component"
-            done
-            
-            echo "${order[@]}"
-          }
-          
-          # Generate ordered component list
-          ORDERED_COMPONENTS=($(topological_sort))
-          
-          # Always ensure these core components come first if they exist
-          CORE_COMPONENTS=("backend" "iam" "network")
-          FINAL_ORDER=()
-          
-          # First add core components in the specified order
-          for core in "${CORE_COMPONENTS[@]}"; do
-            if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${core} " ]]; then
-              if [[ ! " ${FINAL_ORDER[*]} " =~ " ${core} " ]]; then
-                FINAL_ORDER+=("$core")
-              fi
-            fi
-          done
-          
-          # Then add the rest from our sorted order
-          for component in "${ORDERED_COMPONENTS[@]}"; do
-            if [[ ! " ${FINAL_ORDER[*]} " =~ " ${component} " ]]; then
-              FINAL_ORDER+=("$component")
-            fi
-          done
-          
-          # Log the automatically determined dependency order
-          echo "Detected component order: ${FINAL_ORDER[*]}"
-          
-          # Use our final order
-          ORDERED_COMPONENTS=("${FINAL_ORDER[@]}")
-          
-          # We already discovered components during dependency analysis
-          echo "Found ${#AVAILABLE_COMPONENTS[@]} components: ${AVAILABLE_COMPONENTS[*]}"
-          
-          # Handle tainting for stateful resources like EKS clusters if needed
-          # This helps with resources that might need recreation
-          handle_taints() {
-            component=$1
-            stack="${tenant}-${account}-${environment}"
-            
-            if [ "$component" == "eks" ]; then
-              echo "Checking if EKS cluster needs to be tainted..."
-              # Attempt to taint EKS cluster if it exists
-              atmos terraform taint -allow-missing aws_eks_cluster.this -s $stack || true
-              echo "Taint completed (if resource exists)"
-            fi
-          }
-          
-          # Function to apply a component with error handling
-          apply_component() {
-            component=$1
-            echo "Applying ${component}..."
-            echo "----------------------------------------"
-            
-            # Handle tainting for certain components before applying
-            handle_taints "$component"
-            
-            if ! atmos terraform apply ${component} -s ${tenant}-${account}-${environment}; then
-              echo "ERROR: Failed to apply ${component}. Exiting."
-              return 1
-            fi
-            echo "Successfully applied ${component}."
-            echo "----------------------------------------"
-            return 0
-          }
-          
-          # Start deployment in dependency order, but only apply components that exist
-          echo "Starting deployment for ${tenant}-${account}-${environment}"
-          echo "============================================"
-          
-          # First apply components in known dependency order
-          for component in "${ORDERED_COMPONENTS[@]}"; do
-            # Check if this component exists in the available components list
-            if [[ " ${AVAILABLE_COMPONENTS[*]} " =~ " ${component} " ]]; then
-              apply_component "$component" || exit 1
-            fi
-          done
-          
-          # Then apply any components that weren't in our known ordering
-          for component in "${AVAILABLE_COMPONENTS[@]}"; do
-            # Check if this component was already applied in the ordered phase
-            if [[ ! " ${ORDERED_COMPONENTS[*]} " =~ " ${component} " ]]; then
-              echo "Applying unordered component ${component}..."
-              apply_component "$component" || exit 1
-            fi
-          done
-          
-          echo "============================================"
-          echo "Deployment completed successfully for ${tenant}-${account}-${environment}"
-          
-          # Perform validation checks if validation workflow exists
-          echo "Running post-deployment validation checks..."
-          
-          # Check if validation workflow exists
-          if atmos workflow describe validate &>/dev/null; then
-            atmos workflow validate tenant=${tenant} account=${account} environment=${environment}
+            # Validate deployment
+            echo "Running validation checks..."
+            gaia workflow validate \
+              --tenant ${tenant} \
+              --account ${account} \
+              --environment ${environment}
           else
-            echo "Validation workflow not found, skipping validation checks."
-            echo "Consider adding a 'validate' workflow to automate post-deployment validation."
+            echo "Deployment failed."
+            exit 1
           fi
         env:
           AWS_SDK_LOAD_CONFIG: 1
