@@ -37,7 +37,6 @@ stacks:
   base_path: stacks
   included_paths:
     - "orgs/fnx/dev/eu-west-2/testenv-01.yaml"
-    - "!**/_defaults.yaml"
   excluded_paths:
     - "**/_defaults.yaml"
     - "**/defaults.yaml"
@@ -47,8 +46,8 @@ stacks:
   # Enable schema validation
   validate_schemas: true
   
-  # Basic pattern that will be filled from stack vars
-  name_pattern: "{tenant}-{environment}-{stage}"
+  # As simple as possible
+  name_template: "fnx-testenv-01-dev"
 
 workflows:
   base_path: workflows
