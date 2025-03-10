@@ -75,8 +75,9 @@ components:
     external-secrets:
       vars:
         enabled: true
-        create_namespace: true
-        namespace: "external-secrets"
+        namespace:
+          name: "external-secrets"
+          create: true
         
     monitoring:
       vars:

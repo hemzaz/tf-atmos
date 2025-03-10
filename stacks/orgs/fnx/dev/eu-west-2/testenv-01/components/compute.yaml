@@ -120,8 +120,9 @@ components:
         oidc_provider_url: "${output.eks/main.oidc_provider_url}"
         
         # Config options
-        namespace: "external-secrets"
-        create_namespace: true
+        namespace:
+          name: "external-secrets"
+          create: true
         serviceaccount:
           name: "external-secrets"
         chart_version: "0.9.9"
@@ -147,8 +148,9 @@ components:
         oidc_provider_url: "${output.eks/data.oidc_provider_url}"
         
         # Config options
-        namespace: "external-secrets"
-        create_namespace: true
+        namespace:
+          name: "external-secrets"
+          create: true
         serviceaccount:
           name: "external-secrets"
         chart_version: "0.9.9"

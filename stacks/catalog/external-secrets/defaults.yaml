@@ -19,8 +19,9 @@ components:
         oidc_provider_url: ${eks.outputs.oidc_provider_urls.main}
     
     # Optional settings with defaults
-    namespace: "external-secrets"
-    create_namespace: true
+    namespace:
+      name: "external-secrets"
+      create: true
     serviceaccount:
       name: "external-secrets"
     chart_version: "0.9.9"
