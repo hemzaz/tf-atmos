@@ -24,11 +24,15 @@ components:
       create: true
     serviceaccount:
       name: "external-secrets"
-    chart_version: "0.9.9"
+    helm:
+      chart_version: "0.9.9"
     certificate_store:
       path_template: "certificates/{name}"
-    create_default_cluster_secret_store: true
-    create_certificate_secret_store: true
+    secret_stores:
+      default_cluster:
+        create: true
+      certificate:
+        create: true
     
     # Tags for resources
     tags:

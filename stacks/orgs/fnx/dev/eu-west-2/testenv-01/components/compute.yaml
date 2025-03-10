@@ -125,7 +125,8 @@ components:
           create: true
         serviceaccount:
           name: "external-secrets"
-        chart_version: "0.9.9"
+        helm:
+          chart_version: "0.9.9"
         path_prefix: "${secrets_manager_path_prefix}"
         
         # Configure certificate store paths
@@ -133,8 +134,11 @@ components:
           path_template: "certificates/{name}"
         
         # Create both general and certificate-specific secret stores
-        create_default_cluster_secret_store: true
-        create_certificate_secret_store: true
+        secret_stores:
+          default_cluster:
+            create: true
+          certificate:
+            create: true
     
     external-secrets/data:
       metadata:
@@ -153,9 +157,13 @@ components:
           create: true
         serviceaccount:
           name: "external-secrets"
-        chart_version: "0.9.9"
+        helm:
+          chart_version: "0.9.9"
         path_prefix: "data/${secrets_manager_path_prefix}"
         
         # Create only the default secret store (no certificates for data cluster)
-        create_default_cluster_secret_store: true
-        create_certificate_secret_store: false
+        secret_stores:
+          default_cluster:
+            create: true
+          certificate:
+            create: false
