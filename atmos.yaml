@@ -48,12 +48,15 @@ stacks:
   
   # Use stack naming pattern that matches your directory structure
   name_pattern: "{tenant}-{account}-{environment}-{stage}"
+  name_pattern_map_list:
+    - pattern: "catalog/**/*.yaml"
+      name_pattern: "{tenant}-{component}"
   
   # Map variables from directory structure
   name_pattern_maps:
     tenant:
       - pattern: "account/*/*/{tenant}/*.yaml"
-      - pattern: "catalog/*.yaml"
+      - pattern: "catalog/**/*.yaml"
         value: "catalog"
       - pattern: "orgs/{tenant}/**/*.yaml"
     account:
@@ -67,6 +70,8 @@ stacks:
       - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/*.yaml"
       - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/**/*.yaml"
         strip_extension: true
+    component:
+      - pattern: "catalog/{component}/**/*.yaml"
 
 workflows:
   base_path: workflows

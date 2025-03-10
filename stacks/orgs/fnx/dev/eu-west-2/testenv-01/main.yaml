@@ -2,7 +2,7 @@ import:
   # Import common configurations
   - catalog/infrastructure/defaults.yaml
   - mixins/tenant/fnx.yaml
-  - mixins/stage/development.yaml
+  - mixins/stage/dev.yaml
   - mixins/region/eu-west-2.yaml
   - orgs/fnx/dev/_defaults.yaml
 
