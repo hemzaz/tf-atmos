@@ -122,12 +122,14 @@ components:
         # Config options
         namespace: "external-secrets"
         create_namespace: true
-        service_account_name: "external-secrets"
+        serviceaccount:
+          name: "external-secrets"
         chart_version: "0.9.9"
         path_prefix: "${secrets_manager_path_prefix}"
         
         # Configure certificate store paths
-        certificate_secret_path_template: "certificates/{name}"
+        certificate_store:
+          path_template: "certificates/{name}"
         
         # Create both general and certificate-specific secret stores
         create_default_cluster_secret_store: true
@@ -147,7 +149,8 @@ components:
         # Config options
         namespace: "external-secrets"
         create_namespace: true
-        service_account_name: "external-secrets"
+        serviceaccount:
+          name: "external-secrets"
         chart_version: "0.9.9"
         path_prefix: "data/${secrets_manager_path_prefix}"
         
