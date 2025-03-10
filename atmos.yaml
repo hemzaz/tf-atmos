@@ -28,10 +28,10 @@ components:
       s3:
         encrypt: true
         bucket: "atmos-terraform-state-${tenant}-${account}-${environment}"
-        key: "terraform/${stage}/${tenant}/${environment}/${component}.tfstate"
+        key: "terraform/${tenant}/${environment}/${component}.tfstate"
         dynamodb_table: "atmos-terraform-state-lock"
         region: "${region}"
-        role_arn: "${backend_role_arn}"
+        role_arn: ""
 
 stacks:
   base_path: stacks
@@ -48,28 +48,25 @@ stacks:
   
   # Use stack naming pattern that matches your directory structure
   name_pattern: "{tenant}-{account}-{environment}-{stage}"
-  name_pattern_map_list:
-    - pattern: "catalog/**/*.yaml"
-      name_pattern: "{tenant}-{component}"
-  
-  # Map variables from directory structure
   name_pattern_maps:
     tenant:
-      - pattern: "account/*/*/{tenant}/*.yaml"
+      - pattern: "orgs/{tenant}/**/*.yaml"
       - pattern: "catalog/**/*.yaml"
         value: "catalog"
-      - pattern: "orgs/{tenant}/**/*.yaml"
     account:
-      - pattern: "account/{account}/*/*.yaml"
       - pattern: "orgs/{tenant}/{account}/**/*.yaml"
+      - pattern: "catalog/**/*.yaml"
+        value: "shared"
     environment:
-      - pattern: "account/{account}/{environment}/*/*.yaml"
       - pattern: "orgs/{tenant}/{account}/{environment}/**/*.yaml"
+      - pattern: "catalog/**/*.yaml"
+        value: "global"
     stage:
       - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}.yaml"
       - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/*.yaml"
       - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/**/*.yaml"
-        strip_extension: true
+      - pattern: "catalog/**/*.yaml"
+        value: "catalog"
     component:
       - pattern: "catalog/{component}/**/*.yaml"
 
