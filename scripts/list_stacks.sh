@@ -8,18 +8,8 @@ cd "$REPO_ROOT" || exit 1
 echo "===================== ATMOS ENVIRONMENT LISTING ====================="
 echo "Running: atmos list stacks"
 
-# Get the raw stack listing
-STACKS=$(atmos list stacks)
-
-# Format stack names to be user-friendly
-for stack in $STACKS; do
-  # Map stack paths to user-friendly names
-  if [[ $stack == "orgs/fnx/dev/eu-west-2/testenv-01" ]]; then
-    echo "fnx-testenv-01-dev"
-  else
-    echo $stack
-  fi
-done
+# Run atmos list stacks but replace with friendly names
+atmos list stacks | sed 's|orgs/fnx/dev/eu-west-2/testenv-01|fnx-testenv-01-dev|g'
 echo ""
 
 echo "===================== DIRECTORY STRUCTURE ========================="
