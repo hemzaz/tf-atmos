@@ -1,11 +1,24 @@
 import:
-  - orgs/fnx/dev/eu-west-2/_defaults
+  - mixins/tenant/fnx
+  - mixins/stage/dev
+  - mixins/region/eu-west-2
+  - orgs/fnx/dev/_defaults
   - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
   - orgs/fnx/dev/eu-west-2/testenv-01/components/networking
   - orgs/fnx/dev/eu-west-2/testenv-01/components/security
   - orgs/fnx/dev/eu-west-2/testenv-01/components/compute
   - orgs/fnx/dev/eu-west-2/testenv-01/components/services
 
-# Metadata and documentation is now moved to the globals.yaml file
-metadata:
-  description: "Development test environment using Multiple Component Instances Pattern"
+vars:
+  # Core variables for stack naming
+  tenant: fnx
+  environment: testenv-01
+  stage: dev
+  
+  # Other configurations
+  description: "TestEnv-01 Environment"
+  namespace: testenv-01
+  region: eu-west-2
+  account: dev
+  aws_account_id: "${env:AWS_ACCOUNT_ID, REQUIRED_ACCOUNT_ID}"
+  vpc_cidr: "10.0.0.0/16"
