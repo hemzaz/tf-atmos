@@ -1,0 +1,69 @@
+name: acm
+description: "ACM certificate management"
+
+components:
+  terraform:
+    acm/defaults:
+      metadata:
+        component: acm
+        type: abstract
+        version: "1.0.0"
+        description: "Manages ACM certificates"
+        category: "security"
+      vars:
+        tenant: "${tenant}"
+        enabled: true
+        region: ${region}
+        zone_id: ${zone_id | default("")}
+        
+        # Define certificates
+        dns_domains: ${acm_dns_domains | default('{}')}
+        
+        # Cross-region certificate replication
+        enable_cross_region_replication: ${acm_cross_region | default(false)}
+        target_regions: ${acm_target_regions | default([])}
+        
+        # Certificate validation options
+        validation_method: ${acm_validation_method | default("DNS")}
+        wait_for_validation: ${acm_wait_for_validation | default(true)}
+        
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "ACM"
+        ManagedBy: "Terraform"
+        
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/acm/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+              
+      # Provider configuration
+      providers:
+        aws:
+          region: ${region}
+          
+      # Define outputs with improved descriptions
+      outputs:
+        certificate_arns:
+          description: "Map of certificate domain names to their ARNs"
+          value: ${output.certificate_arns}
+        certificate_domains:
+          description: "Map of certificate ARNs to their domain names"
+          value: ${output.certificate_domains}
+        validation_options:
+          description: "Map of certificate domain names to their validation options"
+          value: ${output.validation_options}
+
+vars:
+  tenant: "${tenant}"
+  account: "${account}"
+  environment: "${environment}"

@@ -1,0 +1,7 @@
+components:
+  terraform:
+    iam:
+      metadata:
+        component: iam
+      vars:
+        enabled: false

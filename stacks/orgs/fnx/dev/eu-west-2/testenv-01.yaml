@@ -1,0 +1,11 @@
+import:
+  - orgs/fnx/dev/eu-west-2/_defaults
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/networking
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/security
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/compute
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/services
+
+# Metadata and documentation is now moved to the globals.yaml file
+metadata:
+  description: "Development test environment using Multiple Component Instances Pattern"

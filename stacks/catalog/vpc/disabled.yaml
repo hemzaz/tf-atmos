@@ -1,0 +1,8 @@
+components:
+  terraform:
+    vpc:
+      metadata:
+        # Point to the Terraform component
+        component: vpc
+      vars:
+        enabled: false

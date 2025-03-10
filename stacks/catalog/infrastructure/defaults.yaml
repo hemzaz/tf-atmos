@@ -1,0 +1,100 @@
+name: infrastructure
+description: "Reusable infrastructure configuration with RDS and other core services"
+
+components:
+  terraform:
+    rds:
+      metadata:
+        component: rds
+        type: abstract
+        version: "1.0.0"
+        description: "RDS database instances configuration"
+        category: "databases"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        tenant: "${tenant}"
+        enabled: "${rds_enabled | default(true)}"
+        region: "${region}"
+        identifier: "${tenant}-${account}-${environment}-db"
+        engine: "${rds_engine | default('postgres')}"
+        engine_version: "${rds_engine_version | default('14')}"
+        instance_class: "${rds_instance_class | default('db.t3.micro')}"
+        allocated_storage: "${rds_allocated_storage | default(20)}"
+        max_allocated_storage: "${rds_max_allocated_storage | default(100)}"
+        db_name: "${rds_db_name | default('app')}"
+        username: "${rds_username | default('dbadmin')}"
+        port: "${rds_port | default(5432)}"
+        
+        # High availability settings based on environment type
+        multi_az: "${multi_az | default(false)}"
+        backup_retention_period: "${automatic_backup_retention | default(7)}"
+        backup_window: "03:00-04:00"
+        maintenance_window: "sun:04:30-sun:05:30"
+        
+        # Security settings
+        deletion_protection: "${deletion_protection | default(false)}"
+        skip_final_snapshot: "${!is_production | default(true)}"
+        final_snapshot_identifier: "${tenant}-${account}-${environment}-db-final"
+        storage_encrypted: true
+        
+        # Network settings
+        subnet_ids: "${output.vpc.database_subnet_ids | default(output.vpc.private_subnet_ids)}"
+        vpc_security_group_ids: ["${output.securitygroup.database_security_group_id}"]
+
+      tags:
+        Tenant: "${tenant}"
+        Account: "${account}"
+        Environment: "${environment}"
+        Component: "RDS"
+        ManagedBy: "Terraform"
+        
+      # Terraform backend configuration  
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: "${tenant}-terraform-state"
+              key: "${account}/${environment}/infrastructure/rds/terraform.tfstate"
+              region: "${region}"
+              role_arn: "arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role"
+              dynamodb_table: "${tenant}-terraform-locks"
+          vars:
+            tenant: "${tenant}"
+            validation:
+              rules:
+                validate_engine:
+                  rule: "contains(['mysql', 'postgres', 'oracle', 'sqlserver'], engine)"
+                  message: "Database engine must be one of: mysql, postgres, oracle, sqlserver"
+                validate_production_backups:
+                  rule: "!is_production || backup_retention_period >= 7"
+                  message: "Production databases must have at least 7 days of backups"
+          
+      # Provider configuration
+      providers:
+        aws:
+          region: "${region}"
+          
+      # Define outputs with improved descriptions 
+      outputs:
+        db_instance_address:
+          description: "The address of the RDS instance"
+          value: "${output.db_instance_address}"
+        db_instance_arn:
+          description: "The ARN of the RDS instance"
+          value: "${output.db_instance_arn}"
+        db_instance_endpoint:
+          description: "The connection endpoint of the RDS instance"
+          value: "${output.db_instance_endpoint}"
+        db_instance_id:
+          description: "The ID of the RDS instance"
+          value: "${output.db_instance_id}"
+        db_subnet_group_name:
+          description: "The name of the DB subnet group"
+          value: "${output.db_subnet_group_name}"
+
+vars:
+  tenant: "${tenant}"
+  account: "${account}"
+  environment: "${environment}"

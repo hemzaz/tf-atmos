@@ -1,0 +1,98 @@
+name: eks-addons
+description: "EKS cluster addons and Kubernetes resources"
+
+components:
+  terraform:
+    eks-addons:
+      metadata:
+        component: eks-addons
+        type: abstract
+        version: "1.0.0"
+        description: "EKS cluster addons and Kubernetes resources"
+        category: "container-orchestration"
+        namespace: "k8s"
+      depends_on:
+        - eks
+      vars:
+        tenant: "${tenant}"
+        enabled: true
+        region: "${region}"
+        # Reference to existing EKS resources with proper validation
+        cluster_name: "${eks_cluster_name | default('')}"
+        host: "${eks_host | default('')}"
+        cluster_ca_certificate: "${eks_ca_cert | default('')}"
+        oidc_provider_arn: "${eks_oidc_provider_arn | default('')}"
+        oidc_provider_url: "${eks_oidc_provider_url | default('')}"
+        
+        # Enable specific addons based on variables with defaults for flexibility
+        enable_metrics_server: "${eks_enable_metrics_server | default(true)}"
+        enable_cluster_autoscaler: "${eks_enable_cluster_autoscaler | default(true)}"
+        enable_aws_load_balancer_controller: "${eks_enable_alb | default(true)}"
+        enable_external_dns: "${eks_enable_external_dns | default(true)}"
+        enable_cert_manager: "${eks_enable_cert_manager | default(true)}"
+        enable_external_secrets: "${eks_enable_external_secrets | default(true)}"
+        
+        # Map of clusters with addons, Helm releases, and Kubernetes manifests
+        clusters: "${eks_addon_clusters | default('{}')}"
+        
+        # Service account configuration
+        create_service_accounts: true
+        service_account_namespace: "kube-system"
+
+      # Define common tags
+      tags:
+        Tenant: "${tenant}"
+        Account: "${account}"
+        Environment: "${environment}"
+        Component: "EKS-Addons"
+        ManagedBy: "Terraform"
+
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: "${tenant}-terraform-state"
+              key: "${account}/${environment}/infrastructure/eks-addons/terraform.tfstate"
+              region: "${region}"
+              role_arn: "arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role"
+              dynamodb_table: "${tenant}-terraform-locks"
+          vars:
+            tenant: "${tenant}"
+            validation:
+              rules:
+                validate_cluster_name:
+                  rule: "cluster_name != ''"
+                  message: "Cluster name must be provided"
+                validate_host:
+                  rule: "host != ''"
+                  message: "Kubernetes host endpoint must be provided"
+
+      # Provider configuration
+      providers:
+        aws:
+          region: "${region}"
+        kubernetes:
+          host: "${eks_host | default('')}"
+          cluster_ca_certificate: "${eks_ca_cert | default('')}"
+          token: "${eks_token | default('')}"
+
+      # Improved output descriptions
+      outputs:
+        addon_arns:
+          description: "Map of EKS addon names to their ARNs"
+          value: "${output.addon_arns}"
+        helm_release_statuses:
+          description: "Map of Helm release names to their installation status"
+          value: "${output.helm_release_statuses}"
+        service_account_roles:
+          description: "Map of service account names to their IAM role ARNs"
+          value: "${output.service_account_roles}"
+        load_balancer_controller_webhook:
+          description: "Webhook endpoint for the AWS Load Balancer Controller"
+          value: "${output.load_balancer_controller_webhook}"
+
+vars:
+  tenant: "${tenant}"
+  account: "${account}"
+  environment: "${environment}"

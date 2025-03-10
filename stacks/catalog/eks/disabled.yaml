@@ -1,0 +1,7 @@
+components:
+  terraform:
+    eks:
+      metadata:
+        component: eks
+      vars:
+        enabled: false

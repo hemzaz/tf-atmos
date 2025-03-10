@@ -1,0 +1,4 @@
+vars:
+  namespace: fnx
+  tenant: fnx
+  management_account_id: "123456789012" # Replace with actual AWS management account ID

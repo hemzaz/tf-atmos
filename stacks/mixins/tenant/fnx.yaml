@@ -1,0 +1,4 @@
+vars:
+  tenant: fnx
+
+# Other defaults for the `fnx` tenant/OU

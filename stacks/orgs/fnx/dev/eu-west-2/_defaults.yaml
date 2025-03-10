@@ -1,0 +1,11 @@
+import:
+  - orgs/fnx/dev/_defaults
+  - mixins/region/eu-west-2
+
+vars:
+  region: eu-west-2
+  environment: eu-west-2
+  availability_zones:
+    - eu-west-2a
+    - eu-west-2b
+    - eu-west-2c

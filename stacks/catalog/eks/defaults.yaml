@@ -1,0 +1,95 @@
+name: eks
+description: "EKS cluster management"
+
+components:
+  terraform:
+    eks/defaults:
+      metadata:
+        component: eks
+        type: abstract
+        version: "1.0.0"
+        description: "Manages EKS clusters"
+        category: "container-orchestration"
+        namespace: "k8s"
+      depends_on:
+        - vpc
+        - iam
+      vars:
+        tenant: "${tenant}"
+        enabled: true
+        region: "${region}"
+        kubernetes_version: "${eks_kubernetes_version | default('1.28')}"
+        cluster_name: "${tenant}-${account}-${environment}-eks"
+        vpc_id: "${output.vpc.vpc_id}"
+        subnet_ids: "${output.vpc.private_subnet_ids}"
+        
+        # Cluster endpoint configuration
+        endpoint_private_access: "${endpoint_private_access | default(true)}"
+        endpoint_public_access: "${endpoint_public_access | default(false)}"
+        
+        # Security settings
+        encrypt_secrets: "${encrypt_secrets | default(true)}"
+        enable_cluster_logging: "${enable_cluster_logging | default(true)}"
+        enabled_cluster_log_types: "${enabled_cluster_log_types | default(['api', 'audit', 'authenticator', 'controllerManager', 'scheduler'])}"
+        
+        # Node group configuration
+        node_groups: "${eks_node_groups | default('{}')}"
+        
+        # Cluster configuration
+        clusters: "${eks_clusters | default('{}')}"
+        
+      # Define common tags
+      tags:
+        Tenant: "${tenant}"
+        Account: "${account}"
+        Environment: "${environment}"
+        Component: "EKS"
+        ManagedBy: "Terraform"
+        
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: "${tenant}-terraform-state"
+              key: "${account}/${environment}/infrastructure/eks/terraform.tfstate"
+              region: "${region}"
+              role_arn: "arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role"
+              dynamodb_table: "${tenant}-terraform-locks"
+              
+      # Provider configuration
+      providers:
+        aws:
+          region: "${region}"
+          
+      # Define outputs with improved descriptions
+      outputs:
+        cluster_id:
+          description: "The ID of the EKS cluster"
+          value: "${output.cluster_id}"
+        cluster_endpoint:
+          description: "The endpoint of the EKS cluster"
+          value: "${output.cluster_endpoint}"
+        cluster_security_group_id:
+          description: "The security group ID attached to the EKS cluster"
+          value: "${output.cluster_security_group_id}"
+        cluster_iam_role_arn:
+          description: "The IAM role ARN associated with the EKS cluster"
+          value: "${output.cluster_iam_role_arn}"
+        cluster_oidc_issuer_url:
+          description: "The URL on the EKS cluster for the OpenID Connect identity provider"
+          value: "${output.cluster_oidc_issuer_url}"
+        oidc_provider_arn:
+          description: "The ARN of the OIDC Provider"
+          value: "${output.oidc_provider_arn}"
+        cluster_version:
+          description: "The Kubernetes version for the EKS cluster"
+          value: "${output.cluster_version}"
+        nodegroup_roles:
+          description: "IAM roles for the node groups"
+          value: "${output.nodegroup_roles}"
+
+vars:
+  tenant: "${tenant}"
+  account: "${account}"
+  environment: "${environment}"

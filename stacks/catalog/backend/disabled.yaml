@@ -1,0 +1,7 @@
+components:
+  terraform:
+    backend:
+      metadata:
+        component: backend
+      vars:
+        enabled: false

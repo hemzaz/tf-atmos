@@ -1,0 +1,15 @@
+import:
+  # Import the catalog with vpc configuration for eu-west-2 region
+  - catalog/vpc/defaults
+  # All accounts (stages) in this region will have vpc components
+  - catalog/vpc-flow-logs-bucket/defaults
+
+vars:
+  region: eu-west-2
+  environment: eu-west-2
+  availability_zones:
+    - eu-west-2a
+    - eu-west-2b
+    - eu-west-2c
+
+# Other defaults for the eu-west-2 region

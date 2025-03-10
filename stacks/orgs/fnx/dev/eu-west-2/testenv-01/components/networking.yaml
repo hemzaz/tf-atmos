@@ -1,0 +1,96 @@
+import:
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+
+components:
+  terraform:
+    # VPC instances
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        name: main
+        ipv4_primary_cidr_block: 10.0.0.0/16
+        vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
+        
+    vpc/services:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        name: services
+        ipv4_primary_cidr_block: 10.1.0.0/16
+        vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
+        map_public_ip_on_launch: false
+    
+    # Network resources for main VPC
+    network/main:
+      metadata:
+        component: network
+      vars:
+        vpc_id: "${output.vpc/main.vpc_id}"
+        # DNS settings
+        dns_create_root_zone: false
+        dns_multi_account: false
+        
+        # Define zones
+        dns_zones:
+          main:
+            name: "fnx.example.com"
+            comment: "Main zone for fnx environment"
+            force_destroy: true
+            enable_query_logging: true
+            vpc_associations: []
+          internal:
+            name: "internal.fnx.example.com"
+            comment: "Internal DNS for fnx environment"
+            force_destroy: true
+        
+        # Define essential DNS records
+        dns_records:
+          www_main:
+            zone_name: "main"
+            name: "www.fnx.example.com"
+            type: "A"
+            ttl: 300
+            records: ["10.0.101.100"]
+          db_internal:
+            zone_name: "internal"
+            name: "db.internal.fnx.example.com"
+            type: "A"
+            ttl: 60
+            records: ["10.0.1.50"]
+    
+    # Network resources for services VPC
+    network/services:
+      metadata:
+        component: network
+      vars:
+        vpc_id: "${output.vpc/services.vpc_id}"
+        # DNS settings
+        dns_create_root_zone: false
+        dns_multi_account: false
+        
+        # Define zones
+        dns_zones:
+          services:
+            name: "services.fnx.example.com"
+            comment: "Services zone for fnx environment"
+            force_destroy: true
+          data:
+            name: "data.services.fnx.example.com"
+            comment: "Data services DNS zone"
+            force_destroy: true
+        
+        # Define essential DNS records
+        dns_records:
+          api_services:
+            zone_name: "services"
+            name: "api.services.fnx.example.com"
+            type: "CNAME"
+            ttl: 300
+            records: ["api-internal.services.fnx.example.com"]

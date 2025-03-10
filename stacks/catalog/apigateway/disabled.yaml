@@ -1,0 +1,7 @@
+components:
+  terraform:
+    apigateway:
+      metadata:
+        component: apigateway
+      vars:
+        enabled: false

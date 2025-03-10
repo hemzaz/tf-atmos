@@ -1,0 +1,156 @@
+import:
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
+  - catalog/eks/defaults
+  - catalog/ec2/defaults
+  - catalog/external-secrets/defaults
+
+components:
+  terraform:
+    # EKS instances
+    eks/main:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        cluster_name: "main"
+        kubernetes_version: "${eks_kubernetes_version}"
+        endpoint_private_access: true
+        endpoint_public_access: "${eks_public_access}"
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_ids: "${output.vpc/main.private_subnet_ids}"
+        node_groups:
+          workers:
+            enabled: true
+            instance_types: ["t3.medium"]
+            desired_size: 2
+            min_size: 1
+            max_size: 4
+            labels:
+              role: worker
+          monitoring:
+            enabled: true
+            instance_types: ["t3.large"]
+            desired_size: 1
+            min_size: 1
+            max_size: 2
+            labels:
+              role: monitoring
+            taints:
+              - key: dedicated
+                value: monitoring
+                effect: "NO_SCHEDULE"
+    
+    eks/data:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        cluster_name: "data"
+        kubernetes_version: "${eks_kubernetes_version}"
+        endpoint_private_access: true
+        endpoint_public_access: false
+        vpc_id: "${output.vpc/services.vpc_id}"
+        subnet_ids: "${output.vpc/services.private_subnet_ids}"
+        node_groups:
+          data-workers:
+            enabled: true
+            instance_types: ["m5.large"]
+            desired_size: 2
+            min_size: 2
+            max_size: 4
+            labels:
+              role: data
+    
+    # EC2 instances
+    ec2/bastion:
+      metadata:
+        component: ec2
+      vars:
+        name: "bastion"
+        instance_type: "t3.small"
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_id: "${output.vpc/main.public_subnet_ids[0]}"
+        create_ssh_keys: true
+        store_ssh_keys_in_secrets_manager: true
+        ssh_key_algorithm: "RSA"
+        ssh_key_rsa_bits: 4096
+        key_name: "bastion-ssh-key"
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/16"]
+            description: "SSH access from company VPN"
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound access"
+    
+    ec2/app-server:
+      metadata:
+        component: ec2
+      vars:
+        name: "app-server"
+        instance_type: "t3.medium"
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_id: "${output.vpc/main.private_subnet_ids[0]}"
+        root_volume_size: 50
+        key_name: "${output.ec2/bastion.ssh_key_name}"
+        allowed_ingress_rules:
+          - from_port: 8080
+            to_port: 8080 
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/16"]
+            description: "Application access"
+    
+    # External secrets operator instances
+    external-secrets/main:
+      metadata:
+        component: external-secrets
+      vars:
+        enabled: "${use_external_secrets}"
+        cluster_name: "${output.eks/main.cluster_name}"
+        host: "${output.eks/main.cluster_endpoint}"
+        cluster_ca_certificate: "${output.eks/main.cluster_ca_certificate}"
+        oidc_provider_arn: "${output.eks/main.oidc_provider_arn}"
+        oidc_provider_url: "${output.eks/main.oidc_provider_url}"
+        
+        # Config options
+        namespace: "external-secrets"
+        create_namespace: true
+        service_account_name: "external-secrets"
+        chart_version: "0.9.9"
+        path_prefix: "${secrets_manager_path_prefix}"
+        
+        # Configure certificate store paths
+        certificate_secret_path_template: "certificates/{name}"
+        
+        # Create both general and certificate-specific secret stores
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
+    
+    external-secrets/data:
+      metadata:
+        component: external-secrets
+      vars:
+        enabled: "${use_external_secrets}"
+        cluster_name: "${output.eks/data.cluster_name}"
+        host: "${output.eks/data.cluster_endpoint}"
+        cluster_ca_certificate: "${output.eks/data.cluster_ca_certificate}"
+        oidc_provider_arn: "${output.eks/data.oidc_provider_arn}"
+        oidc_provider_url: "${output.eks/data.oidc_provider_url}"
+        
+        # Config options
+        namespace: "external-secrets"
+        create_namespace: true
+        service_account_name: "external-secrets"
+        chart_version: "0.9.9"
+        path_prefix: "data/${secrets_manager_path_prefix}"
+        
+        # Create only the default secret store (no certificates for data cluster)
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: false

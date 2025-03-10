@@ -1,0 +1,7 @@
+components:
+  terraform:
+    network:
+      metadata:
+        component: network
+      vars:
+        enabled: false

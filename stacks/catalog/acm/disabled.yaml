@@ -1,0 +1,7 @@
+components:
+  terraform:
+    acm:
+      metadata:
+        component: acm
+      vars:
+        enabled: false

@@ -1,0 +1,9 @@
+import:
+  - orgs/fnx/_defaults
+  - mixins/tenant/fnx
+  - mixins/stage/dev
+
+vars:
+  account: dev
+  account_id: "123456789012" # Replace with actual AWS account ID
+  aws_profile: "dev" # AWS profile to use for deployment

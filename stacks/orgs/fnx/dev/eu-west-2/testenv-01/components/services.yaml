@@ -1,0 +1,164 @@
+import:
+  - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
+  - catalog/apigateway/defaults
+  - catalog/monitoring/defaults
+  - catalog/infrastructure/defaults
+
+components:
+  terraform:
+    # API Gateway instances
+    apigateway/main:
+      metadata:
+        component: apigateway
+      vars:
+        name: "main-api"
+        description: "Main API Gateway for ${tenant}-${environment}"
+        stage_name: "v1"
+        
+        # API resources
+        api_resources:
+          - path_part: "api"
+          - path_part: "auth"
+        
+        # API methods
+        api_methods:
+          - resource_id: "${output.apigateway_rest.rest_api_root_resource_id}"
+            http_method: "GET"
+            authorization: "NONE"
+          - resource_id: "${resource_ids.api}"
+            http_method: "ANY"
+            authorization: "COGNITO_USER_POOLS"
+        
+        # Domain Configuration
+        domain_name: "api.${domain_name}"
+        certificate_arn: "${output.acm/main.certificate_arns.main_wildcard}"
+        route53_zone_id: "${output.network/main.zone_ids.main}"
+        
+        # API monitoring
+        enable_logging: true
+        log_retention_days: 30
+        create_dashboard: true
+    
+    apigateway/data:
+      metadata:
+        component: apigateway
+      vars:
+        name: "data-api"
+        description: "Data API Gateway for ${tenant}-${environment}"
+        stage_name: "v1"
+        
+        # API resources
+        api_resources:
+          - path_part: "data"
+          - path_part: "metrics"
+        
+        # Domain Configuration
+        domain_name: "data.services.${domain_name}"
+        certificate_arn: "${output.acm/services.certificate_arns.services_wildcard}"
+        route53_zone_id: "${output.network/services.zone_ids.data}"
+        
+        # API monitoring
+        enable_logging: true
+        log_retention_days: 30
+        create_dashboard: true
+    
+    # Infrastructure instances
+    infrastructure/main:
+      metadata:
+        component: infrastructure
+      vars:
+        # ECS configuration
+        ecs:
+          enabled: true
+          fargate_only: true
+          cluster_name: "main-apps"
+          vpc_id: "${output.vpc/main.vpc_id}"
+          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+        
+        # RDS configuration
+        rds:
+          enabled: true
+          identifier: "main-db"
+          instance_class: "db.t3.micro"
+          allocated_storage: 5
+          db_name: "mainapp"
+          engine: "${rds_engine}"
+          engine_version: "${rds_engine_version}"
+          vpc_id: "${output.vpc/main.vpc_id}"
+          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+    
+    infrastructure/data:
+      metadata:
+        component: infrastructure
+      vars:
+        # ECS configuration (disabled for data)
+        ecs:
+          enabled: false
+        
+        # Data-specific RDS
+        rds:
+          enabled: true
+          identifier: "data-db"
+          instance_class: "db.r5.large"
+          allocated_storage: 20
+          db_name: "datawarehouse"
+          engine: "${rds_engine}"
+          engine_version: "${rds_engine_version}"
+          vpc_id: "${output.vpc/services.vpc_id}"
+          subnet_ids: "${output.vpc/services.private_subnet_ids}"
+        
+        # Data-specific Lambda functions
+        lambda:
+          enabled: true
+          function_name: "data-processor"
+          memory_size: 512
+          runtime: "python3.9"
+          vpc_id: "${output.vpc/services.vpc_id}"
+          subnet_ids: "${output.vpc/services.private_subnet_ids}"
+    
+    # Monitoring instances
+    monitoring/main:
+      metadata:
+        component: monitoring
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-main-dashboard"
+        
+        # Enable certificate monitoring
+        enable_certificate_monitoring: true
+        enable_container_insights: "${enable_container_insights}"
+        
+        # Certificate monitoring configuration
+        certificate_arns: ${output.acm/main.certificate_arns | {}}
+        certificate_names: ${keys(output.acm/main.certificate_domains) | []}
+        certificate_domains: ${values(output.acm/main.certificate_domains) | []}
+        certificate_expiry_threshold: 30
+        
+        # Alert emails
+        alarm_notifications_enabled: true
+        alarm_email_addresses:
+          - "${metadata.monitoring.critical_alerts[0]}"
+          - "${metadata.monitoring.warning_alerts[0]}"
+    
+    monitoring/data:
+      metadata:
+        component: monitoring
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-data-dashboard"
+        
+        # Data-specific monitoring settings
+        enable_resource_monitoring: true
+        enable_vpc_flow_logs: true
+        enable_certificate_monitoring: true
+        
+        # Certificate monitoring configuration
+        certificate_arns: ${output.acm/services.certificate_arns | {}}
+        certificate_expiry_threshold: 30
+        
+        # Alert emails - only send critical alerts
+        alarm_notifications_enabled: true
+        alarm_email_addresses:
+          - "${metadata.monitoring.critical_alerts[0]}"

@@ -1,0 +1,69 @@
+import:
+  - orgs/fnx/dev/eu-west-2/_defaults
+  - mixins/development
+  
+  # Catalog imports with defaults
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+  - catalog/infrastructure/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/external-secrets/defaults
+  - catalog/ec2/defaults
+  - catalog/eks/defaults
+  - catalog/iam/defaults
+  - catalog/acm/defaults
+  - catalog/services/defaults
+  - catalog/apigateway/defaults
+  - catalog/backend/defaults
+  - catalog/monitoring/defaults
+
+metadata:
+  description: "Development test environment for infrastructure validation"
+  owner: "DevOps Team"
+  version: "1.0.0"
+  stage: "dev"
+  region: "eu-west-2"
+  compliance:
+    hipaa: false
+    pci: false
+    sox: false
+    gdpr: true
+  monitoring:
+    critical_alerts: ["ops@example.com"]
+    warning_alerts: ["team@example.com"]
+
+vars:
+  # Core environment identifiers
+  environment: testenv-01
+  tenant_name: testenv-01
+  
+  # Domain configuration
+  domain_name: "example.com"
+  hosted_zone_id: "Z1234567890EXAMPLE"
+  
+  # Environment-specific configuration
+  eks_kubernetes_version: "1.28"
+  eks_public_access: false
+  rds_engine: "postgres"
+  rds_engine_version: "14"
+  use_external_secrets: true
+  secrets_manager_path_prefix: "myapp/fnx/certificates"
+  
+  # Feature flags
+  enable_container_insights: false
+  enable_vpc_flow_logs: false
+  
+  # Override development mixin with specific values
+  security:
+    vpc_flow_logs: true  # Override development mixin default
+
+# Environment tagging strategy
+tags:
+  Team: "DevOps"
+  CostCenter: "IT"
+  Project: "Infrastructure"
+  Environment: "testenv-01"
+  ManagedBy: "Terraform"
+  Tenant: "fnx" 
+  Application: "Testing"
+  Provisioner: "Atmos"

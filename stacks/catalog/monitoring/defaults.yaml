@@ -1,0 +1,86 @@
+name: monitoring
+description: "Monitoring and alerting configuration"
+
+components:
+  terraform:
+    monitoring/defaults:
+      metadata:
+        component: monitoring
+        type: abstract
+        version: "1.0.0"
+        description: "Manages CloudWatch dashboards, alarms, and monitoring resources"
+        category: "monitoring"
+      depends_on:
+        - vpc
+      vars:
+        tenant: "${tenant}"
+        enabled: true
+        region: ${region}
+        
+        # Enable specific monitoring features
+        enable_vpc_flow_logs: ${enable_vpc_flow_logs | default(false)}
+        enable_certificate_monitoring: ${enable_certificate_monitoring | default(true)}
+        enable_resource_monitoring: ${enable_resource_monitoring | default(true)}
+        enable_cost_monitoring: ${enable_cost_monitoring | default(true)}
+        
+        # Certificate monitoring configuration
+        certificate_arns: ${certificate_arns | default('{}')}
+        certificate_names: ${certificate_names | default([])}
+        certificate_domains: ${certificate_domains | default([])}
+        certificate_expiry_threshold: ${certificate_expiry_threshold | default(30)}
+        
+        # EKS monitoring
+        eks_cluster_name: ${eks_cluster_name | default("")}
+        
+        # Alarm notification configuration
+        alarm_notifications_enabled: ${alarm_notifications_enabled | default(true)}
+        alarm_email_addresses: ${alarm_email_addresses | default([])}
+        sns_topic_name: "${tenant}-${environment}-alarms"
+        
+        # Dashboard configuration
+        create_dashboard: ${create_dashboard | default(true)}
+        dashboard_name: "${tenant}-${environment}-dashboard"
+        
+      # Define common tags
+      tags:
+        Tenant: ${tenant}
+        Account: ${account}
+        Environment: ${environment}
+        Component: "Monitoring"
+        ManagedBy: "Terraform"
+        
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: ${tenant}-terraform-state
+              key: ${account}/${environment}/monitoring/terraform.tfstate
+              region: ${region}
+              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
+              dynamodb_table: ${tenant}-terraform-locks
+              
+      # Provider configuration
+      providers:
+        aws:
+          region: ${region}
+          
+      # Define outputs with improved descriptions
+      outputs:
+        dashboard_arn:
+          description: "ARN of the CloudWatch dashboard"
+          value: ${output.dashboard_arn}
+        alarm_sns_topic_arn:
+          description: "ARN of the SNS topic for CloudWatch alarms"
+          value: ${output.alarm_sns_topic_arn}
+        certificate_alarms:
+          description: "Map of certificate domain names to their CloudWatch alarm ARNs"
+          value: ${output.certificate_alarms}
+        flow_log_ids:
+          description: "IDs of the VPC flow logs"
+          value: ${output.flow_log_ids}
+
+vars:
+  tenant: "${tenant}"
+  account: "${account}"
+  environment: "${environment}"

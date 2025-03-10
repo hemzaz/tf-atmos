@@ -1,0 +1,7 @@
+components:
+  terraform:
+    eks-addons:
+      metadata:
+        component: eks-addons
+      vars:
+        enabled: false

@@ -1,0 +1,7 @@
+components:
+  terraform:
+    monitoring:
+      metadata:
+        component: monitoring
+      vars:
+        enabled: false

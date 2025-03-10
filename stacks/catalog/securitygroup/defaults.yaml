@@ -1,0 +1,74 @@
+name: securitygroup
+description: "Security group management"
+
+components:
+  terraform:
+    securitygroup:
+      metadata:
+        component: securitygroup
+        type: abstract
+        version: "1.0.0"
+        description: "Manages security groups"
+        category: "networking"
+      depends_on:
+        - vpc
+      vars:
+        tenant: "${tenant}"
+        enabled: true
+        region: "${region}"
+        vpc_id: "${output.vpc.vpc_id}"
+        
+        # Security group configurations
+        create_default_security_group: "${create_default_sg | default(true)}"
+        default_security_group_name: "${tenant}-${account}-${environment}-default-sg"
+        
+        # Database security group
+        create_database_security_group: "${create_db_sg | default(true)}"
+        database_security_group_name: "${tenant}-${account}-${environment}-db-sg"
+        
+        # Custom security groups
+        security_groups: "${security_groups | default('{}')}"
+        
+      # Define common tags
+      tags:
+        Tenant: "${tenant}"
+        Account: "${account}"
+        Environment: "${environment}"
+        Component: "SecurityGroup"
+        ManagedBy: "Terraform"
+        
+      # Terraform backend configuration
+      settings:
+        terraform:
+          backend:
+            s3:
+              bucket: "${tenant}-terraform-state"
+              key: "${account}/${environment}/network/securitygroup/terraform.tfstate"
+              region: "${region}"
+              role_arn: "arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role"
+              dynamodb_table: "${tenant}-terraform-locks"
+              
+      # Provider configuration
+      providers:
+        aws:
+          region: "${region}"
+          
+      # Define outputs with improved descriptions
+      outputs:
+        default_security_group_id:
+          description: "ID of the default security group"
+          value: "${output.default_security_group_id}"
+        database_security_group_id:
+          description: "ID of the database security group"
+          value: "${output.database_security_group_id}"
+        security_group_ids:
+          description: "Map of security group names to their IDs"
+          value: "${output.security_group_ids}"
+        security_group_rules:
+          description: "Map of security group rule IDs"
+          value: "${output.security_group_rules}"
+
+vars:
+  tenant: "${tenant}"
+  account: "${account}"
+  environment: "${environment}"
