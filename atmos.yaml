@@ -46,29 +46,8 @@ stacks:
   # Enable schema validation
   validate_schemas: true
   
-  # Use stack naming pattern that matches your directory structure
-  name_pattern: "{tenant}-{account}-{environment}-{stage}"
-  name_pattern_maps:
-    tenant:
-      - pattern: "orgs/{tenant}/**/*.yaml"
-      - pattern: "catalog/**/*.yaml"
-        value: "catalog"
-    account:
-      - pattern: "orgs/{tenant}/{account}/**/*.yaml"
-      - pattern: "catalog/**/*.yaml"
-        value: "shared"
-    environment:
-      - pattern: "orgs/{tenant}/{account}/{environment}/**/*.yaml"
-      - pattern: "catalog/**/*.yaml"
-        value: "global"
-    stage:
-      - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}.yaml"
-      - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/*.yaml"
-      - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/**/*.yaml"
-      - pattern: "catalog/**/*.yaml"
-        value: "catalog"
-    component:
-      - pattern: "catalog/{component}/**/*.yaml"
+  # Stack naming pattern - keep it simple
+  name_pattern: "{dir}"
 
 workflows:
   base_path: workflows

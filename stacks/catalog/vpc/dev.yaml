@@ -1,5 +1,7 @@
 vars:
   tenant: catalog
+  account: shared
+  environment: global
   stage: dev
   
 imports:
