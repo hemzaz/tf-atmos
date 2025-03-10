@@ -10,11 +10,10 @@ components:
     apply_auto_approve: false
     deploy_run_init: true
     init_run_reconfigure: true
-    auto_generate_backend_file: false
+    auto_generate_backend_file: true
     backend_type: "s3"
     terraform_version: "1.11.0"
     terragrunt_version: "0.45.0"
-    # Add component hooks for standardized behaviors
     hooks:
       pre_plan:
         - run:
@@ -25,35 +24,70 @@ components:
       post_apply:
         - run:
             command: terraform output -json > "${TF_DATA_DIR}/outputs.json"
+    backend:
+      s3:
+        encrypt: true
+        bucket: "atmos-terraform-state-${tenant}-${account}-${environment}"
+        key: "terraform/${stage}/${tenant}/${environment}/${component}.tfstate"
+        dynamodb_table: "atmos-terraform-state-lock"
+        region: "${region}"
+        role_arn: "${backend_role_arn, ""}"
 
 stacks:
   base_path: stacks
   included_paths:
-  - "account/**/**/*.yaml"
-  - "catalog/**/*.yaml"
-  - "mixins/**/*.yaml"
+    - "account/**/*.yaml"
+    - "catalog/**/*.yaml"
+    - "orgs/**/*.yaml"
   excluded_paths:
-  - "**/_defaults.yaml"
-  # Updated to use name_template instead of name_pattern for more flexibility
-  name_template: "{{.tenant}}-{{.account}}-{{.environment}}"
-  # Fallback to maintain backward compatibility
-  name_pattern: "{tenant}-{account}-{environment}"
+    - "**/_defaults.yaml"
+    - "**/defaults.yaml"
+    - "**/disabled.yaml"
+  
+  # Enable schema validation
+  validate_schemas: true
+  
+  # Use stack naming pattern that matches your directory structure
+  name_pattern: "{tenant}-{account}-{environment}-{stage}"
+  
+  # Map variables from directory structure
+  name_pattern_maps:
+    tenant:
+      - pattern: "account/*/*/{tenant}/*.yaml"
+      - pattern: "catalog/*.yaml"
+        value: "catalog"
+      - pattern: "orgs/{tenant}/**/*.yaml"
+    account:
+      - pattern: "account/{account}/*/*.yaml"
+      - pattern: "orgs/{tenant}/{account}/**/*.yaml"
+    environment:
+      - pattern: "account/{account}/{environment}/*/*.yaml"
+      - pattern: "orgs/{tenant}/{account}/{environment}/**/*.yaml"
+    stage:
+      - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}.yaml"
+      - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/*.yaml"
+      - pattern: "orgs/{tenant}/{account}/{environment}/{region}/{stage}/**/*.yaml"
+        strip_extension: true
 
 workflows:
   base_path: workflows
   imports:
-  - apply-backend.yaml
-  - apply-environment.yaml
-  - bootstrap-backend.yaml
-  - compliance-check.yaml
-  - destroy-backend.yaml
-  - destroy-environment.yaml
-  - drift-detection.yaml
-  - import.yaml
-  - lint.yaml
-  - onboard-environment.yaml
-  - plan-environment.yaml
-  - validate.yaml
+    - apply-backend.yaml
+    - apply-environment.yaml
+    - bootstrap-backend.yaml
+    - compliance-check.yaml
+    - create-environment-template.yaml
+    - destroy-backend.yaml
+    - destroy-environment.yaml
+    - drift-detection.yaml
+    - import.yaml
+    - lint.yaml
+    - onboard-environment.yaml
+    - plan-environment.yaml
+    - rotate-certificate.yaml
+    - state-operations.yaml
+    - update-environment-template.yaml
+    - validate.yaml
 
 logs:
   file: "/dev/stderr"
@@ -64,12 +98,13 @@ settings:
   list_merge_strategy: replace
   atmos_cli_version: "1.163.0"
   component:
-    # Enable component dependency resolution
     deps:
       enabled: true
-    # Set component versioning
     version:
       enabled: true
+  affected:
+    enabled: true
+    command: terraform
 
 schemas:
   atmos:
@@ -82,18 +117,30 @@ templates:
     enabled: true
   gomplate:
     enabled: true
+  terragrunt:
+    enabled: true
 
-# Global variables section
 vars:
-  # Common variables
-  tenant: "fnx"
+  # Global variables
   region: "eu-west-2"
   workspace: "default"
+  terraform_version: "1.11.0"
   
-  # Account configurations - these MUST be overridden in environment stacks
-  # The placeholder values are designed to fail validation if not properly set
+  # AWS Provider configuration
+  aws_provider_version: "~> 5.0"
+  aws_region: "${region}"
+  
+  # Backend configuration
+  backend_type: "s3"
+  backend_region: "${region}"
+  
+  # Standard tags for all resources
+  tags:
+    ManagedBy: "atmos"
+    Environment: "${environment}"
+    Tenant: "${tenant}"
+    Project: "tf-atmos"
+
+  # Account configurations
   account_id: "${env:AWS_ACCOUNT_ID, REQUIRED_ACCOUNT_ID}"
-  
-  # Management account configuration - must be set explicitly
-  # The placeholder value will fail validation if not properly set
   management_account_id: "${env:AWS_MANAGEMENT_ACCOUNT_ID, REQUIRED_MANAGEMENT_ACCOUNT_ID}"

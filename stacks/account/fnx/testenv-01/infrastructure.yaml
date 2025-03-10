@@ -3,8 +3,9 @@ import:
 
 vars:
   account: dev
-  environment: testenv-01
+  environment: fnx
   region: eu-west-2
+  tenant: testenv-01
 
   # EC2 instances have been moved to a dedicated ec2.yaml configuration file
 

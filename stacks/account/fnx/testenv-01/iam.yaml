@@ -3,14 +3,14 @@ import:
 
 vars:
   account: dev
-  environment: testenv-01
+  environment: fnx
   region: eu-west-2
-  tenant: fnx
+  tenant: testenv-01
   management_account_id: "${env:AWS_MANAGEMENT_ACCOUNT_ID, 123456789012}"
   account_id: "234567890123"
   target_account_id: "234567890123"
-  cross_account_role_name: "fnx-dev-testenv-01-CrossAccountRole"
-  policy_name: "fnx-dev-testenv-01-CrossAccountPolicy"
+  cross_account_role_name: "testenv-01-dev-fnx-CrossAccountRole"
+  policy_name: "testenv-01-dev-fnx-CrossAccountPolicy"
   trusted_account_ids:
     - "${env:AWS_MANAGEMENT_ACCOUNT_ID, 123456789012}"
 

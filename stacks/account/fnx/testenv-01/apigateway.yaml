@@ -3,9 +3,9 @@ import:
 
 vars:
   account: dev
-  environment: testenv-01
-  region: us-east-1
-  tenant: fnx
+  environment: fnx
+  region: eu-west-2
+  tenant: testenv-01
 
   # API Gateway Configuration
   api_name: "${tenant}-${environment}-api"
@@ -41,7 +41,7 @@ vars:
       uri: "${output.lambda.function_invoke_arns.auth_handler}"
   
   # Domain Configuration
-  domain_name: "api.${environment}.${tenant}.com"
+  domain_name: "api.${environment}.example.com"
   certificate_arn: "${output.acm.certificate_arn}"
   
   # Route53 Configuration

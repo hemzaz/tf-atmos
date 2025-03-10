@@ -8,4 +8,4 @@ hosted_zone_id: "Z1234567890EXAMPLE"
 
 # Certificate management
 use_external_secrets: true  # Using external-secrets operator for certificate management
-secrets_manager_path_prefix: "myapp/testenv-01/certificates"
+secrets_manager_path_prefix: "myapp/fnx/certificates"

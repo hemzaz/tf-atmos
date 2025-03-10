@@ -1,0 +1,22 @@
+import:
+  - catalog/services
+
+vars:
+  account: dev
+  environment: fnx
+  region: eu-west-2
+  tenant: testenv-01
+  
+dependencies:
+  - eks
+  - network
+
+# API Gateway specific overrides
+api_gateway:
+  enabled: true
+  name: "testenv-01-dev-fnx-api"
+  description: "API Gateway for fnx environment"
+
+# Load Balancer specific overrides
+load_balancer:
+  enabled: true

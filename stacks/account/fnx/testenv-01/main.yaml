@@ -8,28 +8,28 @@ import:
   
   # Component-specific imports in functional groups
   # Networking and connectivity
-  - network             # Base network resources (VPC, subnets, etc.)
+  - catalog/network             # Base network resources (VPC, subnets, etc.)
   
   # Core infrastructure resources
-  - infrastructure      # Core infrastructure components (EKS, RDS, etc.)
-  - secretsmanager      # Secret management resources
-  - external-secrets    # Kubernetes secret management
-  - ec2                 # EC2 instances configuration
+  - catalog/infrastructure      # Core infrastructure components (EKS, RDS, etc.)
+  - catalog/secretsmanager      # Secret management resources
+  - catalog/external-secrets    # Kubernetes secret management
+  - catalog/ec2                 # EC2 instances configuration
   
   # Container orchestration
-  - eks                 # Kubernetes clusters
+  - catalog/eks                 # Kubernetes clusters
   
   # Security and access
-  - iam                 # IAM roles, policies, and groups
-  - acm                 # Certificate management
+  - catalog/iam                 # IAM roles, policies, and groups
+  - catalog/acm                 # Certificate management
   
   # Application services
-  - services            # Application services
-  - apigateway          # API gateway configuration
+  - catalog/services            # Application services
+  - catalog/apigateway          # API gateway configuration
   
   # Backend and monitoring
-  - backend             # Terraform backend
-  - monitoring          # CloudWatch monitoring and dashboards
+  - catalog/backend             # Terraform backend
+  - catalog/monitoring          # CloudWatch monitoring and dashboards
 
 ##################################################
 # Environment Metadata
@@ -57,9 +57,9 @@ metadata:
 vars:
   # Core environment identifiers
   account: dev
-  environment: testenv-01
+  environment: fnx
   region: eu-west-2
-  tenant: fnx
+  tenant: testenv-01
   
   # Domain configuration
   domain_name: "example.com"
@@ -90,8 +90,8 @@ tags:
   Team: "DevOps"
   CostCenter: "IT"
   Project: "Infrastructure"
-  Environment: "testenv-01"
+  Environment: "fnx"
   ManagedBy: "Terraform"
-  Tenant: "fnx"
+  Tenant: "testenv-01"
   Application: "Testing"
   Provisioner: "Atmos"

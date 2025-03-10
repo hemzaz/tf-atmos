@@ -3,9 +3,9 @@ import:
 
 vars:
   account: dev
-  environment: testenv-01
+  environment: fnx
   region: eu-west-2
-  tenant: fnx
+  tenant: testenv-01
   
 dependencies:
   - network
@@ -27,7 +27,7 @@ components:
         
         # Global SSH key for environment-wide use
         # All instances without a specific key_name will use this key
-        global_key_name: "testenv-ssh-key"
+        global_key_name: "fnx-ssh-key"
         
         # If you want to use an existing key as default instead:
         # default_key_name: "existing-key-name"
@@ -206,11 +206,11 @@ components:
         terraform:
           backend:
             s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/ec2/terraform.tfstate
-              region: ${region}
-              role_arn: "arn:aws:iam::${account_id}:role/${tenant}-terraform-backend-role"
-              dynamodb_table: ${tenant}-terraform-locks
+              bucket: "fnx-terraform-state"
+              key: "${account}/${environment}/services/ec2/terraform.tfstate"
+              region: "${region}"
+              role_arn: "arn:aws:iam::${account_id}:role/fnx-terraform-backend-role"
+              dynamodb_table: "fnx-terraform-locks"
 
       # Provider configuration
       providers:
