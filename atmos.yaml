@@ -31,14 +31,13 @@ components:
         key: "terraform/${stage}/${tenant}/${environment}/${component}.tfstate"
         dynamodb_table: "atmos-terraform-state-lock"
         region: "${region}"
-        role_arn: "${backend_role_arn, ""}"
+        role_arn: "${backend_role_arn}"
 
 stacks:
   base_path: stacks
   included_paths:
-    - "account/**/*.yaml"
-    - "catalog/**/*.yaml"
     - "orgs/**/*.yaml"
+    - "catalog/**/*.yaml"
   excluded_paths:
     - "**/_defaults.yaml"
     - "**/defaults.yaml"
