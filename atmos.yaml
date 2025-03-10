@@ -36,18 +36,19 @@ components:
 stacks:
   base_path: stacks
   included_paths:
-    - "orgs/**/*.yaml"
-    - "catalog/**/*.yaml"
+    - "orgs/fnx/dev/eu-west-2/testenv-01.yaml"
   excluded_paths:
     - "**/_defaults.yaml"
     - "**/defaults.yaml"
     - "**/disabled.yaml"
+    - "**/components/**/*.yaml"
   
   # Enable schema validation
   validate_schemas: true
   
-  # Stack naming pattern - keep it simple
-  name_pattern: "{dir}"
+  # Use a simple pattern that matches our files
+  name_pattern: "fnx-{env}-{stage}"
+  name_template: "fnx-testenv-01-dev"
 
 workflows:
   base_path: workflows
