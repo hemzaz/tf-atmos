@@ -2,6 +2,7 @@
 import os
 import sys
 import yaml
+import shutil
 from pathlib import Path
 from utility import (
     run_command,
@@ -26,33 +27,53 @@ tenant = answers.get('tenant')
 account = answers.get('account')
 env_name = answers.get('env_name')
 env_type = answers.get('env_type')
+aws_region = answers.get('aws_region')
 eks_cluster = answers.get('eks_cluster')
 rds_instances = answers.get('rds_instances')
+
+# Clean up old structure if it exists
+old_structure_path = os.path.join("stacks", tenant, account, env_name)
+if os.path.exists(old_structure_path):
+    print(f"Removing old directory structure: {old_structure_path}")
+    shutil.rmtree(old_structure_path)
+
+# Define new structure paths
+new_structure_base = os.path.join("stacks", "orgs", tenant, account, aws_region, env_name)
+compute_path = os.path.join(new_structure_base, "components", "compute.yaml")
+services_path = os.path.join(new_structure_base, "components", "services.yaml")
 
 # Cleanup tasks based on configuration
 if not eks_cluster:
     print("EKS cluster disabled, removing EKS configuration files...")
     
-    eks_yaml_path = os.path.join(
-        "stacks", tenant, account, env_name, "eks.yaml"
-    )
-    if os.path.exists(eks_yaml_path):
-        os.remove(eks_yaml_path)
-        print(f"Removed {eks_yaml_path}")
+    if os.path.exists(compute_path):
+        os.remove(compute_path)
+        print(f"Removed {compute_path}")
     else:
-        print(f"EKS config file not found at {eks_yaml_path}, skipping removal")
+        print(f"Compute file not found at {compute_path}, skipping removal")
 
-if not rds_instances:
-    print("RDS instances disabled, removing RDS configuration files...")
-    
-    rds_yaml_path = os.path.join(
-        "stacks", tenant, account, env_name, "rds.yaml"
-    )
-    if os.path.exists(rds_yaml_path):
-        os.remove(rds_yaml_path)
-        print(f"Removed {rds_yaml_path}")
-    else:
-        print(f"RDS config file not found at {rds_yaml_path}, skipping removal")
+    # If no RDS instances either, remove services.yaml
+    if not rds_instances and os.path.exists(services_path):
+        os.remove(services_path)
+        print(f"Removed {services_path}")
+
+# Create _defaults.yaml files if needed
+account_defaults_dir = os.path.join("stacks", "orgs", tenant, account)
+account_defaults_file = os.path.join(account_defaults_dir, "_defaults.yaml")
+
+if not os.path.exists(account_defaults_file):
+    os.makedirs(os.path.dirname(account_defaults_file), exist_ok=True)
+    with open(account_defaults_file, 'w') as f:
+        f.write(f"""# Default configuration for {tenant}-{account}
+vars:
+  tenant: {tenant}
+  account: {account}
+  
+  tags:
+    Tenant: {tenant}
+    Account: {account}
+""")
+    print(f"Created {account_defaults_file}")
 
 # Check if atmos is available
 try:
@@ -62,9 +83,10 @@ try:
         print("\n✅ Atmos detected, validating generated environment...")
         
         # Validate generated environment with Atmos
+        stack_name = f"{tenant}-{account}-{aws_region}-{env_name}"
         cmd = [
             "atmos", "validate", "stacks", 
-            "--stack", f"{tenant}-{account}-{env_name}"
+            "--stack", stack_name
         ]
         
         stdout, stderr, code = run_command(cmd, check=False)
@@ -79,10 +101,10 @@ except Exception as e:
 
 # Print next steps
 print("\n=== Environment Generation Complete ===")
-print(f"Environment: {tenant}-{account}-{env_name} ({env_type})")
+print(f"Environment: {tenant}-{account}-{aws_region}-{env_name} ({env_type})")
 print("\nNext steps:")
 print(f"1. Review generated files in: {os.getcwd()}")
 print(f"2. Add the environment to your terraform-atmos repository")
-print(f"3. Run: atmos terraform plan vpc -s {tenant}-{account}-{env_name}")
+print(f"3. Run: atmos terraform plan vpc -s {tenant}-{account}-{aws_region}-{env_name}")
 print(f"4. Run: atmos workflow apply-environment tenant={tenant} account={account} environment={env_name}")
 print("\nFor more information, see the environment-templating-guide.md in the docs directory.")

@@ -1,0 +1,57 @@
+# Services configuration for {{ env_name }} environment
+components:
+  terraform:
+{% if eks_cluster %}
+    eks-addons:
+      vars:
+        enabled: true
+        cluster_name: "{{ env_name }}-eks"
+        cluster_endpoint: "${output.eks.cluster_endpoint}"
+        cluster_oidc_issuer_url: "${output.eks.cluster_oidc_issuer_url}"
+        addons:
+          aws_load_balancer_controller: 
+            enabled: true
+          external_dns:
+            enabled: true
+          cluster_autoscaler:
+            enabled: true
+          metrics_server:
+            enabled: true
+{% if env_type == "production" %}
+          aws_for_fluentbit:
+            enabled: true
+          aws_cloudwatch_metrics:
+            enabled: true
+          cert_manager:
+            enabled: true
+          istio:
+            enabled: true
+          external_secrets:
+            enabled: true
+{% endif %}
+{% endif %}
+
+{% if rds_instances %}
+    rds:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-db"
+        engine: "postgres"
+        engine_version: "14.6"
+        database_name: "appdb"
+        database_user: "app"
+        database_port: 5432
+        multi_az: {{ "true" if env_type == "production" else "false" }}
+        storage_type: "{{ 'gp3' if env_type == 'production' else 'gp2' }}"
+        allocated_storage: {{ "100" if env_type == "production" else "20" }}
+        backup_retention_period: {{ "7" if env_type == "production" else "1" }}
+        skip_final_snapshot: {{ "false" if env_type == "production" else "true" }}
+        deletion_protection: {{ "true" if env_type == "production" else "false" }}
+        instance_class: "{{ 'db.t3.large' if env_type == 'production' else 'db.t3.small' }}"
+        
+        # Security settings
+        storage_encrypted: true
+        performance_insights_enabled: {{ "true" if env_type == "production" or env_type == "staging" else "false" }}
+        create_random_password: true
+        kms_key_id: "${output.kms.key_id}"
+{% endif %}

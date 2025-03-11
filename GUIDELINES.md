@@ -41,7 +41,7 @@
 - **Casing**: Use snake_case for resources, variables, and outputs
 - **Boolean Prefixes**: Use `is_`, `has_`, or `enable_` prefixes for boolean variables
 - **Map Keys**: Use consistent key names in maps and objects across components
-- **Stack Naming**: Follow `<tenant>-<account>-<environment>` pattern
+- **Stack Naming**: Follow `<tenant>-<account>-<region>-<environment>` pattern
 
 ### Input/Output Standards
 - **Variables**: 
@@ -61,6 +61,20 @@
 - **Error Handling**: Use lifecycle blocks with preconditions for complex validations
 - **Retry Logic**: For resources that may have eventual consistency issues, implement retry logic
 - **Configuration Hierarchies**: Use Atmos stack hierarchies for configuration inheritance
+
+### Component Organization
+- **Environment Structure**: Organize environments using the standard hierarchy:
+  ```
+  stacks/orgs/{tenant}/{account}/{region}/{env_name}/
+  ```
+- **Component Separation**: Divide environment configuration into separate component files under the components/ directory:
+  - `globals.yaml`: Global settings, backend configuration, IAM roles
+  - `networking.yaml`: VPC, subnets, security groups
+  - `security.yaml`: ACM certificates, security resources
+  - `compute.yaml`: Compute resources (EC2, EKS)
+  - `services.yaml`: Service configurations (EKS addons, RDS)
+- **Main Configuration**: Use main.yaml to import all component configurations
+- **Naming Pattern**: Stack names should follow the pattern: `{tenant}-{account}-{region}-{env_name}`
 
 ### Security Best Practices
 - **Encryption**: Encrypt sensitive data at rest and in transit using customer-managed KMS keys

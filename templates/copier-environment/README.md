@@ -1,6 +1,26 @@
 # Atmos Environment Templating
 
-This directory contains the Copier template for creating new Atmos environments.
+This directory contains the Copier template for creating new Atmos environments following the organizational stack structure.
+
+## Stack Structure
+
+This template generates environments using the following structure:
+
+```
+stacks/
+└── orgs/
+    └── {tenant}/
+        └── {account}/
+            └── {region}/
+                └── {env_name}/
+                    ├── main.yaml
+                    └── components/
+                        ├── globals.yaml
+                        ├── networking.yaml
+                        ├── security.yaml
+                        ├── compute.yaml
+                        └── services.yaml
+```
 
 ## Using the Template
 
@@ -10,10 +30,10 @@ The template can be used in two ways:
 
 ```bash
 # Create a new environment
-gaia template create-environment --tenant acme --account dev --environment us-east-1 --vpc-cidr 10.0.0.0/16
+gaia template create-environment --tenant acme --account dev --region us-east-1 --environment test-01 --vpc-cidr 10.0.0.0/16
 
 # Update an existing environment with template changes
-gaia template update-environment --tenant acme --account dev --environment us-east-1
+gaia template update-environment --tenant acme --account dev --region us-east-1 --environment test-01
 
 # List available templates
 gaia template list
@@ -23,13 +43,13 @@ gaia template list
 
 ```bash
 # Create a new environment
-atmos workflow template-environment create-environment tenant=acme account=dev environment=us-east-1 vpc-cidr=10.0.0.0/16
+atmos workflow template-environment create-environment tenant=acme account=dev region=us-east-1 environment=test-01 vpc-cidr=10.0.0.0/16
 
 # Update an existing environment
-atmos workflow template-environment update-environment tenant=acme account=dev environment=us-east-1
+atmos workflow template-environment update-environment tenant=acme account=dev region=us-east-1 environment=test-01
 
 # Create and apply a new environment in one step
-atmos workflow template-environment onboard-environment tenant=acme account=dev environment=us-east-1 vpc-cidr=10.0.0.0/16
+atmos workflow template-environment onboard-environment tenant=acme account=dev region=us-east-1 environment=test-01 vpc-cidr=10.0.0.0/16
 ```
 
 ## Template Variables
@@ -40,16 +60,19 @@ The template supports the following variables:
 |----------|-------------|---------|
 | tenant | Organization tenant name | mycompany |
 | account | AWS account name (e.g., dev, staging, prod) | dev |
+| aws_region | AWS region for this environment | us-west-2 |
 | env_name | Environment name (e.g., test-01) | test-01 |
 | env_type | Environment type (affects resource sizing) | development |
-| aws_region | AWS region for this environment | us-west-2 |
 | vpc_cidr | VPC CIDR block | 10.0.0.0/16 |
 | availability_zones | List of availability zones | ["us-west-2a", "us-west-2b", "us-west-2c"] |
 | eks_cluster | Enable EKS cluster | true |
+| eks_node_instance_type | EKS node instance type | t3.medium |
+| eks_node_min_count | Minimum number of EKS nodes | 2 |
+| eks_node_max_count | Maximum number of EKS nodes | 5 |
 | rds_instances | Enable RDS instances | false |
 | enable_logging | Enable centralized logging | true |
 | enable_monitoring | Enable monitoring | true |
-| compliance_level | Compliance requirements level | basic |
+| compliance_level | Compliance requirements level (basic, soc2, hipaa, pci) | basic |
 | team_email | Team email for notifications | team@example.com |
 
 ## Customizing the Template
@@ -57,8 +80,20 @@ The template supports the following variables:
 To customize the template:
 
 1. Edit the `copier.yml` file to modify variables, defaults, or validation rules
-2. Update the template files in the `{{env_name}}` directory
+2. Update the template files in the `{{env_name}}/stacks/orgs/` directory
 3. Modify the hooks in the `hooks/` directory for pre/post processing
+
+## Generated Structure
+
+The template generates the following component configuration files:
+
+1. **globals.yaml**: Global settings, backend configuration, IAM roles
+2. **networking.yaml**: VPC, subnets, security groups
+3. **security.yaml**: ACM certificates, security resources
+4. **compute.yaml**: EKS cluster configuration (if enabled)
+5. **services.yaml**: EKS addons, RDS instances (if enabled)
+
+This organization follows the standard component patterns and properly inherits from the existing configuration hierarchy.
 
 ## Python Integration
 

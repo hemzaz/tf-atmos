@@ -1,0 +1,33 @@
+# Compute configuration for {{ env_name }} environment
+components:
+  terraform:
+    eks:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-eks"
+        kubernetes_version: "1.28"
+        endpoint_private_access: true
+        endpoint_public_access: {{ "false" if env_type == "production" else "true" }}
+        cluster_security_group_ingress_cidr_blocks: 
+          - "{{ vpc_cidr }}"
+        managed_node_groups:
+          main:
+            min_size: {{ eks_node_min_count }}
+            max_size: {{ eks_node_max_count }}
+            desired_size: {{ eks_node_min_count }}
+            instance_types:
+              - {{ eks_node_instance_type }}
+            capacity_type: {{ "ON_DEMAND" if env_type == "production" else "SPOT" }}
+            
+        # Enable control plane logging as per security guidelines
+        cluster_log_types:
+          - api
+          - audit
+          - authenticator
+          - controllerManager
+          - scheduler
+{% if env_type == "production" %}
+        # Enhanced security settings for production
+        cluster_encryption_config_enabled: true
+        kubernetes_network_policy_enabled: true
+{% endif %}

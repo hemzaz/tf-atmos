@@ -1,0 +1,28 @@
+# Networking configuration for {{ env_name }} environment
+components:
+  terraform:
+    vpc:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-vpc"
+        cidr_block: "{{ vpc_cidr }}"
+        availability_zones:
+{% for az in availability_zones %}
+          - {{ az }}
+{% endfor %}
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+        vpc_flow_logs_log_destination_type: "s3"
+{% if env_type == "production" %}
+        vpc_flow_logs_retention_in_days: 90
+{% else %}
+        vpc_flow_logs_retention_in_days: 30
+{% endif %}
+        vpc_flow_logs_bucket_name: "{{ env_name }}-vpc-flow-logs"
+        
+    securitygroup:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-sg"
+        vpc_id: "${output.vpc.vpc_id}"
+        allow_all_egress: true

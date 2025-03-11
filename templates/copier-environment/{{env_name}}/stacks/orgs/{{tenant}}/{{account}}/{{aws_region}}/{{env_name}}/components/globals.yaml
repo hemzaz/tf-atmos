@@ -1,0 +1,36 @@
+# Global configurations for {{ env_name }} environment
+components:
+  terraform:
+    backend:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-backend"
+        terraform_state_bucket_name: "atmos-terraform-state-{{ tenant }}-{{ account }}-{{ env_name }}"
+        terraform_state_table_name: "atmos-terraform-state-lock"
+        
+    iam:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-iam"
+        create_cross_account_roles: true
+        
+    monitoring:
+      vars:
+        enabled: {{ enable_monitoring }}
+        name: "{{ env_name }}-monitoring"
+        create_dashboard: true
+{% if env_type == "production" %}
+        detailed_monitoring: true
+        retention_days: 90
+{% elif env_type == "staging" %}
+        detailed_monitoring: true
+        retention_days: 30
+{% else %}
+        detailed_monitoring: false
+        retention_days: 14
+{% endif %}
+        
+    secretsmanager:
+      vars:
+        enabled: true
+        name: "{{ env_name }}-secrets"

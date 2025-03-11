@@ -39,23 +39,41 @@ stacks/
 │   │       ├── _defaults.yaml          # Tenant defaults
 │   │       ├── dev/                    # Development account
 │   │       │   ├── _defaults.yaml      # Account defaults
-│   │       │   ├── us-east-2.yaml      # us-east-2 stack
-│   │       │   └── us-west-2.yaml      # us-west-2 stack
+│   │       │   ├── us-east-2/          # us-east-2 region
+│   │       │   │   ├── _defaults.yaml  # Region defaults
+│   │       │   │   └── test-01/        # Environment directory
+│   │       │   │       ├── main.yaml   # Main environment config
+│   │       │   │       └── components/ # Component configurations
+│   │       │   │           ├── globals.yaml    # Global settings
+│   │       │   │           ├── networking.yaml # Network config
+│   │       │   │           ├── security.yaml   # Security config
+│   │       │   │           ├── compute.yaml    # Compute config
+│   │       │   │           └── services.yaml   # Services config
+│   │       │   └── us-west-2/          # us-west-2 region
+│   │       │       ├── _defaults.yaml  # Region defaults
+│   │       │       └── test-02/        # Another environment
 │   │       ├── staging/                # Staging account
 │   │       │   ├── _defaults.yaml      # Account defaults
-│   │       │   ├── us-east-2.yaml      # us-east-2 stack
-│   │       │   └── us-west-2.yaml      # us-west-2 stack
+│   │       │   ├── us-east-2/          # us-east-2 region
+│   │       │   └── us-west-2/          # us-west-2 region
 │   │       └── prod/                   # Production account
 │   │           ├── _defaults.yaml      # Account defaults
-│   │           ├── us-east-2.yaml      # us-east-2 stack
-│   │           └── us-west-2.yaml      # us-west-2 stack
+│   │           ├── us-east-2/          # us-east-2 region
+│   │           └── us-west-2/          # us-west-2 region
 │   └── fnx/                # FNX Organization 
 │       ├── _defaults.yaml  # Organization defaults
 │       └── dev/            # Development account
 │           ├── _defaults.yaml          # Account defaults
 │           └── eu-west-2/              # eu-west-2 region
 │               ├── _defaults.yaml      # Region defaults
-│               └── testenv-01.yaml     # Environment stack
+│               └── testenv-01/         # Environment directory
+│                   ├── main.yaml       # Main environment config
+│                   └── components/     # Component configurations
+│                       ├── globals.yaml    # Global settings
+│                       ├── networking.yaml # Network config
+│                       ├── security.yaml   # Security config
+│                       ├── compute.yaml    # Compute config
+│                       └── services.yaml   # Services config
 ```
 
 ## Usage
@@ -64,7 +82,7 @@ To deploy an environment:
 
 ```bash
 # For ACME organization
-atmos terraform apply vpc -s acme-plat-dev-us-east-2
+atmos terraform apply vpc -s acme-plat-dev-us-east-2-test-01
 
 # For FNX organization
 atmos terraform apply vpc -s fnx-dev-eu-west-2-testenv-01

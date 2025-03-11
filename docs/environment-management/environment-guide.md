@@ -526,20 +526,23 @@ Environments are organized in `stacks/orgs/` with a hierarchical structure:
 stacks/orgs/
 └── {tenant}/                   # Tenant (organization)
     ├── _defaults.yaml          # Tenant-wide defaults
-    └── {account}/              # AWS account (dev, prod)
+    └── {account}/              # AWS account (dev, staging, prod)
         ├── _defaults.yaml      # Account-wide defaults
-        └── {environment}/      # Environment (region)
-            ├── _defaults.yaml  # Environment defaults
-            └── {region}/       # AWS region
-                ├── {stage}.yaml # Stage configuration
-                └── {stage}/     # Stage components
-                    ├── main.yaml       # Main configuration
-                    └── components/     # Component configurations
-                        ├── networking.yaml
-                        ├── compute.yaml
-                        ├── security.yaml
-                        └── services.yaml
+        └── {region}/           # AWS region (us-east-2, eu-west-2)
+            ├── _defaults.yaml  # Region-wide defaults
+            └── {env_name}/     # Environment name (test-01, prod-02, etc.)
+                ├── main.yaml         # Main configuration
+                └── components/       # Component configurations
+                    ├── globals.yaml      # Global settings
+                    ├── networking.yaml   # Network config
+                    ├── security.yaml     # Security config
+                    ├── compute.yaml      # Compute config
+                    └── services.yaml     # Services config
 ```
+
+Stack naming follows the pattern: `{tenant}-{account}-{region}-{env_name}`
+
+For example: `acme-dev-us-east-2-test-01` or `fnx-prod-eu-west-2-primary`
 
 ### Configuration Hierarchy
 

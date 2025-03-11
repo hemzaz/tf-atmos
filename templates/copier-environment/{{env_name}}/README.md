@@ -1,4 +1,4 @@
-# {{ tenant | capitalize }}-{{ account }}-{{ env_name }} Environment
+# {{ tenant | capitalize }}-{{ account }}-{{ aws_region }}-{{ env_name }} Environment
 
 Environment configuration for the {{ env_name }} environment.
 
@@ -52,7 +52,7 @@ To deploy this environment:
 
 ```bash
 # Plan the deployment
-atmos terraform plan vpc -s {{ tenant }}-{{ account }}-{{ env_name }}
+atmos terraform plan vpc -s {{ tenant }}-{{ account }}-{{ aws_region }}-{{ env_name }}
 
 # Apply the environment
 atmos workflow apply-environment tenant={{ tenant }} account={{ account }} environment={{ env_name }}
@@ -64,10 +64,30 @@ To validate the environment configuration:
 
 ```bash
 # Validate the stack
-atmos validate stacks --stack {{ tenant }}-{{ account }}-{{ env_name }}
+atmos validate stacks --stack {{ tenant }}-{{ account }}-{{ aws_region }}-{{ env_name }}
 
 # Run compliance checks
 atmos workflow compliance-check tenant={{ tenant }} account={{ account }} environment={{ env_name }}
+```
+
+## Stack Organization
+
+This environment follows the organizational structure:
+
+```
+stacks/
+└── orgs/
+    └── {{ tenant }}/
+        └── {{ account }}/
+            └── {{ aws_region }}/
+                └── {{ env_name }}/
+                    ├── main.yaml
+                    └── components/
+                        ├── globals.yaml
+                        ├── networking.yaml
+                        ├── security.yaml
+                        {% if eks_cluster %}├── compute.yaml{% endif %}
+                        {% if rds_instances or eks_cluster %}└── services.yaml{% endif %}
 ```
 
 ## Contact
