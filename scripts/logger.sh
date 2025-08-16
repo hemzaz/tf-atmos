@@ -156,7 +156,9 @@ setup_verbosity() {
 set_log_level() {
   local level_name="$1"
   
-  case "${level_name^^}" in
+  # Convert to uppercase using tr (bash 3.x compatible)
+  local upper_level_name=$(echo "$level_name" | tr '[:lower:]' '[:upper:]')
+  case "$upper_level_name" in
     DEBUG) LOG_LEVEL=$LEVEL_DEBUG ;;
     INFO)  LOG_LEVEL=$LEVEL_INFO ;;
     WARN)  LOG_LEVEL=$LEVEL_WARN ;;

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Add required variables to all catalog component files
 
 REPO_ROOT="/Users/elad/IdeaProjects/tf-atmos"

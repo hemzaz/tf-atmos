@@ -1,0 +1,276 @@
+# Development Environment Configuration Template
+#
+# Cost-optimized, developer-friendly configuration
+# Use this as a base for development and testing environments
+
+terraform:
+  vars:
+    # Development environment settings
+    environment_type: "development"
+    cost_center: "development"
+    business_unit: "engineering"
+    
+    # Cost optimization (single AZ, smaller instances)
+    availability_zones: ["a", "b"]  # Fewer AZs for cost
+    multi_az_enabled: false  # Single AZ for development
+    
+    # Network configuration
+    vpc_cidr: "10.1.0.0/16"  # Different CIDR from production
+    enable_dns_hostnames: true
+    enable_dns_support: true
+    enable_nat_gateway: true
+    single_nat_gateway: true  # Single NAT for cost optimization
+    
+    # Essential VPC endpoints only
+    vpc_endpoints:
+      s3: true
+      ecr_dkr: true  # For container images
+      
+    # Security (relaxed for development)
+    encryption_at_rest: false  # Optional for dev
+    encryption_in_transit: false  # Optional for dev
+    enable_flow_logs: false  # Disabled for cost
+    
+    # Monitoring (basic)
+    monitoring_enabled: true
+    detailed_monitoring: false  # Basic monitoring only
+    log_retention_days: 7  # Short retention for cost
+    enable_container_insights: false  # Disabled for cost
+    
+    # Backup (minimal)
+    backup_enabled: false  # Not needed for dev
+    backup_retention_days: 7
+    point_in_time_recovery: false
+    cross_region_backup: false
+    
+    # Performance (smaller instances)
+    instance_types:
+      web: ["t3.micro", "t3.small"]
+      app: ["t3.small", "t3.medium"]
+      db: ["db.t3.micro", "db.t3.small"]
+      
+    auto_scaling:
+      min_capacity: 1
+      max_capacity: 5
+      target_cpu: 80  # Higher threshold for cost
+      target_memory: 85
+      
+    # Database configuration (basic)
+    database:
+      multi_az: false
+      backup_retention_period: 7
+      backup_window: "03:00-04:00"
+      maintenance_window: "sun:04:00-sun:05:00"
+      deletion_protection: false  # Easier cleanup
+      skip_final_snapshot: true  # Skip for dev
+      
+    # Load balancer (basic)
+    load_balancer:
+      deletion_protection: false
+      access_logs_enabled: false  # Disabled for cost
+      ssl_policy: "ELBSecurityPolicy-2016-08"
+      
+    # Security groups (more permissive for development)
+    security_groups:
+      web_tier:
+        ingress_rules:
+          - description: "HTTP from anywhere (dev only)"
+            from_port: 80
+            to_port: 80
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+          - description: "HTTPS from anywhere (dev only)"
+            from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            
+      app_tier:
+        ingress_rules:
+          - description: "App port from web tier"
+            from_port: 8080
+            to_port: 8080
+            protocol: "tcp"
+            source_security_group_ref: "web_tier"
+          - description: "Debug port (dev only)"
+            from_port: 5000
+            to_port: 5000
+            protocol: "tcp"
+            cidr_blocks: ["10.1.0.0/16"]
+            
+      db_tier:
+        ingress_rules:
+          - description: "Database from app tier"
+            from_port: 5432
+            to_port: 5432
+            protocol: "tcp"
+            source_security_group_ref: "app_tier"
+            
+    # IAM (relaxed for development)
+    iam:
+      password_policy:
+        minimum_password_length: 8
+        require_symbols: false
+        require_numbers: true
+        require_uppercase: false
+        require_lowercase: true
+        allow_users_to_change_password: true
+        max_password_age: 0  # No expiration for dev
+        
+    # Compliance (minimal for development)
+    compliance:
+      enable_cloudtrail: false  # Disabled for cost
+      enable_config: false
+      enable_guardduty: false
+      enable_security_hub: false
+      
+    # Cost optimization (aggressive)
+    cost_optimization:
+      enable_rightsizing: true
+      enable_spot_instances: true  # Use spot instances
+      enable_scheduled_scaling: true  # Scale down at night
+      
+    # Development-specific features
+    development:
+      enable_ssh_access: true  # SSH access for debugging
+      enable_port_forwarding: true
+      enable_exec_access: true  # ECS Exec for debugging
+      
+    # Tagging strategy
+    mandatory_tags:
+      Environment: "development"
+      CostCenter: "development"
+      BusinessUnit: "engineering"
+      DataClassification: "internal"
+      BackupRequired: "false"
+      
+    additional_tags:
+      Schedule: "business-hours"  # Can be shut down at night
+      AutoShutdown: "true"
+      Developer: "${var.developer_name}"
+
+import:
+  # Development-specific mixins
+  - mixins/stage/dev
+  - mixins/cost-optimization/aggressive
+  - mixins/developer-tools/enabled
+
+components:
+  terraform:
+    # Development-optimized component settings
+    vpc:
+      vars:
+        # Cost-optimized VPC
+        flow_logs_enabled: false
+        
+    security-groups:
+      vars:
+        # More permissive for development
+        allow_ssh_from_office: true
+        office_cidr_blocks: ["203.0.113.0/24"]  # Replace with actual office IP
+        
+    eks:
+      vars:
+        # Development EKS settings
+        kubernetes_version: "1.28"
+        endpoint_private_access: true
+        endpoint_public_access: true  # Easier access for development
+        public_access_cidrs: ["203.0.113.0/24"]  # Office IP only
+        
+        # Cost-optimized node groups
+        node_groups:
+          development:
+            instance_types: ["t3.medium", "t3.large"]
+            capacity_type: "SPOT"  # Use spot instances for cost
+            min_size: 1
+            max_size: 5
+            desired_size: 2
+            
+            # Development-friendly settings
+            remote_access:
+              ec2_ssh_key: "${var.developer_ssh_key}"
+              source_security_group_ids: ["${atmos.component.security-groups.outputs.developer_sg_id}"]
+            
+        # Basic add-ons only
+        cluster_addons:
+          vpc-cni:
+            version: "latest"
+          kube-proxy:
+            version: "latest"
+          coredns:
+            version: "latest"
+            
+    rds:
+      vars:
+        # Development database settings
+        instance_class: "db.t3.micro"
+        allocated_storage: 20
+        max_allocated_storage: 100
+        storage_encrypted: false  # Not required for dev
+        
+        # Single AZ for cost
+        multi_az: false
+        
+        # Minimal backup
+        backup_retention_period: 0  # No backups for dev
+        
+        # Performance insights disabled
+        performance_insights_enabled: false
+        
+        # Easy cleanup
+        deletion_protection: false
+        skip_final_snapshot: true
+        
+        # Development database name
+        db_name: "${var.tenant}_${var.environment}_dev"
+        
+    monitoring:
+      vars:
+        # Basic monitoring only
+        detailed_monitoring: false
+        enable_insights: false
+        
+        # Relaxed alerting thresholds
+        cpu_alarm_threshold: 90
+        memory_alarm_threshold: 95
+        disk_alarm_threshold: 95
+        
+        # Simple dashboard
+        dashboards:
+          - name: "development-basic"
+            widgets:
+              - type: "metric"
+                properties:
+                  metrics:
+                    - ["AWS/ECS", "CPUUtilization"]
+                    - ["AWS/ECS", "MemoryUtilization"]
+                    
+    # Development tools and utilities
+    developer-tools:
+      vars:
+        # Enable development utilities
+        enable_bastion_host: true
+        bastion_instance_type: "t3.micro"
+        
+        # Development databases
+        enable_dev_database: true
+        dev_database_publicly_accessible: true  # For easy access
+        
+        # CI/CD pipeline access
+        enable_pipeline_access: true
+        
+        # Logging
+        centralized_logging: false  # Local logging only
+        
+# Development-specific environment variables
+environment_variables:
+  NODE_ENV: "development"
+  LOG_LEVEL: "debug"
+  ENABLE_DEBUG: "true"
+  
+# Development secrets (non-sensitive)
+development_secrets:
+  # Use simple values for development
+  database_password: "dev_password_123"
+  api_key: "dev_api_key"
+  jwt_secret: "dev_jwt_secret"

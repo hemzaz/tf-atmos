@@ -1,0 +1,291 @@
+# Microservices Stack Template
+# Container-optimized infrastructure for microservices architecture
+# 
+# Features: EKS with service mesh, API Gateway, monitoring, service discovery
+# Best for: Cloud-native applications, containerized workloads
+
+terraform:
+  vars:
+    # Stack configuration
+    stack_purpose: "microservices-platform"
+    cost_center: "engineering"
+    
+    # Networking optimized for containers
+    vpc_cidr: "10.0.0.0/16"
+    availability_zones: ["a", "b", "c"]
+    
+    # EKS optimized for microservices
+    kubernetes_version: "1.28"
+    node_groups:
+      # General purpose nodes
+      general:
+        instance_types: ["m5.large"]
+        min_size: 3
+        max_size: 20
+        desired_size: 6
+        labels:
+          workload-type: "general"
+          
+      # Compute-optimized for CPU-intensive services  
+      compute:
+        instance_types: ["c5.xlarge"]
+        min_size: 0
+        max_size: 10
+        desired_size: 0
+        labels:
+          workload-type: "compute"
+        taints:
+          - key: "workload-type"
+            value: "compute"
+            effect: "NO_SCHEDULE"
+            
+    # Service mesh configuration
+    service_mesh_enabled: true
+    istio_version: "1.19"
+    
+    # API Gateway for external access
+    api_gateway_enabled: true
+    
+    # Observability stack
+    observability_enabled: true
+    jaeger_enabled: true
+    prometheus_enabled: true
+    grafana_enabled: true
+    
+import:
+  - catalog/vpc/defaults
+  - catalog/eks/defaults  
+  - catalog/monitoring/defaults
+  - mixins/tenant/${tenant}
+  - mixins/stage/${account}
+  - mixins/region/${region}
+
+components:
+  terraform:
+    # Container-optimized VPC
+    vpc:
+      metadata:
+        component: vpc
+        inherits: [vpc/defaults]
+      vars:
+        name: "${var.tenant}-${var.environment}-vpc"
+        cidr_block: "${var.vpc_cidr}"
+        availability_zones: "${var.availability_zones}"
+        
+        # Subnets optimized for containers
+        public_subnets_enabled: true
+        public_subnet_cidrs: ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+        
+        private_subnets_enabled: true
+        private_subnet_cidrs: ["10.0.10.0/24", "10.0.20.0/24", "10.0.30.0/24"]
+        
+        # Additional subnets for pods (secondary CIDR)
+        secondary_cidr_blocks: ["100.64.0.0/16"]
+        pod_subnet_cidrs: ["100.64.0.0/18", "100.64.64.0/18", "100.64.128.0/18"]
+        
+        # High-bandwidth NAT for container traffic
+        nat_gateway_enabled: true
+        single_nat_gateway: false
+        
+        # VPC endpoints for container registry
+        vpc_endpoints:
+          ecr_dkr: true
+          ecr_api: true
+          s3: true
+          logs: true
+          
+    # Security groups for microservices
+    security-groups:
+      metadata:
+        component: securitygroup
+      vars:
+        name: "${var.tenant}-${var.environment}-sg"
+        security_groups:
+          eks-cluster:
+            description: "EKS cluster control plane"
+            ingress_rules:
+              - description: "HTTPS API access"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["${var.vpc_cidr}"]
+                
+          eks-nodes:
+            description: "EKS worker nodes"
+            ingress_rules:
+              - description: "All traffic between nodes"
+                from_port: 0
+                to_port: 65535
+                protocol: "tcp"
+                self: true
+              - description: "Cluster API to nodes"
+                from_port: 1025
+                to_port: 65535
+                protocol: "tcp"
+                source_security_group_id: "eks-cluster"
+              - description: "Service mesh sidecar"
+                from_port: 15090
+                to_port: 15090
+                protocol: "tcp"
+                self: true
+                
+          api-gateway:
+            description: "API Gateway for external traffic"
+            ingress_rules:
+              - description: "HTTPS from internet"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+              - description: "HTTP redirect to HTTPS"
+                from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                
+    # EKS cluster optimized for microservices
+    eks:
+      metadata:
+        component: eks
+        inherits: [eks/defaults]
+      vars:
+        name: "${var.tenant}-${var.environment}-eks"
+        kubernetes_version: "${var.kubernetes_version}"
+        
+        # Cluster networking for microservices
+        cluster_ip_family: "ipv4"
+        cluster_service_ipv4_cidr: "172.20.0.0/16"
+        
+        # Node groups
+        node_groups: "${var.node_groups}"
+        
+        # IRSA for service accounts
+        enable_irsa: true
+        
+        # Cluster add-ons
+        cluster_addons:
+          vpc-cni:
+            version: "latest"
+            configuration_values:
+              env:
+                ENABLE_PREFIX_DELEGATION: "true"
+                WARM_PREFIX_TARGET: "1"
+          coredns:
+            version: "latest"
+          kube-proxy:
+            version: "latest"
+            
+    # Comprehensive EKS add-ons for microservices
+    eks-addons:
+      metadata:
+        component: eks-addons
+        inherits: [eks-addons/defaults]
+      vars:
+        cluster_name: "${atmos.component.eks.outputs.cluster_name}"
+        cluster_endpoint: "${atmos.component.eks.outputs.cluster_endpoint}"
+        oidc_provider_arn: "${atmos.component.eks.outputs.oidc_provider_arn}"
+        
+        # Load balancing and ingress
+        aws_load_balancer_controller_enabled: true
+        nginx_ingress_enabled: true
+        
+        # Service mesh (Istio)
+        istio_enabled: "${var.service_mesh_enabled}"
+        istio_version: "${var.istio_version}"
+        
+        # Autoscaling
+        cluster_autoscaler_enabled: true
+        karpenter_enabled: true
+        
+        # Observability
+        prometheus_enabled: "${var.prometheus_enabled}"
+        grafana_enabled: "${var.grafana_enabled}"
+        jaeger_enabled: "${var.jaeger_enabled}"
+        
+        # Security
+        external_secrets_enabled: true
+        cert_manager_enabled: true
+        
+        # DNS and service discovery
+        external_dns_enabled: true
+        coredns_enabled: true
+        
+    # API Gateway for microservices
+    api-gateway:
+      metadata:
+        component: apigateway
+      vars:
+        name: "${var.tenant}-${var.environment}-api"
+        
+        # Gateway configuration
+        gateway_type: "HTTP"
+        protocol_type: "HTTP"
+        
+        # CORS for microservices
+        cors_configuration:
+          allow_headers: ["content-type", "x-amz-date", "authorization"]
+          allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+          allow_origins: ["*"]
+          
+        # Routes to EKS services
+        routes:
+          users:
+            path: "/api/users/{proxy+}"
+            target: "http://users-service.default.svc.cluster.local"
+            
+          orders:
+            path: "/api/orders/{proxy+}"
+            target: "http://orders-service.default.svc.cluster.local"
+            
+          products:
+            path: "/api/products/{proxy+}"
+            target: "http://products-service.default.svc.cluster.local"
+            
+    # Monitoring for microservices
+    monitoring:
+      metadata:
+        component: monitoring
+        inherits: [monitoring/defaults]
+      vars:
+        name: "${var.tenant}-${var.environment}-monitoring"
+        
+        # Microservices-specific dashboards
+        dashboards_enabled: true
+        dashboards:
+          service_overview:
+            title: "Microservices Overview"
+            metrics:
+              - "container_cpu_usage_seconds_total"
+              - "container_memory_working_set_bytes"
+              - "istio_request_duration_milliseconds"
+              
+          api_gateway:
+            title: "API Gateway Metrics"
+            metrics:
+              - "aws_apigateway_count"
+              - "aws_apigateway_latency"
+              - "aws_apigateway_4xxerror"
+              - "aws_apigateway_5xxerror"
+              
+        # Service-level alarms
+        alarms:
+          high_pod_cpu:
+            metric_name: "pod_cpu_usage"
+            threshold: 80
+            comparison_operator: "GreaterThanThreshold"
+            
+          high_pod_memory:
+            metric_name: "pod_memory_usage"
+            threshold: 85
+            comparison_operator: "GreaterThanThreshold"
+            
+          api_gateway_errors:
+            metric_name: "4XXError"
+            threshold: 10
+            comparison_operator: "GreaterThanThreshold"
+            period: 300
+            
+          service_mesh_latency:
+            metric_name: "istio_request_duration_milliseconds_p99"
+            threshold: 1000
+            comparison_operator: "GreaterThanThreshold"

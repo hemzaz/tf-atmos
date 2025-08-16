@@ -1,0 +1,96 @@
+# Minimal Stack Template
+# Basic infrastructure with VPC, security groups, and essential components
+#
+# Usage: Copy to your stack directory and customize
+# Example: cp templates/stacks/minimal-stack.yaml stacks/orgs/myorg/dev/us-east-1/minimal/main.yaml
+
+terraform:
+  vars:
+    # Global stack variables
+    stack_purpose: "minimal-infrastructure"
+    cost_center: "development"
+    
+    # Networking
+    vpc_cidr: "10.0.0.0/16"
+    availability_zones: ["a", "b"]
+    
+    # Tagging strategy
+    additional_tags:
+      Purpose: "minimal-stack"
+      Template: "minimal-stack.yaml"
+      ManagedBy: "atmos"
+
+import:
+  # Base configurations
+  - catalog/vpc/defaults
+  - mixins/tenant/${tenant}
+  - mixins/stage/${account}
+  - mixins/region/${region}
+
+components:
+  terraform:
+    # Core networking
+    vpc:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        name: "${var.tenant}-${var.environment}-vpc"
+        cidr_block: "${var.vpc_cidr}"
+        availability_zones: "${var.availability_zones}"
+        
+        # Public subnets for load balancers
+        public_subnets_enabled: true
+        public_subnet_cidrs: ["10.0.1.0/24", "10.0.2.0/24"]
+        
+        # Private subnets for applications  
+        private_subnets_enabled: true
+        private_subnet_cidrs: ["10.0.10.0/24", "10.0.20.0/24"]
+        
+        # NAT Gateway for private subnet internet access
+        nat_gateway_enabled: true
+        nat_instance_enabled: false
+        
+    # Basic security groups
+    security-groups:
+      metadata:
+        component: securitygroup
+      vars:
+        name: "${var.tenant}-${var.environment}-sg"
+        
+        # Web tier security group
+        security_groups:
+          web:
+            description: "Web tier security group"
+            ingress_rules:
+              - description: "HTTP from anywhere"
+                from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+              - description: "HTTPS from anywhere"  
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                
+          # Application tier security group
+          app:
+            description: "Application tier security group"
+            ingress_rules:
+              - description: "App port from web tier"
+                from_port: 8080
+                to_port: 8080
+                protocol: "tcp"
+                source_security_group_id: "web"
+                
+          # Database tier security group  
+          db:
+            description: "Database tier security group"
+            ingress_rules:
+              - description: "MySQL from app tier"
+                from_port: 3306
+                to_port: 3306
+                protocol: "tcp"
+                source_security_group_id: "app"

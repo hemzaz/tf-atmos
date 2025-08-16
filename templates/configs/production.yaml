@@ -1,0 +1,235 @@
+# Production Environment Configuration Template
+# 
+# Security-hardened, high-availability configuration
+# Use this as a base for production environments
+
+terraform:
+  vars:
+    # Production environment settings
+    environment_type: "production"
+    cost_center: "production"
+    business_unit: "platform"
+    
+    # High availability configuration
+    availability_zones: ["a", "b", "c"]
+    multi_az_enabled: true
+    
+    # Network security
+    vpc_cidr: "10.0.0.0/16"
+    enable_dns_hostnames: true
+    enable_dns_support: true
+    enable_nat_gateway: true
+    single_nat_gateway: false  # HA NAT gateways
+    
+    # VPC endpoints for security
+    vpc_endpoints:
+      s3: true
+      dynamodb: true
+      ec2: true
+      ssm: true
+      secretsmanager: true
+      kms: true
+      logs: true
+      
+    # Security hardening
+    encryption_at_rest: true
+    encryption_in_transit: true
+    enable_flow_logs: true
+    
+    # Monitoring and logging
+    monitoring_enabled: true
+    detailed_monitoring: true
+    log_retention_days: 90
+    enable_container_insights: true
+    
+    # Backup and disaster recovery
+    backup_enabled: true
+    backup_retention_days: 30
+    point_in_time_recovery: true
+    cross_region_backup: true
+    
+    # Performance and scaling
+    instance_types:
+      web: ["m5.large", "m5.xlarge"]
+      app: ["c5.large", "c5.xlarge"] 
+      db: ["r5.large", "r5.xlarge"]
+      
+    auto_scaling:
+      min_capacity: 3
+      max_capacity: 20
+      target_cpu: 60
+      target_memory: 70
+      
+    # Database configuration
+    database:
+      multi_az: true
+      backup_retention_period: 30
+      backup_window: "03:00-04:00"
+      maintenance_window: "sun:04:00-sun:05:00"
+      deletion_protection: true
+      skip_final_snapshot: false
+      
+    # Load balancer settings
+    load_balancer:
+      deletion_protection: true
+      access_logs_enabled: true
+      ssl_policy: "ELBSecurityPolicy-TLS-1-2-2017-01"
+      
+    # Security groups - restrictive defaults
+    security_groups:
+      web_tier:
+        ingress_rules:
+          - description: "HTTPS from CloudFront"
+            from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            prefix_list_ids: ["pl-id-for-cloudfront"]  # CloudFront prefix list
+            
+      app_tier:
+        ingress_rules:
+          - description: "App port from web tier"
+            from_port: 8080
+            to_port: 8080
+            protocol: "tcp"
+            source_security_group_ref: "web_tier"
+            
+      db_tier:
+        ingress_rules:
+          - description: "Database from app tier"
+            from_port: 5432
+            to_port: 5432
+            protocol: "tcp"
+            source_security_group_ref: "app_tier"
+            
+    # IAM and access control
+    iam:
+      password_policy:
+        minimum_password_length: 14
+        require_symbols: true
+        require_numbers: true
+        require_uppercase: true
+        require_lowercase: true
+        allow_users_to_change_password: true
+        max_password_age: 90
+        
+    # Compliance and governance
+    compliance:
+      enable_cloudtrail: true
+      enable_config: true
+      enable_guardduty: true
+      enable_security_hub: true
+      
+    # Cost optimization
+    cost_optimization:
+      enable_rightsizing: true
+      enable_reserved_instances: true
+      enable_savings_plans: true
+      
+    # Tagging strategy
+    mandatory_tags:
+      Environment: "production"
+      CostCenter: "production"
+      BusinessUnit: "platform" 
+      DataClassification: "confidential"
+      BackupRequired: "true"
+      MonitoringRequired: "true"
+      
+    additional_tags:
+      Schedule: "24x7"
+      SLA: "99.9"
+      RecoveryTime: "4h"
+      RecoveryPoint: "1h"
+
+import:
+  # Production-specific mixins
+  - mixins/stage/prod
+  - mixins/compliance/production
+  - mixins/security/hardened
+  - mixins/monitoring/enhanced
+
+components:
+  terraform:
+    # All components should inherit production settings
+    vpc:
+      vars:
+        # Override defaults for production
+        flow_logs_enabled: true
+        flow_logs_retention: 90
+        
+    security-groups:
+      vars:
+        # Restrictive security groups
+        default_egress_enabled: false  # Explicit egress rules only
+        
+    eks:
+      vars:
+        # Production EKS settings
+        kubernetes_version: "1.28"  # Stable version
+        endpoint_private_access: true
+        endpoint_public_access: false  # Private only for production
+        
+        # Node groups with spot disabled for production
+        node_groups:
+          production:
+            instance_types: ["m5.large", "m5.xlarge"]
+            capacity_type: "ON_DEMAND"  # No spot instances in production
+            min_size: 3
+            max_size: 10
+            desired_size: 6
+            
+        # Add-ons for production
+        cluster_addons:
+          vpc-cni:
+            version: "v1.12.6"  # Pinned version
+          kube-proxy:
+            version: "v1.28.1"  # Pinned version
+          coredns:
+            version: "v1.10.1"  # Pinned version
+            
+    rds:
+      vars:
+        # Production database settings
+        instance_class: "db.r5.xlarge"
+        allocated_storage: 100
+        max_allocated_storage: 1000
+        storage_encrypted: true
+        kms_key_id: "alias/production-rds"
+        
+        # High availability
+        multi_az: true
+        
+        # Backup and maintenance
+        backup_retention_period: 30
+        backup_window: "03:00-04:00"
+        maintenance_window: "sun:04:00-sun:05:00"
+        
+        # Performance insights
+        performance_insights_enabled: true
+        performance_insights_retention_period: 7
+        
+        # Security
+        deletion_protection: true
+        skip_final_snapshot: false
+        
+    monitoring:
+      vars:
+        # Enhanced monitoring for production
+        detailed_monitoring: true
+        enable_insights: true
+        
+        # Alerting thresholds (stricter for production)
+        cpu_alarm_threshold: 70
+        memory_alarm_threshold: 80
+        disk_alarm_threshold: 85
+        
+        # Custom dashboards
+        dashboards:
+          - name: "production-overview"
+            widgets:
+              - type: "metric"
+                properties:
+                  metrics:
+                    - ["AWS/ECS", "CPUUtilization"]
+                    - ["AWS/ECS", "MemoryUtilization"]
+                    - ["AWS/RDS", "CPUUtilization"]
+                    - ["AWS/RDS", "DatabaseConnections"]

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Script to clean up documentation structure:
 # - Create a single, clean docs directory structure

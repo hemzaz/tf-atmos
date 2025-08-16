@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Enhanced script to list all available Atmos stacks with friendly names
 # This script provides user-friendly names and helpful context
 
@@ -15,6 +15,18 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m'
+
+# Check bash version and show compatibility info
+check_bash_compatibility() {
+    local bash_version=$(bash --version 2>/dev/null | head -1 | grep -o '[0-9]\.[0-9]' | head -1 || echo "3.0")
+    local major_version=$(echo "$bash_version" | cut -d. -f1 2>/dev/null || echo "3")
+    
+    if [ "$major_version" -lt 4 ]; then
+        echo -e "${YELLOW}ℹ️  Running bash $bash_version (bash 4+ recommended for full features)${NC}" >&2
+    fi
+}
+
+check_bash_compatibility
 
 # Stack name mapping function
 map_stack_name() {
@@ -77,16 +89,11 @@ echo
 echo -e "${WHITE}Available Environments:${NC}"
 echo -e "${WHITE}======================${NC}"
 
-# Create associative arrays (if bash 4+ is available)
-declare -A STACK_MAP
-declare -A REVERSE_MAP
-
+# Process stacks with bash 3.x compatible approach (no associative arrays)
 while IFS= read -r raw_stack; do
     [ -z "$raw_stack" ] && continue
     
     friendly=$(map_stack_name "$raw_stack")
-    STACK_MAP["$friendly"]="$raw_stack"
-    REVERSE_MAP["$raw_stack"]="$friendly"
     
     # Extract components for display
     if [[ "$raw_stack" =~ orgs/([^/]+)/([^/]+)/([^/]+)/([^/]+) ]]; then
@@ -165,8 +172,19 @@ echo
 
 # Export functions for other scripts to use
 cat > "$REPO_ROOT/.stack_aliases" << 'EOF'
-# Stack name mapping functions
+#!/usr/bin/env bash
+# Stack name mapping functions for Atmos
+# Compatible with bash 3.x and bash 4+
 # Source this file to use: source .stack_aliases
+
+# Check bash version compatibility
+check_bash_version() {
+    local bash_version=$(bash --version | head -1 | grep -o '[0-9]\.[0-9]' | head -1)
+    local major_version=$(echo "$bash_version" | cut -d. -f1)
+    if [ "$major_version" -lt 4 ]; then
+        echo "Warning: Using bash $bash_version. Some features optimized for bash 4+" >&2
+    fi
+}
 
 map_stack_name() {
     local stack="$1"
@@ -193,11 +211,19 @@ get_stack_by_friendly() {
 }
 
 list_friendly_stacks() {
-    atmos list stacks 2>/dev/null | while read -r stack; do
-        [ -z "$stack" ] && continue
-        map_stack_name "$stack"
-    done
+    if command -v atmos >/dev/null 2>&1; then
+        atmos list stacks 2>/dev/null | while read -r stack; do
+            [ -z "$stack" ] && continue
+            map_stack_name "$stack"
+        done
+    else
+        echo "Error: atmos command not found" >&2
+        return 1
+    fi
 }
+
+# Initialize with version check
+check_bash_version
 EOF
 
 echo -e "${GREEN}✅ Stack listing complete!${NC}"

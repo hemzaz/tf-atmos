@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Wrapper script for atmos to provide friendly stack names
 
 # Helpful aliases that could be added to .zshrc or .bashrc:

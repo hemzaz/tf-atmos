@@ -1,0 +1,22 @@
+---
+name: validate-simple
+description: "Simple validation test to avoid TTY issues"
+
+workflows:
+  validate-simple:
+    description: "Simple validation without TTY-causing commands"
+    steps:
+    - name: "test-simple"
+      description: "Simple test without TTY access"
+      run:
+        command: |
+          echo "=== Simple Validation Test ==="
+          echo "Testing without TTY access"
+          echo "Current directory: $(pwd)"
+          echo "Environment variables set:"
+          echo "TERM: $TERM"
+          echo "NO_COLOR: $NO_COLOR"
+          echo "CI: $CI"
+          echo "✅ Simple test completed successfully"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

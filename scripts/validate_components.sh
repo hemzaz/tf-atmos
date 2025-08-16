@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Script to validate Atmos components and stacks
 
 # Set to the repository root directory

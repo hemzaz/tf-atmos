@@ -1,0 +1,253 @@
+# Full Stack Template  
+# Complete production-ready infrastructure
+#
+# Includes: VPC, EKS, RDS, monitoring, security, secrets management
+# Usage: Copy and customize for production environments
+
+terraform:
+  vars:
+    # Stack configuration
+    stack_purpose: "full-production-infrastructure"
+    cost_center: "production"
+    
+    # Networking
+    vpc_cidr: "10.0.0.0/16"
+    availability_zones: ["a", "b", "c"]
+    
+    # EKS Configuration
+    kubernetes_version: "1.28"
+    node_groups:
+      general:
+        instance_types: ["m5.large", "m5.xlarge"]
+        min_size: 2
+        max_size: 10
+        desired_size: 3
+        
+    # Database configuration
+    db_engine: "mysql"
+    db_engine_version: "8.0"
+    db_instance_class: "db.r5.large"
+    db_multi_az: true
+    
+    # Monitoring and observability
+    monitoring_enabled: true
+    logging_retention_days: 30
+    
+    # Security
+    secrets_manager_enabled: true
+    certificate_arn: "" # Set via environment variable or SSM
+    
+import:
+  - catalog/vpc/defaults
+  - catalog/eks/defaults
+  - catalog/rds/defaults
+  - catalog/monitoring/defaults
+  - mixins/tenant/${tenant}
+  - mixins/stage/${account}
+  - mixins/region/${region}
+
+components:
+  terraform:
+    # Core networking
+    vpc:
+      metadata:
+        component: vpc
+        inherits: [vpc/defaults]
+      vars:
+        name: "${var.tenant}-${var.environment}-vpc"
+        cidr_block: "${var.vpc_cidr}"
+        availability_zones: "${var.availability_zones}"
+        
+        # Multi-tier subnets
+        public_subnets_enabled: true
+        public_subnet_cidrs: ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+        
+        private_subnets_enabled: true  
+        private_subnet_cidrs: ["10.0.10.0/24", "10.0.20.0/24", "10.0.30.0/24"]
+        
+        database_subnets_enabled: true
+        database_subnet_cidrs: ["10.0.100.0/24", "10.0.200.0/24", "10.0.300.0/24"]
+        
+        # High availability NAT
+        nat_gateway_enabled: true
+        single_nat_gateway: false
+        
+        # VPC endpoints for security
+        vpc_endpoints:
+          s3: true
+          dynamodb: true
+          ec2: true
+          ssm: true
+          
+    # Security groups
+    security-groups:
+      metadata:
+        component: securitygroup
+      vars:
+        name: "${var.tenant}-${var.environment}-sg"
+        security_groups:
+          eks-cluster:
+            description: "EKS cluster security group"
+            ingress_rules:
+              - description: "HTTPS API"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["${var.vpc_cidr}"]
+                
+          eks-nodes:
+            description: "EKS node group security group"
+            ingress_rules:
+              - description: "Node to node communication"
+                from_port: 0
+                to_port: 65535
+                protocol: "tcp"
+                self: true
+              - description: "Cluster to nodes"
+                from_port: 1025
+                to_port: 65535
+                protocol: "tcp"
+                source_security_group_id: "eks-cluster"
+                
+          rds:
+            description: "RDS security group"
+            ingress_rules:
+              - description: "MySQL from EKS nodes"
+                from_port: 3306
+                to_port: 3306
+                protocol: "tcp"
+                source_security_group_id: "eks-nodes"
+                
+          alb:
+            description: "Application Load Balancer"
+            ingress_rules:
+              - description: "HTTP from internet"
+                from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+              - description: "HTTPS from internet"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                
+    # EKS Cluster
+    eks:
+      metadata:
+        component: eks
+        inherits: [eks/defaults]
+      vars:
+        name: "${var.tenant}-${var.environment}-eks"
+        kubernetes_version: "${var.kubernetes_version}"
+        
+        # Cluster configuration
+        endpoint_private_access: true
+        endpoint_public_access: true
+        public_access_cidrs: ["0.0.0.0/0"] # Restrict in production
+        
+        # Node groups
+        node_groups: "${var.node_groups}"
+        
+        # Add-ons
+        cluster_addons:
+          vpc-cni:
+            version: "latest"
+          kube-proxy:
+            version: "latest"  
+          coredns:
+            version: "latest"
+            
+    # EKS Add-ons
+    eks-addons:
+      metadata:
+        component: eks-addons
+        inherits: [eks-addons/defaults]
+      vars:
+        cluster_name: "${atmos.component.eks.outputs.cluster_name}"
+        cluster_endpoint: "${atmos.component.eks.outputs.cluster_endpoint}"
+        oidc_provider_arn: "${atmos.component.eks.outputs.oidc_provider_arn}"
+        
+        # Essential add-ons
+        aws_load_balancer_controller_enabled: true
+        cluster_autoscaler_enabled: true
+        external_dns_enabled: true
+        cert_manager_enabled: true
+        
+        # Monitoring
+        cloudwatch_metrics_enabled: "${var.monitoring_enabled}"
+        container_insights_enabled: "${var.monitoring_enabled}"
+        
+        # Security
+        external_secrets_enabled: "${var.secrets_manager_enabled}"
+        
+    # RDS Database
+    rds:
+      metadata:
+        component: rds
+        inherits: [rds/defaults]
+      vars:
+        name: "${var.tenant}-${var.environment}-db"
+        engine: "${var.db_engine}"
+        engine_version: "${var.db_engine_version}"
+        instance_class: "${var.db_instance_class}"
+        
+        # High availability
+        multi_az: "${var.db_multi_az}"
+        
+        # Security
+        deletion_protection: true
+        skip_final_snapshot: false
+        final_snapshot_identifier: "${var.tenant}-${var.environment}-final-snapshot"
+        
+        # Networking
+        subnet_group_name: "database"
+        
+        # Backup and maintenance
+        backup_retention_period: 7
+        backup_window: "03:00-04:00"
+        maintenance_window: "sun:04:00-sun:05:00"
+        
+    # Secrets Manager
+    secrets:
+      metadata:
+        component: secretsmanager
+      vars:
+        name: "${var.tenant}-${var.environment}-secrets"
+        secrets:
+          database:
+            description: "Database credentials"
+            secret_string: |
+              {
+                "username": "admin",
+                "password": "CHANGE_ME_IN_CONSOLE",
+                "host": "${atmos.component.rds.outputs.endpoint}",
+                "port": 3306,
+                "database": "${var.tenant}_${var.environment}"
+              }
+              
+    # Monitoring
+    monitoring:
+      metadata:
+        component: monitoring
+        inherits: [monitoring/defaults]  
+      vars:
+        name: "${var.tenant}-${var.environment}-monitoring"
+        
+        # CloudWatch dashboards
+        dashboards_enabled: true
+        
+        # Alarms
+        alarms:
+          high_cpu:
+            metric_name: "CPUUtilization"
+            threshold: 80
+            comparison_operator: "GreaterThanThreshold"
+            
+          database_connections:
+            metric_name: "DatabaseConnections"  
+            threshold: 50
+            comparison_operator: "GreaterThanThreshold"
+            
+        # Log groups
+        log_retention_days: "${var.logging_retention_days}"

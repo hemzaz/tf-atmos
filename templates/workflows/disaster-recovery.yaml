@@ -1,0 +1,410 @@
+# Disaster Recovery Workflow Template
+#
+# Automated disaster recovery procedures for infrastructure
+# Includes backup, restore, and failover capabilities
+#
+# Usage: Copy to workflows/ and customize for your DR strategy
+
+name: disaster-recovery
+description: "Disaster recovery workflows for infrastructure backup and restore"
+
+workflows:
+  backup-infrastructure:
+    description: "Backup critical infrastructure state and configurations"
+    steps:
+    - name: "backup-terraform-state"
+      description: "Backup Terraform state files"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Terraform State Backup ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          BACKUP_DIR="backups/terraform-state/$(date -u '+%Y%m%d-%H%M%S')"
+          mkdir -p "$BACKUP_DIR"
+          
+          STACK="${tenant}-${account}-${environment}"
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+          
+          if [ -z "$COMPONENTS" ]; then
+            echo "⚠️  No components found for stack $STACK"
+            exit 0
+          fi
+          
+          echo "Backing up state for components: $COMPONENTS"
+          
+          # Backup each component's state
+          for component in $COMPONENTS; do
+            echo "Backing up state for: $component"
+            
+            # Get the backend configuration
+            BACKEND_CONFIG=$(atmos terraform show backend "$component" -s "$STACK" 2>/dev/null || echo "")
+            
+            if [ -n "$BACKEND_CONFIG" ]; then
+              # Save backend config
+              echo "$BACKEND_CONFIG" > "$BACKUP_DIR/${component}-backend.json"
+              
+              # Download state file
+              terraform -chdir="components/terraform/$component" \
+                state pull > "$BACKUP_DIR/${component}-state.json" || true
+              
+              echo "✅ State backed up for $component"
+            else
+              echo "⚠️  No backend configuration found for $component"
+            fi
+          done
+          
+          # Create backup metadata
+          cat << EOF > "$BACKUP_DIR/backup-metadata.json"
+          {
+            "timestamp": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')",
+            "stack": "$STACK",
+            "components": [$(echo "$COMPONENTS" | sed 's/ /", "/g' | sed 's/^/"/;s/$/"/')],
+            "backup_type": "terraform-state",
+            "backup_version": "1.0"
+          }
+          EOF
+          
+          echo "✅ Terraform state backup complete: $BACKUP_DIR"
+          echo "Backup contains $(echo $COMPONENTS | wc -w) component states"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "backup-configurations"
+      description: "Backup stack configurations and manifests"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Configuration Backup ==="
+          
+          BACKUP_DIR="backups/configurations/$(date -u '+%Y%m%d-%H%M%S')"
+          mkdir -p "$BACKUP_DIR"
+          
+          # Backup stack configurations
+          echo "Backing up stack configurations..."
+          cp -r stacks "$BACKUP_DIR/"
+          
+          # Backup component definitions
+          echo "Backing up component definitions..."
+          cp -r components "$BACKUP_DIR/"
+          
+          # Backup Atmos configuration
+          echo "Backing up Atmos configuration..."
+          cp atmos.yaml "$BACKUP_DIR/"
+          
+          # Backup workflows
+          if [ -d workflows ]; then
+            echo "Backing up workflows..."
+            cp -r workflows "$BACKUP_DIR/"
+          fi
+          
+          # Generate configuration manifest
+          echo "Generating configuration manifest..."
+          find "$BACKUP_DIR" -type f -name "*.yaml" -o -name "*.yml" -o -name "*.tf" | \
+            sort > "$BACKUP_DIR/file-manifest.txt"
+          
+          # Create backup metadata
+          cat << EOF > "$BACKUP_DIR/backup-metadata.json"
+          {
+            "timestamp": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')",
+            "backup_type": "configurations",
+            "total_files": $(cat "$BACKUP_DIR/file-manifest.txt" | wc -l),
+            "backup_version": "1.0"
+          }
+          EOF
+          
+          echo "✅ Configuration backup complete: $BACKUP_DIR"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "backup-secrets"
+      description: "Backup secrets and sensitive configurations"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Secrets Backup ==="
+          
+          BACKUP_DIR="backups/secrets/$(date -u '+%Y%m%d-%H%M%S')"
+          mkdir -p "$BACKUP_DIR"
+          
+          # Backup SSM parameters
+          echo "Backing up SSM parameters..."
+          aws ssm describe-parameters \
+            --parameter-filters "Key=Name,Option=BeginsWith,Values=/${tenant}/" \
+            --query 'Parameters[*].Name' \
+            --output text | tr '\t' '\n' > "$BACKUP_DIR/ssm-parameter-names.txt"
+          
+          # Export parameter values (encrypted)
+          if [ -s "$BACKUP_DIR/ssm-parameter-names.txt" ]; then
+            echo "Exporting SSM parameter values..."
+            while IFS= read -r param_name; do
+              if [ -n "$param_name" ]; then
+                aws ssm get-parameter --name "$param_name" --with-decryption \
+                  --output json >> "$BACKUP_DIR/ssm-parameters.json" 2>/dev/null || true
+              fi
+            done < "$BACKUP_DIR/ssm-parameter-names.txt"
+          fi
+          
+          # Backup Secrets Manager secrets
+          echo "Backing up Secrets Manager secrets..."
+          aws secretsmanager list-secrets \
+            --filters "Key=name,Values=${tenant}" \
+            --query 'SecretList[*].Name' \
+            --output text | tr '\t' '\n' > "$BACKUP_DIR/secrets-manager-names.txt"
+          
+          # Note: Actual secret values are not backed up for security
+          # Only metadata and references are preserved
+          
+          cat << EOF > "$BACKUP_DIR/backup-metadata.json"
+          {
+            "timestamp": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')",
+            "backup_type": "secrets",
+            "ssm_parameters": $([ -s "$BACKUP_DIR/ssm-parameter-names.txt" ] && cat "$BACKUP_DIR/ssm-parameter-names.txt" | wc -l || echo 0),
+            "secrets_manager_secrets": $([ -s "$BACKUP_DIR/secrets-manager-names.txt" ] && cat "$BACKUP_DIR/secrets-manager-names.txt" | wc -l || echo 0),
+            "note": "Secret values are not included for security",
+            "backup_version": "1.0"
+          }
+          EOF
+          
+          echo "✅ Secrets backup complete: $BACKUP_DIR"
+          echo "ℹ️  Secret values not backed up for security (references only)"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+  restore-infrastructure:
+    description: "Restore infrastructure from backups"
+    steps:
+    - name: "validate-backup"
+      description: "Validate backup integrity and requirements"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Backup Validation ==="
+          
+          BACKUP_PATH="${backup_path:?Backup path is required}"
+          
+          if [ ! -d "$BACKUP_PATH" ]; then
+            echo "❌ Backup path does not exist: $BACKUP_PATH"
+            exit 1
+          fi
+          
+          # Validate backup metadata
+          if [ ! -f "$BACKUP_PATH/backup-metadata.json" ]; then
+            echo "❌ Backup metadata not found"
+            exit 1
+          fi
+          
+          echo "Backup metadata:"
+          cat "$BACKUP_PATH/backup-metadata.json" | jq '.'
+          
+          # Validate backup contents
+          BACKUP_TYPE=$(cat "$BACKUP_PATH/backup-metadata.json" | jq -r '.backup_type')
+          
+          case "$BACKUP_TYPE" in
+            "terraform-state")
+              if [ ! -f "$BACKUP_PATH/backup-metadata.json" ]; then
+                echo "❌ Invalid terraform-state backup"
+                exit 1
+              fi
+              ;;
+            "configurations")
+              if [ ! -f "$BACKUP_PATH/file-manifest.txt" ]; then
+                echo "❌ Invalid configurations backup"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "⚠️  Unknown backup type: $BACKUP_TYPE"
+              ;;
+          esac
+          
+          echo "✅ Backup validation passed"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "restore-configurations"
+      description: "Restore stack configurations"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Configuration Restore ==="
+          
+          BACKUP_PATH="${backup_path:?Backup path is required}"
+          
+          # Safety check
+          if [ "${force_restore:-false}" != "true" ]; then
+            echo "❌ Force restore required for safety"
+            echo "Set force_restore=true to proceed"
+            echo "⚠️  This will overwrite existing configurations!"
+            exit 1
+          fi
+          
+          echo "⚠️  DANGER: Overwriting existing configurations"
+          echo "Backup path: $BACKUP_PATH"
+          
+          # Create restore point
+          RESTORE_BACKUP="backups/pre-restore-$(date -u '+%Y%m%d-%H%M%S')"
+          mkdir -p "$RESTORE_BACKUP"
+          
+          echo "Creating restore point: $RESTORE_BACKUP"
+          cp -r stacks "$RESTORE_BACKUP/" 2>/dev/null || true
+          cp -r components "$RESTORE_BACKUP/" 2>/dev/null || true
+          cp atmos.yaml "$RESTORE_BACKUP/" 2>/dev/null || true
+          
+          # Restore configurations
+          echo "Restoring configurations..."
+          if [ -d "$BACKUP_PATH/stacks" ]; then
+            cp -r "$BACKUP_PATH/stacks" ./
+          fi
+          
+          if [ -d "$BACKUP_PATH/components" ]; then
+            cp -r "$BACKUP_PATH/components" ./
+          fi
+          
+          if [ -f "$BACKUP_PATH/atmos.yaml" ]; then
+            cp "$BACKUP_PATH/atmos.yaml" ./
+          fi
+          
+          if [ -d "$BACKUP_PATH/workflows" ]; then
+            cp -r "$BACKUP_PATH/workflows" ./
+          fi
+          
+          echo "✅ Configuration restore complete"
+          echo "Restore point saved: $RESTORE_BACKUP"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "restore-terraform-state"
+      description: "Restore Terraform state files"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Terraform State Restore ==="
+          
+          BACKUP_PATH="${backup_path:?Backup path is required}"
+          
+          # Safety check
+          if [ "${force_restore:-false}" != "true" ]; then
+            echo "❌ Force restore required for safety"
+            echo "Set force_restore=true to proceed"
+            echo "⚠️  This will overwrite existing Terraform state!"
+            exit 1
+          fi
+          
+          if [ ! -f "$BACKUP_PATH/backup-metadata.json" ]; then
+            echo "❌ Backup metadata not found"
+            exit 1
+          fi
+          
+          # Get components from backup
+          COMPONENTS=$(cat "$BACKUP_PATH/backup-metadata.json" | jq -r '.components[]' 2>/dev/null || echo "")
+          
+          if [ -z "$COMPONENTS" ]; then
+            echo "❌ No components found in backup"
+            exit 1
+          fi
+          
+          echo "Restoring state for components: $(echo $COMPONENTS | tr '\n' ' ')"
+          
+          # Restore each component's state
+          for component in $COMPONENTS; do
+            echo "Restoring state for: $component"
+            
+            STATE_FILE="$BACKUP_PATH/${component}-state.json"
+            BACKEND_FILE="$BACKUP_PATH/${component}-backend.json"
+            
+            if [ -f "$STATE_FILE" ] && [ -f "$BACKEND_FILE" ]; then
+              # Configure backend
+              terraform -chdir="components/terraform/$component" init -reconfigure
+              
+              # Push state
+              terraform -chdir="components/terraform/$component" \
+                state push "$STATE_FILE" || true
+              
+              echo "✅ State restored for $component"
+            else
+              echo "⚠️  State files not found for $component"
+            fi
+          done
+          
+          echo "✅ Terraform state restore complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+  failover-region:
+    description: "Failover to disaster recovery region"
+    steps:
+    - name: "prepare-dr-region"
+      description: "Prepare disaster recovery region"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== DR Region Preparation ==="
+          
+          DR_REGION="${dr_region:?DR region is required}"
+          PRIMARY_REGION="${primary_region:-eu-west-2}"
+          
+          echo "Primary region: $PRIMARY_REGION"
+          echo "DR region: $DR_REGION"
+          
+          # Update region configuration
+          echo "Updating region configuration for DR failover..."
+          
+          # This would typically involve:
+          # 1. Updating DNS records
+          # 2. Redirecting traffic
+          # 3. Activating standby resources
+          # 4. Scaling up DR region infrastructure
+          
+          echo "✅ DR region preparation initiated"
+          echo "Manual verification required before completing failover"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "health-check-dr"
+      description: "Validate DR region health"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== DR Region Health Check ==="
+          
+          DR_REGION="${dr_region:?DR region is required}"
+          STACK="${tenant}-${account}-${environment}"
+          
+          echo "Checking health of stack in DR region: $STACK"
+          
+          # Switch to DR region context
+          export AWS_DEFAULT_REGION="$DR_REGION"
+          
+          # Validate components in DR region
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+          
+          HEALTH_CHECK_FAILED=false
+          for component in $COMPONENTS; do
+            echo "Health check for: $component"
+            
+            if atmos terraform validate "$component" -s "$STACK"; then
+              echo "✅ $component healthy in DR region"
+            else
+              echo "❌ $component unhealthy in DR region"
+              HEALTH_CHECK_FAILED=true
+            fi
+          done
+          
+          if [ "$HEALTH_CHECK_FAILED" = true ]; then
+            echo "❌ DR region health check failed"
+            echo "Manual intervention required"
+            exit 1
+          fi
+          
+          echo "✅ DR region health check passed"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

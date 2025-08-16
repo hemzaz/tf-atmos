@@ -1,0 +1,440 @@
+# Serverless Stack Template
+# Lambda-based serverless infrastructure
+#
+# Features: API Gateway, Lambda, DynamoDB, EventBridge, Step Functions
+# Best for: Event-driven applications, APIs, data processing pipelines
+
+terraform:
+  vars:
+    # Stack configuration
+    stack_purpose: "serverless-platform"
+    cost_center: "product"
+    
+    # Lambda configuration
+    lambda_runtime: "python3.11"
+    lambda_timeout: 30
+    lambda_memory: 512
+    
+    # API Gateway settings
+    api_throttling_burst_limit: 2000
+    api_throttling_rate_limit: 1000
+    
+    # DynamoDB configuration
+    dynamodb_billing_mode: "PAY_PER_REQUEST"
+    dynamodb_point_in_time_recovery: true
+    
+    # Event-driven architecture
+    eventbridge_enabled: true
+    step_functions_enabled: true
+    
+    # Monitoring and observability
+    xray_tracing_enabled: true
+    cloudwatch_logs_retention: 14
+    
+import:
+  - catalog/lambda/defaults
+  - catalog/apigateway/defaults
+  - mixins/tenant/${tenant}
+  - mixins/stage/${account}
+  - mixins/region/${region}
+
+components:
+  terraform:
+    # Lambda functions
+    lambda-functions:
+      metadata:
+        component: lambda
+      vars:
+        name: "${var.tenant}-${var.environment}-lambda"
+        
+        # Function configurations
+        functions:
+          # API handlers
+          users-api:
+            description: "Users API handler"
+            runtime: "${var.lambda_runtime}"
+            handler: "handlers.users.handler"
+            timeout: "${var.lambda_timeout}"
+            memory_size: "${var.lambda_memory}"
+            
+            # Environment variables
+            environment_variables:
+              USERS_TABLE: "${atmos.component.dynamodb.outputs.users_table_name}"
+              STAGE: "${var.environment}"
+              
+            # Permissions
+            policies:
+              - "AWSLambdaBasicExecutionRole"
+              - "${atmos.component.iam-roles.outputs.dynamodb_read_write_policy_arn}"
+              
+            # Event sources
+            event_sources:
+              api_gateway:
+                type: "api_gateway"
+                http_method: "ANY"
+                resource_path: "/users/{proxy+}"
+                
+          # Background processors  
+          order-processor:
+            description: "Order processing function"
+            runtime: "${var.lambda_runtime}"
+            handler: "processors.orders.handler"
+            timeout: 300  # 5 minutes for processing
+            memory_size: 1024
+            
+            environment_variables:
+              ORDERS_TABLE: "${atmos.component.dynamodb.outputs.orders_table_name}"
+              NOTIFICATIONS_TOPIC: "${atmos.component.sns.outputs.notifications_topic_arn}"
+              
+            # Triggered by EventBridge
+            event_sources:
+              eventbridge:
+                type: "eventbridge"
+                rule_name: "order-created"
+                event_pattern: |
+                  {
+                    "source": ["myapp.orders"],
+                    "detail-type": ["Order Created"]
+                  }
+                  
+          # Scheduled functions
+          daily-reports:
+            description: "Daily report generation"
+            runtime: "${var.lambda_runtime}"
+            handler: "reports.daily.handler"
+            timeout: 600  # 10 minutes
+            memory_size: 2048
+            
+            environment_variables:
+              REPORTS_BUCKET: "${atmos.component.s3.outputs.reports_bucket_name}"
+              
+            # Scheduled execution
+            event_sources:
+              schedule:
+                type: "schedule"
+                schedule_expression: "cron(0 6 * * ? *)"  # Daily at 6 AM UTC
+                
+        # Global Lambda settings
+        tracing_config:
+          mode: "${var.xray_tracing_enabled ? 'Active' : 'PassThrough'}"
+          
+        # Dead letter queues
+        dead_letter_config:
+          target_arn: "${atmos.component.sqs.outputs.dlq_arn}"
+          
+    # API Gateway for serverless APIs
+    api-gateway:
+      metadata:
+        component: apigateway
+      vars:
+        name: "${var.tenant}-${var.environment}-api"
+        
+        # Gateway configuration
+        gateway_type: "HTTP"
+        protocol_type: "HTTP"
+        
+        # Throttling
+        throttle_settings:
+          burst_limit: "${var.api_throttling_burst_limit}"
+          rate_limit: "${var.api_throttling_rate_limit}"
+          
+        # CORS
+        cors_configuration:
+          allow_credentials: false
+          allow_headers: ["content-type", "x-amz-date", "authorization", "x-api-key"]
+          allow_methods: ["*"]
+          allow_origins: ["*"]
+          max_age: 86400
+          
+        # Custom domain (optional)
+        custom_domain_enabled: false
+        # domain_name: "api.${var.tenant}.com"
+        # certificate_arn: "${var.certificate_arn}"
+        
+        # Stages
+        stages:
+          - name: "${var.environment}"
+            auto_deploy: true
+            description: "Serverless API ${var.environment} stage"
+            
+            # Stage-level throttling
+            throttle_settings:
+              burst_limit: "${var.api_throttling_burst_limit}"
+              rate_limit: "${var.api_throttling_rate_limit}"
+              
+    # DynamoDB tables for data storage
+    dynamodb:
+      metadata:
+        component: dynamodb
+      vars:
+        name: "${var.tenant}-${var.environment}-db"
+        
+        tables:
+          # Users table
+          users:
+            table_name: "${var.tenant}-${var.environment}-users"
+            billing_mode: "${var.dynamodb_billing_mode}"
+            
+            hash_key: "user_id"
+            hash_key_type: "S"
+            
+            # Global Secondary Indexes
+            global_secondary_indexes:
+              email_index:
+                name: "email-index"
+                hash_key: "email"
+                hash_key_type: "S"
+                projection_type: "ALL"
+                
+            # Attributes
+            attributes:
+              user_id: "S"
+              email: "S"
+              
+            # Backup and recovery
+            point_in_time_recovery_enabled: "${var.dynamodb_point_in_time_recovery}"
+            
+            # Encryption
+            server_side_encryption:
+              enabled: true
+              kms_key_id: "alias/aws/dynamodb"
+              
+          # Orders table
+          orders:
+            table_name: "${var.tenant}-${var.environment}-orders"
+            billing_mode: "${var.dynamodb_billing_mode}"
+            
+            hash_key: "order_id"  
+            hash_key_type: "S"
+            range_key: "created_at"
+            range_key_type: "S"
+            
+            # GSI for user orders
+            global_secondary_indexes:
+              user_orders_index:
+                name: "user-orders-index"
+                hash_key: "user_id"
+                hash_key_type: "S"
+                range_key: "created_at"
+                range_key_type: "S"
+                projection_type: "ALL"
+                
+            attributes:
+              order_id: "S"
+              user_id: "S"
+              created_at: "S"
+              
+            # DynamoDB Streams for event-driven processing
+            stream_enabled: true
+            stream_view_type: "NEW_AND_OLD_IMAGES"
+            
+    # EventBridge for event-driven architecture
+    eventbridge:
+      metadata:
+        component: eventbridge
+      vars:
+        name: "${var.tenant}-${var.environment}-events"
+        
+        # Custom event bus
+        custom_bus_enabled: true
+        event_bus_name: "${var.tenant}-${var.environment}-bus"
+        
+        # Event rules
+        rules:
+          order_created:
+            name: "order-created-rule"
+            description: "Route order creation events"
+            event_pattern: |
+              {
+                "source": ["myapp.orders"],
+                "detail-type": ["Order Created"]
+              }
+            targets:
+              - arn: "${atmos.component.lambda-functions.outputs.order_processor_function_arn}"
+                id: "order-processor-target"
+                
+          user_registered:
+            name: "user-registered-rule"
+            description: "Route user registration events"
+            event_pattern: |
+              {
+                "source": ["myapp.users"], 
+                "detail-type": ["User Registered"]
+              }
+            targets:
+              - arn: "${atmos.component.sns.outputs.notifications_topic_arn}"
+                id: "user-notifications-target"
+                
+    # Step Functions for complex workflows
+    step-functions:
+      metadata:
+        component: stepfunctions
+      vars:
+        name: "${var.tenant}-${var.environment}-workflows"
+        
+        state_machines:
+          # Order fulfillment workflow
+          order_fulfillment:
+            name: "order-fulfillment-workflow"
+            definition: |
+              {
+                "Comment": "Order fulfillment workflow",
+                "StartAt": "ValidateOrder",
+                "States": {
+                  "ValidateOrder": {
+                    "Type": "Task",
+                    "Resource": "${atmos.component.lambda-functions.outputs.validate_order_function_arn}",
+                    "Next": "ProcessPayment"
+                  },
+                  "ProcessPayment": {
+                    "Type": "Task",
+                    "Resource": "${atmos.component.lambda-functions.outputs.process_payment_function_arn}",
+                    "Next": "UpdateInventory"
+                  },
+                  "UpdateInventory": {
+                    "Type": "Task",
+                    "Resource": "${atmos.component.lambda-functions.outputs.update_inventory_function_arn}",
+                    "Next": "SendConfirmation"
+                  },
+                  "SendConfirmation": {
+                    "Type": "Task",
+                    "Resource": "${atmos.component.lambda-functions.outputs.send_confirmation_function_arn}",
+                    "End": true
+                  }
+                }
+              }
+              
+            role_arn: "${atmos.component.iam-roles.outputs.step_functions_execution_role_arn}"
+            
+    # IAM roles and policies
+    iam-roles:
+      metadata:
+        component: iam
+      vars:
+        name: "${var.tenant}-${var.environment}-iam"
+        
+        roles:
+          # Lambda execution role
+          lambda_execution:
+            name: "${var.tenant}-${var.environment}-lambda-execution"
+            assume_role_policy: |
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Principal": {
+                      "Service": "lambda.amazonaws.com"
+                    },
+                    "Action": "sts:AssumeRole"
+                  }
+                ]
+              }
+            managed_policies:
+              - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              - "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+              
+          # Step Functions execution role
+          step_functions_execution:
+            name: "${var.tenant}-${var.environment}-stepfunctions"
+            assume_role_policy: |
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Principal": {
+                      "Service": "states.amazonaws.com"
+                    },
+                    "Action": "sts:AssumeRole"
+                  }
+                ]
+              }
+              
+        # Custom policies
+        policies:
+          dynamodb_read_write:
+            name: "${var.tenant}-${var.environment}-dynamodb-access"
+            policy: |
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Action": [
+                      "dynamodb:GetItem",
+                      "dynamodb:PutItem",
+                      "dynamodb:UpdateItem",
+                      "dynamodb:DeleteItem",
+                      "dynamodb:Query",
+                      "dynamodb:Scan"
+                    ],
+                    "Resource": [
+                      "${atmos.component.dynamodb.outputs.users_table_arn}",
+                      "${atmos.component.dynamodb.outputs.users_table_arn}/*",
+                      "${atmos.component.dynamodb.outputs.orders_table_arn}",
+                      "${atmos.component.dynamodb.outputs.orders_table_arn}/*"
+                    ]
+                  }
+                ]
+              }
+              
+    # Monitoring for serverless
+    monitoring:
+      metadata:
+        component: monitoring
+      vars:
+        name: "${var.tenant}-${var.environment}-monitoring"
+        
+        # Serverless-specific dashboards
+        dashboards_enabled: true
+        dashboards:
+          lambda_overview:
+            title: "Lambda Functions Overview"
+            metrics:
+              - "AWS/Lambda/Duration"
+              - "AWS/Lambda/Errors"
+              - "AWS/Lambda/Throttles" 
+              - "AWS/Lambda/Invocations"
+              
+          api_gateway:
+            title: "API Gateway Metrics"
+            metrics:
+              - "AWS/ApiGateway/Count"
+              - "AWS/ApiGateway/Latency"
+              - "AWS/ApiGateway/4XXError"
+              - "AWS/ApiGateway/5XXError"
+              
+          dynamodb:
+            title: "DynamoDB Performance"
+            metrics:
+              - "AWS/DynamoDB/ConsumedReadCapacityUnits"
+              - "AWS/DynamoDB/ConsumedWriteCapacityUnits"
+              - "AWS/DynamoDB/ThrottledRequests"
+              
+        # Serverless-specific alarms
+        alarms:
+          lambda_errors:
+            metric_name: "Errors"
+            namespace: "AWS/Lambda"
+            threshold: 5
+            comparison_operator: "GreaterThanThreshold"
+            period: 300
+            
+          lambda_duration:
+            metric_name: "Duration"
+            namespace: "AWS/Lambda"
+            threshold: 10000  # 10 seconds
+            comparison_operator: "GreaterThanThreshold"
+            
+          api_gateway_latency:
+            metric_name: "Latency"
+            namespace: "AWS/ApiGateway"
+            threshold: 2000  # 2 seconds
+            comparison_operator: "GreaterThanThreshold"
+            
+          dynamodb_throttles:
+            metric_name: "ThrottledRequests"
+            namespace: "AWS/DynamoDB"
+            threshold: 0
+            comparison_operator: "GreaterThanThreshold"

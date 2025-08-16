@@ -1,10 +1,39 @@
 {
   "mcpServers": {
-    "fetch": {
+    "Web Fetch MCP": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-fetch"
+        "@kazuph/mcp-fetch@latest"
+      ],
+      "env": {
+        "TIMEOUT": "30000",
+        "MAX_FILE_SIZE": "10485760"
+      }
+    },
+    "Simple Fetch MCP": {
+      "command": "npx",
+      "args": [
+        "-y", 
+        "mcp-fetch-server@latest"
+      ]
+    },
+    "Memory Context MCP": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory@latest"
+      ],
+      "env": {
+        "MEMORY_STORAGE_PATH": "/tmp/mcp-memory",
+        "MAX_MEMORY_SIZE": "100MB"
+      }
+    },
+    "Sequential Thinking MCP": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking@latest"
       ]
     }
   }

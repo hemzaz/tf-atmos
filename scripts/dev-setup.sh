@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Development Environment Setup Script
 set -euo pipefail
 

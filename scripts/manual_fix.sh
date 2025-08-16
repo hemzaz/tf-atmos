@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Manually fix each catalog file
 
 cd /Users/elad/IdeaProjects/tf-atmos

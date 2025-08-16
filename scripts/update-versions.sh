@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 # Script to update tool versions in .env file
 # Supports updating to latest, LTS, or specific versions
@@ -23,18 +23,18 @@ CHECK_ONLY=false
 SHOW_ALL=false
 BATCH_MODE=false
 
-# Tool categories for batch updates
-declare -A TOOL_CATEGORIES
-TOOL_CATEGORIES[core]="TERRAFORM_VERSION ATMOS_VERSION KUBECTL_VERSION HELM_VERSION"
-TOOL_CATEGORIES[security]="TFSEC_VERSION TFLINT_VERSION CHECKOV_VERSION"
-TOOL_CATEGORIES[aws]="AWS_CLI_VERSION SESSION_MANAGER_VERSION"
-TOOL_CATEGORIES[providers]="TF_PROVIDER_AWS_VERSION TF_PROVIDER_KUBERNETES_VERSION TF_PROVIDER_HELM_VERSION TF_PROVIDER_TLS_VERSION TF_PROVIDER_TIME_VERSION TF_PROVIDER_KUBECTL_VERSION"
-TOOL_CATEGORIES[cicd]="YAMLLINT_VERSION PRECOMMIT_VERSION TERRAFORM_DOCS_VERSION"
-TOOL_CATEGORIES[templating]="COPIER_VERSION"
-TOOL_CATEGORIES[all]=$(echo "${TOOL_CATEGORIES[core]} ${TOOL_CATEGORIES[security]} ${TOOL_CATEGORIES[aws]} ${TOOL_CATEGORIES[providers]} ${TOOL_CATEGORIES[cicd]} ${TOOL_CATEGORIES[templating]}" | tr ' ' '\n' | sort | uniq | tr '\n' ' ')
+# Tool categories for batch updates (bash 3.x compatible)
+# Using variables instead of associative arrays
+TOOL_CATEGORY_CORE="TERRAFORM_VERSION ATMOS_VERSION KUBECTL_VERSION HELM_VERSION"
+TOOL_CATEGORY_SECURITY="TFSEC_VERSION TFLINT_VERSION CHECKOV_VERSION"
+TOOL_CATEGORY_AWS="AWS_CLI_VERSION SESSION_MANAGER_VERSION"
+TOOL_CATEGORY_PROVIDERS="TF_PROVIDER_AWS_VERSION TF_PROVIDER_KUBERNETES_VERSION TF_PROVIDER_HELM_VERSION TF_PROVIDER_TLS_VERSION TF_PROVIDER_TIME_VERSION TF_PROVIDER_KUBECTL_VERSION"
+TOOL_CATEGORY_CICD="YAMLLINT_VERSION PRECOMMIT_VERSION TERRAFORM_DOCS_VERSION"
+TOOL_CATEGORY_TEMPLATING="COPIER_VERSION"
+TOOL_CATEGORY_ALL="$TOOL_CATEGORY_CORE $TOOL_CATEGORY_SECURITY $TOOL_CATEGORY_AWS $TOOL_CATEGORY_PROVIDERS $TOOL_CATEGORY_CICD $TOOL_CATEGORY_TEMPLATING"
 
-# API endpoints and patterns for version lookups
-declare -A VERSION_APIS
+# API endpoints and patterns for version lookups (bash 3.x compatible)
+# Using a lookup function instead of associative arrays
 VERSION_APIS[TERRAFORM_VERSION]="https://releases.hashicorp.com/terraform/|latest_version=\\\"([0-9]+\\.[0-9]+\\.[0-9]+)\\\""
 VERSION_APIS[TERRAFORM_VERSION_LTS]="https://releases.hashicorp.com/terraform/|latest_version=\\\"([0-9]+\\.[0-9]+\\.[0-9]+)\\\""
 VERSION_APIS[ATMOS_VERSION]="https://api.github.com/repos/cloudposse/atmos/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
@@ -103,13 +103,48 @@ fetch_latest_version() {
     tool_key="${tool}_LTS"
   fi
   
-  if [[ -z "${VERSION_APIS[$tool_key]}" ]]; then
-    echo -e "${YELLOW}No version lookup available for $tool${RESET}"
-    return 1
-  fi
+  local api_info=""
+  local pattern=""
   
-  local api_info=$(echo "${VERSION_APIS[$tool_key]}" | cut -d'|' -f1)
-  local pattern=$(echo "${VERSION_APIS[$tool_key]}" | cut -d'|' -f2)
+  # Lookup API info based on tool (bash 3.x compatible)
+  case "$tool_key" in
+    "TERRAFORM_VERSION"|"TERRAFORM_VERSION_LTS")
+      api_info="https://releases.hashicorp.com/terraform/"
+      pattern="latest_version=\"([0-9]+\.[0-9]+\.[0-9]+)\""
+      ;;
+    "ATMOS_VERSION"|"ATMOS_VERSION_LTS")
+      api_info="https://api.github.com/repos/cloudposse/atmos/releases/latest"
+      pattern="\"tag_name\":\"v([0-9]+\.[0-9]+\.[0-9]+)\""
+      ;;
+    "KUBECTL_VERSION"|"KUBECTL_VERSION_LTS")
+      api_info="https://storage.googleapis.com/kubernetes-release/release/stable.txt"
+      pattern="v([0-9]+\.[0-9]+\.[0-9]+)"
+      ;;
+    "HELM_VERSION"|"HELM_VERSION_LTS")
+      api_info="https://api.github.com/repos/helm/helm/releases/latest"
+      pattern="\"tag_name\":\"v([0-9]+\.[0-9]+\.[0-9]+)\""
+      ;;
+    "TFSEC_VERSION")
+      api_info="https://api.github.com/repos/aquasecurity/tfsec/releases/latest"
+      pattern="\"tag_name\":\"v([0-9]+\.[0-9]+\.[0-9]+)\""
+      ;;
+    "TFLINT_VERSION")
+      api_info="https://api.github.com/repos/terraform-linters/tflint/releases/latest"
+      pattern="\"tag_name\":\"v([0-9]+\.[0-9]+\.[0-9]+)\""
+      ;;
+    "CHECKOV_VERSION")
+      api_info="https://api.github.com/repos/bridgecrewio/checkov/releases/latest"
+      pattern="\"tag_name\":\"([0-9]+\.[0-9]+\.[0-9]+)\""
+      ;;
+    "COPIER_VERSION")
+      api_info="curl -s https://pypi.org/pypi/copier/json | jq -r '.info.version'"
+      pattern="([0-9]+\.[0-9]+\.[0-9]+)"
+      ;;
+    *)
+      echo -e "${YELLOW}No version lookup available for $tool${RESET}" >&2
+      return 1
+      ;;
+  esac
   
   # Special handling for Copier which uses a direct command rather than a URL
   if [[ "$tool" == "COPIER_VERSION" ]]; then
@@ -218,37 +253,37 @@ show_all_tools() {
   echo -e "${BOLD}Available Tools in .env:${RESET}"
   echo
   echo -e "${BOLD}Core Tools:${RESET}"
-  for tool in ${TOOL_CATEGORIES[core]}; do
+  for tool in $TOOL_CATEGORY_CORE; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
   
   echo
   echo -e "${BOLD}Security Tools:${RESET}"
-  for tool in ${TOOL_CATEGORIES[security]}; do
+  for tool in $TOOL_CATEGORY_SECURITY; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
   
   echo
   echo -e "${BOLD}AWS Tools:${RESET}"
-  for tool in ${TOOL_CATEGORIES[aws]}; do
+  for tool in $TOOL_CATEGORY_AWS; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
   
   echo
   echo -e "${BOLD}Terraform Providers:${RESET}"
-  for tool in ${TOOL_CATEGORIES[providers]}; do
+  for tool in $TOOL_CATEGORY_PROVIDERS; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
   
   echo
   echo -e "${BOLD}CI/CD Tools:${RESET}"
-  for tool in ${TOOL_CATEGORIES[cicd]}; do
+  for tool in $TOOL_CATEGORY_CICD; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
   
   echo
   echo -e "${BOLD}Templating Tools:${RESET}"
-  for tool in ${TOOL_CATEGORIES[templating]}; do
+  for tool in $TOOL_CATEGORY_TEMPLATING; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
   
@@ -286,12 +321,39 @@ while [[ $# -gt 0 ]]; do
       ;;
     -g|--group)
       BATCH_MODE=true
-      if [[ -z "${TOOL_CATEGORIES[$2]}" ]]; then
-        echo -e "${RED}Error: Unknown group '$2'. Available groups: core, security, aws, k8s, providers, cicd, all${RESET}"
-        exit 1
-      fi
-      # Split the string of tool names into an array
-      read -ra TOOLS <<< "${TOOL_CATEGORIES[$2]}"
+      local group="$2"
+      local tools_string=""
+      
+      case "$group" in
+        "core")
+          tools_string="$TOOL_CATEGORY_CORE"
+          ;;
+        "security")
+          tools_string="$TOOL_CATEGORY_SECURITY"
+          ;;
+        "aws")
+          tools_string="$TOOL_CATEGORY_AWS"
+          ;;
+        "providers")
+          tools_string="$TOOL_CATEGORY_PROVIDERS"
+          ;;
+        "cicd")
+          tools_string="$TOOL_CATEGORY_CICD"
+          ;;
+        "templating")
+          tools_string="$TOOL_CATEGORY_TEMPLATING"
+          ;;
+        "all")
+          tools_string="$TOOL_CATEGORY_ALL"
+          ;;
+        *)
+          echo -e "${RED}Error: Unknown group '$group'. Available groups: core, security, aws, providers, cicd, templating, all${RESET}"
+          exit 1
+          ;;
+      esac
+      
+      # Split the string into array (bash 3.x compatible)
+      IFS=' ' read -ra TOOLS <<< "$tools_string"
       shift 2
       ;;
     -*)

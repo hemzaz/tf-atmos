@@ -1,0 +1,359 @@
+# Deployment Pipeline Workflow Template
+# 
+# Complete CI/CD pipeline for infrastructure deployment
+# Includes validation, planning, approval gates, and deployment
+#
+# Usage: Copy to workflows/ directory and customize
+
+name: deployment-pipeline
+description: "Complete deployment pipeline with validation, planning, and deployment"
+
+workflows:
+  deployment-pipeline:
+    description: "Full deployment pipeline workflow"
+    steps:
+    - name: "validate-syntax"
+      description: "Validate Terraform syntax and configuration"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Syntax Validation ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          # Validate Terraform files
+          echo "Checking Terraform syntax..."
+          terraform fmt -check=true -recursive ./components/terraform
+          
+          # Validate YAML syntax
+          echo "Checking YAML syntax..."
+          find stacks -name "*.yaml" -o -name "*.yml" | xargs yamllint
+          
+          # Validate Atmos configuration
+          echo "Validating Atmos configuration..."
+          atmos validate stacks
+          
+          echo "✅ Syntax validation complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "security-scan"  
+      description: "Run security scans on infrastructure code"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Security Scanning ==="
+          
+          # Run tfsec security scanning
+          echo "Running tfsec security scan..."
+          if command -v tfsec &> /dev/null; then
+            tfsec ./components/terraform --format json --out tfsec-results.json || true
+            echo "Security scan results saved to tfsec-results.json"
+          else
+            echo "⚠️  tfsec not installed - skipping security scan"
+          fi
+          
+          # Run checkov if available
+          echo "Running checkov security scan..."
+          if command -v checkov &> /dev/null; then
+            checkov -d ./components/terraform --framework terraform --output json --output-file checkov-results.json || true
+            echo "Checkov results saved to checkov-results.json"
+          else
+            echo "⚠️  checkov not installed - skipping checkov scan"
+          fi
+          
+          echo "✅ Security scanning complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "validate-components"
+      description: "Validate all Terraform components"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Component Validation ==="
+          
+          # Validate required parameters
+          if [ -z "${tenant:-}" ] || [ -z "${account:-}" ] || [ -z "${environment:-}" ]; then
+            echo "ERROR: Missing required parameters"
+            echo "Usage: tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+          
+          STACK="${tenant}-${account}-${environment}"
+          echo "Validating components for stack: $STACK"
+          
+          # Get list of components
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+          
+          if [ -z "$COMPONENTS" ]; then
+            echo "⚠️  No components found for stack $STACK"
+            exit 0
+          fi
+          
+          echo "Components to validate: $COMPONENTS"
+          
+          # Validate each component
+          VALIDATION_FAILED=false
+          for component in $COMPONENTS; do
+            echo "Validating component: $component"
+            
+            if atmos terraform validate "$component" -s "$STACK"; then
+              echo "✅ $component validation passed"
+            else
+              echo "❌ $component validation failed"
+              VALIDATION_FAILED=true
+            fi
+          done
+          
+          if [ "$VALIDATION_FAILED" = true ]; then
+            echo "❌ One or more component validations failed"
+            exit 1
+          fi
+          
+          echo "✅ All component validations passed"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "cost-estimation"
+      description: "Estimate infrastructure costs"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Cost Estimation ==="
+          
+          # Run infracost if available
+          if command -v infracost &> /dev/null; then
+            echo "Running cost estimation..."
+            
+            # Generate plan files for cost estimation
+            STACK="${tenant}-${account}-${environment}"
+            COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+            
+            for component in $COMPONENTS; do
+              echo "Generating plan for $component..."
+              atmos terraform plan "$component" -s "$STACK" -out="${component}.tfplan" || continue
+              
+              echo "Estimating costs for $component..."
+              infracost breakdown --path="${component}.tfplan" --format json --out-file="${component}-costs.json" || true
+            done
+            
+            echo "Cost estimation complete"
+          else
+            echo "⚠️  infracost not installed - skipping cost estimation"
+            echo "💡 Install infracost for cost analysis: https://www.infracost.io/docs/"
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "plan-changes"
+      description: "Plan infrastructure changes"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Planning Changes ==="
+          
+          STACK="${tenant}-${account}-${environment}"
+          echo "Planning changes for stack: $STACK"
+          
+          # Create plans directory
+          mkdir -p plans
+          
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+          
+          if [ -z "$COMPONENTS" ]; then
+            echo "⚠️  No components found for stack $STACK"
+            exit 0
+          fi
+          
+          echo "Planning components: $COMPONENTS"
+          
+          # Plan each component
+          PLAN_FAILED=false
+          for component in $COMPONENTS; do
+            echo "Planning component: $component"
+            
+            if atmos terraform plan "$component" -s "$STACK" -out="plans/${component}.tfplan"; then
+              echo "✅ $component plan generated"
+              
+              # Convert plan to readable format
+              terraform show -no-color "plans/${component}.tfplan" > "plans/${component}-plan.txt"
+              echo "Plan saved to plans/${component}-plan.txt"
+            else
+              echo "❌ $component plan failed"
+              PLAN_FAILED=true
+            fi
+          done
+          
+          if [ "$PLAN_FAILED" = true ]; then
+            echo "❌ One or more component plans failed"
+            exit 1
+          fi
+          
+          echo "✅ All component plans generated successfully"
+          echo "Review plans in the 'plans/' directory before proceeding"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "approval-gate"
+      description: "Manual approval checkpoint before deployment"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Deployment Approval Gate ==="
+          echo "Review the following before approving deployment:"
+          echo ""
+          echo "📋 Checklist:"
+          echo "  ✅ Syntax validation passed"
+          echo "  ✅ Security scan completed"
+          echo "  ✅ Component validation passed"
+          echo "  ✅ Cost estimation reviewed"
+          echo "  ✅ Infrastructure plans reviewed"
+          echo ""
+          echo "📁 Review Files:"
+          echo "  • Component plans: plans/*.txt"
+          echo "  • Security results: *-results.json"
+          echo "  • Cost estimates: *-costs.json"
+          echo ""
+          
+          if [ "${auto_approve:-false}" = "true" ]; then
+            echo "🚀 Auto-approval enabled - proceeding with deployment"
+          else
+            echo "⏸️  Manual approval required"
+            echo "Set auto_approve=true to skip this gate"
+            echo ""
+            echo "To proceed manually:"
+            echo "1. Review all generated files"
+            echo "2. Confirm infrastructure changes are expected"
+            echo "3. Re-run with auto_approve=true parameter"
+            exit 0
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "deploy-infrastructure"
+      description: "Deploy infrastructure changes"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Deploying Infrastructure ==="
+          
+          STACK="${tenant}-${account}-${environment}"
+          echo "Deploying stack: $STACK"
+          
+          # Safety check
+          if [ "${auto_approve:-false}" != "true" ]; then
+            echo "❌ Deployment requires auto_approve=true"
+            echo "This is a safety measure to ensure approval gate was passed"
+            exit 1
+          fi
+          
+          # Get components to deploy
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+          
+          if [ -z "$COMPONENTS" ]; then
+            echo "⚠️  No components found for stack $STACK"
+            exit 0
+          fi
+          
+          echo "Deploying components: $COMPONENTS"
+          
+          # Deploy components in order
+          DEPLOYMENT_FAILED=false
+          for component in $COMPONENTS; do
+            echo ""
+            echo "🚀 Deploying component: $component"
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            
+            # Apply with plan file if it exists
+            if [ -f "plans/${component}.tfplan" ]; then
+              echo "Using existing plan file..."
+              if atmos terraform apply "$component" -s "$STACK" "plans/${component}.tfplan"; then
+                echo "✅ $component deployment successful"
+              else
+                echo "❌ $component deployment failed"
+                DEPLOYMENT_FAILED=true
+                break
+              fi
+            else
+              echo "No plan file found, generating fresh plan..."
+              if atmos terraform apply "$component" -s "$STACK" -auto-approve; then
+                echo "✅ $component deployment successful"
+              else
+                echo "❌ $component deployment failed"
+                DEPLOYMENT_FAILED=true
+                break
+              fi
+            fi
+          done
+          
+          if [ "$DEPLOYMENT_FAILED" = true ]; then
+            echo "❌ Deployment failed"
+            echo "Manual intervention may be required"
+            exit 1
+          fi
+          
+          echo ""
+          echo "🎉 Deployment completed successfully!"
+          echo "Stack $STACK deployed at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "post-deployment-validation"
+      description: "Validate deployment success"
+      run:
+        command: |
+          set -euo pipefail
+          
+          echo "=== Post-Deployment Validation ==="
+          
+          STACK="${tenant}-${account}-${environment}"
+          echo "Validating deployed stack: $STACK"
+          
+          # Wait for resources to settle
+          echo "Waiting 30 seconds for resources to settle..."
+          sleep 30
+          
+          # Validate components are still healthy
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+          
+          VALIDATION_FAILED=false
+          for component in $COMPONENTS; do
+            echo "Post-deployment validation for: $component"
+            
+            # Re-run terraform plan to check for drift
+            if atmos terraform plan "$component" -s "$STACK" -detailed-exitcode > /dev/null 2>&1; then
+              echo "✅ $component - no drift detected"
+            else
+              exit_code=$?
+              if [ $exit_code -eq 2 ]; then
+                echo "⚠️  $component - configuration drift detected"
+                VALIDATION_FAILED=true
+              else
+                echo "❌ $component - validation error"
+                VALIDATION_FAILED=true
+              fi
+            fi
+          done
+          
+          if [ "$VALIDATION_FAILED" = true ]; then
+            echo "⚠️  Post-deployment validation found issues"
+            echo "Review the output above and investigate any drift or errors"
+          else
+            echo "✅ Post-deployment validation passed"
+          fi
+          
+          echo ""
+          echo "=== Deployment Summary ==="
+          echo "Stack: $STACK"
+          echo "Components: $COMPONENTS"
+          echo "Status: $([ "$VALIDATION_FAILED" = false ] && echo "✅ SUCCESS" || echo "⚠️  ISSUES DETECTED")"
+          echo "Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

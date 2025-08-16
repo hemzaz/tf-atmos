@@ -1,7 +1,18 @@
 ---
 import:
-  # Import common configurations
+  # Import component catalog configurations
+  - catalog/network/defaults.yaml
+  - catalog/vpc/defaults.yaml
+  - catalog/eks/defaults.yaml
+  - catalog/eks-addons/defaults.yaml
+  - catalog/acm/defaults.yaml
+  - catalog/external-secrets/defaults.yaml
+  - catalog/monitoring/defaults.yaml
+  - catalog/iam/defaults.yaml
+  - catalog/backend/defaults.yaml
+  - catalog/secretsmanager/defaults.yaml
   - catalog/infrastructure/defaults.yaml
+  # Import common configurations
   - mixins/tenant/fnx.yaml
   - mixins/stage/dev.yaml
   - mixins/region/eu-west-2.yaml
@@ -23,6 +34,7 @@ components:
   terraform:
     # Include all essential components for a complete environment
     vpc:
+      component: vpc
       vars:
         enabled: true
         name: "testenv-01-vpc"
@@ -35,6 +47,7 @@ components:
         vpc_flow_logs_bucket_name: "testenv-01-vpc-flow-logs"
 
     eks:
+      component: eks/defaults
       vars:
         enabled: true
         name: "testenv-01-eks"
@@ -53,6 +66,7 @@ components:
             capacity_type: ON_DEMAND
 
     eks-addons:
+      component: eks-addons
       vars:
         enabled: true
         cluster_name: "testenv-01-eks"
@@ -67,6 +81,7 @@ components:
             enabled: true
 
     acm:
+      component: acm/defaults
       vars:
         enabled: true
         domain_name: "testenv-01.example.com"
@@ -74,6 +89,7 @@ components:
           - "*.testenv-01.example.com"
 
     external-secrets:
+      component: external-secrets/defaults
       vars:
         enabled: true
         namespace:
@@ -81,18 +97,21 @@ components:
           create: true
 
     monitoring:
+      component: monitoring/defaults
       vars:
         enabled: true
         name: "testenv-01-monitoring"
         create_dashboard: true
 
     iam:
+      component: iam
       vars:
         enabled: true
         name: "testenv-01-iam"
         create_cross_account_roles: true
 
     backend:
+      component: backend
       vars:
         enabled: true
         name: "testenv-01-backend"
@@ -100,6 +119,7 @@ components:
         terraform_state_table_name: "atmos-terraform-state-lock"
 
     secretsmanager:
+      component: secretsmanager
       vars:
         enabled: true
         name: "testenv-01-secrets"

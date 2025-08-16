@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Comprehensive Backup Procedures for IDP Platform
 # This script implements automated backup procedures with validation and monitoring
 

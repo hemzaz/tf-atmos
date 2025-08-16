@@ -110,3 +110,60 @@ local.yml
 # Developer Experience Metrics (contains potentially sensitive usage data)
 .dx-metrics/
 .stack_aliases
+
+# Atmos specific
+.atmos/
+atmos.lock
+*.atmos.lock
+
+# Claude Code
+.claude/sessions/
+.claude/memory/
+
+# Additional IDE files
+*.sublime-*
+.vim/
+.netrwhist
+
+# Container and Docker
+.docker/
+docker-compose.override.yml
+
+# Certificate files (security)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Backup and temporary files
+*~
+*.orig
+*.rej
+.#*
+#*#
+
+# Generated directories
+backups/
+benchmarks/
+profiles/
+plans/
+manifests/
+
+# Additional Terraform ignores
+terraform.tfstate*
+*.tfplan.out
+*.tfvars.backup
+crash.log
+
+# Generated component files
+components/terraform/*/*.terraform.tfvars.json
+components/terraform/*/backend.tf.json
+components/terraform/*/providers_override.tf.json
+
+# Additional logs and temporary files
+*.tmp
+temp/
+tmp/
+*.out
+*.err

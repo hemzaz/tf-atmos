@@ -1,136 +1,387 @@
 ---
 name: bootstrap-backend
-description: "Initialize the Terraform backend (S3 bucket and DynamoDB table) with enhanced security"
+description: "Initialize the Terraform backend (S3 bucket and DynamoDB table) with enhanced security and cross-account support"
 
 workflows:
   bootstrap:
     steps:
     - run:
         command: |
-          # Get CLI version automatically (in a cross-platform way)
-          GAIA_CLI_VERSION=$(gaia version | sed -n 's/.*Gaia \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-          echo "Using Gaia CLI version: ${GAIA_CLI_VERSION}"
-
+          # =============================================================================
+          # Enhanced Terraform Backend Bootstrap Workflow
+          # =============================================================================
+          # This workflow creates AWS backend infrastructure using the new aws-setup.sh script
+          # with enhanced security, validation, and cross-account support.
+          
+          set -euo pipefail
+          
+          # Colors for output
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          YELLOW='\033[1;33m'
+          BLUE='\033[0;34m'
+          WHITE='\033[1;37m'
+          NC='\033[0m' # No Color
+          
+          log_info() {
+              echo -e "${BLUE}ℹ️  $*${NC}"
+          }
+          
+          log_success() {
+              echo -e "${GREEN}✅ $*${NC}"
+          }
+          
+          log_warning() {
+              echo -e "${YELLOW}⚠️  $*${NC}"
+          }
+          
+          log_error() {
+              echo -e "${RED}❌ $*${NC}"
+          }
+          
+          # =============================================================================
+          # Parameter Validation and Setup
+          # =============================================================================
+          
+          log_info "Starting Enhanced Terraform Backend Bootstrap"
+          
           # Validate required parameters
-          if [ -z "${tenant}" ]; then
-            echo "ERROR: Missing required parameter 'tenant'"
-            echo "Usage: gaia workflow bootstrap-backend tenant=<tenant> region=<region> [bucket_suffix=<suffix>]"
+          REQUIRED_PARAMS=()
+          if [ -z "${tenant:-}" ]; then
+            REQUIRED_PARAMS+=("tenant")
+          fi
+          
+          if [ -z "${account:-}" ]; then
+            REQUIRED_PARAMS+=("account")
+          fi
+          
+          if [ -z "${environment:-}" ]; then
+            REQUIRED_PARAMS+=("environment")
+          fi
+          
+          if [ ${#REQUIRED_PARAMS[@]} -gt 0 ]; then
+            log_error "Missing required parameters: ${REQUIRED_PARAMS[*]}"
+            echo
+            echo "${WHITE}Usage:${NC}"
+            echo "  atmos workflow bootstrap-backend tenant=<tenant> account=<account> environment=<environment> [OPTIONS]"
+            echo
+            echo "${WHITE}Required Parameters:${NC}"
+            echo "  tenant=<name>        Tenant name (e.g., 'fnx')"
+            echo "  account=<name>       Account name (e.g., 'dev', 'prod')"
+            echo "  environment=<name>   Environment name (e.g., 'testenv-01')"
+            echo
+            echo "${WHITE}Optional Parameters:${NC}"
+            echo "  region=<region>      AWS region (default: us-east-1)"
+            echo "  assume_role=<arn>    Cross-account IAM role ARN"
+            echo "  kms_key=<id>         Existing KMS key ID for encryption"
+            echo "  dry_run=true         Show what would be created without changes"
+            echo "  force=true           Skip confirmation prompts"
+            echo
+            echo "${WHITE}Examples:${NC}"
+            echo "  atmos workflow bootstrap-backend tenant=fnx account=dev environment=testenv-01"
+            echo "  atmos workflow bootstrap-backend tenant=fnx account=prod environment=production region=us-west-2"
+            echo "  atmos workflow bootstrap-backend tenant=fnx account=prod environment=prod assume_role=arn:aws:iam::123456789:role/TerraformRole"
             exit 1
           fi
-
-          if [ -z "${region}" ]; then
-            echo "ERROR: Missing required parameter 'region'"
-            echo "Usage: gaia workflow bootstrap-backend tenant=<tenant> region=<region> [bucket_suffix=<suffix>]"
+          
+          # Set default values
+          REGION=${region:-"us-east-1"}
+          ASSUME_ROLE_ARN=${assume_role:-""}
+          KMS_KEY_ID=${kms_key:-""}
+          DRY_RUN=${dry_run:-"false"}
+          FORCE=${force:-"false"}
+          
+          # =============================================================================
+          # AWS Setup Script Execution
+          # =============================================================================
+          
+          log_info "Backend Configuration:"
+          echo "  Tenant:      ${tenant}"
+          echo "  Account:     ${account}"
+          echo "  Environment: ${environment}"
+          echo "  Region:      ${REGION}"
+          
+          if [ -n "$ASSUME_ROLE_ARN" ]; then
+            echo "  Cross-Account Role: ${ASSUME_ROLE_ARN}"
+          fi
+          
+          if [ -n "$KMS_KEY_ID" ]; then
+            echo "  KMS Key: ${KMS_KEY_ID}"
+          fi
+          
+          # Check if aws-setup.sh script exists
+          SCRIPT_PATH="./scripts/aws-setup.sh"
+          if [ ! -f "$SCRIPT_PATH" ]; then
+            log_error "aws-setup.sh script not found at: $SCRIPT_PATH"
+            log_info "Please ensure the script exists and is executable"
             exit 1
           fi
-
-          # Generate bucket and table names
-          BUCKET_SUFFIX=${bucket_suffix:-"terraform-state"}
-          DYNAMODB_SUFFIX=${dynamodb_suffix:-"terraform-locks"}
-
-          # Format names with proper kebab-case
-          BUCKET_NAME="${tenant}-${BUCKET_SUFFIX}"
-          DYNAMODB_TABLE_NAME="${tenant}-${DYNAMODB_SUFFIX}"
-
-          # Check if AWS credentials are valid
-          echo "Validating AWS credentials..."
-          if ! aws sts get-caller-identity > /dev/null; then
-            echo "ERROR: Invalid AWS credentials. Please check your credentials and try again."
-            exit 1
+          
+          if [ ! -x "$SCRIPT_PATH" ]; then
+            log_warning "Making aws-setup.sh executable..."
+            chmod +x "$SCRIPT_PATH"
           fi
-
-          # Check if the bucket already exists
-          echo "Checking if bucket already exists..."
-          if aws s3api head-bucket --bucket ${BUCKET_NAME} 2>/dev/null; then
-            echo "Bucket ${BUCKET_NAME} already exists. Skipping bucket creation."
-          else
-            # Create S3 bucket for Terraform state with enhanced security
-            echo "Creating S3 bucket for Terraform state: ${BUCKET_NAME}"
-
-            # Handle us-east-1 region differently (no LocationConstraint needed)
-            if [ "${region}" = "us-east-1" ]; then
-              aws s3api create-bucket --bucket ${BUCKET_NAME} --region ${region}
-            else
-              aws s3api create-bucket --bucket ${BUCKET_NAME} --region ${region} --create-bucket-configuration LocationConstraint=${region}
+          
+          # Build command arguments
+          SETUP_ARGS=(
+            "--tenant" "$tenant"
+            "--account" "$account"
+            "--environment" "$environment"
+            "--region" "$REGION"
+          )
+          
+          if [ -n "$ASSUME_ROLE_ARN" ]; then
+            SETUP_ARGS+=("--assume-role" "$ASSUME_ROLE_ARN")
+          fi
+          
+          if [ -n "$KMS_KEY_ID" ]; then
+            SETUP_ARGS+=("--kms-key-id" "$KMS_KEY_ID")
+          fi
+          
+          if [ "$DRY_RUN" == "true" ]; then
+            SETUP_ARGS+=("--dry-run")
+          fi
+          
+          if [ "$FORCE" == "true" ]; then
+            SETUP_ARGS+=("--force")
+          fi
+          
+          # Enable debug if requested
+          if [ "${debug:-false}" == "true" ]; then
+            SETUP_ARGS+=("--debug")
+          fi
+          
+          # =============================================================================
+          # Execute AWS Setup
+          # =============================================================================
+          
+          log_info "Executing AWS backend setup script..."
+          
+          # Execute the setup script with all arguments
+          if "$SCRIPT_PATH" "${SETUP_ARGS[@]}"; then
+            log_success "AWS backend setup completed successfully"
+            
+            # =============================================================================
+            # Post-Setup Actions
+            # =============================================================================
+            
+            # Generate resource names for verification
+            BUCKET_NAME="${tenant}-${account}-${environment}-terraform-state"
+            DYNAMODB_TABLE="${tenant}-${account}-${environment}-terraform-locks"
+            
+            log_info "Verifying created resources..."
+            
+            # Verify S3 bucket (if not dry run)
+            if [ "$DRY_RUN" != "true" ]; then
+              if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+                log_success "S3 bucket verified: $BUCKET_NAME"
+              else
+                log_warning "Could not verify S3 bucket: $BUCKET_NAME"
+              fi
+              
+              # Verify DynamoDB table
+              if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" 2>/dev/null >/dev/null; then
+                log_success "DynamoDB table verified: $DYNAMODB_TABLE"
+              else
+                log_warning "Could not verify DynamoDB table: $DYNAMODB_TABLE"
+              fi
             fi
-
-            # Enable versioning on the bucket
-            echo "Enabling versioning on bucket: ${BUCKET_NAME}"
-            aws s3api put-bucket-versioning --bucket ${BUCKET_NAME} --versioning-configuration Status=Enabled
-
-            # Enable server-side encryption
-            echo "Enabling default encryption on bucket: ${BUCKET_NAME}"
-            aws s3api put-bucket-encryption --bucket ${BUCKET_NAME} --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
-
-            # Block public access
-            echo "Blocking public access to bucket: ${BUCKET_NAME}"
-            aws s3api put-public-access-block --bucket ${BUCKET_NAME} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
-          fi
-
-          # Check if the DynamoDB table already exists
-          echo "Checking if DynamoDB table already exists..."
-          if aws dynamodb describe-table --table-name ${DYNAMODB_TABLE_NAME} --region ${region} 2>/dev/null; then
-            echo "DynamoDB table ${DYNAMODB_TABLE_NAME} already exists. Skipping table creation."
+            
+            # =============================================================================
+            # Next Steps Instructions
+            # =============================================================================
+            
+            echo
+            echo "${WHITE}===========================================${NC}"
+            echo "${WHITE}🎉 Backend Bootstrap Completed Successfully${NC}"
+            echo "${WHITE}===========================================${NC}"
+            echo
+            echo "${WHITE}Next Steps:${NC}"
+            echo "1. Review the generated configuration in: backend-configs/"
+            echo "2. Apply the backend component:"
+            echo "   ${BLUE}atmos terraform apply backend -s ${tenant}-${account}-${environment}${NC}"
+            echo "3. Initialize other components with the new backend"
+            echo
+            echo "${WHITE}Quick Commands:${NC}"
+            echo "   ${BLUE}# Validate backend component${NC}"
+            echo "   atmos terraform validate backend -s ${tenant}-${account}-${environment}"
+            echo
+            echo "   ${BLUE}# Plan backend infrastructure${NC}"
+            echo "   atmos terraform plan backend -s ${tenant}-${account}-${environment}"
+            echo
+            echo "   ${BLUE}# Apply backend infrastructure${NC}"
+            echo "   atmos terraform apply backend -s ${tenant}-${account}-${environment}"
+            echo
+            
+            # Show configuration snippet if available
+            CONFIG_FILE="./backend-configs/${tenant}-${account}-${environment}.yaml"
+            if [ -f "$CONFIG_FILE" ]; then
+              echo "${WHITE}Generated Configuration Preview:${NC}"
+              head -20 "$CONFIG_FILE" | sed 's/^/   /'
+              echo "   ..."
+              echo "   ${BLUE}(Full configuration in: $CONFIG_FILE)${NC}"
+            fi
+            
           else
-            # Create DynamoDB table for state locking
-            echo "Creating DynamoDB table for state locking: ${DYNAMODB_TABLE_NAME}"
-            aws dynamodb create-table --table-name ${DYNAMODB_TABLE_NAME} --attribute-definitions AttributeName=LockID,AttributeType=S --key-schema AttributeName=LockID,KeyType=HASH --billing-mode PAY_PER_REQUEST --region ${region}
-
-            # Wait for table to be created and active
-            echo "Waiting for DynamoDB table to become active..."
-            aws dynamodb wait table-exists --table-name ${DYNAMODB_TABLE_NAME} --region ${region}
+            log_error "AWS backend setup failed"
+            echo
+            echo "${WHITE}Troubleshooting:${NC}"
+            echo "1. Check AWS credentials: aws sts get-caller-identity"
+            echo "2. Verify AWS permissions for S3 and DynamoDB"
+            echo "3. Check the setup log file in: logs/"
+            echo "4. Run with debug flag: debug=true"
+            echo
+            exit 1
           fi
-
-          # Add tags to resources
-          echo "Adding tags to resources..."
-          TAGS='[{"Key":"ManagedBy","Value":"Gaia"},{"Key":"Environment","Value":"Terraform"},{"Key":"CreatedBy","Value":"bootstrap-workflow"}]'
-
-          # Tag S3 bucket
-          aws s3api put-bucket-tagging --bucket ${BUCKET_NAME} --tagging "TagSet=${TAGS}"
-
-          # Tag DynamoDB table
-          aws dynamodb tag-resource --resource-arn "arn:aws:dynamodb:${region}:$(aws sts get-caller-identity --query 'Account' --output text):table/${DYNAMODB_TABLE_NAME}" --tags "Key=ManagedBy,Value=Gaia" "Key=Environment,Value=Terraform" "Key=CreatedBy,Value=bootstrap-workflow"
-
-          echo "=========================================================="
-          echo "Backend infrastructure successfully created:"
-          echo "S3 Bucket: ${BUCKET_NAME}"
-          echo "DynamoDB Table: ${DYNAMODB_TABLE_NAME}"
-          echo "Region: ${region}"
-          echo ""
-          echo "Add the following to your backend configuration:"
-          echo "```yaml"
-          echo "import:"
-          echo "  - catalog/backend"
-          echo ""
-          echo "vars:"
-          echo "  bucket_name: \"${BUCKET_NAME}\""
-          echo "  dynamodb_table_name: \"${DYNAMODB_TABLE_NAME}\""
-          echo "  region: \"${region}\""
-          echo "```"
-          echo "=========================================================="
-
-          # Copy template to clipboard if clipboard utility is available
-          CONFIG="import:\n  - catalog/backend\n\nvars:\n  bucket_name: \"${BUCKET_NAME}\"\n  dynamodb_table_name: \"${DYNAMODB_TABLE_NAME}\"\n  region: \"${region}\""
-
-          # Try different clipboard utilities based on OS
-          if [[ "$OSTYPE" == "darwin"* ]] && command -v pbcopy > /dev/null; then
-            # macOS
-            echo -e "$CONFIG" | pbcopy
-            echo "Configuration has been copied to clipboard."
-          elif command -v xclip > /dev/null; then
-            # Linux with xclip
-            echo -e "$CONFIG" | xclip -selection clipboard
-            echo "Configuration has been copied to clipboard using xclip."
-          elif command -v xsel > /dev/null; then
-            # Linux with xsel
-            echo -e "$CONFIG" | xsel --clipboard
-            echo "Configuration has been copied to clipboard using xsel."
-          elif command -v wl-copy > /dev/null; then
-            # Wayland
-            echo -e "$CONFIG" | wl-copy
-            echo "Configuration has been copied to clipboard using wl-copy."
-          else
-            echo "No clipboard utility found. Configure backend using the template above."
-          fi
+          
         env:
           AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # Additional Workflows for Backend Management
+  # =============================================================================
+  
+  verify:
+    description: "Verify existing backend infrastructure"
+    steps:
+    - run:
+        command: |
+          set -euo pipefail
+          
+          # Colors
+          GREEN='\033[0;32m'
+          BLUE='\033[0;34m'
+          RED='\033[0;31m'
+          NC='\033[0m'
+          
+          echo -e "${BLUE}Verifying backend infrastructure...${NC}"
+          
+          # Validate parameters
+          if [ -z "${tenant:-}" ] || [ -z "${account:-}" ] || [ -z "${environment:-}" ]; then
+            echo -e "${RED}ERROR: Missing parameters. Usage: tenant=<name> account=<name> environment=<name>${NC}"
+            exit 1
+          fi
+          
+          REGION=${region:-"us-east-1"}
+          BUCKET_NAME="${tenant}-${account}-${environment}-terraform-state"
+          DYNAMODB_TABLE="${tenant}-${account}-${environment}-terraform-locks"
+          
+          echo "Checking resources for: ${tenant}-${account}-${environment}"
+          echo "Region: ${REGION}"
+          echo
+          
+          # Check S3 bucket
+          echo -n "S3 Bucket ($BUCKET_NAME): "
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo -e "${GREEN}✅ EXISTS${NC}"
+            
+            # Check versioning
+            VERSIONING=$(aws s3api get-bucket-versioning --bucket "$BUCKET_NAME" --query 'Status' --output text 2>/dev/null || echo "None")
+            echo "  Versioning: $VERSIONING"
+            
+            # Check encryption
+            if aws s3api get-bucket-encryption --bucket "$BUCKET_NAME" >/dev/null 2>&1; then
+              echo -e "  Encryption: ${GREEN}✅ Enabled${NC}"
+            else
+              echo -e "  Encryption: ${RED}❌ Not configured${NC}"
+            fi
+          else
+            echo -e "${RED}❌ NOT FOUND${NC}"
+          fi
+          
+          # Check DynamoDB table
+          echo -n "DynamoDB Table ($DYNAMODB_TABLE): "
+          if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" >/dev/null 2>&1; then
+            echo -e "${GREEN}✅ EXISTS${NC}"
+            
+            # Check point-in-time recovery
+            PITR=$(aws dynamodb describe-continuous-backups --table-name "$DYNAMODB_TABLE" --region "$REGION" --query 'ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus' --output text 2>/dev/null || echo "UNKNOWN")
+            echo "  Point-in-Time Recovery: $PITR"
+          else
+            echo -e "${RED}❌ NOT FOUND${NC}"
+          fi
+          
+          echo
+          echo -e "${GREEN}✅ Verification completed${NC}"
+
+  cleanup:
+    description: "Clean up backend infrastructure (DANGEROUS - use with caution)"
+    steps:
+    - run:
+        command: |
+          set -euo pipefail
+          
+          # Colors
+          RED='\033[0;31m'
+          YELLOW='\033[1;33m'
+          GREEN='\033[0;32m'
+          WHITE='\033[1;37m'
+          NC='\033[0m'
+          
+          echo -e "${RED}⚠️  DANGER: Backend Infrastructure Cleanup${NC}"
+          echo -e "${RED}This will DELETE your Terraform backend infrastructure!${NC}"
+          echo
+          
+          # Validate parameters
+          if [ -z "${tenant:-}" ] || [ -z "${account:-}" ] || [ -z "${environment:-}" ]; then
+            echo -e "${RED}ERROR: Missing parameters. Usage: tenant=<name> account=<name> environment=<name>${NC}"
+            exit 1
+          fi
+          
+          REGION=${region:-"us-east-1"}
+          BUCKET_NAME="${tenant}-${account}-${environment}-terraform-state"
+          DYNAMODB_TABLE="${tenant}-${account}-${environment}-terraform-locks"
+          FORCE_CLEANUP=${force:-"false"}
+          
+          echo "Resources to be deleted:"
+          echo "  S3 Bucket: $BUCKET_NAME"
+          echo "  DynamoDB Table: $DYNAMODB_TABLE"
+          echo "  Region: $REGION"
+          echo
+          
+          # Safety confirmation (unless forced)
+          if [ "$FORCE_CLEANUP" != "true" ]; then
+            echo -e "${WHITE}Type '${tenant}-${account}-${environment}' to confirm deletion:${NC}"
+            read -r CONFIRMATION
+            
+            if [ "$CONFIRMATION" != "${tenant}-${account}-${environment}" ]; then
+              echo -e "${GREEN}Cleanup cancelled - confirmation didn't match${NC}"
+              exit 0
+            fi
+            
+            echo -e "${YELLOW}Are you absolutely sure? This cannot be undone! (y/N):${NC}"
+            read -n 1 -r FINAL_CONFIRM
+            echo
+            
+            if [[ ! $FINAL_CONFIRM =~ ^[Yy]$ ]]; then
+              echo -e "${GREEN}Cleanup cancelled${NC}"
+              exit 0
+            fi
+          fi
+          
+          echo -e "${YELLOW}Starting cleanup...${NC}"
+          
+          # Delete S3 bucket contents and bucket
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "Emptying S3 bucket: $BUCKET_NAME"
+            aws s3 rm "s3://$BUCKET_NAME" --recursive || true
+            
+            echo "Deleting S3 bucket: $BUCKET_NAME"
+            aws s3 rb "s3://$BUCKET_NAME" --force || true
+          else
+            echo "S3 bucket $BUCKET_NAME not found (may already be deleted)"
+          fi
+          
+          # Delete DynamoDB table
+          if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" >/dev/null 2>&1; then
+            echo "Deleting DynamoDB table: $DYNAMODB_TABLE"
+            aws dynamodb delete-table --table-name "$DYNAMODB_TABLE" --region "$REGION" || true
+            
+            echo "Waiting for table deletion to complete..."
+            aws dynamodb wait table-not-exists --table-name "$DYNAMODB_TABLE" --region "$REGION" || true
+          else
+            echo "DynamoDB table $DYNAMODB_TABLE not found (may already be deleted)"
+          fi
+          
+          echo -e "${GREEN}✅ Cleanup completed${NC}"
+          echo -e "${YELLOW}⚠️  Remember to remove any backend configurations from your Terraform code${NC}"
