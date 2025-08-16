@@ -43,32 +43,15 @@ stacks:
     - "**/disabled.yaml"
     - "**/components/**/*.yaml"
     - "**/main.yaml"
-  
+
   # Enable schema validation
   validate_schemas: true
-  
+
   # Simple path-based pattern
   name_pattern: "{dir}"
 
 workflows:
   base_path: workflows
-  imports:
-    - apply-backend.yaml
-    - apply-environment.yaml
-    - bootstrap-backend.yaml
-    - compliance-check.yaml
-    - create-environment-template.yaml
-    - destroy-backend.yaml
-    - destroy-environment.yaml
-    - drift-detection.yaml
-    - import.yaml
-    - lint.yaml
-    - onboard-environment.yaml
-    - plan-environment.yaml
-    - rotate-certificate.yaml
-    - state-operations.yaml
-    - update-environment-template.yaml
-    - validate.yaml
 
 logs:
   file: "/dev/stderr"
@@ -106,15 +89,15 @@ vars:
   region: "eu-west-2"
   workspace: "default"
   terraform_version: "1.11.0"
-  
+
   # AWS Provider configuration
   aws_provider_version: "~> 5.0"
   aws_region: "${region}"
-  
+
   # Backend configuration
   backend_type: "s3"
   backend_region: "${region}"
-  
+
   # Standard tags for all resources
   tags:
     ManagedBy: "atmos"

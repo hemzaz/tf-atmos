@@ -1,6 +1,6 @@
 resource "aws_iam_role" "cross_account_role" {
   name = var.cross_account_role_name
-  
+
   # Use templatefile instead of file to enable customization
   assume_role_policy = templatefile(
     "${path.module}/policies/assume-role-policy.json.tpl",
@@ -15,7 +15,7 @@ resource "aws_iam_policy" "cross_account_policy" {
   name        = var.policy_name
   path        = "/"
   description = "Cross-account access policy"
-  
+
   # Use templatefile instead of file to enable customization
   policy = templatefile(
     "${path.module}/policies/account-setup-policies.json.tpl",

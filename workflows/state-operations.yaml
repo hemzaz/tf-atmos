@@ -1,3 +1,4 @@
+---
 name: state-operations
 description: "Manage Terraform state locks"
 
@@ -10,7 +11,7 @@ workflows:
           gaia state list-locks ${tenant}-${account}-${environment}
         env:
           AWS_SDK_LOAD_CONFIG: 1
-          
+
   detect-abandoned-locks:
     steps:
     - run:
@@ -21,7 +22,7 @@ workflows:
             --older-than ${older_than:-120}
         env:
           AWS_SDK_LOAD_CONFIG: 1
-          
+
   clean-abandoned-locks:
     steps:
     - run:

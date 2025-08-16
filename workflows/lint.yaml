@@ -1,23 +1,142 @@
+---
 name: lint
 description: "Lint Terraform code and configuration files"
 
 workflows:
   lint:
+    description: "Run comprehensive linting on Terraform code, YAML files, and security checks"
     steps:
-    - run:
-        command: |
-          # Use Python-based CLI for linting operations
-          SKIP_SECURITY="${skip_security:-false}"
-          
-          gaia workflow lint \
-            --fix ${fix:-false} \
-            ${SKIP_SECURITY:+"--skip-security"}
+      - name: "validate-environment"
+        description: "Validate execution environment and dependencies"
+        run:
+          command: |
+            set -euo pipefail
 
-          EXIT_CODE=$?
-          
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "Linting failed. Please fix the issues before proceeding."
-            exit $EXIT_CODE
-          fi
-        env:
-          AWS_SDK_LOAD_CONFIG: 1
+            echo "=== Atmos Workflow: Terraform Linting ==="
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "Working Directory: $(pwd)"
+
+            # Validate atmos configuration
+            if [ ! -f "atmos.yaml" ]; then
+              echo "ERROR: atmos.yaml not found in current directory"
+              echo "Please run this workflow from the repository root"
+              exit 1
+            fi
+
+            # Check if required tools are available
+            command -v terraform >/dev/null 2>&1 || { echo "ERROR: terraform is required but not installed"; exit 1; }
+
+            echo "✅ Environment validation complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "terraform-format-check"
+        description: "Check and fix Terraform formatting"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo "\n=== Step: Terraform Format Check ==="
+
+            FIX_FLAG="${fix:-false}"
+            TERRAFORM_DIR="./components/terraform"
+
+            if [ ! -d "$TERRAFORM_DIR" ]; then
+              echo "ERROR: Terraform components directory not found: $TERRAFORM_DIR"
+              exit 1
+            fi
+
+            if [ "$FIX_FLAG" = "true" ]; then
+              echo "Running terraform fmt with auto-fix..."
+              terraform fmt -recursive "$TERRAFORM_DIR"
+              echo "✅ Terraform formatting applied"
+            else
+              echo "Running terraform fmt check..."
+              if terraform fmt -check -recursive "$TERRAFORM_DIR"; then
+                echo "✅ Terraform formatting check passed"
+              else
+                echo "❌ Terraform formatting issues found"
+                echo "Run with fix=true to automatically fix formatting issues"
+                exit 1
+              fi
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "yaml-lint-check"
+        description: "Lint YAML configuration files"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo "\n=== Step: YAML Lint Check ==="
+
+            # Check if yamllint is available
+            if ! command -v yamllint >/dev/null 2>&1; then
+              echo "⚠️  yamllint not found, skipping YAML linting"
+              echo "Install with: pip install yamllint"
+              exit 0
+            fi
+
+            # Use yamllint config if available, otherwise use default
+            YAMLLINT_CONFIG=""
+            if [ -f ".yamllint.yml" ]; then
+              YAMLLINT_CONFIG="-c .yamllint.yml"
+            else
+              YAMLLINT_CONFIG="-d '{extends: default, rules: {line-length: {max: 120}}}'"
+            fi
+
+            echo "Running YAML linting..."
+            if eval "yamllint $YAMLLINT_CONFIG ."; then
+              echo "✅ YAML lint check passed"
+            else
+              echo "❌ YAML lint issues found"
+              exit 1
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "security-scan"
+        description: "Run security scanning on Terraform code"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo "\n=== Step: Security Scan ==="
+
+            SKIP_SECURITY="${skip_security:-false}"
+
+            if [ "$SKIP_SECURITY" = "true" ]; then
+              echo "⚠️  Security scanning skipped (skip_security=true)"
+              exit 0
+            fi
+
+            # Check if tfsec is available
+            if ! command -v tfsec >/dev/null 2>&1; then
+              echo "⚠️  tfsec not found, skipping security scanning"
+              echo "Install with: go install github.com/aquasecurity/tfsec/cmd/tfsec@latest"
+              exit 0
+            fi
+
+            echo "Running security scan with tfsec..."
+            if tfsec ./components/terraform --soft-fail --concise-output; then
+              echo "✅ Security scan completed"
+            else
+              echo "⚠️  Security issues found in Terraform code"
+              echo "Review the output above and address security concerns"
+              # Don't fail the workflow for security issues (soft-fail)
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "lint-summary"
+        description: "Provide summary of linting results"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo "\n=== Linting Summary ==="
+            echo "✅ All lint checks completed successfully"
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1

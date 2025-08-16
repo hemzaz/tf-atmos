@@ -1,3 +1,4 @@
+---
 name: destroy-backend
 description: "Destroy the Terraform backend (use with caution)"
 

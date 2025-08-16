@@ -1,9 +1,10 @@
+---
 vars:
   tenant: catalog
   account: shared
   environment: global
   stage: ue2
   region: us-east-2
-  
+
 imports:
   - catalog/vpc/defaults

@@ -23,7 +23,7 @@ compute:
   # EC2
   ec2_instance_type: "r5.xlarge"
   enable_spot_instances: true
-  
+
   # EKS
   eks_enabled: true
   eks_version: "1.32"
@@ -34,14 +34,14 @@ compute:
   eks_node_max_count: 8
   eks_node_disk_size: 200
   eks_cluster_log_types: ["api", "audit"]
-  
+
   # EMR
   emr_enabled: true
   emr_release_label: "emr-6.10.0"
   emr_instance_type: "r5.2xlarge"
   emr_instance_count: 5
   emr_spot_enabled: true
-  
+
   # Batch Processing
   batch_enabled: true
   batch_compute_type: "EC2"
@@ -61,13 +61,13 @@ storage:
   s3_intelligent_tiering_enabled: true
   s3_inventory_enabled: true
   s3_versioning_enabled: true
-  
+
   # EFS
   efs_enabled: true
   efs_provisioned_throughput: 128
   efs_performance_mode: "generalPurpose"
   efs_throughput_mode: "bursting"
-  
+
   # RDS
   rds_enabled: true
   rds_instance_type: "db.r5.large"
@@ -77,7 +77,7 @@ storage:
   rds_storage_type: "gp3"
   rds_allocated_storage: 500
   rds_max_allocated_storage: 2000
-  
+
   # Redshift
   redshift_enabled: true
   redshift_node_type: "dc2.large"
@@ -87,17 +87,17 @@ storage:
 data_services:
   glue_enabled: true
   glue_job_bookmark_enabled: true
-  
+
   athena_enabled: true
   athena_query_result_encryption: true
-  
+
   quicksight_enabled: true
   quicksight_enterprise: false
-  
+
   kinesis_enabled: true
   kinesis_data_stream_enabled: true
   kinesis_firehose_enabled: true
-  
+
   msk_enabled: false
 
 # Security
@@ -109,11 +109,11 @@ security:
   security_hub_enabled: false
   aws_config_enabled: false
   macie_enabled: true
-  
+
   # Data Security
   data_encryption_enabled: true
   data_classification_enabled: true
-  
+
 # Monitoring
 monitoring:
   detailed_monitoring_enabled: true
@@ -124,7 +124,7 @@ monitoring:
   data_pipeline_monitoring_enabled: true
   storage_usage_monitoring_enabled: true
   etl_job_monitoring_enabled: true
-  
+
 # Tagging
 tags:
   Environment: "data"

@@ -1,3 +1,4 @@
+---
 ##################################################
 # Catalog Configuration for External Secrets
 ##################################################
@@ -17,7 +18,7 @@ components:
         cluster_ca_certificate: ${eks.outputs.cluster_ca_data.main}
         oidc_provider_arn: ${eks.outputs.oidc_provider_arns.main}
         oidc_provider_url: ${eks.outputs.oidc_provider_urls.main}
-    
+
     # Optional settings with defaults
     namespace:
       name: "external-secrets"
@@ -33,7 +34,7 @@ components:
         create: true
       certificate:
         create: true
-    
+
     # Tags for resources
     tags:
       Environment: ${environment}

@@ -93,14 +93,13 @@ resource "aws_acm_certificate_validation" "main" {
       condition     = length([for dvo in aws_acm_certificate.main[each.key].domain_validation_options : dvo.resource_record_name]) > 0
       error_message = "No validation records found for certificate ${each.key}. Check that the domain is configured correctly."
     }
-    
+
     # Verify all validation records have been created
     precondition {
-      condition     = length([for dvo in aws_acm_certificate.main[each.key].domain_validation_options : dvo.resource_record_name]) == 
-                      length([for record in aws_route53_record.validation : record.name if contains(keys(aws_route53_record.validation), "${each.key}.${aws_acm_certificate.main[each.key].domain_name}")])
+      condition     = length([for dvo in aws_acm_certificate.main[each.key].domain_validation_options : dvo.resource_record_name]) == length([for record in aws_route53_record.validation : record.name if contains(keys(aws_route53_record.validation), "${each.key}.${aws_acm_certificate.main[each.key].domain_name}")])
       error_message = "Not all validation records have been created for certificate ${each.key}. DNS validation may fail."
     }
-    
+
     # Add post-condition to verify certificate was successfully validated
     postcondition {
       condition     = aws_acm_certificate.main[each.key].status == "ISSUED" || aws_acm_certificate.main[each.key].status == "PENDING_VALIDATION"

@@ -1,18 +1,154 @@
+---
 name: validate
-description: "Validate Terraform configurations"
+description: "Validate Terraform configurations for a specific stack"
 
 workflows:
   validate:
+    description: "Comprehensive validation of Terraform components in a stack"
     steps:
-    - run:
+    - name: "validate-inputs"
+      description: "Validate required parameters and environment"
+      run:
         command: |
-          # Use Python-based CLI to validate components with integrated linting
-          gaia workflow validate \
-            --tenant ${tenant} \
-            --account ${account} \
-            --environment ${environment} \
-            --parallel ${parallel:-true}
-            
-          exit $?
+          set -euo pipefail
+
+          echo "=== Atmos Workflow: Terraform Validation ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # Validate required parameters
+          if [ -z "${tenant:-}" ]; then
+            echo "ERROR: Missing required parameter 'tenant'"
+            echo "Usage: atmos workflow validate -f validate.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          if [ -z "${account:-}" ]; then
+            echo "ERROR: Missing required parameter 'account'"
+            echo "Usage: atmos workflow validate -f validate.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          if [ -z "${environment:-}" ]; then
+            echo "ERROR: Missing required parameter 'environment'"
+            echo "Usage: atmos workflow validate -f validate.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          # Construct stack name
+          STACK="${tenant}-${account}-${environment}"
+          echo "Validating stack: $STACK"
+
+          # Validate atmos configuration
+          if [ ! -f "atmos.yaml" ]; then
+            echo "ERROR: atmos.yaml not found in current directory"
+            exit 1
+          fi
+
+          echo "✅ Input validation complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "lint-check"
+      description: "Run linting before validation"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Pre-validation Linting ==="
+
+          # Run terraform format check
+          echo "Checking Terraform formatting..."
+          if ! terraform fmt -check -recursive ./components/terraform; then
+            echo "❌ Terraform formatting issues found"
+            echo "Run 'atmos workflow lint -f lint.yaml fix=true' to fix formatting"
+            exit 1
+          fi
+
+          echo "✅ Terraform formatting check passed"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "stack-validation"
+      description: "Validate stack configuration exists"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Stack Configuration Validation ==="
+
+          STACK="${tenant}-${account}-${environment}"
+
+          # Check if stack exists in Atmos configuration
+          echo "Validating stack configuration..."
+          if atmos list stacks | grep -q "$STACK"; then
+            echo "✅ Stack $STACK found in configuration"
+          else
+            echo "❌ Stack $STACK not found in Atmos configuration"
+            echo "Available stacks:"
+            atmos list stacks
+            exit 1
+          fi
+
+          # List components for the stack
+          echo "Components in stack $STACK:"
+          atmos list components -s "$STACK" || echo "No components found for stack"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "terraform-validation"
+      description: "Validate Terraform components"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Terraform Component Validation ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          PARALLEL="${parallel:-true}"
+          VALIDATION_FAILED=false
+
+          # Get list of components for the stack
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "⚠️  No components found for stack $STACK"
+            exit 0
+          fi
+
+          echo "Validating components: $COMPONENTS"
+
+          # Validate each component
+          for component in $COMPONENTS; do
+            echo "\nValidating component: $component"
+
+            if atmos terraform validate "$component" -s "$STACK"; then
+              echo "✅ Component $component validation passed"
+            else
+              echo "❌ Component $component validation failed"
+              VALIDATION_FAILED=true
+
+              # Continue with other components even if one fails
+              continue
+            fi
+          done
+
+          if [ "$VALIDATION_FAILED" = true ]; then
+            echo "\n❌ One or more component validations failed"
+            exit 1
+          fi
+
+          echo "\n✅ All component validations passed"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "validation-summary"
+      description: "Provide validation summary"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Validation Summary ==="
+          echo "✅ Stack ${tenant}-${account}-${environment} validation completed successfully"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         env:
           AWS_SDK_LOAD_CONFIG: 1

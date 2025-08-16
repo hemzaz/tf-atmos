@@ -1,0 +1,133 @@
+---
+name: Feature Flag Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'list'
+        type: choice
+        options:
+          - list
+          - enable
+          - disable
+          - rollout
+          - rollback
+      feature_flag:
+        description: 'Feature flag name'
+        required: false
+        type: string
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      rollout_percentage:
+        description: 'Rollout percentage (0-100)'
+        required: false
+        default: '0'
+        type: string
+
+env:
+  LAUNCHDARKLY_SDK_KEY: ${{ secrets.LAUNCHDARKLY_SDK_KEY }}
+  LAUNCHDARKLY_ACCESS_TOKEN: ${{ secrets.LAUNCHDARKLY_ACCESS_TOKEN }}
+  SPLIT_IO_API_KEY: ${{ secrets.SPLIT_IO_API_KEY }}
+
+jobs:
+  feature-flag-management:
+    name: Manage Feature Flags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests launchdarkly-server-sdk pyyaml
+
+      - name: Validate inputs
+        run: |
+          if [[ "${{ inputs.action }}" != "list" && -z "${{ inputs.feature_flag }}" ]]; then
+            echo "Feature flag name is required for action: ${{ inputs.action }}"
+            exit 1
+          fi
+
+          if [[ "${{ inputs.action }}" == "rollout" && -z "${{ inputs.rollout_percentage }}" ]]; then
+            echo "Rollout percentage is required for rollout action"
+            exit 1
+          fi
+
+      - name: List Feature Flags
+        if: inputs.action == 'list'
+        run: |
+          python scripts/feature-flags/list-flags.py --environment ${{ inputs.environment }}
+
+      - name: Enable Feature Flag
+        if: inputs.action == 'enable'
+        run: |
+          python scripts/feature-flags/manage-flag.py \
+            --action enable \
+            --flag ${{ inputs.feature_flag }} \
+            --environment ${{ inputs.environment }}
+
+      - name: Disable Feature Flag
+        if: inputs.action == 'disable'
+        run: |
+          python scripts/feature-flags/manage-flag.py \
+            --action disable \
+            --flag ${{ inputs.feature_flag }} \
+            --environment ${{ inputs.environment }}
+
+      - name: Rollout Feature Flag
+        if: inputs.action == 'rollout'
+        run: |
+          python scripts/feature-flags/manage-flag.py \
+            --action rollout \
+            --flag ${{ inputs.feature_flag }} \
+            --environment ${{ inputs.environment }} \
+            --percentage ${{ inputs.rollout_percentage }}
+
+      - name: Rollback Feature Flag
+        if: inputs.action == 'rollback'
+        run: |
+          python scripts/feature-flags/manage-flag.py \
+            --action rollback \
+            --flag ${{ inputs.feature_flag }} \
+            --environment ${{ inputs.environment }}
+
+      - name: Update deployment config
+        if: inputs.action != 'list'
+        run: |
+          # Update Kubernetes ConfigMap with new feature flag state
+          kubectl create configmap idp-feature-flags \
+            --from-file=feature-flags.yaml \
+            --dry-run=client -o yaml | \
+            kubectl apply -f - -n idp-system
+
+      - name: Notify team
+        if: inputs.action != 'list'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#platform-features'
+          text: |
+            🚩 Feature Flag Update
+            Action: ${{ inputs.action }}
+            Flag: ${{ inputs.feature_flag }}
+            Environment: ${{ inputs.environment }}
+            ${{ inputs.action == 'rollout' && format('Percentage: {0}%', inputs.rollout_percentage) || '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

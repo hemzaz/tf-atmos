@@ -1,0 +1,771 @@
+#!/bin/bash
+# Platform Integrations Manager
+# Seamless tool ecosystem integration and compatibility
+
+set -e
+
+COMMAND="${1:-help}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Color codes
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+
+show_help() {
+    cat <<EOF
+🔌 Platform Integrations - Seamless Tool Ecosystem
+
+USAGE:
+    integrations <command> [options]
+
+COMMANDS:
+    # IDE Integrations
+    ide setup <vscode|intellij|vim>     Setup IDE integration
+    ide extensions                      Install recommended extensions
+    ide config sync                     Sync IDE configuration
+    
+    # CLI Tool Integration
+    cli install                         Install all platform CLI tools
+    cli update                          Update tools to latest versions
+    cli aliases                         Setup helpful command aliases
+    cli completions                     Enable shell completions
+    
+    # Git Integration
+    git hooks install                   Install git hooks for validation
+    git templates                       Setup commit message templates
+    git workflows                       Configure GitHub Actions workflows
+    
+    # CI/CD Integration
+    cicd github                         Setup GitHub Actions integration
+    cicd jenkins                        Setup Jenkins integration
+    cicd gitlab                         Setup GitLab CI integration
+    cicd atlantis                       Configure Atlantis for Terraform
+    
+    # Monitoring Integration
+    monitor grafana                     Setup Grafana dashboards
+    monitor datadog                     Configure Datadog integration
+    monitor newrelic                    Setup New Relic monitoring
+    monitor prometheus                  Configure Prometheus metrics
+    
+    # Notification Integration
+    notify slack                        Setup Slack notifications
+    notify teams                        Configure Microsoft Teams
+    notify email                        Setup email notifications
+    notify pagerduty                    Configure PagerDuty alerts
+    
+    # Developer Tools
+    dev tunnel                          Setup development tunneling (ngrok)
+    dev proxy                           Configure local development proxy
+    dev debug                           Setup remote debugging tools
+    dev hotreload                       Configure hot reload for services
+
+EXAMPLES:
+    integrations ide setup vscode            # Setup VS Code integration
+    integrations cli install                 # Install all CLI tools
+    integrations git hooks install          # Install validation hooks
+    integrations monitor grafana            # Setup monitoring dashboards
+    integrations notify slack               # Configure Slack notifications
+
+EOF
+}
+
+# IDE Integration Setup
+setup_ide() {
+    local ide="$1"
+    
+    case "$ide" in
+        "vscode")
+            setup_vscode_integration
+            ;;
+        "intellij")
+            setup_intellij_integration
+            ;;
+        "vim"|"neovim")
+            setup_vim_integration
+            ;;
+        *)
+            log_error "Supported IDEs: vscode, intellij, vim"
+            exit 1
+            ;;
+    esac
+}
+
+setup_vscode_integration() {
+    log_info "Setting up VS Code integration..."
+    
+    # Create VS Code settings
+    mkdir -p .vscode
+    
+    cat > .vscode/settings.json <<EOF
+{
+  "terraform.languageServer": {
+    "enabled": true,
+    "args": ["serve"]
+  },
+  "terraform.experimentalFeatures": {
+    "validateOnSave": true,
+    "prefillRequiredFields": true
+  },
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/atmos-tools/atmos/master/pkg/schema/atmos-manifest.json": [
+      "**/atmos.yaml",
+      "**/atmos.yml"
+    ]
+  },
+  "files.associations": {
+    "*.tf": "terraform",
+    "*.tfvars": "terraform-vars",
+    "atmos.yaml": "yaml"
+  },
+  "editor.formatOnSave": true,
+  "terraform.format.enable": true,
+  "[terraform]": {
+    "editor.defaultFormatter": "hashicorp.terraform",
+    "editor.formatOnSave": true
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml",
+    "editor.formatOnSave": true
+  }
+}
+EOF
+    
+    # Create tasks configuration
+    cat > .vscode/tasks.json <<EOF
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Atmos Validate",
+      "type": "shell",
+      "command": "atmos workflow validate",
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Atmos Plan Component", 
+      "type": "shell",
+      "command": "atmos terraform plan \${input:component} -s \${input:stack}",
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Gaia Deploy Service",
+      "type": "shell", 
+      "command": "gaia workflow apply-component component=\${input:component} stack=\${input:stack}",
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always", 
+        "focus": false,
+        "panel": "shared"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "component",
+      "description": "Component name",
+      "default": "vpc",
+      "type": "promptString"
+    },
+    {
+      "id": "stack",
+      "description": "Stack name",
+      "default": "fnx-dev-testenv-01",
+      "type": "promptString"
+    }
+  ]
+}
+EOF
+    
+    # Create launch configuration for debugging
+    cat > .vscode/launch.json <<EOF
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Gaia CLI",
+      "type": "python",
+      "request": "launch",
+      "program": "\${workspaceFolder}/gaia/cli.py",
+      "args": ["--help"],
+      "console": "integratedTerminal",
+      "cwd": "\${workspaceFolder}"
+    },
+    {
+      "name": "Debug Terraform Plan",
+      "type": "bash",
+      "request": "launch",
+      "program": "atmos",
+      "args": ["terraform", "plan", "vpc", "-s", "fnx-dev-testenv-01"]
+    }
+  ]
+}
+EOF
+    
+    # Recommended extensions
+    cat > .vscode/extensions.json <<EOF
+{
+  "recommendations": [
+    "hashicorp.terraform",
+    "redhat.vscode-yaml",
+    "ms-python.python",
+    "ms-vscode.vscode-json",
+    "timonwong.shellcheck",
+    "foxundermoon.shell-format",
+    "ms-kubernetes-tools.vscode-kubernetes-tools",
+    "ms-vscode.makefile-tools",
+    "streetsidesoftware.code-spell-checker"
+  ]
+}
+EOF
+    
+    # Code snippets for platform
+    mkdir -p .vscode/snippets
+    cat > .vscode/snippets/terraform.json <<EOF
+{
+  "Terraform Component": {
+    "prefix": "tf-component",
+    "body": [
+      "# \${1:Component Name}",
+      "",
+      "variable \"name_prefix\" {",
+      "  description = \"Prefix for resource names\"",
+      "  type        = string",
+      "}",
+      "",
+      "locals {",
+      "  name_prefix = var.name_prefix",
+      "}",
+      "",
+      "resource \"\${2:aws_resource}\" \"\${3:name}\" {",
+      "  \${4:# Resource configuration}",
+      "  ",
+      "  tags = {",
+      "    Name = \"\${local.name_prefix}-\${3:name}\"",
+      "  }",
+      "}"
+    ],
+    "description": "Create a new Terraform component"
+  },
+  "Atmos Stack Configuration": {
+    "prefix": "atmos-stack",
+    "body": [
+      "components:",
+      "  terraform:",
+      "    \${1:component_name}:",
+      "      vars:",
+      "        \${2:variable_name}: \${3:value}",
+      "      \${4:# Additional configuration}"
+    ],
+    "description": "Atmos stack component configuration"
+  }
+}
+EOF
+    
+    log_success "VS Code integration configured!"
+    log_info "Recommended: Install extensions with: code --install-extension hashicorp.terraform"
+}
+
+# CLI Tools Installation and Management
+install_cli_tools() {
+    log_info "Installing platform CLI tools..."
+    
+    # Check and install dependencies
+    local tools=(
+        "atmos:brew install atmos"
+        "terraform:brew install terraform"
+        "kubectl:brew install kubectl"  
+        "helm:brew install helm"
+        "jq:brew install jq"
+        "yq:brew install yq"
+        "aws:brew install awscli"
+        "gh:brew install gh"
+        "trivy:brew install aquasecurity/trivy/trivy"
+        "kubectx:brew install kubectx"
+        "stern:brew install stern"
+        "k9s:brew install k9s"
+    )
+    
+    for tool in "${tools[@]}"; do
+        IFS=':' read -r name install_cmd <<< "$tool"
+        
+        if command -v "$name" >/dev/null 2>&1; then
+            log_success "$name already installed"
+        else
+            log_info "Installing $name..."
+            eval "$install_cmd" || log_warning "Failed to install $name"
+        fi
+    done
+    
+    # Install Gaia CLI
+    if [[ -f "setup.py" ]]; then
+        pip install -e . || log_warning "Failed to install Gaia CLI"
+        log_success "Gaia CLI installed"
+    fi
+    
+    # Setup shell completions
+    setup_shell_completions
+}
+
+setup_shell_completions() {
+    log_info "Setting up shell completions..."
+    
+    local shell_config=""
+    case "$SHELL" in
+        */bash) shell_config="$HOME/.bashrc" ;;
+        */zsh) shell_config="$HOME/.zshrc" ;;
+        */fish) shell_config="$HOME/.config/fish/config.fish" ;;
+        *) log_warning "Unsupported shell: $SHELL"; return ;;
+    esac
+    
+    # Add completion sources
+    cat >> "$shell_config" <<EOF
+
+# Platform CLI Completions
+if command -v kubectl >/dev/null 2>&1; then
+    source <(kubectl completion $(basename $SHELL))
+fi
+
+if command -v helm >/dev/null 2>&1; then
+    source <(helm completion $(basename $SHELL))
+fi
+
+if command -v gh >/dev/null 2>&1; then
+    eval "\$(gh completion -s $(basename $SHELL))"
+fi
+
+# Platform aliases
+alias p='platform'
+alias g='gaia'
+alias k='kubectl'
+alias kx='kubectx'
+alias kn='kubens'
+alias tf='terraform'
+alias a='atmos'
+
+# Quick platform commands
+alias penv='platform env list'
+alias pdeploy='platform deploy'
+alias plogs='platform logs'
+alias pcost='platform cost current'
+EOF
+    
+    log_success "Shell completions configured. Restart your shell or run: source $shell_config"
+}
+
+# Git Integration Setup
+setup_git_integration() {
+    local subcommand="$1"
+    
+    case "$subcommand" in
+        "hooks")
+            install_git_hooks
+            ;;
+        "templates")
+            setup_commit_templates
+            ;;
+        "workflows")
+            setup_github_workflows
+            ;;
+        *)
+            log_error "Git subcommands: hooks, templates, workflows"
+            exit 1
+            ;;
+    esac
+}
+
+install_git_hooks() {
+    log_info "Installing git hooks for validation..."
+    
+    # Pre-commit hook
+    cat > .git/hooks/pre-commit <<'EOF'
+#!/bin/bash
+# Platform pre-commit validation
+
+set -e
+
+echo "🔍 Running pre-commit validations..."
+
+# Terraform formatting check
+if git diff --cached --name-only | grep -E '\.(tf|tfvars)$' > /dev/null; then
+    echo "📝 Checking Terraform formatting..."
+    terraform fmt -check=true -diff=true || {
+        echo "❌ Terraform files are not formatted. Run: terraform fmt"
+        exit 1
+    }
+fi
+
+# YAML lint check  
+if git diff --cached --name-only | grep -E '\.(yaml|yml)$' > /dev/null; then
+    echo "📝 Checking YAML formatting..."
+    if command -v yamllint >/dev/null 2>&1; then
+        git diff --cached --name-only | grep -E '\.(yaml|yml)$' | xargs yamllint || {
+            echo "❌ YAML files have formatting issues"
+            exit 1
+        }
+    fi
+fi
+
+# Security scan
+if command -v trivy >/dev/null 2>&1; then
+    echo "🔒 Running security scan..."
+    trivy fs . --severity HIGH,CRITICAL --exit-code 0
+fi
+
+# Atmos validation
+if git diff --cached --name-only | grep -E '(components/|stacks/|workflows/)' > /dev/null; then
+    echo "⚙️ Validating Atmos configuration..."
+    atmos workflow validate || {
+        echo "❌ Atmos validation failed"
+        exit 1
+    }
+fi
+
+echo "✅ All pre-commit checks passed!"
+EOF
+    
+    # Commit message hook
+    cat > .git/hooks/commit-msg <<'EOF'
+#!/bin/bash
+# Validate commit message format
+
+commit_regex='^(feat|fix|docs|style|refactor|test|chore|ci|perf|build)(\(.+\))?: .{1,50}'
+
+if ! grep -qE "$commit_regex" "$1"; then
+    echo "❌ Invalid commit message format!"
+    echo ""
+    echo "Format: type(scope): description"
+    echo ""
+    echo "Types: feat, fix, docs, style, refactor, test, chore, ci, perf, build"
+    echo "Example: feat(vpc): add support for multiple availability zones"
+    echo ""
+    exit 1
+fi
+EOF
+    
+    # Make hooks executable
+    chmod +x .git/hooks/pre-commit
+    chmod +x .git/hooks/commit-msg
+    
+    log_success "Git hooks installed successfully!"
+}
+
+# CI/CD Integration
+setup_cicd_integration() {
+    local system="$1"
+    
+    case "$system" in
+        "github")
+            setup_github_actions
+            ;;
+        "jenkins")
+            setup_jenkins_integration
+            ;;
+        "gitlab")
+            setup_gitlab_ci
+            ;;
+        "atlantis")
+            setup_atlantis_integration
+            ;;
+        *)
+            log_error "Supported CI/CD systems: github, jenkins, gitlab, atlantis"
+            exit 1
+            ;;
+    esac
+}
+
+setup_github_actions() {
+    log_info "Setting up GitHub Actions workflows..."
+    
+    mkdir -p .github/workflows
+    
+    # Platform validation workflow
+    cat > .github/workflows/validate.yml <<EOF
+name: Platform Validation
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  validate:
+    name: Validate Infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.6.0
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Atmos
+      run: |
+        curl -fsSL https://get.atmos.tools | bash
+        
+    - name: Install Gaia
+      run: |
+        pip install -r requirements.txt
+        pip install -e .
+        
+    - name: Terraform Format Check
+      run: terraform fmt -check=true -recursive
+      
+    - name: YAML Lint
+      run: |
+        pip install yamllint
+        yamllint .
+        
+    - name: Atmos Validate
+      run: atmos workflow validate
+      
+    - name: Security Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        severity: 'HIGH,CRITICAL'
+        
+    - name: Cost Estimation
+      run: |
+        gaia cost estimate --all-components --format github-comment > cost-estimate.md
+        
+    - name: Comment PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const costEstimate = fs.readFileSync('cost-estimate.md', 'utf8');
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: costEstimate
+          });
+
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: validate
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: \${{ secrets.AWS_ROLE_ARN }}
+        aws-region: us-west-2
+        
+    - name: Deploy Components
+      run: |
+        gaia workflow apply-environment \
+          tenant=fnx \
+          account=dev \
+          environment=testenv-01
+EOF
+    
+    # Dependency update workflow
+    cat > .github/workflows/dependencies.yml <<EOF
+name: Update Dependencies
+
+on:
+  schedule:
+    - cron: '0 2 * * MON'  # Weekly on Monday at 2 AM
+  workflow_dispatch:
+
+jobs:
+  update-dependencies:
+    name: Update Platform Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Update Terraform Providers
+      run: |
+        find components/terraform -name "*.tf" -exec terraform init -upgrade {} \;
+        
+    - name: Update Python Dependencies
+      run: |
+        pip install pip-tools
+        pip-compile --upgrade requirements.in
+        
+    - name: Update GitHub Actions
+      uses: docker://renovate/renovate:latest
+      env:
+        RENOVATE_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        commit-message: 'chore: update dependencies'
+        title: 'Automated dependency updates'
+        body: |
+          Automated dependency updates:
+          - Terraform providers updated
+          - Python packages updated  
+          - GitHub Actions updated
+          
+          Please review and test before merging.
+        branch: dependencies/automated-update
+EOF
+    
+    log_success "GitHub Actions workflows configured!"
+}
+
+# Monitoring Integration
+setup_monitoring_integration() {
+    local system="$1"
+    
+    case "$system" in
+        "grafana")
+            setup_grafana_dashboards
+            ;;
+        "datadog")
+            setup_datadog_integration
+            ;;
+        "prometheus")
+            setup_prometheus_metrics
+            ;;
+        *)
+            log_error "Supported monitoring: grafana, datadog, prometheus"
+            exit 1
+            ;;
+    esac
+}
+
+setup_grafana_dashboards() {
+    log_info "Setting up Grafana dashboards..."
+    
+    mkdir -p monitoring/grafana/dashboards
+    
+    # Platform overview dashboard
+    cat > monitoring/grafana/dashboards/platform-overview.json <<EOF
+{
+  "dashboard": {
+    "id": null,
+    "title": "Platform Overview",
+    "tags": ["platform", "overview"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Active Deployments",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(kube_deployment_status_replicas{namespace=~\".*\"})"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2, 
+        "title": "Platform Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"platform-api\"}"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Developer Activity",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(platform_api_requests_total[5m])"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      }
+    ],
+    "time": {"from": "now-1h", "to": "now"},
+    "refresh": "30s"
+  }
+}
+EOF
+    
+    log_success "Grafana dashboards created!"
+}
+
+# Main command router
+main() {
+    case "$COMMAND" in
+        "help"|"-h"|"--help"|"")
+            show_help
+            ;;
+        "ide")
+            setup_ide "$2"
+            ;;
+        "cli")
+            case "$2" in
+                "install") install_cli_tools ;;
+                "completions") setup_shell_completions ;;
+                "aliases") setup_shell_completions ;;  # Includes aliases
+                *) log_error "CLI subcommands: install, completions, aliases" ;;
+            esac
+            ;;
+        "git")
+            setup_git_integration "$2"
+            ;;
+        "cicd")
+            setup_cicd_integration "$2"
+            ;;
+        "monitor")
+            setup_monitoring_integration "$2"
+            ;;
+        "dev")
+            case "$2" in
+                "tunnel") setup_development_tunnel ;;
+                "proxy") setup_development_proxy ;;
+                "debug") setup_remote_debugging ;;
+                *) log_error "Dev subcommands: tunnel, proxy, debug" ;;
+            esac
+            ;;
+        *)
+            log_error "Unknown command: $COMMAND"
+            echo "Run 'integrations help' for usage information"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

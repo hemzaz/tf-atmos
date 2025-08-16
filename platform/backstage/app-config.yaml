@@ -1,0 +1,241 @@
+---
+app:
+  title: Internal Developer Platform
+  baseUrl: ${BACKSTAGE_BASE_URL}
+  support:
+    url: https://platform.company.com/support
+    items:
+      - title: Issues
+        icon: github
+        links:
+          - url: https://github.com/company/tf-atmos/issues
+            title: GitHub Issues
+      - title: Discord Chatroom
+        icon: chat
+        links:
+          - url: https://discord.gg/platform-team
+            title: '#platform-support'
+
+organization:
+  name: Company Platform Engineering
+
+backend:
+  # Used for enabling authentication, secret management, etc.
+  baseUrl: ${BACKSTAGE_BACKEND_URL}
+  listen:
+    port: 7007
+    # Uncomment the following host directive to bind to specific interfaces
+    # host: 127.0.0.1
+  csp:
+    connect-src: ["'self'", 'http:', 'https:']
+    # Content-Security-Policy directives follow the Helmet format: https://helmetjs.github.io/#reference
+    # Default Helmet Content-Security-Policy values can be removed by setting the key to false
+  cors:
+    origin: ${BACKSTAGE_BASE_URL}
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+  # This is for local development only, it is not recommended to use this in production
+  # The production database configuration is stored in app-config.production.yaml
+  database:
+    client: pg
+    connection:
+      host: ${POSTGRES_HOST}
+      port: ${POSTGRES_PORT}
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+      database: ${POSTGRES_DB}
+      # https://node-postgres.com/features/ssl
+      ssl: ${POSTGRES_SSL} # require | false
+
+  reading:
+    allow:
+      - host: github.com
+      - host: raw.githubusercontent.com
+      - host: '*.company.com'
+      - host: localhost:3000
+      - host: localhost:7007
+
+  # workingDirectory: /tmp # Use this to configure a working directory for the scaffolder, defaults to the OS temp-dir
+
+integrations:
+  github:
+    - host: github.com
+      # This is a Personal Access Token or GitHub App token
+      token: ${GITHUB_TOKEN}
+      apps:
+        - $include: github-app-credentials.yaml
+  # bitbucketCloud:
+  #   - username: ${BITBUCKET_USERNAME}
+  #     appPassword: ${BITBUCKET_APP_PASSWORD}
+  # bitbucketServer:
+  #   - host: ${BITBUCKET_HOST}
+  #     token: ${BITBUCKET_TOKEN}
+  # gitlab:
+  #   - host: ${GITLAB_HOST}
+  #     token: ${GITLAB_TOKEN}
+  # azure:
+  #   - host: dev.azure.com
+  #     token: ${AZURE_TOKEN}
+
+proxy:
+  endpoints:
+    # Atmos API integration
+    '/atmos':
+      target: 'http://platform-api:8000/api/v1/atmos'
+      headers:
+        Authorization: Bearer ${PLATFORM_API_TOKEN}
+
+    # Cost analysis integration
+    '/cost':
+      target: 'http://platform-api:8000/api/v1/cost'
+      headers:
+        Authorization: Bearer ${PLATFORM_API_TOKEN}
+
+    # Compliance integration
+    '/compliance':
+      target: 'http://platform-api:8000/api/v1/compliance'
+      headers:
+        Authorization: Bearer ${PLATFORM_API_TOKEN}
+
+    # ArgoCD integration
+    '/argocd/api':
+      target: https://argocd.company.com/api/v1/
+      changeOrigin: true
+      headers:
+        Authorization: Bearer ${ARGOCD_TOKEN}
+
+    # Grafana integration
+    '/grafana/api':
+      target: https://grafana.company.com
+      headers:
+        Authorization: Bearer ${GRAFANA_TOKEN}
+
+# Reference documentation http://backstage.io/docs/features/techdocs/configuration
+# Note: After experimenting with basic setup, use CI/CD to generate docs
+# and an external cloud storage when deploying TechDocs for production use-case.
+# https://backstage.io/docs/features/techdocs/how-to-guides#how-to-deploy-techdocs-in-a-recommended-deployment-setup
+techdocs:
+  builder: 'local' # Alternatives - 'external'
+  generator:
+    runIn: 'docker' # Alternatives - 'local'
+  publisher:
+    type: 'local' # Alternatives - 'googleGcs' or 'awsS3' or 'azureBlobStorage' or 'openStackSwift'
+    # The following configs are used when publisher.type is set to awsS3
+    awsS3:
+      bucketName: ${TECHDOCS_S3_BUCKET_NAME}
+      region: ${AWS_DEFAULT_REGION}
+      credentials:
+        accessKeyId: ${AWS_ACCESS_KEY_ID}
+        secretAccessKey: ${AWS_SECRET_ACCESS_KEY}
+
+auth:
+  # see https://backstage.io/docs/auth/ to learn about auth providers
+  providers:
+    github:
+      development:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+    # oauth2Proxy: {}
+    aws:
+      allowGuestAccess: false
+      region: ${AWS_DEFAULT_REGION}
+      roleArn: ${AWS_ROLE_ARN}
+
+scaffolder:
+  # see https://backstage.io/docs/features/software-templates/configuration for software template options
+  defaultAuthor:
+    name: Platform Team
+    email: platform-team@company.com
+  defaultCommitMessage: 'Initial commit by Platform Scaffolder'
+
+catalog:
+  import:
+    entityFilename: catalog-info.yaml
+    pullRequestBranchName: backstage-integration
+  rules:
+    - allow: [Component, System, API, Resource, Location, Template, Domain, User, Group]
+  locations:
+    # Atmos Components Discovery
+    - type: file
+      target: ../../infrastructure/components/terraform/*/catalog-info.yaml
+
+    # Service Catalog Discovery
+    - type: file
+      target: ../../catalog/services/*/catalog-info.yaml
+
+    # Software Templates Discovery
+    - type: file
+      target: ../../catalog/templates/*/template.yaml
+
+    # System Definitions
+    - type: file
+      target: ../../catalog/systems/*.yaml
+
+    # Platform Components
+    - type: file
+      target: ../../platform/catalog/*.yaml
+
+    # External integrations (commented out for now)
+    # - type: url
+    #   target: https://github.com/company/shared-components/blob/main/catalog-info.yaml
+
+  processors:
+    github:
+      validateLocationsExist: true
+    awsS3:
+      region: ${AWS_DEFAULT_REGION}
+
+# Kubernetes configuration for in-cluster resources
+kubernetes:
+  serviceLocatorMethod:
+    type: 'multiTenant'
+  clusterLocatorMethods:
+    - type: 'config'
+      clusters:
+        - url: ${K8S_CLUSTER_URL}
+          name: ${K8S_CLUSTER_NAME}
+          authProvider: 'serviceAccount'
+          skipTLSVerify: false
+          serviceAccountToken: ${K8S_TOKEN}
+          dashboardUrl: https://k8s-dashboard.company.com
+          dashboardApp: kubernetes
+
+# Cost insights integration
+costInsights:
+  engineerCost: 200000
+  products:
+    computeEngine:
+      name: Compute Engine
+      icon: compute
+    cloudDataflow:
+      name: Cloud Dataflow
+      icon: data
+    bigQuery:
+      name: BigQuery
+      icon: storage
+    events:
+      name: Events
+      icon: data
+  currencies:
+    engineers:
+      label: 'Engineers 🤓'
+      unit: 'engineer'
+    usd:
+      label: 'US Dollars 💵'
+      unit: 'dollar'
+
+# Platform-specific configuration
+platform:
+  atmos:
+    baseUrl: http://platform-api:8000/api/v1/atmos
+    defaultTenant: ${PLATFORM_DEFAULT_TENANT}
+    defaultAccount: ${PLATFORM_DEFAULT_ACCOUNT}
+    defaultRegion: ${AWS_DEFAULT_REGION}
+    workflowTimeout: 1800 # 30 minutes
+
+  features:
+    costAnalysis: true
+    complianceChecking: true
+    driftDetection: true
+    environmentProvisioning: true
+    certificateManagement: true

@@ -14,7 +14,7 @@ compute:
   # EC2
   ec2_instance_type: "t3.medium"
   enable_spot_instances: true
-  
+
   # EKS
   eks_enabled: true
   eks_version: "1.32"
@@ -25,7 +25,7 @@ compute:
   eks_node_max_count: 4
   eks_node_disk_size: 50
   eks_cluster_log_types: ["api", "audit"]
-  
+
   # Autoscaling
   autoscaling_metrics_enabled: false
   autoscaling_default_cooldown: 300
@@ -40,18 +40,18 @@ security:
   aws_config_enabled: false
   macie_enabled: false
   iam_password_policy_min_length: 12
-  
+
   # Access
   public_access_cidrs: ["0.0.0.0/0"]
   ssh_allowed: true
-  
+
 # Database
 database:
   rds_enabled: false
   rds_instance_type: "db.t3.small"
   rds_multi_az: false
   rds_backup_retention_period: 7
-  
+
 # Monitoring
 monitoring:
   detailed_monitoring_enabled: false
@@ -59,7 +59,7 @@ monitoring:
   enhanced_monitoring_enabled: false
   alarm_notification_enabled: true
   alarm_notification_channel: "email"
-  
+
 # Tagging
 tags:
   Environment: "development"

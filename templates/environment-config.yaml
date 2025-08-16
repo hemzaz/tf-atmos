@@ -1,3 +1,4 @@
+---
 # Template: Environment-specific Component Configuration
 # This template follows the best practices outlined in GUIDELINES.md
 # Replace placeholder values and comments with your actual implementation
@@ -14,11 +15,11 @@ vars:
   # Component-specific configuration
   name: "${tenant}-${environment}-component-name"  # Replace with your component name
   description: "Custom description for ${environment} environment"  # Customize as needed
-  
+
   # Feature flags
   enable_logging: true
   enable_monitoring: true
-  
+
   # Environment-specific parameters
   example_parameter_string: "env-specific-value"
   example_parameter_number: 20
@@ -28,15 +29,15 @@ vars:
   example_parameter_map:
     env_key1: "env-value1"
     env_key2: "env-value2"
-  
+
   # Integration with other components
   example_dependency_id: "${output.dependency_component.id}"
   example_dependency_arns: ${output.dependency_component.arns}
-  
+
   # Security configuration
   kms_key_id: "${output.kms.key_id}"
   log_retention_days: 14  # Override default value
-  
+
 # Dependencies on other components
 dependencies:
   - dependency_component

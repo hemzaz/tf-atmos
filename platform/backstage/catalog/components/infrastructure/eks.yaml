@@ -1,0 +1,148 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: eks
+  title: Elastic Kubernetes Service
+  description: Managed Kubernetes cluster with worker nodes, OIDC, and platform integrations
+  tags:
+    - infrastructure
+    - kubernetes
+    - containers
+    - aws
+    - terraform
+    - eks
+  annotations:
+    backstage.io/source-location: 'dir:../../../../components/terraform/eks'
+    atmos.tools/component: 'eks'
+    atmos.tools/type: 'terraform'
+    cost.platform.com/monthly-estimate: '$150-300'
+    compliance.platform.com/framework: 'SOC2,ISO27001,CIS'
+    backstage.io/techdocs-ref: 'dir:../../../../components/terraform/eks'
+    github.com/project-slug: 'your-org/infrastructure'
+    grafana/dashboard-selector: 'eks-cluster'
+    prometheus/alert-selector: 'cluster="eks-*"'
+spec:
+  type: infrastructure-service
+  lifecycle: production
+  owner: platform-team
+  system: infrastructure
+  dependsOn:
+    - component:vpc
+    - component:iam
+    - component:kms
+  providesApis:
+    - kubernetes-api
+    - eks-cluster-api
+  consumesApis:
+    - aws-ec2-api
+    - aws-iam-api
+    - aws-kms-api
+
+  # EKS-specific metadata
+  kubernetes:
+    versions:
+      supported: ['1.26', '1.27', '1.28', '1.29']
+      default: '1.28'
+
+    nodeGroups:
+      managed:
+        instanceTypes: ['t3.medium', 't3.large', 'm5.large', 'm5.xlarge']
+        capacityTypes: ['ON_DEMAND', 'SPOT']
+        scalingConfig:
+          minSize: 1
+          maxSize: 10
+          desiredSize: 2
+
+    addons:
+      coreAddons: ['vpc-cni', 'coredns', 'kube-proxy']
+      optionalAddons: ['aws-load-balancer-controller', 'external-dns', 'cluster-autoscaler']
+
+    networking:
+      cni: 'vpc-cni'
+      serviceCidr: '172.20.0.0/16'
+      podCidr: '10.0.0.0/8'  # Managed by VPC CNI
+
+    security:
+      encryption: true
+      oidc: true
+      rbac: true
+      podSecurityStandards: 'restricted'
+
+    observability:
+      logging: ['api', 'audit', 'authenticator', 'controllerManager', 'scheduler']
+      monitoring: true
+      tracing: false
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: kubernetes-api
+  title: Kubernetes API
+  description: Standard Kubernetes API provided by EKS cluster
+spec:
+  type: kubernetes
+  lifecycle: production
+  owner: platform-team
+  system: infrastructure
+  definition: |
+    # Kubernetes API Resources
+    Core Resources:
+      - Pods
+      - Services
+      - ConfigMaps
+      - Secrets
+      - Namespaces
+      - Nodes
+
+    Apps Resources:
+      - Deployments
+      - ReplicaSets
+      - DaemonSets
+      - StatefulSets
+      - Jobs
+      - CronJobs
+
+    Custom Resources:
+      - ServiceMonitors (Prometheus)
+      - Ingresses (AWS Load Balancer)
+      - ExternalSecrets (External Secrets Operator)
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: eks-cluster-api
+  title: EKS Cluster API
+  description: AWS EKS-specific APIs and integrations
+spec:
+  type: aws-service
+  lifecycle: production
+  owner: platform-team
+  system: infrastructure
+  definition: |
+    # EKS-specific Resources
+    Cluster Resources:
+      - EKS Cluster
+      - Node Groups
+      - Fargate Profiles
+      - EKS Add-ons
+
+    IAM Resources:
+      - Cluster Service Role
+      - Node Instance Role
+      - OIDC Identity Provider
+      - Service Account Roles (IRSA)
+
+    Security Resources:
+      - KMS Encryption Keys
+      - Security Groups
+      - Pod Security Policies
+
+    Outputs:
+      - cluster_endpoint
+      - cluster_certificate_authority_data
+      - cluster_oidc_issuer_url
+      - node_group_arns
+      - cluster_security_group_id

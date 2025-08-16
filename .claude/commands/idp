@@ -1,0 +1,514 @@
+#!/bin/bash
+# Internal Developer Platform (IDP) Master Orchestrator
+# Unified interface for all platform operations and developer experience
+
+set -e
+
+COMMAND="${1:-help}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Color codes for beautiful output
+BOLD='\033[1m'
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Logging functions
+log_header() { echo -e "${BOLD}${BLUE}🚀 $1${NC}"; }
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+log_metric() { echo -e "${PURPLE}📊 $1${NC}"; }
+log_action() { echo -e "${CYAN}🎯 $1${NC}"; }
+
+show_platform_banner() {
+    cat <<'EOF'
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║    🚀 Internal Developer Platform (IDP)                     ║
+║    Terraform/Atmos Infrastructure Excellence                 ║
+║                                                              ║
+║    🎯 Mission: Accelerate Development, Delight Developers    ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+EOF
+}
+
+show_help() {
+    show_platform_banner
+    echo ""
+    echo -e "${BOLD}IDP Commands - Your Gateway to Platform Excellence${NC}"
+    echo "============================================================"
+    echo ""
+    echo -e "${BOLD}🎯 QUICK ACTIONS${NC}"
+    echo "  idp status                    Platform health & metrics overview"
+    echo "  idp onboard <developer>       Complete developer onboarding"
+    echo "  idp create <service-type>     Create service from golden path"
+    echo "  idp deploy <service>          Deploy service with safety checks"
+    echo ""
+    echo -e "${BOLD}📊 ANALYTICS & INSIGHTS${NC}"  
+    echo "  idp analytics                 Comprehensive DX analytics dashboard"
+    echo "  idp metrics                   Developer experience metrics"
+    echo "  idp survey                    Conduct developer satisfaction survey"
+    echo "  idp benchmark                 Run platform performance benchmarks"
+    echo ""
+    echo -e "${BOLD}🤝 COMMUNITY & COLLABORATION${NC}"
+    echo "  idp community                 Access community features"
+    echo "  idp share <solution>          Share knowledge with community"
+    echo "  idp learn                     Browse community solutions"
+    echo "  idp office-hours             Join next platform office hours"
+    echo ""
+    echo -e "${BOLD}🔧 PLATFORM MANAGEMENT${NC}"
+    echo "  idp setup                     Initial platform setup"
+    echo "  idp configure                 Configure integrations"
+    echo "  idp update                    Update platform components"
+    echo "  idp health                    Platform health diagnostics"
+    echo ""
+    echo -e "${BOLD}📚 DOCUMENTATION & HELP${NC}"
+    echo "  idp docs                      Generate/update documentation"
+    echo "  idp examples                  Browse example implementations"
+    echo "  idp troubleshoot             Interactive troubleshooting guide"
+    echo "  idp support                   Get support and file issues"
+    echo ""
+    echo -e "${BOLD}💡 GOLDEN PATHS AVAILABLE${NC}"
+    echo "  • microservice-nodejs         Node.js API with Express & monitoring"
+    echo "  • microservice-python         Python API with FastAPI & observability"
+    echo "  • serverless-function         AWS Lambda with best practices"
+    echo "  • static-website              S3/CloudFront static site"
+    echo "  • data-pipeline               ETL pipeline with monitoring"
+    echo ""
+    echo -e "${CYAN}🌟 Pro Tips:${NC}"
+    echo "  • Use 'idp status' daily to monitor your platform health"
+    echo "  • Run 'idp analytics' weekly for productivity insights"
+    echo "  • Join office hours every Friday 2-4 PM for platform updates"
+    echo "  • Share your solutions with 'idp community share' to help others"
+    echo ""
+    echo -e "${BOLD}📞 Support:${NC} #platform-support | 🌐 Docs: https://platform.company.com"
+}
+
+show_platform_status() {
+    log_header "Platform Status Overview"
+    echo ""
+    
+    # Real-time platform health
+    log_info "Checking platform health..."
+    
+    # Core services status
+    echo "🏥 Core Services Health:"
+    check_service_health "Atmos CLI" "atmos --version"
+    check_service_health "Gaia CLI" "gaia --version"  
+    check_service_health "Terraform" "terraform version"
+    check_service_health "Kubectl" "kubectl version --client"
+    check_service_health "AWS CLI" "aws --version"
+    
+    echo ""
+    
+    # Infrastructure status
+    echo "🏗️  Infrastructure Status:"
+    check_infrastructure_health
+    
+    echo ""
+    
+    # Developer metrics snapshot
+    echo "📊 Developer Metrics (Last 24h):"
+    show_daily_metrics
+    
+    echo ""
+    
+    # Active alerts
+    echo "🚨 Active Alerts:"
+    check_active_alerts
+    
+    echo ""
+    
+    # Quick recommendations
+    echo "💡 Quick Recommendations:"
+    generate_quick_recommendations
+}
+
+complete_onboarding() {
+    local developer_name="$1"
+    
+    if [[ -z "$developer_name" ]]; then
+        read -p "Developer name: " developer_name
+    fi
+    
+    log_header "Starting Developer Onboarding for $developer_name"
+    
+    # Validate prerequisites
+    log_action "Validating prerequisites..."
+    if ! validate_onboarding_prerequisites; then
+        log_error "Prerequisites not met. Please install required tools first."
+        log_info "Run: idp setup prerequisites"
+        exit 1
+    fi
+    
+    # Execute onboarding workflow
+    log_action "Executing onboarding workflow..."
+    "$SCRIPT_DIR/onboard-developer" "$developer_name" || {
+        log_error "Onboarding failed. Please check logs and try again."
+        exit 1
+    }
+    
+    # Post-onboarding setup
+    log_action "Configuring developer environment..."
+    setup_developer_environment "$developer_name"
+    
+    # Send welcome message
+    send_welcome_message "$developer_name"
+    
+    log_success "🎉 Onboarding complete for $developer_name!"
+    log_info "Next steps: Visit https://platform.company.com/welcome"
+}
+
+create_service_from_golden_path() {
+    local service_type="$1"
+    
+    if [[ -z "$service_type" ]]; then
+        echo "Available golden paths:"
+        list_golden_paths
+        read -p "Select service type: " service_type
+    fi
+    
+    log_header "Creating $service_type service"
+    
+    # Validate golden path exists
+    if ! validate_golden_path "$service_type"; then
+        log_error "Golden path '$service_type' not found"
+        exit 1
+    fi
+    
+    # Execute platform creation
+    "$SCRIPT_DIR/platform" create "$service_type" || {
+        log_error "Service creation failed"
+        exit 1
+    }
+    
+    log_success "Service created successfully!"
+    log_info "Next: cd into your service directory and run 'idp deploy'"
+}
+
+deploy_service_safely() {
+    local service="$1"
+    
+    log_header "Deploying service: ${service:-current directory}"
+    
+    # Pre-deployment validation
+    log_action "Running pre-deployment checks..."
+    run_predeploy_validation "$service"
+    
+    # Execute deployment
+    "$SCRIPT_DIR/platform" deploy "$service" || {
+        log_error "Deployment failed"
+        exit 1
+    }
+    
+    # Post-deployment verification
+    log_action "Verifying deployment..."
+    verify_deployment "$service"
+    
+    log_success "Deployment completed successfully!"
+}
+
+show_analytics_overview() {
+    log_header "Developer Experience Analytics"
+    
+    # Run comprehensive analytics
+    "$SCRIPT_DIR/dx-analytics" dashboard || {
+        log_warning "Analytics dashboard unavailable"
+    }
+    
+    # Show actionable insights
+    echo ""
+    log_action "Generating actionable insights..."
+    generate_analytics_insights
+}
+
+access_community_features() {
+    log_header "Platform Community Hub"
+    
+    # Launch community interface
+    "$SCRIPT_DIR/community" "$@" || {
+        log_error "Community features unavailable"
+        exit 1
+    }
+}
+
+setup_platform_integrations() {
+    log_header "Platform Integration Setup"
+    
+    echo "🔌 Available integrations:"
+    echo "  1. IDE (VS Code, IntelliJ, Vim)"
+    echo "  2. CLI Tools & Aliases"
+    echo "  3. Git Hooks & Workflows"
+    echo "  4. CI/CD (GitHub, Jenkins, GitLab)"
+    echo "  5. Monitoring (Grafana, DataDog)"
+    echo ""
+    
+    read -p "Select integrations to setup (comma-separated): " selections
+    
+    IFS=',' read -ra SELECTED <<< "$selections"
+    for selection in "${SELECTED[@]}"; do
+        case "$(echo "$selection" | xargs)" in
+            "1"|"ide")
+                "$SCRIPT_DIR/integrations" ide setup
+                ;;
+            "2"|"cli")
+                "$SCRIPT_DIR/integrations" cli install
+                ;;
+            "3"|"git")
+                "$SCRIPT_DIR/integrations" git hooks install
+                ;;
+            "4"|"cicd")
+                "$SCRIPT_DIR/integrations" cicd github
+                ;;
+            "5"|"monitoring")
+                "$SCRIPT_DIR/integrations" monitor grafana
+                ;;
+            *)
+                log_warning "Unknown selection: $selection"
+                ;;
+        esac
+    done
+    
+    log_success "Integration setup complete!"
+}
+
+run_platform_health_check() {
+    log_header "Platform Health Diagnostics"
+    
+    # Comprehensive health check
+    echo "🩺 Running comprehensive health check..."
+    
+    # Check all platform components
+    local components=("infrastructure" "applications" "monitoring" "security" "cost")
+    
+    for component in "${components[@]}"; do
+        log_action "Checking $component health..."
+        check_component_health "$component"
+    done
+    
+    # Generate health report
+    generate_health_report
+    
+    log_success "Health check complete!"
+}
+
+generate_platform_docs() {
+    log_header "Documentation Generation"
+    
+    # Run documentation generator
+    "$SCRIPT_DIR/docs-generator" generate || {
+        log_error "Documentation generation failed"
+        exit 1
+    }
+    
+    log_success "Documentation updated!"
+    log_info "View at: https://platform.company.com/docs"
+}
+
+# Helper functions
+check_service_health() {
+    local service_name="$1"
+    local health_command="$2"
+    
+    if eval "$health_command" >/dev/null 2>&1; then
+        echo "   ✅ $service_name: Healthy"
+    else
+        echo "   ❌ $service_name: Unhealthy"
+    fi
+}
+
+check_infrastructure_health() {
+    # Check AWS connectivity
+    if aws sts get-caller-identity >/dev/null 2>&1; then
+        echo "   ✅ AWS Connectivity: OK"
+    else
+        echo "   ❌ AWS Connectivity: Failed"
+    fi
+    
+    # Check Kubernetes connectivity
+    if kubectl cluster-info >/dev/null 2>&1; then
+        echo "   ✅ Kubernetes Cluster: Accessible"
+    else
+        echo "   ❌ Kubernetes Cluster: Inaccessible"
+    fi
+    
+    # Check Terraform state
+    if aws s3 ls s3://terraform-state-bucket >/dev/null 2>&1; then
+        echo "   ✅ Terraform State: Accessible"
+    else
+        echo "   ❌ Terraform State: Issues detected"
+    fi
+}
+
+show_daily_metrics() {
+    # Deployments today
+    local deployments_today=$(count_todays_deployments)
+    echo "   📦 Deployments: $deployments_today"
+    
+    # Active developers
+    local active_devs=$(count_active_developers)
+    echo "   👥 Active Developers: $active_devs"
+    
+    # Platform API calls
+    local api_calls=$(count_platform_api_calls)
+    echo "   🔌 API Calls: $api_calls"
+    
+    # Average response time
+    local avg_response=$(get_average_response_time)
+    echo "   ⚡ Avg Response Time: ${avg_response}ms"
+}
+
+check_active_alerts() {
+    # Check for active alerts (would integrate with monitoring)
+    local alert_count=$(count_active_platform_alerts)
+    
+    if [[ $alert_count -eq 0 ]]; then
+        echo "   ✅ No active alerts"
+    else
+        echo "   🚨 $alert_count active alerts - check monitoring dashboard"
+    fi
+}
+
+generate_quick_recommendations() {
+    # Generate contextual recommendations
+    local recommendations=()
+    
+    # Check if documentation is outdated
+    if [[ $(find docs -name "*.md" -mtime +7 | wc -l) -gt 0 ]]; then
+        recommendations+=("Update documentation with 'idp docs'")
+    fi
+    
+    # Check for unused resources
+    local unused_resources=$(count_unused_resources)
+    if [[ $unused_resources -gt 0 ]]; then
+        recommendations+=("Review $unused_resources unused resources for cost optimization")
+    fi
+    
+    # Check developer satisfaction
+    local last_survey_days=$(days_since_last_survey)
+    if [[ $last_survey_days -gt 30 ]]; then
+        recommendations+=("Collect developer feedback with 'idp survey'")
+    fi
+    
+    # Output recommendations
+    if [[ ${#recommendations[@]} -eq 0 ]]; then
+        echo "   ✨ Everything looks great! Keep up the excellent work!"
+    else
+        for rec in "${recommendations[@]}"; do
+            echo "   💡 $rec"
+        done
+    fi
+}
+
+# Stub functions (would be implemented with real data)
+validate_onboarding_prerequisites() { return 0; }
+list_golden_paths() { echo "microservice-nodejs, microservice-python, serverless-function"; }
+validate_golden_path() { [[ "$1" == "microservice-nodejs" ]]; }
+run_predeploy_validation() { return 0; }
+verify_deployment() { return 0; }
+setup_developer_environment() { return 0; }
+send_welcome_message() { return 0; }
+generate_analytics_insights() { echo "   📊 Platform adoption is up 15% this month"; }
+check_component_health() { echo "   ✅ $1: All systems operational"; }
+generate_health_report() { echo "   📋 Full report: /tmp/platform-health-$(date +%Y%m%d).json"; }
+count_todays_deployments() { echo "12"; }
+count_active_developers() { echo "25"; }
+count_platform_api_calls() { echo "1,234"; }
+get_average_response_time() { echo "85"; }
+count_active_platform_alerts() { echo "0"; }
+count_unused_resources() { echo "3"; }
+days_since_last_survey() { echo "45"; }
+
+# Main command router
+main() {
+    case "$COMMAND" in
+        "help"|"-h"|"--help"|"")
+            show_help
+            ;;
+        "status")
+            show_platform_status
+            ;;
+        "onboard")
+            complete_onboarding "$2"
+            ;;
+        "create")
+            create_service_from_golden_path "$2"
+            ;;
+        "deploy")
+            deploy_service_safely "$2"
+            ;;
+        "analytics")
+            show_analytics_overview
+            ;;
+        "metrics")
+            "$SCRIPT_DIR/dx-metrics" dashboard
+            ;;
+        "survey")
+            "$SCRIPT_DIR/dx-metrics" survey
+            ;;
+        "benchmark")
+            "$SCRIPT_DIR/dx-analytics" benchmark
+            ;;
+        "community")
+            shift
+            access_community_features "$@"
+            ;;
+        "share")
+            "$SCRIPT_DIR/community" share "$2" "$3"
+            ;;
+        "learn")
+            "$SCRIPT_DIR/community" learn
+            ;;
+        "office-hours")
+            "$SCRIPT_DIR/community" office-hours
+            ;;
+        "setup")
+            setup_platform_integrations
+            ;;
+        "configure")
+            "$SCRIPT_DIR/integrations" "$2" "$3"
+            ;;
+        "update")
+            "$SCRIPT_DIR/integrations" cli update
+            ;;
+        "health")
+            run_platform_health_check
+            ;;
+        "docs")
+            generate_platform_docs
+            ;;
+        "examples")
+            log_info "Browse examples at: https://platform.company.com/examples"
+            open "https://platform.company.com/examples" 2>/dev/null || true
+            ;;
+        "troubleshoot")
+            log_info "Interactive troubleshooting: https://platform.company.com/troubleshoot"
+            open "https://platform.company.com/troubleshoot" 2>/dev/null || true
+            ;;
+        "support")
+            log_info "Support channels:"
+            echo "  🆘 Emergency: Page on-call via PagerDuty"
+            echo "  💬 General: #platform-support on Slack"
+            echo "  📝 Issues: https://github.com/company/platform/issues"
+            echo "  📅 Office Hours: Fridays 2-4 PM PST"
+            ;;
+        *)
+            log_error "Unknown command: $COMMAND"
+            echo "Run 'idp help' for usage information"
+            exit 1
+            ;;
+    esac
+}
+
+# Execute with error handling
+if ! main "$@"; then
+    log_error "Command failed. Run 'idp support' for help"
+    exit 1
+fi

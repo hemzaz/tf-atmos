@@ -1,3 +1,4 @@
+---
 name: update-environment-template
 description: "Update an existing environment with the latest template changes using Copier's two-way updates"
 

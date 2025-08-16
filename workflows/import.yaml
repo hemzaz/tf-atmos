@@ -1,19 +1,304 @@
+---
 name: import
-description: "Import existing resources into Terraform state"
+description: "Import existing AWS resources into Terraform state with validation and safety checks"
 
 workflows:
   import:
+    description: "Safely import existing resources into Terraform state management"
     steps:
-    - run:
+    - name: "validate-inputs"
+      description: "Validate all required parameters for import operation"
+      run:
         command: |
-          # Create stack name from tenant, account, and environment
-          STACK_NAME="${tenant}-${account}-${environment}"
-          
-          # Use Python-based CLI for import operation with better validation
-          gaia workflow import \
-            --address "${RESOURCE_ADDRESS}" \
-            --id "${RESOURCE_ID}" \
-            --component "${component}" \
-            --stack "${STACK_NAME}"
+          set -euo pipefail
+
+          echo "=== Atmos Workflow: Resource Import ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # Validate required parameters
+          if [ -z "${tenant:-}" ]; then
+            echo "ERROR: Missing required parameter 'tenant'"
+            echo "Usage: atmos workflow import -f import.yaml tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<address> resource_id=<id>"
+            exit 1
+          fi
+
+          if [ -z "${account:-}" ]; then
+            echo "ERROR: Missing required parameter 'account'"
+            echo "Usage: atmos workflow import -f import.yaml tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<address> resource_id=<id>"
+            exit 1
+          fi
+
+          if [ -z "${environment:-}" ]; then
+            echo "ERROR: Missing required parameter 'environment'"
+            echo "Usage: atmos workflow import -f import.yaml tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<address> resource_id=<id>"
+            exit 1
+          fi
+
+          if [ -z "${component:-}" ]; then
+            echo "ERROR: Missing required parameter 'component'"
+            echo "Usage: atmos workflow import -f import.yaml tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<address> resource_id=<id>"
+            exit 1
+          fi
+
+          if [ -z "${resource_address:-}" ]; then
+            echo "ERROR: Missing required parameter 'resource_address'"
+            echo "Example: resource_address=aws_s3_bucket.my_bucket"
+            echo "Usage: atmos workflow import -f import.yaml tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<address> resource_id=<id>"
+            exit 1
+          fi
+
+          if [ -z "${resource_id:-}" ]; then
+            echo "ERROR: Missing required parameter 'resource_id'"
+            echo "Example: resource_id=my-actual-bucket-name"
+            echo "Usage: atmos workflow import -f import.yaml tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<address> resource_id=<id>"
+            exit 1
+          fi
+
+          STACK="${tenant}-${account}-${environment}"
+
+          echo "Import Configuration:"
+          echo "  Stack: $STACK"
+          echo "  Component: ${component}"
+          echo "  Resource Address: ${resource_address}"
+          echo "  Resource ID: ${resource_id}"
+
+          # Validate AWS credentials
+          if ! aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "ERROR: Invalid AWS credentials or AWS CLI not configured"
+            exit 1
+          fi
+
+          echo "✅ Input validation and AWS credentials check complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "pre-import-validation"
+      description: "Validate component and resource before import"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Pre-Import Validation ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          COMPONENT="${component}"
+          RESOURCE_ADDRESS="${resource_address}"
+          RESOURCE_ID="${resource_id}"
+
+          # Check stack exists
+          if ! atmos list stacks | grep -q "$STACK"; then
+            echo "ERROR: Stack $STACK not found in Atmos configuration"
+            echo "Available stacks:"
+            atmos list stacks
+            exit 1
+          fi
+
+          # Check component exists
+          if ! atmos list components -s "$STACK" 2>/dev/null | grep -q "$COMPONENT"; then
+            echo "ERROR: Component $COMPONENT not found in stack $STACK"
+            echo "Available components:"
+            atmos list components -s "$STACK" 2>/dev/null || echo "No components found"
+            exit 1
+          fi
+
+          # Validate component configuration
+          echo "Validating component configuration..."
+          if ! atmos terraform validate "$COMPONENT" -s "$STACK"; then
+            echo "ERROR: Component $COMPONENT validation failed"
+            echo "Fix component configuration before attempting import"
+            exit 1
+          fi
+
+          # Check if resource already exists in state
+          echo "Checking if resource already exists in Terraform state..."
+          set +e
+          STATE_CHECK=$(atmos terraform state show "$COMPONENT" "$RESOURCE_ADDRESS" -s "$STACK" 2>/dev/null)
+          STATE_CHECK_EXIT=$?
+          set -e
+
+          if [ $STATE_CHECK_EXIT -eq 0 ]; then
+            echo "WARNING: Resource $RESOURCE_ADDRESS already exists in Terraform state"
+            echo "Current state:"
+            echo "$STATE_CHECK"
+            echo "\nIf you want to re-import, first remove from state with:"
+            echo "atmos terraform state rm \"$RESOURCE_ADDRESS\" -s \"$STACK\""
+
+            FORCE_IMPORT="${force_import:-false}"
+            if [ "$FORCE_IMPORT" != "true" ]; then
+              echo "\nSet force_import=true to proceed with removing and re-importing"
+              exit 1
+            else
+              echo "\nForce import enabled, removing existing resource from state..."
+              atmos terraform state rm "$RESOURCE_ADDRESS" -s "$STACK"
+            fi
+          fi
+
+          echo "✅ Pre-import validation complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "verify-resource-exists"
+      description: "Verify the resource exists in AWS before importing"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Verify Resource Exists ==="
+
+          RESOURCE_ID="${resource_id}"
+          RESOURCE_ADDRESS="${resource_address}"
+
+          # Basic resource existence check based on resource type
+          echo "Verifying resource exists in AWS: $RESOURCE_ID"
+
+          # Extract resource type from address (e.g., aws_s3_bucket from aws_s3_bucket.my_bucket)
+          RESOURCE_TYPE=$(echo "$RESOURCE_ADDRESS" | cut -d'.' -f1)
+
+          case "$RESOURCE_TYPE" in
+            "aws_s3_bucket")
+              if aws s3api head-bucket --bucket "$RESOURCE_ID" >/dev/null 2>&1; then
+                echo "✅ S3 bucket $RESOURCE_ID exists"
+              else
+                echo "ERROR: S3 bucket $RESOURCE_ID does not exist or is not accessible"
+                exit 1
+              fi
+              ;;
+            "aws_dynamodb_table")
+              if aws dynamodb describe-table --table-name "$RESOURCE_ID" >/dev/null 2>&1; then
+                echo "✅ DynamoDB table $RESOURCE_ID exists"
+              else
+                echo "ERROR: DynamoDB table $RESOURCE_ID does not exist or is not accessible"
+                exit 1
+              fi
+              ;;
+            "aws_iam_role")
+              if aws iam get-role --role-name "$RESOURCE_ID" >/dev/null 2>&1; then
+                echo "✅ IAM role $RESOURCE_ID exists"
+              else
+                echo "ERROR: IAM role $RESOURCE_ID does not exist or is not accessible"
+                exit 1
+              fi
+              ;;
+            "aws_vpc")
+              if aws ec2 describe-vpcs --vpc-ids "$RESOURCE_ID" >/dev/null 2>&1; then
+                echo "✅ VPC $RESOURCE_ID exists"
+              else
+                echo "ERROR: VPC $RESOURCE_ID does not exist or is not accessible"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "⚠️  Resource type $RESOURCE_TYPE not specifically validated"
+              echo "Proceeding with import - Terraform will validate during import"
+              ;;
+          esac
+
+          echo "✅ Resource existence verification complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "import-resource"
+      description: "Import the resource into Terraform state"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Import Resource ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          COMPONENT="${component}"
+          RESOURCE_ADDRESS="${resource_address}"
+          RESOURCE_ID="${resource_id}"
+
+          echo "Importing resource into Terraform state..."
+          echo "  Resource: $RESOURCE_ADDRESS"
+          echo "  ID: $RESOURCE_ID"
+          echo "  Component: $COMPONENT"
+          echo "  Stack: $STACK"
+
+          # Perform the import
+          if atmos terraform import "$COMPONENT" "$RESOURCE_ADDRESS" "$RESOURCE_ID" -s "$STACK"; then
+            echo "✅ Resource imported successfully"
+          else
+            echo "❌ Resource import failed"
+            echo "\nCommon reasons for import failure:"
+            echo "1. Resource does not exist in AWS"
+            echo "2. Incorrect resource ID format"
+            echo "3. Resource address not defined in Terraform configuration"
+            echo "4. Permission issues accessing the resource"
+            exit 1
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "post-import-validation"
+      description: "Validate the imported resource and check for configuration drift"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Post-Import Validation ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          COMPONENT="${component}"
+          RESOURCE_ADDRESS="${resource_address}"
+
+          # Verify resource is now in state
+          echo "Verifying resource is in Terraform state..."
+          if atmos terraform state show "$COMPONENT" "$RESOURCE_ADDRESS" -s "$STACK" >/dev/null 2>&1; then
+            echo "✅ Resource confirmed in Terraform state"
+          else
+            echo "ERROR: Resource not found in Terraform state after import"
+            exit 1
+          fi
+
+          # Check for configuration drift after import
+          echo "\nChecking for configuration drift after import..."
+          set +e
+          PLAN_OUTPUT=$(atmos terraform plan "$COMPONENT" -s "$STACK" -detailed-exitcode 2>&1)
+          PLAN_EXIT_CODE=$?
+          set -e
+
+          case $PLAN_EXIT_CODE in
+            0)
+              echo "✅ No configuration drift detected - resource matches configuration perfectly"
+              ;;
+            2)
+              echo "⚠️  Configuration drift detected after import"
+              echo "The imported resource configuration may need adjustment"
+              echo "\nPlan output:"
+              echo "$PLAN_OUTPUT" | grep -E "to add|to change|to destroy|~|\+|\-" | head -10
+              echo "\nReview and update the Terraform configuration to match the imported resource"
+              ;;
+            *)
+              echo "❌ Error running plan after import (exit code: $PLAN_EXIT_CODE)"
+              echo "$PLAN_OUTPUT"
+              exit 1
+              ;;
+          esac
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "import-summary"
+      description: "Provide import operation summary and next steps"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Import Summary ==="
+          echo "Resource: ${resource_address}"
+          echo "ID: ${resource_id}"
+          echo "Component: ${component}"
+          echo "Stack: ${tenant}-${account}-${environment}"
+          echo "Status: ✅ Successfully Imported"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          echo "\nℹ️  Next Steps:"
+          echo "1. Review the imported resource state: atmos terraform state show ${component} \"${resource_address}\" -s ${tenant}-${account}-${environment}"
+          echo "2. Check for configuration drift: atmos terraform plan ${component} -s ${tenant}-${account}-${environment}"
+          echo "3. Update Terraform configuration if needed to match imported resource"
+          echo "4. Run validation: atmos terraform validate ${component} -s ${tenant}-${account}-${environment}"
+
+          echo "\n✅ Resource import completed successfully"
         env:
           AWS_SDK_LOAD_CONFIG: 1

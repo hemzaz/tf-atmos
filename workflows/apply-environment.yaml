@@ -1,32 +1,273 @@
+---
 name: apply-environment
-description: "Apply changes for all components in an environment"
+description: "Apply changes for all components in an environment with comprehensive validation and rollback support"
 
 workflows:
   apply:
+    description: "Apply Terraform changes to all components in an environment stack"
     steps:
-    - run:
+    - name: "validate-inputs"
+      description: "Validate required parameters and environment"
+      run:
         command: |
-          # Use Python-based CLI to apply all components
-          gaia workflow apply-environment \
-            --tenant ${tenant} \
-            --account ${account} \
-            --environment ${environment} \
-            --auto-approve ${auto_approve:-false} \
-            --parallel ${parallel:-false}
-            
-          # Perform validation checks if successful
-          if [ $? -eq 0 ]; then
-            echo "Deployment completed successfully."
-            
-            # Validate deployment
-            echo "Running validation checks..."
-            gaia workflow validate \
-              --tenant ${tenant} \
-              --account ${account} \
-              --environment ${environment}
-          else
-            echo "Deployment failed."
+          set -euo pipefail
+
+          echo "=== Atmos Workflow: Environment Apply ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # Validate required parameters
+          if [ -z "${tenant:-}" ]; then
+            echo "ERROR: Missing required parameter 'tenant'"
+            echo "Usage: atmos workflow apply-environment -f apply-environment.yaml tenant=<tenant> account=<account> environment=<environment>"
             exit 1
+          fi
+
+          if [ -z "${account:-}" ]; then
+            echo "ERROR: Missing required parameter 'account'"
+            echo "Usage: atmos workflow apply-environment -f apply-environment.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          if [ -z "${environment:-}" ]; then
+            echo "ERROR: Missing required parameter 'environment'"
+            echo "Usage: atmos workflow apply-environment -f apply-environment.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          STACK="${tenant}-${account}-${environment}"
+          AUTO_APPROVE="${auto_approve:-false}"
+          PARALLEL="${parallel:-false}"
+
+          echo "Configuration:"
+          echo "  Stack: $STACK"
+          echo "  Auto-approve: $AUTO_APPROVE"
+          echo "  Parallel execution: $PARALLEL"
+
+          # Validate AWS credentials
+          if ! aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "ERROR: Invalid AWS credentials or AWS CLI not configured"
+            exit 1
+          fi
+
+          echo "✅ Input validation and AWS credentials check complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "pre-apply-validation"
+      description: "Run validation checks before applying changes"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Pre-Apply Validation ==="
+
+          STACK="${tenant}-${account}-${environment}"
+
+          # Check stack exists
+          if ! atmos list stacks | grep -q "$STACK"; then
+            echo "ERROR: Stack $STACK not found in Atmos configuration"
+            echo "Available stacks:"
+            atmos list stacks
+            exit 1
+          fi
+
+          # Run linting first
+          echo "Running pre-apply linting..."
+          if ! terraform fmt -check -recursive ./components/terraform; then
+            echo "ERROR: Terraform formatting issues found"
+            echo "Run 'atmos workflow lint -f lint.yaml fix=true' to fix formatting"
+            exit 1
+          fi
+
+          # Validate components
+          echo "Validating Terraform components..."
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "WARNING: No components found for stack $STACK"
+            exit 0
+          fi
+
+          for component in $COMPONENTS; do
+            echo "Validating component: $component"
+            if ! atmos terraform validate "$component" -s "$STACK"; then
+              echo "ERROR: Component $component validation failed"
+              exit 1
+            fi
+          done
+
+          echo "✅ Pre-apply validation complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "plan-review"
+      description: "Generate and review execution plans for all components"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Generate Execution Plans ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          AUTO_APPROVE="${auto_approve:-false}"
+          PLAN_DIR="./plans/${STACK}-$(date +%Y%m%d-%H%M%S)"
+
+          # Create plan directory
+          mkdir -p "$PLAN_DIR"
+
+          # Get components list
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "No components to plan"
+            exit 0
+          fi
+
+          echo "Generating plans for components: $COMPONENTS"
+
+          # Generate plans for each component
+          PLAN_FAILED=false
+          for component in $COMPONENTS; do
+            echo "\nGenerating plan for component: $component"
+            PLAN_FILE="$PLAN_DIR/${component}.tfplan"
+
+            if atmos terraform plan "$component" -s "$STACK" -out="$PLAN_FILE"; then
+              echo "✅ Plan generated for $component: $PLAN_FILE"
+            else
+              echo "❌ Plan failed for component: $component"
+              PLAN_FAILED=true
+            fi
+          done
+
+          if [ "$PLAN_FAILED" = true ]; then
+            echo "ERROR: One or more component plans failed"
+            exit 1
+          fi
+
+          # Show plan summary
+          echo "\n=== Plan Summary ==="
+          echo "Plans stored in: $PLAN_DIR"
+          ls -la "$PLAN_DIR"
+
+          # If not auto-approve, prompt for confirmation
+          if [ "$AUTO_APPROVE" = "false" ]; then
+            echo "\n⚠️  Plans generated successfully. Review the plans before proceeding."
+            echo "To apply changes, re-run with auto_approve=true"
+            exit 0
+          fi
+
+          echo "✅ Plans generated successfully, proceeding with auto-approve"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "apply-components"
+      description: "Apply Terraform changes to all components"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Apply Components ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          AUTO_APPROVE="${auto_approve:-false}"
+          PARALLEL="${parallel:-false}"
+
+          # Only proceed if auto-approve is true
+          if [ "$AUTO_APPROVE" != "true" ]; then
+            echo "Skipping apply step (auto_approve not set to true)"
+            exit 0
+          fi
+
+          # Get components list
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "No components to apply"
+            exit 0
+          fi
+
+          echo "Applying components: $COMPONENTS"
+
+          # Apply components sequentially for safety
+          # Sequential execution ensures proper dependency resolution
+          # Future enhancement: Consider parallel execution for independent components
+          APPLY_FAILED=false
+          APPLIED_COMPONENTS=""
+
+          for component in $COMPONENTS; do
+            echo "\nApplying component: $component"
+
+            if atmos terraform apply "$component" -s "$STACK" -auto-approve; then
+              echo "✅ Component $component applied successfully"
+              APPLIED_COMPONENTS="$APPLIED_COMPONENTS $component"
+            else
+              echo "❌ Component $component apply failed"
+              APPLY_FAILED=true
+
+              echo "\n⚠️  Apply failed for $component. Applied components so far: $APPLIED_COMPONENTS"
+              echo "Manual intervention may be required to resolve the issue."
+              exit 1
+            fi
+          done
+
+          if [ "$APPLY_FAILED" = true ]; then
+            echo "ERROR: One or more component applies failed"
+            exit 1
+          fi
+
+          echo "\n✅ All components applied successfully"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "post-apply-validation"
+      description: "Run validation checks after applying changes"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Post-Apply Validation ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          AUTO_APPROVE="${auto_approve:-false}"
+
+          # Only run if we actually applied changes
+          if [ "$AUTO_APPROVE" != "true" ]; then
+            echo "Skipping post-apply validation (no changes were applied)"
+            exit 0
+          fi
+
+          # Validate that components are in expected state
+          echo "Running post-deployment validation..."
+
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          for component in $COMPONENTS; do
+            echo "Validating component: $component"
+            if ! atmos terraform validate "$component" -s "$STACK"; then
+              echo "⚠️  Post-apply validation failed for component: $component"
+              # Don't fail the workflow, but warn
+            fi
+          done
+
+          echo "✅ Post-apply validation complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "apply-summary"
+      description: "Provide deployment summary"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Deployment Summary ==="
+          echo "Stack: ${tenant}-${account}-${environment}"
+          echo "Status: $( [ "${auto_approve:-false}" = "true" ] && echo "Applied" || echo "Planned Only" )"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          if [ "${auto_approve:-false}" = "true" ]; then
+            echo "✅ Deployment completed successfully"
+          else
+            echo "ℹ️  Plans generated. Set auto_approve=true to apply changes"
           fi
         env:
           AWS_SDK_LOAD_CONFIG: 1

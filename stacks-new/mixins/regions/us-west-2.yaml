@@ -1,0 +1,115 @@
+---
+# US-West-2 (Oregon) regional configuration mixin
+# Primary region with high availability and disaster recovery capabilities
+
+vars:
+  # Regional identification
+  region: "us-west-2"
+  region_name: "Oregon"
+  availability_zones:
+    - "us-west-2a"
+    - "us-west-2b"
+    - "us-west-2c"
+    - "us-west-2d"
+
+  # Regional networking configuration
+  regional_networking:
+    # VPC CIDR allocation
+    vpc_cidr_allocation:
+      production: "10.0.0.0/16"    # 10.0.0.0 - 10.0.255.255
+      staging: "10.1.0.0/16"       # 10.1.0.0 - 10.1.255.255
+      development: "10.2.0.0/16"   # 10.2.0.0 - 10.2.255.255
+
+    # Subnet allocation (per AZ)
+    subnet_allocation:
+      public_cidr_block: "/24"     # 256 IPs per public subnet
+      private_cidr_block: "/22"    # 1024 IPs per private subnet
+      database_cidr_block: "/24"   # 256 IPs per database subnet
+
+    # NAT Gateway configuration
+    nat_gateway:
+      high_availability: true      # NAT GW in each AZ
+      single_nat_gateway: false    # Multiple NAT GWs for HA
+
+  # Regional compute configuration
+  regional_compute:
+    # EC2 instance types optimized for US-West-2
+    preferred_instance_types:
+      - "m5.large"
+      - "m5.xlarge"
+      - "c5.large"
+      - "c5.xlarge"
+      - "r5.large"
+      - "r5.xlarge"
+
+    # EKS configuration
+    eks:
+      version: "1.28"
+      endpoint_private_access: true
+      endpoint_public_access: true
+      node_groups:
+        default_instance_types: ["m5.large", "m5.xlarge"]
+        capacity_type: "ON_DEMAND"
+
+  # Regional storage configuration
+  regional_storage:
+    # EBS configuration
+    ebs:
+      volume_type: "gp3"
+      encryption_enabled: true
+
+    # S3 configuration
+    s3:
+      replication_region: "us-east-1"
+      storage_class_analysis: true
+      intelligent_tiering: true
+
+  # Regional database configuration
+  regional_database:
+    # RDS configuration
+    rds:
+      multi_az: true
+      preferred_backup_window: "03:00-04:00"      # UTC
+      preferred_maintenance_window: "sun:04:00-sun:05:00"  # UTC
+      backup_retention_period: 7
+
+    # ElastiCache configuration
+    elasticache:
+      node_type: "cache.t3.micro"
+      num_cache_nodes: 2
+
+  # Regional monitoring
+  regional_monitoring:
+    # CloudWatch configuration
+    cloudwatch:
+      log_retention_in_days: 90
+      metrics_collection_interval: 300
+
+    # X-Ray configuration
+    xray:
+      tracing_config: "Active"
+
+  # Regional disaster recovery
+  disaster_recovery:
+    # Cross-region backup
+    cross_region_backup_enabled: true
+    backup_region: "us-east-1"
+
+    # RTO/RPO settings
+    recovery_time_objective: "4h"
+    recovery_point_objective: "1h"
+
+# Regional-specific component configurations
+components:
+  terraform:
+    # AWS provider configuration for us-west-2
+    aws:
+      region: "us-west-2"
+
+# Regional tags
+tags:
+  Region: "us-west-2"
+  RegionName: "Oregon"
+  PrimaryRegion: "true"
+  DisasterRecoveryRegion: "us-east-1"
+  Timezone: "America/Los_Angeles"

@@ -1,3 +1,4 @@
+---
 name: onboard-environment
 description: "Onboard a new environment with infrastructure"
 
@@ -20,27 +21,27 @@ workflows:
             --vpc-cidr ${vpc_cidr} \
             ${region:+--region ${region}} \
             ${env_type:+--env-type ${env_type}}
-          
+
           if [ $? -ne 0 ]; then
             echo "Failed to create environment template."
             exit 1
           fi
-          
+
           # Deploy the environment if auto-deploy is enabled
           if [ "${auto_deploy:-false}" == "true" ]; then
             echo "Auto-deploying environment..."
-            
+
             gaia workflow apply-environment \
               --tenant ${tenant} \
               --account ${account} \
               --environment ${environment} \
               --auto-approve true
-            
+
             if [ $? -ne 0 ]; then
               echo "Environment deployment failed."
               exit 1
             fi
-            
+
             echo "Environment successfully onboarded and deployed!"
           else
             echo "Environment template created. Run 'gaia workflow apply-environment' to deploy."

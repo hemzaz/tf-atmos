@@ -1,0 +1,323 @@
+---
+# EKS Component Catalog
+# Standardized Elastic Kubernetes Service configuration with environment-specific variations
+
+metadata:
+  name: "eks"
+  description: "Elastic Kubernetes Service cluster with managed node groups and add-ons"
+  version: "1.0.0"
+  category: "platform"
+  service_level: "platform"
+
+# Environment-specific configurations
+configurations:
+  production:
+    vars:
+      # Production EKS cluster settings
+      cluster_version: "1.28"
+      cluster_endpoint_private_access: true
+      cluster_endpoint_public_access: false    # Private clusters in production
+      cluster_endpoint_public_access_cidrs: ["10.0.0.0/8"]
+
+      # Cluster add-ons
+      cluster_addons:
+        coredns:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        kube-proxy:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        vpc-cni:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+          configuration_values: |
+            {
+              "env": {
+                "ENABLE_PREFIX_DELEGATION": "true",
+                "ENABLE_POD_ENI": "true"
+              }
+            }
+        aws-ebs-csi-driver:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+
+      # Node groups configuration
+      eks_managed_node_groups:
+        main:
+          instance_types: ["m5.large", "m5.xlarge"]
+          capacity_type: "ON_DEMAND"
+          min_size: 2
+          max_size: 10
+          desired_size: 3
+
+          # Taints and labels
+          taints:
+            - key: "dedicated"
+              value: "main"
+              effect: "NO_SCHEDULE"
+
+          labels:
+            node-type: "main"
+            environment: "production"
+
+          # Update configuration
+          update_config:
+            max_unavailable_percentage: 25
+
+          # Launch template
+          create_launch_template: true
+          launch_template_name: "${local.name_prefix}-main"
+          launch_template_description: "Main node group launch template"
+
+      # Security groups
+      cluster_security_group_additional_rules:
+        ingress_nodes_443:
+          description: "Node groups to cluster API"
+          protocol: "tcp"
+          from_port: 443
+          to_port: 443
+          type: "ingress"
+          source_node_security_group: true
+
+      # OIDC provider
+      enable_irsa: true
+
+      # Logging
+      cluster_enabled_log_types: ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+      cloudwatch_log_group_retention_in_days: 30
+
+    tags:
+      HighAvailability: "true"
+      NodeCapacityType: "ON_DEMAND"
+      ClusterAccess: "private"
+
+  staging:
+    vars:
+      # Staging EKS cluster settings
+      cluster_version: "1.28"
+      cluster_endpoint_private_access: true
+      cluster_endpoint_public_access: true     # Allow public access for staging
+      cluster_endpoint_public_access_cidrs: ["0.0.0.0/0"]
+
+      # Cluster add-ons (same as production)
+      cluster_addons:
+        coredns:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        kube-proxy:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        vpc-cni:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        aws-ebs-csi-driver:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+
+      # Node groups configuration (smaller)
+      eks_managed_node_groups:
+        main:
+          instance_types: ["t3.large", "m5.large"]
+          capacity_type: "ON_DEMAND"
+          min_size: 1
+          max_size: 5
+          desired_size: 2
+
+          labels:
+            node-type: "main"
+            environment: "staging"
+
+          update_config:
+            max_unavailable_percentage: 50    # Faster updates in staging
+
+      # OIDC provider
+      enable_irsa: true
+
+      # Logging (reduced)
+      cluster_enabled_log_types: ["api", "audit"]
+      cloudwatch_log_group_retention_in_days: 14
+
+    tags:
+      ClusterAccess: "public"
+      NodeCapacityType: "ON_DEMAND"
+
+  development:
+    vars:
+      # Development EKS cluster settings (cost-optimized)
+      cluster_version: "1.28"
+      cluster_endpoint_private_access: false
+      cluster_endpoint_public_access: true     # Public for easier access
+      cluster_endpoint_public_access_cidrs: ["0.0.0.0/0"]
+
+      # Cluster add-ons (minimal)
+      cluster_addons:
+        coredns:
+          most_recent: true
+        kube-proxy:
+          most_recent: true
+        vpc-cni:
+          most_recent: true
+        aws-ebs-csi-driver:
+          most_recent: true
+
+      # Node groups configuration (spot instances)
+      eks_managed_node_groups:
+        main:
+          instance_types: ["t3.medium", "t3.large"]
+          capacity_type: "SPOT"               # Use spot instances for cost savings
+          min_size: 0                         # Can scale to zero
+          max_size: 5
+          desired_size: 1
+
+          labels:
+            node-type: "main"
+            environment: "development"
+
+          # Spot instance configuration
+          taints:
+            - key: "spot-instance"
+              value: "true"
+              effect: "NO_SCHEDULE"
+
+      # OIDC provider
+      enable_irsa: true
+
+      # Logging (minimal)
+      cluster_enabled_log_types: ["api"]
+      cloudwatch_log_group_retention_in_days: 7
+
+    tags:
+      CostOptimized: "true"
+      ClusterAccess: "public"
+      NodeCapacityType: "SPOT"
+
+  testenv-01:
+    vars:
+      # Test environment settings (production-like)
+      cluster_version: "1.28"
+      cluster_endpoint_private_access: true
+      cluster_endpoint_public_access: true
+      cluster_endpoint_public_access_cidrs: ["10.0.0.0/8"]
+
+      # Cluster add-ons
+      cluster_addons:
+        coredns:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        kube-proxy:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        vpc-cni:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+        aws-ebs-csi-driver:
+          most_recent: true
+          resolve_conflicts: "OVERWRITE"
+
+      # Node groups configuration
+      eks_managed_node_groups:
+        main:
+          instance_types: ["t3.large", "m5.large"]
+          capacity_type: "ON_DEMAND"
+          min_size: 1
+          max_size: 6
+          desired_size: 2
+
+          labels:
+            node-type: "main"
+            environment: "testenv-01"
+
+      # OIDC provider
+      enable_irsa: true
+
+      # Logging (comprehensive for testing)
+      cluster_enabled_log_types: ["api", "audit", "authenticator"]
+      cloudwatch_log_group_retention_in_days: 30
+
+    tags:
+      TestEnvironment: "true"
+      ProductionParity: "true"
+      ClusterAccess: "public"
+
+# Common variables across all environments
+vars:
+  # Cluster naming
+  cluster_name: "${local.name_prefix}"
+
+  # Cluster service IPv4 CIDR
+  cluster_service_ipv4_cidr: "172.20.0.0/16"
+
+  # Cluster encryption
+  cluster_encryption_config:
+    - provider_key_arn: "${module.kms.key_arn}"
+      resources: ["secrets"]
+
+  # Authentication mode
+  authentication_mode: "API_AND_CONFIG_MAP"
+
+  # Access entries (default)
+  enable_cluster_creator_admin_permissions: true
+
+  # Fargate profiles (disabled by default)
+  fargate_profiles: {}
+
+  # Self-managed node groups (none by default)
+  self_managed_node_groups: {}
+
+  # EKS identity mappings
+  aws_auth_roles: []
+  aws_auth_users: []
+  aws_auth_accounts: []
+
+# Component dependencies
+dependencies:
+  - component: "vpc"
+    outputs: ["vpc_id", "private_subnets", "public_subnets"]
+  - component: "kms"
+    outputs: ["key_arn"]
+
+# Component outputs
+outputs:
+  cluster_id:
+    description: "Name/ID of the EKS cluster"
+    sensitive: false
+
+  cluster_arn:
+    description: "ARN of the EKS cluster"
+    sensitive: false
+
+  cluster_endpoint:
+    description: "Endpoint for EKS control plane"
+    sensitive: false
+
+  cluster_version:
+    description: "Kubernetes version for the EKS cluster"
+    sensitive: false
+
+  cluster_security_group_id:
+    description: "Security group ID attached to the EKS cluster"
+    sensitive: false
+
+  node_security_group_id:
+    description: "ID of the node shared security group"
+    sensitive: false
+
+  oidc_provider_arn:
+    description: "ARN of the OIDC Provider for EKS"
+    sensitive: false
+
+  cluster_certificate_authority_data:
+    description: "Base64 encoded certificate data for the cluster"
+    sensitive: true
+
+  cluster_oidc_issuer_url:
+    description: "URL of the OpenID Connect identity provider"
+    sensitive: false
+
+# Default tags applied to all EKS resources
+tags:
+  ComponentType: "Compute"
+  ServiceLevel: "Platform"
+  ManagedBy: "Terraform"
+  Component: "eks"
+  KubernetesCluster: "${local.name_prefix}"

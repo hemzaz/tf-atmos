@@ -1,0 +1,502 @@
+#!/usr/bin/env python3
+"""
+Task Hygiene CLI Command
+Automated backlog optimization and task consolidation tool
+"""
+
+import argparse
+import json
+import yaml
+import re
+import os
+import sys
+from pathlib import Path
+from typing import Dict, List, Set, Optional, Tuple
+from datetime import datetime
+from collections import defaultdict
+import hashlib
+
+class Task:
+    def __init__(self, content: str, source: str, line_number: Optional[int] = None, 
+                 status: str = "pending", priority: str = "medium", effort: Optional[int] = None):
+        self.content = content.strip()
+        self.source = source
+        self.line_number = line_number
+        self.status = status
+        self.priority = priority
+        self.effort = effort or self._estimate_effort()
+        self.id = self._generate_id()
+        self.keywords = self._extract_keywords()
+        
+    def _generate_id(self) -> str:
+        """Generate unique task ID based on content"""
+        return hashlib.md5(self.content.encode()).hexdigest()[:8]
+        
+    def _extract_keywords(self) -> Set[str]:
+        """Extract key terms from task content"""
+        # Common technical keywords that indicate task scope
+        tech_keywords = {
+            'api', 'database', 'auth', 'security', 'monitoring', 'deploy', 'test',
+            'docker', 'kubernetes', 'terraform', 'ci/cd', 'frontend', 'backend',
+            'ui', 'ux', 'dashboard', 'integration', 'service', 'component',
+            'infrastructure', 'observability', 'analytics', 'documentation'
+        }
+        
+        words = set(re.findall(r'\b\w+\b', self.content.lower()))
+        return words.intersection(tech_keywords)
+        
+    def _estimate_effort(self) -> int:
+        """Estimate effort in hours based on task complexity indicators"""
+        content = self.content.lower()
+        
+        # Base effort
+        effort = 4
+        
+        # Complexity indicators
+        if any(word in content for word in ['implement', 'build', 'create', 'develop']):
+            effort += 8
+        if any(word in content for word in ['integration', 'infrastructure', 'architecture']):
+            effort += 12
+        if any(word in content for word in ['security', 'compliance', 'audit']):
+            effort += 6
+        if any(word in content for word in ['setup', 'configure', 'install']):
+            effort += 4
+        if any(word in content for word in ['fix', 'bug', 'issue', 'troubleshoot']):
+            effort += 2
+        if any(word in content for word in ['epic', 'large', 'complete', 'comprehensive']):
+            effort += 16
+            
+        return min(effort, 40)  # Cap at 40 hours
+
+class TaskHygiene:
+    def __init__(self):
+        self.tasks: List[Task] = []
+        self.duplicates: List[Tuple[Task, Task, float]] = []
+        self.consolidation_groups: List[List[Task]] = []
+        self.unnecessary_tasks: List[Task] = []
+        
+    def scan_directory(self, directory: str, extensions: List[str] = None) -> None:
+        """Scan directory for task files"""
+        if extensions is None:
+            extensions = ['.md', '.txt', '.json', '.yaml', '.yml']
+            
+        path = Path(directory)
+        if not path.exists():
+            print(f"❌ Directory not found: {directory}")
+            return
+            
+        print(f"🔍 Scanning {directory} for tasks...")
+        
+        for file_path in path.rglob('*'):
+            if file_path.suffix in extensions:
+                self._parse_file(file_path)
+                
+        print(f"✅ Found {len(self.tasks)} tasks across {len(set(t.source for t in self.tasks))} files")
+        
+    def _parse_file(self, file_path: Path) -> None:
+        """Parse individual file for tasks"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Parse based on file type
+            if file_path.suffix == '.json':
+                self._parse_json_tasks(content, str(file_path))
+            elif file_path.suffix in ['.yaml', '.yml']:
+                self._parse_yaml_tasks(content, str(file_path))
+            else:
+                self._parse_markdown_tasks(content, str(file_path))
+                
+        except Exception as e:
+            print(f"⚠️  Error parsing {file_path}: {e}")
+            
+    def _parse_json_tasks(self, content: str, source: str) -> None:
+        """Parse JSON format tasks"""
+        try:
+            data = json.loads(content)
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and 'content' in item:
+                        task = Task(
+                            content=item['content'],
+                            source=source,
+                            status=item.get('status', 'pending'),
+                            priority=item.get('priority', 'medium'),
+                            effort=item.get('effort')
+                        )
+                        self.tasks.append(task)
+        except json.JSONDecodeError:
+            pass
+            
+    def _parse_yaml_tasks(self, content: str, source: str) -> None:
+        """Parse YAML format tasks"""
+        try:
+            data = yaml.safe_load(content)
+            if isinstance(data, dict) and 'todos' in data:
+                for item in data['todos']:
+                    if isinstance(item, dict) and 'content' in item:
+                        task = Task(
+                            content=item['content'],
+                            source=source,
+                            status=item.get('status', 'pending'),
+                            priority=item.get('priority', 'medium'),
+                            effort=item.get('effort')
+                        )
+                        self.tasks.append(task)
+        except yaml.YAMLError:
+            pass
+            
+    def _parse_markdown_tasks(self, content: str, source: str) -> None:
+        """Parse Markdown format tasks (checkboxes, bullets, etc.)"""
+        lines = content.split('\n')
+        
+        for line_num, line in enumerate(lines, 1):
+            line = line.strip()
+            
+            # Match various task formats
+            patterns = [
+                r'- \[ \] (.+)',  # Unchecked checkbox
+                r'- \[x\] (.+)',  # Checked checkbox
+                r'- (.+)',        # Bullet point
+                r'\d+\. (.+)',    # Numbered list
+                r'#{1,6} (.+)',   # Headers as tasks
+            ]
+            
+            for pattern in patterns:
+                match = re.match(pattern, line, re.IGNORECASE)
+                if match:
+                    task_content = match.group(1)
+                    
+                    # Skip if too short or looks like a header
+                    if len(task_content) < 10 or line.startswith('###'):
+                        continue
+                        
+                    status = 'completed' if '\\[x\\]' in line else 'pending'
+                    
+                    task = Task(
+                        content=task_content,
+                        source=source,
+                        line_number=line_num,
+                        status=status
+                    )
+                    self.tasks.append(task)
+                    break
+                    
+    def find_duplicates(self, similarity_threshold: float = 0.7) -> None:
+        """Find duplicate or highly similar tasks"""
+        print("🔍 Analyzing for duplicates and overlapping tasks...")
+        
+        self.duplicates = []
+        
+        for i, task1 in enumerate(self.tasks):
+            for j, task2 in enumerate(self.tasks[i+1:], i+1):
+                similarity = self._calculate_similarity(task1, task2)
+                
+                if similarity >= similarity_threshold:
+                    self.duplicates.append((task1, task2, similarity))
+                    
+        print(f"⚠️  Found {len(self.duplicates)} potential duplicates")
+        
+    def _calculate_similarity(self, task1: Task, task2: Task) -> float:
+        """Calculate similarity between two tasks"""
+        # Keyword overlap
+        common_keywords = task1.keywords.intersection(task2.keywords)
+        total_keywords = task1.keywords.union(task2.keywords)
+        keyword_similarity = len(common_keywords) / len(total_keywords) if total_keywords else 0
+        
+        # Content similarity (simple word overlap)
+        words1 = set(task1.content.lower().split())
+        words2 = set(task2.content.lower().split())
+        common_words = words1.intersection(words2)
+        total_words = words1.union(words2)
+        content_similarity = len(common_words) / len(total_words) if total_words else 0
+        
+        # Combined similarity score
+        return (keyword_similarity * 0.6 + content_similarity * 0.4)
+        
+    def identify_consolidation_opportunities(self) -> None:
+        """Identify tasks that should be consolidated into epics"""
+        print("🔄 Identifying consolidation opportunities...")
+        
+        # Group by common keywords
+        keyword_groups = defaultdict(list)
+        
+        for task in self.tasks:
+            if task.status != 'completed':  # Don't consolidate completed tasks
+                for keyword in task.keywords:
+                    keyword_groups[keyword].append(task)
+        
+        # Find groups with multiple tasks
+        self.consolidation_groups = []
+        processed_tasks = set()
+        
+        for keyword, tasks in keyword_groups.items():
+            if len(tasks) >= 3 and keyword in ['monitoring', 'security', 'api', 'infrastructure', 'frontend']:
+                # Filter out already processed tasks
+                unprocessed_tasks = [t for t in tasks if t.id not in processed_tasks]
+                
+                if len(unprocessed_tasks) >= 2:
+                    self.consolidation_groups.append(unprocessed_tasks)
+                    processed_tasks.update(t.id for t in unprocessed_tasks)
+                    
+        print(f"💡 Identified {len(self.consolidation_groups)} consolidation opportunities")
+        
+    def identify_unnecessary_tasks(self) -> None:
+        """Identify tasks that might be unnecessary"""
+        print("🗑️  Identifying unnecessary tasks...")
+        
+        unnecessary_keywords = {
+            'speculative', 'future', 'maybe', 'consider', 'explore', 'investigate',
+            'research', 'nice-to-have', 'eventually', 'someday', 'ideas'
+        }
+        
+        self.unnecessary_tasks = []
+        
+        for task in self.tasks:
+            content_words = set(task.content.lower().split())
+            
+            # Check for unnecessary indicators
+            if content_words.intersection(unnecessary_keywords):
+                self.unnecessary_tasks.append(task)
+                continue
+                
+            # Check for overly broad tasks
+            if task.effort > 30:
+                self.unnecessary_tasks.append(task)
+                continue
+                
+            # Check for duplicate functionality
+            if any(word in task.content.lower() for word in ['duplicate', 'already exists', 'redundant']):
+                self.unnecessary_tasks.append(task)
+                
+        print(f"🗑️  Identified {len(self.unnecessary_tasks)} potentially unnecessary tasks")
+        
+    def generate_report(self, output_format: str = 'markdown') -> str:
+        """Generate hygiene report"""
+        if output_format == 'markdown':
+            return self._generate_markdown_report()
+        elif output_format == 'json':
+            return self._generate_json_report()
+        else:
+            return self._generate_text_report()
+            
+    def _generate_markdown_report(self) -> str:
+        """Generate detailed markdown report"""
+        report = []
+        
+        # Header
+        report.append("# 🧹 Task Hygiene Report")
+        report.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        report.append("")
+        
+        # Summary
+        total_tasks = len(self.tasks)
+        pending_tasks = len([t for t in self.tasks if t.status == 'pending'])
+        completed_tasks = len([t for t in self.tasks if t.status == 'completed'])
+        total_effort = sum(t.effort for t in self.tasks if t.status == 'pending')
+        
+        report.append("## 📊 Summary")
+        report.append(f"- **Total Tasks**: {total_tasks}")
+        report.append(f"- **Pending Tasks**: {pending_tasks}")
+        report.append(f"- **Completed Tasks**: {completed_tasks}")
+        report.append(f"- **Total Effort**: {total_effort} hours")
+        report.append(f"- **Duplicates Found**: {len(self.duplicates)}")
+        report.append(f"- **Consolidation Groups**: {len(self.consolidation_groups)}")
+        report.append(f"- **Unnecessary Tasks**: {len(self.unnecessary_tasks)}")
+        report.append("")
+        
+        # Duplicates section
+        if self.duplicates:
+            report.append("## 🔄 Duplicate Tasks")
+            for task1, task2, similarity in self.duplicates:
+                report.append(f"### Similarity: {similarity:.1%}")
+                report.append(f"**Task 1**: {task1.content[:100]}...")
+                report.append(f"*Source*: {task1.source}")
+                report.append("")
+                report.append(f"**Task 2**: {task2.content[:100]}...")
+                report.append(f"*Source*: {task2.source}")
+                report.append("")
+                report.append("**Recommendation**: Consider consolidating these tasks")
+                report.append("")
+                
+        # Consolidation opportunities
+        if self.consolidation_groups:
+            report.append("## 💡 Consolidation Opportunities")
+            for i, group in enumerate(self.consolidation_groups, 1):
+                report.append(f"### Epic {i}: {self._suggest_epic_name(group)}")
+                total_group_effort = sum(t.effort for t in group)
+                report.append(f"**Total Effort**: {total_group_effort} hours")
+                report.append("**Tasks to consolidate**:")
+                for task in group:
+                    report.append(f"- {task.content[:80]}... ({task.effort}h)")
+                report.append("")
+                
+        # Unnecessary tasks
+        if self.unnecessary_tasks:
+            report.append("## 🗑️ Potentially Unnecessary Tasks")
+            for task in self.unnecessary_tasks:
+                report.append(f"- **{task.content[:80]}...** ({task.effort}h)")
+                report.append(f"  *Source*: {task.source}")
+                report.append("")
+                
+        # Recommendations
+        report.append("## 🎯 Recommendations")
+        
+        if self.duplicates:
+            report.append("### Duplicate Resolution")
+            report.append("1. Review each duplicate pair carefully")
+            report.append("2. Merge similar tasks, keeping the most detailed description")
+            report.append("3. Update references and close duplicate issues")
+            report.append("")
+            
+        if self.consolidation_groups:
+            report.append("### Task Consolidation")
+            report.append("1. Create epics for related task groups")
+            report.append("2. Break epics into manageable sub-tasks (4-16 hours each)")
+            report.append("3. Establish clear acceptance criteria for each epic")
+            report.append("")
+            
+        if self.unnecessary_tasks:
+            report.append("### Task Cleanup")
+            report.append("1. Archive or remove speculative tasks")
+            report.append("2. Break down overly large tasks (>30 hours)")
+            report.append("3. Move 'nice-to-have' items to a future/backlog list")
+            report.append("")
+            
+        # Sprint suggestions
+        report.append("## 🚀 Suggested Sprint Organization")
+        critical_tasks = [t for t in self.tasks if any(word in t.content.lower() 
+                         for word in ['critical', 'urgent', 'security', 'bug', 'fix'])]
+        
+        if critical_tasks:
+            report.append("### Sprint 1: Critical Items")
+            for task in critical_tasks[:5]:  # Top 5 critical
+                report.append(f"- {task.content[:60]}... ({task.effort}h)")
+            report.append("")
+            
+        # Effort distribution
+        effort_ranges = {
+            'Quick wins (1-4h)': [t for t in self.tasks if t.effort <= 4 and t.status == 'pending'],
+            'Medium tasks (5-16h)': [t for t in self.tasks if 5 <= t.effort <= 16 and t.status == 'pending'],
+            'Large tasks (17-40h)': [t for t in self.tasks if t.effort > 16 and t.status == 'pending']
+        }
+        
+        report.append("### Effort Distribution")
+        for range_name, tasks in effort_ranges.items():
+            if tasks:
+                total_range_effort = sum(t.effort for t in tasks)
+                report.append(f"**{range_name}**: {len(tasks)} tasks, {total_range_effort}h total")
+                
+        return "\\n".join(report)
+        
+    def _suggest_epic_name(self, tasks: List[Task]) -> str:
+        """Suggest an epic name based on common keywords"""
+        all_keywords = set()
+        for task in tasks:
+            all_keywords.update(task.keywords)
+            
+        # Priority keywords for naming
+        priority_keywords = ['security', 'monitoring', 'api', 'infrastructure', 'frontend', 'backend']
+        
+        for keyword in priority_keywords:
+            if keyword in all_keywords:
+                return f"{keyword.capitalize()} Epic"
+                
+        return f"Related Tasks Epic"
+        
+    def _generate_json_report(self) -> str:
+        """Generate JSON format report"""
+        report_data = {
+            'timestamp': datetime.now().isoformat(),
+            'summary': {
+                'total_tasks': len(self.tasks),
+                'pending_tasks': len([t for t in self.tasks if t.status == 'pending']),
+                'completed_tasks': len([t for t in self.tasks if t.status == 'completed']),
+                'total_effort': sum(t.effort for t in self.tasks if t.status == 'pending'),
+                'duplicates_found': len(self.duplicates),
+                'consolidation_groups': len(self.consolidation_groups),
+                'unnecessary_tasks': len(self.unnecessary_tasks)
+            },
+            'duplicates': [
+                {
+                    'similarity': similarity,
+                    'task1': {'content': task1.content, 'source': task1.source, 'effort': task1.effort},
+                    'task2': {'content': task2.content, 'source': task2.source, 'effort': task2.effort}
+                }
+                for task1, task2, similarity in self.duplicates
+            ],
+            'consolidation_groups': [
+                {
+                    'epic_name': self._suggest_epic_name(group),
+                    'total_effort': sum(t.effort for t in group),
+                    'tasks': [{'content': t.content, 'effort': t.effort, 'source': t.source} for t in group]
+                }
+                for group in self.consolidation_groups
+            ],
+            'unnecessary_tasks': [
+                {'content': t.content, 'effort': t.effort, 'source': t.source} 
+                for t in self.unnecessary_tasks
+            ]
+        }
+        
+        return json.dumps(report_data, indent=2)
+        
+def main():
+    parser = argparse.ArgumentParser(description="Task Hygiene - Automated backlog optimization")
+    parser.add_argument('path', nargs='?', default='.', help='Path to scan for tasks')
+    parser.add_argument('--format', choices=['markdown', 'json', 'text'], default='markdown',
+                       help='Output format')
+    parser.add_argument('--output', '-o', help='Output file path')
+    parser.add_argument('--similarity-threshold', type=float, default=0.7,
+                       help='Similarity threshold for duplicate detection (0.0-1.0)')
+    parser.add_argument('--interactive', action='store_true',
+                       help='Interactive mode with consolidation prompts')
+    parser.add_argument('--backup', action='store_true', default=True,
+                       help='Create backup before making changes')
+    
+    args = parser.parse_args()
+    
+    # Initialize task hygiene analyzer
+    hygiene = TaskHygiene()
+    
+    # Scan for tasks
+    print("🧹 Starting Task Hygiene Analysis...")
+    hygiene.scan_directory(args.path)
+    
+    if not hygiene.tasks:
+        print("❌ No tasks found in the specified path")
+        sys.exit(1)
+        
+    # Perform analysis
+    hygiene.find_duplicates(args.similarity_threshold)
+    hygiene.identify_consolidation_opportunities()
+    hygiene.identify_unnecessary_tasks()
+    
+    # Generate report
+    report = hygiene.generate_report(args.format)
+    
+    # Output results
+    if args.output:
+        with open(args.output, 'w', encoding='utf-8') as f:
+            f.write(report)
+        print(f"✅ Report saved to {args.output}")
+    else:
+        print("\\n" + report)
+        
+    # Interactive mode
+    if args.interactive:
+        print("\\n🤔 Interactive Mode - Review consolidation opportunities:")
+        for i, group in enumerate(hygiene.consolidation_groups, 1):
+            print(f"\\n📦 Group {i}: {hygiene._suggest_epic_name(group)}")
+            print(f"   Tasks: {len(group)}, Total effort: {sum(t.effort for t in group)}h")
+            
+            response = input(f"   Consolidate this group? (y/n): ").lower().strip()
+            if response == 'y':
+                print(f"   ✅ Marked for consolidation")
+            else:
+                print(f"   ⏭️  Skipping")
+                
+    print("\\n🎉 Task hygiene analysis complete!")
+
+if __name__ == '__main__':
+    main()

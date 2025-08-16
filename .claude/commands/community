@@ -1,0 +1,567 @@
+#!/bin/bash
+# Community Building and Collaboration Tools
+# Foster platform adoption and knowledge sharing
+
+set -e
+
+COMMAND="${1:-help}"
+
+# Color codes
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+
+show_help() {
+    cat <<EOF
+🤝 Platform Community - Collaboration & Knowledge Sharing
+
+USAGE:
+    community <command> [options]
+
+COMMANDS:
+    # Knowledge Sharing
+    share <type>             Share your solution with the community
+    learn                    Browse community solutions
+    ask <question>           Ask the community for help
+    answer <question-id>     Answer a community question
+    
+    # Showcases & Examples
+    showcase create          Create a showcase of your work
+    showcase list            Browse community showcases
+    examples add <category>  Add example to the library
+    examples browse          Browse example library
+    
+    # Office Hours & Events
+    office-hours             Join next office hours session
+    demo schedule            Schedule a demo of your work
+    lunch-learn schedule     Schedule lunch & learn session
+    events list              List upcoming platform events
+    
+    # Recognition & Gamification
+    leaderboard              Show community contribution leaderboard
+    badges                   View your platform badges
+    achievements             Show your platform achievements
+    nominate <person>        Nominate someone for recognition
+    
+    # Feedback & Improvement
+    feedback submit          Submit platform improvement idea
+    feedback vote            Vote on improvement ideas
+    roadmap                  View platform roadmap
+    survey                   Take developer experience survey
+
+EXAMPLES:
+    community share solution --category monitoring    # Share monitoring solution
+    community ask "How to optimize Lambda costs?"     # Ask for help
+    community showcase create --service my-api        # Showcase your service
+    community demo schedule --title "ML Pipeline"     # Schedule demo
+    community feedback submit --idea "Cost alerts"    # Submit improvement idea
+
+EOF
+}
+
+# Share solutions and knowledge
+share_knowledge() {
+    local type="$1"
+    local category="$2"
+    local title="$3"
+    
+    case "$type" in
+        "solution")
+            share_solution "$category" "$title"
+            ;;
+        "pattern")
+            share_pattern "$category" "$title"
+            ;;
+        "template")
+            share_template "$category" "$title"
+            ;;
+        "tip")
+            share_tip "$category" "$title"
+            ;;
+        *)
+            log_info "Available share types: solution, pattern, template, tip"
+            ;;
+    esac
+}
+
+share_solution() {
+    local category="$1"
+    local title="$2"
+    
+    if [[ -z "$category" ]]; then
+        echo "Available categories:"
+        echo "  • monitoring    • cost-optimization  • security"
+        echo "  • deployment    • debugging          • performance"
+        read -p "Category: " category
+    fi
+    
+    if [[ -z "$title" ]]; then
+        read -p "Solution title: " title
+    fi
+    
+    log_info "Creating solution share for: $title"
+    
+    # Create solution template
+    local solution_file="community/solutions/$(date +%Y%m%d)-${title// /-}.md"
+    cat > "$solution_file" <<EOF
+# $title
+
+**Category**: $category  
+**Author**: $(git config user.name) ($(git config user.email))  
+**Date**: $(date +"%Y-%m-%d")  
+**Tags**: #$category #solution
+
+## Problem
+<!-- Describe the problem you solved -->
+
+## Solution
+<!-- Describe your solution approach -->
+
+\`\`\`bash
+# Example commands
+\`\`\`
+
+## Benefits
+<!-- What improvements did this provide? -->
+- ⚡ Performance improvement: X%
+- 💰 Cost reduction: $X/month
+- ⏰ Time saved: X hours/week
+
+## Implementation Guide
+
+### Prerequisites
+- Requirement 1
+- Requirement 2
+
+### Step-by-Step
+1. Step one
+2. Step two
+3. Step three
+
+### Configuration
+\`\`\`yaml
+# Configuration example
+\`\`\`
+
+## Monitoring & Alerting
+\`\`\`yaml
+# Monitoring setup
+\`\`\`
+
+## Troubleshooting
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Error 1 | Cause 1 | Fix 1 |
+
+## Related Resources
+- [Link 1](url)
+- [Link 2](url)
+
+## Community Discussion
+Ask questions or share experiences: #platform-solutions
+
+---
+*If this solution helped you, give it a ⭐ and share your experience!*
+EOF
+    
+    # Open in editor
+    ${EDITOR:-vim} "$solution_file"
+    
+    # Submit to community
+    log_info "Submitting to community..."
+    git add "$solution_file"
+    git commit -m "feat(community): add $category solution - $title
+
+Contributes to platform knowledge base and helps other developers.
+
+Category: $category
+Impact: $(read -p "Impact (performance/cost/time): " impact && echo $impact)
+"
+    
+    # Create Slack notification
+    create_slack_notification "solution" "$title" "$category" "$(git config user.name)"
+    
+    log_success "Solution shared! 🎉"
+    log_info "View at: https://platform.company.com/community/solutions"
+    log_info "Slack: #platform-solutions"
+}
+
+# Community Q&A system
+ask_question() {
+    local question="$1"
+    
+    if [[ -z "$question" ]]; then
+        echo "What's your question about the platform?"
+        echo "Examples:"
+        echo "  • How do I optimize Lambda cold starts?"
+        echo "  • What's the best way to handle secrets in EKS?"
+        echo "  • How to implement blue-green deployments?"
+        read -p "Question: " question
+    fi
+    
+    log_info "Submitting question to community..."
+    
+    # Create question file
+    local question_id="q$(date +%Y%m%d%H%M%S)"
+    local question_file="community/questions/$question_id.md"
+    
+    cat > "$question_file" <<EOF
+# Q: $question
+
+**Asked by**: $(git config user.name)  
+**Date**: $(date +"%Y-%m-%d %H:%M")  
+**ID**: $question_id  
+**Status**: Open  
+**Tags**: $(suggest_tags "$question")
+
+## Context
+<!-- Provide more context about your situation -->
+
+## What I've Tried
+<!-- What have you already attempted? -->
+
+## Expected Outcome
+<!-- What are you trying to achieve? -->
+
+## Environment
+- **Stack**: $(atmos describe stacks | head -1 || echo "N/A")
+- **Components**: $(echo "List relevant components" )
+- **AWS Region**: $(aws configure get region 2>/dev/null || echo "N/A")
+
+---
+## Answers
+
+*No answers yet. Be the first to help!*
+
+### How to Answer
+\`\`\`bash
+community answer $question_id
+\`\`\`
+
+---
+*Asked via platform community tools*
+EOF
+    
+    # Open for editing
+    ${EDITOR:-vim} "$question_file"
+    
+    # Submit question
+    git add "$question_file"
+    git commit -m "question: $question
+
+ID: $question_id
+Asked by: $(git config user.name)
+"
+    
+    # Notify community
+    post_to_slack "#platform-support" "🤔 New Question: $question" "$question_id"
+    
+    log_success "Question submitted! 🤔"
+    log_info "Question ID: $question_id"
+    log_info "Track at: https://platform.company.com/community/questions/$question_id"
+    log_info "The community will be notified in #platform-support"
+}
+
+# Schedule showcases and demos
+schedule_demo() {
+    local title="$1"
+    local description="$2"
+    
+    if [[ -z "$title" ]]; then
+        read -p "Demo title: " title
+    fi
+    
+    if [[ -z "$description" ]]; then
+        read -p "Brief description: " description
+    fi
+    
+    log_info "Scheduling demo: $title"
+    
+    # Get next available slot
+    local next_slot=$(get_next_demo_slot)
+    
+    cat <<EOF > "community/demos/$(date +%Y%m%d)-${title// /-}.md"
+# Demo: $title
+
+**Presenter**: $(git config user.name)  
+**Date**: $next_slot  
+**Duration**: 15-20 minutes  
+**Audience**: Platform Community  
+
+## Description
+$description
+
+## What You'll Learn
+- Key learning 1
+- Key learning 2
+- Key learning 3
+
+## Demo Outline
+1. Problem/Challenge (3 min)
+2. Solution Overview (5 min)
+3. Live Demo (7 min)
+4. Q&A (5 min)
+
+## Technical Details
+- **Components Used**: 
+- **Technologies**: 
+- **Architecture**: 
+
+## Resources
+- GitHub: [Link to code]
+- Documentation: [Link to docs]
+- Metrics: [Link to dashboards]
+
+## Registration
+Sign up: https://platform.company.com/events/demo-$next_slot
+
+---
+*All demos are recorded and available in the community library*
+EOF
+    
+    # Add to calendar
+    create_calendar_event "$title" "$next_slot" "Demo by $(git config user.name): $description"
+    
+    # Notify community
+    post_to_slack "#platform-demos" "📺 New Demo Scheduled: $title by $(git config user.name)" "$next_slot"
+    
+    log_success "Demo scheduled for $next_slot! 📺"
+    log_info "Community will be notified in #platform-demos"
+}
+
+# Gamification and recognition
+show_leaderboard() {
+    echo "🏆 Platform Community Leaderboard (Last 30 Days)"
+    echo "=================================================="
+    
+    # Calculate contributions
+    local contributors=(
+        "alice:Solutions:5:Templates:3:Answers:8:Score:42"
+        "bob:Solutions:3:Templates:7:Answers:5:Score:38" 
+        "charlie:Solutions:4:Templates:2:Answers:12:Score:36"
+        "diana:Solutions:2:Templates:4:Answers:9:Score:28"
+        "eve:Solutions:6:Templates:1:Answers:3:Score:26"
+    )
+    
+    local rank=1
+    for contributor in "${contributors[@]}"; do
+        IFS=':' read -r name solutions_label solutions templates_label templates answers_label answers score_label score <<< "$contributor"
+        
+        local badge=""
+        case $rank in
+            1) badge="🥇" ;;
+            2) badge="🥈" ;;
+            3) badge="🥉" ;;
+            *) badge="🎖️ " ;;
+        esac
+        
+        printf "%s %-12s %3d pts | Solutions: %d | Templates: %d | Answers: %d\n" \
+            "$badge" "$name" "$score" "$solutions" "$templates" "$answers"
+        
+        ((rank++))
+    done
+    
+    echo ""
+    echo "🎯 Your Stats: $(get_user_stats $(git config user.name))"
+    echo "🏆 Your Rank: $(get_user_rank $(git config user.name))"
+    echo ""
+    echo "💡 Earn points by:"
+    echo "   • Sharing solutions (+10 pts)"
+    echo "   • Creating templates (+8 pts)"
+    echo "   • Answering questions (+5 pts)"
+    echo "   • Attending demos (+2 pts)"
+}
+
+show_badges() {
+    local user=$(git config user.name)
+    
+    echo "🎖️  Your Platform Badges"
+    echo "========================"
+    
+    # Check earned badges
+    local badges=(
+        "🎓:Onboarding Complete:You completed the platform onboarding"
+        "📚:Knowledge Sharer:Shared 3+ solutions with the community"
+        "💡:Problem Solver:Answered 5+ community questions"
+        "🚀:Early Adopter:One of the first 50 platform users"
+        "🔧:Template Creator:Created reusable templates"
+        "📊:Cost Optimizer:Achieved >20% cost reduction"
+        "🛡️:Security Champion:Identified security improvement"
+        "🏆:Community Leader:Top 10 community contributor"
+    )
+    
+    for badge in "${badges[@]}"; do
+        IFS=':' read -r icon name description <<< "$badge"
+        
+        if user_has_badge "$user" "$name"; then
+            echo "✅ $icon $name - $description"
+        else
+            echo "⬜ $icon $name - $description"
+        fi
+    done
+    
+    echo ""
+    echo "🎯 Next Badge: $(get_next_badge "$user")"
+}
+
+# Feedback and improvement system
+submit_feedback() {
+    local idea="$1"
+    
+    if [[ -z "$idea" ]]; then
+        echo "💡 What's your improvement idea?"
+        read -p "Idea: " idea
+    fi
+    
+    log_info "Submitting improvement idea..."
+    
+    # Create feedback file
+    local feedback_id="f$(date +%Y%m%d%H%M%S)"
+    local feedback_file="community/feedback/$feedback_id.md"
+    
+    cat > "$feedback_file" <<EOF
+# 💡 Improvement Idea: $idea
+
+**Submitted by**: $(git config user.name)  
+**Date**: $(date +"%Y-%m-%d")  
+**ID**: $feedback_id  
+**Status**: Under Review  
+**Votes**: 0 👍 / 0 👎  
+
+## Problem
+<!-- What problem does this solve? -->
+
+## Proposed Solution
+$idea
+
+## Benefits
+<!-- What benefits would this provide? -->
+- Benefit 1
+- Benefit 2
+
+## Implementation Complexity
+- [ ] Low (< 1 week)
+- [ ] Medium (1-4 weeks)  
+- [ ] High (> 1 month)
+
+## Community Votes
+<!-- Votes will be tracked here -->
+
+### Vote
+\`\`\`bash
+community feedback vote $feedback_id [up|down]
+\`\`\`
+
+---
+*Platform team reviews all feedback monthly*
+EOF
+    
+    # Submit feedback
+    git add "$feedback_file"
+    git commit -m "feedback: $idea
+
+ID: $feedback_id
+Submitted by: $(git config user.name)
+"
+    
+    # Notify platform team
+    post_to_slack "#platform-feedback" "💡 New Improvement Idea: $idea" "$feedback_id"
+    
+    log_success "Feedback submitted! 💡"
+    log_info "Feedback ID: $feedback_id"
+    log_info "Community can vote at: https://platform.company.com/feedback/$feedback_id"
+}
+
+# Helper functions
+suggest_tags() {
+    local question="$1"
+    local tags=""
+    
+    # Simple keyword-based tagging
+    echo "$question" | grep -i "cost\|money\|expensive" >/dev/null && tags="$tags #cost"
+    echo "$question" | grep -i "performance\|slow\|fast" >/dev/null && tags="$tags #performance"
+    echo "$question" | grep -i "security\|auth\|permissions" >/dev/null && tags="$tags #security"
+    echo "$question" | grep -i "deploy\|build\|ci/cd" >/dev/null && tags="$tags #deployment"
+    echo "$question" | grep -i "monitor\|alert\|log" >/dev/null && tags="$tags #monitoring"
+    
+    echo "${tags:-#general}"
+}
+
+create_slack_notification() {
+    local type="$1"
+    local title="$2"
+    local category="$3"
+    local author="$4"
+    
+    # Would integrate with Slack API
+    echo "Slack notification: $type - $title ($category) by $author"
+}
+
+post_to_slack() {
+    local channel="$1"
+    local message="$2"
+    local id="$3"
+    
+    # Would integrate with Slack API
+    echo "Posting to $channel: $message (ID: $id)"
+}
+
+get_next_demo_slot() {
+    # Would integrate with calendar system
+    echo "$(date -d 'next friday' +%Y-%m-%d) 2:00 PM PST"
+}
+
+user_has_badge() {
+    local user="$1"
+    local badge="$2"
+    
+    # Would check badge database
+    [[ "$badge" == "Onboarding Complete" ]] && return 0
+    return 1
+}
+
+# Main command router
+main() {
+    case "$COMMAND" in
+        "help"|"-h"|"--help"|"")
+            show_help
+            ;;
+        "share")
+            share_knowledge "$2" "$3" "$4"
+            ;;
+        "ask")
+            ask_question "$2"
+            ;;
+        "demo")
+            case "$2" in
+                "schedule") schedule_demo "$3" "$4" ;;
+                *) echo "Usage: community demo schedule [title] [description]" ;;
+            esac
+            ;;
+        "leaderboard")
+            show_leaderboard
+            ;;
+        "badges")
+            show_badges
+            ;;
+        "feedback")
+            case "$2" in
+                "submit") submit_feedback "$3" ;;
+                "vote") vote_feedback "$3" "$4" ;;
+                *) echo "Usage: community feedback [submit|vote]" ;;
+            esac
+            ;;
+        *)
+            echo "Unknown command: $COMMAND"
+            echo "Run 'community help' for usage information"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

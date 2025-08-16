@@ -1,0 +1,199 @@
+---
+# Staging environment configuration mixin
+# Pre-production environment for final validation and user acceptance testing
+
+vars:
+  # Environment identification
+  environment: "staging"
+  environment_type: "pre-production"
+  environment_purpose: "Final validation and user acceptance testing"
+
+  # Staging-specific settings
+  staging_config:
+    # Pre-production validation
+    user_acceptance_testing: true
+    final_integration_testing: true
+    production_data_simulation: true
+
+    # Data management
+    data_retention_days: 90       # 3 months for thorough testing
+    data_refresh_schedule: "monthly"
+    production_like_data: true    # Use production-like data
+
+    # Environment validation
+    production_parity: true       # Should mirror production closely
+    configuration_validation: true
+
+  # Availability settings (production-like)
+  high_availability:
+    enabled: true
+    multi_az: true                # Multi-AZ like production
+    cross_region_backup: false    # No cross-region for staging
+    auto_scaling_enabled: true
+    load_balancer_enabled: true
+
+  # Security configuration (production-like)
+  security:
+    # Production-like security settings
+    enable_waf: true
+    encryption_at_rest: true
+    encryption_in_transit: true
+    require_mfa: true             # Require MFA for staging access
+    session_timeout: 7200         # 2 hours
+
+    # Logging and monitoring (production-like)
+    cloudtrail_enabled: true
+    vpc_flow_logs: true
+    config_service_enabled: true
+    guardduty_enabled: true
+    security_hub_enabled: true
+
+    # Access control (production-like)
+    enforce_least_privilege: true
+    require_approval_for_privileged_access: true
+    enable_access_analyzer: true
+
+    # Compliance (moderate)
+    compliance_frameworks: ["soc2"]  # Subset of production compliance
+    enable_compliance_monitoring: true
+    audit_log_retention_days: 365  # 1 year
+
+  # Backup and disaster recovery (production-like)
+  backup:
+    enabled: true
+    retention_days: 30            # 1 month retention
+    cross_region_backup: false
+    point_in_time_recovery: true
+    automated_backup_window: "01:00-02:00"  # UTC
+    backup_deletion_protection: true
+
+  # Monitoring and alerting (production-like)
+  monitoring:
+    detailed_monitoring: true
+    custom_metrics: true
+    alerting_enabled: true
+    notification_channels:
+      - email: "staging-alerts@company.com"
+      - slack: "#staging-alerts"
+      - pagerduty: false          # No pager duty for staging
+
+    # Performance monitoring
+    performance_insights: true
+    x_ray_tracing: true
+
+  # Cost optimization (balanced)
+  cost_optimization:
+    # Reserved instances (some coverage)
+    reserved_instance_coverage: 40  # Moderate RI coverage
+    savings_plans_enabled: true
+
+    # Resource scheduling (limited)
+    auto_shutdown:
+      enabled: false              # Keep running for continuous validation
+
+    # Auto scaling
+    auto_scaling:
+      enabled: true
+      scale_in_protection: false
+      min_capacity: 1             # Maintain minimum capacity
+
+    # Lifecycle management
+    s3_lifecycle_policies: true
+    s3_intelligent_tiering: true
+    ebs_snapshot_lifecycle: true
+    log_lifecycle_management: true
+
+  # Network configuration (production-like)
+  networking:
+    # Production-like networking
+    dedicated_tenancy: false
+    enhanced_networking: true
+    placement_groups: false
+
+    # DNS
+    private_hosted_zones: true
+    dns_resolution: true
+    dns_hostnames: true
+
+    # VPC configuration
+    vpc:
+      enable_nat_gateway: true
+      single_nat_gateway: false   # Multi-AZ NAT like production
+      enable_vpn_gateway: false
+      enable_dns_hostnames: true
+      enable_dns_support: true
+
+  # Compute configuration (production-like)
+  compute:
+    # EC2 settings (similar to production)
+    instance_types:
+      preferred: ["m5.large", "m5.xlarge", "c5.large"]
+      allowed: ["t3.large", "t3.xlarge", "m5.*", "c5.*"]
+
+    # EKS settings (production-like)
+    kubernetes:
+      version: "1.28"
+      endpoint_private_access: true
+      endpoint_public_access: true
+      node_group_capacity_type: "ON_DEMAND"  # Stable capacity
+      node_group_instance_types: ["m5.large", "m5.xlarge"]
+
+  # Database configuration (production-like)
+  database:
+    # RDS settings
+    multi_az: true                # Multi-AZ like production
+    backup_retention_period: 30
+    backup_window: "01:00-02:00"  # UTC
+    maintenance_window: "sun:02:00-sun:03:00"  # UTC
+    deletion_protection: true
+    encryption_at_rest: true
+    performance_insights_enabled: true
+    monitoring_interval: 60
+
+    # Parameter group settings
+    enhanced_monitoring: true
+    log_exports: ["error", "general", "slow-query"]
+
+  # Storage configuration (production-like)
+  storage:
+    # S3 settings
+    versioning_enabled: true
+    mfa_delete: false
+    lifecycle_configuration: true
+    cross_region_replication: false
+    access_logging: true
+
+    # EBS settings
+    encrypted: true
+    volume_type: "gp3"
+    iops: null
+    throughput: null
+
+# Staging-specific component configurations
+components:
+  terraform:
+    # Staging deployment settings
+    apply_auto_approve: false     # Require approval like production
+    plan_timeout: 25              # Generous timeout
+
+    # State management
+    state_lock_enabled: true
+    state_encryption_enabled: true
+
+    # Validation (strict)
+    validate_required: true
+    fmt_required: true
+
+# Staging tags
+tags:
+  Environment: "staging"
+  EnvironmentType: "pre-production"
+  BusinessCritical: "false"
+  ProductionParity: "true"
+  HighAvailability: "true"
+  DisasterRecovery: "false"
+  BackupRequired: "true"
+  MonitoringLevel: "Enhanced"
+  SecurityLevel: "High"
+  ComplianceRequired: "true"
+  UserAcceptanceTesting: "true"

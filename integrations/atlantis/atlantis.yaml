@@ -1,3 +1,4 @@
+---
 version: 3
 automerge: true
 parallel_plan: true
@@ -27,21 +28,21 @@ workflows:
       - run: |
           # IMPORTANT: Use proper error handling
           set -eo pipefail
-          
+
           # Save structured plan data for PR comment
           echo "Executing plan for $COMPONENT in stack $STACK"
           if ! atmos terraform plan "$COMPONENT" -s "$STACK" -o json > plan.json; then
             echo "Plan failed. See logs for details."
             exit 1
           fi
-          
+
           # Generate human-readable plan summary
           jq -r '.resource_changes[] | select(.change.actions[0] != "no-op") | "\(.change.actions[0]): \(.address)"' plan.json > plan_summary.txt
-          
+
           # Archive plan files
           mkdir -p .atlantis/plans
           cp terraform.tfplan ".atlantis/plans/${STACK}-${COMPONENT}.tfplan"
-          
+
           echo "Plan completed successfully"
 
     apply:
@@ -49,7 +50,7 @@ workflows:
       - run: |
           # IMPORTANT: Use proper error handling with retry logic
           set -eo pipefail
-          
+
           # Retry atmos apply with exponential backoff
           max_attempts=3
           attempt=1
@@ -69,7 +70,7 @@ workflows:
               attempt=$((attempt+1))
             fi
           done
-          
+
           # Post-apply validation
           echo "Running post-apply validation"
           if ! atmos terraform plan "$COMPONENT" -s "$STACK"; then
@@ -83,20 +84,20 @@ workflows:
           # Extra validation for production environments
           if [[ "$STACK" == *"-prod-"* ]]; then
             echo "Running enhanced security checks for production environment"
-            
+
             # Check for unapproved resources
             if grep -q "aws_iam_user\|aws_access_key" **/*.tf; then
               echo "ERROR: IAM users and access keys are not allowed in production"
               exit 1
             fi
-            
+
             # Check for insecure configurations
             if grep -q "acl.*public-read\|public_access_block.*false" **/*.tf; then
               echo "ERROR: Public access configurations are not allowed in production"
               exit 1
             fi
           fi
-          
+
           # Run regular plan after validation
           atmos terraform plan "$COMPONENT" -s "$STACK"
 
@@ -108,7 +109,7 @@ workflows:
             echo "IMPORTANT: Applying changes to PRODUCTION environment"
             sleep 5  # Brief pause to ensure user notices the warning
           fi
-          
+
           # Run regular apply
           atmos terraform apply "$COMPONENT" -s "$STACK"
 
@@ -126,31 +127,31 @@ repos:
     allowed_workflows:
       - atmos
       - production
-    
+
     # Atlantis commands to run for each component
     pre_workflow_hooks:
       - run: |
           set -eo pipefail
-          
+
           # Improve component and stack detection
           echo "Analyzing repository structure and modified files..."
-          
+
           # Extract component and stack from the modified files
           MODIFIED_TF_DIRS=$(find . -type f -name "*.tf" -path "*/$CHANGED_FILES/*" | xargs dirname | sort -u)
           if [ -z "$MODIFIED_TF_DIRS" ]; then
             echo "No Terraform files modified in the current change"
             exit 0
           fi
-          
+
           # Find component name and stack using more robust parsing
           for TF_DIR in $MODIFIED_TF_DIRS; do
             if [[ $TF_DIR == *"components/terraform/"* ]]; then
               # Extract component name more reliably
               COMPONENT_PATH=$(echo $TF_DIR | grep -o "components/terraform/[^/]*")
               export COMPONENT=$(basename $COMPONENT_PATH)
-              
+
               echo "Detected component: $COMPONENT"
-              
+
               # Use proper yaml parsing for stack detection
               STACK_FILES=$(find ./stacks -name "*.yaml" -type f)
               for STACK_FILE in $STACK_FILES; do
@@ -166,7 +167,7 @@ repos:
                       ENV=${BASH_REMATCH[3]}
                       export STACK="${TENANT}-${ACCOUNT}-${ENV}"
                       echo "Component '$COMPONENT' found in stack '$STACK'"
-                      
+
                       # Setup AWS credentials for this account if needed
                       if [[ "$ACCOUNT" != "dev" ]]; then
                         # Get role ARN from AWS SSO or credentials store
@@ -174,7 +175,7 @@ repos:
                         AWS_PROFILE="${ACCOUNT}-admin"
                         aws --profile $AWS_PROFILE sts get-caller-identity || true
                       fi
-                      
+
                       break 2
                     fi
                   fi
@@ -195,24 +196,24 @@ repos:
               done
             fi
           done
-          
+
           if [ -z "$COMPONENT" ] || [ -z "$STACK" ]; then
             echo "WARNING: Could not automatically determine component and stack for the modified files"
             echo "Please specify component and stack manually using: atlantis plan -w atmos -- component=NAME stack=STACK"
             exit 1
           fi
-          
+
           # Validate component and stack are valid
           echo "Verifying component '$COMPONENT' exists..."
           if [ ! -d "./components/terraform/$COMPONENT" ]; then
             echo "ERROR: Component '$COMPONENT' not found"
             exit 1
           fi
-          
+
           echo "Verifying stack '$STACK' exists..."
           if ! grep -q "$STACK" ./stacks/*/*.yaml 2>/dev/null; then
             echo "ERROR: Stack '$STACK' not found"
             exit 1
           fi
-          
+
           echo "Configuration validated. Proceeding with $COMPONENT in stack $STACK"

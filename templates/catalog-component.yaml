@@ -1,3 +1,4 @@
+---
 # Template: Catalog Component
 # This template follows the best practices outlined in GUIDELINES.md
 # Replace placeholder values and comments with your actual implementation
@@ -16,11 +17,11 @@ components:
         region: ${region}
         name: "${tenant}-${environment}-component-name"  # Replace with your component name
         description: "Component description for ${environment} environment"  # Replace with your component description
-        
+
         # Feature flags
         enable_logging: true
         enable_monitoring: true
-        
+
         # Component-specific configuration
         example_parameter_string: "value"
         example_parameter_number: 10
@@ -30,11 +31,11 @@ components:
         example_parameter_map:
           key1: "value1"
           key2: "value2"
-        
+
         # Dependencies
         example_dependency_id: "${output.dependency_component.id}"
         example_dependency_arns: ${output.dependency_component.arns}
-        
+
         # Security configuration
         kms_key_id: "${output.kms.key_id}"
         log_retention_days: 30

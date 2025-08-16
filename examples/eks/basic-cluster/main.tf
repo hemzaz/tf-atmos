@@ -78,7 +78,7 @@ variable "node_group_max_size" {
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to resources"
-  default     = {
+  default = {
     Environment = "dev"
     Terraform   = "true"
   }
@@ -221,7 +221,7 @@ resource "aws_eks_node_group" "main" {
   subnet_ids      = var.subnet_ids
 
   instance_types = var.node_group_instance_types
-  
+
   scaling_config {
     desired_size = var.node_group_desired_size
     min_size     = var.node_group_min_size
@@ -272,7 +272,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
   url             = aws_eks_cluster.main.identity[0].oidc[0].issuer
-  
+
   tags = var.tags
 }
 
@@ -280,7 +280,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
 resource "aws_cloudwatch_log_group" "eks_cluster" {
   name              = "/aws/eks/${var.cluster_name}/cluster"
   retention_in_days = 7
-  
+
   tags = var.tags
 }
 

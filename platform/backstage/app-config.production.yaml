@@ -1,0 +1,242 @@
+---
+app:
+  # Should be the same as backend.baseUrl when using the `app-backend` plugin.
+  baseUrl: https://platform.company.com
+
+backend:
+  baseUrl: https://api.platform.company.com
+  listen:
+    port: 7007
+    host: 0.0.0.0
+
+  # Production database configuration
+  database:
+    client: pg
+    connection:
+      host: ${POSTGRES_HOST}
+      port: ${POSTGRES_PORT:5432}
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+      database: ${POSTGRES_DB}
+      ssl:
+        require: true
+        rejectUnauthorized: true
+
+  # HTTPS configuration
+  https:
+    certificate:
+      key: ${SSL_PRIVATE_KEY}
+      cert: ${SSL_CERTIFICATE}
+
+  # Security headers
+  csp:
+    connect-src:
+      - "'self'"
+      - "https:"
+      - "wss:"
+      - "https://api.platform.company.com"
+      - "https://grafana.company.com"
+      - "https://argocd.company.com"
+    img-src:
+      - "'self'"
+      - "data:"
+      - "https:"
+    script-src:
+      - "'self'"
+      - "'unsafe-inline'"
+      - "'unsafe-eval'"
+    style-src:
+      - "'self'"
+      - "'unsafe-inline'"
+      - "https://fonts.googleapis.com"
+    font-src:
+      - "'self'"
+      - "https://fonts.gstatic.com"
+
+  # CORS configuration for production
+  cors:
+    origin:
+      - https://platform.company.com
+      - https://api.platform.company.com
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+    allowedHeaders: ['Content-Type', 'Authorization']
+
+  # Production reading allowlist
+  reading:
+    allow:
+      - host: github.com
+      - host: raw.githubusercontent.com
+      - host: '*.company.com'
+
+# Production integrations
+integrations:
+  github:
+    - host: github.com
+      token: ${GITHUB_TOKEN}
+      apps:
+        - appId: ${GITHUB_APP_ID}
+          clientId: ${GITHUB_APP_CLIENT_ID}
+          clientSecret: ${GITHUB_APP_CLIENT_SECRET}
+          webhookUrl: ${GITHUB_WEBHOOK_URL}
+          webhookSecret: ${GITHUB_WEBHOOK_SECRET}
+          privateKey: ${GITHUB_PRIVATE_KEY}
+
+# Production auth configuration
+auth:
+  providers:
+    github:
+      production:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+        signIn:
+          resolvers:
+            - resolver: emailMatchingUserEntityName
+            - resolver: emailLocalPartMatchingUserEntityName
+            - resolver: usernameMatchingUserEntityName
+    aws:
+      production:
+        region: ${AWS_DEFAULT_REGION}
+        roleArn: ${AWS_ROLE_ARN}
+        roleDurationSeconds: 3600
+        allowGuestAccess: false
+
+# Production TechDocs configuration
+techdocs:
+  builder: 'local'
+  generator:
+    runIn: 'docker'
+    dockerImage: 'spotify/techdocs'
+    pullImage: true
+  publisher:
+    type: 'awsS3'
+    awsS3:
+      bucketName: ${TECHDOCS_S3_BUCKET_NAME}
+      region: ${AWS_DEFAULT_REGION}
+      credentials:
+        accessKeyId: ${AWS_ACCESS_KEY_ID}
+        secretAccessKey: ${AWS_SECRET_ACCESS_KEY}
+      sse: 'AES256'
+
+# Production catalog configuration
+catalog:
+  # Refresh catalog every 5 minutes in production
+  schedule:
+    frequency: { minutes: 5 }
+    timeout: { minutes: 3 }
+
+# Production Kubernetes configuration
+kubernetes:
+  serviceLocatorMethod:
+    type: 'multiTenant'
+  clusterLocatorMethods:
+    - type: 'config'
+      clusters:
+        - url: ${K8S_CLUSTER_URL}
+          name: ${K8S_CLUSTER_NAME}
+          authProvider: 'aws'
+          region: ${AWS_DEFAULT_REGION}
+          assumeRole: ${K8S_ASSUME_ROLE_ARN}
+          skipTLSVerify: false
+          dashboardUrl: https://k8s-dashboard.company.com
+
+# Production proxy endpoints
+proxy:
+  endpoints:
+    '/atmos':
+      target: 'http://platform-api:8000/api/v1/atmos'
+      headers:
+        Authorization: Bearer ${PLATFORM_API_TOKEN}
+      changeOrigin: true
+
+    '/cost':
+      target: 'http://platform-api:8000/api/v1/cost'
+      headers:
+        Authorization: Bearer ${PLATFORM_API_TOKEN}
+      changeOrigin: true
+
+    '/compliance':
+      target: 'http://platform-api:8000/api/v1/compliance'
+      headers:
+        Authorization: Bearer ${PLATFORM_API_TOKEN}
+      changeOrigin: true
+
+    '/argocd/api':
+      target: 'https://argocd.company.com/api/v1/'
+      changeOrigin: true
+      headers:
+        Authorization: Bearer ${ARGOCD_TOKEN}
+      pathRewrite:
+        '^/argocd/api': '/api/v1'
+
+    '/grafana/api':
+      target: 'https://grafana.company.com'
+      changeOrigin: true
+      headers:
+        Authorization: Bearer ${GRAFANA_TOKEN}
+
+# Production cost insights
+costInsights:
+  engineerCost: 200000
+  products:
+    aws_compute:
+      name: AWS Compute
+      icon: compute
+    aws_database:
+      name: AWS Database
+      icon: storage
+    aws_networking:
+      name: AWS Networking
+      icon: networking
+    aws_storage:
+      name: AWS Storage
+      icon: storage
+  currencies:
+    engineers:
+      label: 'Engineers 🤓'
+      unit: 'engineer'
+    usd:
+      label: 'US Dollars 💵'
+      unit: 'dollar'
+
+# Production logging
+logging:
+  level: 'info'
+  format: 'json'
+  redacted: ['authorization', 'cookie', 'x-api-key']
+
+# Production metrics
+metrics:
+  enabled: true
+  port: 9090
+
+# Production platform configuration
+platform:
+  atmos:
+    baseUrl: 'http://platform-api:8000/api/v1/atmos'
+    defaultTenant: ${PLATFORM_DEFAULT_TENANT}
+    defaultAccount: ${PLATFORM_DEFAULT_ACCOUNT}
+    defaultRegion: ${AWS_DEFAULT_REGION}
+    workflowTimeout: 1800
+    cacheTimeout: 300
+    retryAttempts: 3
+
+  features:
+    costAnalysis: true
+    complianceChecking: true
+    driftDetection: true
+    environmentProvisioning: true
+    certificateManagement: true
+    performanceMonitoring: true
+    securityScanning: true
+
+  security:
+    enableRateLimiting: true
+    maxRequestsPerMinute: 100
+    enableAuditLogging: true
+    auditLogRetention: 90
+
+  monitoring:
+    healthCheckInterval: 30
+    metricsCollection: true
+    performanceTracking: true

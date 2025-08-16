@@ -1,0 +1,407 @@
+---
+# Default values for idp-platform
+# This file contains the default configuration values for the IDP Platform
+
+global:
+  # Global configuration
+  environment: production
+  region: us-east-1
+  domain: platform.company.com
+  imageRegistry: ghcr.io/company
+  imagePullPolicy: IfNotPresent
+
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+
+  # Resource defaults
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# Backstage configuration
+backstage:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/company/idp-backstage
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 7007
+    targetPort: 7007
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    hosts:
+      - host: platform.company.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: backstage-tls
+        hosts:
+          - platform.company.com
+
+  # Backstage configuration
+  config:
+    app:
+      title: Internal Developer Platform
+      baseUrl: https://platform.company.com
+
+    backend:
+      baseUrl: https://platform.company.com
+      cors:
+        origin: https://platform.company.com
+
+      # Database configuration (uses PostgreSQL dependency)
+      database:
+        client: pg
+        connection:
+          host: "{{ .Release.Name }}-postgresql"
+          port: 5432
+          user: backstage
+          database: backstage
+
+  # Environment variables
+  env:
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: "{{ .Release.Name }}-postgresql"
+          key: postgres-password
+    - name: BACKSTAGE_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: backstage-secrets
+          key: secret-key
+
+  # Resource configuration
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+  # Auto-scaling configuration
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Probes
+  livenessProbe:
+    httpGet:
+      path: /api/catalog/health
+      port: 7007
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /api/catalog/health
+      port: 7007
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 3
+    successThreshold: 1
+    failureThreshold: 3
+
+# Platform API configuration
+platformApi:
+  enabled: true
+  replicaCount: 3
+
+  image:
+    repository: ghcr.io/company/idp-platform-api
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8000
+    targetPort: 8000
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/rate-limit: "100"
+      nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    hosts:
+      - host: api.platform.company.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: platform-api-tls
+        hosts:
+          - api.platform.company.com
+
+  # Environment variables
+  env:
+    - name: DATABASE_URL
+      valueFrom:
+        secretKeyRef:
+          name: platform-api-secrets
+          key: database-url
+    - name: REDIS_URL
+      value: "redis://{{ .Release.Name }}-redis:6379"
+    - name: AWS_DEFAULT_REGION
+      value: "{{ .Values.global.region }}"
+
+  # Resource configuration
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "800m"
+
+  # Auto-scaling configuration
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Probes
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: 8000
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 3
+    successThreshold: 1
+    failureThreshold: 3
+
+# PostgreSQL configuration (dependency)
+postgresql:
+  enabled: true
+  auth:
+    enablePostgresUser: true
+    postgresPassword: ""  # Generated automatically
+    username: backstage
+    password: ""  # Generated automatically
+    database: backstage
+
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: gp3
+
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "250m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+# Redis configuration (dependency)
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: ""  # Generated automatically
+
+  master:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: gp3
+
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+# Monitoring configuration
+monitoring:
+  # Prometheus configuration
+  prometheus:
+    enabled: true
+    server:
+      retention: "15d"
+      persistentVolume:
+        size: 50Gi
+        storageClass: gp3
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "2000m"
+
+  # Grafana configuration
+  grafana:
+    enabled: true
+    adminPassword: ""  # Generated automatically
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: gp3
+    ingress:
+      enabled: true
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+      hosts:
+        - grafana.platform.company.com
+      tls:
+        - secretName: grafana-tls
+          hosts:
+            - grafana.platform.company.com
+
+  # Loki configuration
+  loki:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: gp3
+
+  # Jaeger configuration
+  jaeger:
+    enabled: true
+    storage:
+      type: elasticsearch
+      elasticsearch:
+        host: elasticsearch
+        port: 9200
+
+# External Secrets configuration
+externalSecrets:
+  enabled: true
+  serviceAccount:
+    create: true
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/ExternalSecretsRole"
+
+  # Secret stores
+  secretStores:
+    aws-secrets-manager:
+      provider: aws
+      region: "{{ .Values.global.region }}"
+      service: SecretsManager
+      auth:
+        jwt:
+          serviceAccountRef:
+            name: external-secrets
+
+# Service Account configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/IDPServiceRole"
+  # The name of the service account to use.
+  name: ""
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network Policies
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+
+  egress:
+    - to: []  # Allow all egress by default
+
+# Security Context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+# Pod Security Standards
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+
+# Tolerations for node placement
+tolerations: []
+
+# Node selector for pod placement
+nodeSelector: {}
+
+# Affinity rules for pod placement
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - idp-platform
+          topologyKey: kubernetes.io/hostname

@@ -1,3 +1,4 @@
+---
 name: template-component
 description: "Create components from templates"
 
@@ -7,41 +8,41 @@ workflow:
     steps:
       - command: "gaia template create-component --name $NAME --template $TEMPLATE $ADDITIONAL_ARGS"
         description: "Generate component files from template"
-      
+
       - command: "echo 'Component $NAME created successfully'"
         description: "Print success message"
-    
+
     parameters:
       name:
         description: "Component name"
         type: string
         required: true
         prefix: "NAME="
-      
+
       template:
         description: "Template to use (defaults to terraform-component)"
         type: string
         default: "terraform-component"
         prefix: "TEMPLATE="
-      
+
       description:
         description: "Component description"
         type: string
         required: false
         prefix: "--description "
-      
+
       destination:
         description: "Destination directory (defaults to components/<name>)"
         type: string
         required: false
         prefix: "--destination "
-      
+
       additional-args:
         description: "Additional arguments to pass to the template command"
         type: string
         required: false
         prefix: "ADDITIONAL_ARGS="
-  
+
   list-templates:
     description: "List available templates"
     steps:

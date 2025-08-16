@@ -37,6 +37,54 @@ resource "aws_s3_bucket" "trigger_bucket" {
   bucket = var.s3_bucket_name
 }
 
+# SECURITY: Block public access
+resource "aws_s3_bucket_public_access_block" "trigger_bucket" {
+  bucket = aws_s3_bucket.trigger_bucket.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# SECURITY: Enable encryption
+resource "aws_s3_bucket_server_side_encryption_configuration" "trigger_bucket" {
+  bucket = aws_s3_bucket.trigger_bucket.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+# SECURITY: Enable versioning
+resource "aws_s3_bucket_versioning" "trigger_bucket" {
+  bucket = aws_s3_bucket.trigger_bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# SECURITY: Lifecycle configuration
+resource "aws_s3_bucket_lifecycle_configuration" "trigger_bucket" {
+  bucket = aws_s3_bucket.trigger_bucket.id
+
+  rule {
+    id     = "cleanup_old_versions"
+    status = "Enabled"
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
 resource "aws_s3_bucket_notification" "bucket_notification" {
   bucket = aws_s3_bucket.trigger_bucket.id
 

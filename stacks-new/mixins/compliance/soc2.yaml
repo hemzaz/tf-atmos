@@ -1,0 +1,205 @@
+---
+# SOC2 Type II compliance configuration mixin
+# Implements security controls required for SOC2 compliance
+
+vars:
+  # SOC2 compliance identification
+  compliance_framework: "soc2"
+  compliance_type: "type2"
+  audit_period: "annual"
+
+  # SOC2 Trust Service Criteria
+  soc2_criteria:
+    # Security - Information and systems are protected against unauthorized access
+    security:
+      logical_access_controls: true
+      network_security_controls: true
+      secure_system_development: true
+
+    # Availability - Information and systems are available for operation and use
+    availability:
+      system_availability_controls: true
+      capacity_planning: true
+      system_monitoring: true
+      incident_response_procedures: true
+
+    # Processing Integrity - System processing is complete, valid, accurate, timely, and authorized
+    processing_integrity:
+      data_input_controls: true
+      data_processing_controls: true
+      data_output_controls: true
+      error_correction_procedures: true
+
+    # Confidentiality - Information designated as confidential is protected
+    confidentiality:
+      data_classification_procedures: true
+      data_encryption_controls: true
+      access_restriction_procedures: true
+
+    # Privacy - Personal information is collected, used, retained, disclosed, and disposed of in accordance with privacy policy
+    privacy:
+      privacy_policy_procedures: true
+      data_retention_procedures: true
+      data_disposal_procedures: true
+      consent_management: true
+
+  # SOC2 Security Controls
+  security_controls:
+    # Access Control (CC6.0)
+    access_control:
+      # Logical access controls
+      user_access_provisioning: true
+      user_access_modification: true
+      user_access_termination: true
+      privileged_access_controls: true
+      multi_factor_authentication: true
+      password_requirements:
+        minimum_length: 14
+        complexity_requirements: true
+        password_history: 12
+        max_age_days: 90
+        lockout_threshold: 5
+        lockout_duration: 30
+
+      # Physical access controls
+      data_center_access_controls: true
+      equipment_maintenance_controls: true
+
+    # Communication and Information (CC7.0)
+    communication_information:
+      system_documentation: true
+      data_classification: true
+      information_handling_procedures: true
+
+    # System Monitoring (CC8.0)
+    system_monitoring:
+      vulnerability_management: true
+      malware_protection: true
+      network_monitoring: true
+      logging_monitoring:
+        security_events: true
+        system_events: true
+        application_events: true
+        log_retention_period: 2555  # 7 years
+        log_integrity_protection: true
+
+    # Configuration Management (CC9.0)
+    configuration_management:
+      system_configuration_standards: true
+      configuration_change_management: true
+      system_component_inventory: true
+
+  # SOC2 Operational Controls
+  operational_controls:
+    # Change Management
+    change_management:
+      change_authorization_procedures: true
+      change_testing_procedures: true
+      change_approval_procedures: true
+      emergency_change_procedures: true
+
+    # Risk Assessment
+    risk_assessment:
+      risk_identification_procedures: true
+      risk_evaluation_procedures: true
+      risk_mitigation_procedures: true
+      risk_monitoring_procedures: true
+
+    # Vendor Management
+    vendor_management:
+      vendor_selection_procedures: true
+      vendor_monitoring_procedures: true
+      vendor_contract_management: true
+
+  # SOC2 Monitoring and Alerting
+  monitoring_alerting:
+    # Security monitoring
+    security_monitoring:
+      intrusion_detection: true
+      anomaly_detection: true
+      threat_intelligence: true
+      security_incident_response: true
+
+    # Availability monitoring
+    availability_monitoring:
+      system_performance_monitoring: true
+      capacity_monitoring: true
+      backup_monitoring: true
+      disaster_recovery_testing: true
+
+    # Processing integrity monitoring
+    integrity_monitoring:
+      data_validation_controls: true
+      system_processing_controls: true
+      error_detection_correction: true
+
+  # SOC2 Data Protection
+  data_protection:
+    # Encryption requirements
+    encryption:
+      data_at_rest_encryption: true
+      data_in_transit_encryption: true
+      encryption_key_management: true
+      encryption_algorithm_standards: "AES-256"
+
+    # Data backup and recovery
+    backup_recovery:
+      backup_procedures: true
+      backup_testing: true
+      recovery_procedures: true
+      recovery_testing: true
+      backup_retention_period: 2555  # 7 years
+
+    # Data disposal
+    data_disposal:
+      secure_deletion_procedures: true
+      media_disposal_procedures: true
+
+  # SOC2 Incident Response
+  incident_response:
+    incident_response_plan: true
+    incident_detection_procedures: true
+    incident_response_procedures: true
+    incident_recovery_procedures: true
+    incident_documentation: true
+    incident_communication: true
+
+  # SOC2 Business Continuity
+  business_continuity:
+    business_continuity_plan: true
+    disaster_recovery_plan: true
+    business_impact_analysis: true
+    recovery_testing: true
+
+# SOC2-specific component configurations
+components:
+  terraform:
+    # SOC2 compliance settings
+    compliance_validation: true
+    security_scanning: true
+
+    # Change management
+    change_approval_required: true
+    change_documentation_required: true
+
+    # Audit logging
+    audit_logging:
+      enabled: true
+      log_retention_days: 2555  # 7 years
+      log_encryption: true
+      log_integrity_monitoring: true
+
+# SOC2 compliance tags
+tags:
+  ComplianceFramework: "SOC2"
+  ComplianceType: "Type2"
+  AuditScope: "true"
+  SecurityControlsImplemented: "true"
+  DataRetentionPeriod: "7years"
+  EncryptionRequired: "true"
+  AccessLoggingRequired: "true"
+  MonitoringRequired: "true"
+  IncidentResponseEnabled: "true"
+  BusinessContinuityEnabled: "true"
+  VulnerabilityManagementEnabled: "true"
+  ChangeManagementEnabled: "true"

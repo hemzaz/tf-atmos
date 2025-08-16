@@ -14,6 +14,23 @@ variable "vpc_cidr" {
   }
 }
 
+variable "cidr_block" {
+  type        = string
+  description = "CIDR block for the VPC (alias for vpc_cidr for consistency)"
+  default     = null
+}
+
+variable "management_cidr" {
+  type        = string
+  description = "CIDR block for management access (SSH, etc.). If null, SSH access is disabled"
+  default     = null
+
+  validation {
+    condition     = var.management_cidr == null || can(cidrhost(var.management_cidr, 0))
+    error_message = "Must be a valid IPv4 CIDR block address or null."
+  }
+}
+
 variable "azs" {
   type        = list(string)
   description = "Availability Zones"
@@ -46,6 +63,17 @@ variable "public_subnets" {
   validation {
     condition     = alltrue([for cidr in var.public_subnets : can(cidrhost(cidr, 0))])
     error_message = "All public subnet CIDR blocks must be valid IPv4 CIDR block addresses."
+  }
+}
+
+variable "database_subnets" {
+  type        = list(string)
+  description = "CIDR blocks for database subnets"
+  default     = []
+
+  validation {
+    condition     = alltrue([for cidr in var.database_subnets : can(cidrhost(cidr, 0))])
+    error_message = "All database subnet CIDR blocks must be valid IPv4 CIDR block addresses."
   }
 }
 

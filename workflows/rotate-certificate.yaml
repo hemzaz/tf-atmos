@@ -1,3 +1,4 @@
+---
 name: rotate-certificate
 description: "Rotate certificates in AWS and Kubernetes"
 
@@ -18,9 +19,9 @@ workflows:
             ${key_path:+"--key-path ${key_path}"} \
             ${restart_pods:+"--restart-pods"} \
             ${debug:+"--debug"}
-          
+
           EXIT_CODE=$?
-          
+
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Certificate rotation failed."
             exit $EXIT_CODE

@@ -1,0 +1,120 @@
+---
+{{- if .Values.platformApi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "idp-platform.fullname" . }}-platform-api
+  labels:
+    {{- include "idp-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-api
+spec:
+  {{- if not .Values.platformApi.autoscaling.enabled }}
+  replicas: {{ .Values.platformApi.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "idp-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: platform-api
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/platform-api-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/platform-api-secret.yaml") . | sha256sum }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+      labels:
+        {{- include "idp-platform.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: platform-api
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "idp-platform.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: platform-api
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.platformApi.image.repository }}:{{ .Values.platformApi.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.platformApi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: FLASK_ENV
+              value: "production"
+            - name: PYTHONPATH
+              value: "/app"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: "/tmp/prometheus_multiproc_dir"
+            {{- range .Values.platformApi.env }}
+            - name: {{ .name }}
+              {{- if .value }}
+              value: {{ .value | quote }}
+              {{- else if .valueFrom }}
+              valueFrom:
+                {{- toYaml .valueFrom | nindent 16 }}
+              {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: prometheus-multiproc
+              mountPath: /tmp/prometheus_multiproc_dir
+          livenessProbe:
+            {{- toYaml .Values.platformApi.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.platformApi.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.platformApi.resources | nindent 12 }}
+        - name: atmos-sidecar
+          image: cloudposse/atmos:latest
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          volumeMounts:
+            - name: atmos-config
+              mountPath: /atmos
+              readOnly: true
+            - name: shared-workspace
+              mountPath: /workspace
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+      volumes:
+        - name: app-config
+          configMap:
+            name: {{ include "idp-platform.fullname" . }}-platform-api-config
+        - name: atmos-config
+          configMap:
+            name: {{ include "idp-platform.fullname" . }}-atmos-config
+        - name: tmp
+          emptyDir: {}
+        - name: prometheus-multiproc
+          emptyDir: {}
+        - name: shared-workspace
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

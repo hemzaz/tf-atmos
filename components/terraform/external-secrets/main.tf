@@ -166,7 +166,7 @@ resource "kubernetes_manifest" "cluster_secret_store" {
     }
   }
 
-  depends_on = [time_sleep.wait_for_crds]
+  depends_on = [helm_release.external_secrets]
 }
 
 # Create a dedicated ClusterSecretStore for certificate secrets
@@ -197,5 +197,5 @@ resource "kubernetes_manifest" "certificate_secret_store" {
     }
   }
 
-  depends_on = [time_sleep.wait_for_crds]
+  depends_on = [helm_release.external_secrets]
 }

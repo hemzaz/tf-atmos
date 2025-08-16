@@ -287,11 +287,136 @@ variable "api_integrations" {
 variable "create_dashboard" {
   type        = bool
   description = "Whether to create a CloudWatch dashboard for the API Gateway"
-  default     = false
+  default     = true
 }
 
 variable "tags" {
   type        = map(string)
   description = "A map of tags to add to all resources"
   default     = {}
+}
+
+# WAF Configuration Variables
+variable "enable_waf" {
+  type        = bool
+  description = "Whether to enable AWS WAF for the API Gateway"
+  default     = false
+}
+
+variable "waf_rate_limit" {
+  type        = number
+  description = "The maximum number of requests per 5 minutes from a single IP"
+  default     = 10000
+  validation {
+    condition     = var.waf_rate_limit >= 100 && var.waf_rate_limit <= 2000000000
+    error_message = "WAF rate limit must be between 100 and 2,000,000,000."
+  }
+}
+
+variable "allowed_countries" {
+  type        = list(string)
+  description = "List of country codes to allow access (empty list disables geo-blocking)"
+  default     = []
+  validation {
+    condition     = alltrue([for country in var.allowed_countries : can(regex("^[A-Z]{2}$", country))])
+    error_message = "Country codes must be 2-letter uppercase ISO country codes."
+  }
+}
+
+# Caching Configuration Variables
+variable "enable_caching" {
+  type        = bool
+  description = "Whether to enable caching for the API Gateway"
+  default     = false
+}
+
+variable "cache_ttl_seconds" {
+  type        = number
+  description = "The time to live (TTL) period for cached responses in seconds"
+  default     = 300
+  validation {
+    condition     = var.cache_ttl_seconds >= 0 && var.cache_ttl_seconds <= 3600
+    error_message = "Cache TTL must be between 0 and 3600 seconds."
+  }
+}
+
+variable "cache_key_parameters" {
+  type        = list(string)
+  description = "List of parameters to include in the cache key"
+  default     = []
+}
+
+# Throttling Configuration Variables
+variable "throttling_rate_limit" {
+  type        = number
+  description = "The steady-state request rate limit (requests per second)"
+  default     = 10000
+  validation {
+    condition     = var.throttling_rate_limit > 0
+    error_message = "Throttling rate limit must be greater than 0."
+  }
+}
+
+variable "throttling_burst_limit" {
+  type        = number
+  description = "The burst request rate limit (requests per second)"
+  default     = 5000
+  validation {
+    condition     = var.throttling_burst_limit > 0
+    error_message = "Throttling burst limit must be greater than 0."
+  }
+}
+
+# Logging Configuration Variables
+variable "logging_level" {
+  type        = string
+  description = "The logging level for API Gateway method execution"
+  default     = "INFO"
+  validation {
+    condition     = contains(["OFF", "ERROR", "INFO"], var.logging_level)
+    error_message = "Logging level must be one of: OFF, ERROR, INFO."
+  }
+}
+
+variable "data_trace_enabled" {
+  type        = bool
+  description = "Whether to enable data trace logging for API Gateway"
+  default     = false
+}
+
+variable "metrics_enabled" {
+  type        = bool
+  description = "Whether to enable CloudWatch metrics for API Gateway"
+  default     = true
+}
+
+# Performance Monitoring Variables
+variable "create_performance_alarms" {
+  type        = bool
+  description = "Whether to create CloudWatch alarms for API performance monitoring"
+  default     = false
+}
+
+variable "alarm_4xx_threshold" {
+  type        = number
+  description = "Threshold for 4xx error alarm (number of errors in 5 minutes)"
+  default     = 10
+}
+
+variable "alarm_5xx_threshold" {
+  type        = number
+  description = "Threshold for 5xx error alarm (number of errors in 5 minutes)"
+  default     = 5
+}
+
+variable "alarm_latency_threshold" {
+  type        = number
+  description = "Threshold for latency alarm in milliseconds"
+  default     = 1000
+}
+
+variable "sns_topic_arn" {
+  type        = string
+  description = "SNS topic ARN for sending alarm notifications"
+  default     = null
 }

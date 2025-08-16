@@ -247,3 +247,173 @@ variable "tags" {
   description = "Tags to apply to resources"
   default     = {}
 }
+
+# Performance Optimization Variables
+variable "create_read_replica" {
+  type        = bool
+  description = "Create a read replica for performance scaling"
+  default     = false
+}
+
+variable "read_replica_instance_class" {
+  type        = string
+  description = "Instance class for the read replica (defaults to main instance class)"
+  default     = null
+}
+
+variable "performance_insights_retention_period" {
+  type        = number
+  description = "Performance Insights retention period in days"
+  default     = 7
+  validation {
+    condition     = contains([7, 731], var.performance_insights_retention_period)
+    error_message = "Performance Insights retention period must be either 7 or 731 days."
+  }
+}
+
+variable "enabled_cloudwatch_logs_exports" {
+  type        = list(string)
+  description = "List of log types to export to CloudWatch"
+  default     = []
+}
+
+variable "iops" {
+  type        = number
+  description = "The amount of provisioned IOPS"
+  default     = null
+}
+
+variable "storage_throughput" {
+  type        = number
+  description = "Storage throughput value for gp3 storage type"
+  default     = null
+}
+
+# Database Performance Parameters
+variable "max_connections" {
+  type        = number
+  description = "Maximum number of connections to the database"
+  default     = 100
+}
+
+variable "work_mem_mb" {
+  type        = number
+  description = "Amount of memory used for internal sort operations and hash tables (PostgreSQL)"
+  default     = 4
+}
+
+variable "maintenance_work_mem_mb" {
+  type        = number
+  description = "Amount of memory used for maintenance operations (PostgreSQL)"
+  default     = 64
+}
+
+variable "effective_cache_size_mb" {
+  type        = number
+  description = "Effective cache size for query planning (PostgreSQL)"
+  default     = 128
+}
+
+variable "random_page_cost" {
+  type        = number
+  description = "Random page cost for query planning (PostgreSQL)"
+  default     = 1.1
+}
+
+variable "checkpoint_completion_target" {
+  type        = number
+  description = "Checkpoint completion target (PostgreSQL)"
+  default     = 0.9
+  validation {
+    condition     = var.checkpoint_completion_target >= 0.0 && var.checkpoint_completion_target <= 1.0
+    error_message = "Checkpoint completion target must be between 0.0 and 1.0."
+  }
+}
+
+# RDS Proxy Configuration
+variable "enable_rds_proxy" {
+  type        = bool
+  description = "Enable RDS Proxy for connection pooling"
+  default     = false
+}
+
+variable "proxy_require_tls" {
+  type        = bool
+  description = "Require TLS for RDS Proxy connections"
+  default     = true
+}
+
+variable "proxy_idle_client_timeout" {
+  type        = number
+  description = "Idle client timeout in seconds for RDS Proxy"
+  default     = 1800
+}
+
+variable "proxy_max_connections_percent" {
+  type        = number
+  description = "Maximum connections as percentage of max_connections for RDS Proxy"
+  default     = 100
+  validation {
+    condition     = var.proxy_max_connections_percent >= 1 && var.proxy_max_connections_percent <= 100
+    error_message = "Proxy max connections percent must be between 1 and 100."
+  }
+}
+
+variable "proxy_max_idle_connections_percent" {
+  type        = number
+  description = "Maximum idle connections as percentage of max_connections for RDS Proxy"
+  default     = 50
+  validation {
+    condition     = var.proxy_max_idle_connections_percent >= 0 && var.proxy_max_idle_connections_percent <= 100
+    error_message = "Proxy max idle connections percent must be between 0 and 100."
+  }
+}
+
+# Enhanced Security Variables
+variable "custom_ingress_rules" {
+  type = list(object({
+    description     = string
+    from_port       = number
+    to_port         = number
+    protocol        = string
+    cidr_blocks     = optional(list(string))
+    security_groups = optional(list(string))
+  }))
+  description = "Custom ingress rules for RDS security group"
+  default     = []
+}
+
+# Performance Monitoring Variables
+variable "create_performance_alarms" {
+  type        = bool
+  description = "Create CloudWatch alarms for database performance monitoring"
+  default     = false
+}
+
+variable "cpu_alarm_threshold" {
+  type        = number
+  description = "CPU utilization alarm threshold percentage"
+  default     = 80
+  validation {
+    condition     = var.cpu_alarm_threshold >= 0 && var.cpu_alarm_threshold <= 100
+    error_message = "CPU alarm threshold must be between 0 and 100."
+  }
+}
+
+variable "connection_alarm_threshold" {
+  type        = number
+  description = "Database connection count alarm threshold"
+  default     = 80
+}
+
+variable "free_storage_alarm_threshold" {
+  type        = number
+  description = "Free storage space alarm threshold in bytes"
+  default     = 2147483648 # 2GB in bytes
+}
+
+variable "sns_topic_arn" {
+  type        = string
+  description = "SNS topic ARN for sending alarm notifications"
+  default     = null
+}

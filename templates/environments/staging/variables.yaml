@@ -19,7 +19,7 @@ compute:
   enable_spot_instances: true
   spot_instance_types: ["m5.large", "m5a.large", "m5n.large"]
   spot_allocation_strategy: "price-capacity-optimized"
-  
+
   # EKS
   eks_enabled: true
   eks_version: "1.32"
@@ -32,7 +32,7 @@ compute:
   eks_node_disk_size: 100
   eks_cluster_log_types: ["api", "audit", "authenticator"]
   eks_cluster_encryption_enabled: true
-  
+
   # Autoscaling
   autoscaling_metrics_enabled: true
   autoscaling_default_cooldown: 300
@@ -47,11 +47,11 @@ security:
   aws_config_enabled: true
   macie_enabled: false
   iam_password_policy_min_length: 14
-  
+
   # Access
   public_access_cidrs: ["10.0.0.0/8"]
   ssh_allowed: false
-  
+
 # Database
 database:
   rds_enabled: true
@@ -60,7 +60,7 @@ database:
   rds_backup_retention_period: 14
   rds_storage_encrypted: true
   rds_deletion_protection: true
-  
+
 # Monitoring
 monitoring:
   detailed_monitoring_enabled: true
@@ -68,7 +68,7 @@ monitoring:
   enhanced_monitoring_enabled: true
   alarm_notification_enabled: true
   alarm_notification_channel: "email+slack"
-  
+
 # Tagging
 tags:
   Environment: "staging"

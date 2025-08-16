@@ -1,3 +1,4 @@
+---
 name: iam
 description: "Reusable IAM configuration for cross-account access"
 

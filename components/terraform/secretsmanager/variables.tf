@@ -11,7 +11,7 @@ variable "secrets_enabled" {
 variable "context_name" {
   type        = string
   description = "The context name to use as the first segment of the secret path (application, service, or system name)"
-  
+
   validation {
     condition     = var.context_name != ""
     error_message = "The context_name variable is required and cannot be empty."

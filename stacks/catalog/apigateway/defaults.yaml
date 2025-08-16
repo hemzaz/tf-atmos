@@ -1,3 +1,4 @@
+---
 name: apigateway
 description: "Reusable API Gateway configuration"
 
@@ -15,26 +16,26 @@ components:
         description: "REST API Gateway for ${environment} environment"
         api_type: "REST"
         endpoint_type: ["REGIONAL"]
-        
+
         # REST API specific configurations
         binary_media_types:
           - "application/octet-stream"
           - "image/*"
         minimum_compression_size: 10240
-        
+
         # Authorization
         authorizer_type: "COGNITO_USER_POOLS"
         cognito_user_pool_arns: ["${cognito_user_pool_arn}"]
         authorizer_identity_source: "method.request.header.Authorization"
-        
+
         # API Gateway access logging
         enable_logging: true
         log_format: "{ \"requestId\":\"$context.requestId\", \"ip\": \"$context.identity.sourceIp\", \"requestTime\":\"$context.requestTime\", \"httpMethod\":\"$context.httpMethod\", \"resourcePath\":\"$context.resourcePath\", \"status\":\"$context.status\", \"protocol\":\"$context.protocol\", \"responseLength\":\"$context.responseLength\", \"integrationError\":\"$context.integrationErrorMessage\" }"
         log_retention_days: 30
-        
+
         # Stage configurations
         stage_name: "${environment}"
-        
+
         # API Keys and Usage Plans
         create_api_key: false
         create_usage_plan: false
@@ -42,10 +43,10 @@ components:
         usage_plan_quota_period: "MONTH"
         usage_plan_throttle_burst_limit: 5000
         usage_plan_throttle_rate_limit: 10000
-        
+
         # Integration timeouts
         api_integrations: []
-        
+
         # Monitoring
         create_dashboard: true
         tracing_enabled: true
@@ -85,7 +86,7 @@ components:
         api_name: "${tenant}-${environment}-http-api"
         description: "HTTP API Gateway for ${environment} environment"
         api_type: "HTTP"
-        
+
         # HTTP API specific configurations
         cors_configuration:
           allow_origins:
@@ -102,21 +103,21 @@ components:
           expose_headers: []
           max_age: 300
           allow_credentials: false
-        
+
         # Authentication options
         authorizer_type: "JWT"
         jwt_audience: ["${cognito_client_id}"]
         jwt_issuer: "https://cognito-idp.${region}.amazonaws.com/${cognito_user_pool_id}"
-        
+
         # Logging
         enable_logging: true
         log_format: "{ \"requestId\":\"$context.requestId\", \"ip\": \"$context.identity.sourceIp\", \"requestTime\":\"$context.requestTime\", \"httpMethod\":\"$context.httpMethod\", \"routeKey\":\"$context.routeKey\", \"status\":\"$context.status\", \"protocol\":\"$context.protocol\", \"responseLength\":\"$context.responseLength\", \"integrationError\":\"$context.integrationErrorMessage\" }"
         log_retention_days: 30
-        
+
         # Stage configurations
         stage_name: "${environment}"
         auto_deploy: true
-        
+
         # Monitoring
         create_dashboard: true
         tracing_enabled: true
@@ -158,11 +159,11 @@ components:
         domain_name: "api.${environment}.${root_domain}"
         certificate_arn: "${acm_certificate_arn}"
         zone_id: "${route53_zone_id}"
-        
+
         # Stage mapping
         stage_name: "${environment}"
         base_path: null
-        
+
         # Logging (minimal for domain component)
         enable_logging: false
 

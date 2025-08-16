@@ -16,7 +16,7 @@ compute:
   # EC2
   ec2_instance_type: "t3.large"
   enable_spot_instances: true
-  
+
   # EKS
   eks_enabled: true
   eks_version: "1.32"
@@ -28,7 +28,7 @@ compute:
   eks_node_disk_size: 75
   eks_cluster_log_types: ["api", "audit", "authenticator"]
   eks_cluster_encryption_enabled: false
-  
+
   # Autoscaling
   autoscaling_metrics_enabled: true
   autoscaling_default_cooldown: 300
@@ -43,11 +43,11 @@ security:
   aws_config_enabled: false
   macie_enabled: false
   iam_password_policy_min_length: 12
-  
+
   # Access
   public_access_cidrs: ["10.0.0.0/8"]
   ssh_allowed: true
-  
+
 # Database
 database:
   rds_enabled: true
@@ -56,7 +56,7 @@ database:
   rds_backup_retention_period: 7
   rds_storage_encrypted: true
   rds_deletion_protection: false
-  
+
 # Monitoring
 monitoring:
   detailed_monitoring_enabled: true
@@ -64,7 +64,7 @@ monitoring:
   enhanced_monitoring_enabled: false
   alarm_notification_enabled: true
   alarm_notification_channel: "email+slack"
-  
+
 # Tagging
 tags:
   Environment: "qa"
@@ -83,7 +83,7 @@ addons:
   istio_enabled: false
   keda_enabled: false
   karpenter_enabled: false
-  
+
 # Testing
 testing:
   test_data_generator_enabled: true

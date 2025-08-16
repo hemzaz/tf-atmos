@@ -1,0 +1,595 @@
+---
+name: IDP Platform CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, 'feature/*', 'hotfix/*' ]
+  pull_request:
+    branches: [ main, develop ]
+  release:
+    types: [ published ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKSTAGE: ${{ github.repository }}/idp-backstage
+  IMAGE_NAME_PLATFORM_API: ${{ github.repository }}/idp-platform-api
+  TERRAFORM_VERSION: 1.6.6
+  ATMOS_VERSION: 1.44.0
+  KUBERNETES_VERSION: 1.28.0
+  HELM_VERSION: 3.13.3
+
+# Allow concurrent runs for different branches but cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  actions: read
+  id-token: write # For OIDC authentication
+
+jobs:
+  # Job 1: Code Quality and Security Analysis
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for SonarCloud analysis
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+          cache-dependency-path: platform/backstage/yarn.lock
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install bandit safety black flake8 mypy pytest pytest-cov
+
+      - name: Install Node.js dependencies
+        run: |
+          cd platform/backstage
+          yarn install --frozen-lockfile
+
+      # Python Security Analysis
+      - name: Run Bandit security analysis
+        run: |
+          bandit -r gaia/ platform/api/ -f json -o bandit-report.json || true
+          bandit -r gaia/ platform/api/ -f txt
+
+      - name: Check Python dependencies for vulnerabilities
+        run: |
+          safety check --json --output safety-report.json || true
+          safety check
+
+      # Python Code Quality
+      - name: Run Black formatter check
+        run: black --check --diff gaia/ platform/api/
+
+      - name: Run Flake8 linting
+        run: flake8 gaia/ platform/api/ --output-file=flake8-report.txt
+
+      - name: Run MyPy type checking
+        run: mypy gaia/ platform/api/ --txt-report mypy-report
+
+      # JavaScript/TypeScript Code Quality
+      - name: Run ESLint
+        run: |
+          cd platform/backstage
+          yarn lint:all --format=json --output-file=../../eslint-report.json || true
+          yarn lint:all
+
+      - name: Run TypeScript compiler
+        run: |
+          cd platform/backstage
+          yarn tsc:full
+
+      # Infrastructure Code Quality
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Install Atmos
+        run: |
+          curl -L -o /tmp/atmos.tar.gz https://github.com/cloudposse/atmos/releases/download/v${{ env.ATMOS_VERSION }}/atmos_linux_amd64.tar.gz
+          sudo tar -xf /tmp/atmos.tar.gz -C /usr/local/bin atmos
+          sudo chmod +x /usr/local/bin/atmos
+          atmos --version
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive .
+
+      - name: Atmos Lint
+        run: atmos workflow lint
+
+      - name: Atmos Validate
+        run: atmos workflow validate
+
+      # Container Security Scanning
+      - name: Build images for scanning
+        run: |
+          docker build -f platform/backstage/Dockerfile.local --target production -t temp-backstage .
+          docker build -f platform/api/Dockerfile.local --target production -t temp-platform-api .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'temp-backstage'
+          format: 'sarif'
+          output: 'trivy-backstage-results.sarif'
+
+      - name: Run Trivy vulnerability scanner for Platform API
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'temp-platform-api'
+          format: 'sarif'
+          output: 'trivy-platform-api-results.sarif'
+
+      # Upload security results to GitHub Security tab
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-backstage-results.sarif'
+
+      - name: Upload Platform API Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-platform-api-results.sarif'
+
+      # SonarCloud Analysis
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: code-quality-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+            flake8-report.txt
+            mypy-report/
+            eslint-report.json
+            trivy-*-results.sarif
+          retention-days: 30
+
+  # Job 2: Unit and Integration Tests
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: code-quality
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+          cache-dependency-path: platform/backstage/yarn.lock
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Install Node.js dependencies
+        run: |
+          cd platform/backstage
+          yarn install --frozen-lockfile
+
+      # Python Tests
+      - name: Run Python unit tests
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          FLASK_ENV: testing
+        run: |
+          pytest gaia/ platform/api/ --cov=gaia --cov=platform/api --cov-report=xml --cov-report=html --junitxml=pytest-report.xml -v
+
+      # Node.js/TypeScript Tests
+      - name: Run Backstage unit tests
+        run: |
+          cd platform/backstage
+          yarn test:all --coverage --outputFile=../../jest-report.xml
+
+      # Integration Tests
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          TEST_ENVIRONMENT: ci
+        run: |
+          pytest tests/integration/ -v --junitxml=integration-test-report.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-results
+          path: |
+            pytest-report.xml
+            jest-report.xml
+            integration-test-report.xml
+            htmlcov/
+            coverage/
+          retention-days: 30
+
+      # Publish test results
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Test Results
+          path: '*-report.xml'
+          reporter: java-junit
+
+  # Job 3: Build and Push Container Images
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [code-quality, test]
+    if: github.event_name != 'pull_request' || github.event.action != 'opened'
+
+    outputs:
+      backstage-image: ${{ steps.meta-backstage.outputs.tags }}
+      platform-api-image: ${{ steps.meta-platform-api.outputs.tags }}
+      backstage-digest: ${{ steps.build-backstage.outputs.digest }}
+      platform-api-digest: ${{ steps.build-platform-api.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate metadata for Backstage image
+      - name: Extract metadata for Backstage
+        id: meta-backstage
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKSTAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # Generate metadata for Platform API image
+      - name: Extract metadata for Platform API
+        id: meta-platform-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLATFORM_API }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # Build and push Backstage image
+      - name: Build and push Backstage image
+        id: build-backstage
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: platform/backstage/Dockerfile.local
+          target: production
+          push: true
+          tags: ${{ steps.meta-backstage.outputs.tags }}
+          labels: ${{ steps.meta-backstage.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      # Build and push Platform API image
+      - name: Build and push Platform API image
+        id: build-platform-api
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: platform/api/Dockerfile.local
+          target: production
+          push: true
+          tags: ${{ steps.meta-platform-api.outputs.tags }}
+          labels: ${{ steps.meta-platform-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      # Sign images with cosign
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign Backstage image
+        run: |
+          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKSTAGE }}@${{ steps.build-backstage.outputs.digest }}
+
+      - name: Sign Platform API image
+        run: |
+          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLATFORM_API }}@${{ steps.build-platform-api.outputs.digest }}
+
+  # Job 4: End-to-End Tests
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build
+    if: github.event_name != 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Kubernetes cluster (kind)
+        uses: helm/kind-action@v1
+        with:
+          kubernetes_version: v${{ env.KUBERNETES_VERSION }}
+          cluster_name: e2e-test-cluster
+          config: .github/workflows/configs/kind-config.yaml
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v${{ env.HELM_VERSION }}
+
+      - name: Load test images into kind
+        run: |
+          # Pull images and load into kind cluster
+          docker pull ${{ needs.build.outputs.backstage-image }}
+          docker pull ${{ needs.build.outputs.platform-api-image }}
+          kind load docker-image ${{ needs.build.outputs.backstage-image }} --name e2e-test-cluster
+          kind load docker-image ${{ needs.build.outputs.platform-api-image }} --name e2e-test-cluster
+
+      - name: Deploy to test environment
+        run: |
+          helm dependency update k8s/helm/idp-platform
+          helm install idp-test k8s/helm/idp-platform \
+            --namespace idp-system --create-namespace \
+            --set backstage.image.tag=$(echo ${{ needs.build.outputs.backstage-image }} | cut -d: -f2) \
+            --set platformApi.image.tag=$(echo ${{ needs.build.outputs.platform-api-image }} | cut -d: -f2) \
+            --set global.environment=test \
+            --set ingress.enabled=false \
+            --wait --timeout=10m
+
+      - name: Wait for deployment
+        run: |
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=idp-platform -n idp-system --timeout=300s
+
+      - name: Set up Node.js for E2E tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Playwright
+        run: |
+          npm install -g @playwright/test
+          playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: |
+          # Port forward services for testing
+          kubectl port-forward -n idp-system svc/idp-test-backstage 3000:7007 &
+          kubectl port-forward -n idp-system svc/idp-test-platform-api 8000:8000 &
+          sleep 10
+
+          # Run Playwright tests
+          playwright test --config=tests/e2e/playwright.config.ts
+
+      - name: Upload E2E test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 30
+
+  # Job 5: Infrastructure Deployment
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [build, e2e-tests]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://platform.company.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Install Atmos
+        run: |
+          curl -L -o /tmp/atmos.tar.gz https://github.com/cloudposse/atmos/releases/download/v${{ env.ATMOS_VERSION }}/atmos_linux_amd64.tar.gz
+          sudo tar -xf /tmp/atmos.tar.gz -C /usr/local/bin atmos
+          sudo chmod +x /usr/local/bin/atmos
+          atmos --version
+
+      - name: Terraform Plan
+        run: |
+          atmos workflow plan-environment tenant=prod account=prod environment=prod
+
+      - name: Terraform Apply
+        run: |
+          atmos workflow apply-environment tenant=prod account=prod environment=prod
+
+      - name: Update Kubeconfig
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name prod-eks-cluster
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v${{ env.HELM_VERSION }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          helm dependency update k8s/helm/idp-platform
+          helm upgrade --install idp-platform k8s/helm/idp-platform \
+            --namespace idp-system --create-namespace \
+            --set backstage.image.tag=$(echo ${{ needs.build.outputs.backstage-image }} | cut -d: -f2) \
+            --set platformApi.image.tag=$(echo ${{ needs.build.outputs.platform-api-image }} | cut -d: -f2) \
+            --set global.environment=production \
+            --values k8s/helm/idp-platform/values-production.yaml \
+            --wait --timeout=15m
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/idp-platform-backstage -n idp-system
+          kubectl rollout status deployment/idp-platform-platform-api -n idp-system
+          kubectl get pods -n idp-system
+
+  # Job 6: Security Scanning (Scheduled)
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run SAST with CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: python, javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+      # Dependency scanning
+      - name: Run dependency scan
+        run: |
+          pip install safety
+          safety check --json --output security-report.json
+
+      - name: Upload security results
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-scan-results
+          path: security-report.json
+          retention-days: 90
+
+  # Job 7: Notification and Reporting
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [code-quality, test, build, e2e-tests, deploy-infrastructure]
+
+    steps:
+      - name: Notify Slack on success
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#platform-deployments'
+          text: '✅ IDP Platform deployment successful! 🚀'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#platform-alerts'
+          text: '❌ IDP Platform deployment failed! Please check the logs.'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Update deployment status
+        if: always()
+        run: |
+          echo "Pipeline completed with status: ${{ job.status }}"

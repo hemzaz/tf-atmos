@@ -44,7 +44,7 @@ variable "lambda_functions" {
 
 resource "aws_cloudwatch_dashboard" "main" {
   dashboard_name = var.dashboard_name
-  
+
   dashboard_body = jsonencode({
     widgets = concat(
       # EC2 Metrics
@@ -70,7 +70,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           }
         }
       ],
-      
+
       # RDS Metrics
       [
         for i, db_identifier in var.rds_instances : {
@@ -94,7 +94,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           }
         }
       ],
-      
+
       # Lambda Metrics
       [
         for i, function_name in var.lambda_functions : {
@@ -117,7 +117,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           }
         }
       ],
-      
+
       # System Overview
       [{
         type   = "text"
@@ -146,7 +146,7 @@ resource "aws_cloudwatch_metric_alarm" "ec2_cpu_high" {
   threshold           = 80
   alarm_description   = "This metric monitors EC2 CPU utilization"
   alarm_actions       = []
-  
+
   dimensions = {
     InstanceId = var.ec2_instances[count.index]
   }
@@ -165,7 +165,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
   threshold           = 80
   alarm_description   = "This metric monitors RDS CPU utilization"
   alarm_actions       = []
-  
+
   dimensions = {
     DBInstanceIdentifier = var.rds_instances[count.index]
   }
@@ -184,7 +184,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   threshold           = 1
   alarm_description   = "This metric monitors Lambda function errors"
   alarm_actions       = []
-  
+
   dimensions = {
     FunctionName = var.lambda_functions[count.index]
   }

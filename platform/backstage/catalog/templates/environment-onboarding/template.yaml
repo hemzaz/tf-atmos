@@ -1,0 +1,355 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: environment-onboarding
+  title: Environment Onboarding
+  description: Onboard a new environment with complete infrastructure stack
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - environment
+    - onboarding
+    - infrastructure
+    - platform
+spec:
+  owner: platform-team
+  type: environment
+
+  parameters:
+    - title: Environment Details
+      required:
+        - tenant
+        - account
+        - environment
+        - region
+        - owner
+      properties:
+        tenant:
+          title: Tenant
+          type: string
+          pattern: '^[a-z0-9]+$'
+          description: 'Organization or tenant identifier'
+          ui:autofocus: true
+          ui:help: 'Lowercase alphanumeric only (e.g., acme, fnx)'
+        account:
+          title: Account Type
+          type: string
+          description: 'AWS account type'
+          enum:
+            - 'dev'
+            - 'staging'
+            - 'prod'
+          enumNames:
+            - 'Development'
+            - 'Staging'
+            - 'Production'
+        environment:
+          title: Environment Name
+          type: string
+          pattern: '^[a-z0-9-]+$'
+          description: 'Specific environment identifier'
+          ui:help: 'e.g., testenv-01, us-west-2, sandbox-01'
+        region:
+          title: AWS Region
+          type: string
+          description: 'Primary AWS region for deployment'
+          default: 'us-west-2'
+          enum:
+            - 'us-east-1'
+            - 'us-east-2'
+            - 'us-west-1'
+            - 'us-west-2'
+            - 'eu-west-1'
+            - 'eu-central-1'
+            - 'ap-southeast-1'
+            - 'ap-northeast-1'
+        owner:
+          title: Environment Owner
+          type: string
+          description: 'Team responsible for this environment'
+          ui:field: OwnerPicker
+          ui:options:
+            allowedKinds:
+              - Group
+
+    - title: Network Configuration
+      properties:
+        vpcCidr:
+          title: VPC CIDR Block
+          type: string
+          description: 'CIDR block for the VPC'
+          default: '10.0.0.0/16'
+          pattern: '^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/([0-9]|[1-2][0-9]|3[0-2])$'
+          ui:help: 'Must be a valid CIDR notation (e.g., 10.0.0.0/16)'
+
+        availabilityZones:
+          title: Number of Availability Zones
+          type: integer
+          description: 'Number of AZs to span'
+          default: 3
+          minimum: 2
+          maximum: 4
+          ui:widget: updown
+
+        enableNatGateway:
+          title: Enable NAT Gateway
+          type: boolean
+          default: true
+          description: 'Create NAT Gateway for private subnet internet access'
+
+        enableVpcFlowLogs:
+          title: Enable VPC Flow Logs
+          type: boolean
+          default: true
+          description: 'Enable VPC Flow Logs for network monitoring'
+
+    - title: Application Platform
+      properties:
+        enableEks:
+          title: Enable Kubernetes (EKS)
+          type: boolean
+          default: true
+          description: 'Deploy EKS cluster for container workloads'
+
+        eksVersion:
+          title: EKS Version
+          type: string
+          description: 'Kubernetes version for EKS cluster'
+          default: '1.28'
+          enum:
+            - '1.26'
+            - '1.27'
+            - '1.28'
+            - '1.29'
+
+        nodeGroupSize:
+          title: Initial Node Group Size
+          type: integer
+          description: 'Initial number of worker nodes'
+          default: 2
+          minimum: 1
+          maximum: 10
+
+        enableLambda:
+          title: Enable Serverless (Lambda)
+          type: boolean
+          default: false
+          description: 'Include Lambda execution environment'
+
+    - title: Data Services
+      properties:
+        enableRds:
+          title: Enable Database (RDS)
+          type: boolean
+          default: false
+          description: 'Deploy PostgreSQL database'
+
+        rdsEngine:
+          title: Database Engine
+          type: string
+          description: 'Database engine type'
+          default: 'postgresql'
+          enum:
+            - 'postgresql'
+            - 'mysql'
+          enumNames:
+            - 'PostgreSQL'
+            - 'MySQL'
+          ui:field: Conditional
+          ui:condition: enableRds
+
+        enableElastiCache:
+          title: Enable Caching (ElastiCache)
+          type: boolean
+          default: false
+          description: 'Deploy Redis cluster for caching'
+
+        enableS3:
+          title: Enable Object Storage (S3)
+          type: boolean
+          default: true
+          description: 'Create S3 buckets for application data'
+
+    - title: Security & Monitoring
+      properties:
+        enableKms:
+          title: Enable Encryption (KMS)
+          type: boolean
+          default: true
+          description: 'Create KMS keys for encryption'
+
+        enableSecretsManager:
+          title: Enable Secrets Manager
+          type: boolean
+          default: true
+          description: 'Deploy AWS Secrets Manager'
+
+        enableCloudWatch:
+          title: Enable Monitoring
+          type: boolean
+          default: true
+          description: 'Configure CloudWatch monitoring and alerting'
+
+        enableBackup:
+          title: Enable Backup Services
+          type: boolean
+          default: false
+          description: 'Configure AWS Backup for data protection'
+
+        complianceLevel:
+          title: Compliance Level
+          type: string
+          description: 'Security and compliance requirements'
+          default: 'standard'
+          enum:
+            - 'basic'
+            - 'standard'
+            - 'strict'
+          enumNames:
+            - 'Basic (Development)'
+            - 'Standard (Production)'
+            - 'Strict (High Security/Compliance)'
+
+  steps:
+    - id: validate-cidr
+      name: Validate Network Configuration
+      action: platform:validate-cidr
+      input:
+        vpcCidr: ${{ parameters.vpcCidr }}
+        existingEnvironments: true
+
+    - id: generate-stack
+      name: Generate Stack Configuration
+      action: fetch:template
+      input:
+        url: './stack-template'
+        values:
+          tenant: ${{ parameters.tenant }}
+          account: ${{ parameters.account }}
+          environment: ${{ parameters.environment }}
+          region: ${{ parameters.region }}
+          owner: ${{ parameters.owner }}
+          vpcCidr: ${{ parameters.vpcCidr }}
+          availabilityZones: ${{ parameters.availabilityZones }}
+          enableNatGateway: ${{ parameters.enableNatGateway }}
+          enableVpcFlowLogs: ${{ parameters.enableVpcFlowLogs }}
+          enableEks: ${{ parameters.enableEks }}
+          eksVersion: ${{ parameters.eksVersion }}
+          nodeGroupSize: ${{ parameters.nodeGroupSize }}
+          enableLambda: ${{ parameters.enableLambda }}
+          enableRds: ${{ parameters.enableRds }}
+          rdsEngine: ${{ parameters.rdsEngine }}
+          enableElastiCache: ${{ parameters.enableElastiCache }}
+          enableS3: ${{ parameters.enableS3 }}
+          enableKms: ${{ parameters.enableKms }}
+          enableSecretsManager: ${{ parameters.enableSecretsManager }}
+          enableCloudWatch: ${{ parameters.enableCloudWatch }}
+          enableBackup: ${{ parameters.enableBackup }}
+          complianceLevel: ${{ parameters.complianceLevel }}
+
+    - id: create-branch
+      name: Create Environment Branch
+      action: github:branch
+      input:
+        repoUrl: 'github.com/your-org/infrastructure-stacks'
+        branchName: 'onboard-${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+
+    - id: commit-stack
+      name: Commit Stack Configuration
+      action: github:commit
+      input:
+        repoUrl: 'github.com/your-org/infrastructure-stacks'
+        branchName: 'onboard-${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+        message: 'feat: onboard environment ${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+        files:
+          - path: 'stacks/${{ parameters.account }}/${{ parameters.environment }}/main.yaml'
+            content: ${{ steps.generate-stack.output.stackConfig }}
+          - path: 'stacks/${{ parameters.account }}/${{ parameters.environment }}/README.md'
+            content: ${{ steps.generate-stack.output.readme }}
+
+    - id: validate-terraform
+      name: Validate Terraform Configuration
+      action: atmos:workflow
+      input:
+        workflow: 'validate'
+        stack: '${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+
+    - id: create-pr
+      name: Create Onboarding PR
+      action: github:pullRequest
+      input:
+        repoUrl: 'github.com/your-org/infrastructure-stacks'
+        title: 'feat: onboard ${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }} environment'
+        branchName: 'onboard-${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+        description: |
+          ## Environment Onboarding: ${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}
+
+          **Region:** ${{ parameters.region }}
+          **Owner:** ${{ parameters.owner }}
+          **VPC CIDR:** ${{ parameters.vpcCidr }}
+          **Compliance Level:** ${{ parameters.complianceLevel }}
+
+          ### Enabled Components
+          - VPC & Networking: ✅
+          {% if parameters.enableEks %}- EKS Kubernetes: ✅ (v${{ parameters.eksVersion }}){% endif %}
+          {% if parameters.enableRds %}- RDS Database: ✅ (${{ parameters.rdsEngine }}){% endif %}
+          {% if parameters.enableElastiCache %}- ElastiCache Redis: ✅{% endif %}
+          {% if parameters.enableS3 %}- S3 Storage: ✅{% endif %}
+          {% if parameters.enableKms %}- KMS Encryption: ✅{% endif %}
+          {% if parameters.enableSecretsManager %}- Secrets Manager: ✅{% endif %}
+          {% if parameters.enableCloudWatch %}- CloudWatch Monitoring: ✅{% endif %}
+          {% if parameters.enableBackup %}- AWS Backup: ✅{% endif %}
+
+          ### Deployment Steps
+          1. Review and approve this PR
+          2. Merge to trigger automated deployment
+          3. Monitor deployment progress in the platform dashboard
+
+          **Estimated deployment time:** 25-35 minutes
+
+    - id: register-environment
+      name: Register Environment in Catalog
+      action: catalog:register
+      input:
+        catalogInfoUrl: 'https://raw.githubusercontent.com/your-org/infrastructure-stacks/main/stacks/${{ parameters.account }}/${{ parameters.environment }}/catalog-info.yaml'
+
+    - id: schedule-deployment
+      name: Schedule Automated Deployment
+      action: atmos:schedule-workflow
+      input:
+        workflow: 'onboard-environment'
+        stack: '${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+        parameters:
+          tenant: ${{ parameters.tenant }}
+          account: ${{ parameters.account }}
+          environment: ${{ parameters.environment }}
+          vpc_cidr: ${{ parameters.vpcCidr }}
+        triggerOnMerge: true
+
+  output:
+    links:
+      - title: 'Environment Onboarding PR'
+        url: ${{ steps.create-pr.output.remoteUrl }}
+      - title: 'View Environment in Catalog'
+        url: 'https://platform.company.com/catalog/default/system/${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+      - title: 'Monitor Deployment'
+        url: 'https://platform.company.com/atmos?stack=${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}'
+    text:
+      - title: 'Environment Onboarding Initiated!'
+        content: |
+          Your new environment **${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}** has been configured and is ready for deployment.
+
+          **Stack Name:** `${{ parameters.tenant }}-${{ parameters.account }}-${{ parameters.environment }}`
+          **Region:** ${{ parameters.region }}
+          **VPC CIDR:** ${{ parameters.vpcCidr }}
+
+          **Next steps:**
+          1. Review and approve the onboarding PR
+          2. Merge to trigger automated deployment
+          3. Monitor progress in the platform dashboard
+
+          **Manual deployment commands:**
+          ```bash
+          atmos workflow onboard-environment tenant=${{ parameters.tenant }} account=${{ parameters.account }} environment=${{ parameters.environment }} vpc_cidr=${{ parameters.vpcCidr }}
+          ```

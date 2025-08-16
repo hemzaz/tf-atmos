@@ -1,138 +1,221 @@
 # Atmos Workflows
 
-This directory contains Atmos workflow definitions for common infrastructure operations. These workflows are designed to simplify complex operations by providing standardized, repeatable processes.
+This directory contains comprehensive Atmos workflow definitions for infrastructure operations. These workflows provide standardized, reliable, and secure processes for managing Terraform infrastructure at scale.
 
-## Available Workflows
+## 🏗️ Architecture Overview
 
-| Workflow | Description | Command |
-|----------|-------------|---------|
-| apply-backend | Apply changes to the Terraform backend infrastructure | `atmos workflow apply-backend tenant=<tenant> region=<region>` |
-| apply-environment | Apply changes for all components in an environment | `atmos workflow apply-environment tenant=<tenant> account=<account> environment=<environment> [auto_approve=true|false] [parallel=true|false]` |
-| bootstrap-backend | Initialize the Terraform backend (S3 bucket and DynamoDB table) | `atmos workflow bootstrap-backend tenant=<tenant> region=<region> [bucket_suffix=<suffix>] [dynamodb_suffix=<suffix>]` |
-| compliance-check | Run security and compliance checks on your infrastructure | `atmos workflow compliance-check tenant=<tenant> account=<account> environment=<environment>` |
-| create-environment-template | Create a new environment from templates | `atmos workflow create-environment-template tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<cidr> [region=<region>] [env_type=<type>]` |
-| destroy-backend | Destroy the Terraform backend infrastructure | `atmos workflow destroy-backend tenant=<tenant> region=<region> [confirm=true]` |
-| destroy-environment | Destroy all components in an environment | `atmos workflow destroy-environment tenant=<tenant> account=<account> environment=<environment> [auto_approve=true|false] [safe_destroy=true|false]` |
-| drift-detection | Detect infrastructure drift in an environment | `atmos workflow drift-detection tenant=<tenant> account=<account> environment=<environment> [parallel=true|false]` |
-| import | Import existing resources into Terraform | `atmos workflow import tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<addr> resource_id=<id>` |
-| lint | Run linters on Terraform code and configuration files | `atmos workflow lint [fix=true|false] [skip_security=true|false]` |
-| onboard-environment | Onboard a new environment with infrastructure | `atmos workflow onboard-environment tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<cidr> [region=<region>] [env_type=<type>] [auto_deploy=true|false]` |
-| plan-environment | Plan changes for all components in an environment | `atmos workflow plan-environment tenant=<tenant> account=<account> environment=<environment> [output_dir=<dir>] [parallel=true|false]` |
-| rotate-certificate | Rotate certificates in Secrets Manager and ACM | `atmos workflow rotate-certificate secret_name=<secret> namespace=<namespace> [acm_arn=<acm_cert_arn>]` |
-| state-operations | Manage Terraform state operations | `atmos workflow state-operations action=<list|detect|clean> tenant=<tenant> account=<account> environment=<environment> [older_than=<minutes>] [force=true|false]` |
-| update-environment-template | Update an existing environment with template changes | `atmos workflow update-environment-template tenant=<tenant> account=<account> environment=<environment>` |
-| validate | Validate components in an environment | `atmos workflow validate tenant=<tenant> account=<account> environment=<environment> [parallel=true|false]` |
+All workflows follow a consistent multi-step architecture:
+1. **Input Validation** - Validate parameters and environment setup
+2. **Pre-execution Checks** - Verify prerequisites and dependencies  
+3. **Core Operations** - Execute the primary workflow logic
+4. **Post-execution Validation** - Verify results and state consistency
+5. **Summary & Guidance** - Provide actionable results and next steps
 
-## Common Parameters
+## 📋 Available Workflows
 
-Most workflows accept the following common parameters:
+### Core Infrastructure Operations
 
-- `tenant`: Organization or project identifier (e.g., "acme")
-- `account`: AWS account identifier (e.g., "dev", "staging", "prod")
-- `environment`: Environment name (e.g., "us-east-1", "eu-west-1")
-- `auto_approve`: Skip interactive approval (true/false)
-- `parallel`: Run operations in parallel when possible (true/false)
+| Workflow | Purpose | Usage |
+|----------|---------|-------|
+| **lint** | Code quality and security scanning | `atmos workflow lint -f lint.yaml [fix=true] [skip_security=true]` |
+| **validate** | Component validation for a stack | `atmos workflow validate -f validate.yaml tenant=<tenant> account=<account> environment=<environment>` |
+| **plan-environment** | Generate execution plans | `atmos workflow plan-environment -f plan-environment.yaml tenant=<tenant> account=<account> environment=<environment>` |
+| **apply-environment** | Apply infrastructure changes | `atmos workflow apply-environment -f apply-environment.yaml tenant=<tenant> account=<account> environment=<environment> [auto_approve=true]` |
+| **drift-detection** | Detect configuration drift | `atmos workflow drift-detection -f drift-detection.yaml tenant=<tenant> account=<account> environment=<environment>` |
 
-## Detailed Usage Examples
+### Resource Management
 
-### Environment Provisioning
+| Workflow | Purpose | Usage |
+|----------|---------|-------|
+| **import** | Import existing AWS resources | `atmos workflow import -f import.yaml tenant=<tenant> account=<account> environment=<environment> component=<component> resource_address=<address> resource_id=<id>` |
+| **destroy-environment** | Safely destroy infrastructure | `atmos workflow destroy-environment -f destroy-environment.yaml tenant=<tenant> account=<account> environment=<environment> [auto_approve=true]` |
 
+### Backend Operations
+
+| Workflow | Purpose | Usage |
+|----------|---------|-------|
+| **bootstrap-backend** | Initialize Terraform backend | `atmos workflow bootstrap-backend -f bootstrap-backend.yaml tenant=<tenant> region=<region>` |
+| **apply-backend** | Manage backend infrastructure | `atmos workflow apply-backend -f apply-backend.yaml tenant=<tenant> region=<region>` |
+| **destroy-backend** | Remove backend infrastructure | `atmos workflow destroy-backend -f destroy-backend.yaml tenant=<tenant> region=<region>` |
+
+### Environment Management
+
+| Workflow | Purpose | Usage |
+|----------|---------|-------|
+| **onboard-environment** | Create new environments | `atmos workflow onboard-environment -f onboard-environment.yaml tenant=<tenant> account=<account> environment=<environment> vpc_cidr=<cidr>` |
+| **create-environment-template** | Generate from templates | `atmos workflow create-environment-template -f create-environment-template.yaml tenant=<tenant> account=<account> environment=<environment>` |
+| **update-environment-template** | Update template-based envs | `atmos workflow update-environment-template -f update-environment-template.yaml tenant=<tenant> account=<account> environment=<environment>` |
+
+### Security & Compliance
+
+| Workflow | Purpose | Usage |
+|----------|---------|-------|
+| **compliance-check** | Security and compliance validation | `atmos workflow compliance-check -f compliance-check.yaml tenant=<tenant> account=<account> environment=<environment>` |
+| **rotate-certificate** | Certificate rotation management | `atmos workflow rotate-certificate -f rotate-certificate.yaml secret_name=<secret> namespace=<namespace>` |
+
+### Operations & Maintenance
+
+| Workflow | Purpose | Usage |
+|----------|---------|-------|
+| **state-operations** | Terraform state management | `atmos workflow state-operations -f state-operations.yaml action=<list\|detect\|clean> tenant=<tenant> account=<account> environment=<environment>` |
+
+## 🚀 Quick Start Examples
+
+### 1. Validate Infrastructure
 ```bash
-# Create a new environment
-atmos workflow create-environment-template tenant=acme account=dev environment=us-east-1 vpc_cidr=10.0.0.0/16 region=us-east-1 env_type=development
-
-# Onboard a complete environment (create template and deploy)
-atmos workflow onboard-environment tenant=acme account=dev environment=us-east-1 vpc_cidr=10.0.0.0/16 auto_deploy=true
-
-# Plan changes to an environment
-atmos workflow plan-environment tenant=acme account=dev environment=us-east-1 output_dir=./plans
-
-# Apply changes to an environment
-atmos workflow apply-environment tenant=acme account=dev environment=us-east-1 auto_approve=false parallel=true
-
-# Validate components in an environment
-atmos workflow validate tenant=acme account=dev environment=us-east-1 parallel=true
+# Run linting and validation
+atmos workflow lint -f lint.yaml fix=true
+atmos workflow validate -f validate.yaml tenant=fnx account=dev environment=testenv-01
 ```
 
-### Backend Management
-
+### 2. Plan and Apply Changes
 ```bash
-# Bootstrap a new Terraform backend
-atmos workflow bootstrap-backend tenant=acme region=us-east-1 bucket_suffix=terraform-state dynamodb_suffix=terraform-locks
+# Generate execution plans
+atmos workflow plan-environment -f plan-environment.yaml \
+  tenant=fnx account=dev environment=testenv-01 \
+  output_dir=./plans/dev-review
 
-# Apply changes to backend infrastructure
-atmos workflow apply-backend tenant=acme region=us-east-1
+# Apply changes (with confirmation)
+atmos workflow apply-environment -f apply-environment.yaml \
+  tenant=fnx account=dev environment=testenv-01 \
+  auto_approve=false
 
-# Destroy backend infrastructure (USE WITH CAUTION)
-atmos workflow destroy-backend tenant=acme region=us-east-1 confirm=true
+# Apply changes (auto-approve for CI/CD)
+atmos workflow apply-environment -f apply-environment.yaml \
+  tenant=fnx account=dev environment=testenv-01 \
+  auto_approve=true
 ```
 
-### Maintenance Operations
-
+### 3. Drift Detection and Remediation
 ```bash
-# Detect drift in an environment
-atmos workflow drift-detection tenant=acme account=dev environment=us-east-1 parallel=true
+# Detect drift
+atmos workflow drift-detection -f drift-detection.yaml \
+  tenant=fnx account=prod environment=main
 
-# Import existing resources
-atmos workflow import tenant=acme account=dev environment=us-east-1 component=vpc resource_address=aws_vpc.main resource_id=vpc-12345
-
-# List state locks
-atmos workflow state-operations action=list tenant=acme account=dev environment=us-east-1
-
-# Clean abandoned state locks
-atmos workflow state-operations action=clean tenant=acme account=dev environment=us-east-1 older_than=120 force=false
+# Review and fix drift
+atmos workflow plan-environment -f plan-environment.yaml \
+  tenant=fnx account=prod environment=main
 ```
 
-### Quality Assurance
-
+### 4. Import Existing Resources
 ```bash
-# Run linters with automatic fixing
-atmos workflow lint fix=true
-
-# Run linters without security scanning
-atmos workflow lint skip_security=true
-
-# Validate components
-atmos workflow validate tenant=acme account=dev environment=us-east-1
+# Import an S3 bucket
+atmos workflow import -f import.yaml \
+  tenant=fnx account=dev environment=testenv-01 \
+  component=s3-bucket \
+  resource_address=aws_s3_bucket.main \
+  resource_id=my-existing-bucket-name
 ```
 
-### Certificate Management
+## ⚙️ Parameters Reference
 
+### Common Parameters
+- **tenant** - Organization identifier (e.g., "fnx", "acme")
+- **account** - Account identifier (e.g., "dev", "prod", "staging")  
+- **environment** - Environment name (e.g., "testenv-01", "main")
+- **parallel** - Enable parallel execution (true/false, default: false)
+
+### Security Parameters
+- **auto_approve** - Skip manual confirmation (true/false, default: false)
+- **force_import** - Force re-import of existing resources (true/false)
+- **skip_security** - Skip security scanning (true/false, default: false)
+
+### Output Parameters
+- **output_dir** - Directory for plan outputs (default: auto-generated)
+- **report_format** - Report format for drift detection (json/text/both)
+
+## 🔐 Security Best Practices
+
+### Input Validation
+- All workflows validate required parameters before execution
+- AWS credentials are verified before any operations
+- Stack and component existence is confirmed
+
+### Safe Operations
+- **Plan-first approach**: Generate plans before applying changes
+- **Drift detection**: Regular drift monitoring with detailed reporting
+- **State protection**: Safe state operations with backup validation
+- **Resource validation**: Pre and post-operation validation checks
+
+### Access Control
+- Workflows respect AWS IAM permissions
+- Stack-level isolation prevents cross-environment impact
+- Component-level granular control
+
+## 📊 Workflow States and Exit Codes
+
+### Standard Exit Codes
+- **0**: Success - operation completed successfully
+- **1**: Error - operation failed with recoverable error
+- **2**: Warning - operation completed with warnings (e.g., drift detected)
+
+### Common Workflow States
+- **Input Validation**: Parameter and environment checks
+- **Pre-execution**: Prerequisites and dependency validation
+- **Core Operation**: Main workflow logic execution
+- **Post-validation**: Result verification and state consistency
+- **Summary**: Results reporting and next step guidance
+
+## 🔍 Monitoring and Observability
+
+### Logging
+- Structured logging with timestamps and operation context
+- Detailed step-by-step execution tracking
+- Error context and remediation guidance
+
+### Reporting
+- JSON and human-readable reports for all operations
+- Drift detection with detailed change analysis
+- Plan summaries with resource impact assessment
+
+### Troubleshooting
+- Comprehensive error messages with resolution steps
+- Common failure scenarios with specific guidance
+- Resource state validation and recovery procedures
+
+## 🛠️ Advanced Usage
+
+### CI/CD Integration
 ```bash
-# Rotate certificate in Secrets Manager and ACM
-atmos workflow rotate-certificate secret_name=example-com namespace=cert-manager acm_arn=arn:aws:acm:us-east-1:123456789012:certificate/abcd1234
+# Pipeline-friendly execution with proper exit codes
+set -e
+atmos workflow lint -f lint.yaml fix=false
+atmos workflow validate -f validate.yaml tenant=fnx account=dev environment=ci
+atmos workflow plan-environment -f plan-environment.yaml tenant=fnx account=dev environment=ci
+atmos workflow apply-environment -f apply-environment.yaml tenant=fnx account=dev environment=ci auto_approve=true
 ```
 
-## Core Components
+### Batch Operations
+```bash
+# Multiple environment operations
+for env in dev staging prod; do
+  echo "Processing environment: $env"
+  atmos workflow drift-detection -f drift-detection.yaml \
+    tenant=fnx account=main environment=$env
+done
+```
 
-The workflow system uses several reusable components:
+### Custom Workflows
+See individual workflow files for advanced parameters and customization options. Each workflow is designed to be:
+- **Composable**: Can be combined with other workflows
+- **Extensible**: Supports custom parameters and configurations  
+- **Reliable**: Comprehensive error handling and validation
+- **Observable**: Detailed logging and reporting
 
-1. **Component Discovery**: Automatically discovers components in an environment, analyzes their dependencies, and sorts them in the correct order
-2. **Component Operations**: Provides operations (apply, plan, validate, destroy, drift) on components
-3. **State Management**: Manages Terraform state locks and helps resolve locking issues
-4. **Certificate Rotation**: Securely handles certificate rotation and deployment
+## 📞 Support and Troubleshooting
 
-## Design Principles
+### Common Issues
+1. **AWS Credentials**: Ensure valid credentials with appropriate permissions
+2. **Stack Configuration**: Verify stack exists in Atmos configuration
+3. **Component Validation**: Fix component configuration before operations
+4. **State Locks**: Handle DynamoDB state locks appropriately
 
-1. **Separation of Concerns** - YAML files define the interface, implementation contains the logic
-2. **DRY (Don't Repeat Yourself)** - Common logic is extracted into utility functions
-3. **Self-Documentation** - Clear parameter names and descriptions
-4. **Consistency** - Common parameter names and formats across workflows
-5. **Progressive Enhancement** - Basic operations work in non-interactive mode, with additional features in interactive mode
-6. **Dynamic Discovery** - Components and their dependencies are automatically discovered and ordered
-7. **Error Handling** - Robust error handling with clear messaging and proper exit codes
+### Getting Help
+- Review workflow-specific documentation in individual YAML files
+- Check execution logs for detailed error context
+- Validate prerequisites using the validation workflow
+- Use drift-detection to understand current state vs. configuration
 
-## Error Handling
+---
 
-All workflows are designed to fail fast and return appropriate exit codes:
-- 0: Success
-- 1: Error during execution
-- 2: Invalid parameters or prerequisites not met
-
-## Environment Variables
-
-Some workflows may use the following environment variables:
-- `AWS_PROFILE`: AWS profile to use for authentication
-- `AWS_REGION`: Default AWS region
-- `MANAGEMENT_ACCOUNT_ID`: AWS management account ID for cross-account operations
-- `ALARM_EMAIL`: Email address for CloudWatch Alarms
+*Last Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*

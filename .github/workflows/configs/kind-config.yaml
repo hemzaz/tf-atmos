@@ -1,0 +1,67 @@
+---
+# Kind cluster configuration for E2E testing
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: e2e-test-cluster
+nodes:
+  # Control plane node
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Port forward for ingress controller
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+      # Port forward for NodePort services
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP
+      - containerPort: 30001
+        hostPort: 30001
+        protocol: TCP
+    # Mount Docker socket for testcontainers
+    extraMounts:
+      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+
+  # Worker nodes
+  - role: worker
+    extraMounts:
+      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+
+  - role: worker
+    extraMounts:
+      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+
+networking:
+  # Disable default CNI to install our own
+  disableDefaultCNI: false
+
+  # Pod subnet
+  podSubnet: "10.244.0.0/16"
+
+  # Service subnet
+  serviceSubnet: "10.96.0.0/16"
+
+  # API server configuration
+  apiServerAddress: "127.0.0.1"
+  apiServerPort: 6443
+
+# Feature gates for testing
+featureGates:
+  "EphemeralContainers": true
+  "TTLAfterFinished": true
+
+# Runtime configuration
+runtimeConfig:
+  "api/all": "true"

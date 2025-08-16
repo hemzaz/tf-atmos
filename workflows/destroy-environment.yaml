@@ -1,3 +1,4 @@
+---
 name: destroy-environment
 description: "Destroy all components in an environment"
 
@@ -13,9 +14,9 @@ workflows:
             --environment ${environment} \
             --auto-approve ${auto_approve:-false} \
             --safe-destroy ${safe_destroy:-true}
-            
+
           EXIT_CODE=$?
-          
+
           if [ $EXIT_CODE -eq 0 ]; then
             echo "Environment destruction completed successfully."
           else

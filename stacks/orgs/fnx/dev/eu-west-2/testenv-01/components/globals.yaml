@@ -1,7 +1,8 @@
+---
 import:
   - orgs/fnx/dev/eu-west-2/_defaults
   - mixins/development
-  
+
   # Catalog imports with defaults
   - catalog/vpc/defaults
   - catalog/network/defaults
@@ -36,11 +37,11 @@ vars:
   # Core environment identifiers
   environment: testenv-01
   tenant_name: testenv-01
-  
+
   # Domain configuration
   domain_name: "example.com"
   hosted_zone_id: "Z1234567890EXAMPLE"
-  
+
   # Environment-specific configuration
   eks_kubernetes_version: "1.28"
   eks_public_access: false
@@ -48,11 +49,11 @@ vars:
   rds_engine_version: "14"
   use_external_secrets: true
   secrets_manager_path_prefix: "myapp/fnx/certificates"
-  
+
   # Feature flags
   enable_container_insights: false
   enable_vpc_flow_logs: false
-  
+
   # Override development mixin with specific values
   security:
     vpc_flow_logs: true  # Override development mixin default
@@ -64,6 +65,6 @@ tags:
   Project: "Infrastructure"
   Environment: "testenv-01"
   ManagedBy: "Terraform"
-  Tenant: "fnx" 
+  Tenant: "fnx"
   Application: "Testing"
   Provisioner: "Atmos"

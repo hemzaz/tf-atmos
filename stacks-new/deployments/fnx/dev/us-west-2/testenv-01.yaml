@@ -1,0 +1,173 @@
+---
+# FNX Development Account - Test Environment 01 Stack
+# Primary test environment for integration and performance testing
+# Stack: fnx-dev-us-west-2-testenv-01
+
+# Stack imports (order matters - globals first, then mixins, then catalogs)
+imports:
+  # Global settings
+  - "_globals/globals"
+
+  # Mixins (account -> region -> environment -> compliance)
+  - "mixins/accounts/development"
+  - "mixins/regions/us-west-2"
+  - "mixins/environments/testenv-01"
+
+  # Component catalogs
+  - "catalogs/foundation/vpc"
+  - "catalogs/platform/eks"
+
+# Stack metadata
+metadata:
+  stack_name: "fnx-dev-us-west-2-testenv-01"
+  description: "FNX development test environment in US West 2"
+  environment_type: "testing"
+  deployment_order: 2  # After development
+
+# Stack-level variables
+vars:
+  # Stack identification
+  tenant: "fnx"
+  account: "dev"
+  region: "us-west-2"
+  environment: "testenv-01"
+
+  # Naming
+  name_prefix: "${tenant}-${environment}"
+
+  # Network configuration
+  vpc_cidr: "10.2.0.0/16"          # Development network range
+  availability_zones: ["us-west-2a", "us-west-2b", "us-west-2c"]
+
+  # Subnet allocation
+  private_subnets: ["10.2.1.0/24", "10.2.2.0/24", "10.2.3.0/24"]
+  public_subnets: ["10.2.101.0/24", "10.2.102.0/24", "10.2.103.0/24"]
+  database_subnets: ["10.2.201.0/24", "10.2.202.0/24", "10.2.203.0/24"]
+
+  # DNS configuration
+  domain_name: "testenv-01.dev.fnx.platform.company.com"
+
+  # Cost optimization (testing environment)
+  cost_center: "Development"
+  project_name: "Platform Testing"
+  resource_owner: "test-team@company.com"
+
+  # Testing-specific configuration
+  test_data_enabled: true
+  performance_testing_enabled: true
+  load_testing_enabled: true
+
+# Component configurations
+components:
+  terraform:
+    # VPC component
+    vpc:
+      vars:
+        # Network configuration
+        cidr_block: "${vpc_cidr}"
+        azs: "${availability_zones}"
+        private_subnets: "${private_subnets}"
+        public_subnets: "${public_subnets}"
+        database_subnets: "${database_subnets}"
+
+        # Test environment specific VPC settings
+        enable_nat_gateway: true
+        single_nat_gateway: false      # Multi-AZ NAT for HA testing
+        enable_vpn_gateway: false
+        enable_dns_hostnames: true
+        enable_dns_support: true
+
+        # Flow logs for network testing
+        enable_flow_log: true
+        flow_log_destination_type: "cloud-watch-logs"
+
+      tags:
+        Name: "${name_prefix}-vpc"
+        TestEnvironment: "true"
+        NetworkTesting: "enabled"
+
+    # EKS component
+    eks:
+      vars:
+        # Cluster configuration
+        cluster_name: "${name_prefix}-eks"
+        cluster_version: "1.28"
+
+        # Network configuration
+        vpc_id: "${components.terraform.vpc.vpc_id}"
+        subnet_ids: "${components.terraform.vpc.private_subnets}"
+
+        # Test environment cluster settings
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: true
+        cluster_endpoint_public_access_cidrs: ["10.0.0.0/8"]
+
+        # Node groups for testing
+        eks_managed_node_groups:
+          test_main:
+            instance_types: ["t3.large", "m5.large"]
+            capacity_type: "ON_DEMAND"    # Stable capacity for testing
+            min_size: 1
+            max_size: 6
+            desired_size: 2
+
+            # Test-specific labels and taints
+            labels:
+              node-type: "test-main"
+              environment: "testenv-01"
+              testing-enabled: "true"
+
+            taints:
+              - key: "test-environment"
+                value: "testenv-01"
+                effect: "NO_SCHEDULE"
+
+        # Enhanced logging for testing
+        cluster_enabled_log_types: ["api", "audit", "authenticator"]
+        cloudwatch_log_group_retention_in_days: 30
+
+      tags:
+        Name: "${name_prefix}-eks"
+        TestEnvironment: "true"
+        KubernetesVersion: "1.28"
+        NodeCapacityType: "ON_DEMAND"
+
+# Stack-level tags (applied to all resources)
+tags:
+  # Stack identification
+  Stack: "fnx-dev-us-west-2-testenv-01"
+  Tenant: "fnx"
+  Account: "dev"
+  Region: "us-west-2"
+  Environment: "testenv-01"
+
+  # Environment characteristics
+  EnvironmentType: "testing"
+  TestEnvironment: "true"
+  BusinessCritical: "false"
+  HighAvailability: "true"         # Multi-AZ for realistic testing
+  DisasterRecovery: "false"
+
+  # Operational tags
+  BackupRequired: "true"
+  MonitoringLevel: "Enhanced"
+  SecurityLevel: "Standard"
+  ComplianceRequired: "false"
+
+  # Cost and management
+  CostCenter: "Development"
+  Project: "Platform Testing"
+  Owner: "test-team@company.com"
+  ManagedBy: "Terraform"
+  CreatedBy: "Atmos"
+
+  # Testing-specific tags
+  PerformanceTesting: "enabled"
+  LoadTesting: "enabled"
+  IntegrationTesting: "enabled"
+  TestDataEnabled: "true"
+  ProductionParity: "true"
+
+  # Scheduling (for cost optimization)
+  AutoScheduled: "true"
+  Schedule: "business-hours-extended"

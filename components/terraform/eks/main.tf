@@ -52,9 +52,7 @@ resource "aws_eks_cluster" "clusters" {
   encryption_config {
     provider {
       # Use explicit fallback logic to avoid dependency cycle
-      key_arn = lookup(each.value, "kms_key_arn", null) != null ? 
-                lookup(each.value, "kms_key_arn", null) : 
-                aws_kms_key.eks[each.key].arn
+      key_arn = lookup(each.value, "kms_key_arn", null) != null ? lookup(each.value, "kms_key_arn", null) : aws_kms_key.eks[each.key].arn
     }
     resources = ["secrets"]
   }
@@ -114,22 +112,37 @@ resource "aws_kms_key" "eks" {
   description             = "KMS key for EKS ${each.key} secrets encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
-  
+
   # Add key policy to allow EKS service to use the key and AWS root user to administer it
   policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
-        Sid = "Enable IAM User Permissions",
+        Sid    = "Enable IAM User Permissions",
         Effect = "Allow",
         Principal = {
           AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
         },
-        Action = "kms:*",
-        Resource = "*"
+        Action = [
+          "kms:Create*",
+          "kms:Describe*",
+          "kms:Enable*",
+          "kms:List*",
+          "kms:Put*",
+          "kms:Update*",
+          "kms:Revoke*",
+          "kms:Disable*",
+          "kms:Get*",
+          "kms:Delete*",
+          "kms:TagResource",
+          "kms:UntagResource",
+          "kms:ScheduleKeyDeletion",
+          "kms:CancelKeyDeletion"
+        ],
+        Resource = aws_kms_key.eks_cluster_key.arn
       },
       {
-        Sid = "Allow EKS Service to use the key",
+        Sid    = "Allow EKS Service to use the key",
         Effect = "Allow",
         Principal = {
           Service = "eks.amazonaws.com"
@@ -141,11 +154,11 @@ resource "aws_kms_key" "eks" {
           "kms:GenerateDataKey*",
           "kms:DescribeKey"
         ],
-        Resource = "*",
+        Resource = aws_kms_key.eks_cluster_key.arn,
         Condition = {
           StringEquals = {
             "kms:CallerAccount" = data.aws_caller_identity.current.account_id,
-            "kms:ViaService" = "eks.${var.region}.amazonaws.com"
+            "kms:ViaService"    = "eks.${var.region}.amazonaws.com"
           }
         }
       }
@@ -156,10 +169,10 @@ resource "aws_kms_key" "eks" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.key}-kms-key"
+      Name        = "${var.tags["Environment"]}-${each.key}-kms-key"
       Environment = var.tags["Environment"]
-      Cluster = each.key
-      ManagedBy = "terraform"
+      Cluster     = each.key
+      ManagedBy   = "terraform"
     }
   )
 }
@@ -240,8 +253,8 @@ resource "aws_eks_node_group" "node_groups" {
   # Add validation for taint effect values
   lifecycle {
     precondition {
-      condition     = length(lookup(each.value, "taints", [])) == 0 || alltrue([
-        for taint in lookup(each.value, "taints", []) : 
+      condition = length(lookup(each.value, "taints", [])) == 0 || alltrue([
+        for taint in lookup(each.value, "taints", []) :
         contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], lookup(taint, "effect", "NO_SCHEDULE"))
       ])
       error_message = "Taint effect must be one of: NO_SCHEDULE, PREFER_NO_SCHEDULE, or NO_EXECUTE."
@@ -271,7 +284,7 @@ resource "aws_eks_node_group" "node_groups" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.key}",
+      Name        = "${var.tags["Environment"]}-${each.key}",
       ClusterName = aws_eks_cluster.clusters[each.value.cluster_name].name
     }
   )
@@ -302,7 +315,7 @@ resource "aws_eks_node_group" "node_groups" {
       condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) > 0
       error_message = "At least one subnet must be provided for the node group."
     }
-    
+
     # Add precondition to validate instance types are valid
     precondition {
       condition     = length(lookup(each.value, "instance_types", ["t3.medium"])) > 0
@@ -379,16 +392,16 @@ resource "aws_iam_openid_connect_provider" "oidc_provider" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.key}-oidc"
+      Name        = "${var.tags["Environment"]}-${each.key}-oidc"
       ClusterName = "${var.tags["Environment"]}-${each.key}"
     }
   )
-  
+
   lifecycle {
     # Thumbprint list may be updated by AWS, but we want to trigger rotation only
     # when URL changes to avoid needless redeployments
     ignore_changes = [thumbprint_list]
-    
+
     # Add explicit message for maintainers about why thumbprint changes are ignored
     # This isn't functional but helps document the decision
     precondition {
@@ -404,7 +417,7 @@ data "tls_certificate" "eks" {
   for_each = local.clusters
 
   url = aws_eks_cluster.clusters[each.key].identity[0].oidc[0].issuer
-  
+
   # Add retry logic for certificate lookup which can sometimes fail
   lifecycle {
     # Add explicit error messages to help with troubleshooting

@@ -79,6 +79,17 @@ variable "environment_variables" {
   default     = {}
 }
 
+variable "kms_key_arn" {
+  type        = string
+  description = "KMS key ARN for encrypting Lambda environment variables"
+  default     = null
+
+  validation {
+    condition     = var.kms_key_arn == null || can(regex("^arn:aws:kms:", var.kms_key_arn))
+    error_message = "KMS key ARN must be a valid AWS KMS key ARN or null."
+  }
+}
+
 variable "vpc_id" {
   type        = string
   description = "VPC ID for Lambda function"
@@ -203,4 +214,176 @@ variable "tags" {
   type        = map(string)
   description = "Tags to apply to resources"
   default     = {}
+}
+
+# Performance Optimization Variables
+variable "reserved_concurrent_executions" {
+  type        = number
+  description = "Amount of reserved concurrent executions for the Lambda function"
+  default     = null
+  validation {
+    condition     = var.reserved_concurrent_executions == null || var.reserved_concurrent_executions >= 0
+    error_message = "Reserved concurrent executions must be 0 or greater."
+  }
+}
+
+variable "provisioned_concurrency_config" {
+  type = object({
+    provisioned_concurrent_executions = number
+    qualifier                         = string
+  })
+  description = "Provisioned concurrency configuration"
+  default     = null
+}
+
+variable "routing_config" {
+  type = object({
+    additional_version_weights = map(number)
+  })
+  description = "Blue/Green deployment routing configuration"
+  default     = null
+}
+
+variable "telemetry_log_level" {
+  type        = string
+  description = "Telemetry log level for Lambda function"
+  default     = "WARN"
+  validation {
+    condition     = contains(["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"], var.telemetry_log_level)
+    error_message = "Telemetry log level must be one of: TRACE, DEBUG, INFO, WARN, ERROR, FATAL."
+  }
+}
+
+variable "enable_snapstart" {
+  type        = bool
+  description = "Enable SnapStart for Java Lambda functions"
+  default     = false
+}
+
+variable "package_type" {
+  type        = string
+  description = "Lambda deployment package type (Zip or Image)"
+  default     = "Zip"
+  validation {
+    condition     = contains(["Zip", "Image"], var.package_type)
+    error_message = "Package type must be either 'Zip' or 'Image'."
+  }
+}
+
+variable "architectures" {
+  type        = list(string)
+  description = "Instruction set architectures supported by the function"
+  default     = ["x86_64"]
+  validation {
+    condition     = alltrue([for arch in var.architectures : contains(["x86_64", "arm64"], arch)])
+    error_message = "Architectures must be 'x86_64' and/or 'arm64'."
+  }
+}
+
+# Container Image Configuration
+variable "image_command" {
+  type        = list(string)
+  description = "Parameters that you want to pass in with entry_point"
+  default     = []
+}
+
+variable "image_entry_point" {
+  type        = list(string)
+  description = "Entry point to the application"
+  default     = []
+}
+
+variable "image_working_directory" {
+  type        = string
+  description = "Working directory for the Lambda function"
+  default     = null
+}
+
+# EFS Configuration
+variable "efs_access_point_arn" {
+  type        = string
+  description = "EFS access point ARN for Lambda function"
+  default     = null
+}
+
+variable "efs_local_mount_path" {
+  type        = string
+  description = "Local mount path for EFS"
+  default     = "/mnt/efs"
+}
+
+# Enhanced Security Variables
+variable "database_port" {
+  type        = number
+  description = "Database port for security group egress rule"
+  default     = null
+}
+
+variable "database_cidr_blocks" {
+  type        = list(string)
+  description = "CIDR blocks for database access"
+  default     = []
+}
+
+variable "custom_egress_rules" {
+  type = list(object({
+    description     = string
+    from_port       = number
+    to_port         = number
+    protocol        = string
+    cidr_blocks     = optional(list(string))
+    security_groups = optional(list(string))
+  }))
+  description = "Custom egress rules for Lambda security group"
+  default     = []
+}
+
+# Performance Monitoring Variables
+variable "create_performance_alarms" {
+  type        = bool
+  description = "Whether to create performance monitoring alarms"
+  default     = false
+}
+
+variable "duration_alarm_threshold" {
+  type        = number
+  description = "Duration alarm threshold in milliseconds"
+  default     = 30000
+}
+
+variable "error_rate_alarm_threshold" {
+  type        = number
+  description = "Error rate alarm threshold"
+  default     = 5
+}
+
+variable "throttle_alarm_threshold" {
+  type        = number
+  description = "Throttle alarm threshold"
+  default     = 1
+}
+
+variable "sns_topic_arn" {
+  type        = string
+  description = "SNS topic ARN for alarm notifications"
+  default     = null
+}
+
+# Scheduling Variables
+variable "schedule_expression" {
+  type        = string
+  description = "CloudWatch Events schedule expression"
+  default     = null
+}
+
+variable "schedule_enabled" {
+  type        = bool
+  description = "Whether the schedule is enabled"
+  default     = true
+}
+
+variable "schedule_input" {
+  type        = string
+  description = "JSON input for scheduled Lambda invocation"
+  default     = null
 }

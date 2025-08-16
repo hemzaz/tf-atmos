@@ -1,0 +1,259 @@
+version: '3.8'
+
+services:
+  # Core IDP Services
+  backstage:
+    build:
+      context: ./platform/backstage
+      dockerfile: Dockerfile.local
+    container_name: idp-backstage
+    ports:
+      - "3000:3000"
+      - "7007:7007"
+    environment:
+      - NODE_ENV=development
+      - BACKSTAGE_BASE_URL=http://localhost:3000
+      - BACKSTAGE_BACKEND_URL=http://localhost:7007
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=backstage
+      - POSTGRES_PASSWORD=backstage_dev
+      - POSTGRES_DB=backstage
+      - POSTGRES_SSL=false
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - AUTH_GITHUB_CLIENT_ID=${AUTH_GITHUB_CLIENT_ID:-}
+      - AUTH_GITHUB_CLIENT_SECRET=${AUTH_GITHUB_CLIENT_SECRET:-}
+      - PLATFORM_API_TOKEN=dev-token-123
+      - K8S_CLUSTER_URL=http://localhost:8080
+      - K8S_CLUSTER_NAME=local-dev
+      - K8S_TOKEN=dev-token
+      - AWS_DEFAULT_REGION=us-east-1
+      - PLATFORM_DEFAULT_TENANT=dev
+      - PLATFORM_DEFAULT_ACCOUNT=local
+    volumes:
+      - ./platform/backstage:/app
+      - ./components:/app/components
+      - ./catalog:/app/catalog
+      - ./docs:/app/docs
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - postgres
+      - redis
+      - platform-api
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Platform API Service
+  platform-api:
+    build:
+      context: ./platform/api
+      dockerfile: Dockerfile.local
+    container_name: idp-platform-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=development
+      - DATABASE_URL=postgresql://platform:platform_dev@postgres:5432/platform
+      - REDIS_URL=redis://redis:6379/0
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=us-east-1
+      - ATMOS_CLI_CONFIG_PATH=/app/atmos.yaml
+      - LOG_LEVEL=DEBUG
+      - PLATFORM_SECRET_KEY=dev-secret-key-change-in-prod
+    volumes:
+      - ./:/app/infrastructure
+      - ./logs:/app/logs
+      - ~/.aws:/root/.aws:ro
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Database Services
+  postgres:
+    image: postgres:15-alpine
+    container_name: idp-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres_root
+      - POSTGRES_MULTIPLE_DATABASES=backstage,platform
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/database/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Cache and Message Broker
+  redis:
+    image: redis:7-alpine
+    container_name: idp-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redis_dev
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Development Tools
+  atlantis:
+    build:
+      context: ./integrations/atlantis
+      dockerfile: Dockerfile
+    container_name: idp-atlantis
+    ports:
+      - "4141:4141"
+      - "4142:4142"
+    environment:
+      - ATLANTIS_GH_USER=${ATLANTIS_GH_USER:-atlantis}
+      - ATLANTIS_GH_TOKEN=${GITHUB_TOKEN:-}
+      - ATLANTIS_GH_WEBHOOK_SECRET=${ATLANTIS_WEBHOOK_SECRET:-dev-webhook-secret}
+      - ATLANTIS_REPO_ALLOWLIST=${ATLANTIS_REPO_ALLOWLIST:-github.com/company/*}
+      - ATLANTIS_LOG_LEVEL=debug
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - ./:/atlantis/repo
+      - atlantis_data:/atlantis/data
+      - ~/.aws:/root/.aws:ro
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Monitoring Stack
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: idp-prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: idp-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin_dev
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-kubernetes-app
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Log Aggregation
+  loki:
+    image: grafana/loki:latest
+    container_name: idp-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: idp-promtail
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Security Scanning
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: idp-trivy
+    volumes:
+      - trivy_cache:/root/.cache
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: server --listen 0.0.0.0:4954 --cache-dir /root/.cache
+    ports:
+      - "4954:4954"
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Development Utilities
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: idp-mailhog
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+  # Local Kubernetes (k3s)
+  k3s:
+    image: rancher/k3s:latest
+    container_name: idp-k3s
+    command: server --disable traefik --disable servicelb --disable metrics-server
+    environment:
+      - K3S_CLUSTER_SECRET=dev-cluster-secret
+      - K3S_KUBECONFIG_OUTPUT=/output/kubeconfig.yaml
+      - K3S_KUBECONFIG_MODE=666
+    volumes:
+      - k3s_server:/var/lib/rancher/k3s
+      - ./k8s/kubeconfig:/output
+    ports:
+      - "6443:6443"
+      - "8080:8080"
+    privileged: true
+    restart: unless-stopped
+    networks:
+      - idp-network
+
+networks:
+  idp-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  atlantis_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  trivy_cache:
+  k3s_server:

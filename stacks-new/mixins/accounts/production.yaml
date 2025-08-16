@@ -1,0 +1,175 @@
+---
+# Production account configuration mixin
+# High availability, security, and compliance focused settings
+
+vars:
+  # Account identification
+  account_type: "production"
+  account_name: "production"
+  business_critical: true
+
+  # High availability settings
+  high_availability:
+    enabled: true
+    multi_az: true
+    cross_region_backup: true
+    auto_scaling_enabled: true
+    load_balancer_enabled: true
+
+  # Security configuration for production
+  security:
+    # Enhanced security settings
+    enable_waf: true
+    encryption_at_rest: true
+    encryption_in_transit: true
+    require_mfa: true
+    session_timeout: 3600  # 1 hour
+
+    # Logging and monitoring
+    cloudtrail_enabled: true
+    vpc_flow_logs: true
+    config_service_enabled: true
+    guardduty_enabled: true
+    security_hub_enabled: true
+
+    # Access control
+    enforce_least_privilege: true
+    require_approval_for_privileged_access: true
+    enable_access_analyzer: true
+
+    # Compliance
+    compliance_frameworks: ["soc2", "iso27001"]
+    enable_compliance_monitoring: true
+    audit_log_retention_days: 2555  # 7 years for SOC2
+
+  # Backup and disaster recovery
+  backup:
+    enabled: true
+    retention_days: 30
+    cross_region_backup: true
+    point_in_time_recovery: true
+    automated_backup_window: "03:00-04:00"  # UTC
+    backup_deletion_protection: true
+
+  # Monitoring and alerting
+  monitoring:
+    detailed_monitoring: true
+    custom_metrics: true
+    alerting_enabled: true
+    notification_channels:
+      - email: "production-alerts@company.com"
+      - slack: "#production-alerts"
+      - pagerduty: true
+
+    # Performance monitoring
+    performance_insights: true
+    x_ray_tracing: true
+
+  # Cost optimization
+  cost_optimization:
+    # Reserved instances
+    reserved_instance_coverage: 80  # Target 80% RI coverage
+    savings_plans_enabled: true
+
+    # Resource scheduling (minimal in production)
+    auto_scaling:
+      enabled: true
+      scale_in_protection: true
+      min_capacity: 2  # Always maintain minimum capacity
+
+    # Lifecycle management
+    s3_lifecycle_policies: true
+    ebs_snapshot_lifecycle: true
+    log_lifecycle_management: true
+
+  # Network configuration
+  networking:
+    # Production networking requirements
+    dedicated_tenancy: false  # Use default unless required
+    enhanced_networking: true
+    placement_groups: true
+
+    # DNS
+    private_hosted_zones: true
+    dns_resolution: true
+    dns_hostnames: true
+
+    # VPC configuration
+    vpc:
+      enable_nat_gateway: true
+      single_nat_gateway: false  # Multi-AZ NAT gateways for HA
+      enable_vpn_gateway: false
+      enable_dns_hostnames: true
+      enable_dns_support: true
+
+  # Compute configuration
+  compute:
+    # EC2 settings
+    instance_types:
+      preferred: ["m5.large", "m5.xlarge", "c5.large", "c5.xlarge"]
+      allowed: ["t3.medium", "t3.large", "t3.xlarge", "m5.*", "c5.*", "r5.*"]
+
+    # EKS settings
+    kubernetes:
+      version: "1.28"  # Use stable, supported version
+      endpoint_private_access: true
+      endpoint_public_access: false  # Private clusters in production
+      node_group_capacity_type: "ON_DEMAND"  # Reliability over cost
+      node_group_instance_types: ["m5.large", "m5.xlarge"]
+
+  # Database configuration
+  database:
+    # RDS settings
+    multi_az: true
+    backup_retention_period: 30
+    backup_window: "03:00-04:00"  # UTC
+    maintenance_window: "sun:04:00-sun:05:00"  # UTC
+    deletion_protection: true
+    encryption_at_rest: true
+    performance_insights_enabled: true
+    monitoring_interval: 60
+
+    # Parameter group settings
+    enhanced_monitoring: true
+    log_exports: ["error", "general", "slow-query"]
+
+  # Storage configuration
+  storage:
+    # S3 settings
+    versioning_enabled: true
+    mfa_delete: false  # Enable if extra protection needed
+    lifecycle_configuration: true
+    cross_region_replication: true
+    access_logging: true
+
+    # EBS settings
+    encrypted: true
+    volume_type: "gp3"  # Use gp3 for better performance
+    iops: null  # Let AWS optimize
+    throughput: null  # Let AWS optimize
+
+# Production-specific component configurations
+components:
+  terraform:
+    # Production deployment settings
+    apply_auto_approve: false  # Always require approval in production
+    plan_timeout: 30  # 30 minute timeout for large plans
+
+    # State management
+    state_lock_enabled: true
+    state_encryption_enabled: true
+
+    # Validation
+    validate_required: true
+    fmt_required: true
+
+# Production tags
+tags:
+  Environment: "production"
+  BusinessCritical: "true"
+  HighAvailability: "true"
+  DisasterRecovery: "true"
+  BackupRequired: "true"
+  MonitoringLevel: "Enhanced"
+  SecurityLevel: "High"
+  ComplianceRequired: "true"

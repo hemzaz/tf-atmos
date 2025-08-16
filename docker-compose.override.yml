@@ -1,0 +1,112 @@
+---
+# Docker Compose Override for Development
+# This file extends docker-compose.yml for local development
+# Use: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+
+version: '3.8'
+
+services:
+  backstage:
+    build:
+      target: development
+    volumes:
+      # Enable hot reloading for development
+      - ./platform/backstage/packages:/app/packages:cached
+      - ./platform/backstage/plugins:/app/plugins:cached
+      - ./platform/backstage/app-config.yaml:/app/app-config.yaml:ro
+      - ./platform/backstage/app-config.local.yaml:/app/app-config.local.yaml:ro
+      - ./components:/app/components:ro
+      - ./catalog:/app/catalog:ro
+      - ./docs:/app/docs:ro
+      - backstage_node_modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - CHOKIDAR_USEPOLLING=true  # For Windows/WSL compatibility
+      - BACKSTAGE_APP_CONFIG_debug=true
+    command: yarn dev
+    develop:
+      watch:
+        - action: sync
+          path: ./platform/backstage/packages
+          target: /app/packages
+        - action: sync+restart
+          path: ./platform/backstage/app-config.yaml
+          target: /app/app-config.yaml
+
+  platform-api:
+    build:
+      target: development
+    volumes:
+      - ./platform/api:/app/api:cached
+      - ./gaia:/app/gaia:cached
+      - ./:/app/infrastructure:cached
+      - api_cache:/app/.cache
+    environment:
+      - PYTHONPATH=/app
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - WATCHDOG_ENABLED=true
+      - HOT_RELOAD=true
+    command: python -m flask run --host=0.0.0.0 --port=8000 --reload
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./platform/api
+          target: /app/api
+        - action: sync+restart
+          path: ./gaia
+          target: /app/gaia
+
+  # Development-specific services
+  docs:
+    image: squidfunk/mkdocs-material:latest
+    container_name: idp-docs
+    ports:
+      - "8080:8000"
+    volumes:
+      - ./:/docs
+    command: serve --dev-addr=0.0.0.0:8000 --livereload
+    networks:
+      - idp-network
+
+  # Code quality tools
+  sonarqube:
+    image: sonarqube:community
+    container_name: idp-sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+      - SONAR_JDBC_URL=jdbc:postgresql://postgres:5432/sonarqube
+      - SONAR_JDBC_USERNAME=sonarqube
+      - SONAR_JDBC_PASSWORD=sonarqube_dev
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    depends_on:
+      - postgres
+    networks:
+      - idp-network
+
+  # Testing environment
+  selenium:
+    image: selenium/standalone-chrome:latest
+    container_name: idp-selenium
+    ports:
+      - "4444:4444"
+      - "7900:7900"  # VNC server for debugging
+    environment:
+      - SE_VNC_NO_PASSWORD=1
+    volumes:
+      - /dev/shm:/dev/shm
+    networks:
+      - idp-network
+
+volumes:
+  backstage_node_modules:
+  api_cache:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:

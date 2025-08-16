@@ -1,3 +1,4 @@
+---
 import:
   - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
   - catalog/vpc/defaults
@@ -15,7 +16,7 @@ components:
         name: main
         ipv4_primary_cidr_block: 10.0.0.0/16
         vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
-        
+
     vpc/services:
       metadata:
         component: vpc
@@ -26,7 +27,7 @@ components:
         ipv4_primary_cidr_block: 10.1.0.0/16
         vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
         map_public_ip_on_launch: false
-    
+
     # Network resources for main VPC
     network/main:
       metadata:
@@ -36,7 +37,7 @@ components:
         # DNS settings
         dns_create_root_zone: false
         dns_multi_account: false
-        
+
         # Define zones
         dns_zones:
           main:
@@ -49,7 +50,7 @@ components:
             name: "internal.fnx.example.com"
             comment: "Internal DNS for fnx environment"
             force_destroy: true
-        
+
         # Define essential DNS records
         dns_records:
           www_main:
@@ -64,7 +65,7 @@ components:
             type: "A"
             ttl: 60
             records: ["10.0.1.50"]
-    
+
     # Network resources for services VPC
     network/services:
       metadata:
@@ -74,7 +75,7 @@ components:
         # DNS settings
         dns_create_root_zone: false
         dns_multi_account: false
-        
+
         # Define zones
         dns_zones:
           services:
@@ -85,7 +86,7 @@ components:
             name: "data.services.fnx.example.com"
             comment: "Data services DNS zone"
             force_destroy: true
-        
+
         # Define essential DNS records
         dns_records:
           api_services:

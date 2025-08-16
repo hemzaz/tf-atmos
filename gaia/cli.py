@@ -1,701 +1,621 @@
 #!/usr/bin/env python3
 """
-Main CLI module for Gaia operations
+Gaia CLI - Enhanced developer experience wrapper for Atmos operations
+
+Provides user-friendly commands, better error handling, and helpful context
+for working with Terraform/Atmos infrastructure.
 """
 
-import os
+import subprocess
 import sys
 import typer
-import logging
-from typing import List, Optional
-import celery
-from celery import Celery
+import os
+import json
+import re
+from typing import List, Optional, Dict, Any
+from pathlib import Path
+from datetime import datetime
 
-from .config import AtmosConfig
-from .operations import (
-    ComponentOperation,
-    PlanOperation,
-    ApplyOperation,
-    ValidateOperation,
-    DestroyOperation,
-    DriftDetectionOperation,
-    lint_code,
-    import_resource,
-    validate_components
+# Enhanced CLI app with rich help
+app = typer.Typer(
+    help="🌍 Gaia CLI - Enhanced developer experience for Atmos operations",
+    rich_markup_mode="rich",
+    add_completion=False
 )
-from .certificates import rotate_certificate
-from .templating import EnvironmentTemplate
-from .templates import ComponentTemplate
-from .discovery import ComponentDiscovery
-from .logger import setup_logger
 
-# Setup application
-app = typer.Typer(help="Gaia - Python implementation for Terraform Atmos operations")
-config = AtmosConfig()
-logger = setup_logger()
-
-# Setup Celery
-# Use configuration from AtmosConfig for Redis connection
-config = get_config()
-redis_url = config.redis_url
-
-# Try to validate Redis connection before configuring Celery
-def validate_redis_connection(url):
-    """Validate Redis connection and return True if successful, False otherwise."""
+def run_atmos_command(command: List[str], check: bool = True, capture_output: bool = False) -> subprocess.CompletedProcess:
+    """Run an atmos command with enhanced error handling and user feedback"""
+    full_command = ["atmos"] + command
+    
+    # Show user-friendly command representation
+    friendly_command = format_command_for_display(command)
+    typer.echo(f"🚀 {friendly_command}")
+    
     try:
-        import redis
-        client = redis.from_url(url, socket_timeout=2.0)
-        client.ping()
+        # Check if atmos is available first
+        if not is_atmos_available():
+            show_atmos_installation_help()
+            sys.exit(1)
+            
+        # Check if we're in a valid atmos project
+        if not is_in_atmos_project():
+            typer.echo("❌ Not in an Atmos project directory. Please run from the project root.", err=True)
+            typer.echo("💡 Look for 'atmos.yaml' file in the current or parent directories.", err=True)
+            sys.exit(1)
+        
+        result = subprocess.run(
+            full_command,
+            capture_output=capture_output,
+            check=check,
+            text=True if capture_output else None
+        )
+        
+        if result.returncode == 0 and not capture_output:
+            typer.echo("✅ Command completed successfully")
+        
+        return result
+        
+    except subprocess.CalledProcessError as e:
+        handle_atmos_error(e, command)
+    except FileNotFoundError:
+        show_atmos_installation_help()
+        sys.exit(1)
+    except KeyboardInterrupt:
+        typer.echo("\n⏹️  Operation cancelled by user", err=True)
+        sys.exit(130)
+
+def format_command_for_display(command: List[str]) -> str:
+    """Format command for user-friendly display"""
+    if not command:
+        return "atmos"
+    
+    # Convert complex stack names to friendly names    
+    cmd_str = " ".join(command)
+    
+    # Replace complex stack patterns with friendly names
+    stack_pattern = r'orgs/([^/]+)/([^/]+)/([^/]+)/([^/\s]+)'
+    friendly_stack = lambda m: f"{m.group(1)}-{m.group(4)}-{m.group(2)}"
+    cmd_str = re.sub(stack_pattern, friendly_stack, cmd_str)
+    
+    return f"atmos {cmd_str}"
+
+def is_atmos_available() -> bool:
+    """Check if atmos command is available"""
+    try:
+        subprocess.run(["atmos", "version"], capture_output=True, check=True)
         return True
-    except Exception as e:
-        logger.warning(f"Redis connection failed: {e}. Async tasks will not be available.")
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
-# Create Celery app with configurable broker/backend
-redis_available = validate_redis_connection(redis_url)
-if redis_available:
-    celery_app = Celery('gaia',
-                       broker=redis_url,
-                       backend=redis_url)
-                       
-    celery_app.conf.update(
-        task_serializer='json',
-        accept_content=['json'],
-        result_serializer='json',
-        timezone='UTC',
-        enable_utc=True,
-        worker_concurrency=config.celery_workers,
-        broker_connection_retry=True,
-        broker_connection_retry_on_startup=True,
-        broker_connection_max_retries=5,
-        task_acks_late=True,
-        task_reject_on_worker_lost=True,
-    )
-else:
-    # Create a dummy Celery app that will raise proper errors when used
-    celery_app = Celery('gaia')
-    celery_app.conf.update(
-        task_always_eager=True,  # Tasks will be executed immediately in the same process
-        task_eager_propagates=True,  # Errors in tasks will be propagated
-    )
-
-# Setup sub-commands
-workflow_app = typer.Typer(help="Workflow operations for components and environments")
-template_app = typer.Typer(help="Template operations for environments and components")
-task_app = typer.Typer(help="Task management for async operations")
-certificate_app = typer.Typer(help="Certificate management operations")
-
-# Register sub-commands
-app.add_typer(workflow_app, name="workflow")
-app.add_typer(template_app, name="template")
-app.add_typer(task_app, name="task")
-app.add_typer(certificate_app, name="certificate")
-
-
-@app.callback()
-def main(
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
-    async_mode: bool = typer.Option(False, "--async", help="Run operations asynchronously with Celery"),
-):
-    """
-    Gaia - Python implementation for Terraform Atmos operations
-    """
-    # Set logging level based on flags
-    if debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    elif verbose:
-        logging.getLogger().setLevel(logging.INFO)
-    else:
-        logging.getLogger().setLevel(logging.WARNING)
+def is_in_atmos_project() -> bool:
+    """Check if we're in a valid Atmos project directory"""
+    current_dir = Path.cwd()
     
-    # Store async mode preference in config
-    config.async_mode = async_mode
+    # Check current directory and parents for atmos.yaml
+    for directory in [current_dir] + list(current_dir.parents):
+        if (directory / "atmos.yaml").exists():
+            return True
+    
+    return False
 
+def show_atmos_installation_help():
+    """Show helpful installation instructions for Atmos"""
+    typer.echo("❌ Atmos command not found!", err=True)
+    typer.echo("")
+    typer.echo("🛠️  To install Atmos:", err=True)
+    typer.echo("   macOS: brew install cloudposse/tap/atmos", err=True)
+    typer.echo("   Linux: Visit https://atmos.tools/install", err=True)
+    typer.echo("")
+    typer.echo("💡 After installation, run 'atmos version' to verify.", err=True)
+
+def handle_atmos_error(error: subprocess.CalledProcessError, command: List[str]):
+    """Handle Atmos command errors with helpful messages"""
+    typer.echo(f"❌ Command failed with exit code {error.returncode}", err=True)
+    
+    # Provide context-specific help based on the command
+    if len(command) >= 2:
+        cmd_type = command[0]
+        sub_command = command[1] if len(command) > 1 else ""
+        
+        if cmd_type == "terraform" and "plan" in sub_command:
+            typer.echo("💡 Common plan failures:", err=True)
+            typer.echo("   • Check AWS credentials: aws sts get-caller-identity", err=True)
+            typer.echo("   • Verify stack configuration exists", err=True)
+            typer.echo("   • Run 'make validate' to check configuration", err=True)
+            
+        elif cmd_type == "workflow":
+            typer.echo("💡 Workflow troubleshooting:", err=True)
+            typer.echo("   • Check if all required parameters are provided", err=True)
+            typer.echo("   • Verify stack exists: make list-stacks", err=True)
+            typer.echo("   • Check logs in the 'logs/' directory", err=True)
+    
+    typer.echo("")
+    typer.echo("🔍 For detailed troubleshooting, run: make doctor", err=True)
+    sys.exit(error.returncode)
+
+def get_available_stacks() -> List[str]:
+    """Get list of available stacks from Atmos"""
+    try:
+        result = run_atmos_command(["list", "stacks"], capture_output=True)
+        if result.stdout:
+            return [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+    except:
+        pass
+    return []
+
+def get_stack_components(stack: str) -> List[str]:
+    """Get components available for a specific stack"""
+    try:
+        result = run_atmos_command(["list", "components", "-s", stack], capture_output=True)
+        if result.stdout:
+            return [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+    except:
+        pass
+    return []
 
 # Workflow Commands
+workflow_app = typer.Typer(help="Workflow operations")
+app.add_typer(workflow_app, name="workflow")
+
 @workflow_app.command("plan-environment")
 def plan_environment(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    components: List[str] = typer.Option(None, "--component", "-c", help="Specific components to plan"),
-    parallel: int = typer.Option(4, "--parallel", "-p", help="Number of parallel operations"),
-    async_mode: Optional[bool] = typer.Option(None, "--async/--sync", help="Override global async mode setting"),
+    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name (e.g., fnx)"),
+    account: str = typer.Option(..., "--account", "-a", help="Account name (e.g., dev)"),
+    environment: str = typer.Option(..., "--environment", "-e", help="Environment name (e.g., testenv-01)"),
 ):
-    """
-    Plan changes for all components in an environment
-    """
-    # Use the command-specific async setting if provided, otherwise use global setting
-    use_async = async_mode if async_mode is not None else config.async_mode
+    """📋 Plan changes for all components in an environment"""
+    friendly_name = f"{tenant}-{environment}-{account}"
+    typer.echo(f"🎯 Planning environment: {friendly_name}")
     
-    if use_async:
-        # Import here to avoid circular imports
-        from .tasks import plan_environment_task
-        task = plan_environment_task.delay(
-            tenant=tenant,
-            account=account,
-            environment=environment,
-            components=components,
-            parallel_count=parallel
-        )
-        typer.echo(f"Task started with ID: {task.id}")
-        typer.echo(f"Run 'gaia task status {task.id}' to check progress")
-        return
-    
-    # Synchronous execution
-    operation = PlanOperation(config)
-    result = operation.execute_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        components=components,
-        parallel_count=parallel
-    )
-    if not result:
-        sys.exit(1)
-
+    run_atmos_command([
+        "workflow", "plan-environment",
+        f"tenant={tenant}",
+        f"account={account}",
+        f"environment={environment}"
+    ])
 
 @workflow_app.command("apply-environment")
 def apply_environment(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    components: List[str] = typer.Option(None, "--component", "-c", help="Specific components to apply"),
-    parallel: int = typer.Option(4, "--parallel", "-p", help="Number of parallel operations"),
-    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto approve terraform apply"),
+    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name (e.g., fnx)"),
+    account: str = typer.Option(..., "--account", "-a", help="Account name (e.g., dev)"),
+    environment: str = typer.Option(..., "--environment", "-e", help="Environment name (e.g., testenv-01)"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Skip confirmation prompt"),
 ):
-    """
-    Apply changes for all components in an environment
-    """
-    operation = ApplyOperation(config)
-    result = operation.execute_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        components=components,
-        parallel_count=parallel,
-        auto_approve=auto_approve
-    )
-    if not result:
-        sys.exit(1)
-
+    """🚀 Apply changes for all components in an environment"""
+    friendly_name = f"{tenant}-{environment}-{account}"
+    
+    if not auto_approve:
+        typer.echo(f"⚠️  This will apply changes to environment: {friendly_name}")
+        confirm = typer.confirm("Are you sure you want to continue?")
+        if not confirm:
+            typer.echo("❌ Apply cancelled")
+            return
+    
+    typer.echo(f"🚀 Applying changes to environment: {friendly_name}")
+    
+    run_atmos_command([
+        "workflow", "apply-environment",
+        f"tenant={tenant}",
+        f"account={account}",
+        f"environment={environment}"
+    ])
 
 @workflow_app.command("validate")
 def validate(
-    components: List[str] = typer.Option(None, "--component", "-c", help="Specific components to validate"),
-    parallel: int = typer.Option(8, "--parallel", "-p", help="Number of parallel validations"),
+    tenant: Optional[str] = typer.Option(None, "--tenant", "-t", help="Tenant name (optional - validates all if not specified)"),
+    account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name (optional)"),
+    environment: Optional[str] = typer.Option(None, "--environment", "-e", help="Environment name (optional)"),
 ):
-    """
-    Validate all components in the repository
-    """
-    operation = ValidateOperation(config)
-    result = operation.execute_all(
-        components=components,
-        parallel_count=parallel
-    )
-    if not result:
-        sys.exit(1)
-
-
-@workflow_app.command("destroy-environment")
-def destroy_environment(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    components: List[str] = typer.Option(None, "--component", "-c", help="Specific components to destroy"),
-    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto approve terraform destroy"),
-):
-    """
-    Destroy all components in an environment
-    """
-    operation = DestroyOperation(config)
-    result = operation.execute_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        components=components,
-        auto_approve=auto_approve
-    )
-    if not result:
-        sys.exit(1)
-
-
-@workflow_app.command("drift-detection")
-def drift_detection(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    components: List[str] = typer.Option(None, "--component", "-c", help="Specific components to check"),
-    parallel: int = typer.Option(4, "--parallel", "-p", help="Number of parallel operations"),
-):
-    """
-    Detect drift for all components in an environment
-    """
-    operation = DriftDetectionOperation(config)
-    result = operation.execute_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        components=components,
-        parallel_count=parallel
-    )
-    if not result:
-        sys.exit(1)
-
-
-@workflow_app.command("onboard-environment")
-def onboard_environment(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    vpc_cidr: str = typer.Option(..., "--vpc-cidr", help="VPC CIDR block"),
-    aws_region: str = typer.Option(None, "--region", "-r", help="AWS region"),
-    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto approve terraform apply"),
-):
-    """
-    Onboard a new environment (create from template and apply)
-    """
-    # First create the environment from template
-    template = EnvironmentTemplate(config)
-    template_result = template.create_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        vpc_cidr=vpc_cidr,
-        aws_region=aws_region
-    )
+    """✅ Validate Terraform configurations"""
     
-    if not template_result:
-        typer.echo("Failed to create environment from template")
-        sys.exit(1)
-    
-    # Then apply the environment
-    operation = ApplyOperation(config)
-    apply_result = operation.execute_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        auto_approve=auto_approve
-    )
-    
-    if not apply_result:
-        typer.echo("Failed to apply environment")
-        sys.exit(1)
-    
-    typer.echo(f"Environment {tenant}-{account}-{environment} onboarded successfully")
-
-
-# Template Commands
-@template_app.command("list")
-def list_templates():
-    """
-    List available templates
-    """
-    env_template = EnvironmentTemplate(config)
-    comp_template = ComponentTemplate(config)
-    
-    # Get environment templates
-    env_templates = env_template.get_available_templates()
-    
-    # Get component templates
-    component_templates = comp_template.list_component_templates()
-    
-    if not env_templates and not component_templates:
-        typer.echo("No templates found")
-        return
-    
-    if env_templates:
-        typer.echo("Environment Templates:")
-        for t in env_templates:
-            typer.echo(f"  - {t}")
-    
-    if component_templates:
-        typer.echo("\nComponent Templates:")
-        for t in component_templates:
-            typer.echo(f"  - {t['name']}: {t['description']}")
-
-
-@template_app.command("create-environment")
-def create_environment(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    env_type: str = typer.Option(None, "--env-type", help="Environment type (development, staging, production)"),
-    aws_region: str = typer.Option(None, "--region", "-r", help="AWS region"),
-    vpc_cidr: str = typer.Option(None, "--vpc-cidr", help="VPC CIDR block"),
-    team_email: str = typer.Option(None, "--team-email", help="Team email for notifications"),
-    target_dir: str = typer.Option(None, "--target-dir", help="Target directory for environment"),
-    eks_cluster: bool = typer.Option(True, "--eks-cluster/--no-eks-cluster", help="Enable EKS cluster"),
-    rds_instances: bool = typer.Option(False, "--rds-instances/--no-rds-instances", help="Enable RDS instances"),
-    enable_logging: bool = typer.Option(True, "--logging/--no-logging", help="Enable centralized logging"),
-    enable_monitoring: bool = typer.Option(True, "--monitoring/--no-monitoring", help="Enable monitoring"),
-):
-    """
-    Create a new environment from template
-    """
-    template = EnvironmentTemplate(config)
-    result = template.create_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        env_type=env_type,
-        aws_region=aws_region,
-        vpc_cidr=vpc_cidr,
-        team_email=team_email,
-        target_dir=target_dir,
-        eks_cluster=eks_cluster,
-        rds_instances=rds_instances,
-        enable_logging=enable_logging,
-        enable_monitoring=enable_monitoring
-    )
-    
-    if not result:
-        typer.echo("Failed to create environment from template")
-        sys.exit(1)
-    
-    typer.echo(f"Environment {tenant}-{account}-{environment} created successfully")
-
-
-@template_app.command("update-environment")
-def update_environment(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    target_dir: str = typer.Option(None, "--target-dir", help="Target directory for environment"),
-    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite all files"),
-):
-    """
-    Update an existing environment from template changes
-    """
-    template = EnvironmentTemplate(config)
-    result = template.update_environment(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        target_dir=target_dir,
-        overwrite=overwrite
-    )
-    
-    if not result:
-        typer.echo("Failed to update environment from template")
-        sys.exit(1)
-    
-    typer.echo(f"Environment {tenant}-{account}-{environment} updated successfully")
-
-
-@template_app.command("create-component")
-def create_component(
-    name: str = typer.Option(..., "--name", "-n", help="Component name"),
-    template: str = typer.Option("terraform-component", "--template", "-t", 
-                                help="Template to use for the component"),
-    description: str = typer.Option(None, "--description", "-d", 
-                                  help="Component description"),
-    destination: str = typer.Option(None, "--destination", "--dest", 
-                                  help="Destination directory (defaults to components/<name>)"),
-):
-    """
-    Create a new component from template
-    """
-    comp_template = ComponentTemplate(config)
-    
-    result = comp_template.create_component(
-        component_name=name,
-        template=template,
-        description=description,
-        destination=destination
-    )
-    
-    if not result:
-        typer.echo(f"Failed to create component {name}")
-        sys.exit(1)
-    
-    typer.echo(f"Component {name} created successfully")
-
-
-# Task management commands
-@task_app.command("status")
-def task_status(
-    task_id: str = typer.Option(..., "--task-id", "-i", help="Task ID to check status"),
-):
-    """
-    Check the status of an async task
-    """
-    from celery.result import AsyncResult
-    result = AsyncResult(task_id, app=celery_app)
-    
-    status = result.status
-    typer.echo(f"Task ID: {task_id}")
-    typer.echo(f"Status: {status}")
-    
-    if status == 'SUCCESS':
-        typer.echo(f"Result: {result.get()}")
-    elif status == 'FAILURE':
-        typer.echo(f"Error: {result.traceback}")
-
-@task_app.command("list")
-def task_list(
-    limit: int = typer.Option(10, "--limit", "-n", help="Number of tasks to show"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status (PENDING, SUCCESS, FAILURE)"),
-    days: int = typer.Option(1, "--days", "-d", help="Number of days of task history to show"),
-):
-    """
-    List recent async tasks directly from Redis backend
-    """
-    if not redis_available:
-        typer.echo("Redis task backend not available. Cannot list tasks.")
-        return
-        
-    try:
-        from redis import Redis
-        import json
-        from datetime import datetime, timedelta
-        
-        # Connect to Redis
-        redis_client = Redis.from_url(redis_url)
-        
-        # Find task keys with pattern matching
-        task_pattern = "celery-task-meta-*"
-        task_keys = redis_client.keys(task_pattern)
-        
-        if not task_keys:
-            typer.echo("No tasks found in the backend.")
-            return
-            
-        # Get task data for each key
-        tasks = []
-        cutoff_date = datetime.now() - timedelta(days=days)
-        
-        for key in task_keys:
-            try:
-                raw_data = redis_client.get(key)
-                if not raw_data:
-                    continue
-                    
-                task_data = json.loads(raw_data)
-                task_id = key.decode('utf-8').replace('celery-task-meta-', '')
-                
-                # Add task ID to the data for display
-                task_data['task_id'] = task_id
-                
-                # Parse the received date
-                date_str = task_data.get('date_done')
-                if date_str:
-                    try:
-                        task_date = datetime.fromisoformat(date_str)
-                        # Skip tasks older than cutoff date
-                        if task_date < cutoff_date:
-                            continue
-                            
-                        # Convert to readable format
-                        task_data['date_done'] = task_date.strftime("%Y-%m-%d %H:%M:%S")
-                    except ValueError:
-                        # Keep original if parsing fails
-                        pass
-                
-                # Filter by status if specified
-                if status and task_data.get('status') != status:
-                    continue
-                    
-                tasks.append(task_data)
-            except Exception as e:
-                logger.debug(f"Error parsing task data for {key}: {e}")
-                
-        # Sort tasks by date (newest first) and limit results
-        tasks.sort(key=lambda x: x.get('date_done', ''), reverse=True)
-        tasks = tasks[:limit]
-        
-        # Display tasks in a formatted table
-        if tasks:
-            typer.echo(f"{'TASK ID':<36} {'STATUS':<10} {'DATE':<20} {'NAME':<30}")
-            typer.echo("-" * 96)
-            
-            for task in tasks:
-                task_id = task.get('task_id', 'Unknown')
-                task_status = task.get('status', 'Unknown')
-                task_date = task.get('date_done', 'Unknown')
-                
-                # Try to get task name
-                task_name = "Unknown"
-                if 'result' in task and isinstance(task['result'], dict):
-                    if 'task_name' in task['result']:
-                        task_name = task['result']['task_name']
-                
-                typer.echo(f"{task_id:<36} {task_status:<10} {task_date:<20} {task_name:<30}")
-        else:
-            typer.echo("No matching tasks found.")
-            
-    except ImportError:
-        typer.echo("Required packages not installed. Run 'pip install redis'.")
-    except Exception as e:
-        typer.echo(f"Error listing tasks: {e}")
-        typer.echo("For a more comprehensive task monitoring interface, you can use Celery Flower:")
-        typer.echo("1. Install with: pip install flower")
-        typer.echo("2. Run with: celery -A gaia.cli.celery_app flower --port=5555")
-        typer.echo("3. Visit: http://localhost:5555 for the task dashboard")
-
-@task_app.command("revoke")
-def task_revoke(
-    task_id: str = typer.Option(..., "--task-id", "-i", help="Task ID to revoke"),
-    terminate: bool = typer.Option(False, "--terminate", "-t", help="Terminate the task if it's running"),
-):
-    """
-    Revoke a task (prevent it from starting if it hasn't yet)
-    """
-    celery_app.control.revoke(task_id, terminate=terminate)
-    typer.echo(f"Task {task_id} has been revoked")
-    if terminate:
-        typer.echo("The task will be terminated if it's currently running")
-
-@task_app.command("purge")
-def task_purge(
-    force: bool = typer.Option(False, "--force", "-f", help="Force purge without confirmation"),
-):
-    """
-    Purge all pending tasks
-    """
-    if not force:
-        confirm = typer.confirm("Are you sure you want to purge all pending tasks?")
-        if not confirm:
-            typer.echo("Operation cancelled")
-            return
-    
-    celery_app.control.purge()
-    typer.echo("All pending tasks have been purged")
-
-
-# Certificate Management Commands
-@certificate_app.command("rotate")
-def cert_rotate(
-    secret_name: str = typer.Option(..., "--secret", "-s", help="AWS Secret name in Secrets Manager"),
-    namespace: str = typer.Option(..., "--namespace", "-n", help="Kubernetes namespace"),
-    acm_cert_arn: Optional[str] = typer.Option(None, "--acm-arn", "-a", help="New AWS ACM Certificate ARN"),
-    region: Optional[str] = typer.Option(None, "--region", "-r", help="AWS Region"),
-    kube_context: Optional[str] = typer.Option(None, "--context", "-c", help="Kubernetes context"),
-    k8s_secret: Optional[str] = typer.Option(None, "--k8s-secret", "-k", help="Kubernetes secret name"),
-    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="AWS Profile"),
-    private_key_path: Optional[str] = typer.Option(None, "--key-path", help="Path to private key file"),
-    auto_restart_pods: bool = typer.Option(False, "--restart-pods", help="Automatically restart pods using the secret"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug output"),
-):
-    """
-    Rotate a certificate in AWS Secrets Manager and update Kubernetes
-    
-    This command performs certificate rotation for TLS certificates used in Kubernetes.
-    It can update certificates from AWS ACM to Secrets Manager and ensure they are 
-    properly synchronized with Kubernetes using External Secrets Operator.
-    """
-    typer.echo(f"Starting certificate rotation for {secret_name} in {namespace}...")
-    
-    result = rotate_certificate(
-        secret_name=secret_name,
-        namespace=namespace,
-        acm_cert_arn=acm_cert_arn,
-        region=region,
-        kube_context=kube_context,
-        k8s_secret=k8s_secret,
-        profile=profile,
-        private_key_path=private_key_path,
-        auto_restart_pods=auto_restart_pods,
-        debug=debug
-    )
-    
-    if result.get("success", False):
-        typer.echo(f"✅ {result.get('message', 'Certificate rotation completed successfully')}")
-        return
+    if tenant and account and environment:
+        friendly_name = f"{tenant}-{environment}-{account}"
+        typer.echo(f"🔍 Validating environment: {friendly_name}")
+        run_atmos_command([
+            "workflow", "validate",
+            f"tenant={tenant}",
+            f"account={account}",
+            f"environment={environment}"
+        ])
     else:
-        typer.echo(f"❌ {result.get('error', 'Certificate rotation failed')}")
-        sys.exit(1)
-
+        typer.echo("🔍 Validating all configurations...")
+        run_atmos_command(["workflow", "validate"])
 
 @workflow_app.command("lint")
 def lint(
-    fix: bool = typer.Option(False, "--fix", help="Automatically fix issues"),
-    skip_security: bool = typer.Option(False, "--skip-security", help="Skip security checks"),
+    fix: bool = typer.Option(False, "--fix", help="Automatically fix formatting issues"),
 ):
-    """
-    Lint Terraform code and configuration files
+    """🧹 Lint and format code"""
+    typer.echo("🧹 Linting and formatting code...")
     
-    Performs formatting checks on Terraform code, YAML linting, and security scanning.
-    """
-    result = lint_code(fix=fix, skip_security=skip_security)
+    cmd = ["workflow", "lint"]
+    if fix:
+        cmd.append("fix=true")
+        typer.echo("🔧 Auto-fix enabled")
     
-    if not result.get("success"):
-        error_msg = result.get("error", result.get("message", "Lint operation failed"))
-        typer.echo(f"Error: {error_msg}")
+    run_atmos_command(cmd)
+
+@workflow_app.command("drift-detection")
+def drift_detection():
+    """🔍 Check for configuration drift"""
+    typer.echo("🔍 Checking for configuration drift...")
+    typer.echo("💡 This compares current state with desired configuration")
+    run_atmos_command(["workflow", "drift-detection"])
+
+@workflow_app.command("onboard-environment")
+def onboard_environment(
+    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name (e.g., fnx)"),
+    account: str = typer.Option(..., "--account", "-a", help="Account name (e.g., dev)"),
+    environment: str = typer.Option(..., "--environment", "-e", help="Environment name (e.g., testenv-02)"),
+    vpc_cidr: str = typer.Option("10.0.0.0/16", "--vpc-cidr", help="VPC CIDR block (default: 10.0.0.0/16)"),
+):
+    """🏗️  Onboard a new environment with all required infrastructure"""
+    friendly_name = f"{tenant}-{environment}-{account}"
+    
+    typer.echo(f"🏗️  Onboarding new environment: {friendly_name}")
+    typer.echo(f"🌐 VPC CIDR: {vpc_cidr}")
+    
+    # Validate CIDR format
+    import ipaddress
+    try:
+        ipaddress.IPv4Network(vpc_cidr, strict=False)
+    except ValueError:
+        typer.echo(f"❌ Invalid VPC CIDR format: {vpc_cidr}", err=True)
+        typer.echo("💡 Example: 10.1.0.0/16", err=True)
         sys.exit(1)
     
-    typer.echo(result.get("message", "Lint operation completed successfully"))
+    typer.echo("ℹ️  This will create:") 
+    typer.echo("   • VPC with public/private subnets")
+    typer.echo("   • Security groups")
+    typer.echo("   • IAM roles and policies")
+    typer.echo("   • Backend state configuration")
+    
+    if not typer.confirm("Continue with onboarding?"):
+        typer.echo("❌ Onboarding cancelled")
+        return
+    
+    run_atmos_command([
+        "workflow", "onboard-environment",
+        f"tenant={tenant}",
+        f"account={account}",
+        f"environment={environment}",
+        f"vpc_cidr={vpc_cidr}"
+    ])
 
+# Direct Terraform Commands
+terraform_app = typer.Typer(help="Direct Terraform operations")
+app.add_typer(terraform_app, name="terraform")
 
-@workflow_app.command("import")
-def import_cmd(
-    address: str = typer.Option(..., "--address", "-a", help="Terraform resource address (e.g., aws_s3_bucket.bucket)"),
-    id: str = typer.Option(..., "--id", "-i", help="Resource ID (e.g., my-bucket-name)"),
-    component: str = typer.Option(..., "--component", "-c", help="Component to import the resource into"),
-    stack: str = typer.Option(..., "--stack", "-s", help="Stack name (e.g., tenant-account-environment)"),
+@terraform_app.command("plan")
+def terraform_plan(
+    component: str = typer.Argument(help="Component name"),
+    stack: str = typer.Option(..., "--stack", "-s", help="Stack name"),
 ):
-    """
-    Import existing resources into Terraform state
-    
-    Imports resources identified by ID into Terraform state at the specified address.
-    """
-    result = import_resource(
-        resource_address=address,
-        resource_id=id,
-        component=component,
-        stack=stack
-    )
-    
-    if not result.get("success"):
-        error_msg = result.get("error", "Import operation failed")
-        typer.echo(f"Error: {error_msg}")
-        sys.exit(1)
-    
-    typer.echo(result.get("message", "Import operation completed successfully"))
+    """Run terraform plan for a component"""
+    run_atmos_command(["terraform", "plan", component, "-s", stack])
 
-
-@workflow_app.command("validate")
-def validate(
-    tenant: str = typer.Option(..., "--tenant", "-t", help="Tenant name"),
-    account: str = typer.Option(..., "--account", "-a", help="Account name"),
-    environment: str = typer.Option(..., "--environment", "-e", help="Environment name"),
-    skip_lint: bool = typer.Option(False, "--skip-lint", help="Skip linting check"),
-    parallel: bool = typer.Option(True, "--parallel", "-p", help="Run validations in parallel"),
-    components: List[str] = typer.Option(None, "--component", "-c", help="Specific components to validate"),
+@terraform_app.command("apply")
+def terraform_apply(
+    component: str = typer.Argument(help="Component name"),
+    stack: str = typer.Option(..., "--stack", "-s", help="Stack name"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto approve changes"),
 ):
-    """
-    Validate Terraform components in a tenant/account/environment
-    
-    Performs linting and Terraform validation on all components in the specified environment.
-    """
-    # Skip linting if requested
-    if not skip_lint:
-        lint_result = lint_code(fix=False, skip_security=False)
-        if not lint_result.get("success"):
-            error_msg = lint_result.get("error", lint_result.get("message", "Lint check failed"))
-            typer.echo(f"Error: {error_msg}")
-            typer.echo("Run 'gaia workflow lint --fix' to fix formatting issues.")
-            sys.exit(1)
-    
-    # Run validation
-    result = validate_components(
-        tenant=tenant,
-        account=account,
-        environment=environment,
-        parallel=parallel,
-        components=components
-    )
-    
-    if not result.get("success"):
-        error_msg = result.get("error", "Validation failed")
-        typer.echo(f"Error: {error_msg}")
-        sys.exit(1)
-    
-    component_count = result.get("components", 0)
-    typer.echo(f"Successfully validated {component_count} components")
+    """Run terraform apply for a component"""
+    cmd = ["terraform", "apply", component, "-s", stack]
+    if auto_approve:
+        cmd.append("--auto-approve")
+    run_atmos_command(cmd)
 
-# Deprecated function removed as part of code cleanup
+@terraform_app.command("validate")
+def terraform_validate(
+    component: str = typer.Argument(help="Component name"),
+    stack: str = typer.Option(..., "--stack", "-s", help="Stack name"),
+):
+    """Run terraform validate for a component"""
+    run_atmos_command(["terraform", "validate", component, "-s", stack])
+
+@terraform_app.command("destroy")
+def terraform_destroy(
+    component: str = typer.Argument(help="Component name"),
+    stack: str = typer.Option(..., "--stack", "-s", help="Stack name"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto approve destruction"),
+):
+    """Run terraform destroy for a component"""
+    cmd = ["terraform", "destroy", component, "-s", stack]
+    if auto_approve:
+        cmd.append("--auto-approve")
+    run_atmos_command(cmd)
+
+# Utility Commands
+@app.command("describe")
+def describe(
+    what: str = typer.Argument(help="What to describe (stacks, component)"),
+    component: Optional[str] = typer.Option(None, "--component", "-c", help="Component name"),
+    stack: Optional[str] = typer.Option(None, "--stack", "-s", help="Stack name"),
+):
+    """📖 Describe stacks or components with detailed information"""
+    
+    if what == "stacks" and not stack:
+        typer.echo("📋 Available stacks:")
+        stacks = get_available_stacks()
+        for stack in stacks:
+            # Convert to friendly name for display
+            friendly = re.sub(r'orgs/([^/]+)/([^/]+)/([^/]+)/([^/\s]+)', r'\1-\4-\2', stack)
+            typer.echo(f"   • {friendly} ({stack})")
+        return
+    
+    cmd = ["describe", what]
+    if component:
+        cmd.append(component)
+    if stack:
+        cmd.extend(["-s", stack])
+    run_atmos_command(cmd)
+
+@app.command("list")
+def list_cmd(
+    what: str = typer.Argument(help="What to list (stacks, components)"),
+    stack: Optional[str] = typer.Option(None, "--stack", "-s", help="Stack name (for listing components)"),
+):
+    """📋 List stacks or components"""
+    
+    if what == "stacks":
+        typer.echo("📋 Available stacks:")
+        stacks = get_available_stacks()
+        for stack in stacks:
+            # Convert to friendly name for display
+            friendly = re.sub(r'orgs/([^/]+)/([^/]+)/([^/]+)/([^/\s]+)', r'\1-\4-\2', stack)
+            typer.echo(f"   • {friendly}")
+    elif what == "components":
+        if stack:
+            typer.echo(f"📦 Components in stack {stack}:")
+            components = get_stack_components(stack)
+            for component in components:
+                typer.echo(f"   • {component}")
+        else:
+            typer.echo("💡 Use --stack to specify which stack's components to list")
+            typer.echo("📋 Available stacks:")
+            stacks = get_available_stacks()
+            for stack in stacks[:3]:  # Show first 3 as examples
+                friendly = re.sub(r'orgs/([^/]+)/([^/]+)/([^/]+)/([^/\s]+)', r'\1-\4-\2', stack)
+                typer.echo(f"   • {friendly}")
+            if len(stacks) > 3:
+                typer.echo(f"   ... and {len(stacks) - 3} more")
+    else:
+        run_atmos_command(["list", what])
+
+@app.command("version")
+def version():
+    """📋 Show version information for Gaia and Atmos"""
+    from . import __version__, __author__
+    
+    typer.echo(f"🌍 Gaia CLI {__version__}")
+    typer.echo(f"👥 {__author__}")
+    typer.echo("")
+    typer.echo("📦 Atmos version:")
+    
+    if is_atmos_available():
+        run_atmos_command(["version"])
+    else:
+        typer.echo("❌ Atmos not found - please install from https://atmos.tools/install")
+
+# =============================================================================
+# New Enhanced Commands
+# =============================================================================
+
+@app.command("status")
+def status(
+    tenant: Optional[str] = typer.Option(None, "--tenant", "-t", help="Tenant name"),
+    account: Optional[str] = typer.Option(None, "--account", "-a", help="Account name"),
+    environment: Optional[str] = typer.Option(None, "--environment", "-e", help="Environment name"),
+):
+    """📊 Show current infrastructure status and recent activity"""
+    
+    if tenant and account and environment:
+        stack = f"orgs/{tenant}/{account}/eu-west-2/{environment}"
+        friendly_name = f"{tenant}-{environment}-{account}"
+        
+        typer.echo(f"📊 Status for environment: {friendly_name}")
+        typer.echo("=" * 50)
+        
+        # Show components
+        components = get_stack_components(stack)
+        if components:
+            typer.echo(f"📦 Components ({len(components)}):")
+            for component in components:
+                typer.echo(f"   • {component}")
+        else:
+            typer.echo("📦 No components found")
+            
+        typer.echo("")
+        typer.echo("💡 To see detailed status, run:")
+        typer.echo(f"   gaia describe stacks --stack {stack}")
+        
+    else:
+        typer.echo("🌍 Gaia Infrastructure Status")
+        typer.echo("=" * 30)
+        
+        # Show available stacks
+        stacks = get_available_stacks()
+        typer.echo(f"📋 Available environments ({len(stacks)}):")
+        for stack in stacks:
+            friendly = re.sub(r'orgs/([^/]+)/([^/]+)/([^/]+)/([^/\s]+)', r'\1-\4-\2', stack)
+            typer.echo(f"   • {friendly}")
+            
+        typer.echo("")
+        typer.echo("💡 For detailed status, specify environment:")
+        typer.echo("   gaia status --tenant fnx --account dev --environment testenv-01")
+
+@app.command("quick-start")
+def quick_start():
+    """🚀 Interactive quick start guide for new developers"""
+    typer.echo("🌍 Welcome to Gaia CLI!")
+    typer.echo("=" * 25)
+    typer.echo("")
+    
+    # Check prerequisites
+    typer.echo("🔍 Checking prerequisites...")
+    
+    if not is_atmos_available():
+        typer.echo("❌ Atmos not found")
+        show_atmos_installation_help()
+        return
+    else:
+        typer.echo("✅ Atmos is installed")
+    
+    if not is_in_atmos_project():
+        typer.echo("❌ Not in an Atmos project directory")
+        typer.echo("💡 Navigate to your Terraform/Atmos project root and try again")
+        return
+    else:
+        typer.echo("✅ In Atmos project directory")
+        
+    typer.echo("")
+    typer.echo("🎯 Common commands to get started:")
+    typer.echo("")
+    typer.echo("📋 List available environments:")
+    typer.echo("   gaia list stacks")
+    typer.echo("")
+    typer.echo("🔍 Check current status:")
+    typer.echo("   gaia status")
+    typer.echo("")
+    typer.echo("✅ Validate configurations:")
+    typer.echo("   gaia workflow validate")
+    typer.echo("")
+    typer.echo("📋 Plan changes (safe):")
+    typer.echo("   gaia workflow plan-environment -t fnx -a dev -e testenv-01")
+    typer.echo("")
+    typer.echo("🚀 Apply changes:")
+    typer.echo("   gaia workflow apply-environment -t fnx -a dev -e testenv-01")
+    typer.echo("")
+    typer.echo("💡 For more help, run: gaia --help")
+    typer.echo("💡 For Makefile shortcuts, run: make help")
+
+@app.command("doctor")
+def doctor():
+    """🩺 Run diagnostics and show system health"""
+    typer.echo("🩺 Gaia System Diagnostics")
+    typer.echo("=" * 30)
+    typer.echo("")
+    
+    # Check Atmos
+    if is_atmos_available():
+        result = subprocess.run(["atmos", "version"], capture_output=True, text=True)
+        typer.echo(f"✅ Atmos: {result.stdout.strip()}")
+    else:
+        typer.echo("❌ Atmos: Not found")
+        
+    # Check Terraform
+    try:
+        result = subprocess.run(["terraform", "version"], capture_output=True, text=True)
+        version_line = result.stdout.split('\n')[0]
+        typer.echo(f"✅ Terraform: {version_line}")
+    except:
+        typer.echo("❌ Terraform: Not found")
+        
+    # Check AWS CLI
+    try:
+        result = subprocess.run(["aws", "--version"], capture_output=True, text=True)
+        typer.echo(f"✅ AWS CLI: {result.stderr.strip()}")
+    except:
+        typer.echo("❌ AWS CLI: Not found")
+        
+    # Check project structure
+    typer.echo("")
+    typer.echo("📁 Project Structure:")
+    
+    if Path("atmos.yaml").exists():
+        typer.echo("✅ atmos.yaml found")
+    else:
+        typer.echo("❌ atmos.yaml missing")
+        
+    if Path("components/terraform").exists():
+        typer.echo("✅ Terraform components directory found")
+    else:
+        typer.echo("❌ Terraform components directory missing")
+        
+    if Path("stacks").exists():
+        typer.echo("✅ Stacks directory found")
+    else:
+        typer.echo("❌ Stacks directory missing")
+    
+    # Check AWS credentials
+    typer.echo("")
+    typer.echo("🔐 AWS Credentials:")
+    try:
+        result = subprocess.run(["aws", "sts", "get-caller-identity"], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            identity = json.loads(result.stdout)
+            typer.echo(f"✅ AWS Account: {identity.get('Account', 'Unknown')}")
+            typer.echo(f"✅ AWS User/Role: {identity.get('Arn', 'Unknown')}")
+        else:
+            typer.echo("❌ AWS credentials not configured or invalid")
+    except:
+        typer.echo("❌ Unable to check AWS credentials")
+    
+    typer.echo("")
+    typer.echo("💡 For infrastructure-specific diagnostics, run: make doctor")
+
+@app.command("feedback")
+def feedback():
+    """📝 Provide feedback to improve developer experience"""
+    typer.echo("📝 Developer Experience Feedback")
+    typer.echo("=" * 35)
+    typer.echo("")
+    typer.echo("Help us improve your development experience!")
+    typer.echo("This will collect anonymous usage data and ask for your feedback.")
+    typer.echo("")
+    
+    if typer.confirm("Would you like to participate?"):
+        try:
+            subprocess.run(["./scripts/collect-dx-feedback.sh", "interactive"], check=True)
+        except subprocess.CalledProcessError:
+            typer.echo("❌ Failed to run feedback collection script", err=True)
+        except FileNotFoundError:
+            typer.echo("❌ Feedback script not found. Are you in the project root?", err=True)
+    else:
+        typer.echo("Thanks anyway! You can run this anytime with 'gaia feedback'")
+
+@app.command("dx-metrics") 
+def dx_metrics():
+    """📊 Show developer experience metrics and insights"""
+    typer.echo("📊 Developer Experience Metrics")
+    typer.echo("=" * 35)
+    typer.echo("")
+    
+    dx_dir = Path(".dx-metrics")
+    summary_file = dx_dir / "dx-summary.json"
+    
+    if not summary_file.exists():
+        typer.echo("⚠️  No DX metrics found.")
+        typer.echo("")
+        typer.echo("💡 To collect metrics:")
+        typer.echo("   • Run 'gaia feedback' for full feedback collection")
+        typer.echo("   • Run 'make dx-metrics' for automated metrics only")
+        return
+    
+    try:
+        import json
+        with open(summary_file) as f:
+            data = json.load(f)
+            
+        summary = data.get('summary', {})
+        typer.echo(f"📈 Total Feedback Responses: {summary.get('total_feedback_responses', 0)}")
+        typer.echo(f"⭐ Average Satisfaction: {summary.get('average_satisfaction', 0):.1f}/10") 
+        typer.echo(f"🎯 Average Onboarding Ease: {summary.get('average_onboarding_ease', 0):.1f}/10")
+        typer.echo("")
+        
+        improvement_areas = summary.get('improvement_areas', [])
+        if improvement_areas:
+            typer.echo("🔧 Focus Areas for Improvement:")
+            for area in improvement_areas:
+                typer.echo(f"   • {area}")
+        
+        typer.echo("")
+        typer.echo(f"📅 Next Review: {summary.get('next_review', 'Unknown')}")
+        
+    except Exception as e:
+        typer.echo(f"❌ Error reading metrics: {e}", err=True)
 
 if __name__ == "__main__":
     app()

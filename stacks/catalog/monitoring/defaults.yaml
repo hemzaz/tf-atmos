@@ -1,3 +1,4 @@
+---
 name: monitoring
 description: "Monitoring and alerting configuration"
 
@@ -16,31 +17,31 @@ components:
         tenant: "${tenant}"
         enabled: true
         region: ${region}
-        
+
         # Enable specific monitoring features
         enable_vpc_flow_logs: ${enable_vpc_flow_logs | default(false)}
         enable_certificate_monitoring: ${enable_certificate_monitoring | default(true)}
         enable_resource_monitoring: ${enable_resource_monitoring | default(true)}
         enable_cost_monitoring: ${enable_cost_monitoring | default(true)}
-        
+
         # Certificate monitoring configuration
         certificate_arns: ${certificate_arns | default('{}')}
         certificate_names: ${certificate_names | default([])}
         certificate_domains: ${certificate_domains | default([])}
         certificate_expiry_threshold: ${certificate_expiry_threshold | default(30)}
-        
+
         # EKS monitoring
         eks_cluster_name: ${eks_cluster_name | default("")}
-        
+
         # Alarm notification configuration
         alarm_notifications_enabled: ${alarm_notifications_enabled | default(true)}
         alarm_email_addresses: ${alarm_email_addresses | default([])}
         sns_topic_name: "${tenant}-${environment}-alarms"
-        
+
         # Dashboard configuration
         create_dashboard: ${create_dashboard | default(true)}
         dashboard_name: "${tenant}-${environment}-dashboard"
-        
+
       # Define common tags
       tags:
         Tenant: ${tenant}
@@ -48,7 +49,7 @@ components:
         Environment: ${environment}
         Component: "Monitoring"
         ManagedBy: "Terraform"
-        
+
       # Terraform backend configuration
       settings:
         terraform:
@@ -59,12 +60,12 @@ components:
               region: ${region}
               role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
               dynamodb_table: ${tenant}-terraform-locks
-              
+
       # Provider configuration
       providers:
         aws:
           region: ${region}
-          
+
       # Define outputs with improved descriptions
       outputs:
         dashboard_arn:

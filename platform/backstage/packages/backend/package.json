@@ -1,0 +1,65 @@
+{
+  "name": "backend",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "private": true,
+  "backstage": {
+    "role": "backend"
+  },
+  "scripts": {
+    "start": "backstage-cli package start",
+    "build": "backstage-cli package build",
+    "lint": "backstage-cli package lint",
+    "test": "backstage-cli package test",
+    "clean": "backstage-cli package clean",
+    "build-image": "docker build ../.. -f Dockerfile --tag backstage"
+  },
+  "dependencies": {
+    "@backstage/backend-common": "^0.20.1",
+    "@backstage/backend-tasks": "^0.5.15",
+    "@backstage/catalog-client": "^1.5.2",
+    "@backstage/catalog-model": "^1.4.3",
+    "@backstage/config": "^1.1.1",
+    "@backstage/plugin-app-backend": "^0.3.48",
+    "@backstage/plugin-auth-backend": "^0.20.4",
+    "@backstage/plugin-auth-node": "^0.4.4",
+    "@backstage/plugin-catalog-backend": "^1.15.0",
+    "@backstage/plugin-catalog-backend-module-github": "^0.1.8",
+    "@backstage/plugin-kubernetes-backend": "^0.11.4",
+    "@backstage/plugin-permission-backend": "^0.5.23",
+    "@backstage/plugin-permission-backend-module-allow-all-policy": "^0.1.8",
+    "@backstage/plugin-permission-common": "^0.7.8",
+    "@backstage/plugin-proxy-backend": "^0.4.8",
+    "@backstage/plugin-scaffolder-backend": "^1.17.4",
+    "@backstage/plugin-search-backend": "^1.4.11",
+    "@backstage/plugin-search-backend-module-pg": "^0.5.11",
+    "@backstage/plugin-search-backend-node": "^1.2.13",
+    "@backstage/plugin-techdocs-backend": "^1.7.0",
+    
+    "app": "link:../app",
+    "better-sqlite3": "^8.0.0",
+    "dockerode": "^3.3.1",
+    "express": "^4.17.1",
+    "express-promise-router": "^4.1.0",
+    "pg": "^8.3.0",
+    "winston": "^3.2.1",
+    
+    "@backstage/plugin-cost-insights": "^0.11.30",
+    
+    "@internal/backstage-plugin-atmos": "workspace:^",
+    "@internal/backstage-plugin-cost-tracking": "workspace:^",
+    "@internal/backstage-plugin-compliance": "workspace:^"
+  },
+  "devDependencies": {
+    "@backstage/cli": "^0.25.0",
+    "@types/dockerode": "^3.3.0",
+    "@types/express": "^4.17.6",
+    "@types/express-serve-static-core": "^4.17.5",
+    "@types/luxon": "^2.0.4",
+    "@types/pg": "^8.6.5"
+  },
+  "files": [
+    "dist"
+  ]
+}

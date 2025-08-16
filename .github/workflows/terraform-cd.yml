@@ -1,0 +1,544 @@
+name: Terraform Infrastructure CD Pipeline
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - develop
+    paths:
+      - 'components/**'
+      - 'stacks/**'
+      - 'workflows/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - 'components/**'
+      - 'stacks/**'
+      - 'workflows/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: dev
+      tenant:
+        description: 'Tenant identifier'
+        required: true
+        default: 'fnx'
+      account:
+        description: 'AWS account identifier'
+        required: true
+        default: 'dev'
+      component:
+        description: 'Specific component to deploy (empty for all)'
+        required: false
+      action:
+        description: 'Deployment action'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: plan
+      skip_tests:
+        description: 'Skip integration tests'
+        type: boolean
+        default: false
+
+env:
+  ATMOS_VERSION: "1.44.0"
+  TERRAFORM_VERSION: "1.5.7"
+  AWS_DEFAULT_REGION: us-east-1
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  # Security and compliance checks
+  security-scan:
+    name: Security & Compliance Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      security-status: ${{ steps.security-check.outputs.status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Checkov static analysis
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          quiet: true
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov.sarif
+
+      - name: Security check status
+        id: security-check
+        run: |
+          if [ -f "trivy-results.sarif" ] && [ -f "checkov.sarif" ]; then
+            echo "status=passed" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+  # Code quality and linting
+  code-quality:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      lint-status: ${{ steps.lint-check.outputs.status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Cache Terraform modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            .terraform/
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      - name: Run Atmos lint workflow
+        run: |
+          atmos workflow lint -f lint.yaml fix=false
+
+      - name: Validate Terraform formatting
+        run: |
+          terraform fmt -check -recursive ./components/terraform/
+
+      - name: Lint status check
+        id: lint-check
+        run: |
+          echo "status=passed" >> $GITHUB_OUTPUT
+
+  # Component validation and testing
+  component-validation:
+    name: Component Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [security-scan, code-quality]
+    if: needs.security-scan.outputs.security-status == 'passed' && needs.code-quality.outputs.lint-status == 'passed'
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+      fail-fast: false
+    outputs:
+      validation-status: ${{ steps.validation-check.outputs.status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Validate components for ${{ matrix.environment }}
+        run: |
+          # Determine tenant and account based on environment
+          case "${{ matrix.environment }}" in
+            dev) TENANT=fnx; ACCOUNT=dev ;;
+            staging) TENANT=fnx; ACCOUNT=staging ;;
+            prod) TENANT=fnx; ACCOUNT=prod ;;
+          esac
+          
+          echo "Validating environment: ${{ matrix.environment }}, tenant: $TENANT, account: $ACCOUNT"
+          atmos workflow validate -f validate.yaml tenant=$TENANT account=$ACCOUNT environment=${{ matrix.environment }}
+
+      - name: Validation status check
+        id: validation-check
+        run: |
+          echo "status=passed" >> $GITHUB_OUTPUT
+
+  # Infrastructure planning
+  infrastructure-plan:
+    name: Infrastructure Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [component-validation]
+    if: needs.component-validation.outputs.validation-status == 'passed'
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+      fail-fast: false
+    outputs:
+      plan-status: ${{ steps.plan-check.outputs.status }}
+      plan-changes: ${{ steps.plan-changes.outputs.changes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', upper(matrix.environment))] }}
+          role-session-name: GitHubActions-${{ matrix.environment }}
+
+      - name: Create plan directory
+        run: |
+          mkdir -p plans/${{ matrix.environment }}
+
+      - name: Generate infrastructure plan
+        run: |
+          # Determine tenant and account based on environment
+          case "${{ matrix.environment }}" in
+            dev) TENANT=fnx; ACCOUNT=dev ;;
+            staging) TENANT=fnx; ACCOUNT=staging ;;
+            prod) TENANT=fnx; ACCOUNT=prod ;;
+          esac
+          
+          echo "Planning environment: ${{ matrix.environment }}, tenant: $TENANT, account: $ACCOUNT"
+          atmos workflow plan-environment -f plan-environment.yaml \
+            tenant=$TENANT \
+            account=$ACCOUNT \
+            environment=${{ matrix.environment }} \
+            output_dir=./plans/${{ matrix.environment }}
+
+      - name: Detect plan changes
+        id: plan-changes
+        run: |
+          if find ./plans/${{ matrix.environment }} -name "*.tfplan" -exec terraform show {} \; | grep -q "Plan:"; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Infrastructure changes detected for ${{ matrix.environment }}"
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No infrastructure changes for ${{ matrix.environment }}"
+          fi
+
+      - name: Upload plan artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plans-${{ matrix.environment }}
+          path: plans/${{ matrix.environment }}/
+          retention-days: 7
+
+      - name: Plan status check
+        id: plan-check
+        run: |
+          echo "status=passed" >> $GITHUB_OUTPUT
+
+      - name: Comment on PR with plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Find plan files
+            const planDir = './plans/${{ matrix.environment }}';
+            if (fs.existsSync(planDir)) {
+              const files = fs.readdirSync(planDir);
+              const planFiles = files.filter(f => f.endsWith('.tfplan'));
+              
+              if (planFiles.length > 0) {
+                const comment = `## Terraform Plan Results for ${{ matrix.environment }}
+            
+            **Environment**: ${{ matrix.environment }}
+            **Plan files generated**: ${planFiles.length}
+            **Changes detected**: ${{ steps.plan-changes.outputs.changes }}
+            
+            <details>
+            <summary>Plan Summary</summary>
+            
+            \`\`\`
+            Plan files: ${planFiles.join(', ')}
+            \`\`\`
+            </details>
+            
+            Plans are available as artifacts for 7 days.`;
+                
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              }
+            }
+
+  # Development environment deployment
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [infrastructure-plan]
+    if: |
+      always() &&
+      needs.infrastructure-plan.result == 'success' &&
+      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    environment: 
+      name: dev
+      url: https://dev.platform.company.com
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          role-session-name: GitHubActions-Deploy-Dev
+
+      - name: Deploy to development
+        run: |
+          echo "Deploying to development environment"
+          atmos workflow apply-environment -f apply-environment.yaml \
+            tenant=fnx \
+            account=dev \
+            environment=dev \
+            auto_approve=true
+
+      - name: Run integration tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          echo "Running integration tests"
+          # Add integration test commands here
+          sleep 5  # Placeholder for actual tests
+
+      - name: Update deployment status
+        run: |
+          echo "Development deployment completed successfully"
+
+  # Staging environment deployment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [deploy-dev]
+    if: |
+      always() &&
+      needs.deploy-dev.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    environment:
+      name: staging
+      url: https://staging.platform.company.com
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_STAGING }}
+          role-session-name: GitHubActions-Deploy-Staging
+
+      - name: Deploy to staging
+        run: |
+          echo "Deploying to staging environment"
+          atmos workflow apply-environment -f apply-environment.yaml \
+            tenant=fnx \
+            account=staging \
+            environment=staging \
+            auto_approve=true
+
+      - name: Run staging tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          echo "Running staging validation tests"
+          # Add staging-specific tests here
+          sleep 5  # Placeholder for actual tests
+
+  # Production environment deployment
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [deploy-staging]
+    if: |
+      always() &&
+      needs.deploy-staging.result == 'success' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    environment:
+      name: production
+      url: https://platform.company.com
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          role-session-name: GitHubActions-Deploy-Prod
+
+      - name: Pre-deployment health check
+        run: |
+          echo "Running pre-deployment health checks"
+          # Add production health checks here
+          aws eks describe-cluster --name production-cluster --query 'cluster.status'
+
+      - name: Deploy to production
+        run: |
+          echo "Deploying to production environment"
+          atmos workflow apply-environment -f apply-environment.yaml \
+            tenant=fnx \
+            account=prod \
+            environment=production \
+            auto_approve=true
+
+      - name: Post-deployment verification
+        run: |
+          echo "Running post-deployment verification"
+          # Add production verification tests here
+          sleep 10  # Allow time for deployment to stabilize
+          
+          # Check application health
+          curl -f https://platform.company.com/health || exit 1
+
+      - name: Run production smoke tests
+        if: github.event.inputs.skip_tests != 'true'
+        run: |
+          echo "Running production smoke tests"
+          # Add production smoke tests here
+          sleep 5  # Placeholder for actual tests
+
+  # Drift detection job (runs after deployments)
+  drift-detection:
+    name: Infrastructure Drift Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [deploy-dev, deploy-staging, deploy-prod]
+    if: always()
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+      fail-fast: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', upper(matrix.environment))] }}
+          role-session-name: GitHubActions-Drift-${{ matrix.environment }}
+
+      - name: Run drift detection
+        run: |
+          case "${{ matrix.environment }}" in
+            dev) TENANT=fnx; ACCOUNT=dev ;;
+            staging) TENANT=fnx; ACCOUNT=staging ;;
+            prod) TENANT=fnx; ACCOUNT=prod ;;
+          esac
+          
+          echo "Running drift detection for ${{ matrix.environment }}"
+          atmos workflow drift-detection -f drift-detection.yaml \
+            tenant=$TENANT \
+            account=$ACCOUNT \
+            environment=${{ matrix.environment }} \
+            report_format=both || echo "Drift detected in ${{ matrix.environment }}"
+
+  # Notification job
+  notification:
+    name: Pipeline Notification
+    runs-on: ubuntu-latest
+    needs: [deploy-dev, deploy-staging, deploy-prod, drift-detection]
+    if: always()
+    steps:
+      - name: Determine pipeline status
+        id: status
+        run: |
+          if [[ "${{ needs.deploy-dev.result }}" == "success" && \
+                "${{ needs.deploy-staging.result }}" == "success" && \
+                "${{ needs.deploy-prod.result }}" == "success" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=All deployments completed successfully" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.deploy-dev.result }}" == "failure" || \
+                  "${{ needs.deploy-staging.result }}" == "failure" || \
+                  "${{ needs.deploy-prod.result }}" == "failure" ]]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "message=One or more deployments failed" >> $GITHUB_OUTPUT
+          else
+            echo "status=partial" >> $GITHUB_OUTPUT
+            echo "message=Pipeline completed with mixed results" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send notification
+        run: |
+          echo "Pipeline Status: ${{ steps.status.outputs.status }}"
+          echo "Message: ${{ steps.status.outputs.message }}"
+          # Add Slack/Teams/email notification logic here

@@ -1,0 +1,535 @@
+#!/bin/bash
+# Developer Experience Analytics Engine
+# Comprehensive measurement and analysis of platform productivity
+
+set -e
+
+COMMAND="${1:-dashboard}"
+TIMEFRAME="${2:-30d}"
+
+# Color codes
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+log_metric() { echo -e "${PURPLE}📊 $1${NC}"; }
+
+show_analytics_dashboard() {
+    local timeframe="$1"
+    
+    echo "📊 Developer Experience Analytics Dashboard"
+    echo "=========================================="
+    echo "⏰ Timeframe: Last $timeframe"
+    echo "🕒 Generated: $(date)"
+    echo ""
+    
+    # Core productivity metrics
+    show_productivity_analytics "$timeframe"
+    show_platform_performance "$timeframe"
+    show_developer_satisfaction_analysis "$timeframe"
+    show_cost_efficiency_analysis "$timeframe"
+    show_security_compliance_metrics "$timeframe"
+    show_predictive_insights "$timeframe"
+}
+
+show_productivity_analytics() {
+    local timeframe="$1"
+    
+    echo "⚡ Developer Productivity Analytics"
+    echo "===================================="
+    
+    # Lead time analysis
+    local avg_lead_time=$(calculate_lead_time_analytics "$timeframe")
+    local lead_time_trend=$(calculate_trend "lead_time" "$timeframe")
+    
+    log_metric "Lead Time for Changes: $avg_lead_time $lead_time_trend"
+    
+    # Deployment frequency analysis
+    local deployments_per_day=$(calculate_deployment_frequency "$timeframe")
+    local deployment_trend=$(calculate_trend "deployments" "$timeframe")
+    
+    log_metric "Deployment Frequency: $deployments_per_day/day $deployment_trend"
+    
+    # Time to recovery analysis
+    local mttr=$(calculate_mttr_analytics "$timeframe")
+    local mttr_trend=$(calculate_trend "mttr" "$timeframe")
+    
+    log_metric "Mean Time to Recovery: $mttr $mttr_trend"
+    
+    # Change failure rate
+    local cfr=$(calculate_change_failure_rate "$timeframe")
+    local cfr_trend=$(calculate_trend "failure_rate" "$timeframe")
+    
+    log_metric "Change Failure Rate: $cfr% $cfr_trend"
+    
+    # Flow efficiency
+    local flow_efficiency=$(calculate_flow_efficiency "$timeframe")
+    log_metric "Flow Efficiency: $flow_efficiency%"
+    
+    # Developer focus time
+    local focus_time=$(calculate_developer_focus_time "$timeframe")
+    log_metric "Daily Focus Time: $focus_time hours"
+    
+    # Context switching frequency
+    local context_switches=$(calculate_context_switching "$timeframe")
+    log_metric "Context Switches/Day: $context_switches"
+    
+    echo ""
+    
+    # Productivity by team/individual
+    show_productivity_breakdown "$timeframe"
+}
+
+show_platform_performance() {
+    local timeframe="$1"
+    
+    echo "🚀 Platform Performance Analytics"
+    echo "=================================="
+    
+    # API performance
+    local api_latency=$(calculate_api_performance "$timeframe")
+    log_metric "Platform API Latency: ${api_latency}ms (p95)"
+    
+    # CLI performance
+    local cli_performance=$(calculate_cli_performance "$timeframe")
+    log_metric "CLI Command Execution: ${cli_performance}s average"
+    
+    # Infrastructure provisioning times
+    local provision_time=$(calculate_provisioning_performance "$timeframe")
+    log_metric "Infrastructure Provisioning: $provision_time"
+    
+    # Platform uptime
+    local uptime=$(calculate_platform_uptime "$timeframe")
+    log_metric "Platform Uptime: $uptime%"
+    
+    # Self-service success rate
+    local self_service_success=$(calculate_self_service_success "$timeframe")
+    log_metric "Self-Service Success Rate: $self_service_success%"
+    
+    echo ""
+    
+    # Performance by component
+    show_component_performance_analysis "$timeframe"
+}
+
+show_developer_satisfaction_analysis() {
+    local timeframe="$1"
+    
+    echo "😊 Developer Satisfaction Analysis"
+    echo "==================================="
+    
+    # NPS score with breakdown
+    local nps_score=$(calculate_detailed_nps "$timeframe")
+    local nps_segments=$(analyze_nps_segments "$timeframe")
+    
+    log_metric "Net Promoter Score: $nps_score"
+    echo "   Promoters (9-10): $(echo "$nps_segments" | jq -r '.promoters')%"
+    echo "   Passives (7-8):   $(echo "$nps_segments" | jq -r '.passives')%"  
+    echo "   Detractors (0-6): $(echo "$nps_segments" | jq -r '.detractors')%"
+    
+    # Satisfaction by category
+    echo ""
+    echo "📊 Satisfaction by Category (1-5 scale):"
+    
+    local categories=("Documentation" "Tooling" "Self-Service" "Support" "Performance" "Security")
+    for category in "${categories[@]}"; do
+        local score=$(get_satisfaction_by_category "$category" "$timeframe")
+        local trend=$(get_satisfaction_trend "$category" "$timeframe")
+        printf "   %-15s: %s/5.0 %s\n" "$category" "$score" "$trend"
+    done
+    
+    # Sentiment analysis from feedback
+    echo ""
+    local sentiment=$(analyze_feedback_sentiment "$timeframe")
+    log_metric "Feedback Sentiment: $sentiment"
+    
+    # Top pain points
+    echo ""
+    echo "🔴 Top Pain Points:"
+    analyze_pain_points "$timeframe"
+    
+    echo ""
+}
+
+show_cost_efficiency_analysis() {
+    local timeframe="$1"
+    
+    echo "💰 Cost Efficiency Analysis"
+    echo "============================"
+    
+    # Platform ROI calculation
+    local platform_investment=$(calculate_platform_investment "$timeframe")
+    local cost_savings=$(calculate_detailed_cost_savings "$timeframe")
+    local roi_percentage=$(calculate_roi "$platform_investment" "$cost_savings")
+    
+    log_metric "Platform ROI: $roi_percentage%"
+    echo "   Investment: \$$platform_investment"
+    echo "   Savings:    \$$cost_savings"
+    
+    # Productivity value calculation
+    local time_savings_hours=$(calculate_time_savings_detailed "$timeframe")
+    local developer_hourly_cost=150  # Average developer cost
+    local productivity_value=$((time_savings_hours * developer_hourly_cost))
+    
+    log_metric "Productivity Value: \$$productivity_value ($time_savings_hours hours saved)"
+    
+    # Cost per deployment
+    local cost_per_deployment=$(calculate_cost_per_deployment "$timeframe")
+    log_metric "Cost per Deployment: \$$cost_per_deployment"
+    
+    # Infrastructure cost optimization
+    local optimization_potential=$(analyze_cost_optimization_opportunities "$timeframe")
+    log_metric "Cost Optimization Potential: \$$optimization_potential/month"
+    
+    echo ""
+    
+    # Cost breakdown by team/service
+    show_cost_breakdown_analysis "$timeframe"
+}
+
+show_security_compliance_metrics() {
+    local timeframe="$1"
+    
+    echo "🛡️  Security & Compliance Analytics"
+    echo "===================================="
+    
+    # Security posture score
+    local security_score=$(calculate_security_posture_score "$timeframe")
+    log_metric "Security Posture Score: $security_score/100"
+    
+    # Policy violations
+    local policy_violations=$(count_policy_violations "$timeframe")
+    local violation_trend=$(calculate_trend "violations" "$timeframe")
+    log_metric "Policy Violations: $policy_violations $violation_trend"
+    
+    # Security scan results
+    local critical_vulns=$(count_critical_vulnerabilities "$timeframe")
+    local high_vulns=$(count_high_vulnerabilities "$timeframe")
+    log_metric "Critical Vulnerabilities: $critical_vulns"
+    log_metric "High Vulnerabilities: $high_vulns"
+    
+    # Compliance coverage
+    local compliance_coverage=$(calculate_compliance_coverage "$timeframe")
+    log_metric "Compliance Coverage: $compliance_coverage%"
+    
+    # Secret management adoption
+    local secret_mgmt_adoption=$(calculate_secret_management_adoption "$timeframe")
+    log_metric "Secret Management Adoption: $secret_mgmt_adoption%"
+    
+    echo ""
+}
+
+show_predictive_insights() {
+    local timeframe="$1"
+    
+    echo "🔮 Predictive Insights & Recommendations"
+    echo "========================================"
+    
+    # Trend analysis and predictions
+    echo "📈 Trend Analysis:"
+    
+    # Predict bottlenecks
+    local predicted_bottlenecks=$(predict_platform_bottlenecks "$timeframe")
+    echo "   Predicted Bottlenecks: $predicted_bottlenecks"
+    
+    # Capacity planning
+    local capacity_needs=$(predict_capacity_needs "$timeframe")
+    echo "   Capacity Needs (90d): $capacity_needs"
+    
+    # Developer onboarding load
+    local onboarding_prediction=$(predict_onboarding_load "$timeframe")
+    echo "   Expected New Developers: $onboarding_prediction"
+    
+    echo ""
+    echo "💡 Recommendations:"
+    generate_actionable_recommendations "$timeframe"
+    
+    echo ""
+}
+
+# Advanced analytics calculations
+calculate_lead_time_analytics() {
+    local timeframe="$1"
+    
+    # Analyze git commits to deployment time
+    local total_lead_time=0
+    local count=0
+    
+    # Get recent deployments and trace back to commits
+    while read -r deployment; do
+        local commit_time=$(echo "$deployment" | jq -r '.commit_time')
+        local deploy_time=$(echo "$deployment" | jq -r '.deploy_time')
+        
+        if [[ "$commit_time" != "null" && "$deploy_time" != "null" ]]; then
+            local lead_time=$(( $(date -d "$deploy_time" +%s) - $(date -d "$commit_time" +%s) ))
+            total_lead_time=$((total_lead_time + lead_time))
+            count=$((count + 1))
+        fi
+    done < <(get_deployment_history "$timeframe")
+    
+    if [[ $count -gt 0 ]]; then
+        local avg_seconds=$((total_lead_time / count))
+        local avg_hours=$((avg_seconds / 3600))
+        echo "${avg_hours}h"
+    else
+        echo "No data"
+    fi
+}
+
+calculate_flow_efficiency() {
+    local timeframe="$1"
+    
+    # Calculate ratio of value-adding time to total cycle time
+    local active_time=$(get_active_development_time "$timeframe")
+    local total_time=$(get_total_cycle_time "$timeframe")
+    
+    if [[ $total_time -gt 0 ]]; then
+        local efficiency=$((active_time * 100 / total_time))
+        echo "$efficiency"
+    else
+        echo "0"
+    fi
+}
+
+calculate_developer_focus_time() {
+    local timeframe="$1"
+    
+    # Analyze git commit patterns to estimate focus time
+    local total_focus_time=0
+    local days=0
+    
+    # Look for continuous commit periods as proxy for focus time
+    while read -r day_commits; do
+        local focus_blocks=$(echo "$day_commits" | calculate_focus_blocks)
+        total_focus_time=$((total_focus_time + focus_blocks))
+        days=$((days + 1))
+    done < <(get_daily_commit_patterns "$timeframe")
+    
+    if [[ $days -gt 0 ]]; then
+        local avg_focus_time=$((total_focus_time / days))
+        echo "$avg_focus_time"
+    else
+        echo "0"
+    fi
+}
+
+analyze_nps_segments() {
+    local timeframe="$1"
+    
+    local total=0
+    local promoters=0
+    local passives=0
+    local detractors=0
+    
+    # Analyze survey responses
+    while read -r response; do
+        local score=$(echo "$response" | jq -r '.overall_satisfaction')
+        if [[ "$score" != "null" ]]; then
+            total=$((total + 1))
+            if [[ $score -ge 4 ]]; then
+                promoters=$((promoters + 1))
+            elif [[ $score -ge 3 ]]; then
+                passives=$((passives + 1))
+            else
+                detractors=$((detractors + 1))
+            fi
+        fi
+    done < <(get_survey_responses "$timeframe")
+    
+    if [[ $total -gt 0 ]]; then
+        local promoter_pct=$((promoters * 100 / total))
+        local passive_pct=$((passives * 100 / total))
+        local detractor_pct=$((detractors * 100 / total))
+        
+        echo "{\"promoters\": $promoter_pct, \"passives\": $passive_pct, \"detractors\": $detractor_pct}"
+    else
+        echo "{\"promoters\": 0, \"passives\": 0, \"detractors\": 0}"
+    fi
+}
+
+analyze_pain_points() {
+    local timeframe="$1"
+    
+    # Extract pain points from feedback and rank by frequency
+    local pain_points=""
+    
+    while read -r feedback; do
+        local pain_point=$(echo "$feedback" | jq -r '.biggest_pain_point')
+        [[ "$pain_point" != "null" ]] && pain_points="$pain_points\n$pain_point"
+    done < <(get_feedback_responses "$timeframe")
+    
+    # Rank pain points by frequency
+    echo -e "$pain_points" | grep -v "^$" | sort | uniq -c | sort -nr | head -5 | while read -r count point; do
+        echo "   • $point ($count mentions)"
+    done
+}
+
+predict_platform_bottlenecks() {
+    local timeframe="$1"
+    
+    # Analyze resource usage trends and predict bottlenecks
+    local cpu_trend=$(analyze_cpu_usage_trend "$timeframe")
+    local memory_trend=$(analyze_memory_usage_trend "$timeframe")
+    local api_latency_trend=$(analyze_api_latency_trend "$timeframe")
+    
+    local bottlenecks=""
+    
+    # Predict based on trends
+    if [[ $(echo "$cpu_trend > 0.8" | bc) -eq 1 ]]; then
+        bottlenecks="$bottlenecks CPU capacity"
+    fi
+    
+    if [[ $(echo "$memory_trend > 0.8" | bc) -eq 1 ]]; then
+        bottlenecks="$bottlenecks Memory capacity"
+    fi
+    
+    if [[ $(echo "$api_latency_trend > 0.5" | bc) -eq 1 ]]; then
+        bottlenecks="$bottlenecks API performance"
+    fi
+    
+    echo "${bottlenecks:-None predicted}"
+}
+
+generate_actionable_recommendations() {
+    local timeframe="$1"
+    
+    # Generate specific, actionable recommendations based on analytics
+    local recommendations=()
+    
+    # Check lead time
+    local lead_time_hours=$(calculate_lead_time_analytics "$timeframe" | sed 's/h//')
+    if [[ $lead_time_hours -gt 24 ]]; then
+        recommendations+=("Reduce lead time by implementing feature flags and smaller batch sizes")
+    fi
+    
+    # Check deployment frequency
+    local deploy_freq=$(calculate_deployment_frequency "$timeframe")
+    if [[ $(echo "$deploy_freq < 1.0" | bc) -eq 1 ]]; then
+        recommendations+=("Increase deployment frequency to improve flow and reduce risk")
+    fi
+    
+    # Check satisfaction scores
+    local docs_satisfaction=$(get_satisfaction_by_category "Documentation" "$timeframe")
+    if [[ $(echo "$docs_satisfaction < 3.5" | bc) -eq 1 ]]; then
+        recommendations+=("Improve documentation with interactive examples and better search")
+    fi
+    
+    # Check cost efficiency
+    local roi=$(calculate_roi "$(calculate_platform_investment "$timeframe")" "$(calculate_detailed_cost_savings "$timeframe")" | sed 's/%//')
+    if [[ $roi -lt 200 ]]; then
+        recommendations+=("Focus on higher-impact automation to improve platform ROI")
+    fi
+    
+    # Output recommendations
+    for i in "${!recommendations[@]}"; do
+        echo "   $((i+1)). ${recommendations[$i]}"
+    done
+}
+
+# Performance benchmarking
+run_performance_benchmark() {
+    echo "🏃 Running Platform Performance Benchmark"
+    echo "=========================================="
+    
+    # API performance test
+    echo "📡 Testing API performance..."
+    local api_start=$(date +%s%N)
+    gaia --version >/dev/null 2>&1
+    local api_end=$(date +%s%N)
+    local api_latency=$(( (api_end - api_start) / 1000000 ))  # Convert to milliseconds
+    
+    echo "   API Response Time: ${api_latency}ms"
+    
+    # CLI performance test
+    echo "⌨️  Testing CLI performance..."
+    local cli_start=$(date +%s%N)
+    atmos describe stacks >/dev/null 2>&1
+    local cli_end=$(date +%s%N)
+    local cli_latency=$(( (cli_end - cli_start) / 1000000000 ))  # Convert to seconds
+    
+    echo "   CLI Execution Time: ${cli_latency}s"
+    
+    # Infrastructure provisioning test
+    echo "🏗️  Testing infrastructure provisioning..."
+    local provision_start=$(date +%s%N)
+    # Simulate provision time (would be actual test in real implementation)
+    sleep 2
+    local provision_end=$(date +%s%N) 
+    local provision_latency=$(( (provision_end - provision_start) / 1000000000 ))
+    
+    echo "   Provisioning Time: ${provision_latency}s"
+    
+    # Generate benchmark report
+    cat > "benchmark-$(date +%Y%m%d-%H%M%S).json" <<EOF
+{
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "benchmarks": {
+    "api_latency_ms": $api_latency,
+    "cli_execution_seconds": $cli_latency,
+    "provisioning_seconds": $provision_latency
+  },
+  "environment": {
+    "os": "$(uname -s)",
+    "arch": "$(uname -m)",
+    "shell": "$(basename "$SHELL")"
+  }
+}
+EOF
+    
+    echo "✅ Benchmark complete! Results saved to benchmark-$(date +%Y%m%d-%H%M%S).json"
+}
+
+# Main command router
+main() {
+    case "$COMMAND" in
+        "dashboard")
+            show_analytics_dashboard "$TIMEFRAME"
+            ;;
+        "benchmark")
+            run_performance_benchmark
+            ;;
+        "report")
+            generate_comprehensive_report "$TIMEFRAME"
+            ;;
+        "predict")
+            show_predictive_insights "$TIMEFRAME"
+            ;;
+        "help")
+            echo "Usage: dx-analytics [dashboard|benchmark|report|predict] [timeframe]"
+            echo ""
+            echo "Commands:"
+            echo "  dashboard    Show comprehensive analytics dashboard"
+            echo "  benchmark    Run performance benchmarks"
+            echo "  report       Generate detailed analytics report"
+            echo "  predict      Show predictive insights and recommendations"
+            echo ""
+            echo "Timeframes: 7d, 30d, 90d, 1y"
+            ;;
+        *)
+            echo "Unknown command: $COMMAND"
+            echo "Run 'dx-analytics help' for usage information"
+            exit 1
+            ;;
+    esac
+}
+
+# Stub functions (would be implemented with real data sources)
+get_deployment_history() { echo '{"commit_time": "2024-08-15T10:00:00Z", "deploy_time": "2024-08-15T11:30:00Z"}'; }
+get_survey_responses() { echo '{"overall_satisfaction": 4}'; }
+get_feedback_responses() { echo '{"biggest_pain_point": "Slow deployment times"}'; }
+calculate_deployment_frequency() { echo "2.3"; }
+calculate_mttr_analytics() { echo "45m"; }
+calculate_change_failure_rate() { echo "5.2"; }
+get_satisfaction_by_category() { echo "4.1"; }
+calculate_platform_investment() { echo "50000"; }
+calculate_detailed_cost_savings() { echo "125000"; }
+calculate_roi() { echo "$(( ($2 - $1) * 100 / $1 ))%"; }
+
+main "$@"

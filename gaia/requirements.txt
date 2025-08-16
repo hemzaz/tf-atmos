@@ -1,0 +1,3 @@
+# Enhanced Gaia CLI Requirements
+typer[all]>=0.9.0
+rich>=13.0.0

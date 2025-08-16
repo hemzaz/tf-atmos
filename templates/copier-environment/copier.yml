@@ -1,3 +1,4 @@
+---
 # Copier configuration file for Atmos environment templating
 _templates_suffix: .jinja
 _envops:
@@ -52,7 +53,7 @@ availability_zones:
   help: List of availability zones (must match region)
   default: ["us-west-2a", "us-west-2b", "us-west-2c"]
 
-# Component Enablement  
+# Component Enablement
 eks_cluster:
   type: bool
   help: Enable EKS cluster
@@ -104,7 +105,7 @@ _tasks:
       eks_node_max_count: 4
       enable_detailed_monitoring: false
       retention_days: 14
-  
+
   - when: "env_type == 'staging'"
     set:
       eks_node_instance_type: t3.large
@@ -112,7 +113,7 @@ _tasks:
       eks_node_max_count: 6
       enable_detailed_monitoring: true
       retention_days: 30
-  
+
   - when: "env_type == 'production'"
     set:
       eks_node_instance_type: m5.large

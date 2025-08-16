@@ -39,6 +39,21 @@ resource "aws_subnet" "public" {
   )
 }
 
+resource "aws_subnet" "database" {
+  count             = length(var.database_subnets)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = var.database_subnets[count.index]
+  availability_zone = var.azs[count.index % length(var.azs)]
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.tags["Environment"]}-database-subnet-${count.index + 1}"
+      Type = "Database"
+    }
+  )
+}
+
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 

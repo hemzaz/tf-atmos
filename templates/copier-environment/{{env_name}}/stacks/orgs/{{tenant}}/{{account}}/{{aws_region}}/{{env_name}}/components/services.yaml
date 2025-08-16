@@ -9,7 +9,7 @@ components:
         cluster_endpoint: "${output.eks.cluster_endpoint}"
         cluster_oidc_issuer_url: "${output.eks.cluster_oidc_issuer_url}"
         addons:
-          aws_load_balancer_controller: 
+          aws_load_balancer_controller:
             enabled: true
           external_dns:
             enabled: true
@@ -48,7 +48,7 @@ components:
         skip_final_snapshot: {{ "false" if env_type == "production" else "true" }}
         deletion_protection: {{ "true" if env_type == "production" else "false" }}
         instance_class: "{{ 'db.t3.large' if env_type == 'production' else 'db.t3.small' }}"
-        
+
         # Security settings
         storage_encrypted: true
         performance_insights_enabled: {{ "true" if env_type == "production" or env_type == "staging" else "false" }}

@@ -1,25 +1,292 @@
+---
 name: plan-environment
-description: "Plan changes for all components in an environment"
+description: "Generate execution plans for all components in an environment"
 
 workflows:
   plan:
+    description: "Generate and analyze Terraform execution plans for all components in a stack"
     steps:
-    - run:
+    - name: "validate-inputs"
+      description: "Validate required parameters and environment"
+      run:
         command: |
-          # Use Python-based CLI to plan all components
-          gaia workflow plan-environment \
-            --tenant ${tenant} \
-            --account ${account} \
-            --environment ${environment} \
-            --output-dir ${output_dir:-} \
-            --parallel ${parallel:-false}
-            
-          # Exit with appropriate status code
-          if [ $? -eq 0 ]; then
-            echo "Planning completed successfully."
-          else
-            echo "Planning had issues with one or more components."
+          set -euo pipefail
+
+          echo "=== Atmos Workflow: Environment Plan ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # Validate required parameters
+          if [ -z "${tenant:-}" ]; then
+            echo "ERROR: Missing required parameter 'tenant'"
+            echo "Usage: atmos workflow plan-environment -f plan-environment.yaml tenant=<tenant> account=<account> environment=<environment>"
             exit 1
           fi
+
+          if [ -z "${account:-}" ]; then
+            echo "ERROR: Missing required parameter 'account'"
+            echo "Usage: atmos workflow plan-environment -f plan-environment.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          if [ -z "${environment:-}" ]; then
+            echo "ERROR: Missing required parameter 'environment'"
+            echo "Usage: atmos workflow plan-environment -f plan-environment.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          STACK="${tenant}-${account}-${environment}"
+          OUTPUT_DIR="${output_dir:-./plans/${STACK}-$(date +%Y%m%d-%H%M%S)}"
+          PARALLEL="${parallel:-false}"
+          DETAILED_EXITCODE="${detailed_exitcode:-true}"
+
+          echo "Configuration:"
+          echo "  Stack: $STACK"
+          echo "  Output Directory: $OUTPUT_DIR"
+          echo "  Parallel Execution: $PARALLEL"
+          echo "  Detailed Exit Codes: $DETAILED_EXITCODE"
+
+          # Validate AWS credentials
+          if ! aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "ERROR: Invalid AWS credentials or AWS CLI not configured"
+            exit 1
+          fi
+
+          echo "✅ Input validation and AWS credentials check complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "pre-plan-validation"
+      description: "Run validation checks before planning"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Pre-Plan Validation ==="
+
+          STACK="${tenant}-${account}-${environment}"
+
+          # Check stack exists
+          if ! atmos list stacks | grep -q "$STACK"; then
+            echo "ERROR: Stack $STACK not found in Atmos configuration"
+            echo "Available stacks:"
+            atmos list stacks
+            exit 1
+          fi
+
+          # Run linting first
+          echo "Running pre-plan linting..."
+          if ! terraform fmt -check -recursive ./components/terraform; then
+            echo "ERROR: Terraform formatting issues found"
+            echo "Run 'atmos workflow lint -f lint.yaml fix=true' to fix formatting"
+            exit 1
+          fi
+
+          # Validate components exist and are valid
+          echo "Validating Terraform components..."
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "WARNING: No components found for stack $STACK"
+            exit 0
+          fi
+
+          echo "Components to plan: $COMPONENTS"
+
+          for component in $COMPONENTS; do
+            echo "Validating component: $component"
+            if ! atmos terraform validate "$component" -s "$STACK"; then
+              echo "ERROR: Component $component validation failed"
+              exit 1
+            fi
+          done
+
+          echo "✅ Pre-plan validation complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "generate-plans"
+      description: "Generate execution plans for all components"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Generate Execution Plans ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          OUTPUT_DIR="${output_dir:-./plans/${STACK}-$(date +%Y%m%d-%H%M%S)}"
+          PARALLEL="${parallel:-false}"
+          DETAILED_EXITCODE="${detailed_exitcode:-true}"
+
+          # Create output directory
+          mkdir -p "$OUTPUT_DIR"
+          echo "Plans will be saved to: $OUTPUT_DIR"
+
+          # Get components list
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "No components to plan"
+            exit 0
+          fi
+
+          # Initialize tracking variables
+          PLAN_FAILED=false
+          PLANS_WITH_CHANGES=""
+          PLANS_NO_CHANGES=""
+          PLANS_WITH_ERRORS=""
+
+          # Generate plans for each component
+          for component in $COMPONENTS; do
+            echo "\nGenerating plan for component: $component"
+            PLAN_FILE="$OUTPUT_DIR/${component}.tfplan"
+            PLAN_OUTPUT_FILE="$OUTPUT_DIR/${component}.plan.txt"
+
+            # Use detailed exit code to detect changes
+            set +e  # Temporarily disable exit on error to capture exit code
+
+            if [ "$DETAILED_EXITCODE" = "true" ]; then
+              # Run plan with detailed exit code
+              atmos terraform plan "$component" -s "$STACK" -detailed-exitcode -out="$PLAN_FILE" > "$PLAN_OUTPUT_FILE" 2>&1
+              PLAN_EXIT_CODE=$?
+
+              case $PLAN_EXIT_CODE in
+                0)
+                  echo "✅ No changes required for $component"
+                  PLANS_NO_CHANGES="$PLANS_NO_CHANGES $component"
+                  ;;
+                2)
+                  echo "⚠️  Changes detected for $component"
+                  PLANS_WITH_CHANGES="$PLANS_WITH_CHANGES $component"
+                  ;;
+                *)
+                  echo "❌ Plan failed for $component (exit code: $PLAN_EXIT_CODE)"
+                  PLANS_WITH_ERRORS="$PLANS_WITH_ERRORS $component"
+                  PLAN_FAILED=true
+                  ;;
+              esac
+            else
+              # Run plan without detailed exit code
+              if atmos terraform plan "$component" -s "$STACK" -out="$PLAN_FILE" > "$PLAN_OUTPUT_FILE" 2>&1; then
+                echo "✅ Plan generated for $component"
+                PLANS_WITH_CHANGES="$PLANS_WITH_CHANGES $component"
+              else
+                echo "❌ Plan failed for $component"
+                PLANS_WITH_ERRORS="$PLANS_WITH_ERRORS $component"
+                PLAN_FAILED=true
+              fi
+            fi
+
+            set -e  # Re-enable exit on error
+
+            # Show plan summary for this component
+            if [ -f "$PLAN_OUTPUT_FILE" ]; then
+              echo "Plan summary for $component:"
+              tail -10 "$PLAN_OUTPUT_FILE" | grep -E "(Plan:|Apply complete|Error:|to add|to change|to destroy)" || echo "No summary available"
+            fi
+          done
+
+          # Generate overall summary
+          echo "\n=== Planning Summary ==="
+          echo "Output directory: $OUTPUT_DIR"
+
+          if [ -n "$PLANS_NO_CHANGES" ]; then
+            echo "Components with no changes:$PLANS_NO_CHANGES"
+          fi
+
+          if [ -n "$PLANS_WITH_CHANGES" ]; then
+            echo "Components with changes:$PLANS_WITH_CHANGES"
+          fi
+
+          if [ -n "$PLANS_WITH_ERRORS" ]; then
+            echo "Components with errors:$PLANS_WITH_ERRORS"
+          fi
+
+          # Create summary file
+          SUMMARY_FILE="$OUTPUT_DIR/plan-summary.txt"
+          {
+            echo "Planning Summary for Stack: $STACK"
+            echo "Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "======================================"
+            echo
+            echo "Components with no changes:$PLANS_NO_CHANGES"
+            echo "Components with changes:$PLANS_WITH_CHANGES"
+            echo "Components with errors:$PLANS_WITH_ERRORS"
+            echo
+            echo "Plan files:"
+            ls -la "$OUTPUT_DIR"/*.tfplan 2>/dev/null || echo "No plan files generated"
+          } > "$SUMMARY_FILE"
+
+          echo "\nSummary saved to: $SUMMARY_FILE"
+
+          if [ "$PLAN_FAILED" = true ]; then
+            echo "ERROR: One or more component plans failed"
+            exit 1
+          fi
+
+          echo "✅ All plans generated successfully"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "plan-analysis"
+      description: "Analyze generated plans and provide recommendations"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Plan Analysis ==="
+
+          OUTPUT_DIR="${output_dir:-./plans/${tenant}-${account}-${environment}-$(date +%Y%m%d-%H%M%S)}"
+
+          # Check if any plans were generated
+          if [ ! -d "$OUTPUT_DIR" ]; then
+            echo "No output directory found, skipping analysis"
+            exit 0
+          fi
+
+          PLAN_FILES=$(ls "$OUTPUT_DIR"/*.tfplan 2>/dev/null || echo "")
+
+          if [ -z "$PLAN_FILES" ]; then
+            echo "No plan files found for analysis"
+            exit 0
+          fi
+
+          echo "Analyzing plan files in: $OUTPUT_DIR"
+
+          # Count resources and changes
+          TOTAL_ADDS=0
+          TOTAL_CHANGES=0
+          TOTAL_DESTROYS=0
+
+          for plan_file in $PLAN_FILES; do
+            if [ -f "$plan_file" ]; then
+              # Extract component name from filename
+              COMPONENT=$(basename "$plan_file" .tfplan)
+              echo "\nAnalyzing $COMPONENT:"
+
+              # Show plan summary using terraform show
+              if terraform show -no-color "$plan_file" | grep -E "to add|to change|to destroy" >/dev/null; then
+                terraform show -no-color "$plan_file" | grep -E "to add|to change|to destroy" | head -5
+              else
+                echo "  No changes detected"
+              fi
+            fi
+          done
+
+          echo "\nℹ️  Review the generated plans before applying changes"
+          echo "Use 'atmos workflow apply-environment -f apply-environment.yaml' to apply changes"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "plan-summary"
+      description: "Provide final planning summary"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Planning Complete ==="
+          echo "Stack: ${tenant}-${account}-${environment}"
+          echo "Plans generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Output directory: ${output_dir:-./plans/${tenant}-${account}-${environment}-$(date +%Y%m%d-%H%M%S)}"
+          echo "✅ Environment planning completed successfully"
         env:
           AWS_SDK_LOAD_CONFIG: 1

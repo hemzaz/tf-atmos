@@ -91,7 +91,7 @@ resource "time_sleep" "wait_for_cluster" {
     cluster_name     = each.key
     cluster_endpoint = data.aws_eks_cluster.this[each.key].endpoint
     # Add hash of cluster status to detect changes
-    cluster_status   = data.aws_eks_cluster.this[each.key].status
+    cluster_status = data.aws_eks_cluster.this[each.key].status
   }
 
   # Set a base wait time that can be overridden per cluster
@@ -219,8 +219,8 @@ resource "time_sleep" "wait_for_addons" {
   triggers = {
     addon_hash = sha256(jsonencode([
       for k, v in aws_eks_addon.addons : {
-        id = v.id
-        status = v.status
+        id            = v.id
+        status        = v.status
         addon_version = v.addon_version
       }
     ]))
@@ -315,12 +315,12 @@ resource "time_sleep" "wait_for_helm_releases" {
     # Include version, values hash, and status to ensure sensitivity to real changes
     releases_hash = sha256(jsonencode([
       for k, v in helm_release.releases : {
-        id = v.id
-        name = v.name
-        version = v.version
-        namespace = v.namespace
+        id          = v.id
+        name        = v.name
+        version     = v.version
+        namespace   = v.namespace
         values_hash = v.metadata[0].values_hash
-        status = v.status
+        status      = v.status
       }
     ]))
     releases_count = length(helm_release.releases)
@@ -329,7 +329,7 @@ resource "time_sleep" "wait_for_helm_releases" {
   # Set a reasonable wait time for Helm releases to stabilize
   # Use a dynamic duration based on the number of releases (min 2m, max 5m)
   create_duration = "${min(max(2 * length(local.helm_releases), 120), 300)}s"
-  
+
   # Add validation for helm releases
   lifecycle {
     postcondition {

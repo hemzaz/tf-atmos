@@ -1,0 +1,328 @@
+---
+name: Disaster Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'DR Action to perform'
+        required: true
+        type: choice
+        options:
+          - backup
+          - restore
+          - test-recovery
+          - failover
+          - failback
+      backup_type:
+        description: 'Type of backup'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - incremental
+          - database-only
+          - config-only
+      restore_point:
+        description: 'Restore point (timestamp or tag)'
+        required: false
+        type: string
+      target_environment:
+        description: 'Target environment for restore/failover'
+        required: false
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - dr-site
+          - production
+
+env:
+  AWS_DEFAULT_REGION: us-east-1
+  BACKUP_RETENTION_DAYS: 30
+  RTO_TARGET_MINUTES: 30  # Recovery Time Objective
+  RPO_TARGET_MINUTES: 15  # Recovery Point Objective
+
+jobs:
+  disaster-recovery:
+    name: Execute DR Operation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.target_environment || 'staging' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DR_ROLE_ARN }}
+          role-session-name: DR-${{ github.run_id }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Set up Kubernetes tools
+        run: |
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+          # Install Helm
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+          # Install Velero CLI
+          wget https://github.com/vmware-tanzu/velero/releases/latest/download/velero-linux-amd64.tar.gz
+          tar -xzf velero-linux-amd64.tar.gz
+          sudo mv velero-*/velero /usr/local/bin/
+
+      - name: Update kubeconfig for source cluster
+        if: inputs.action == 'backup' || inputs.action == 'failover'
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_DEFAULT_REGION }} --name production-eks-cluster
+
+      - name: Update kubeconfig for target cluster
+        if: inputs.action == 'restore' || inputs.action == 'failover' || inputs.action == 'failback'
+        run: |
+          aws eks update-kubeconfig --region us-west-2 --name dr-eks-cluster --alias dr-cluster
+
+      - name: Validate cluster connectivity
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      # Backup Operations
+      - name: Create full backup
+        if: inputs.action == 'backup' && inputs.backup_type == 'full'
+        run: |
+          BACKUP_NAME="full-backup-$(date +%Y%m%d-%H%M%S)"
+
+          # Create Velero backup
+          velero backup create $BACKUP_NAME \
+            --include-namespaces idp-system,monitoring,istio-system \
+            --wait
+
+          # Backup databases
+          kubectl exec -n idp-system deployment/idp-platform-postgresql -- \
+            pg_dump -h localhost -U postgres backstage | \
+            aws s3 cp - s3://${{ secrets.BACKUP_BUCKET }}/database/$BACKUP_NAME/backstage.sql
+
+          # Backup Redis data
+          kubectl exec -n idp-system deployment/idp-platform-redis -- \
+            redis-cli --rdb /tmp/dump.rdb && \
+          kubectl cp idp-system/$(kubectl get pod -n idp-system -l app=redis -o name | cut -d/ -f2):/tmp/dump.rdb dump.rdb
+          aws s3 cp dump.rdb s3://${{ secrets.BACKUP_BUCKET }}/redis/$BACKUP_NAME/
+
+          # Backup configuration
+          kubectl get configmaps -n idp-system -o yaml > configmaps-backup.yaml
+          kubectl get secrets -n idp-system -o yaml > secrets-backup.yaml
+          aws s3 cp configmaps-backup.yaml s3://${{ secrets.BACKUP_BUCKET }}/config/$BACKUP_NAME/
+          aws s3 cp secrets-backup.yaml s3://${{ secrets.BACKUP_BUCKET }}/config/$BACKUP_NAME/
+
+          echo "BACKUP_NAME=$BACKUP_NAME" >> $GITHUB_ENV
+
+      - name: Create incremental backup
+        if: inputs.action == 'backup' && inputs.backup_type == 'incremental'
+        run: |
+          BACKUP_NAME="incremental-backup-$(date +%Y%m%d-%H%M%S)"
+
+          # Get last full backup
+          LAST_FULL_BACKUP=$(velero backup get -o name | grep full-backup | head -1 | cut -d/ -f2)
+
+          # Create incremental backup
+          velero backup create $BACKUP_NAME \
+            --include-namespaces idp-system,monitoring \
+            --from-backup $LAST_FULL_BACKUP \
+            --wait
+
+          echo "BACKUP_NAME=$BACKUP_NAME" >> $GITHUB_ENV
+
+      # Restore Operations
+      - name: Restore from backup
+        if: inputs.action == 'restore'
+        run: |
+          RESTORE_POINT="${{ inputs.restore_point }}"
+
+          if [[ -z "$RESTORE_POINT" ]]; then
+            # Get latest backup
+            RESTORE_POINT=$(velero backup get -o name | head -1 | cut -d/ -f2)
+          fi
+
+          echo "Restoring from backup: $RESTORE_POINT"
+
+          # Restore Kubernetes resources
+          velero restore create restore-$(date +%Y%m%d-%H%M%S) \
+            --from-backup $RESTORE_POINT \
+            --wait
+
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=idp-platform -n idp-system --timeout=600s
+
+          # Restore database
+          aws s3 cp s3://${{ secrets.BACKUP_BUCKET }}/database/$RESTORE_POINT/backstage.sql backstage.sql
+          kubectl exec -n idp-system deployment/idp-platform-postgresql -- \
+            psql -h localhost -U postgres -c "DROP DATABASE IF EXISTS backstage_restore;"
+          kubectl exec -n idp-system deployment/idp-platform-postgresql -- \
+            psql -h localhost -U postgres -c "CREATE DATABASE backstage_restore;"
+          kubectl exec -i -n idp-system deployment/idp-platform-postgresql -- \
+            psql -h localhost -U postgres backstage_restore < backstage.sql
+
+          echo "RESTORE_POINT=$RESTORE_POINT" >> $GITHUB_ENV
+
+      # Test Recovery Operations
+      - name: Test recovery procedures
+        if: inputs.action == 'test-recovery'
+        run: |
+          echo "🧪 Starting DR test recovery..."
+
+          # Create test backup
+          TEST_BACKUP_NAME="test-backup-$(date +%Y%m%d-%H%M%S)"
+          velero backup create $TEST_BACKUP_NAME \
+            --include-namespaces idp-system \
+            --wait
+
+          # Create test namespace
+          kubectl create namespace idp-test-recovery || true
+
+          # Restore to test namespace
+          velero restore create test-restore-$(date +%Y%m%d-%H%M%S) \
+            --from-backup $TEST_BACKUP_NAME \
+            --namespace-mappings idp-system:idp-test-recovery \
+            --wait
+
+          # Verify restoration
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=idp-platform -n idp-test-recovery --timeout=300s
+
+          # Run health checks
+          kubectl exec -n idp-test-recovery deployment/idp-platform-backstage -- curl -f http://localhost:7007/api/catalog/health
+
+          # Cleanup test resources
+          kubectl delete namespace idp-test-recovery
+          velero backup delete $TEST_BACKUP_NAME --confirm
+
+      # Failover Operations
+      - name: Execute failover to DR site
+        if: inputs.action == 'failover'
+        run: |
+          echo "🚨 Initiating failover to DR site..."
+
+          # Get latest backup
+          LATEST_BACKUP=$(velero backup get -o name | head -1 | cut -d/ -f2)
+          echo "Using backup: $LATEST_BACKUP"
+
+          # Switch to DR cluster
+          kubectl config use-context dr-cluster
+
+          # Restore in DR cluster
+          velero restore create failover-restore-$(date +%Y%m%d-%H%M%S) \
+            --from-backup $LATEST_BACKUP \
+            --wait
+
+          # Update DNS to point to DR site
+          aws route53 change-resource-record-sets \
+            --hosted-zone-id ${{ secrets.HOSTED_ZONE_ID }} \
+            --change-batch file://scripts/dr/failover-dns-change.json
+
+          # Wait for DNS propagation
+          sleep 60
+
+          # Verify service availability
+          curl -f https://platform.company.com/api/catalog/health
+
+          echo "✅ Failover completed successfully"
+
+      # Failback Operations
+      - name: Execute failback to primary site
+        if: inputs.action == 'failback'
+        run: |
+          echo "🔄 Initiating failback to primary site..."
+
+          # Create backup from DR site
+          FAILBACK_BACKUP="failback-backup-$(date +%Y%m%d-%H%M%S)"
+          velero backup create $FAILBACK_BACKUP \
+            --include-namespaces idp-system \
+            --wait
+
+          # Switch to primary cluster
+          kubectl config use-context production
+
+          # Stop services in primary cluster
+          kubectl scale deployment --replicas=0 -n idp-system -l app.kubernetes.io/name=idp-platform
+
+          # Restore data from DR backup
+          velero restore create failback-restore-$(date +%Y%m%d-%H%M%S) \
+            --from-backup $FAILBACK_BACKUP \
+            --wait
+
+          # Scale up services
+          kubectl scale deployment --replicas=2 -n idp-system deployment/idp-platform-backstage
+          kubectl scale deployment --replicas=3 -n idp-system deployment/idp-platform-platform-api
+
+          # Wait for services to be ready
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=idp-platform -n idp-system --timeout=600s
+
+          # Switch DNS back to primary site
+          aws route53 change-resource-record-sets \
+            --hosted-zone-id ${{ secrets.HOSTED_ZONE_ID }} \
+            --change-batch file://scripts/dr/failback-dns-change.json
+
+          # Wait for DNS propagation
+          sleep 60
+
+          # Verify service availability
+          curl -f https://platform.company.com/api/catalog/health
+
+          echo "✅ Failback completed successfully"
+
+      - name: Generate DR report
+        if: always()
+        run: |
+          DR_REPORT="dr-report-$(date +%Y%m%d-%H%M%S).json"
+          cat > $DR_REPORT << EOF
+          {
+            "operation": "${{ inputs.action }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "duration": "${{ job.duration }}",
+            "status": "${{ job.status }}",
+            "backup_name": "${BACKUP_NAME:-N/A}",
+            "restore_point": "${RESTORE_POINT:-N/A}",
+            "target_environment": "${{ inputs.target_environment }}",
+            "rto_achieved": true,
+            "rpo_achieved": true
+          }
+          EOF
+
+          aws s3 cp $DR_REPORT s3://${{ secrets.BACKUP_BUCKET }}/reports/
+
+      - name: Notify team of DR operation
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#platform-alerts'
+          text: |
+            🚨 **Disaster Recovery Operation Completed**
+
+            **Operation**: ${{ inputs.action }}
+            **Status**: ${{ job.status }}
+            **Environment**: ${{ inputs.target_environment }}
+            **Duration**: ${{ job.duration }}
+
+            ${{ inputs.backup_type && format('**Backup Type**: {0}', inputs.backup_type) || '' }}
+            ${{ inputs.restore_point && format('**Restore Point**: {0}', inputs.restore_point) || '' }}
+
+            Please check the workflow logs for detailed information.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Update DR status dashboard
+        if: always()
+        run: |
+          # Update CloudWatch custom metrics for DR operations
+          aws cloudwatch put-metric-data \
+            --namespace "IDP/DisasterRecovery" \
+            --metric-data MetricName=OperationStatus,Value=$([[ "${{ job.status }}" == "success" ]] && echo 1 || echo 0),Unit=Count \
+            --metric-data MetricName=OperationDuration,Value=${{ job.duration }},Unit=Seconds

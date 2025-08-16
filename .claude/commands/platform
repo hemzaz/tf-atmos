@@ -1,0 +1,397 @@
+#!/bin/bash
+# Enhanced Platform CLI with Self-Service Capabilities
+# Wraps complex Atmos/Gaia commands with developer-friendly interface
+
+set -e
+
+COMMAND="${1:-help}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Helper functions
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+
+# Display usage information
+show_help() {
+    cat <<EOF
+🚀 Platform CLI - Self-Service Developer Tools
+
+USAGE:
+    platform <command> [options]
+
+COMMANDS:
+    # Service Management
+    create <type>           Create new service from template
+    deploy [service]        Deploy service to environment
+    destroy [service]       Destroy service (with safety checks)
+    scale <service> <n>     Scale service to N replicas
+    
+    # Environment Management
+    env list                List your environments
+    env create <name>       Create new development environment
+    env destroy <name>      Destroy environment (dev only)
+    env clone <from> <to>   Clone environment configuration
+    
+    # Monitoring & Debugging
+    logs <service>          Stream service logs
+    debug <service>         Start remote debugging session
+    metrics <service>       Show service metrics
+    trace <service>         Show distributed traces
+    
+    # Cost & Optimization
+    cost estimate           Estimate costs for planned changes
+    cost current            Show current spending
+    cost optimize           Get optimization recommendations
+    
+    # Developer Tools
+    proxy <service>         Create local proxy to service
+    tunnel <service>        Create secure tunnel to service
+    exec <service>          Execute commands in service pods
+    
+    # Golden Paths
+    scaffold <type>         Scaffold new project from golden path
+    templates               List available templates
+    
+    # Self-Service Portal
+    portal                  Open developer portal in browser
+    catalog                 Browse service catalog
+    docs                    Open documentation
+
+EXAMPLES:
+    platform create api-service                   # Create API service
+    platform deploy my-service                    # Deploy to dev environment  
+    platform env create my-feature               # Create feature environment
+    platform logs my-service --follow            # Stream logs
+    platform cost estimate --service my-service   # Estimate service costs
+    platform scaffold microservice-nodejs        # Create Node.js microservice
+
+GOLDEN PATHS:
+    • microservice-nodejs    - Node.js API with Express
+    • microservice-python    - Python API with FastAPI  
+    • microservice-java      - Java API with Spring Boot
+    • serverless-nodejs      - AWS Lambda with Node.js
+    • serverless-python      - AWS Lambda with Python
+    • static-website         - Static site with S3/CloudFront
+    • data-pipeline          - ETL pipeline with Airflow
+    • ml-training-job        - ML training with SageMaker
+
+For more help: platform help <command>
+Documentation: https://platform.company.com/docs
+Support: #platform-support on Slack
+EOF
+}
+
+# Service creation with templates
+create_service() {
+    local service_type="$1"
+    local service_name="$2"
+    
+    if [[ -z "$service_type" ]]; then
+        log_error "Service type required. Available types:"
+        gaia template list --category services
+        exit 1
+    fi
+    
+    if [[ -z "$service_name" ]]; then
+        read -p "Service name: " service_name
+    fi
+    
+    log_info "Creating $service_type service: $service_name"
+    
+    # Intelligent defaults based on developer context
+    local developer_name=$(whoami)
+    local team=$(git config --get team.name 2>/dev/null || echo "engineering")
+    local region=$(aws configure get region 2>/dev/null || echo "us-west-2")
+    
+    # Cost estimation before creation
+    log_info "Estimating costs..."
+    gaia cost estimate --template "$service_type" --region "$region"
+    
+    read -p "Continue with creation? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_warning "Service creation cancelled"
+        exit 0
+    fi
+    
+    # Create service with intelligent defaults
+    gaia template create-service \
+        --type "$service_type" \
+        --name "$service_name" \
+        --owner "$developer_name" \
+        --team "$team" \
+        --environment "dev" \
+        --region "$region" \
+        --auto-approve
+    
+    log_success "Service created successfully!"
+    log_info "Next steps:"
+    echo "  1. cd $service_name"
+    echo "  2. platform deploy"
+    echo "  3. platform logs --follow"
+}
+
+# Enhanced deployment with safety checks
+deploy_service() {
+    local service="${1:-$(basename "$PWD")}"
+    local environment="${2:-dev}"
+    
+    log_info "Deploying $service to $environment..."
+    
+    # Pre-deployment checks
+    log_info "Running pre-deployment checks..."
+    
+    # Security scan
+    if command -v trivy >/dev/null 2>&1; then
+        trivy fs . --severity HIGH,CRITICAL --exit-code 0
+    fi
+    
+    # Cost check
+    local current_cost=$(gaia cost current --service "$service" --format json | jq -r '.monthly_estimate // 0')
+    local estimated_cost=$(gaia cost estimate --service "$service" --format json | jq -r '.monthly_estimate // 0')
+    
+    if (( $(echo "$estimated_cost > $current_cost * 1.5" | bc -l) )); then
+        log_warning "Deployment will increase costs by >50% ($current_cost → $estimated_cost)"
+        read -p "Continue anyway? (y/N): " confirm
+        [[ ! "$confirm" =~ ^[Yy]$ ]] && exit 0
+    fi
+    
+    # Perform deployment
+    case "$environment" in
+        "dev")
+            gaia workflow apply-component component="$service" stack="fnx-dev-$(whoami)-sandbox"
+            ;;
+        "staging")
+            log_warning "Staging deployment requires approval"
+            gaia workflow apply-component component="$service" stack="fnx-staging-testenv-01" --require-approval
+            ;;
+        "prod")
+            log_error "Production deployments must go through CI/CD pipeline"
+            log_info "Push your changes and create a PR: https://github.com/company/platform/compare"
+            exit 1
+            ;;
+        *)
+            log_error "Unknown environment: $environment"
+            exit 1
+            ;;
+    esac
+    
+    log_success "Deployment complete!"
+    
+    # Post-deployment verification
+    log_info "Verifying deployment..."
+    sleep 10
+    
+    if kubectl get deployment "$service" -n "dev-$(whoami)" >/dev/null 2>&1; then
+        local ready_replicas=$(kubectl get deployment "$service" -n "dev-$(whoami)" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        local desired_replicas=$(kubectl get deployment "$service" -n "dev-$(whoami)" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+        
+        if [[ "$ready_replicas" == "$desired_replicas" ]]; then
+            log_success "Service is healthy ($ready_replicas/$desired_replicas replicas ready)"
+        else
+            log_warning "Service is not fully ready ($ready_replicas/$desired_replicas replicas)"
+        fi
+    fi
+    
+    # Show service URL
+    local service_url=$(kubectl get ingress "$service" -n "dev-$(whoami)" -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo "not-configured")
+    if [[ "$service_url" != "not-configured" ]]; then
+        log_info "Service URL: https://$service_url"
+    fi
+    
+    # Show monitoring links
+    log_info "Monitoring links:"
+    echo "  📊 Metrics: https://grafana.platform.company.com/d/service-overview?var-service=$service"
+    echo "  📋 Logs: platform logs $service"
+    echo "  💰 Costs: https://kubecost.platform.company.com/namespace/dev-$(whoami)"
+}
+
+# Environment management
+manage_environment() {
+    local action="$1"
+    local env_name="$2"
+    local developer=$(whoami)
+    
+    case "$action" in
+        "list")
+            log_info "Your environments:"
+            atmos describe stacks | grep "$(whoami)" | while read stack; do
+                local status=$(gaia stack status "$stack" --format json | jq -r '.status // "unknown"')
+                echo "  • $stack ($status)"
+            done
+            ;;
+        "create")
+            [[ -z "$env_name" ]] && { log_error "Environment name required"; exit 1; }
+            
+            log_info "Creating development environment: $env_name"
+            
+            # Generate unique VPC CIDR
+            local cidr_third_octet=$((100 + $(echo "$env_name" | cksum | cut -d' ' -f1) % 155))
+            local vpc_cidr="10.$cidr_third_octet.0.0/16"
+            
+            gaia template create-environment \
+                --tenant fnx \
+                --account dev \
+                --environment "$developer-$env_name" \
+                --vpc-cidr "$vpc_cidr" \
+                --owner "$developer" \
+                --auto-approve
+            
+            log_success "Environment created: fnx-dev-$developer-$env_name"
+            ;;
+        "destroy")
+            [[ -z "$env_name" ]] && { log_error "Environment name required"; exit 1; }
+            
+            log_warning "This will destroy environment: $developer-$env_name"
+            read -p "Type 'destroy' to confirm: " confirm
+            
+            if [[ "$confirm" == "destroy" ]]; then
+                gaia workflow destroy-environment \
+                    tenant=fnx \
+                    account=dev \
+                    environment="$developer-$env_name"
+                log_success "Environment destroyed"
+            else
+                log_info "Destruction cancelled"
+            fi
+            ;;
+    esac
+}
+
+# Intelligent log viewing
+view_logs() {
+    local service="$1"
+    local follow="${2:-false}"
+    local developer=$(whoami)
+    
+    [[ -z "$service" ]] && service=$(basename "$PWD")
+    
+    log_info "Viewing logs for $service..."
+    
+    # Try multiple sources
+    if kubectl get deployment "$service" -n "dev-$developer" >/dev/null 2>&1; then
+        # Kubernetes logs
+        local kubectl_args="logs deployment/$service -n dev-$developer"
+        [[ "$follow" == "--follow" ]] && kubectl_args="$kubectl_args -f"
+        kubectl $kubectl_args
+    elif aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$service" >/dev/null 2>&1; then
+        # Lambda logs
+        aws logs tail "/aws/lambda/$service" --follow
+    else
+        log_warning "No logs found for service: $service"
+        log_info "Available services:"
+        kubectl get deployments -n "dev-$developer" --no-headers | awk '{print "  • " $1}'
+    fi
+}
+
+# Cost management
+manage_costs() {
+    local action="$1"
+    local service="$2"
+    local developer=$(whoami)
+    
+    case "$action" in
+        "estimate")
+            if [[ -n "$service" ]]; then
+                gaia cost estimate --service "$service" --namespace "dev-$developer"
+            else
+                gaia cost estimate --namespace "dev-$developer"
+            fi
+            ;;
+        "current")
+            if command -v kubecost >/dev/null 2>&1; then
+                kubecost cost --namespace "dev-$developer" --window 30d
+            else
+                log_warning "Kubecost not available. Showing AWS costs..."
+                aws ce get-cost-and-usage \
+                    --time-period Start=2024-$(date +%m)-01,End=$(date +%Y-%m-%d) \
+                    --granularity MONTHLY \
+                    --metrics BlendedCost \
+                    --group-by Type=DIMENSION,Key=SERVICE
+            fi
+            ;;
+        "optimize")
+            log_info "Cost optimization recommendations:"
+            
+            # Check for oversized resources
+            kubectl top pods -n "dev-$developer" --containers | awk '
+                NR>1 && $3 ~ /Mi$/ { 
+                    cpu=$2; mem=$3;
+                    gsub(/[^0-9]/, "", mem);
+                    if (mem > 1000) print "  🔸 " $1 " using " $3 " memory - consider rightsizing"
+                }
+            '
+            
+            # Check for idle resources
+            kubectl get deployments -n "dev-$developer" -o json | jq -r '
+                .items[] | select(.status.replicas > 0 and .status.readyReplicas == 0) |
+                "  🔸 " + .metadata.name + " has " + (.status.replicas|tostring) + " replicas but none ready - consider scaling down"
+            '
+            
+            log_info "For detailed recommendations, visit: https://kubecost.platform.company.com/namespace/dev-$developer"
+            ;;
+    esac
+}
+
+# Main command router
+main() {
+    case "$COMMAND" in
+        "help"|"-h"|"--help"|"")
+            show_help
+            ;;
+        "create")
+            create_service "$2" "$3"
+            ;;
+        "deploy")
+            deploy_service "$2" "$3"
+            ;;
+        "env")
+            manage_environment "$2" "$3"
+            ;;
+        "logs")
+            view_logs "$2" "$3"
+            ;;
+        "cost")
+            manage_costs "$2" "$3"
+            ;;
+        "portal")
+            log_info "Opening developer portal..."
+            open "https://platform.company.com"
+            ;;
+        "docs")
+            log_info "Opening documentation..."
+            open "https://platform.company.com/docs"
+            ;;
+        "templates")
+            log_info "Available templates:"
+            gaia template list --format table
+            ;;
+        "scaffold")
+            local template_type="$2"
+            [[ -z "$template_type" ]] && { log_error "Template type required"; exit 1; }
+            
+            copier copy "templates/$template_type" . \
+                --data developer_name="$(whoami)" \
+                --data team="$(git config --get team.name 2>/dev/null || echo engineering)"
+            ;;
+        *)
+            log_error "Unknown command: $COMMAND"
+            echo "Run 'platform help' for usage information"
+            exit 1
+            ;;
+    esac
+}
+
+# Execute with error handling
+if ! main "$@"; then
+    log_error "Command failed. Check the logs above or contact #platform-support"
+    exit 1
+fi

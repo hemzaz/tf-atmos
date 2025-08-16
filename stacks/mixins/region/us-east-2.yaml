@@ -1,3 +1,4 @@
+---
 import:
   # Import the `ue2` manifest with `vpc` configuration for `us-east-2` region
   - catalog/vpc/ue2

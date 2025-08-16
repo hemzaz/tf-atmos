@@ -1,0 +1,466 @@
+---
+# Velero Setup for IDP Platform Backup and Restore
+# This configuration sets up Velero for comprehensive Kubernetes backup and restore
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+
+---
+# Velero ServiceAccount with IRSA for AWS access
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero
+  namespace: velero
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/VeleroServiceRole"
+
+---
+# Velero Server Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-server-config
+  namespace: velero
+data:
+  velero-server-config.yaml: |
+    # Velero server configuration
+    logLevel: info
+    logFormat: text
+
+    # Default backup storage location
+    defaultBackupStorageLocation: default
+
+    # Default volume snapshot location
+    defaultVolumeSnapshotLocations:
+      aws: default
+
+    # Backup features
+    features: EnableCSI
+
+    # Restore resource priorities
+    restoreResourcePriorities: >
+      namespaces,
+      storageclasses,
+      volumesnapshotclass.snapshot.storage.k8s.io,
+      volumesnapshotcontents.snapshot.storage.k8s.io,
+      volumesnapshots.snapshot.storage.k8s.io,
+      persistentvolumes,
+      persistentvolumeclaims,
+      secrets,
+      configmaps,
+      serviceaccounts,
+      limitranges,
+      pods,
+      replicasets.apps,
+      clusters.cluster.x-k8s.io,
+      clusterclasses.cluster.x-k8s.io
+
+---
+# Velero Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: velero
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: velero
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8085"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: velero
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      containers:
+      - name: velero
+        image: velero/velero:v1.12.1
+        imagePullPolicy: IfNotPresent
+        command:
+        - /velero
+        args:
+        - server
+        - --log-level=info
+        - --log-format=text
+        - --features=EnableCSI
+        - --default-backup-storage-location=default
+        - --default-volume-snapshot-locations=aws:default
+        - --restore-resource-priorities=namespaces,storageclasses,volumesnapshotclass.snapshot.storage.k8s.io,volumesnapshotcontents.snapshot.storage.k8s.io,volumesnapshots.snapshot.storage.k8s.io,persistentvolumes,persistentvolumeclaims,secrets,configmaps,serviceaccounts,limitranges,pods,replicasets.apps
+        - --metrics-address=0.0.0.0:8085
+        env:
+        - name: VELERO_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: VELERO_SCRATCH_DIR
+          value: /scratch
+        - name: AWS_CLUSTER_NAME
+          value: idp-platform-cluster
+        ports:
+        - name: http-monitoring
+          containerPort: 8085
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: http-monitoring
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: http-monitoring
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+          requests:
+            cpu: 500m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: plugins
+          mountPath: /plugins
+        - name: scratch
+          mountPath: /scratch
+        - name: certs
+          mountPath: /etc/ssl/certs
+      initContainers:
+      - name: velero-plugin-for-aws
+        image: velero/velero-plugin-for-aws:v1.8.2
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /target
+          name: plugins
+      - name: velero-plugin-for-csi
+        image: velero/velero-plugin-for-csi:v0.6.2
+        imagePullPolicy: IfNotPresent
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /target
+          name: plugins
+      volumes:
+      - name: plugins
+        emptyDir: {}
+      - name: scratch
+        emptyDir: {}
+      - name: certs
+        emptyDir: {}
+
+---
+# Velero BackupStorageLocation for AWS S3
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: default
+  namespace: velero
+spec:
+  provider: aws
+  objectStorage:
+    bucket: idp-platform-velero-backups
+    prefix: velero
+  config:
+    region: us-east-1
+    s3ForcePathStyle: "false"
+    checksumAlgorithm: ""
+  default: true
+
+---
+# Velero VolumeSnapshotLocation for AWS EBS
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: default
+  namespace: velero
+spec:
+  provider: aws
+  config:
+    region: us-east-1
+
+---
+# Velero Schedule for daily backups
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  template:
+    includedNamespaces:
+    - idp-system
+    - monitoring
+    - istio-system
+    - external-secrets-system
+    excludedResources:
+    - events
+    - events.events.k8s.io
+    - backups.velero.io
+    - restores.velero.io
+    storageLocation: default
+    volumeSnapshotLocations:
+    - default
+    ttl: 720h0m0s  # 30 days
+    defaultVolumesToFsBackup: true
+    snapshotVolumes: true
+    includeClusterResources: true
+
+---
+# Velero Schedule for weekly full backups
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: weekly-full-backup
+  namespace: velero
+spec:
+  schedule: "0 1 * * 0"  # Weekly on Sunday at 1 AM
+  template:
+    includedNamespaces:
+    - "*"
+    excludedNamespaces:
+    - kube-system
+    - kube-public
+    - kube-node-lease
+    excludedResources:
+    - events
+    - events.events.k8s.io
+    storageLocation: default
+    volumeSnapshotLocations:
+    - default
+    ttl: 2160h0m0s  # 90 days
+    defaultVolumesToFsBackup: true
+    snapshotVolumes: true
+    includeClusterResources: true
+
+---
+# Velero Schedule for configuration backups
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: config-backup
+  namespace: velero
+spec:
+  schedule: "0 6,18 * * *"  # Twice daily at 6 AM and 6 PM
+  template:
+    includedResources:
+    - configmaps
+    - secrets
+    - networkpolicies
+    - ingresses
+    - serviceaccounts
+    - roles
+    - rolebindings
+    - clusterroles
+    - clusterrolebindings
+    includedNamespaces:
+    - idp-system
+    - monitoring
+    - istio-system
+    storageLocation: default
+    ttl: 168h0m0s  # 7 days
+    includeClusterResources: true
+
+---
+# ServiceMonitor for Prometheus monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: velero
+  endpoints:
+  - port: http-monitoring
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+# Velero Service for metrics
+apiVersion: v1
+kind: Service
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+spec:
+  ports:
+  - name: http-monitoring
+    port: 8085
+    targetPort: http-monitoring
+  selector:
+    app.kubernetes.io/name: velero
+
+---
+# Velero RBAC
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: velero
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+- nonResourceURLs: ["*"]
+  verbs: ["*"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velero
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: velero
+subjects:
+- kind: ServiceAccount
+  name: velero
+  namespace: velero
+
+---
+# Velero Node Agent DaemonSet for file-system backups
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: node-agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: node-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: node-agent
+    spec:
+      serviceAccountName: velero
+      securityContext:
+        runAsUser: 0
+      containers:
+      - name: node-agent
+        image: velero/velero:v1.12.1
+        imagePullPolicy: IfNotPresent
+        command:
+        - /velero
+        args:
+        - node-agent
+        - server
+        - --log-level=info
+        - --log-format=text
+        - --metrics-address=0.0.0.0:8085
+        env:
+        - name: VELERO_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: VELERO_SCRATCH_DIR
+          value: /scratch
+        ports:
+        - name: http-monitoring
+          containerPort: 8085
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          privileged: false
+          runAsUser: 0
+        volumeMounts:
+        - name: host-pods
+          mountPath: /host_pods
+          mountPropagation: HostToContainer
+        - name: scratch
+          mountPath: /scratch
+        - name: certs
+          mountPath: /etc/ssl/certs
+      hostNetwork: false
+      hostPID: false
+      volumes:
+      - name: host-pods
+        hostPath:
+          path: /var/lib/kubelet/pods
+      - name: scratch
+        emptyDir: {}
+      - name: certs
+        emptyDir: {}
+
+---
+# PodDisruptionBudget for Velero high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: velero
+  namespace: velero
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: velero

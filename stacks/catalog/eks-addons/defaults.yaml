@@ -1,3 +1,4 @@
+---
 name: eks-addons
 description: "EKS cluster addons and Kubernetes resources"
 
@@ -23,7 +24,7 @@ components:
         cluster_ca_certificate: "${eks_ca_cert | default('')}"
         oidc_provider_arn: "${eks_oidc_provider_arn | default('')}"
         oidc_provider_url: "${eks_oidc_provider_url | default('')}"
-        
+
         # Enable specific addons based on variables with defaults for flexibility
         enable_metrics_server: "${eks_enable_metrics_server | default(true)}"
         enable_cluster_autoscaler: "${eks_enable_cluster_autoscaler | default(true)}"
@@ -31,10 +32,10 @@ components:
         enable_external_dns: "${eks_enable_external_dns | default(true)}"
         enable_cert_manager: "${eks_enable_cert_manager | default(true)}"
         enable_external_secrets: "${eks_enable_external_secrets | default(true)}"
-        
+
         # Map of clusters with addons, Helm releases, and Kubernetes manifests
         clusters: "${eks_addon_clusters | default('{}')}"
-        
+
         # Service account configuration
         create_service_accounts: true
         service_account_namespace: "kube-system"

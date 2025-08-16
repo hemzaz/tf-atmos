@@ -1,3 +1,4 @@
+---
 name: development
 description: "Development environment settings mixin"
 
@@ -9,7 +10,7 @@ vars:
   monitoring_enabled: false
   is_production: false
   backup_retention_days: 7
-  
+
   # Security settings for development
   security:
     enable_waf: false

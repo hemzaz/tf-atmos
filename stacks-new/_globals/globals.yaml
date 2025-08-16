@@ -1,0 +1,127 @@
+---
+# Global configuration settings applied to all stacks
+# These are the foundational settings that apply universally
+
+# Global metadata
+metadata:
+  organization: "Platform Engineering"
+  framework: "Atmos"
+  version: "2.0"
+  last_updated: "2024-08-16"
+
+# Universal variables available to all components
+vars:
+  # Organization settings
+  organization_name: "Platform Engineering"
+  organization_domain: "platform.company.com"
+
+  # Default AWS settings
+  default_region: "us-west-2"
+  backup_region: "us-east-1"
+
+  # Global networking
+  global_cidr_blocks:
+    development: "10.0.0.0/8"    # 10.0.0.0 - 10.255.255.255
+    staging: "172.16.0.0/12"     # 172.16.0.0 - 172.31.255.255
+    production: "192.168.0.0/16"  # 192.168.0.0 - 192.168.255.255
+
+  # DNS settings
+  dns:
+    domain_name: "platform.company.com"
+    hosted_zone_id: "${DNS_HOSTED_ZONE_ID}"
+    certificate_validation_method: "DNS"
+
+  # Security defaults
+  security:
+    encryption_at_rest: true
+    encryption_in_transit: true
+    enforce_ssl: true
+    enable_detailed_monitoring: true
+    enable_vpc_flow_logs: true
+
+  # Cost optimization
+  cost_optimization:
+    enable_resource_tagging: true
+    enable_cost_allocation_tags: true
+    default_backup_retention_days: 7
+    enable_lifecycle_management: true
+
+  # Monitoring and observability
+  monitoring:
+    enable_cloudwatch: true
+    enable_cloudtrail: true
+    log_retention_days: 90
+    enable_config_service: true
+
+# Global imports - configurations imported into all stacks
+imports:
+  - "settings/security"
+  - "settings/networking"
+  - "settings/compliance"
+  - "settings/tags"
+
+# Global Terraform settings
+terraform:
+  # Required Terraform version
+  required_version: ">= 1.6.0"
+
+  # Required provider versions
+  required_providers:
+    aws:
+      source: "hashicorp/aws"
+      version: "~> 5.0"
+    kubernetes:
+      source: "hashicorp/kubernetes"
+      version: "~> 2.23"
+    helm:
+      source: "hashicorp/helm"
+      version: "~> 2.11"
+    tls:
+      source: "hashicorp/tls"
+      version: "~> 4.0"
+    random:
+      source: "hashicorp/random"
+      version: "~> 3.5"
+
+# Global component settings
+components:
+  terraform:
+    # Global Terraform component settings
+    base_path: "components/terraform"
+    apply_auto_approve: false
+    deploy_run_init: true
+    auto_generate_backend_file: true
+
+    # Global backend configuration
+    backend_type: "s3"
+    backend:
+      encrypt: true
+      bucket: "${TERRAFORM_STATE_BUCKET}"
+      key: "terraform/{tenant}/{account}/{region}/{environment}/{component}.tfstate"
+      dynamodb_table: "${TERRAFORM_STATE_LOCK_TABLE}"
+      region: "${AWS_DEFAULT_REGION}"
+
+  helmfile:
+    # Global Helmfile component settings
+    base_path: "components/helmfile"
+    kubeconfig_path: "/dev/shm"
+    helm_aws_profile_pattern: "{namespace}-{tenant}-gbl-{stage}-helm"
+    cluster_name_pattern: "{namespace}-{tenant}-{stage}-{region}"
+
+# Global workflows configuration
+workflows:
+  base_path: "workflows"
+
+# Global validation settings
+schemas:
+  # Component validation
+  opa:
+    base_path: "stacks/schemas/opa"
+
+  jsonschema:
+    base_path: "stacks/schemas/jsonschema"
+
+# Global stack naming pattern
+stacks:
+  name_pattern: "{tenant}-{account}-{region}-{environment}"
+  name_template: "{{ .tenant }}-{{ .account }}-{{ .region }}-{{ .environment }}"

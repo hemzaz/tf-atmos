@@ -1,3 +1,4 @@
+---
 ##################################################
 # Catalog Configuration for AWS Secrets Manager
 ##################################################
@@ -10,15 +11,15 @@ secretsmanager:
     context_name: "common"
     name: "secretsmanager"
     secrets_enabled: true
-    
+
     # Default KMS settings - should be overridden with account-specific KMS key
     default_kms_key_id: null
-    
+
     # Default rotation settings
     default_rotation_days: 30
     default_rotation_automatically: false
     default_recovery_window_in_days: 30
-    
+
     # Random password generation settings
     random_password_length: 32
     random_password_special: true
@@ -36,7 +37,7 @@ secretsmanager_app_db:
     context_name: "app"
     name: "database-secrets"
     secrets_enabled: true
-    
+
     # Example secrets definition (to be overridden per environment)
     secrets:
       db_credentials:
@@ -44,7 +45,7 @@ secretsmanager_app_db:
         description: "Application database credentials"
         path: "database"
         generate_random_password: true
-        
+
       db_connection:
         name: "connection"
         description: "Application database connection string"
@@ -57,9 +58,9 @@ secretsmanager_api:
   vars:
     enabled: true
     context_name: "app"
-    name: "api-secrets" 
+    name: "api-secrets"
     secrets_enabled: true
-    
+
     # Example secrets definition (to be overridden per environment)
     secrets:
       api_key:
@@ -67,7 +68,7 @@ secretsmanager_api:
         description: "API key for external services"
         path: "integration"
         generate_random_password: true
-      
+
       jwt_secret:
         name: "jwt-secret"
         description: "JWT signing secret"
@@ -82,7 +83,7 @@ secretsmanager_infra:
     context_name: "infra"
     name: "infra-secrets"
     secrets_enabled: true
-    
+
     # Default rotation settings for infrastructure
     default_rotation_days: 90
     default_rotation_automatically: true

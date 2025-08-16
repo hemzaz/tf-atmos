@@ -1,9 +1,10 @@
+---
 vars:
   tenant: catalog
   account: shared
   environment: global
   stage: uw2
   region: us-west-2
-  
+
 imports:
   - catalog/vpc/defaults

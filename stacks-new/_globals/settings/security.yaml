@@ -1,0 +1,194 @@
+---
+# Global security configuration settings
+# Applied to all stacks to ensure consistent security posture
+
+# Security baseline variables
+vars:
+  # Global security settings
+  security_baseline:
+    # Encryption settings
+    encryption:
+      kms_key_rotation_enabled: true
+      s3_default_encryption: "AES256"
+      ebs_encryption_by_default: true
+      rds_encryption_at_rest: true
+
+    # Access control
+    access_control:
+      enforce_mfa: true
+      password_policy_enabled: true
+      session_duration: 3600  # 1 hour
+      max_session_duration: 43200  # 12 hours
+
+    # Network security
+    network:
+      default_security_group_ingress: []  # No ingress by default
+      default_security_group_egress:
+        - protocol: "-1"
+          from_port: 0
+          to_port: 0
+          cidr_blocks: ["0.0.0.0/0"]
+      vpc_enable_dns_hostnames: true
+      vpc_enable_dns_support: true
+
+    # Logging and monitoring
+    logging:
+      cloudtrail_enabled: true
+      config_enabled: true
+      guardduty_enabled: true
+      security_hub_enabled: true
+      access_logging_enabled: true
+
+    # Compliance
+    compliance:
+      aws_config_conformance_packs: ["Security-Best-Practices-for-S3"]
+      enable_security_standards: true
+
+  # IAM security settings
+  iam_security:
+    # Password policy
+    password_policy:
+      minimum_password_length: 14
+      require_uppercase_characters: true
+      require_lowercase_characters: true
+      require_numbers: true
+      require_symbols: true
+      allow_users_to_change_password: true
+      max_password_age: 90
+      password_reuse_prevention: 12
+      hard_expiry: false
+
+    # Account settings
+    account_settings:
+      allow_users_to_change_password: true
+      hard_expiry: false
+      max_password_age: 90
+      minimum_password_length: 14
+      password_reuse_prevention: 12
+      require_lowercase_characters: true
+      require_numbers: true
+      require_symbols: true
+      require_uppercase_characters: true
+
+  # KMS security settings
+  kms_security:
+    key_policy_template: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::${AWS_ACCOUNT_ID}:root"
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+          },
+          {
+            "Sid": "Allow use of the key",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "${KEY_USERS}"
+            },
+            "Action": [
+              "kms:Encrypt",
+              "kms:Decrypt",
+              "kms:ReEncrypt*",
+              "kms:GenerateDataKey*",
+              "kms:DescribeKey"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+
+  # S3 security settings
+  s3_security:
+    # Default bucket policy
+    default_bucket_policy_template: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "DenyInsecureConnections",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:*",
+            "Resource": [
+              "arn:aws:s3:::${BUCKET_NAME}/*",
+              "arn:aws:s3:::${BUCKET_NAME}"
+            ],
+            "Condition": {
+              "Bool": {
+                "aws:SecureTransport": "false"
+              }
+            }
+          }
+        ]
+      }
+
+    # Default bucket settings
+    default_settings:
+      versioning_enabled: true
+      server_side_encryption_configuration:
+        rule:
+          apply_server_side_encryption_by_default:
+            sse_algorithm: "AES256"
+      public_access_block:
+        block_public_acls: true
+        block_public_policy: true
+        ignore_public_acls: true
+        restrict_public_buckets: true
+
+  # Security group defaults
+  security_group_defaults:
+    # Default ingress rules (restrictive)
+    default_ingress: []
+
+    # Default egress rules (allow all outbound)
+    default_egress:
+      - from_port: 0
+        to_port: 0
+        protocol: "-1"
+        cidr_blocks: ["0.0.0.0/0"]
+        description: "Allow all outbound traffic"
+
+    # Common security group rules
+    common_rules:
+      ssh:
+        from_port: 22
+        to_port: 22
+        protocol: "tcp"
+        description: "SSH access"
+
+      https:
+        from_port: 443
+        to_port: 443
+        protocol: "tcp"
+        description: "HTTPS access"
+
+      http:
+        from_port: 80
+        to_port: 80
+        protocol: "tcp"
+        description: "HTTP access"
+
+      kubernetes_api:
+        from_port: 443
+        to_port: 443
+        protocol: "tcp"
+        description: "Kubernetes API server"
+
+# Security-focused component defaults
+components:
+  terraform:
+    # Security-related components get additional validation
+    security_components: ["iam", "kms", "secretsmanager", "security-group"]
+
+    # Default security tags applied to all resources
+    default_security_tags:
+      SecurityLevel: "Standard"
+      DataClassification: "Internal"
+      EncryptionRequired: "true"
+      BackupRequired: "true"

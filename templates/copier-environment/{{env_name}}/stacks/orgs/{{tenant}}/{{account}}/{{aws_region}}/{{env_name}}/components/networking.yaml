@@ -19,7 +19,7 @@ components:
         vpc_flow_logs_retention_in_days: 30
 {% endif %}
         vpc_flow_logs_bucket_name: "{{ env_name }}-vpc-flow-logs"
-        
+
     securitygroup:
       vars:
         enabled: true

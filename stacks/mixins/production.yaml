@@ -1,3 +1,4 @@
+---
 name: production
 description: "Production environment settings mixin"
 
@@ -9,7 +10,7 @@ vars:
   monitoring_enabled: true
   is_production: true
   backup_retention_days: 30
-  
+
   # Security settings for production
   security:
     enable_waf: true

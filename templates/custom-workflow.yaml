@@ -1,3 +1,4 @@
+---
 # Template: Custom Atmos Workflow
 # This template follows the best practices outlined in GUIDELINES.md
 # Replace placeholder values and comments with your actual implementation
@@ -35,7 +36,7 @@ steps:
       - component1
       - -s
       - "{tenant}-{account}-{environment}"
-  
+
   # Planning step
   - name: plan
     description: "Plan deployment changes"
@@ -46,7 +47,7 @@ steps:
       - component1
       - -s
       - "{tenant}-{account}-{environment}"
-  
+
   # Confirmation step
   - name: confirm
     description: "Confirm deployment"
@@ -54,7 +55,7 @@ steps:
     args:
       - "Do you want to continue with the deployment? (Press Ctrl+C to cancel)"
     interactive: true
-  
+
   # Apply step
   - name: apply
     description: "Apply changes"
@@ -66,7 +67,7 @@ steps:
       - -s
       - "{tenant}-{account}-{environment}"
       - --auto-approve
-  
+
   # Additional component steps
   - name: deploy_component2
     description: "Deploy component2"
@@ -78,7 +79,7 @@ steps:
       - -s
       - "{tenant}-{account}-{environment}"
       - --auto-approve
-  
+
   # Verification step
   - name: verify
     description: "Verify deployment"
@@ -89,7 +90,7 @@ steps:
       - component1
       - -s
       - "{tenant}-{account}-{environment}"
-  
+
   # Success message
   - name: success
     description: "Deployment completed successfully"

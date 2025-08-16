@@ -1,26 +1,274 @@
+---
 name: drift-detection
-description: "Detect infrastructure drift in an environment"
+description: "Detect infrastructure drift in an environment by comparing current state with configuration"
 
 workflows:
   drift-detection:
+    description: "Comprehensive drift detection with detailed reporting and remediation guidance"
     steps:
-    - run:
+    - name: "validate-inputs"
+      description: "Validate required parameters and environment"
+      run:
         command: |
-          # Use Python-based CLI to detect drift
-          gaia workflow drift-detection \
-            --tenant ${tenant} \
-            --account ${account} \
-            --environment ${environment} \
-            --parallel ${parallel:-true}
-            
-          EXIT_CODE=$?
-          
-          if [ $EXIT_CODE -eq 1 ]; then
-            echo "🚨 DRIFT DETECTED in one or more components! 🚨"
-            echo "Run 'gaia workflow plan-environment' to see details."
+          set -euo pipefail
+
+          echo "=== Atmos Workflow: Drift Detection ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # Validate required parameters
+          if [ -z "${tenant:-}" ]; then
+            echo "ERROR: Missing required parameter 'tenant'"
+            echo "Usage: atmos workflow drift-detection -f drift-detection.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          if [ -z "${account:-}" ]; then
+            echo "ERROR: Missing required parameter 'account'"
+            echo "Usage: atmos workflow drift-detection -f drift-detection.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          if [ -z "${environment:-}" ]; then
+            echo "ERROR: Missing required parameter 'environment'"
+            echo "Usage: atmos workflow drift-detection -f drift-detection.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          STACK="${tenant}-${account}-${environment}"
+          PARALLEL="${parallel:-true}"
+          REPORT_FORMAT="${report_format:-both}"
+
+          echo "Configuration:"
+          echo "  Stack: $STACK"
+          echo "  Parallel Execution: $PARALLEL"
+          echo "  Report Format: $REPORT_FORMAT"
+
+          # Validate AWS credentials
+          if ! aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "ERROR: Invalid AWS credentials or AWS CLI not configured"
+            exit 1
+          fi
+
+          echo "✅ Input validation and AWS credentials check complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "pre-drift-checks"
+      description: "Run pre-drift validation checks"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Pre-Drift Checks ==="
+
+          STACK="${tenant}-${account}-${environment}"
+
+          # Check stack exists
+          if ! atmos list stacks | grep -q "$STACK"; then
+            echo "ERROR: Stack $STACK not found in Atmos configuration"
+            echo "Available stacks:"
+            atmos list stacks
+            exit 1
+          fi
+
+          # Get components list
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "WARNING: No components found for stack $STACK"
+            exit 0
+          fi
+
+          echo "Components to check for drift: $COMPONENTS"
+
+          # Quick validation that components are accessible
+          for component in $COMPONENTS; do
+            echo "Checking component accessibility: $component"
+            if ! atmos terraform validate "$component" -s "$STACK" >/dev/null 2>&1; then
+              echo "WARNING: Component $component may have configuration issues"
+            fi
+          done
+
+          echo "✅ Pre-drift checks complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "detect-drift"
+      description: "Run drift detection on all components"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Drift Detection ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          PARALLEL="${parallel:-true}"
+          DRIFT_DIR="./logs/drift/${STACK}-$(date +%Y%m%d-%H%M%S)"
+
+          # Create drift report directory
+          mkdir -p "$DRIFT_DIR"
+          echo "Drift reports will be saved to: $DRIFT_DIR"
+
+          # Get components list
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "No components to check for drift"
+            exit 0
+          fi
+
+          # Initialize tracking variables
+          DRIFT_DETECTED=false
+          DRIFTED_COMPONENTS=""
+          NO_DRIFT_COMPONENTS=""
+          ERROR_COMPONENTS=""
+
+          echo "Running drift detection on components: $COMPONENTS"
+
+          # Check each component for drift using plan with detailed exit code
+          for component in $COMPONENTS; do
+            echo "\nChecking drift for component: $component"
+
+            DRIFT_PLAN_FILE="$DRIFT_DIR/${component}-drift.tfplan"
+            DRIFT_OUTPUT_FILE="$DRIFT_DIR/${component}-drift.txt"
+
+            # Run plan with detailed exit code to detect changes
+            set +e  # Temporarily disable exit on error to capture exit code
+
+            atmos terraform plan "$component" -s "$STACK" -detailed-exitcode -out="$DRIFT_PLAN_FILE" > "$DRIFT_OUTPUT_FILE" 2>&1
+            PLAN_EXIT_CODE=$?
+
+            set -e  # Re-enable exit on error
+
+            case $PLAN_EXIT_CODE in
+              0)
+                echo "✅ No drift detected for $component"
+                NO_DRIFT_COMPONENTS="$NO_DRIFT_COMPONENTS $component"
+                ;;
+              2)
+                echo "⚠️  DRIFT DETECTED for $component"
+                DRIFT_DETECTED=true
+                DRIFTED_COMPONENTS="$DRIFTED_COMPONENTS $component"
+
+                # Extract drift summary
+                if [ -f "$DRIFT_OUTPUT_FILE" ]; then
+                  echo "Drift summary:"
+                  grep -E "to add|to change|to destroy|# will be" "$DRIFT_OUTPUT_FILE" | head -5 || echo "Unable to parse drift details"
+                fi
+                ;;
+              *)
+                echo "❌ Error checking drift for $component (exit code: $PLAN_EXIT_CODE)"
+                ERROR_COMPONENTS="$ERROR_COMPONENTS $component"
+
+                # Show error details
+                if [ -f "$DRIFT_OUTPUT_FILE" ]; then
+                  echo "Error details:"
+                  tail -10 "$DRIFT_OUTPUT_FILE"
+                fi
+                ;;
+            esac
+          done
+
+          echo "\n=== Drift Detection Summary ==="
+          echo "Components with no drift:$NO_DRIFT_COMPONENTS"
+          if [ -n "$DRIFTED_COMPONENTS" ]; then
+            echo "Components with drift:$DRIFTED_COMPONENTS"
+          fi
+          if [ -n "$ERROR_COMPONENTS" ]; then
+            echo "Components with errors:$ERROR_COMPONENTS"
+          fi
+
+          # Create comprehensive drift report
+          DRIFT_REPORT="$DRIFT_DIR/drift-report.json"
+          {
+            echo "{"
+            echo "  \"report_id\": \"$(date +%Y%m%d-%H%M%S)\","
+            echo "  \"stack\": \"$STACK\","
+            echo "  \"timestamp\": \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\","
+            echo "  \"drift_detected\": $( [ "$DRIFT_DETECTED" = true ] && echo "true" || echo "false" ),"
+            echo "  \"summary\": {"
+            echo "    \"total_components\": $(echo $COMPONENTS | wc -w),"
+            echo "    \"no_drift_count\": $(echo $NO_DRIFT_COMPONENTS | wc -w),"
+            echo "    \"drift_count\": $(echo $DRIFTED_COMPONENTS | wc -w),"
+            echo "    \"error_count\": $(echo $ERROR_COMPONENTS | wc -w)"
+            echo "  },"
+            echo "  \"components\": {"
+            echo "    \"no_drift\":$(echo \"$NO_DRIFT_COMPONENTS\" | sed 's/ /", "/g' | sed 's/^/["/; s/$/"]/'),"
+            echo "    \"drifted\":$(echo \"$DRIFTED_COMPONENTS\" | sed 's/ /", "/g' | sed 's/^/["/; s/$/"]/'),"
+            echo "    \"errors\":$(echo \"$ERROR_COMPONENTS\" | sed 's/ /", "/g' | sed 's/^/["/; s/$/"]/') "
+            echo "  }"
+            echo "}"
+          } > "$DRIFT_REPORT"
+
+          echo "\nDetailed drift report saved to: $DRIFT_REPORT"
+
+          # Exit with appropriate code
+          if [ "$DRIFT_DETECTED" = true ]; then
+            echo "\n🚨 DRIFT DETECTED in one or more components!"
+            exit 1
+          elif [ -n "$ERROR_COMPONENTS" ]; then
+            echo "\n⚠️  Errors occurred during drift detection"
+            exit 2
+          else
+            echo "\n✅ No drift detected in any components"
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "drift-remediation-guidance"
+      description: "Provide guidance for drift remediation"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Step: Remediation Guidance ==="
+
+          STACK="${tenant}-${account}-${environment}"
+          DRIFT_DIR="./logs/drift/${STACK}-$(date +%Y%m%d-%H%M%S)"
+
+          # This step runs regardless of drift detection results
+          set +e
+          DRIFT_DETECTED=$([ -f "$DRIFT_DIR/drift-report.json" ] && grep -q '"drift_detected": true' "$DRIFT_DIR/drift-report.json" && echo "true" || echo "false")
+          set -e
+
+          if [ "$DRIFT_DETECTED" = "true" ]; then
+            echo "ℹ️  Drift Remediation Options:"
+            echo "1. Review drift details in: $DRIFT_DIR"
+            echo "2. Generate detailed plans: atmos workflow plan-environment -f plan-environment.yaml tenant=$tenant account=$account environment=$environment"
+            echo "3. Apply corrections: atmos workflow apply-environment -f apply-environment.yaml tenant=$tenant account=$account environment=$environment auto_approve=true"
+            echo "4. Manual review: Check individual components with 'atmos terraform plan <component> -s $STACK'"
+            echo
+            echo "⚠️  IMPORTANT: Always review changes before applying them to production environments"
+          else
+            echo "✅ No remediation required - infrastructure is in sync with configuration"
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "drift-summary"
+      description: "Provide final drift detection summary"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "\n=== Drift Detection Complete ==="
+          echo "Stack: ${tenant}-${account}-${environment}"
+          echo "Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # Determine final status
+          DRIFT_DIR="./logs/drift/${tenant}-${account}-${environment}-$(date +%Y%m%d-%H%M%S)"
+
+          set +e
+          DRIFT_DETECTED=$([ -f "$DRIFT_DIR/drift-report.json" ] && grep -q '"drift_detected": true' "$DRIFT_DIR/drift-report.json" && echo "true" || echo "false")
+          set -e
+
+          if [ "$DRIFT_DETECTED" = "true" ]; then
+            echo "🚨 Status: DRIFT DETECTED"
+            echo "Action Required: Review and remediate drifted components"
             exit 1
           else
-            echo "✅ No drift detected in any components"
+            echo "✅ Status: NO DRIFT DETECTED"
+            echo "Infrastructure is in sync with configuration"
           fi
         env:
           AWS_SDK_LOAD_CONFIG: 1

@@ -1,3 +1,4 @@
+---
 name: securitygroup
 description: "Security group management"
 
@@ -17,18 +18,18 @@ components:
         enabled: true
         region: "${region}"
         vpc_id: "${output.vpc.vpc_id}"
-        
+
         # Security group configurations
         create_default_security_group: "${create_default_sg | default(true)}"
         default_security_group_name: "${tenant}-${account}-${environment}-default-sg"
-        
+
         # Database security group
         create_database_security_group: "${create_db_sg | default(true)}"
         database_security_group_name: "${tenant}-${account}-${environment}-db-sg"
-        
+
         # Custom security groups
         security_groups: "${security_groups | default('{}')}"
-        
+
       # Define common tags
       tags:
         Tenant: "${tenant}"
@@ -36,7 +37,7 @@ components:
         Environment: "${environment}"
         Component: "SecurityGroup"
         ManagedBy: "Terraform"
-        
+
       # Terraform backend configuration
       settings:
         terraform:
@@ -47,12 +48,12 @@ components:
               region: "${region}"
               role_arn: "arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role"
               dynamodb_table: "${tenant}-terraform-locks"
-              
+
       # Provider configuration
       providers:
         aws:
           region: "${region}"
-          
+
       # Define outputs with improved descriptions
       outputs:
         default_security_group_id:

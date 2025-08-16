@@ -1,3 +1,4 @@
+---
 import:
   # Import the catalog with vpc configuration for eu-west-2 region
   - catalog/vpc/defaults

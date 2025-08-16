@@ -1,3 +1,4 @@
+---
 name: acm
 description: "ACM certificate management"
 
@@ -15,18 +16,18 @@ components:
         enabled: true
         region: ${region}
         zone_id: ${zone_id | default("")}
-        
+
         # Define certificates
         dns_domains: ${acm_dns_domains | default('{}')}
-        
+
         # Cross-region certificate replication
         enable_cross_region_replication: ${acm_cross_region | default(false)}
         target_regions: ${acm_target_regions | default([])}
-        
+
         # Certificate validation options
         validation_method: ${acm_validation_method | default("DNS")}
         wait_for_validation: ${acm_wait_for_validation | default(true)}
-        
+
       # Define common tags
       tags:
         Tenant: ${tenant}
@@ -34,7 +35,7 @@ components:
         Environment: ${environment}
         Component: "ACM"
         ManagedBy: "Terraform"
-        
+
       # Terraform backend configuration
       settings:
         terraform:
@@ -45,12 +46,12 @@ components:
               region: ${region}
               role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
               dynamodb_table: ${tenant}-terraform-locks
-              
+
       # Provider configuration
       providers:
         aws:
           region: ${region}
-          
+
       # Define outputs with improved descriptions
       outputs:
         certificate_arns:

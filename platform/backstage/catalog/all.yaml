@@ -1,0 +1,236 @@
+---
+apiVersion: backstage.io/v1alpha1
+kind: Location
+metadata:
+  name: platform-catalog-discovery
+  title: Platform Catalog Discovery
+  description: Discovers all platform components, services, and templates
+  annotations:
+    backstage.io/managed-by-location: 'file:catalog/all.yaml'
+spec:
+  targets:
+    # Infrastructure Components Discovery
+    - ../../infrastructure/components/terraform/*/catalog-info.yaml
+
+    # Service Catalog Discovery
+    - ../../catalog/services/*/catalog-info.yaml
+    - ../../catalog/services/*/*/catalog-info.yaml
+
+    # Software Templates Discovery
+    - ../../catalog/templates/*/template.yaml
+
+    # System Definitions
+    - ../../catalog/systems/*.yaml
+
+    # Platform Components
+    - ./components/*.yaml
+    - ./systems/*.yaml
+    - ./domains/*.yaml
+
+    # User and Group Definitions
+    - ./org/*.yaml
+
+---
+# Platform Domain Definition
+apiVersion: backstage.io/v1alpha1
+kind: Domain
+metadata:
+  name: platform
+  title: Platform Engineering
+  description: Internal Developer Platform and Infrastructure
+  tags:
+    - platform
+    - infrastructure
+    - devops
+spec:
+  owner: platform-team
+
+---
+# Infrastructure System
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: infrastructure
+  title: Infrastructure Foundation
+  description: Core AWS infrastructure components managed by Terraform/Atmos
+  tags:
+    - infrastructure
+    - aws
+    - terraform
+    - atmos
+  annotations:
+    backstage.io/source-location: 'dir:../../infrastructure/'
+spec:
+  owner: platform-team
+  domain: platform
+
+---
+# Developer Platform System
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: developer-platform
+  title: Developer Platform
+  description: Self-service developer tools and automation
+  tags:
+    - platform
+    - self-service
+    - automation
+  annotations:
+    backstage.io/source-location: 'dir:../../platform/'
+spec:
+  owner: platform-team
+  domain: platform
+
+---
+# Service Catalog System
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: service-catalog
+  title: Service Catalog
+  description: Discoverable services and templates for developers
+  tags:
+    - catalog
+    - services
+    - templates
+  annotations:
+    backstage.io/source-location: 'dir:../../catalog/'
+spec:
+  owner: platform-team
+  domain: platform
+
+---
+# Platform Team Definition
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: platform-team
+  title: Platform Engineering Team
+  description: Team responsible for internal developer platform
+spec:
+  type: team
+  children: []
+
+---
+# Platform APIs
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: platform-api
+  title: Platform API
+  description: REST API for platform operations and Atmos integration
+  tags:
+    - api
+    - platform
+    - atmos
+  annotations:
+    backstage.io/source-location: 'dir:../../platform/api/'
+spec:
+  type: openapi
+  lifecycle: production
+  owner: platform-team
+  system: developer-platform
+  definition: |
+    openapi: 3.0.0
+    info:
+      title: Platform API
+      version: 1.0.0
+      description: Internal Developer Platform API for Atmos integration
+    servers:
+      - url: https://api.platform.company.com/api/v1
+    paths:
+      /atmos/stacks:
+        get:
+          summary: Get all Atmos stacks
+          tags: [Atmos]
+          responses:
+            '200':
+              description: List of Atmos stacks
+      /atmos/components:
+        get:
+          summary: Get all Atmos components
+          tags: [Atmos]
+          responses:
+            '200':
+              description: List of Atmos components
+      /atmos/workflows/execute:
+        post:
+          summary: Execute Atmos workflow
+          tags: [Atmos]
+          requestBody:
+            required: true
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    workflow:
+                      type: string
+                    stack:
+                      type: string
+                    parameters:
+                      type: object
+          responses:
+            '200':
+              description: Workflow execution result
+
+---
+# Atmos API
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: atmos-api
+  title: Atmos Integration API
+  description: Direct integration with Atmos CLI and workflows
+  tags:
+    - atmos
+    - terraform
+    - infrastructure
+spec:
+  type: rest
+  lifecycle: production
+  owner: platform-team
+  system: infrastructure
+  definition:
+    $text: https://backstage.company.com/api/atmos/docs
+
+---
+# Cost Tracking API
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: cost-api
+  title: Cost Tracking API
+  description: Infrastructure cost analysis and tracking
+  tags:
+    - cost
+    - finops
+    - analytics
+spec:
+  type: rest
+  lifecycle: production
+  owner: platform-team
+  system: developer-platform
+  definition:
+    $text: https://backstage.company.com/api/cost/docs
+
+---
+# Compliance API
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: compliance-api
+  title: Compliance Checking API
+  description: Security and compliance validation
+  tags:
+    - compliance
+    - security
+    - governance
+spec:
+  type: rest
+  lifecycle: production
+  owner: platform-team
+  system: developer-platform
+  definition:
+    $text: https://backstage.company.com/api/compliance/docs

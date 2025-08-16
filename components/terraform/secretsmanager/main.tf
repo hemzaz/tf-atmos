@@ -39,7 +39,7 @@ resource "random_password" "this" {
   min_upper        = var.random_password_min_upper
   min_numeric      = var.random_password_min_numeric
   min_special      = var.random_password_min_special
-  
+
   lifecycle {
     # Ensure passwords are treated as sensitive values
     precondition {
@@ -65,13 +65,13 @@ resource "aws_secretsmanager_secret" "this" {
       condition     = each.value.kms_key_id != null || var.default_kms_key_id != null
       error_message = "Either default_kms_key_id or individual secret kms_key_id must be set to ensure encryption."
     }
-    
+
     # Validate recovery window is reasonable
     precondition {
       condition     = each.value.recovery_window_in_days >= 7 || each.value.recovery_window_in_days == 0
       error_message = "Recovery window should be either 0 (force delete with no window) or at least 7 days for security (recommended: 7-30 days)."
     }
-    
+
     # Add explicit protection for production secrets
     precondition {
       condition     = !contains(["prod", "production"], lower(module.this.environment)) || each.value.recovery_window_in_days >= 7
@@ -100,23 +100,15 @@ resource "aws_secretsmanager_secret_version" "this" {
       # First check if random password is being generated or if secret data is null (both are valid)
       # Then check if it doesn't look like JSON (starts with '{') - if not JSON, no validation needed
       # Finally, if it looks like JSON, validate it can be decoded and is not empty
-      condition     = each.value.generate_random_password || 
-                     (each.value.secret_data == null) || 
-                     (!can(regex("^\\s*\\{", each.value.secret_data))) || 
-                     (can(jsondecode(each.value.secret_data)) && length(jsondecode(each.value.secret_data)) > 0)
+      condition     = each.value.generate_random_password || (each.value.secret_data == null) || (!can(regex("^\\s*\\{", each.value.secret_data))) || (can(jsondecode(each.value.secret_data)) && length(jsondecode(each.value.secret_data)) > 0)
       error_message = "Secret data for ${each.key} appears to be JSON but is not valid or is empty. Ensure the JSON is well-formed and contains data."
     }
-    
+
     # Add comprehensive validation for sensitive data patterns
     precondition {
       # Check that secrets don't contain obviously hardcoded credentials in dev/test patterns
       # More comprehensive regex pattern to catch various forms of weak or test credentials
-      condition     = each.value.generate_random_password || each.value.secret_data == null ||
-                      !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", each.value.secret_data)) &&
-                      !can(regex("(?i)(AKIA[0-9A-Z]{16})", each.value.secret_data)) &&  # AWS Access Key pattern
-                      !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", each.value.secret_data)) &&  # Stripe secret key pattern
-                      !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", each.value.secret_data)) && # GitHub PAT
-                      !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", each.value.secret_data))  # Generic API key patterns
+      condition     = each.value.generate_random_password || each.value.secret_data == null || (!can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", each.value.secret_data)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", each.value.secret_data)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", each.value.secret_data)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", each.value.secret_data)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", each.value.secret_data)))
       error_message = "Secret data for ${each.key} appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without using predictable patterns."
     }
   }
@@ -140,14 +132,14 @@ resource "aws_secretsmanager_secret_rotation" "this" {
   rotation_rules {
     automatically_after_days = each.value.rotation_days
   }
-  
+
   # Add validation for Lambda ARN format and rotation days
   lifecycle {
     precondition {
       condition     = can(regex("^arn:aws:lambda:[a-z0-9-]+:[0-9]{12}:function:.+$", each.value.rotation_lambda_arn))
       error_message = "The rotation_lambda_arn must be a valid Lambda function ARN (e.g., arn:aws:lambda:region:account-id:function:function-name)."
     }
-    
+
     precondition {
       condition     = each.value.rotation_days >= 1 && each.value.rotation_days <= 365
       error_message = "The rotation_days value must be between 1 and 365."

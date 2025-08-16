@@ -84,7 +84,7 @@ variable "multi_az" {
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to resources"
-  default     = {
+  default = {
     Environment = "dev"
     Terraform   = "true"
   }
@@ -105,7 +105,7 @@ resource "aws_secretsmanager_secret" "db_password" {
 }
 
 resource "aws_secretsmanager_secret_version" "db_password" {
-  secret_id     = aws_secretsmanager_secret.db_password.id
+  secret_id = aws_secretsmanager_secret.db_password.id
   secret_string = jsonencode({
     username = var.username
     password = random_password.db_password.result
@@ -230,20 +230,20 @@ resource "aws_db_instance" "postgres" {
   db_subnet_group_name   = aws_db_subnet_group.postgres.name
   parameter_group_name   = aws_db_parameter_group.postgres.name
   option_group_name      = null
-  
+
   # Backup settings
-  backup_retention_period = 7
-  backup_window           = "03:00-06:00"
-  maintenance_window      = "Mon:00:00-Mon:03:00"
-  copy_tags_to_snapshot   = true
-  skip_final_snapshot     = false
+  backup_retention_period   = 7
+  backup_window             = "03:00-06:00"
+  maintenance_window        = "Mon:00:00-Mon:03:00"
+  copy_tags_to_snapshot     = true
+  skip_final_snapshot       = false
   final_snapshot_identifier = "${var.identifier}-final-snapshot"
-  delete_automated_backups = true
-  
+  delete_automated_backups  = true
+
   # Monitoring settings
   monitoring_interval = 60
   monitoring_role_arn = aws_iam_role.rds_monitoring.arn
-  
+
   # Advanced settings
   auto_minor_version_upgrade  = true
   allow_major_version_upgrade = false
@@ -251,10 +251,10 @@ resource "aws_db_instance" "postgres" {
   deletion_protection         = true
   multi_az                    = var.multi_az
   publicly_accessible         = false
-  
+
   # Performance Insights
-  performance_insights_enabled    = true
-  performance_insights_kms_key_id = aws_kms_key.postgres.arn
+  performance_insights_enabled          = true
+  performance_insights_kms_key_id       = aws_kms_key.postgres.arn
   performance_insights_retention_period = 7
 
   tags = var.tags
@@ -318,7 +318,7 @@ resource "aws_cloudwatch_metric_alarm" "free_storage_space_low" {
   namespace           = "AWS/RDS"
   period              = 300
   statistic           = "Average"
-  threshold           = 5 * 1024 * 1024 * 1024  # 5 GB in bytes
+  threshold           = 5 * 1024 * 1024 * 1024 # 5 GB in bytes
   alarm_description   = "This metric monitors RDS free storage space"
   alarm_actions       = []
 
@@ -337,7 +337,7 @@ resource "aws_cloudwatch_metric_alarm" "freeable_memory_low" {
   namespace           = "AWS/RDS"
   period              = 300
   statistic           = "Average"
-  threshold           = 128 * 1024 * 1024  # 128 MB in bytes
+  threshold           = 128 * 1024 * 1024 # 128 MB in bytes
   alarm_description   = "This metric monitors RDS freeable memory"
   alarm_actions       = []
 

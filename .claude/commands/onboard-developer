@@ -1,0 +1,199 @@
+#!/bin/bash
+# 15-Minute Developer Onboarding Script
+# Creates complete developer environment with golden paths
+
+set -e
+
+DEVELOPER_NAME="${1:-$(whoami)}"
+TEAM="${2:-engineering}"
+ENVIRONMENT="${3:-dev}"
+
+echo "🚀 Welcome to the Platform! Setting up your developer environment..."
+
+# 1. Validate prerequisites (2 minutes)
+echo "⚙️  Checking prerequisites..."
+check_prerequisites() {
+    command -v atmos >/dev/null 2>&1 || { echo "❌ Atmos CLI not found. Run: brew install atmos"; exit 1; }
+    command -v terraform >/dev/null 2>&1 || { echo "❌ Terraform not found. Run: brew install terraform"; exit 1; }
+    command -v gaia >/dev/null 2>&1 || { echo "❌ Gaia CLI not found. Run: pip install -e ."; exit 1; }
+    echo "✅ All prerequisites installed"
+}
+
+# 2. Platform authentication (1 minute)
+authenticate_platform() {
+    echo "🔐 Setting up platform authentication..."
+    
+    # AWS SSO setup
+    aws configure sso --profile platform-${TEAM}
+    
+    # Kubernetes access
+    aws eks update-kubeconfig --region us-west-2 --name fnx-dev-testenv-01 --profile platform-${TEAM}
+    
+    echo "✅ Authentication configured"
+}
+
+# 3. Create developer workspace (5 minutes)
+create_workspace() {
+    echo "🏗️  Creating your developer workspace..."
+    
+    # Create developer namespace in Kubernetes
+    kubectl create namespace "dev-${DEVELOPER_NAME}" --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Set up development environment
+    gaia template create-environment \
+        --tenant fnx \
+        --account dev \
+        --environment "${DEVELOPER_NAME}-sandbox" \
+        --vpc-cidr "10.$(shuf -i 100-200 -n1).0.0/16" \
+        --validate
+    
+    # Deploy developer tools
+    helm upgrade --install dev-tools ./charts/developer-tools \
+        --namespace "dev-${DEVELOPER_NAME}" \
+        --set developer.name="${DEVELOPER_NAME}" \
+        --set developer.team="${TEAM}"
+    
+    echo "✅ Workspace created: dev-${DEVELOPER_NAME}"
+}
+
+# 4. Deploy sample application (3 minutes)
+deploy_sample_app() {
+    echo "📦 Deploying sample application..."
+    
+    # Create from golden path template
+    copier copy templates/microservice-nodejs "sample-app-${DEVELOPER_NAME}" \
+        --data developer_name="${DEVELOPER_NAME}" \
+        --data team="${TEAM}" \
+        --data environment="${ENVIRONMENT}"
+    
+    cd "sample-app-${DEVELOPER_NAME}"
+    
+    # Deploy infrastructure
+    gaia workflow apply-component component=lambda stack="fnx-dev-${DEVELOPER_NAME}-sandbox"
+    
+    # Deploy application
+    skaffold deploy --default-repo="${AWS_ACCOUNT_ID}.dkr.ecr.us-west-2.amazonaws.com/${DEVELOPER_NAME}"
+    
+    echo "✅ Sample app deployed: https://${DEVELOPER_NAME}-sample.dev.platform.company.com"
+}
+
+# 5. Setup monitoring & debugging tools (2 minutes)
+setup_observability() {
+    echo "📊 Setting up monitoring and debugging tools..."
+    
+    # Create Grafana dashboard
+    kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${DEVELOPER_NAME}-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  dashboard.json: |
+    $(envsubst < templates/dashboards/developer-starter.json)
+EOF
+    
+    # Setup log aggregation
+    kubectl label namespace "dev-${DEVELOPER_NAME}" logging.platform.com/enabled=true
+    
+    # Create alerts
+    kubectl apply -f - <<EOF
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ${DEVELOPER_NAME}-alerts
+  namespace: dev-${DEVELOPER_NAME}
+spec:
+  groups:
+  - name: developer-alerts
+    rules:
+    - alert: HighMemoryUsage
+      expr: container_memory_usage_bytes{namespace="dev-${DEVELOPER_NAME}"} > 500Mi
+      annotations:
+        summary: "High memory usage in {{ \$labels.pod }}"
+        runbook_url: "https://platform.company.com/runbooks/memory-issues"
+EOF
+    
+    echo "✅ Monitoring configured: https://grafana.platform.company.com/d/${DEVELOPER_NAME}"
+}
+
+# 6. Generate onboarding summary (2 minutes)
+generate_summary() {
+    echo "📋 Generating your onboarding summary..."
+    
+    cat > "ONBOARDING_SUMMARY_${DEVELOPER_NAME}.md" <<EOF
+# Welcome to the Platform, ${DEVELOPER_NAME}! 🎉
+
+## Your Resources
+- **Namespace**: dev-${DEVELOPER_NAME}
+- **Sample App**: https://${DEVELOPER_NAME}-sample.dev.platform.company.com
+- **Grafana Dashboard**: https://grafana.platform.company.com/d/${DEVELOPER_NAME}
+- **Cost Tracking**: https://kubecost.platform.company.com/namespace/dev-${DEVELOPER_NAME}
+
+## Quick Commands
+\`\`\`bash
+# Deploy new version
+skaffold deploy
+
+# View logs
+kubectl logs -f deployment/sample-app -n dev-${DEVELOPER_NAME}
+
+# Scale application
+kubectl scale deployment/sample-app --replicas=3 -n dev-${DEVELOPER_NAME}
+
+# View costs
+gaia cost estimate --namespace dev-${DEVELOPER_NAME}
+\`\`\`
+
+## Golden Paths Available
+- 🚀 **Microservice (Node.js)**: \`gaia template create microservice-nodejs\`
+- 🐍 **API Service (Python)**: \`gaia template create api-python\`
+- ⚡ **Serverless Function**: \`gaia template create lambda-function\`
+- 📊 **Data Pipeline**: \`gaia template create data-pipeline\`
+
+## Support Resources
+- 📖 **Documentation**: https://platform.company.com/docs
+- 💬 **Slack**: #platform-support
+- 🎯 **Runbooks**: https://platform.company.com/runbooks
+- 📅 **Office Hours**: Fridays 2-4 PM
+
+## Next Steps
+1. Explore the [Developer Portal](https://platform.company.com)
+2. Join your team's Slack channels
+3. Review the [Platform Architecture Guide](https://platform.company.com/docs/architecture)
+4. Attend the next Platform Demo (weekly Wednesdays)
+
+Happy coding! 🚀
+EOF
+    
+    echo "✅ Summary saved to ONBOARDING_SUMMARY_${DEVELOPER_NAME}.md"
+    echo "📧 Slack notification sent to #${TEAM} channel"
+}
+
+# Execute onboarding flow
+main() {
+    echo "🎯 Starting 15-minute developer onboarding for ${DEVELOPER_NAME}..."
+    
+    check_prerequisites
+    authenticate_platform
+    create_workspace
+    deploy_sample_app
+    setup_observability
+    generate_summary
+    
+    echo ""
+    echo "🎉 Onboarding complete! Welcome to the platform!"
+    echo "📖 Your summary: ONBOARDING_SUMMARY_${DEVELOPER_NAME}.md"
+    echo "🚀 Sample app: https://${DEVELOPER_NAME}-sample.dev.platform.company.com"
+    echo "📊 Dashboard: https://grafana.platform.company.com/d/${DEVELOPER_NAME}"
+    echo ""
+    echo "⏱️  Total time: $(date)"
+}
+
+# Run with error handling
+if ! main "$@"; then
+    echo "❌ Onboarding failed. Please reach out to #platform-support"
+    exit 1
+fi

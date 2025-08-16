@@ -1,0 +1,473 @@
+#!/bin/bash
+# Developer Experience Metrics Collection and Analysis
+# Measure and improve platform adoption and satisfaction
+
+set -e
+
+COMMAND="${1:-dashboard}"
+
+# Color codes
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
+
+show_dashboard() {
+    echo "📊 Developer Experience Dashboard"
+    echo "=================================="
+    echo ""
+    
+    # Core DX Metrics
+    show_productivity_metrics
+    show_satisfaction_metrics
+    show_platform_adoption
+    show_support_metrics
+    show_cost_impact
+    show_improvement_opportunities
+}
+
+show_productivity_metrics() {
+    echo "⚡ Developer Productivity Metrics"
+    echo "--------------------------------"
+    
+    # Time to First Deployment
+    local ttfd_current="$(calculate_ttfd)"
+    local ttfd_target="30 minutes"
+    local ttfd_status=$(get_metric_status "$ttfd_current" "$ttfd_target")
+    
+    echo "🚀 Time to First Deployment"
+    echo "   Current: $ttfd_current"
+    echo "   Target:  $ttfd_target"
+    echo "   Status:  $ttfd_status"
+    echo ""
+    
+    # Deployment Frequency
+    local deploy_freq="$(calculate_deployment_frequency)"
+    echo "📦 Deployment Frequency: $deploy_freq deployments/day"
+    
+    # Lead Time for Changes
+    local lead_time="$(calculate_lead_time)"
+    echo "⏱️  Lead Time for Changes: $lead_time"
+    
+    # Mean Time to Recovery
+    local mttr="$(calculate_mttr)"
+    echo "🔧 Mean Time to Recovery: $mttr"
+    
+    # Change Failure Rate
+    local cfr="$(calculate_change_failure_rate)"
+    echo "❌ Change Failure Rate: $cfr"
+    
+    echo ""
+}
+
+show_satisfaction_metrics() {
+    echo "😊 Developer Satisfaction Metrics"
+    echo "---------------------------------"
+    
+    # Net Promoter Score
+    local nps_score="$(calculate_nps)"
+    local nps_trend="$(get_nps_trend)"
+    
+    echo "📈 Platform NPS Score: $nps_score $nps_trend"
+    
+    # Satisfaction by Category
+    echo "📊 Satisfaction Breakdown:"
+    echo "   • Documentation:     $(get_satisfaction_score "documentation")/5.0 ⭐"
+    echo "   • Tooling:          $(get_satisfaction_score "tooling")/5.0 ⭐"
+    echo "   • Self-Service:     $(get_satisfaction_score "self-service")/5.0 ⭐"
+    echo "   • Support:          $(get_satisfaction_score "support")/5.0 ⭐"
+    echo "   • Performance:      $(get_satisfaction_score "performance")/5.0 ⭐"
+    
+    # Recent Feedback
+    echo ""
+    echo "💬 Recent Feedback:"
+    show_recent_feedback
+    
+    echo ""
+}
+
+show_platform_adoption() {
+    echo "🎯 Platform Adoption Metrics"
+    echo "----------------------------"
+    
+    # Active Users
+    local active_users="$(count_active_users)"
+    local total_users="$(count_total_users)"
+    local adoption_rate=$((active_users * 100 / total_users))
+    
+    echo "👥 Active Users: $active_users/$total_users ($adoption_rate%)"
+    
+    # Feature Adoption
+    echo "🔧 Feature Adoption:"
+    echo "   • Self-Service Portal:  $(get_feature_adoption "portal")%"
+    echo "   • Template Usage:       $(get_feature_adoption "templates")%"
+    echo "   • Cost Monitoring:      $(get_feature_adoption "cost")%"
+    echo "   • Automated Testing:    $(get_feature_adoption "testing")%"
+    echo "   • Golden Paths:         $(get_feature_adoption "golden-paths")%"
+    
+    # Service Creation Trends
+    echo ""
+    echo "📈 Service Creation (Last 30 Days):"
+    echo "   • Total Services:   $(count_services_created 30)"
+    echo "   • Via Templates:    $(count_template_usage 30) ($(calculate_template_percentage 30)%)"
+    echo "   • Manual Creation:  $(count_manual_creation 30)"
+    
+    echo ""
+}
+
+show_support_metrics() {
+    echo "🆘 Support & Community Metrics"
+    echo "------------------------------"
+    
+    # Ticket Volume
+    local open_tickets="$(count_open_tickets)"
+    local avg_resolution_time="$(calculate_avg_resolution_time)"
+    
+    echo "🎫 Support Tickets:"
+    echo "   • Open:               $open_tickets"
+    echo "   • Avg Resolution:     $avg_resolution_time"
+    echo "   • Self-Resolved:      $(get_self_resolution_rate)%"
+    
+    # Documentation Usage
+    echo ""
+    echo "📚 Documentation Engagement:"
+    echo "   • Page Views (30d):   $(get_docs_pageviews 30)"
+    echo "   • Search Queries:     $(get_docs_searches 30)"
+    echo "   • Helpfulness Score:  $(get_docs_helpfulness_score)/5.0"
+    
+    # Community Activity
+    echo ""
+    echo "🤝 Community Activity:"
+    echo "   • Questions Asked:    $(count_questions_asked 30)"
+    echo "   • Answers Provided:   $(count_answers_provided 30)"
+    echo "   • Knowledge Shared:   $(count_knowledge_shared 30)"
+    echo "   • Office Hours Attendance: $(get_office_hours_attendance)"
+    
+    echo ""
+}
+
+show_cost_impact() {
+    echo "💰 Cost Impact Metrics"
+    echo "----------------------"
+    
+    # Platform ROI
+    local platform_cost="$(calculate_platform_cost)"
+    local cost_savings="$(calculate_cost_savings)"
+    local roi_percentage="$(calculate_roi "$platform_cost" "$cost_savings")"
+    
+    echo "📊 Platform ROI:"
+    echo "   • Platform Cost:      $platform_cost/month"
+    echo "   • Cost Savings:       $cost_savings/month"
+    echo "   • ROI:                $roi_percentage%"
+    
+    # Developer Time Savings
+    local time_saved="$(calculate_time_savings)"
+    local productivity_gain="$(calculate_productivity_gain)"
+    
+    echo ""
+    echo "⏰ Productivity Impact:"
+    echo "   • Time Saved:         $time_saved hours/developer/month"
+    echo "   • Productivity Gain:  $productivity_gain%"
+    echo "   • Equivalent FTEs:    $(calculate_equivalent_ftes)"
+    
+    echo ""
+}
+
+show_improvement_opportunities() {
+    echo "🎯 Improvement Opportunities"
+    echo "---------------------------"
+    
+    # Top Pain Points
+    echo "🔴 Top Pain Points:"
+    show_top_pain_points
+    
+    echo ""
+    echo "💡 Recommended Actions:"
+    show_recommended_actions
+    
+    echo ""
+    echo "📈 Trending Issues (Last 7 Days):"
+    show_trending_issues
+    
+    echo ""
+}
+
+# Survey and feedback collection
+conduct_dx_survey() {
+    echo "📋 Developer Experience Survey"
+    echo "============================="
+    echo ""
+    echo "Help us improve the platform! This survey takes 3-5 minutes."
+    echo ""
+    
+    local survey_id="dx-$(date +%Y%m%d%H%M%S)"
+    local survey_file="metrics/surveys/$survey_id.json"
+    
+    # Core satisfaction questions
+    echo "📊 Platform Satisfaction (1-5 scale):"
+    read -p "Overall platform satisfaction: " overall_satisfaction
+    read -p "Documentation quality: " docs_satisfaction
+    read -p "Self-service capabilities: " selfservice_satisfaction
+    read -p "Tooling effectiveness: " tooling_satisfaction
+    read -p "Support responsiveness: " support_satisfaction
+    
+    echo ""
+    echo "⚡ Productivity Questions:"
+    read -p "How much time does the platform save you per week? (hours): " time_saved
+    read -p "How often do you use platform templates? (never/rarely/sometimes/often/always): " template_usage
+    
+    echo ""
+    echo "🎯 Feature Requests:"
+    read -p "What's the #1 feature you wish the platform had?: " top_feature_request
+    read -p "What's your biggest pain point?: " biggest_pain_point
+    
+    echo ""
+    echo "💬 Open Feedback:"
+    read -p "Any additional comments?: " additional_comments
+    
+    # Save survey results
+    cat > "$survey_file" <<EOF
+{
+  "survey_id": "$survey_id",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "respondent": "$(git config user.name)",
+  "email": "$(git config user.email)",
+  "team": "$(git config --get team.name 2>/dev/null || echo unknown)",
+  "responses": {
+    "overall_satisfaction": $overall_satisfaction,
+    "docs_satisfaction": $docs_satisfaction,
+    "selfservice_satisfaction": $selfservice_satisfaction,
+    "tooling_satisfaction": $tooling_satisfaction,
+    "support_satisfaction": $support_satisfaction,
+    "time_saved_hours": "$time_saved",
+    "template_usage": "$template_usage",
+    "top_feature_request": "$top_feature_request",
+    "biggest_pain_point": "$biggest_pain_point",
+    "additional_comments": "$additional_comments"
+  }
+}
+EOF
+    
+    # Submit anonymized results
+    submit_survey_results "$survey_file"
+    
+    log_success "Thank you for your feedback! 🙏"
+    log_info "Your responses help us improve the platform for everyone."
+}
+
+# Real-time feedback collection
+collect_realtime_feedback() {
+    local context="$1"
+    local sentiment="$2"
+    local comment="$3"
+    
+    local feedback_id="rt-$(date +%Y%m%d%H%M%S)"
+    
+    # Quick feedback collection
+    cat >> "metrics/realtime-feedback.jsonl" <<EOF
+{"id":"$feedback_id","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","user":"$(whoami)","context":"$context","sentiment":"$sentiment","comment":"$comment","session_id":"$SESSION_ID"}
+EOF
+    
+    # Trigger analysis if negative feedback
+    if [[ "$sentiment" == "negative" ]]; then
+        trigger_feedback_alert "$context" "$comment"
+    fi
+}
+
+# Analytics and reporting
+generate_monthly_report() {
+    local month="${1:-$(date +%Y-%m)}"
+    
+    echo "📈 Monthly DX Report - $month"
+    echo "=============================="
+    
+    # Executive Summary
+    cat <<EOF
+
+## Executive Summary
+
+### Key Metrics
+- **Developer Satisfaction**: $(get_monthly_nps "$month")/10 NPS
+- **Time to First Deploy**: $(get_monthly_ttfd "$month")
+- **Platform Adoption**: $(get_monthly_adoption "$month")%
+- **Cost Savings**: \$$(get_monthly_savings "$month")
+
+### Highlights
+$(get_monthly_highlights "$month")
+
+### Action Items
+$(get_monthly_action_items "$month")
+
+EOF
+    
+    # Detailed metrics follow...
+    generate_detailed_metrics "$month"
+}
+
+# Helper functions for metric calculation
+calculate_ttfd() {
+    # Time to first deployment for new developers
+    local total_time=0
+    local count=0
+    
+    # Analyze onboarding logs from last 30 days
+    while read -r log_entry; do
+        # Extract onboarding completion times
+        local start_time=$(echo "$log_entry" | jq -r '.onboarding_start')
+        local first_deploy=$(echo "$log_entry" | jq -r '.first_deployment')
+        
+        if [[ "$start_time" != "null" && "$first_deploy" != "null" ]]; then
+            local duration=$(date -d "$first_deploy" +%s) - $(date -d "$start_time" +%s)
+            total_time=$((total_time + duration))
+            count=$((count + 1))
+        fi
+    done < <(find metrics/onboarding -name "*.json" -mtime -30 -exec cat {} \;)
+    
+    if [[ $count -gt 0 ]]; then
+        local avg_seconds=$((total_time / count))
+        local avg_minutes=$((avg_seconds / 60))
+        echo "${avg_minutes} minutes"
+    else
+        echo "No data"
+    fi
+}
+
+calculate_nps() {
+    # Net Promoter Score calculation
+    local total_responses=0
+    local promoters=0
+    local detractors=0
+    
+    # Analyze recent survey responses
+    while read -r survey; do
+        local satisfaction=$(echo "$survey" | jq -r '.responses.overall_satisfaction')
+        if [[ "$satisfaction" != "null" ]]; then
+            total_responses=$((total_responses + 1))
+            if [[ $satisfaction -ge 4 ]]; then
+                promoters=$((promoters + 1))
+            elif [[ $satisfaction -le 2 ]]; then
+                detractors=$((detractors + 1))
+            fi
+        fi
+    done < <(find metrics/surveys -name "*.json" -mtime -90 -exec cat {} \;)
+    
+    if [[ $total_responses -gt 0 ]]; then
+        local nps=$(( (promoters - detractors) * 100 / total_responses ))
+        echo "$nps"
+    else
+        echo "No data"
+    fi
+}
+
+# Integration with monitoring systems
+setup_dx_monitoring() {
+    log_info "Setting up DX monitoring dashboards..."
+    
+    # Create Grafana dashboard for DX metrics
+    cat > "monitoring/dx-dashboard.json" <<EOF
+{
+  "dashboard": {
+    "title": "Developer Experience Metrics",
+    "panels": [
+      {
+        "title": "Time to First Deployment",
+        "type": "stat",
+        "targets": [{"expr": "avg(dx_time_to_first_deployment)"}]
+      },
+      {
+        "title": "Platform NPS Score", 
+        "type": "stat",
+        "targets": [{"expr": "dx_nps_score"}]
+      },
+      {
+        "title": "Feature Adoption Rate",
+        "type": "graph",
+        "targets": [{"expr": "dx_feature_adoption_rate"}]
+      },
+      {
+        "title": "Support Ticket Volume",
+        "type": "graph", 
+        "targets": [{"expr": "dx_support_tickets"}]
+      }
+    ]
+  }
+}
+EOF
+    
+    # Set up alerts for DX degradation
+    create_dx_alerts
+    
+    log_success "DX monitoring configured"
+}
+
+create_dx_alerts() {
+    cat > "monitoring/dx-alerts.yaml" <<EOF
+groups:
+- name: developer-experience
+  rules:
+  - alert: HighTimeToFirstDeployment
+    expr: avg(dx_time_to_first_deployment) > 60
+    for: 1h
+    annotations:
+      summary: "Time to first deployment is high ({{ \$value }} minutes)"
+      runbook_url: "https://platform.company.com/runbooks/high-ttfd"
+  
+  - alert: LowDeveloperSatisfaction
+    expr: dx_nps_score < 30
+    for: 1h
+    annotations:
+      summary: "Developer NPS score is low ({{ \$value }})"
+      runbook_url: "https://platform.company.com/runbooks/low-satisfaction"
+  
+  - alert: HighSupportTicketVolume
+    expr: rate(dx_support_tickets_total[1h]) > 0.5
+    for: 30m
+    annotations:
+      summary: "High volume of support tickets ({{ \$value }}/hour)"
+      runbook_url: "https://platform.company.com/runbooks/high-support-volume"
+EOF
+}
+
+# Main command router
+main() {
+    case "$COMMAND" in
+        "dashboard")
+            show_dashboard
+            ;;
+        "survey")
+            conduct_dx_survey
+            ;;
+        "feedback")
+            collect_realtime_feedback "$2" "$3" "$4"
+            ;;
+        "report")
+            generate_monthly_report "$2"
+            ;;
+        "setup")
+            setup_dx_monitoring
+            ;;
+        "help")
+            echo "Usage: dx-metrics [dashboard|survey|feedback|report|setup]"
+            echo ""
+            echo "Commands:"
+            echo "  dashboard     Show current DX metrics dashboard"
+            echo "  survey        Conduct developer experience survey"
+            echo "  feedback      Collect real-time feedback"
+            echo "  report        Generate monthly DX report"
+            echo "  setup         Setup monitoring dashboards"
+            ;;
+        *)
+            echo "Unknown command: $COMMAND"
+            echo "Run 'dx-metrics help' for usage information"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

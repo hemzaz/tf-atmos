@@ -127,7 +127,7 @@ variable "default_cluster_log_retention_days" {
     )
     error_message = "Log retention days must be a CloudWatch allowed value: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, or 3653 days."
   }
-  
+
   # We can't reference var.tags here as it creates a circular reference,
   # so we'll provide guidance in the description instead
   # Better practice is to enforce this in module logic or via CI/CD validation

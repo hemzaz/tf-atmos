@@ -1,0 +1,456 @@
+---
+# HashiCorp Vault Configuration for IDP Platform
+# This configuration sets up Vault for secrets management
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault-system
+  labels:
+    name: vault-system
+
+---
+# Vault Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault
+  namespace: vault-system
+  labels:
+    app: vault
+
+---
+# Vault ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vault
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create", "get", "list", "patch", "update", "watch", "delete"]
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["serviceaccounts/token"]
+  verbs: ["create"]
+
+---
+# Vault ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vault
+subjects:
+- kind: ServiceAccount
+  name: vault
+  namespace: vault-system
+
+---
+# Vault ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault-system
+data:
+  vault.hcl: |
+    ui = true
+
+    listener "tcp" {
+      tls_disable = 1
+      address = "[::]:8200"
+      cluster_address = "[::]:8201"
+    }
+
+    storage "consul" {
+      address = "consul:8500"
+      path = "vault/"
+    }
+
+    # Alternative file storage for development
+    storage "file" {
+      path = "/vault/data"
+    }
+
+    # AWS KMS auto-unseal (production)
+    seal "awskms" {
+      region = "us-east-1"
+      kms_key_id = "alias/vault-unseal-key"
+      endpoint = "https://kms.us-east-1.amazonaws.com"
+    }
+
+    # Cluster configuration
+    cluster_addr = "https://vault:8201"
+    api_addr = "https://vault.platform.company.com"
+
+    # Telemetry
+    telemetry {
+      prometheus_retention_time = "30s"
+      disable_hostname = true
+    }
+
+    # Plugin directory
+    plugin_directory = "/vault/plugins"
+
+---
+# Vault StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: vault-system
+  labels:
+    app: vault
+spec:
+  serviceName: vault-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8200"
+        prometheus.io/path: "/v1/sys/metrics"
+    spec:
+      serviceAccountName: vault
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: vault
+        image: vault:1.15.2
+        command:
+        - "/bin/sh"
+        - "-ec"
+        args:
+        - |
+          exec vault server -config=/vault/config/vault.hcl
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        env:
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: VAULT_K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: VAULT_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: VAULT_ADDR
+          value: "http://127.0.0.1:8200"
+        - name: VAULT_API_ADDR
+          value: "http://$(POD_IP):8200"
+        - name: SKIP_CHOWN
+          value: "true"
+        - name: SKIP_SETCAP
+          value: "true"
+        - name: VAULT_CLUSTER_ADDR
+          value: "https://$(POD_IP):8201"
+        ports:
+        - containerPort: 8200
+          name: http
+        - containerPort: 8201
+          name: https-internal
+        - containerPort: 8202
+          name: http-rep
+        readinessProbe:
+          exec:
+            command: ["/bin/sh", "-ec", "vault status -tls-skip-verify"]
+          failureThreshold: 2
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        livenessProbe:
+          exec:
+            command: ["/bin/sh", "-ec", "vault status -tls-skip-verify"]
+          failureThreshold: 2
+          initialDelaySeconds: 60
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        volumeMounts:
+        - name: config
+          mountPath: /vault/config
+        - name: data
+          mountPath: /vault/data
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+      volumes:
+      - name: config
+        configMap:
+          name: vault-config
+      - name: tmp
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: gp3
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+# Vault Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-headless
+  namespace: vault-system
+  labels:
+    app: vault
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: http
+    port: 8200
+    targetPort: 8200
+  - name: https-internal
+    port: 8201
+    targetPort: 8201
+  selector:
+    app: vault
+
+---
+# Vault Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: vault-system
+  labels:
+    app: vault
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8200"
+    prometheus.io/path: "/v1/sys/metrics"
+spec:
+  ports:
+  - name: http
+    port: 8200
+    targetPort: 8200
+  selector:
+    app: vault
+
+---
+# Vault Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vault
+  namespace: vault-system
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+spec:
+  tls:
+  - hosts:
+    - vault.platform.company.com
+    secretName: vault-tls
+  rules:
+  - host: vault.platform.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vault
+            port:
+              number: 8200
+
+---
+# Vault Initialization Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-init
+  namespace: vault-system
+spec:
+  template:
+    spec:
+      serviceAccountName: vault
+      restartPolicy: OnFailure
+      containers:
+      - name: vault-init
+        image: vault:1.15.2
+        command:
+        - "/bin/sh"
+        - "-c"
+        - |
+          # Wait for Vault to be ready
+          until vault status -address=http://vault:8200; do
+            echo "Waiting for vault to be ready..."
+            sleep 5
+          done
+
+          # Initialize Vault if not already initialized
+          if ! vault status -address=http://vault:8200 -format=json | jq -r '.initialized' | grep -q true; then
+            echo "Initializing Vault..."
+            vault operator init -address=http://vault:8200 -key-shares=5 -key-threshold=3 -format=json > /tmp/vault-init.json
+
+            # Store init keys in Kubernetes secrets
+            kubectl create secret generic vault-init-keys \
+              --from-file=vault-init.json=/tmp/vault-init.json \
+              --namespace=vault-system
+          fi
+        env:
+        - name: VAULT_ADDR
+          value: "http://vault:8200"
+
+---
+# External Secrets Operator Integration
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-secret-store
+  namespace: idp-system
+spec:
+  provider:
+    vault:
+      server: "http://vault.vault-system.svc.cluster.local:8200"
+      path: "secret"
+      version: "v2"
+      auth:
+        kubernetes:
+          mountPath: "kubernetes"
+          role: "idp-platform"
+          serviceAccountRef:
+            name: "external-secrets"
+
+---
+# Vault Policy for IDP Platform
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-idp-policy
+  namespace: vault-system
+data:
+  idp-policy.hcl: |
+    # Policy for IDP Platform secrets access
+
+    # Allow read access to IDP secrets
+    path "secret/data/idp/*" {
+      capabilities = ["read"]
+    }
+
+    # Allow list access to see secret paths
+    path "secret/metadata/idp/*" {
+      capabilities = ["list"]
+    }
+
+    # Allow renewal of own token
+    path "auth/token/renew-self" {
+      capabilities = ["update"]
+    }
+
+    # Allow looking up own token
+    path "auth/token/lookup-self" {
+      capabilities = ["read"]
+    }
+
+    # Database secrets engine
+    path "database/creds/idp-db-role" {
+      capabilities = ["read"]
+    }
+
+    # PKI secrets engine for certificates
+    path "pki/issue/idp-platform" {
+      capabilities = ["update"]
+    }
+
+---
+# Vault Auth Method Configuration Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-auth-config
+  namespace: vault-system
+spec:
+  template:
+    spec:
+      serviceAccountName: vault
+      restartPolicy: OnFailure
+      containers:
+      - name: vault-auth-config
+        image: vault:1.15.2
+        command:
+        - "/bin/sh"
+        - "-c"
+        - |
+          export VAULT_ADDR=http://vault:8200
+
+          # Wait for Vault to be unsealed
+          until vault status | grep -q "Sealed.*false"; do
+            echo "Waiting for Vault to be unsealed..."
+            sleep 10
+          done
+
+          # Enable Kubernetes auth method
+          vault auth enable kubernetes || true
+
+          # Configure Kubernetes auth
+          vault write auth/kubernetes/config \
+            token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+            kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443" \
+            kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+          # Create IDP platform role
+          vault write auth/kubernetes/role/idp-platform \
+            bound_service_account_names=external-secrets \
+            bound_service_account_namespaces=idp-system \
+            policies=idp-policy \
+            ttl=24h
+
+          # Create policy
+          vault policy write idp-policy /vault/policies/idp-policy.hcl
+        volumeMounts:
+        - name: vault-policies
+          mountPath: /vault/policies
+        env:
+        - name: VAULT_ADDR
+          value: "http://vault:8200"
+      volumes:
+      - name: vault-policies
+        configMap:
+          name: vault-idp-policy

@@ -1,3 +1,4 @@
+---
 name: ec2
 description: "EC2 instance management"
 
@@ -19,19 +20,19 @@ components:
         region: "${region}"
         vpc_id: "${output.vpc.vpc_id}"
         subnet_ids: "${output.vpc.private_subnet_ids}"
-        
+
         # SSH key configuration
         create_ssh_keys: "${create_ssh_keys | default(true)}"
         store_ssh_keys_in_secrets_manager: "${store_ssh_keys | default(true)}"
         ssh_key_algorithm: "${ssh_key_algorithm | default('RSA')}"
         ssh_key_rsa_bits: "${ssh_key_rsa_bits | default(4096)}"
-        
+
         # Global SSH key for environment-wide use
         global_key_name: "${global_key_name | default('${tenant}-${environment}-ssh-key')}"
-        
+
         # Instances configuration
         instances: "${ec2_instances | default('{}')}"
-        
+
       # Define common tags
       tags:
         Tenant: "${tenant}"
@@ -39,7 +40,7 @@ components:
         Environment: "${environment}"
         Component: "EC2"
         ManagedBy: "Terraform"
-        
+
       # Terraform backend configuration
       settings:
         terraform:
@@ -50,12 +51,12 @@ components:
               region: "${region}"
               role_arn: "arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role"
               dynamodb_table: "${tenant}-terraform-locks"
-              
+
       # Provider configuration
       providers:
         aws:
           region: "${region}"
-          
+
       # Define outputs with improved descriptions
       outputs:
         instance_ids:

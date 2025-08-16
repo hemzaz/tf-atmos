@@ -1,3 +1,4 @@
+---
 name: template-environment
 description: "Create or update an environment from templates using Copier"
 
@@ -7,175 +8,175 @@ workflow:
     steps:
       - command: "gaia template create-environment -t $TENANT -a $ACCOUNT -e $ENVIRONMENT $ADDITIONAL_ARGS"
         description: "Generate environment files from template"
-      
+
       - command: "echo 'Environment $TENANT-$ACCOUNT-$ENVIRONMENT created successfully'"
         description: "Print success message"
-    
+
     parameters:
       tenant:
         description: "Tenant name (e.g., acme)"
         type: string
         required: true
         prefix: "TENANT="
-      
+
       account:
         description: "Account name (e.g., dev, staging, prod)"
         type: string
         required: true
         prefix: "ACCOUNT="
-      
+
       environment:
         description: "Environment name (e.g., us-east-1)"
         type: string
         required: true
         prefix: "ENVIRONMENT="
-      
+
       env-type:
         description: "Environment type (development, staging, production)"
         type: string
         required: false
         prefix: "--env-type "
-      
+
       region:
         description: "AWS region for deployment"
         type: string
         required: false
         prefix: "--region "
-      
+
       vpc-cidr:
         description: "VPC CIDR block (e.g., 10.0.0.0/16)"
         type: string
         required: false
         prefix: "--vpc-cidr "
-      
+
       team-email:
         description: "Team email for notifications"
         type: string
         required: false
         prefix: "--team-email "
-      
+
       target-dir:
         description: "Target directory for environment files"
         type: string
         required: false
         prefix: "--target-dir "
-      
+
       eks-cluster:
         description: "Enable EKS cluster components"
         type: boolean
         default: true
         prefix: "--eks-cluster "
-      
+
       rds-instances:
         description: "Enable RDS instances"
         type: boolean
         default: false
         prefix: "--rds-instances "
-      
+
       enable-logging:
         description: "Enable centralized logging"
         type: boolean
         default: true
         prefix: "--logging "
-      
+
       enable-monitoring:
         description: "Enable monitoring"
         type: boolean
         default: true
         prefix: "--monitoring "
-      
+
       additional-args:
         description: "Additional arguments to pass to the template command"
         type: string
         required: false
         prefix: "ADDITIONAL_ARGS="
-  
+
   update-environment:
     description: "Update an existing environment from template changes"
     steps:
       - command: "gaia template update-environment -t $TENANT -a $ACCOUNT -e $ENVIRONMENT $ADDITIONAL_ARGS"
         description: "Update environment files from template"
-      
+
       - command: "echo 'Environment $TENANT-$ACCOUNT-$ENVIRONMENT updated successfully'"
         description: "Print success message"
-    
+
     parameters:
       tenant:
         description: "Tenant name (e.g., acme)"
         type: string
         required: true
         prefix: "TENANT="
-      
+
       account:
         description: "Account name (e.g., dev, staging, prod)"
         type: string
         required: true
         prefix: "ACCOUNT="
-      
+
       environment:
         description: "Environment name (e.g., us-east-1)"
         type: string
         required: true
         prefix: "ENVIRONMENT="
-      
+
       target-dir:
         description: "Target directory for environment files"
         type: string
         required: false
         prefix: "--target-dir "
-      
+
       overwrite:
         description: "Overwrite all files"
         type: boolean
         default: false
         prefix: "--overwrite "
-      
+
       additional-args:
         description: "Additional arguments to pass to the template command"
         type: string
         required: false
         prefix: "ADDITIONAL_ARGS="
-  
+
   onboard-environment:
     description: "Create and apply a new environment in one step"
     steps:
       - command: "gaia workflow template-environment create-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT vpc-cidr=$VPC_CIDR $ADDITIONAL_ARGS"
         description: "Generate environment files from template"
-      
+
       - command: "gaia workflow apply-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT auto-approve=$AUTO_APPROVE"
         description: "Apply the new environment"
-    
+
     parameters:
       tenant:
         description: "Tenant name (e.g., acme)"
         type: string
         required: true
         prefix: "TENANT="
-      
+
       account:
         description: "Account name (e.g., dev, staging, prod)"
         type: string
         required: true
         prefix: "ACCOUNT="
-      
+
       environment:
         description: "Environment name (e.g., us-east-1)"
         type: string
         required: true
         prefix: "ENVIRONMENT="
-      
+
       vpc-cidr:
         description: "VPC CIDR block (e.g., 10.0.0.0/16)"
         type: string
         required: true
         prefix: "VPC_CIDR="
-      
+
       auto-approve:
         description: "Auto approve terraform apply"
         type: boolean
         default: false
         prefix: "AUTO_APPROVE="
-      
+
       additional-args:
         description: "Additional arguments to pass to the template command"
         type: string

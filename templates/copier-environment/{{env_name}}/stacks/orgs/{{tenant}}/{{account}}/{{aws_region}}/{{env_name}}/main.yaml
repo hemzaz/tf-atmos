@@ -23,7 +23,7 @@ vars:
   tenant: {{ tenant }}
   environment: {{ env_name }}
   stage: {{ account }}
-  
+
   # Other configurations
   description: "{{ env_name | capitalize }} Environment"
   namespace: {{ env_name }}

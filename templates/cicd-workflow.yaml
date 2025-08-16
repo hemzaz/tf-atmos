@@ -30,7 +30,7 @@ steps:
     command: echo
     args:
       - "Starting CI/CD workflow for {tenant}-{account}-{environment}"
-  
+
   # Lint step
   - name: lint
     description: "Run linting on Terraform code"
@@ -38,7 +38,7 @@ steps:
     args:
       - workflow
       - lint
-  
+
   # Validation step
   - name: validate
     description: "Validate Terraform configurations"
@@ -46,7 +46,7 @@ steps:
     args:
       - workflow
       - validate
-  
+
   # Plan step
   - name: plan
     description: "Generate and save Terraform plans"
@@ -62,7 +62,7 @@ steps:
             atmos terraform plan "$component" -s {tenant}-{account}-{environment} --tf-plan-file=${component}.tfplan
           done
         fi
-  
+
   # Apply step (for CI/CD, typically uses saved plan files)
   - name: apply
     description: "Apply Terraform changes using saved plan files"
@@ -79,7 +79,7 @@ steps:
             atmos terraform apply "$component" -s {tenant}-{account}-{environment} --tf-plan-file=${component}.tfplan --auto-approve
           done
         fi
-  
+
   # Test step
   - name: test
     description: "Run tests on deployed infrastructure"
@@ -94,7 +94,7 @@ steps:
         # - Infrastructure validation tests
         # - Connectivity tests
         echo "Tests completed successfully"
-  
+
   # Notification step
   - name: notify
     description: "Send deployment notification"

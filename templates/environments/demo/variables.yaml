@@ -15,7 +15,7 @@ compute:
   # EC2
   ec2_instance_type: "t3.medium"
   enable_spot_instances: false
-  
+
   # EKS
   eks_enabled: true
   eks_version: "1.32"
@@ -27,7 +27,7 @@ compute:
   eks_node_max_count: 2
   eks_node_disk_size: 50
   eks_cluster_log_types: ["api"]
-  
+
   # Autoscaling
   autoscaling_enabled: false
   autoscaling_metrics_enabled: false
@@ -41,11 +41,11 @@ security:
   security_hub_enabled: false
   aws_config_enabled: false
   macie_enabled: false
-  
+
   # Access
   public_access_cidrs: ["0.0.0.0/0"]
   ssh_allowed: true
-  
+
 # Database
 database:
   rds_enabled: true
@@ -54,14 +54,14 @@ database:
   rds_backup_retention_period: 1
   rds_storage_encrypted: false
   rds_deletion_protection: false
-  
+
 # Monitoring
 monitoring:
   detailed_monitoring_enabled: false
   dashboard_enabled: true
   enhanced_monitoring_enabled: false
   alarm_notification_enabled: false
-  
+
 # Demo Specific
 demo:
   preload_demo_data: true
@@ -71,7 +71,7 @@ demo:
   demo_app_enabled: true
   showcase_dashboard_enabled: true
   reset_button_enabled: true
-  
+
 # Tagging
 tags:
   Environment: "demo"
@@ -85,7 +85,7 @@ addons:
   external_dns_enabled: true
   load_balancer_controller_enabled: true
   metrics_server_enabled: true
-  
+
 # Applications
 applications:
   sample_app_enabled: true

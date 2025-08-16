@@ -3,7 +3,7 @@ locals {
   instances = {
     for k, v in var.instances : k => v if lookup(v, "enabled", true)
   }
-  
+
   # Check if we need a global key
   create_global_key = var.create_ssh_keys && var.global_key_name != null
 
@@ -14,7 +14,7 @@ locals {
         # Check if key_name is explicitly set to null
         v.key_name == null ? null :
         # Check if key_name is an empty string
-        v.key_name == "" ? null : 
+        v.key_name == "" ? null :
         # Use the specified key_name value
         v.key_name,
         # Default to null if key_name is not specified at all
@@ -22,31 +22,31 @@ locals {
       )
     })
   }
-  
+
   # Define global key name with a consistent prefix pattern
   global_key_name = local.create_global_key ? "${var.tags["Environment"]}-global-${var.global_key_name}" : null
-  
+
   # Determine which instances need individual SSH keys to be created
   instances_requiring_keys = {
-    for k, v in local.instances_with_normalized_key_names : k => v 
-    if var.create_ssh_keys && 
-       v.normalized_key_name == null && 
-       var.default_key_name == null && 
-       !local.create_global_key
+    for k, v in local.instances_with_normalized_key_names : k => v
+    if var.create_ssh_keys &&
+    v.normalized_key_name == null &&
+    var.default_key_name == null &&
+    !local.create_global_key
   }
-  
+
   # Determine instances that will use the global key
   instances_using_global_key = {
-    for k, v in local.instances_with_normalized_key_names : k => v 
-    if var.create_ssh_keys && 
-       v.normalized_key_name == null && 
-       var.default_key_name == null && 
-       local.create_global_key
+    for k, v in local.instances_with_normalized_key_names : k => v
+    if var.create_ssh_keys &&
+    v.normalized_key_name == null &&
+    var.default_key_name == null &&
+    local.create_global_key
   }
-  
+
   # Instances using existing keys
   instances_using_existing_keys = {
-    for k, v in local.instances_with_normalized_key_names : k => v 
+    for k, v in local.instances_with_normalized_key_names : k => v
     if v.normalized_key_name != null || var.default_key_name != null
   }
 }
@@ -56,20 +56,20 @@ resource "tls_private_key" "ssh_key" {
   for_each  = local.instances_requiring_keys
   algorithm = var.ssh_key_algorithm
   rsa_bits  = var.ssh_key_algorithm == "RSA" ? var.ssh_key_rsa_bits : null
-  
+
   lifecycle {
     # Prevent recreation of keys, which helps with idempotency
     # Terraform will error if this can't be achieved rather than replacing the key
     prevent_destroy = true
     # Mark the key as sensitive
     sensitive = true
-    
+
     # Add preconditions to validate that key parameters haven't changed
     precondition {
       condition     = var.ssh_key_algorithm == "RSA" || var.ssh_key_algorithm == "ED25519"
       error_message = "Only RSA and ED25519 algorithms are supported for SSH key generation."
     }
-    
+
     # For RSA keys, validate the bit size
     precondition {
       condition     = var.ssh_key_algorithm != "RSA" || (var.ssh_key_rsa_bits >= 2048 && var.ssh_key_rsa_bits <= 8192)
@@ -83,20 +83,20 @@ resource "tls_private_key" "global_ssh_key" {
   count     = local.create_global_key ? 1 : 0
   algorithm = var.ssh_key_algorithm
   rsa_bits  = var.ssh_key_algorithm == "RSA" ? var.ssh_key_rsa_bits : null
-  
+
   lifecycle {
     # Prevent recreation of keys, which helps with idempotency
     # Terraform will error if this can't be achieved rather than replacing the key
     prevent_destroy = true
     # Mark the key as sensitive
     sensitive = true
-    
+
     # Add preconditions to validate that key parameters haven't changed
     precondition {
       condition     = var.ssh_key_algorithm == "RSA" || var.ssh_key_algorithm == "ED25519"
       error_message = "Only RSA and ED25519 algorithms are supported for SSH key generation."
     }
-    
+
     # For RSA keys, validate the bit size
     precondition {
       condition     = var.ssh_key_algorithm != "RSA" || (var.ssh_key_rsa_bits >= 2048 && var.ssh_key_rsa_bits <= 8192)
@@ -138,25 +138,25 @@ resource "aws_key_pair" "global" {
 # Store individual instance SSH keys in Secrets Manager
 resource "aws_secretsmanager_secret" "ssh_key" {
   for_each = var.store_ssh_keys_in_secrets_manager ? local.instances_requiring_keys : {}
-  
+
   name        = "ssh-key/${var.tags["Environment"]}/${each.key}"
   description = "SSH private key for ${each.key} EC2 instance"
-  
+
   tags = merge(
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name        = "${var.tags["Environment"]}-${each.key}-ssh-key"
+      Name         = "${var.tags["Environment"]}-${each.key}-ssh-key"
       InstanceName = "${var.tags["Environment"]}-${each.key}"
-      KeyType     = "instance"
+      KeyType      = "instance"
     }
   )
 }
 
 resource "aws_secretsmanager_secret_version" "ssh_key" {
-  for_each      = var.store_ssh_keys_in_secrets_manager ? local.instances_requiring_keys : {}
-  secret_id     = aws_secretsmanager_secret.ssh_key[each.key].id
-  
+  for_each  = var.store_ssh_keys_in_secrets_manager ? local.instances_requiring_keys : {}
+  secret_id = aws_secretsmanager_secret.ssh_key[each.key].id
+
   # Include all metadata directly in the secret value, including instance_id
   # This eliminates the need for local-exec provisioner
   secret_string = jsonencode({
@@ -173,9 +173,9 @@ resource "aws_secretsmanager_secret_version" "ssh_key" {
     environment         = var.tags["Environment"]
     created_at          = timestamp()
   })
-  
+
   depends_on = [aws_instance.instances]
-  
+
   lifecycle {
     # Add validation to ensure all required information is available
     precondition {
@@ -192,10 +192,10 @@ resource "aws_secretsmanager_secret_version" "ssh_key" {
 # Store global SSH key in Secrets Manager
 resource "aws_secretsmanager_secret" "global_ssh_key" {
   count = var.store_ssh_keys_in_secrets_manager && local.create_global_key ? 1 : 0
-  
+
   name        = "ssh-key/${var.tags["Environment"]}/global-keys/${var.global_key_name}"
   description = "Global SSH private key for ${var.tags["Environment"]} environment"
-  
+
   tags = merge(
     var.tags,
     {
@@ -206,28 +206,28 @@ resource "aws_secretsmanager_secret" "global_ssh_key" {
 }
 
 resource "aws_secretsmanager_secret_version" "global_ssh_key" {
-  count         = var.store_ssh_keys_in_secrets_manager && local.create_global_key ? 1 : 0
-  secret_id     = aws_secretsmanager_secret.global_ssh_key[0].id
+  count     = var.store_ssh_keys_in_secrets_manager && local.create_global_key ? 1 : 0
+  secret_id = aws_secretsmanager_secret.global_ssh_key[0].id
   secret_string = jsonencode({
-    private_key_pem = tls_private_key.global_ssh_key[0].private_key_pem
+    private_key_pem    = tls_private_key.global_ssh_key[0].private_key_pem
     public_key_openssh = tls_private_key.global_ssh_key[0].public_key_openssh
-    key_name = aws_key_pair.global[0].key_name
-    environment = var.tags["Environment"]
-    used_by_instances = keys(local.instances_using_global_key)
+    key_name           = aws_key_pair.global[0].key_name
+    environment        = var.tags["Environment"]
+    used_by_instances  = keys(local.instances_using_global_key)
   })
 }
 
 # Update global key with instance details after instances are created
 resource "null_resource" "update_global_key_instance_info" {
   count = var.store_ssh_keys_in_secrets_manager && local.create_global_key && length(local.instances_using_global_key) > 0 ? 1 : 0
-  
+
   triggers = {
     # Use instance IDs as triggers so this runs when instances change
     instance_ids = join(",", [for k, v in local.instances_using_global_key : aws_instance.instances[k].id])
     # Use constant secret name to avoid circular dependencies
     secret_name = local.create_global_key ? aws_secretsmanager_secret.global_ssh_key[0].name : ""
   }
-  
+
   provisioner "local-exec" {
     command = <<EOT
       # Exit on errors and echo commands
@@ -247,9 +247,9 @@ resource "null_resource" "update_global_key_instance_info" {
       fi
       
       # Create instance details map
-      INSTANCE_DETAILS='{${join(",", [for k, v in local.instances_using_global_key : 
-        format("\"%s\": \"%s\"", k, aws_instance.instances[k].id)
-      ])}}'
+      INSTANCE_DETAILS='{${join(",", [for k, v in local.instances_using_global_key :
+    format("\"%s\": \"%s\"", k, aws_instance.instances[k].id)
+])}}'
       
       # Add instance_details to the JSON
       echo "Adding instance details to global secret..."
@@ -267,17 +267,17 @@ resource "null_resource" "update_global_key_instance_info" {
       
       echo "Successfully updated global secret with instance details"
     EOT
-  }
-  
-  depends_on = [
-    aws_instance.instances, 
-    aws_secretsmanager_secret_version.global_ssh_key
-  ]
-  
-  lifecycle {
-    # Ignore changes to secret_name to prevent recreation when secret metadata changes
-    ignore_changes = [triggers.secret_name]
-  }
+}
+
+depends_on = [
+  aws_instance.instances,
+  aws_secretsmanager_secret_version.global_ssh_key
+]
+
+lifecycle {
+  # Ignore changes to secret_name to prevent recreation when secret metadata changes
+  ignore_changes = [triggers.secret_name]
+}
 }
 
 locals {
@@ -290,11 +290,7 @@ resource "aws_instance" "instances" {
 
   ami                    = lookup(each.value, "ami_id", local.default_ami)
   instance_type          = each.value.instance_type
-  key_name               = contains(keys(local.instances_requiring_keys), each.key) ? 
-                            aws_key_pair.generated[each.key].key_name : 
-                            (contains(keys(local.instances_using_global_key), each.key) ? 
-                              aws_key_pair.global[0].key_name : 
-                              lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", var.default_key_name))
+  key_name               = contains(keys(local.instances_requiring_keys), each.key) ? aws_key_pair.generated[each.key].key_name : (contains(keys(local.instances_using_global_key), each.key) ? aws_key_pair.global[0].key_name : lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", var.default_key_name))
   vpc_security_group_ids = concat([aws_security_group.instances[each.key].id], lookup(each.value, "additional_security_group_ids", []))
   subnet_id              = lookup(each.value, "subnet_id", var.subnet_ids[0])
   user_data              = lookup(each.value, "user_data", null)
@@ -336,23 +332,21 @@ resource "aws_instance" "instances" {
     # Use more specific configuration for handling AMIs
     # Only ignore AMI changes if explicitly configured
     ignore_changes = lookup(each.value, "enable_ami_updates", false) ? [] : [ami]
-    
+
     # Check that we have a valid key_name
     precondition {
       condition = (
-        contains(keys(local.instances_requiring_keys), each.key) || 
-        contains(keys(local.instances_using_global_key), each.key) || 
-        lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null) != null || 
+        contains(keys(local.instances_requiring_keys), each.key) ||
+        contains(keys(local.instances_using_global_key), each.key) ||
+        lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null) != null ||
         var.default_key_name != null
       )
       error_message = "Instance ${each.key} does not have a valid key_name (either individual, global, or default)."
     }
-    
+
     # Validate that existing keys referenced actually exist (validation happens via data source)
     precondition {
-      condition = lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null) == null || 
-                  contains(keys(data.aws_key_pair.existing), each.key) || 
-                  var.default_key_name == lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null)
+      condition     = lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null) == null || contains(keys(data.aws_key_pair.existing), each.key) || var.default_key_name == lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null)
       error_message = "Instance ${each.key} references key_name '${lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", "")}' which does not exist in AWS. Verify the key exists or let the component create it."
     }
   }
@@ -384,7 +378,7 @@ resource "aws_security_group" "instances" {
       cidr_blocks = ["0.0.0.0/0"]
       description = "Allow HTTPS outbound traffic"
     }])
-    
+
     content {
       from_port       = egress.value.from_port
       to_port         = egress.value.to_port
@@ -460,13 +454,13 @@ resource "aws_iam_role_policy" "custom" {
 # Verify existing key pairs exist
 data "aws_key_pair" "existing" {
   for_each = { for k, v in local.instances_with_normalized_key_names : k => v
-    if v.normalized_key_name != null && 
-    !contains(keys(local.instances_requiring_keys), k) && 
+    if v.normalized_key_name != null &&
+    !contains(keys(local.instances_requiring_keys), k) &&
     !contains(keys(local.instances_using_global_key), k)
   }
-  
+
   key_name = each.value.normalized_key_name
-  
+
   # The data source will fail if the key doesn't exist
   # This provides validation at plan time
 }

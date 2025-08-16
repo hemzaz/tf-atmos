@@ -27,8 +27,8 @@ data "aws_availability_zone" "available" {
 }
 
 resource "aws_eip" "nat" {
-  count = local.nat_gateway_count
-  vpc   = true
+  count  = local.nat_gateway_count
+  domain = "vpc"
 
   tags = merge(
     var.tags,

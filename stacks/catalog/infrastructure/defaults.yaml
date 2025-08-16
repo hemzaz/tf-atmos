@@ -1,3 +1,4 @@
+---
 name: infrastructure
 description: "Reusable infrastructure configuration with RDS and other core services"
 
@@ -26,19 +27,19 @@ components:
         db_name: "${rds_db_name | default('app')}"
         username: "${rds_username | default('dbadmin')}"
         port: "${rds_port | default(5432)}"
-        
+
         # High availability settings based on environment type
         multi_az: "${multi_az | default(false)}"
         backup_retention_period: "${automatic_backup_retention | default(7)}"
         backup_window: "03:00-04:00"
         maintenance_window: "sun:04:30-sun:05:30"
-        
+
         # Security settings
         deletion_protection: "${deletion_protection | default(false)}"
         skip_final_snapshot: "${!is_production | default(true)}"
         final_snapshot_identifier: "${tenant}-${account}-${environment}-db-final"
         storage_encrypted: true
-        
+
         # Network settings
         subnet_ids: "${output.vpc.database_subnet_ids | default(output.vpc.private_subnet_ids)}"
         vpc_security_group_ids: ["${output.securitygroup.database_security_group_id}"]
@@ -49,8 +50,8 @@ components:
         Environment: "${environment}"
         Component: "RDS"
         ManagedBy: "Terraform"
-        
-      # Terraform backend configuration  
+
+      # Terraform backend configuration
       settings:
         terraform:
           backend:
@@ -70,13 +71,13 @@ components:
                 validate_production_backups:
                   rule: "!is_production || backup_retention_period >= 7"
                   message: "Production databases must have at least 7 days of backups"
-          
+
       # Provider configuration
       providers:
         aws:
           region: "${region}"
-          
-      # Define outputs with improved descriptions 
+
+      # Define outputs with improved descriptions
       outputs:
         db_instance_address:
           description: "The address of the RDS instance"

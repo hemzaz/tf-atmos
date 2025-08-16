@@ -1,0 +1,36 @@
+{
+  "name": "tf-atmos",
+  "description": "Terraform/Atmos Infrastructure-as-Code project with Python tooling",
+  "tools": {
+    "bash": {
+      "auto_approve": [
+        "atmos describe*",
+        "atmos list*", 
+        "atmos validate*",
+        "atmos workflow lint*",
+        "atmos workflow validate*",
+        "atmos terraform plan*",
+        "atmos terraform validate*",
+        "./scripts/list_stacks.sh*",
+        "./scripts/add_tenant_to_catalog.sh*",
+        "./scripts/migrate_docs.sh*",
+        "gaia*",
+        "terraform fmt*",
+        "python3*",
+        "ls*",
+        "cat*",
+        "grep*",
+        "find*"
+      ]
+    }
+  },
+  "project_context": {
+    "type": "terraform_atmos",
+    "primary_language": "hcl",
+    "secondary_languages": ["python", "yaml"],
+    "framework": "atmos",
+    "test_command": "atmos workflow validate",
+    "lint_command": "atmos workflow lint",
+    "build_command": null
+  }
+}

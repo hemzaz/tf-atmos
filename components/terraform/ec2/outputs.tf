@@ -44,7 +44,7 @@ output "iam_instance_profile_names" {
 }
 
 output "generated_key_names" {
-  value       = merge(
+  value = merge(
     { for k, v in aws_key_pair.generated : k => v.key_name },
     local.create_global_key ? { "global" = aws_key_pair.global[0].key_name } : {}
   )
@@ -52,7 +52,7 @@ output "generated_key_names" {
 }
 
 output "ssh_key_secret_arns" {
-  value       = merge(
+  value = merge(
     { for k, v in aws_secretsmanager_secret.ssh_key : k => v.arn },
     local.create_global_key && var.store_ssh_keys_in_secrets_manager ? { "global" = aws_secretsmanager_secret.global_ssh_key[0].arn } : {}
   )

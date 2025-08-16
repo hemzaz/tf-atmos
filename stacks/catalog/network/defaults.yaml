@@ -1,3 +1,4 @@
+---
 name: network
 description: "Reusable network configuration including VPC and DNS"
 
@@ -66,7 +67,7 @@ components:
         public_subnet_ids:
           description: "IDs of the public subnets"
           value: ${output.public_subnet_ids}
-    
+
     # DNS component configuration
     dns:
       metadata:
@@ -79,16 +80,16 @@ components:
         root_domain: "${tenant}.com"
         create_root_zone: ${dns_create_root_zone | default(false)}
         multi_account_dns_delegation: ${dns_multi_account | default(false)}
-        
+
         # Configure zones
         zones: ${dns_zones | default('{"main":{"name":"${environment}.${tenant}.com","comment":"Main zone for ${environment} environment","force_destroy":false,"enable_query_logging":true,"vpc_associations":[]},"internal":{"name":"internal.${environment}.${tenant}.com","comment":"Internal DNS for ${environment} environment","vpc_associations":["${output.vpc.vpc_id}"],"force_destroy":false}}')}
-        
+
         # Optional records configuration
         records: ${dns_records | default('{}')}
-        
+
         # Health checks configuration
         health_checks: ${dns_health_checks | default('{}')}
-        
+
         # VPC DNS resolution
         vpc_dns_resolution: ${dns_vpc_resolution | default('{"main_vpc":{"vpc_id":"${output.vpc.vpc_id}","associated_zones":["internal"]}}')}
 
@@ -99,7 +100,7 @@ components:
         Environment: ${environment}
         Component: "DNS"
         ManagedBy: "Terraform"
-        
+
       # Terraform backend configuration
       settings:
         terraform:
@@ -110,12 +111,12 @@ components:
               region: ${region}
               role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
               dynamodb_table: ${tenant}-terraform-locks
-              
+
       # Provider configuration
       providers:
         aws:
           region: ${region}
-              
+
       # Define DNS outputs
       outputs:
         zone_ids:

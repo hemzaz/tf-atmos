@@ -1,3 +1,4 @@
+---
 import:
   - mixins/tenant/fnx
   - mixins/stage/dev
@@ -14,7 +15,7 @@ vars:
   tenant: fnx
   environment: testenv-01
   stage: dev
-  
+
   # Other configurations
   description: "TestEnv-01 Environment"
   namespace: testenv-01

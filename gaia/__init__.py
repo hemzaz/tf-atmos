@@ -1,6 +1,7 @@
 """
-Gaia - Python CLI for Terraform Atmos with Celery support
+Gaia - Simplified Python CLI wrapper for Atmos operations
 """
 
-__version__ = "0.1.0"
-__author__ = "TF-Atmos Team"
+__version__ = "2.0.0"
+__author__ = "Infrastructure Team"
+__description__ = "Simplified Python CLI wrapper for Atmos operations"

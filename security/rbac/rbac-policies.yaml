@@ -1,0 +1,402 @@
+---
+# RBAC Policies for IDP Platform
+# Implements fine-grained access control based on roles and responsibilities
+
+---
+# Platform Admin ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: idp-platform-admin
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+# Full access to IDP platform resources
+- apiGroups: ["apps", ""]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["security.istio.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["external-secrets.io"]
+  resources: ["*"]
+  verbs: ["*"]
+# Monitoring resources
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["*"]
+  verbs: ["*"]
+# Backup and disaster recovery
+- apiGroups: ["velero.io"]
+  resources: ["*"]
+  verbs: ["*"]
+
+---
+# Platform Developer Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: idp-platform-developer
+  namespace: idp-system
+rules:
+# Read access to platform resources
+- apiGroups: ["apps", ""]
+  resources: ["deployments", "services", "configmaps", "pods", "secrets"]
+  verbs: ["get", "list", "watch"]
+# Limited update access for development
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["patch", "update"]
+  resourceNames: ["backstage-dev", "platform-api-dev"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["patch", "update"]
+  resourceNames: ["backstage-config-dev", "platform-api-config-dev"]
+# Access to logs
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list"]
+# Port-forward for debugging
+- apiGroups: [""]
+  resources: ["pods/portforward"]
+  verbs: ["create"]
+
+---
+# Platform Operator Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: idp-platform-operator
+  namespace: idp-system
+rules:
+# Operational access to platform resources
+- apiGroups: ["apps", ""]
+  resources: ["deployments", "services", "configmaps", "pods", "secrets"]
+  verbs: ["get", "list", "watch", "patch", "update"]
+# Scale deployments
+- apiGroups: ["apps"]
+  resources: ["deployments/scale"]
+  verbs: ["patch", "update"]
+# Restart deployments
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["patch"]
+# Monitoring access
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors", "podmonitors"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+# External secrets management
+- apiGroups: ["external-secrets.io"]
+  resources: ["externalsecrets", "secretstores"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+# Platform Viewer Role (Read-only)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: idp-platform-viewer
+  namespace: idp-system
+rules:
+# Read-only access to most resources
+- apiGroups: ["apps", "", "networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+# Explicitly deny access to secrets
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: []  # Empty means no access
+
+---
+# Security Team Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: idp-security-team
+rules:
+# Security policy management
+- apiGroups: ["security.istio.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["*"]
+- apiGroups: ["policy"]
+  resources: ["podsecuritypolicies"]
+  verbs: ["*"]
+# RBAC management
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Secret management (for security team)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["*"]
+- apiGroups: ["external-secrets.io"]
+  resources: ["*"]
+  verbs: ["*"]
+# Compliance and audit
+- apiGroups: ["audit.k8s.io"]
+  resources: ["events"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Monitoring Team Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: idp-monitoring-team
+rules:
+# Monitoring resources
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["*"]
+  verbs: ["*"]
+# Metrics and logs access
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list", "watch"]
+# Alerting configuration
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+  resourceNames: ["alertmanager-*", "prometheus-*", "grafana-*"]
+
+---
+# Service Account for Backstage
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backstage
+  namespace: idp-system
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/BackstageServiceRole"
+
+---
+# Service Account for Platform API
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-api
+  namespace: idp-system
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/PlatformAPIServiceRole"
+
+---
+# RoleBindings for Platform Admin
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-admin-binding
+subjects:
+- kind: User
+  name: platform-admin@company.com
+  apiGroup: rbac.authorization.k8s.io
+- kind: Group
+  name: platform-engineering
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: idp-platform-admin
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBindings for Platform Developers
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-developer-binding
+  namespace: idp-system
+subjects:
+- kind: Group
+  name: platform-developers
+  apiGroup: rbac.authorization.k8s.io
+- kind: User
+  name: dev-user@company.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: idp-platform-developer
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBindings for Platform Operators
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-operator-binding
+  namespace: idp-system
+subjects:
+- kind: Group
+  name: platform-sre
+  apiGroup: rbac.authorization.k8s.io
+- kind: ServiceAccount
+  name: platform-operator
+  namespace: idp-system
+roleRef:
+  kind: Role
+  name: idp-platform-operator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBindings for Security Team
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: security-team-binding
+subjects:
+- kind: Group
+  name: security-team
+  apiGroup: rbac.authorization.k8s.io
+- kind: User
+  name: security-admin@company.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: idp-security-team
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBindings for Monitoring Team
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-team-binding
+subjects:
+- kind: Group
+  name: monitoring-team
+  apiGroup: rbac.authorization.k8s.io
+- kind: User
+  name: monitoring-admin@company.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: idp-monitoring-team
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service Account Role for Backstage
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backstage-service-account
+rules:
+# Kubernetes resource discovery
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "limitranges", "resourcequotas", "namespaces"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses", "networkpolicies"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets"]
+  verbs: ["get", "list", "watch"]
+# Custom resource access
+- apiGroups: ["argoproj.io"]
+  resources: ["applications", "appprojects"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["tekton.dev"]
+  resources: ["pipelines", "pipelineruns", "tasks", "taskruns"]
+  verbs: ["get", "list", "watch"]
+# Metrics access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+# Bind Backstage service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backstage-service-account-binding
+subjects:
+- kind: ServiceAccount
+  name: backstage
+  namespace: idp-system
+roleRef:
+  kind: ClusterRole
+  name: backstage-service-account
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Service Account Role for Platform API
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-api-service-account
+rules:
+# Infrastructure provisioning via Terraform
+- apiGroups: [""]
+  resources: ["namespaces", "serviceaccounts", "secrets", "configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Job management for workflows
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Custom resources for platform workflows
+- apiGroups: ["argoproj.io"]
+  resources: ["workflows", "workflowtemplates"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# Bind Platform API service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-api-service-account-binding
+subjects:
+- kind: ServiceAccount
+  name: platform-api
+  namespace: idp-system
+roleRef:
+  kind: ClusterRole
+  name: platform-api-service-account
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Emergency Access Role (Break-glass)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: emergency-access
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-cluster-admin: "true"
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+
+---
+# Emergency Access RoleBinding (normally empty, activated during incidents)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: emergency-access-binding
+  annotations:
+    emergency.platform.company.com/activation-required: "true"
+    emergency.platform.company.com/auto-expire: "24h"
+subjects: []  # Populated during emergencies
+roleRef:
+  kind: ClusterRole
+  name: emergency-access
+  apiGroup: rbac.authorization.k8s.io

@@ -1,8 +1,9 @@
+---
 vars:
   tenant: catalog
   account: shared
   environment: global
   stage: staging
-  
+
 imports:
   - catalog/vpc/defaults
