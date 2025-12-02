@@ -1,0 +1,682 @@
+---
+# =============================================================================
+# Deploy Template Workflow
+# =============================================================================
+# Comprehensive workflow for deploying any Alexandria Library template
+# with pre-deployment validation, parallel execution support, and
+# post-deployment verification.
+#
+# Usage:
+#   atmos workflow deploy-template -f deploy-template.yaml \
+#     template=<template-name> tenant=<tenant> account=<account> environment=<env>
+#
+# Examples:
+#   atmos workflow deploy-template -f deploy-template.yaml \
+#     template=web-application tenant=mycompany account=dev environment=testenv-01
+#
+#   atmos workflow deploy-template -f deploy-template.yaml \
+#     template=microservices-platform tenant=mycompany account=prod environment=prod-01 \
+#     auto_approve=true
+# =============================================================================
+
+name: deploy-template
+description: "Deploy any Alexandria Library template with validation and verification"
+
+workflows:
+  # ===========================================================================
+  # Main Deployment Workflow
+  # ===========================================================================
+  deploy:
+    description: "Complete template deployment with validation"
+    steps:
+      # Step 1: Validate inputs and prerequisites
+      - name: "validate-prerequisites"
+        description: "Validate required parameters and prerequisites"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo "=============================================="
+            echo "  Alexandria Library Template Deployment"
+            echo "=============================================="
+            echo ""
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+
+            # Validate required parameters
+            if [ -z "${template:-}" ]; then
+              echo "ERROR: Missing required parameter 'template'"
+              echo ""
+              echo "Available templates:"
+              echo "  - web-application"
+              echo "  - microservices-platform"
+              echo "  - data-pipeline"
+              echo "  - serverless-api"
+              echo "  - batch-processing"
+              echo ""
+              echo "Usage:"
+              echo "  atmos workflow deploy-template -f deploy-template.yaml \\"
+              echo "    template=<template-name> tenant=<tenant> account=<account> environment=<env>"
+              exit 1
+            fi
+
+            if [ -z "${tenant:-}" ]; then
+              echo "ERROR: Missing required parameter 'tenant'"
+              exit 1
+            fi
+
+            if [ -z "${account:-}" ]; then
+              echo "ERROR: Missing required parameter 'account'"
+              exit 1
+            fi
+
+            if [ -z "${environment:-}" ]; then
+              echo "ERROR: Missing required parameter 'environment'"
+              exit 1
+            fi
+
+            STACK="${tenant}-${account}-${environment}"
+
+            echo "Configuration:"
+            echo "  Template:     $template"
+            echo "  Stack:        $STACK"
+            echo "  Auto-approve: ${auto_approve:-false}"
+            echo ""
+
+            # Validate template name
+            case "$template" in
+              web-application|microservices-platform|data-pipeline|serverless-api|batch-processing)
+                echo "Template validated: $template"
+                ;;
+              *)
+                echo "ERROR: Unknown template '$template'"
+                echo "Available templates: web-application, microservices-platform, data-pipeline, serverless-api, batch-processing"
+                exit 1
+                ;;
+            esac
+
+            # Check AWS credentials
+            echo ""
+            echo "Checking AWS credentials..."
+            if ! aws sts get-caller-identity >/dev/null 2>&1; then
+              echo "ERROR: Invalid AWS credentials or AWS CLI not configured"
+              exit 1
+            fi
+            echo "AWS credentials validated"
+
+            # Check required tools
+            echo ""
+            echo "Checking required tools..."
+            for tool in terraform atmos aws; do
+              if command -v $tool >/dev/null 2>&1; then
+                echo "  $tool: OK"
+              else
+                echo "  $tool: MISSING"
+                exit 1
+              fi
+            done
+
+            echo ""
+            echo "Prerequisites validated successfully"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      # Step 2: Define components based on template
+      - name: "determine-components"
+        description: "Determine components to deploy based on template"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo ""
+            echo "=== Determining Components for Template: ${template} ==="
+            echo ""
+
+            # Define component order for each template
+            case "$template" in
+              web-application)
+                COMPONENTS="vpc securitygroup iam rds monitoring"
+                ESTIMATED_TIME=25
+                ;;
+              microservices-platform)
+                COMPONENTS="vpc securitygroup iam eks eks-addons monitoring secretsmanager"
+                ESTIMATED_TIME=45
+                ;;
+              data-pipeline)
+                COMPONENTS="vpc securitygroup iam lambda apigateway monitoring"
+                ESTIMATED_TIME=20
+                ;;
+              serverless-api)
+                COMPONENTS="vpc securitygroup iam lambda apigateway monitoring"
+                ESTIMATED_TIME=15
+                ;;
+              batch-processing)
+                COMPONENTS="vpc securitygroup iam lambda monitoring"
+                ESTIMATED_TIME=20
+                ;;
+              *)
+                echo "ERROR: Unknown template"
+                exit 1
+                ;;
+            esac
+
+            echo "Components to deploy (in order):"
+            i=1
+            for component in $COMPONENTS; do
+              echo "  $i. $component"
+              ((i++))
+            done
+            echo ""
+            echo "Estimated deployment time: ~${ESTIMATED_TIME} minutes"
+
+            # Export for use in later steps
+            echo "COMPONENTS=$COMPONENTS" > /tmp/deploy-components.env
+            echo "ESTIMATED_TIME=$ESTIMATED_TIME" >> /tmp/deploy-components.env
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      # Step 3: Pre-deployment validation
+      - name: "pre-deployment-validation"
+        description: "Run comprehensive validation checks"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo ""
+            echo "=== Pre-Deployment Validation ==="
+            echo ""
+
+            STACK="${tenant}-${account}-${environment}"
+
+            # Load components
+            if [ -f /tmp/deploy-components.env ]; then
+              source /tmp/deploy-components.env
+            else
+              echo "ERROR: Component list not found"
+              exit 1
+            fi
+
+            VALIDATION_ERRORS=0
+
+            # Validate stack exists
+            echo "Checking stack configuration..."
+            if ! atmos describe stacks 2>/dev/null | grep -q "$STACK"; then
+              echo "WARNING: Stack $STACK not found in Atmos configuration"
+              echo "The stack may need to be created first using new-environment.sh"
+            else
+              echo "Stack configuration found: $STACK"
+            fi
+
+            # Validate each component
+            echo ""
+            echo "Validating components..."
+            for component in $COMPONENTS; do
+              echo -n "  Validating $component... "
+
+              # Check if component directory exists
+              if [ ! -d "components/terraform/$component" ]; then
+                echo "SKIP (directory not found)"
+                continue
+              fi
+
+              # Run terraform validate
+              if atmos terraform validate "$component" -s "$STACK" >/dev/null 2>&1; then
+                echo "OK"
+              else
+                echo "WARNING"
+                ((VALIDATION_ERRORS++))
+              fi
+            done
+
+            echo ""
+            if [ $VALIDATION_ERRORS -gt 0 ]; then
+              echo "Pre-deployment validation completed with $VALIDATION_ERRORS warning(s)"
+              echo "Proceeding with caution..."
+            else
+              echo "Pre-deployment validation successful"
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      # Step 4: Generate execution plans
+      - name: "generate-plans"
+        description: "Generate Terraform plans for all components"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo ""
+            echo "=== Generating Execution Plans ==="
+            echo ""
+
+            STACK="${tenant}-${account}-${environment}"
+            PLAN_DIR="./plans/${STACK}-$(date +%Y%m%d-%H%M%S)"
+
+            # Load components
+            source /tmp/deploy-components.env
+
+            mkdir -p "$PLAN_DIR"
+            echo "Plan directory: $PLAN_DIR"
+            echo ""
+
+            PLAN_SUCCESS=true
+            for component in $COMPONENTS; do
+              echo "Planning component: $component"
+
+              # Check if component exists
+              if [ ! -d "components/terraform/$component" ]; then
+                echo "  Skipping (component not found)"
+                continue
+              fi
+
+              # Generate plan
+              if atmos terraform plan "$component" -s "$STACK" 2>&1 | tee "$PLAN_DIR/${component}.plan.txt"; then
+                echo "  Plan generated successfully"
+              else
+                echo "  Plan failed"
+                PLAN_SUCCESS=false
+              fi
+              echo ""
+            done
+
+            if [ "$PLAN_SUCCESS" = "false" ]; then
+              echo "ERROR: One or more plans failed"
+              echo "Review the output above before proceeding"
+              exit 1
+            fi
+
+            echo ""
+            echo "All plans generated successfully"
+            echo "Plans stored in: $PLAN_DIR"
+
+            # Store plan dir for later steps
+            echo "PLAN_DIR=$PLAN_DIR" >> /tmp/deploy-components.env
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      # Step 5: Apply components in order
+      - name: "apply-components"
+        description: "Apply Terraform changes for all components"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo ""
+            echo "=== Applying Components ==="
+            echo ""
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            # Load components
+            source /tmp/deploy-components.env
+
+            if [ "$AUTO_APPROVE" != "true" ]; then
+              echo "Auto-approve is not enabled."
+              echo "To apply changes, re-run with auto_approve=true"
+              echo ""
+              echo "Example:"
+              echo "  atmos workflow deploy-template -f deploy-template.yaml \\"
+              echo "    template=$template tenant=$tenant account=$account environment=$environment \\"
+              echo "    auto_approve=true"
+              echo ""
+              exit 0
+            fi
+
+            echo "Starting deployment with auto-approve..."
+            echo ""
+
+            DEPLOYED=""
+            DEPLOY_SUCCESS=true
+            START_TIME=$(date +%s)
+
+            for component in $COMPONENTS; do
+              echo "=============================================="
+              echo "Deploying: $component"
+              echo "=============================================="
+
+              # Check if component exists
+              if [ ! -d "components/terraform/$component" ]; then
+                echo "Skipping (component not found)"
+                continue
+              fi
+
+              COMPONENT_START=$(date +%s)
+
+              # Apply component
+              if atmos terraform apply "$component" -s "$STACK" -auto-approve; then
+                COMPONENT_END=$(date +%s)
+                DURATION=$((COMPONENT_END - COMPONENT_START))
+                echo ""
+                echo "Component $component deployed successfully (${DURATION}s)"
+                DEPLOYED="$DEPLOYED $component"
+              else
+                echo ""
+                echo "ERROR: Component $component deployment failed"
+                DEPLOY_SUCCESS=false
+
+                # Show what was deployed before failure
+                if [ -n "$DEPLOYED" ]; then
+                  echo ""
+                  echo "Successfully deployed before failure:$DEPLOYED"
+                  echo ""
+                  echo "Consider rolling back with:"
+                  echo "  atmos workflow destroy-environment -f destroy-environment.yaml \\"
+                  echo "    tenant=$tenant account=$account environment=$environment"
+                fi
+                exit 1
+              fi
+              echo ""
+            done
+
+            END_TIME=$(date +%s)
+            TOTAL_DURATION=$((END_TIME - START_TIME))
+
+            echo ""
+            echo "=============================================="
+            echo "Deployment Complete"
+            echo "=============================================="
+            echo "Total time: $((TOTAL_DURATION / 60))m $((TOTAL_DURATION % 60))s"
+            echo "Components deployed:$DEPLOYED"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      # Step 6: Post-deployment verification
+      - name: "post-deployment-verification"
+        description: "Verify deployment and collect outputs"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo ""
+            echo "=== Post-Deployment Verification ==="
+            echo ""
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            # Only run if we actually deployed
+            if [ "$AUTO_APPROVE" != "true" ]; then
+              echo "Skipping verification (no deployment occurred)"
+              exit 0
+            fi
+
+            # Load components
+            source /tmp/deploy-components.env
+
+            echo "Verifying deployed components..."
+            echo ""
+
+            VERIFY_SUCCESS=true
+            for component in $COMPONENTS; do
+              echo -n "Verifying $component... "
+
+              # Check if component exists
+              if [ ! -d "components/terraform/$component" ]; then
+                echo "SKIP"
+                continue
+              fi
+
+              # Verify component state
+              if atmos terraform state list "$component" -s "$STACK" >/dev/null 2>&1; then
+                # Get resource count
+                RESOURCE_COUNT=$(atmos terraform state list "$component" -s "$STACK" 2>/dev/null | wc -l | tr -d ' ')
+                echo "OK ($RESOURCE_COUNT resources)"
+              else
+                echo "WARNING (state check failed)"
+                VERIFY_SUCCESS=false
+              fi
+            done
+
+            echo ""
+
+            # Collect key outputs
+            echo "=== Key Outputs ==="
+            echo ""
+
+            # VPC outputs
+            if echo "$COMPONENTS" | grep -q "vpc"; then
+              echo "VPC Outputs:"
+              atmos terraform output vpc -s "$STACK" 2>/dev/null || echo "  (no outputs available)"
+              echo ""
+            fi
+
+            # EKS outputs
+            if echo "$COMPONENTS" | grep -q "eks"; then
+              echo "EKS Outputs:"
+              atmos terraform output eks -s "$STACK" 2>/dev/null || echo "  (no outputs available)"
+              echo ""
+            fi
+
+            # RDS outputs
+            if echo "$COMPONENTS" | grep -q "rds"; then
+              echo "RDS Outputs:"
+              atmos terraform output rds -s "$STACK" 2>/dev/null || echo "  (no outputs available)"
+              echo ""
+            fi
+
+            if [ "$VERIFY_SUCCESS" = "false" ]; then
+              echo "WARNING: Some verifications failed. Manual review recommended."
+            else
+              echo "All verifications passed"
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      # Step 7: Generate deployment report
+      - name: "generate-report"
+        description: "Generate deployment summary report"
+        run:
+          command: |
+            set -euo pipefail
+
+            echo ""
+            echo "=== Deployment Summary ==="
+            echo ""
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            echo "Template:     $template"
+            echo "Stack:        $STACK"
+            echo "Status:       $([ "$AUTO_APPROVE" = "true" ] && echo "DEPLOYED" || echo "PLAN ONLY")"
+            echo "Timestamp:    $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+
+            if [ "$AUTO_APPROVE" = "true" ]; then
+              echo "Next Steps:"
+              echo "  1. Verify resources in AWS Console"
+              echo "  2. Configure application deployments"
+              echo "  3. Set up monitoring alerts"
+              echo "  4. Update DNS records if needed"
+              echo ""
+              echo "Useful Commands:"
+              echo "  # View all outputs"
+              echo "  atmos terraform output vpc -s $STACK"
+              echo ""
+              echo "  # List resources"
+              echo "  atmos terraform state list vpc -s $STACK"
+              echo ""
+              echo "  # Destroy environment"
+              echo "  atmos workflow destroy-environment -f destroy-environment.yaml \\"
+              echo "    tenant=$tenant account=$account environment=$environment"
+            else
+              echo "To apply changes, run:"
+              echo "  atmos workflow deploy-template -f deploy-template.yaml \\"
+              echo "    template=$template tenant=$tenant account=$account environment=$environment \\"
+              echo "    auto_approve=true"
+            fi
+
+            echo ""
+            echo "=============================================="
+            echo "  Deployment workflow completed"
+            echo "=============================================="
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # ===========================================================================
+  # Quick Deploy Workflows (Shortcuts)
+  # ===========================================================================
+  deploy-web-app:
+    description: "Quick deploy web-application template"
+    steps:
+      - name: "deploy"
+        run:
+          command: |
+            atmos workflow deploy-template -f deploy-template.yaml \
+              template=web-application \
+              tenant=${tenant} \
+              account=${account} \
+              environment=${environment} \
+              auto_approve=${auto_approve:-false}
+
+  deploy-microservices:
+    description: "Quick deploy microservices-platform template"
+    steps:
+      - name: "deploy"
+        run:
+          command: |
+            atmos workflow deploy-template -f deploy-template.yaml \
+              template=microservices-platform \
+              tenant=${tenant} \
+              account=${account} \
+              environment=${environment} \
+              auto_approve=${auto_approve:-false}
+
+  deploy-serverless:
+    description: "Quick deploy serverless-api template"
+    steps:
+      - name: "deploy"
+        run:
+          command: |
+            atmos workflow deploy-template -f deploy-template.yaml \
+              template=serverless-api \
+              tenant=${tenant} \
+              account=${account} \
+              environment=${environment} \
+              auto_approve=${auto_approve:-false}
+
+  deploy-data-pipeline:
+    description: "Quick deploy data-pipeline template"
+    steps:
+      - name: "deploy"
+        run:
+          command: |
+            atmos workflow deploy-template -f deploy-template.yaml \
+              template=data-pipeline \
+              tenant=${tenant} \
+              account=${account} \
+              environment=${environment} \
+              auto_approve=${auto_approve:-false}
+
+  deploy-batch:
+    description: "Quick deploy batch-processing template"
+    steps:
+      - name: "deploy"
+        run:
+          command: |
+            atmos workflow deploy-template -f deploy-template.yaml \
+              template=batch-processing \
+              tenant=${tenant} \
+              account=${account} \
+              environment=${environment} \
+              auto_approve=${auto_approve:-false}
+
+  # ===========================================================================
+  # Parallel Deployment (Experimental)
+  # ===========================================================================
+  deploy-parallel:
+    description: "Deploy template with parallel execution where possible"
+    steps:
+      - name: "validate"
+        run:
+          command: |
+            echo "=== Parallel Deployment Mode ==="
+            echo ""
+            echo "WARNING: Parallel deployment is experimental."
+            echo "Only independent components will be deployed in parallel."
+            echo ""
+
+            STACK="${tenant:-default}-${account:-dev}-${environment:-test}"
+            echo "Stack: $STACK"
+            echo "Template: ${template:-minimal}"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-foundation"
+        description: "Deploy foundation layer (VPC, IAM)"
+        run:
+          command: |
+            STACK="${tenant}-${account}-${environment}"
+            echo "Deploying foundation layer in parallel..."
+
+            # VPC and IAM can be deployed in parallel
+            atmos terraform apply vpc -s "$STACK" -auto-approve &
+            PID_VPC=$!
+
+            atmos terraform apply iam -s "$STACK" -auto-approve &
+            PID_IAM=$!
+
+            # Wait for both
+            wait $PID_VPC
+            wait $PID_IAM
+
+            echo "Foundation layer deployed"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-security"
+        description: "Deploy security layer"
+        run:
+          command: |
+            STACK="${tenant}-${account}-${environment}"
+            echo "Deploying security layer..."
+
+            atmos terraform apply securitygroup -s "$STACK" -auto-approve
+
+            echo "Security layer deployed"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-compute"
+        description: "Deploy compute layer"
+        run:
+          command: |
+            STACK="${tenant}-${account}-${environment}"
+            echo "Deploying compute layer..."
+
+            case "${template}" in
+              microservices-platform)
+                atmos terraform apply eks -s "$STACK" -auto-approve
+                atmos terraform apply eks-addons -s "$STACK" -auto-approve
+                ;;
+              web-application|data-pipeline)
+                atmos terraform apply rds -s "$STACK" -auto-approve &
+                atmos terraform apply lambda -s "$STACK" -auto-approve &
+                wait
+                ;;
+              serverless-api)
+                atmos terraform apply lambda -s "$STACK" -auto-approve
+                atmos terraform apply apigateway -s "$STACK" -auto-approve
+                ;;
+            esac
+
+            echo "Compute layer deployed"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-services"
+        description: "Deploy service layer"
+        run:
+          command: |
+            STACK="${tenant}-${account}-${environment}"
+            echo "Deploying service layer..."
+
+            # Monitoring and secrets can be deployed in parallel
+            atmos terraform apply monitoring -s "$STACK" -auto-approve &
+            atmos terraform apply secretsmanager -s "$STACK" -auto-approve &
+            wait
+
+            echo "Service layer deployed"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1

@@ -2626,4 +2626,3049 @@ modules:
         - "CIS AWS Foundations"
         - "IMDSv2 enforced"
 
+  # ===========================================================================
+  # PHASE 3: OBSERVABILITY MODULES (2025-12-02)
+  # ===========================================================================
+
+  # --- CloudWatch Dashboard ---
+
+  - id: "cloudwatch-dashboard"
+    name: "CloudWatch Dashboard"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "observability/metrics"
+    subcategory: "dashboards"
+    path: "_library/observability/cloudwatch-dashboard"
+
+    description: "Reusable dashboard builder with pre-built widget library and auto-discovery"
+    long_description: |
+      Production-ready CloudWatch dashboard module with pre-configured widget templates for
+      infrastructure, application, cost, and security monitoring. Includes auto-discovery of
+      EC2, RDS, and ALB resources, support for custom widgets, metric math capabilities,
+      and cost estimation tracking. Template-based generation ensures consistency across
+      environments.
+
+    tags:
+      - cloudwatch
+      - dashboard
+      - monitoring
+      - metrics
+      - widgets
+      - auto-discovery
+      - visualization
+      - observability
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 15
+
+    cost:
+      estimated_monthly_usd: 3
+      cost_category: "low"
+      cost_factors:
+        - "$3 per dashboard per month"
+        - "Additional costs for custom metrics"
+      cost_breakdown:
+        dashboard: 3
+
+    features:
+      - "Pre-built dashboard types (infrastructure, application, cost, security)"
+      - "Auto-discovery of EC2, RDS, ALB resources"
+      - "Custom widget support"
+      - "Metric math and calculations"
+      - "Template-based generation"
+      - "Cost estimation tracking"
+      - "Log insights widgets"
+      - "Configurable widget library"
+
+    use_cases:
+      - "Infrastructure monitoring dashboards"
+      - "Application performance tracking"
+      - "Cost visibility and tracking"
+      - "Security event monitoring"
+      - "Multi-service overview dashboards"
+
+    maintainer:
+      team: "SRE Team"
+      primary: "sre-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#sre-support"
+      sla_hours: 24
+      oncall: "sre-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "cloudwatch-alarms"
+      - "log-aggregation"
+      - "xray-tracing"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: null
+      examples:
+        - path: "./examples/basic"
+          description: "Basic dashboard with auto-discovery"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- CloudWatch Alarms ---
+
+  - id: "cloudwatch-alarms"
+    name: "CloudWatch Alarms"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "observability/alerting"
+    subcategory: "alarms"
+    path: "_library/observability/cloudwatch-alarms"
+
+    description: "Alarm factory with templates, composite alarms, and auto-remediation"
+    long_description: |
+      Production-ready CloudWatch alarm module with alarm factory pattern for common scenarios.
+      Includes pre-configured templates for CPU, memory, disk monitoring, anomaly detection
+      alarms, composite alarms for complex conditions, SNS topic integration, and Lambda-based
+      auto-remediation. Supports custom alarm definitions and comprehensive notification routing.
+
+    tags:
+      - cloudwatch
+      - alarms
+      - alerting
+      - monitoring
+      - anomaly-detection
+      - composite-alarms
+      - auto-remediation
+      - sns
+      - notifications
+
+    complexity: "intermediate"
+    setup_time_minutes: 12
+    variable_count: 35
+
+    cost:
+      estimated_monthly_usd: 5
+      cost_category: "low"
+      cost_factors:
+        - "$0.10 per standard alarm per month"
+        - "$0.30 per composite alarm per month"
+        - "SNS notification costs"
+        - "Lambda execution costs (if auto-remediation enabled)"
+      cost_breakdown:
+        standard_alarms: 2
+        composite_alarms: 1
+        sns: 1
+        lambda: 1
+
+    features:
+      - "Alarm templates (CPU, memory, disk, custom)"
+      - "Anomaly detection alarms with ML"
+      - "Composite alarms for complex conditions"
+      - "SNS topic creation and subscription"
+      - "Auto-remediation with Lambda"
+      - "Email notifications"
+      - "Custom alarm factory"
+      - "Alarm action routing"
+
+    use_cases:
+      - "Infrastructure health monitoring"
+      - "Application performance alerting"
+      - "Anomaly detection"
+      - "Auto-scaling triggers"
+      - "Incident response automation"
+
+    maintainer:
+      team: "SRE Team"
+      primary: "sre-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#sre-support"
+      sla_hours: 12
+      oncall: "sre-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "cloudwatch-dashboard"
+      - "log-aggregation"
+      - "monitoring"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: null
+      examples:
+        - path: "./examples/basic"
+          description: "Standard alarms with SNS notifications"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- X-Ray Tracing ---
+
+  - id: "xray-tracing"
+    name: "X-Ray Tracing"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "observability/tracing"
+    subcategory: "distributed-tracing"
+    path: "_library/observability/xray-tracing"
+
+    description: "X-Ray groups, sampling rules, and service integrations with cost optimization"
+    long_description: |
+      Production-ready AWS X-Ray module for distributed tracing. Includes cost-optimized
+      sampling rules by environment, X-Ray groups for error tracking and slow requests,
+      service map configuration, Lambda/ECS/API Gateway integration, X-Ray Insights with
+      analytics, and intelligent sampling strategies to minimize costs while maintaining
+      visibility.
+
+    tags:
+      - xray
+      - tracing
+      - distributed-tracing
+      - apm
+      - observability
+      - sampling
+      - service-map
+      - insights
+      - cost-optimization
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 28
+
+    cost:
+      estimated_monthly_usd: 15
+      cost_category: "low"
+      cost_factors:
+        - "$5 per 1M traces recorded"
+        - "$0.50 per 1M traces scanned"
+        - "Cost varies with sampling rate"
+        - "Production: 5% sampling reduces costs by 95%"
+      cost_breakdown:
+        traces_recorded: 10
+        traces_scanned: 3
+        insights: 2
+      cost_optimization:
+        - "Environment-based sampling (5% prod, 20% staging, 100% dev)"
+        - "High-value path sampling at 100%"
+        - "Intelligent reservoir sizing"
+
+    features:
+      - "Cost-optimized sampling strategies by environment"
+      - "X-Ray groups (all, errors, slow requests)"
+      - "Custom sampling rules"
+      - "Lambda function integration"
+      - "ECS task integration"
+      - "API Gateway integration"
+      - "X-Ray Insights and analytics"
+      - "Service map configuration"
+      - "CloudWatch alarms for trace errors"
+
+    use_cases:
+      - "Distributed system tracing"
+      - "Microservices debugging"
+      - "Performance bottleneck identification"
+      - "Service dependency mapping"
+      - "Latency analysis"
+      - "Error tracking"
+
+    maintainer:
+      team: "SRE Team"
+      primary: "sre-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#sre-support"
+      sla_hours: 24
+      oncall: "sre-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "lambda-pattern-library"
+      - "ecs-fargate-service"
+      - "apigateway-rest"
+      - "cloudwatch-dashboard"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: null
+      examples:
+        - path: "./examples/basic"
+          description: "Basic X-Ray setup with cost optimization"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- Log Aggregation ---
+
+  - id: "log-aggregation"
+    name: "Log Aggregation"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "observability/logging"
+    subcategory: "log-management"
+    path: "_library/observability/log-aggregation"
+
+    description: "CloudWatch Logs centralization with Kinesis, S3 export, and Athena queries"
+    long_description: |
+      Enterprise log aggregation solution with CloudWatch Logs centralization, real-time
+      streaming to Kinesis Data Streams, automated S3 export with lifecycle policies,
+      Athena query setup for SQL-based analysis, subscription filters for routing, metric
+      filters for extracting metrics from logs, and comprehensive retention management.
+      Ideal for multi-service logging consolidation.
+
+    tags:
+      - cloudwatch
+      - logs
+      - logging
+      - aggregation
+      - kinesis
+      - s3
+      - athena
+      - subscription-filters
+      - metric-filters
+      - log-analytics
+
+    complexity: "advanced"
+    setup_time_minutes: 15
+    variable_count: 22
+
+    cost:
+      estimated_monthly_usd: 50
+      cost_category: "medium"
+      cost_factors:
+        - "Log ingestion: $0.50 per GB"
+        - "Kinesis: $0.015 per shard-hour + $0.014 per GB"
+        - "S3 storage: $0.023 per GB (transitions to IA/Glacier)"
+        - "Athena: $5 per TB scanned"
+      cost_breakdown:
+        log_ingestion: 25
+        kinesis: 15
+        s3_storage: 5
+        athena: 5
+      cost_optimization:
+        - "Aggressive S3 lifecycle policies"
+        - "Kinesis on-demand mode for variable traffic"
+        - "Partition logs in S3 for efficient Athena queries"
+
+    features:
+      - "Centralized CloudWatch Logs groups"
+      - "Real-time Kinesis Data Streams"
+      - "Automated S3 export with Lambda"
+      - "S3 lifecycle policies (IA, Glacier, expiration)"
+      - "Athena workgroup and database setup"
+      - "Subscription filters for log routing"
+      - "Metric filters for log-based metrics"
+      - "Configurable retention policies"
+      - "KMS encryption for logs and streams"
+
+    use_cases:
+      - "Multi-service log consolidation"
+      - "Real-time log streaming"
+      - "Long-term log archival"
+      - "SQL-based log analysis with Athena"
+      - "Compliance and audit logging"
+      - "Log-based metric extraction"
+
+    maintainer:
+      team: "SRE Team"
+      primary: "sre-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#sre-support"
+      sla_hours: 24
+      oncall: "sre-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "cloudwatch-dashboard"
+      - "cloudwatch-alarms"
+      - "lambda-pattern-library"
+      - "ecs-fargate-service"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: null
+      examples:
+        - path: "./examples/basic"
+          description: "Complete log aggregation pipeline"
+          complexity: "intermediate"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "AWS Well-Architected"
+        - "SOC 2"
+
+  # ===========================================================================
+  # PHASE 3: ADVANCED NETWORKING MODULES (2025-12-02)
+  # ===========================================================================
+
+  # --- Transit Gateway ---
+
+  - id: "transit-gateway"
+    name: "Transit Gateway"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "networking/hybrid"
+    subcategory: "transit-gateway"
+    path: "_library/networking/transit-gateway"
+
+    description: "AWS Transit Gateway with VPC/VPN attachments, route tables, and cross-region peering"
+    long_description: |
+      Enterprise Transit Gateway module for hub-and-spoke network architecture.
+      Supports VPC attachments, VPN connections, custom route tables with associations
+      and propagations, cross-account sharing via RAM, and cross-region peering.
+      Ideal for connecting multiple VPCs and on-premises networks.
+
+    tags:
+      - transit-gateway
+      - tgw
+      - networking
+      - hybrid-cloud
+      - vpn
+      - peering
+      - ram
+      - multi-account
+      - hub-spoke
+
+    complexity: "advanced"
+    setup_time_minutes: 20
+    variable_count: 15
+
+    cost:
+      estimated_monthly_usd: 110
+      cost_category: "medium"
+      cost_factors:
+        - "Transit Gateway: $36.50/month"
+        - "Attachment per VPC: $36.50/month each"
+        - "Data processing: $0.02/GB"
+      cost_breakdown:
+        transit_gateway: 36.50
+        attachments: 73
+        data_processing: "Variable"
+
+    features:
+      - "Transit Gateway with customizable ASN"
+      - "VPC attachments with route table management"
+      - "VPN attachments with BGP support"
+      - "Custom route tables and static routes"
+      - "Route table associations and propagations"
+      - "Cross-account sharing via RAM"
+      - "Cross-region peering"
+      - "Multicast support (optional)"
+      - "VPN ECMP support"
+
+    use_cases:
+      - "Multi-VPC connectivity"
+      - "Hybrid cloud networking"
+      - "Hub-and-spoke architectures"
+      - "Multi-account AWS organizations"
+      - "Centralized egress/ingress"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#networking-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "vpc-*"
+      - "vpn-connection"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- VPN Connection ---
+
+  - id: "vpn-connection"
+    name: "VPN Connection"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "networking/hybrid"
+    subcategory: "vpn"
+    path: "_library/networking/vpn-connection"
+
+    description: "Site-to-Site VPN with customer gateway, dual tunnels, and comprehensive monitoring"
+    long_description: |
+      Production-ready Site-to-Site VPN module supporting both Virtual Private Gateway
+      and Transit Gateway deployments. Features dual tunnels for high availability,
+      static and dynamic (BGP) routing, advanced IPsec parameters (IKEv2), CloudWatch
+      logs and alarms, and automatic failover.
+
+    tags:
+      - vpn
+      - site-to-site
+      - customer-gateway
+      - virtual-private-gateway
+      - bgp
+      - ipsec
+      - ikev2
+      - hybrid-cloud
+      - monitoring
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 35
+
+    cost:
+      estimated_monthly_usd: 40
+      cost_category: "low"
+      cost_factors:
+        - "VPN connection: $36.50/month"
+        - "Data transfer: $0.09/GB out"
+      cost_breakdown:
+        vpn_connection: 36.50
+        data_transfer: "Variable"
+
+    features:
+      - "Customer gateway configuration"
+      - "Virtual Private Gateway or Transit Gateway support"
+      - "Static and dynamic routing (BGP)"
+      - "Dual tunnels for high availability"
+      - "IKEv2 with modern encryption"
+      - "Custom IPsec parameters (DH groups, encryption, integrity)"
+      - "CloudWatch logs per tunnel"
+      - "CloudWatch alarms (tunnel state, data flow)"
+      - "Automatic route propagation"
+
+    use_cases:
+      - "Connect on-premises to AWS"
+      - "Hybrid cloud connectivity"
+      - "Disaster recovery site connectivity"
+      - "Remote office connectivity"
+      - "Multi-cloud networking"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "vpc-*"
+      - "transit-gateway"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- Network Firewall ---
+
+  - id: "network-firewall"
+    name: "Network Firewall"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "networking/security"
+    subcategory: "firewall"
+    path: "_library/networking/network-firewall"
+
+    description: "AWS Network Firewall with stateful/stateless rules, domain filtering, and IPS"
+    long_description: |
+      Enterprise Network Firewall module providing Layer 3-7 network protection.
+      Supports stateless and stateful rule groups, domain-based filtering (allow/deny lists),
+      Suricata-compatible IPS rules, multi-AZ deployment for high availability, and
+      comprehensive logging to S3 and CloudWatch. Ideal for centralized inspection VPC patterns.
+
+    tags:
+      - network-firewall
+      - firewall
+      - ips
+      - ids
+      - stateful
+      - stateless
+      - domain-filtering
+      - suricata
+      - security
+      - inspection
+
+    complexity: "advanced"
+    setup_time_minutes: 20
+    variable_count: 18
+
+    cost:
+      estimated_monthly_usd: 550
+      cost_category: "high"
+      cost_factors:
+        - "Network Firewall endpoint: $0.395/hour per AZ"
+        - "Data processing: $0.065/GB"
+        - "Rule groups included"
+      cost_breakdown:
+        firewall_endpoints: 288
+        data_processing: 260
+        storage: 2
+
+    features:
+      - "Stateless rule groups for fast packet filtering"
+      - "Stateful rule groups (domain, 5-tuple, Suricata)"
+      - "Domain filtering with allow/deny lists"
+      - "Suricata-compatible IPS rules"
+      - "Multi-AZ deployment for high availability"
+      - "Flow logs to S3 and CloudWatch"
+      - "Alert logs to CloudWatch"
+      - "Delete and change protection"
+      - "Centralized inspection VPC pattern ready"
+
+    use_cases:
+      - "Centralized egress filtering"
+      - "Ingress inspection"
+      - "Domain-based filtering"
+      - "IPS/IDS deployment"
+      - "Compliance requirements (PCI DSS, HIPAA)"
+      - "Zero-trust network architectures"
+
+    maintainer:
+      team: "Security Engineering"
+      primary: "security-team@example.com"
+
+    support:
+      channel: "#security-support"
+      sla_hours: 12
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "vpc-*"
+      - "transit-gateway"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "PCI DSS"
+        - "HIPAA"
+
+  # --- NAT Gateway HA ---
+
+  - id: "nat-gateway-ha"
+    name: "NAT Gateway HA"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "networking/connectivity"
+    subcategory: "nat"
+    path: "_library/networking/nat-gateway-ha"
+
+    description: "Highly available NAT Gateway with one per AZ, monitoring, and cost tracking"
+    long_description: |
+      Production-ready NAT Gateway module deploying one NAT Gateway per availability zone
+      for high availability. Includes Elastic IP management, automatic route table configuration,
+      CloudWatch monitoring with alarms for port allocation errors and packet drops, and
+      cost tracking dashboard. Optimized for fault tolerance and observability.
+
+    tags:
+      - nat-gateway
+      - nat
+      - high-availability
+      - multi-az
+      - elastic-ip
+      - monitoring
+      - cost-optimization
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 10
+
+    cost:
+      estimated_monthly_usd: 97
+      cost_category: "medium"
+      cost_factors:
+        - "NAT Gateway per AZ: $32.85/month each"
+        - "Data processing: $0.045/GB"
+        - "Typical 3-AZ deployment shown"
+      cost_breakdown:
+        nat_gateways: 97
+        data_processing: "Variable"
+
+    features:
+      - "One NAT Gateway per availability zone"
+      - "Automatic Elastic IP allocation"
+      - "Route table creation and association"
+      - "CloudWatch alarms for port allocation errors"
+      - "CloudWatch alarms for packet drops"
+      - "Bandwidth monitoring alarms"
+      - "CloudWatch dashboard for cost tracking"
+      - "Per-AZ resource tagging"
+
+    use_cases:
+      - "High-availability internet egress"
+      - "Multi-AZ production workloads"
+      - "Fault-tolerant architectures"
+      - "Private subnet internet access"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "vpc-*"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- VPC Endpoints ---
+
+  - id: "vpc-endpoints"
+    name: "VPC Endpoints"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "networking/connectivity"
+    subcategory: "vpc-endpoints"
+    path: "_library/networking/vpc-endpoints"
+
+    description: "Comprehensive VPC endpoints for 30+ AWS services with Gateway and Interface endpoints"
+    long_description: |
+      Production-ready VPC endpoints module supporting 30+ AWS services including S3, DynamoDB,
+      ECR, ECS, Lambda, Secrets Manager, and more. Features automatic security group creation,
+      private DNS configuration, endpoint policies, cost estimation, and multi-AZ deployment.
+      Reduces data transfer costs and improves security by keeping traffic within AWS network.
+
+    tags:
+      - vpc-endpoints
+      - privatelink
+      - interface-endpoints
+      - gateway-endpoints
+      - private-connectivity
+      - cost-optimization
+      - security
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 6
+
+    cost:
+      estimated_monthly_usd: 22
+      cost_category: "low"
+      cost_factors:
+        - "Interface endpoint: $0.01/hour per AZ"
+        - "Data processing: $0.01/GB"
+        - "Gateway endpoints (S3, DynamoDB): free"
+      cost_breakdown:
+        interface_endpoints: 15
+        data_processing: 7
+        gateway_endpoints: 0
+
+    features:
+      - "Gateway endpoints (S3, DynamoDB) - free"
+      - "Interface endpoints for 30+ services"
+      - "Automatic security group creation"
+      - "Private DNS configuration"
+      - "Custom endpoint policies"
+      - "Multi-AZ deployment"
+      - "Cost estimation and breakdown"
+      - "Service name mapping for all regions"
+
+    supported_services:
+      - "S3, DynamoDB (Gateway)"
+      - "EC2, ECR, ECS, Lambda"
+      - "Secrets Manager, SSM, KMS"
+      - "RDS, SNS, SQS, CloudWatch"
+      - "Kinesis, Athena, Glue"
+      - "SageMaker, Step Functions"
+      - "And 20+ more services"
+
+    use_cases:
+      - "Private connectivity to AWS services"
+      - "Reduce data transfer costs"
+      - "Compliance requirements"
+      - "Private ECS/EKS workloads"
+      - "Lambda in VPC"
+      - "Database connectivity"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "vpc-*"
+      - "eks-*"
+      - "ecs-*"
+      - "lambda"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "AWS Well-Architected"
+        - "Cost optimization"
+
+# End of module registry
+  # PHASE 3: INTEGRATION MODULES (2025-12-02)
+  # ===========================================================================
+
+  # --- SQS Queue ---
+
+  - id: "sqs-queue"
+    name: "SQS Queue"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "integration/messaging"
+    subcategory: "sqs"
+    path: "_library/integration/sqs-queue"
+
+    description: "Production-ready SQS queue with encryption, DLQ, and cross-account access"
+    long_description: |
+      Comprehensive Amazon SQS module supporting standard and FIFO queues with server-side
+      encryption via KMS, dead letter queue configuration, cross-account access policies,
+      SNS topic integration, and CloudWatch alarms for queue monitoring. Includes automatic
+      KMS key creation and configurable message retention and visibility settings.
+
+    tags:
+      - sqs
+      - queue
+      - messaging
+      - fifo
+      - dlq
+      - encryption
+      - kms
+      - cloudwatch
+
+    complexity: "beginner"
+    setup_time_minutes: 8
+    variable_count: 38
+
+    cost:
+      estimated_monthly_usd: 2
+      cost_category: "low"
+      cost_factors:
+        - "SQS requests: $0.40 per million"
+        - "KMS API calls: $0.03 per 10,000 requests"
+        - "Data transfer"
+      cost_breakdown:
+        sqs_requests: 1.20
+        kms: 0.60
+        data_transfer: 0.20
+
+    features:
+      - "Standard and FIFO queues"
+      - "Server-side encryption with KMS"
+      - "Automatic KMS key creation or BYO key"
+      - "Dead letter queue with configurable redrive"
+      - "Cross-account access via queue policies"
+      - "SNS topic subscription support"
+      - "Long polling configuration"
+      - "Message delay and visibility timeout"
+      - "CloudWatch alarms (queue depth, message age, DLQ)"
+
+    use_cases:
+      - "Asynchronous task processing"
+      - "Event-driven architectures"
+      - "Decoupling microservices"
+      - "Message buffering"
+      - "Work queue patterns"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "lambda-pattern-library"
+      - "sns-topic"
+      - "eventbridge-bus"
+      - "ecs-fargate-service"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "FIFO queue with DLQ"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "Encryption at rest enforced"
+
+  # --- SNS Topic ---
+
+  - id: "sns-topic"
+    name: "SNS Topic"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "integration/messaging"
+    subcategory: "sns"
+    path: "_library/integration/sns-topic"
+
+    description: "Production-ready SNS topic with encryption, subscriptions, and message filtering"
+    long_description: |
+      Enterprise Amazon SNS module supporting standard and FIFO topics with KMS encryption,
+      multiple subscription types (SQS, Lambda, HTTP/HTTPS, Email), message filtering for
+      targeted delivery, cross-account access policies, delivery status logging, and
+      CloudWatch alarms for monitoring publication failures.
+
+    tags:
+      - sns
+      - topic
+      - pub-sub
+      - notifications
+      - fifo
+      - encryption
+      - subscriptions
+      - message-filtering
+
+    complexity: "beginner"
+    setup_time_minutes: 8
+    variable_count: 32
+
+    cost:
+      estimated_monthly_usd: 1
+      cost_category: "low"
+      cost_factors:
+        - "SNS requests: $0.50 per million"
+        - "SMS/Mobile push (additional)"
+        - "Data transfer"
+      cost_breakdown:
+        sns_requests: 0.50
+        data_transfer: 0.50
+
+    features:
+      - "Standard and FIFO topics"
+      - "Server-side encryption with KMS"
+      - "Multiple subscription types (SQS, Lambda, HTTP, Email)"
+      - "Message filtering with filter policies"
+      - "Cross-account publishing"
+      - "CloudWatch Events/EventBridge integration"
+      - "Delivery status logging"
+      - "CloudWatch alarms for failed deliveries"
+
+    use_cases:
+      - "Fan-out messaging patterns"
+      - "Application notifications"
+      - "Event broadcasting"
+      - "Alerting and monitoring"
+      - "Mobile push notifications"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "sqs-queue"
+      - "lambda-pattern-library"
+      - "eventbridge-bus"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Topic with SQS and email subscriptions"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "Encryption at rest enforced"
+
+  # --- EventBridge Event Bus ---
+
+  - id: "eventbridge-bus"
+    name: "EventBridge Event Bus"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "integration/event-driven"
+    subcategory: "eventbridge"
+    path: "_library/integration/eventbridge-bus"
+
+    description: "Custom EventBridge bus with rules, multiple targets, archive, and schema registry"
+    long_description: |
+      Enterprise Amazon EventBridge module for event-driven architectures. Creates custom
+      event buses with event rules supporting pattern matching and scheduling, multiple
+      target types (Lambda, SQS, Step Functions, Kinesis, SNS, cross-bus), event archive
+      for replay, cross-account routing, schema registry with automatic discovery, and
+      comprehensive monitoring.
+
+    tags:
+      - eventbridge
+      - event-bus
+      - event-driven
+      - serverless
+      - rules
+      - targets
+      - archive
+      - schema-registry
+      - cross-account
+
+    complexity: "intermediate"
+    setup_time_minutes: 12
+    variable_count: 18
+
+    cost:
+      estimated_monthly_usd: 8
+      cost_category: "low"
+      cost_factors:
+        - "Events ingested: $1 per million"
+        - "Archive storage: $0.10 per GB/month"
+        - "Replay events: $0.10 per GB"
+        - "Schema discovery: $0.10 per million events"
+      cost_breakdown:
+        events: 5
+        archive: 2
+        schema_discovery: 1
+
+    features:
+      - "Custom event buses for application decoupling"
+      - "Event rules with pattern matching and scheduling"
+      - "Multiple target types (Lambda, SQS, Step Functions, etc.)"
+      - "Event archive and replay for disaster recovery"
+      - "Cross-account event routing"
+      - "Schema registry with automatic discovery"
+      - "Dead letter queues for failed targets"
+      - "Input transformation for targets"
+      - "CloudWatch alarms for failed invocations"
+
+    use_cases:
+      - "Event-driven microservices"
+      - "Application integration"
+      - "Real-time data processing"
+      - "Scheduled task execution"
+      - "Cross-account event routing"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "lambda-pattern-library"
+      - "sqs-queue"
+      - "sns-topic"
+      - "step-functions"
+      - "kinesis-stream"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Event bus with scheduled rule"
+          complexity: "intermediate"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- Step Functions ---
+
+  - id: "step-functions"
+    name: "Step Functions State Machine"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "integration/orchestration"
+    subcategory: "step-functions"
+    path: "_library/integration/step-functions"
+
+    description: "Step Functions state machine with comprehensive IAM, logging, X-Ray, and monitoring"
+    long_description: |
+      Production-ready AWS Step Functions module supporting STANDARD and EXPRESS workflows.
+      Includes automatic IAM role creation with least privilege for common integrations
+      (Lambda, SQS, SNS, DynamoDB, ECS, EventBridge), CloudWatch Logs integration,
+      AWS X-Ray tracing, error handling patterns (retry, catch), and CloudWatch alarms
+      for execution failures, throttling, and timeouts.
+
+    tags:
+      - step-functions
+      - state-machine
+      - workflow
+      - orchestration
+      - serverless
+      - xray
+      - cloudwatch
+      - iam
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 25
+
+    cost:
+      estimated_monthly_usd: 25
+      cost_category: "low"
+      cost_factors:
+        - "Standard: $25 per million state transitions"
+        - "Express: $1 per million requests + $0.06 per GB-hour"
+        - "CloudWatch Logs storage"
+      cost_breakdown:
+        state_transitions: 20
+        cloudwatch_logs: 5
+
+    features:
+      - "STANDARD and EXPRESS state machine types"
+      - "CloudWatch Logs with configurable retention"
+      - "AWS X-Ray distributed tracing"
+      - "Automatic IAM role with least privilege"
+      - "Support for Lambda, SQS, SNS, DynamoDB, ECS, EventBridge"
+      - "CloudWatch alarms (failures, throttling, timeouts)"
+      - "Error handling patterns (retry, catch)"
+      - "Extensible IAM policy for custom integrations"
+
+    use_cases:
+      - "Multi-step workflows"
+      - "Long-running processes"
+      - "Parallel task execution"
+      - "Business process automation"
+      - "ETL pipelines"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "lambda-pattern-library"
+      - "sqs-queue"
+      - "sns-topic"
+      - "eventbridge-bus"
+      - "dynamodb-table"
+      - "ecs-fargate-service"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Simple workflow with Pass state"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "AWS Well-Architected"
+
+  # --- API Gateway REST ---
+
+  - id: "api-gateway-rest"
+    name: "API Gateway REST"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "integration/api-management"
+    subcategory: "apigateway"
+    path: "_library/integration/api-gateway-rest"
+
+    description: "REST API Gateway with Lambda integration, authentication, caching, and WAF"
+    long_description: |
+      Enterprise API Gateway REST API module with deployment stages, API keys, usage plans
+      with quotas and throttling, request/response validation, CloudWatch Logs integration,
+      AWS X-Ray tracing, response caching with encryption, WAF integration, custom domain
+      support with ACM certificates, and CloudWatch alarms for monitoring errors and latency.
+
+    tags:
+      - api-gateway
+      - rest-api
+      - lambda
+      - authentication
+      - api-keys
+      - usage-plans
+      - waf
+      - custom-domain
+      - caching
+      - xray
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 48
+
+    cost:
+      estimated_monthly_usd: 50
+      cost_category: "medium"
+      cost_factors:
+        - "API requests: $3.50 per million (REST)"
+        - "Data transfer: $0.09 per GB"
+        - "Caching: $0.02 per hour (0.5GB)"
+        - "Custom domain: No additional cost"
+      cost_breakdown:
+        api_requests: 35
+        data_transfer: 10
+        caching: 5
+
+    features:
+      - "REST API with EDGE, REGIONAL, PRIVATE endpoints"
+      - "Deployment stages with versioning"
+      - "API keys and usage plans with quotas"
+      - "Request/response validation"
+      - "CloudWatch Logs with access logging"
+      - "AWS X-Ray tracing"
+      - "Response caching with encryption"
+      - "WAF integration"
+      - "Custom domain with ACM certificates"
+      - "CloudWatch alarms (5XX errors, latency)"
+      - "Throttling and rate limiting"
+
+    use_cases:
+      - "RESTful API backends"
+      - "Serverless APIs"
+      - "Mobile and web app APIs"
+      - "Public API gateways"
+      - "Private VPC APIs"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "lambda-pattern-library"
+      - "waf-advanced"
+      - "acm"
+      - "dns"
+      - "vpc-standard"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Simple API with API keys"
+          complexity: "intermediate"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "AWS Well-Architected"
+
+# End of module registry
+
+  # ===========================================================================
+  # PHASE 4: DATA PLATFORM MODULES (2025-12-02)
+  # ===========================================================================
+
+  # --- Kinesis Stream ---
+
+  - id: "kinesis-stream"
+    name: "Kinesis Data Stream"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "data-platform/streaming"
+    subcategory: "kinesis"
+    path: "_library/data-platform/kinesis-stream"
+
+    description: "Production-ready Kinesis Data Stream with auto-scaling, enhanced fan-out, and Lambda integration"
+    long_description: |
+      Enterprise Kinesis Data Stream module with ON_DEMAND and PROVISIONED capacity modes,
+      auto-scaling for provisioned streams, enhanced fan-out consumers for low-latency processing,
+      Lambda event source mapping with filtering, KMS encryption at rest, comprehensive CloudWatch
+      monitoring with alarms for iterator age and throttling, and configurable retention (24h to 365 days).
+
+    tags:
+      - kinesis
+      - data-stream
+      - streaming
+      - real-time
+      - lambda
+      - event-driven
+      - fan-out
+      - auto-scaling
+      - encryption
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 18
+
+    cost:
+      estimated_monthly_usd: 50
+      cost_category: "medium"
+      cost_factors:
+        - "ON_DEMAND: $0.015 per GB ingested + $0.04 per million PUT requests"
+        - "PROVISIONED: $0.015 per shard hour + data transfer"
+        - "Enhanced fan-out: $0.015 per GB + $0.08 per consumer-shard hour"
+      cost_breakdown:
+        stream: 25
+        enhanced_fanout: 15
+        data_transfer: 10
+
+    features:
+      - "ON_DEMAND or PROVISIONED capacity modes"
+      - "Auto-scaling for provisioned streams"
+      - "Enhanced fan-out consumers"
+      - "Lambda event source mapping with filtering"
+      - "KMS encryption at rest"
+      - "CloudWatch monitoring and alarms"
+      - "Iterator age tracking"
+      - "Configurable retention (24h-8760h)"
+
+    use_cases:
+      - "Real-time event streaming"
+      - "Log and event data collection"
+      - "Stream processing with Lambda"
+      - "Change data capture (CDC)"
+      - "IoT data ingestion"
+
+    maintainer:
+      team: "Data Engineering"
+      primary: "data-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#data-engineering"
+      sla_hours: 24
+      oncall: "data-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "lambda-pattern-library"
+      - "kinesis-firehose"
+      - "glue-catalog"
+      - "monitoring"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic ON_DEMAND stream"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "AWS Well-Architected"
+        - "Data encryption"
+
+  # --- Kinesis Firehose ---
+
+  - id: "kinesis-firehose"
+    name: "Kinesis Data Firehose"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "data-platform/streaming"
+    subcategory: "firehose"
+    path: "_library/data-platform/kinesis-firehose"
+
+    description: "Delivery stream to S3/Redshift/OpenSearch with Lambda transformation and Parquet conversion"
+    long_description: |
+      Production-ready Kinesis Firehose delivery stream supporting S3, OpenSearch, and Redshift destinations.
+      Includes Lambda data transformation, compression (GZIP, Snappy), JSON to Parquet conversion with Glue
+      schema, buffering configuration, S3 backup for all records or failures, KMS encryption, CloudWatch
+      monitoring with delivery and throttling alarms, and comprehensive error handling.
+
+    tags:
+      - kinesis
+      - firehose
+      - data-delivery
+      - etl
+      - s3
+      - redshift
+      - opensearch
+      - parquet
+      - transformation
+
+    complexity: "intermediate"
+    setup_time_minutes: 12
+    variable_count: 28
+
+    cost:
+      estimated_monthly_usd: 25
+      cost_category: "low"
+      cost_factors:
+        - "$0.029 per GB ingested"
+        - "Data format conversion: $0.018 per GB"
+        - "VPC delivery: $0.01 per hour per AZ"
+        - "Lambda transformation costs"
+      cost_breakdown:
+        ingestion: 15
+        format_conversion: 5
+        lambda: 3
+        storage: 2
+
+    features:
+      - "Delivery to S3, OpenSearch, Redshift"
+      - "Lambda data transformation"
+      - "Compression (GZIP, Snappy, etc.)"
+      - "JSON to Parquet conversion"
+      - "Buffering configuration"
+      - "S3 backup for failures or all records"
+      - "KMS encryption"
+      - "CloudWatch monitoring and alarms"
+
+    use_cases:
+      - "Data lake ingestion"
+      - "Log delivery to S3"
+      - "Real-time analytics with OpenSearch"
+      - "Data warehouse loading (Redshift)"
+      - "ETL pipelines"
+
+    maintainer:
+      team: "Data Engineering"
+      primary: "data-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "kinesis-stream"
+      - "s3-bucket"
+      - "opensearch"
+      - "glue-catalog"
+      - "lambda-pattern-library"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic S3 delivery"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+
+  # --- Glue Catalog ---
+
+  - id: "glue-catalog"
+    name: "AWS Glue Data Catalog"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "data-platform/catalog"
+    subcategory: "glue"
+    path: "_library/data-platform/glue-catalog"
+
+    description: "Glue database, tables, crawlers, schema registry, and data quality rules for data lake"
+    long_description: |
+      Comprehensive AWS Glue Data Catalog module with database and table management, automated crawlers
+      for S3/JDBC/DynamoDB, schema registry with version control, data quality rulesets, ETL job templates,
+      Athena integration, CloudWatch monitoring, and configurable schema change policies. Supports multiple
+      data formats (Parquet, ORC, JSON, CSV) and partition management.
+
+    tags:
+      - glue
+      - data-catalog
+      - crawlers
+      - schema-registry
+      - data-quality
+      - athena
+      - metadata
+      - etl
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 12
+
+    cost:
+      estimated_monthly_usd: 15
+      cost_category: "low"
+      cost_factors:
+        - "Data Catalog: First million objects free, then $1 per 100,000 objects"
+        - "Crawlers: $0.44 per hour (DPU)"
+        - "Schema Registry: Free"
+        - "Data Quality: $0.30 per DPU-hour"
+      cost_breakdown:
+        catalog: 2
+        crawlers: 10
+        data_quality: 3
+
+    features:
+      - "Glue database and tables"
+      - "Automated crawlers (S3, JDBC, DynamoDB)"
+      - "Schema registry with versioning"
+      - "Data quality rulesets"
+      - "Athena integration"
+      - "Schema change policies"
+      - "Partition management"
+      - "CloudWatch monitoring"
+
+    use_cases:
+      - "Data lake metadata management"
+      - "Schema evolution tracking"
+      - "Automated schema discovery"
+      - "Data quality validation"
+      - "Athena query optimization"
+
+    maintainer:
+      team: "Data Engineering"
+      primary: "data-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "s3-bucket"
+      - "athena-workgroup"
+      - "kinesis-firehose"
+      - "rds-*"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic Glue catalog with crawler"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+
+  # --- Athena Workgroup ---
+
+  - id: "athena-workgroup"
+    name: "Amazon Athena Workgroup"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "data-platform/query"
+    subcategory: "athena"
+    path: "_library/data-platform/athena-workgroup"
+
+    description: "Athena workgroup with query limits, encryption, cost control, and monitoring"
+    long_description: |
+      Production-ready Amazon Athena workgroup with per-query data limits, S3 output location with
+      encryption, CloudWatch metrics and alarms, cost control settings, named queries for common operations,
+      data catalog integration, prepared statements, IAM policy generation, and comprehensive query execution
+      monitoring. Supports query result caching and workgroup-level configuration enforcement.
+
+    tags:
+      - athena
+      - query
+      - analytics
+      - sql
+      - data-lake
+      - cost-control
+      - monitoring
+
+    complexity: "beginner"
+    setup_time_minutes: 8
+    variable_count: 24
+
+    cost:
+      estimated_monthly_usd: 20
+      cost_category: "low"
+      cost_factors:
+        - "$5 per TB of data scanned"
+        - "Compressed data reduces costs by 30-90%"
+        - "Partitioning reduces costs significantly"
+        - "Result caching eliminates repeated scan costs"
+      cost_breakdown:
+        queries: 20
+
+    features:
+      - "Workgroup with per-query data limits"
+      - "S3 output location with encryption"
+      - "CloudWatch metrics and alarms"
+      - "Cost control settings"
+      - "Named queries"
+      - "Data catalog integration"
+      - "Prepared statements"
+      - "IAM policy generation"
+
+    use_cases:
+      - "Ad-hoc SQL queries on data lake"
+      - "Log analysis"
+      - "Business intelligence"
+      - "Data exploration"
+      - "Cost-controlled analytics"
+
+    maintainer:
+      team: "Data Engineering"
+      primary: "data-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "glue-catalog"
+      - "s3-bucket"
+      - "kms-multi-region"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic Athena workgroup"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+
+  # --- OpenSearch ---
+
+  - id: "opensearch"
+    name: "Amazon OpenSearch Service"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "data-platform/search"
+    subcategory: "opensearch"
+    path: "_library/data-platform/opensearch"
+
+    description: "OpenSearch domain with multi-AZ, encryption, fine-grained access control, and Cognito auth"
+    long_description: |
+      Enterprise-grade Amazon OpenSearch Service domain with multi-AZ deployment, encryption at rest and
+      in transit, fine-grained access control, Cognito authentication integration, dedicated master nodes,
+      warm and cold storage tiers, Auto-Tune for performance optimization, comprehensive CloudWatch alarms
+      (cluster health, storage, CPU, JVM memory), VPC deployment support, and index state management policies.
+      Supports OpenSearch 2.x and Elasticsearch 7.x.
+
+    tags:
+      - opensearch
+      - elasticsearch
+      - search
+      - analytics
+      - logging
+      - kibana
+      - dashboards
+      - full-text-search
+      - multi-az
+
+    complexity: "advanced"
+    setup_time_minutes: 20
+    variable_count: 42
+
+    cost:
+      estimated_monthly_usd: 250
+      cost_category: "high"
+      cost_factors:
+        - "Instance hours (t3.small: $0.036/hr, r6g.large: $0.162/hr)"
+        - "EBS storage (gp3: $0.08/GB-month)"
+        - "Data transfer"
+        - "UltraWarm storage: $0.024/GB-month"
+      cost_breakdown:
+        instances: 175
+        storage: 50
+        data_transfer: 15
+        warm_storage: 10
+
+    features:
+      - "Multi-AZ deployment with replicas"
+      - "Encryption at rest and in transit"
+      - "Fine-grained access control"
+      - "Cognito authentication"
+      - "Dedicated master nodes"
+      - "Warm and cold storage"
+      - "Auto-Tune optimization"
+      - "CloudWatch alarms"
+      - "VPC deployment"
+
+    use_cases:
+      - "Log analytics and monitoring"
+      - "Full-text search"
+      - "Application monitoring"
+      - "Security analytics"
+      - "Business analytics"
+
+    maintainer:
+      team: "Data Engineering"
+      primary: "data-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "vpc-standard"
+      - "kinesis-firehose"
+      - "kms-multi-region"
+      - "cognito"
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic OpenSearch domain"
+          complexity: "intermediate"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "Encryption at rest and in transit"
+        - "Fine-grained access control"
+        - "VPC isolation"
+
+# End of module registry
+
+  #############################################################################
+  # STORAGE LAYER
+  #############################################################################
+
+  # --- EFS ---
+
+  - id: "efs-filesystem"
+    name: "EFS Filesystem"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "storage/file-systems"
+    subcategory: "efs"
+    path: "_library/storage/efs-filesystem"
+
+    description: "Elastic File System with lifecycle management and multi-AZ mount targets"
+    long_description: |
+      Production-ready Amazon EFS with multi-AZ mount targets, KMS encryption,
+      lifecycle management for cost optimization, access points for application isolation,
+      and CloudWatch monitoring. Supports General Purpose and Max I/O performance modes,
+      with Bursting, Provisioned, or Elastic throughput options.
+
+    tags:
+      - efs
+      - storage
+      - file-system
+      - shared-storage
+      - nfs
+      - multi-az
+      - encrypted
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 25
+
+    cost:
+      estimated_monthly_usd: 90
+      cost_category: "medium"
+      cost_factors:
+        - "Storage (Standard): $0.30/GB-month"
+        - "Storage (IA): $0.025/GB-month"
+        - "Throughput (if provisioned): $6.00/MBps-month"
+      cost_breakdown:
+        storage_standard: 60
+        storage_ia: 10
+        throughput: 20
+
+    features:
+      - "Multi-AZ mount targets for high availability"
+      - "KMS encryption at rest with automatic key rotation"
+      - "Lifecycle management (IA and Archive storage classes)"
+      - "EFS access points for application isolation"
+      - "Automatic backups via AWS Backup integration"
+      - "Performance modes (General Purpose, Max I/O)"
+      - "Throughput modes (Bursting, Provisioned, Elastic)"
+      - "CloudWatch alarms for monitoring"
+
+    use_cases:
+      - "Shared file storage for containers"
+      - "Content management systems"
+      - "Home directories"
+      - "Application configuration files"
+      - "Machine learning training data"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+        - "securitygroup"
+
+    compatible_with:
+      - "ecs-fargate"
+      - "eks-standard"
+      - "ec2-*"
+      - "lambda-*"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "Encryption at rest"
+        - "Automatic backups"
+
+  # --- FSx Lustre ---
+
+  - id: "fsx-lustre"
+    name: "FSx for Lustre"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "storage/file-systems"
+    subcategory: "fsx"
+    path: "_library/storage/fsx-lustre"
+
+    description: "FSx for Lustre with S3 integration for high-performance computing workloads"
+    long_description: |
+      Production-ready FSx for Lustre file system optimized for compute-intensive workloads.
+      Provides high-performance parallel file system with seamless S3 integration for data
+      repository associations. Supports scratch and persistent deployment types with automatic
+      backups, data compression, and CloudWatch monitoring.
+
+    tags:
+      - fsx
+      - lustre
+      - hpc
+      - storage
+      - high-performance
+      - s3-integration
+      - machine-learning
+
+    complexity: "advanced"
+    setup_time_minutes: 15
+    variable_count: 30
+
+    cost:
+      estimated_monthly_usd: 750
+      cost_category: "high"
+      cost_factors:
+        - "Storage capacity (1200 GB minimum)"
+        - "Throughput per unit (50-1000 MB/s/TiB)"
+        - "Deployment type (SCRATCH vs PERSISTENT)"
+        - "Backup storage"
+      cost_breakdown:
+        storage: 550
+        throughput: 150
+        backups: 50
+
+    features:
+      - "Scratch or Persistent deployment types"
+      - "S3 data repository integration (import/export)"
+      - "Data repository associations with auto-import/export"
+      - "KMS encryption at rest"
+      - "Automatic backups for persistent deployments"
+      - "LZ4 data compression"
+      - "Weekly maintenance windows"
+      - "CloudWatch logging and alarms"
+
+    use_cases:
+      - "High-performance computing (HPC)"
+      - "Machine learning training"
+      - "Video processing and transcoding"
+      - "Financial modeling"
+      - "Electronic design automation (EDA)"
+      - "Genomics analysis"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+        - "securitygroup"
+
+    compatible_with:
+      - "ec2-*"
+      - "s3-bucket"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "Encryption at rest"
+        - "VPC isolation"
+
+  # --- Backup Vault ---
+
+  - id: "backup-vault"
+    name: "AWS Backup Vault"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "storage/backup"
+    subcategory: "backup"
+    path: "_library/storage/backup-vault"
+
+    description: "AWS Backup vault with lifecycle rules and cross-region backup for compliance"
+    long_description: |
+      Enterprise-grade AWS Backup vault with KMS encryption, flexible backup plans for
+      multiple resource types (EBS, RDS, EFS, DynamoDB), lifecycle management with cold
+      storage transitions, cross-region backup copy, vault lock for compliance (WORM),
+      and SNS notifications for backup events.
+
+    tags:
+      - backup
+      - disaster-recovery
+      - compliance
+      - retention
+      - vault-lock
+      - cross-region
+
+    complexity: "intermediate"
+    setup_time_minutes: 12
+    variable_count: 20
+
+    cost:
+      estimated_monthly_usd: 180
+      cost_category: "medium"
+      cost_factors:
+        - "Backup storage: $0.05/GB-month (warm)"
+        - "Cold storage: $0.01/GB-month"
+        - "Restore requests"
+        - "Cross-region data transfer"
+      cost_breakdown:
+        warm_storage: 100
+        cold_storage: 40
+        restore: 20
+        transfer: 20
+
+    features:
+      - "KMS encryption at rest"
+      - "Flexible backup plans for multiple resource types"
+      - "Lifecycle management (cold storage transition, retention)"
+      - "Cross-region backup copy"
+      - "Vault lock for compliance (WORM protection)"
+      - "SNS notifications for backup events"
+      - "Tag-based or resource-based backup selection"
+      - "Continuous backup for point-in-time recovery"
+      - "CloudWatch alarms"
+
+    use_cases:
+      - "Disaster recovery strategy"
+      - "Compliance and regulatory requirements"
+      - "Long-term data retention"
+      - "Point-in-time recovery"
+      - "Cross-region backup for DR"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "rds-*"
+      - "dynamodb-*"
+      - "efs-filesystem"
+      - "ec2-*"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "Encryption at rest"
+        - "Vault lock (WORM)"
+        - "Cross-region replication"
+
+  # --- S3 Replication ---
+
+  - id: "s3-replication"
+    name: "S3 Replication"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "storage/object-storage"
+    subcategory: "s3"
+    path: "_library/storage/s3-replication"
+
+    description: "S3 cross-region replication with RTC and metrics for disaster recovery"
+    long_description: |
+      Production-ready S3 replication configuration for cross-region or same-region
+      disaster recovery. Includes Replication Time Control (RTC) for 15-minute SLA,
+      replication metrics, KMS encryption support, delete marker replication, and
+      CloudWatch alarms for monitoring replication health.
+
+    tags:
+      - s3
+      - replication
+      - disaster-recovery
+      - cross-region
+      - rtc
+      - metrics
+
+    complexity: "intermediate"
+    setup_time_minutes: 8
+    variable_count: 18
+
+    cost:
+      estimated_monthly_usd: 120
+      cost_category: "medium"
+      cost_factors:
+        - "Cross-region data transfer: $0.02/GB"
+        - "Replication PUT requests: $0.005/1000"
+        - "RTC: $0.015/GB replicated"
+        - "Storage in destination bucket"
+      cost_breakdown:
+        data_transfer: 60
+        replication_requests: 20
+        rtc: 30
+        storage: 10
+
+    features:
+      - "Cross-region or same-region replication"
+      - "Replication rules with prefix and tag filters"
+      - "Replication Time Control (RTC) for 15-minute SLA"
+      - "S3 Batch Replication for existing objects"
+      - "Replication metrics and events"
+      - "KMS encryption support"
+      - "Delete marker replication"
+      - "Cross-account replication"
+      - "CloudWatch alarms"
+
+    use_cases:
+      - "Disaster recovery and business continuity"
+      - "Compliance and data residency"
+      - "Low-latency data access"
+      - "Data aggregation across regions"
+      - "Live replication for analytics"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "s3-bucket (source and destination)"
+
+    compatible_with:
+      - "s3-bucket"
+      - "kms-*"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "Encryption at rest (KMS)"
+        - "Encryption in transit"
+        - "Cross-region replication"
+
+  #############################################################################
+  # CI/CD LAYER
+  #############################################################################
+
+  # --- CodePipeline ---
+
+  - id: "codepipeline"
+    name: "CodePipeline"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "cicd/pipeline"
+    subcategory: "codepipeline"
+    path: "_library/cicd/codepipeline/v1.0.0"
+
+    description: "Complete CI/CD pipeline with multiple source/deploy providers and cross-account support"
+    long_description: |
+      Production-ready AWS CodePipeline supporting multiple source providers (CodeCommit, GitHub, S3, ECR)
+      and deploy targets (CodeDeploy, ECS, Lambda, CloudFormation, S3). Includes optional build/test stages,
+      manual approval with SNS notifications, cross-account deployment, artifact encryption, and CloudWatch
+      Events for comprehensive monitoring.
+
+    tags:
+      - cicd
+      - codepipeline
+      - deployment
+      - automation
+      - github
+      - codecommit
+      - ecs
+      - lambda
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 35
+
+    cost:
+      estimated_monthly_usd: 20
+      cost_category: "low"
+      cost_factors:
+        - "Pipeline: $1/active pipeline/month"
+        - "S3 artifact storage"
+        - "Data transfer"
+        - "CodeBuild executions (if used)"
+      cost_breakdown:
+        pipeline: 1
+        artifacts: 10
+        data_transfer: 5
+        other: 4
+
+    features:
+      - "Multiple source providers (CodeCommit, GitHub, S3, ECR)"
+      - "Multiple deploy targets (CodeDeploy, ECS, Lambda, CloudFormation, S3)"
+      - "Optional build and test stages with CodeBuild"
+      - "Manual approval stage with SNS notifications"
+      - "Cross-account deployment support"
+      - "Artifact encryption with KMS"
+      - "CloudWatch Events for pipeline notifications"
+      - "Pipeline V2 with advanced execution modes"
+      - "Automatic source change detection"
+
+    use_cases:
+      - "Continuous deployment pipelines"
+      - "Multi-stage release processes"
+      - "Cross-account deployments"
+      - "Containerized application deployments"
+      - "Serverless deployments"
+      - "Infrastructure as Code deployments"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "codebuild-project"
+      - "codedeploy-app"
+      - "ecr-repository"
+      - "ecs-fargate-service"
+      - "lambda-*"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "Artifact encryption (KMS)"
+        - "IAM least privilege"
+        - "Cross-account role assumption"
+
+  # --- CodeBuild Project ---
+
+  - id: "codebuild-project"
+    name: "CodeBuild Project"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "cicd/build"
+    subcategory: "codebuild"
+    path: "_library/cicd/codebuild-project/v1.0.0"
+
+    description: "CodeBuild project with Docker support, VPC configuration, and multiple cache strategies"
+    long_description: |
+      Production-ready AWS CodeBuild project supporting multiple source providers, Docker builds with
+      privileged mode, VPC configuration for private resource access, environment variables from
+      plaintext/SSM/Secrets Manager, build caching (S3, local Docker layers), CloudWatch and S3 logs,
+      GitHub webhooks, and batch builds for parallel execution.
+
+    tags:
+      - cicd
+      - codebuild
+      - docker
+      - build
+      - vpc
+      - github
+      - webhook
+
+    complexity: "intermediate"
+    setup_time_minutes: 12
+    variable_count: 45
+
+    cost:
+      estimated_monthly_usd: 50
+      cost_category: "medium"
+      cost_factors:
+        - "Build minutes: $0.005/minute (general1.small)"
+        - "S3 cache storage"
+        - "CloudWatch Logs"
+        - "VPC data transfer (if enabled)"
+      cost_breakdown:
+        compute: 35
+        storage: 10
+        logs: 3
+        other: 2
+
+    features:
+      - "Multiple source providers (CodeCommit, GitHub, S3, CodePipeline)"
+      - "Docker build support with privileged mode"
+      - "VPC configuration for private resource access"
+      - "Environment variables from plaintext, SSM, Secrets Manager"
+      - "Build caching (S3, local Docker layers, source)"
+      - "CloudWatch Logs and S3 logs"
+      - "Multiple buildspec files support"
+      - "GitHub webhooks for automatic builds"
+      - "Batch builds for parallel execution"
+      - "Secondary sources and artifacts"
+      - "EFS mount support"
+
+    use_cases:
+      - "Docker image builds"
+      - "Application compilation and testing"
+      - "Private resource access builds"
+      - "Multi-stage builds"
+      - "Parallel test execution"
+      - "Custom build environments"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "codepipeline"
+      - "ecr-repository"
+      - "vpc-*"
+      - "securitygroup"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "VPC isolation"
+        - "Secrets Manager integration"
+        - "IAM least privilege"
+        - "CloudWatch Logs encryption"
+
+  # --- ECR Repository ---
+
+  - id: "ecr-repository"
+    name: "ECR Repository"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "cicd/container-registry"
+    subcategory: "ecr"
+    path: "_library/cicd/ecr-repository/v1.0.0"
+
+    description: "Container registry with lifecycle policies, image scanning, and cross-region replication"
+    long_description: |
+      Production-ready AWS ECR repository with automatic lifecycle policies for cleanup, enhanced
+      image scanning (basic or enhanced), image tag immutability, cross-account permissions, KMS
+      encryption, cross-region replication, CloudWatch metrics and alarms, and pull through cache
+      support for external registries.
+
+    tags:
+      - cicd
+      - ecr
+      - docker
+      - containers
+      - registry
+      - scanning
+      - replication
+
+    complexity: "beginner"
+    setup_time_minutes: 8
+    variable_count: 25
+
+    cost:
+      estimated_monthly_usd: 15
+      cost_category: "low"
+      cost_factors:
+        - "Storage: $0.10/GB/month"
+        - "Data transfer out: $0.09/GB"
+        - "Enhanced scanning: $0.09/image"
+        - "Replication data transfer"
+      cost_breakdown:
+        storage: 8
+        scanning: 4
+        data_transfer: 2
+        other: 1
+
+    features:
+      - "Image scanning on push (basic or enhanced)"
+      - "Image tag immutability"
+      - "Automatic lifecycle policies for cleanup"
+      - "Cross-account permissions"
+      - "KMS encryption"
+      - "Cross-region replication"
+      - "CloudWatch metrics and alarms"
+      - "Pull through cache support"
+      - "Vulnerability scanning alerts"
+
+    use_cases:
+      - "Docker image storage"
+      - "Container image registry"
+      - "Multi-account access"
+      - "Disaster recovery with replication"
+      - "Security scanning"
+      - "Image lifecycle management"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "codepipeline"
+      - "codebuild-project"
+      - "ecs-fargate-service"
+      - "kms-*"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "KMS encryption at rest"
+        - "Image scanning (enhanced)"
+        - "IAM access control"
+        - "Cross-account policies"
+
+  # --- CodeDeploy Application ---
+
+  - id: "codedeploy-app"
+    name: "CodeDeploy Application"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "cicd/deployment"
+    subcategory: "codedeploy"
+    path: "_library/cicd/codedeploy-app/v1.0.0"
+
+    description: "Deployment application with blue/green and in-place strategies for EC2, ECS, and Lambda"
+    long_description: |
+      Production-ready AWS CodeDeploy application and deployment groups for EC2/On-Premises, ECS,
+      and Lambda. Supports both in-place and blue/green deployments with custom deployment
+      configurations (canary, linear), Auto Scaling Group integration, alarm-based automatic
+      rollback, CloudWatch monitoring, SNS notifications, and load balancer integration.
+
+    tags:
+      - cicd
+      - codedeploy
+      - deployment
+      - blue-green
+      - canary
+      - ec2
+      - ecs
+      - lambda
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 30
+
+    cost:
+      estimated_monthly_usd: 5
+      cost_category: "low"
+      cost_factors:
+        - "EC2 deployments: Free"
+        - "Lambda/ECS deployments: $0.02/update"
+        - "Additional compute costs for blue/green"
+        - "Load balancer costs"
+      cost_breakdown:
+        deployments: 2
+        compute_overhead: 2
+        other: 1
+
+    features:
+      - "Multiple compute platforms (Server/EC2, ECS, Lambda)"
+      - "In-place and blue/green deployments"
+      - "Custom deployment configurations with traffic shifting"
+      - "Canary and linear deployment strategies"
+      - "Auto Scaling Group integration"
+      - "Alarm-based automatic rollback"
+      - "CloudWatch monitoring and SNS notifications"
+      - "Load balancer integration (ALB, NLB, CLB)"
+      - "Custom deployment hooks"
+      - "Tag-based instance targeting"
+
+    use_cases:
+      - "Zero-downtime deployments"
+      - "Gradual traffic shifting"
+      - "Automated rollbacks on errors"
+      - "Multi-environment deployments"
+      - "Blue/green infrastructure updates"
+      - "Canary releases"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "codepipeline"
+      - "ecs-fargate-service"
+      - "lambda-*"
+      - "asg-launch-template"
+      - "alb"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: null
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "pending"
+
+    security:
+      checkov_passing: false
+      tfsec_passing: false
+      last_scan: null
+      compliance:
+        - "IAM least privilege"
+        - "Automatic rollback"
+        - "CloudWatch monitoring"
+        - "SNS notifications"
+
 # End of module registry

@@ -2,7 +2,57 @@
 
 Enterprise-grade infrastructure-as-code platform with **17 Terraform components**, **Python automation tooling**, and **multi-tenant architecture** for scalable cloud deployments.
 
-## 🚀 Quick Start
+---
+
+## Quick Start
+
+Get from zero to deployed infrastructure in minutes using our rapid deployment automation.
+
+### Prerequisites Check
+
+```bash
+# Verify required tools
+terraform version    # 1.11.0+
+atmos version        # 1.163.0+
+aws --version        # 2.0+
+aws sts get-caller-identity  # Verify credentials
+```
+
+### Option 1: Deploy in 5 Minutes (Using Templates)
+
+```bash
+# 1. Create a new environment
+./scripts/new-environment.sh \
+  --tenant mycompany \
+  --account dev \
+  --environment testenv-01 \
+  --region us-east-1 \
+  --template web-application
+
+# 2. Deploy using smart deployment script
+./scripts/deploy-stack.sh \
+  --template web-application \
+  --stack mycompany-dev-testenv-01 \
+  --auto-approve
+
+# 3. Verify deployment
+atmos terraform output vpc -s mycompany-dev-testenv-01
+```
+
+### Option 2: Interactive Setup
+
+```bash
+# Launch interactive environment wizard
+./scripts/new-environment.sh --interactive
+
+# Follow the prompts to:
+# - Select tenant/organization
+# - Choose environment type (dev/staging/prod)
+# - Pick a stack template
+# - Configure VPC and region
+```
+
+### Option 3: Step-by-Step Manual Deployment
 
 ```bash
 # 1. Clone and setup
@@ -13,14 +63,108 @@ cp .env.example .env
 # 2. Install dependencies
 ./scripts/install-dependencies.sh
 
-# 3. Validate setup
+# 3. Configure AWS
+aws configure
+export AWS_REGION=us-east-1
+
+# 4. Validate setup
 atmos workflow validate
 
-# 4. Test with example stack
-atmos terraform plan vpc -s fnx-dev-testenv-01
+# 5. Deploy individual components
+atmos terraform apply vpc -s mycompany-dev-testenv-01
+atmos terraform apply securitygroup -s mycompany-dev-testenv-01
+atmos terraform apply iam -s mycompany-dev-testenv-01
 ```
 
-**⏱️ Setup Time: < 30 minutes** | **📚 Full Setup Guide: [docs/DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md)**
+### Available Stack Templates
+
+| Template | Use Case | Deploy Time | Monthly Cost |
+|----------|----------|-------------|--------------|
+| **web-application** | Web apps with VPC, RDS, monitoring | ~15 min | ~$150-800 |
+| **microservices-platform** | EKS-based microservices | ~30 min | ~$300-2500 |
+| **data-pipeline** | Lambda-based data processing | ~20 min | ~$50-300 |
+| **serverless-api** | Serverless REST API | ~10 min | ~$20-100 |
+| **batch-processing** | Batch job infrastructure | ~25 min | ~$30-200 |
+| **minimal-stack** | Basic VPC and security | ~5 min | ~$50 |
+
+**Full deployment guides: [docs/QUICK_DEPLOY.md](./docs/QUICK_DEPLOY.md)**
+
+---
+
+## Rapid Deployment Automation
+
+### Smart Deployment Script
+
+The `deploy-stack.sh` script provides intelligent deployment automation:
+
+```bash
+# Full deployment with progress tracking
+./scripts/deploy-stack.sh --template microservices-platform \
+  --stack mycompany-prod-prod-01 \
+  --auto-approve
+
+# Features:
+# - Validates prerequisites (AWS credentials, Terraform, Atmos)
+# - Deploys components in correct dependency order
+# - Shows progress and estimated time remaining
+# - Handles errors gracefully with rollback option
+# - Generates deployment report
+
+# Dry run to see deployment plan
+./scripts/deploy-stack.sh --template web-application \
+  --stack mycompany-dev-testenv-01 \
+  --dry-run
+```
+
+### Environment Bootstrap Script
+
+The `new-environment.sh` script creates complete environment configurations:
+
+```bash
+# Interactive mode
+./scripts/new-environment.sh --interactive
+
+# Or with all options
+./scripts/new-environment.sh \
+  --tenant mycompany \
+  --account prod \
+  --environment prod-01 \
+  --region us-east-1 \
+  --template full-stack \
+  --env-type production \
+  --vpc-cidr 10.20.0.0/16
+
+# Creates:
+# - Stack directory structure
+# - Main stack configuration
+# - Environment-specific variables
+# - Backend configuration
+# - Initializes Terraform workspace
+```
+
+### Template Deployment Workflow
+
+Use Atmos workflows for consistent deployments:
+
+```bash
+# Deploy any template with validation
+atmos workflow deploy-template -f deploy-template.yaml \
+  template=web-application \
+  tenant=mycompany \
+  account=dev \
+  environment=testenv-01 \
+  auto_approve=true
+
+# Quick deploy shortcuts
+atmos workflow deploy-web-app -f deploy-template.yaml \
+  tenant=mycompany account=dev environment=testenv-01
+
+atmos workflow deploy-microservices -f deploy-template.yaml \
+  tenant=mycompany account=prod environment=prod-01
+
+atmos workflow deploy-serverless -f deploy-template.yaml \
+  tenant=mycompany account=dev environment=api-01
+```
 
 ---
 
@@ -28,12 +172,13 @@ atmos terraform plan vpc -s fnx-dev-testenv-01
 
 This platform provides:
 
-- **🏗️ 17 Production-Ready Components**: VPC, EKS, RDS, Lambda, Monitoring, Security, and more
-- **🔄 16 Automated Workflows**: Environment onboarding, drift detection, compliance checks
-- **🐍 Python CLI (Gaia)**: Simplified interface for common operations
-- **🏢 Multi-Tenant Design**: Support for multiple organizations and environments
-- **🔒 Security-First**: Encryption, IAM policies, certificate management
-- **📊 Built-in Monitoring**: CloudWatch dashboards, alerting, cost optimization
+- **17 Production-Ready Components**: VPC, EKS, RDS, Lambda, Monitoring, Security, and more
+- **20+ Automated Workflows**: Environment onboarding, drift detection, compliance checks, template deployment
+- **Python CLI (Gaia)**: Simplified interface for common operations
+- **Multi-Tenant Design**: Support for multiple organizations and environments
+- **Security-First**: Encryption, IAM policies, certificate management
+- **Built-in Monitoring**: CloudWatch dashboards, alerting, cost optimization
+- **Rapid Deployment**: Deploy production infrastructure in minutes
 
 ---
 
@@ -41,19 +186,19 @@ This platform provides:
 
 | Component | Purpose | Status |
 |-----------|---------|--------|
-| **vpc** | Virtual Private Cloud and networking | ✅ Production |
-| **eks** | Kubernetes clusters with best practices | ✅ Production |
-| **eks-addons** | Ingress, monitoring, autoscaling | ✅ Production |
-| **rds** | PostgreSQL/MySQL databases with backups | ✅ Production |
-| **monitoring** | CloudWatch dashboards and alarms | ✅ Production |
-| **secretsmanager** | Secure configuration management | ✅ Production |
-| **iam** | Cross-account roles and policies | ✅ Production |
-| **lambda** | Serverless functions | ✅ Production |
-| **backup** | Automated backup and recovery | ✅ Production |
-| **security-monitoring** | Security scanning and compliance | ✅ Production |
-| **cost-optimization** | Cost monitoring and optimization | ✅ Production |
+| **vpc** | Virtual Private Cloud and networking | Production |
+| **eks** | Kubernetes clusters with best practices | Production |
+| **eks-addons** | Ingress, monitoring, autoscaling | Production |
+| **rds** | PostgreSQL/MySQL databases with backups | Production |
+| **monitoring** | CloudWatch dashboards and alarms | Production |
+| **secretsmanager** | Secure configuration management | Production |
+| **iam** | Cross-account roles and policies | Production |
+| **lambda** | Serverless functions | Production |
+| **backup** | Automated backup and recovery | Production |
+| **security-monitoring** | Security scanning and compliance | Production |
+| **cost-optimization** | Cost monitoring and optimization | Production |
 
-[View all 17 components →](./components/terraform/)
+[View all 17 components](./components/terraform/)
 
 ---
 
@@ -69,7 +214,7 @@ This platform provides:
 | **AWS CLI** | 2.0+ | Cloud authentication |
 | **kubectl** | 1.28+ | Kubernetes management (for EKS) |
 
-**📖 Detailed installation: [docs/DEPLOYMENT_GUIDE.md#prerequisites](./docs/DEPLOYMENT_GUIDE.md#prerequisites)**
+**Detailed installation: [docs/DEPLOYMENT_GUIDE.md#prerequisites](./docs/DEPLOYMENT_GUIDE.md#prerequisites)**
 
 ### Quick Installation
 
@@ -77,7 +222,7 @@ This platform provides:
 # macOS (using Homebrew)
 brew install terraform awscli python@3.11
 brew install cloudposse/tap/atmos
-brew install kubectl helm
+brew install kubectl helm jq
 
 # Verify installations
 terraform version
@@ -85,49 +230,41 @@ atmos version
 aws --version
 python3 --version
 kubectl version --client
+
+# Or use our installation script
+./scripts/install-dependencies.sh
 ```
 
 ---
 
-## Configuration
+## Documentation
 
-### Environment Setup
+**Complete documentation portal: [docs/README.md](./docs/README.md)**
 
-```bash
-# Configure AWS credentials
-aws configure
+### Quick Links
 
-# Set project variables
-export AWS_REGION=us-east-1
-export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-export TENANT=mycompany
-export ENVIRONMENT=dev
+| Document | Description |
+|----------|-------------|
+| **[Quick Deploy Guide](./docs/QUICK_DEPLOY.md)** | Deploy infrastructure in minutes |
+| **[Deployment Guide](./docs/DEPLOYMENT_GUIDE.md)** | Complete deployment instructions |
+| **[Operations Guide](./docs/OPERATIONS_GUIDE.md)** | Daily operations and maintenance |
+| **[FAQ](./docs/FAQ.md)** | Frequently asked questions |
+| **[Cost Estimation](./docs/COST_ESTIMATION.md)** | Cost analysis and optimization |
 
-# Source configuration
-source .env
-```
+### Architecture Documentation
 
-### Project Configuration Files
+| Document | Description |
+|----------|-------------|
+| **[Architecture Overview](./docs/architecture/ARCHITECTURE_DIAGRAM.md)** | High-level system design |
+| **[Network Architecture](./docs/architecture/NETWORK_ARCHITECTURE.md)** | VPC design and networking |
+| **[Security Architecture](./docs/architecture/security-best-practices-guide.md)** | Security model and compliance |
 
-```
-.
-├── .atmos.yaml                 # Atmos CLI configuration
-├── atmos.yaml                 # Stack configuration (legacy)
-├── .env                       # Environment variables
-└── stacks/
-    ├── catalog/               # Component defaults
-    │   ├── vpc/defaults.yaml
-    │   ├── eks/defaults.yaml
-    │   └── ...
-    ├── mixins/                # Reusable patterns
-    │   ├── region/us-east-1.yaml
-    │   └── tags/common.yaml
-    └── orgs/                  # Tenant configurations
-        └── mycompany/
-            └── dev/
-                └── use1/
-                    └── main.yaml
-```
+### Component Documentation
+
+- [VPC Component](./components/terraform/vpc/README.md)
+- [EKS Component](./components/terraform/eks/README.md)
+- [RDS Component](./components/terraform/rds/README.md)
+- [All Components](./components/terraform/)
 
 ---
 
@@ -136,37 +273,34 @@ source .env
 ### Deploy Complete Environment
 
 ```bash
-# Deploy all components for an environment
+# Using deploy script (recommended)
+./scripts/deploy-stack.sh \
+  --template web-application \
+  --stack mycompany-dev-testenv-01 \
+  --auto-approve
+
+# Using Atmos workflow
 atmos workflow apply-environment \
   tenant=mycompany \
   account=dev \
-  environment=use1
-
-# This deploys (in order):
-# 1. Backend (S3 + DynamoDB)
-# 2. VPC with subnets and routing
-# 3. IAM roles and policies
-# 4. Security groups
-# 5. EKS cluster and node groups
-# 6. RDS database
-# 7. Monitoring and logging
-# 8. Additional components
+  environment=testenv-01 \
+  auto_approve=true
 ```
 
 ### Deploy Individual Components
 
 ```bash
 # Plan changes
-atmos terraform plan vpc -s mycompany-dev-use1
+atmos terraform plan vpc -s mycompany-dev-testenv-01
 
 # Apply changes
-atmos terraform apply vpc -s mycompany-dev-use1
+atmos terraform apply vpc -s mycompany-dev-testenv-01
 
 # View outputs
-atmos terraform output vpc -s mycompany-dev-use1
+atmos terraform output vpc -s mycompany-dev-testenv-01
 
 # Destroy (with caution)
-atmos terraform destroy vpc -s mycompany-dev-use1
+atmos terraform destroy vpc -s mycompany-dev-testenv-01
 ```
 
 ### Validate Infrastructure
@@ -182,82 +316,21 @@ atmos workflow lint
 atmos workflow drift-detection \
   tenant=mycompany \
   account=dev \
-  environment=use1
+  environment=testenv-01
 ```
 
 ### List Available Stacks
 
 ```bash
 # List all stacks
-atmos describe stacks
-
-# User-friendly stack listing
 ./scripts/list_stacks.sh
 
+# Or using Atmos
+atmos describe stacks
+
 # View specific stack configuration
-atmos describe component vpc -s mycompany-dev-use1
+atmos describe component vpc -s mycompany-dev-testenv-01
 ```
-
-### Environment Management
-
-```bash
-# Create new environment
-./scripts/create-environment.sh \
-  --tenant mycompany \
-  --account prod \
-  --environment use1 \
-  --vpc-cidr 10.20.0.0/16
-
-# Onboard new environment
-atmos workflow onboard-environment \
-  tenant=mycompany \
-  account=prod \
-  environment=use1 \
-  vpc_cidr=10.20.0.0/16
-
-# Destroy environment
-atmos workflow destroy-environment \
-  tenant=mycompany \
-  account=dev \
-  environment=use1
-```
-
----
-
-## 📚 Documentation
-
-**Complete documentation portal: [docs/README.md](./docs/README.md)**
-
-### Quick Links
-
-| Document | Description |
-|----------|-------------|
-| **[Deployment Guide](./docs/DEPLOYMENT_GUIDE.md)** | Complete deployment instructions from scratch |
-| **[Operations Guide](./docs/OPERATIONS_GUIDE.md)** | Daily operations, maintenance, and troubleshooting |
-| **[FAQ](./docs/FAQ.md)** | Frequently asked questions and answers |
-| **[Cost Estimation](./docs/COST_ESTIMATION.md)** | Detailed cost analysis and optimization strategies |
-| **[Variable Reference](./docs/VARIABLE_REFERENCE.md)** | Complete variable documentation for all components |
-
-### Architecture Documentation
-
-| Document | Description |
-|----------|-------------|
-| **[Architecture Overview](./docs/architecture/ARCHITECTURE_DIAGRAM.md)** | High-level system design and diagrams |
-| **[Network Architecture](./docs/architecture/NETWORK_ARCHITECTURE.md)** | VPC design, subnets, routing, and networking |
-| **[Security Architecture](./docs/architecture/security-best-practices-guide.md)** | Security model, IAM, encryption, and compliance |
-| **[Deployment Architecture](./docs/architecture/DEPLOYMENT_ARCHITECTURE_GUIDE.md)** | Deployment patterns and strategies |
-
-### Component Documentation
-
-Each component has detailed documentation:
-
-- [VPC Component](./components/terraform/vpc/README.md)
-- [EKS Component](./components/terraform/eks/README.md)
-- [RDS Component](./components/terraform/rds/README.md)
-- [Monitoring Component](./components/terraform/monitoring/README.md)
-- [IAM Component](./components/terraform/iam/README.md)
-- [Lambda Component](./components/terraform/lambda/README.md)
-- [All Components →](./components/terraform/)
 
 ---
 
@@ -265,129 +338,35 @@ Each component has detailed documentation:
 
 ```
 tf-atmos/
-├── 📁 components/terraform/     # 17 Infrastructure Components
-│   ├── vpc/                    # Virtual Private Cloud + Networking
-│   ├── eks/                    # Kubernetes Clusters
-│   ├── eks-addons/             # K8s Add-ons (Ingress, Monitoring)
-│   ├── rds/                    # Databases (PostgreSQL, MySQL, Aurora)
-│   ├── monitoring/             # CloudWatch Dashboards & Alarms
-│   ├── security-monitoring/    # Security Scanning & Compliance
-│   ├── backup/                 # Backup & Recovery
-│   ├── cost-optimization/      # Cost Monitoring & Optimization
-│   ├── secretsmanager/         # Secrets Management
-│   ├── iam/                    # IAM Roles & Policies
-│   ├── lambda/                 # Serverless Functions
-│   ├── apigateway/             # API Gateway
-│   ├── dns/                    # Route 53 DNS
-│   ├── acm/                    # Certificate Manager
-│   ├── external-secrets/       # External Secrets Operator
-│   ├── securitygroup/          # Security Groups
-│   └── backend/                # S3 + DynamoDB Backend
-├── 📁 stacks/                  # Environment Configurations
-│   ├── catalog/                # Component Catalogs & Defaults
-│   ├── mixins/                 # Reusable Configuration Patterns
-│   └── orgs/                   # Tenant-Specific Stacks
-├── 📁 workflows/               # 16 Automated Workflows
-│   ├── apply-environment.yaml  # Deploy Complete Environments
-│   ├── plan-environment.yaml   # Plan All Components
-│   ├── drift-detection.yaml    # Infrastructure Drift Detection
-│   ├── onboard-environment.yaml # New Environment Setup
-│   ├── destroy-environment.yaml # Teardown Environments
-│   ├── validate.yaml           # Validate Configurations
-│   ├── lint.yaml               # Lint Terraform Files
-│   ├── compliance-check.yaml   # Compliance Validation
-│   └── ...                     # + 8 more workflows
-├── 📁 gaia/                    # Python CLI Automation Tool
-│   ├── src/gaia/               # Source code
-│   ├── tests/                  # Test suite
-│   └── README.md               # Gaia documentation
-├── 📁 scripts/                 # Developer Utilities
-│   ├── list_stacks.sh          # List available stacks
-│   ├── install-dependencies.sh # Install required tools
-│   ├── create-environment.sh   # Create new environment
-│   └── ...                     # + more utility scripts
-├── 📁 docs/                    # Comprehensive Documentation
-│   ├── DEPLOYMENT_GUIDE.md     # Complete deployment guide
-│   ├── OPERATIONS_GUIDE.md     # Operations and maintenance
-│   ├── FAQ.md                  # Frequently asked questions
-│   ├── COST_ESTIMATION.md      # Cost analysis
-│   ├── VARIABLE_REFERENCE.md   # Variable documentation
-│   ├── architecture/           # Architecture documentation
-│   ├── components/             # Component guides
-│   ├── guides/                 # User guides
-│   ├── operations/             # Operational procedures
-│   └── workflows/              # Workflow documentation
-└── 📁 examples/                # Usage Examples & Templates
++-- components/terraform/     # 17 Infrastructure Components
+|   +-- vpc/                  # Virtual Private Cloud + Networking
+|   +-- eks/                  # Kubernetes Clusters
+|   +-- rds/                  # Databases (PostgreSQL, MySQL, Aurora)
+|   +-- lambda/               # Serverless Functions
+|   +-- monitoring/           # CloudWatch Dashboards & Alarms
+|   +-- ...                   # + 12 more components
++-- stacks/                   # Environment Configurations
+|   +-- catalog/              # Component Catalogs & Defaults
+|   |   +-- templates/        # Alexandria Library Templates
+|   +-- mixins/               # Reusable Configuration Patterns
+|   +-- orgs/                 # Tenant-Specific Stacks
++-- workflows/                # 20+ Automated Workflows
+|   +-- deploy-template.yaml  # Template Deployment Workflow
+|   +-- apply-environment.yaml
+|   +-- drift-detection.yaml
+|   +-- ...
++-- scripts/                  # Developer Utilities
+|   +-- deploy-stack.sh       # Smart Deployment Script
+|   +-- new-environment.sh    # Environment Bootstrap
+|   +-- list_stacks.sh
+|   +-- install-dependencies.sh
++-- docs/                     # Comprehensive Documentation
+|   +-- QUICK_DEPLOY.md       # Fast Deployment Guides
+|   +-- DEPLOYMENT_GUIDE.md
+|   +-- OPERATIONS_GUIDE.md
++-- templates/                # Stack Templates
+    +-- stacks/               # Pre-built Stack Templates
 ```
-
----
-
-## Key Features
-
-### Multi-Tenant Architecture
-
-Support multiple organizations and environments with isolated infrastructure:
-
-```yaml
-# Organization hierarchy
-orgs/
-  ├── company-a/
-  │   ├── dev/
-  │   ├── staging/
-  │   └── prod/
-  └── company-b/
-      ├── dev/
-      └── prod/
-```
-
-### Automated Workflows
-
-Pre-built workflows for common operations:
-
-```bash
-# Complete environment lifecycle
-atmos workflow onboard-environment      # Create new environment
-atmos workflow apply-environment        # Deploy infrastructure
-atmos workflow drift-detection          # Detect configuration drift
-atmos workflow compliance-check         # Run compliance checks
-atmos workflow destroy-environment      # Teardown environment
-
-# Validation and testing
-atmos workflow validate                 # Validate all configurations
-atmos workflow lint                     # Lint Terraform code
-atmos workflow enhanced-validation      # Deep validation
-
-# Operations
-atmos workflow rotate-certificate       # Rotate SSL certificates
-atmos workflow bootstrap-backend        # Initialize Terraform backend
-atmos workflow state-operations         # State management
-```
-
-### Python CLI (Gaia)
-
-Simplified command-line interface for common tasks:
-
-```bash
-# Install Gaia
-pip install -e ./gaia
-
-# List stacks
-gaia list stacks
-
-# Validate infrastructure
-gaia workflow validate \
-  --tenant mycompany \
-  --account dev \
-  --environment use1
-
-# Run workflows
-gaia workflow apply-environment \
-  --tenant mycompany \
-  --account dev \
-  --environment use1
-```
-
-See [gaia/README.md](./gaia/README.md) for complete Gaia documentation.
 
 ---
 
@@ -397,24 +376,13 @@ See [gaia/README.md](./gaia/README.md) for complete Gaia documentation.
 
 | Environment | Monthly Cost | Notes |
 |------------|--------------|-------|
-| **Development** | $495 | Single NAT, Spot instances, minimal resources |
-| **Staging** | $1,195 | Single NAT, mixed instances, moderate resources |
-| **Production** | $6,135 | Multi-AZ, Reserved Instances, full redundancy |
-| **Total** | **$7,825** | For 3 environments |
+| **Development** | $495 | Single NAT, Spot instances |
+| **Staging** | $1,195 | Single NAT, mixed instances |
+| **Production** | $6,135 | Multi-AZ, Reserved Instances |
 
 **With Optimizations: $2,479/month** (68% savings)
 
-See [docs/COST_ESTIMATION.md](./docs/COST_ESTIMATION.md) for detailed breakdown and optimization strategies.
-
-### Cost Optimization Features
-
-- Spot instances for development/staging (70% savings)
-- Auto-scaling with Karpenter
-- Aurora Serverless for non-production databases
-- S3 Intelligent Tiering
-- VPC Endpoints to reduce data transfer
-- Single NAT Gateway for non-production
-- Auto-shutdown schedules for development
+See [docs/COST_ESTIMATION.md](./docs/COST_ESTIMATION.md) for detailed breakdown.
 
 ---
 
@@ -426,12 +394,9 @@ See [docs/COST_ESTIMATION.md](./docs/COST_ESTIMATION.md) for detailed breakdown 
 - **Encryption in Transit**: TLS 1.3 for all connections
 - **Network Isolation**: Private subnets for workloads
 - **IAM Least Privilege**: Minimal necessary permissions
-- **Security Groups**: Stateful firewall rules
-- **Network ACLs**: Subnet-level network filtering
 - **VPC Flow Logs**: Network traffic monitoring
 - **GuardDuty**: Threat detection
 - **AWS Config**: Compliance monitoring
-- **Secrets Management**: Centralized secret storage
 
 ### Security Compliance
 
@@ -439,7 +404,6 @@ See [docs/COST_ESTIMATION.md](./docs/COST_ESTIMATION.md) for detailed breakdown 
 - CIS AWS Foundations Benchmark
 - PCI-DSS ready
 - HIPAA eligible
-- SOC 2 compliant infrastructure
 
 See [docs/architecture/security-best-practices-guide.md](./docs/architecture/security-best-practices-guide.md) for details.
 
@@ -453,8 +417,6 @@ See [docs/architecture/security-best-practices-guide.md](./docs/architecture/sec
 - **Test Commands**:
   ```bash
   atmos terraform plan vpc -s fnx-dev-testenv-01
-  atmos terraform output vpc -s fnx-dev-testenv-01
-  gaia list stacks
   ./scripts/list_stacks.sh
   ```
 
@@ -464,16 +426,15 @@ See [docs/architecture/security-best-practices-guide.md](./docs/architecture/sec
 
 ### Documentation
 
-1. **[Deployment Guide](./docs/DEPLOYMENT_GUIDE.md)** - Start here for setup
-2. **[Operations Guide](./docs/OPERATIONS_GUIDE.md)** - Daily operations
-3. **[FAQ](./docs/FAQ.md)** - Common questions
-4. **[Troubleshooting](./docs/operations/TROUBLESHOOTING.md)** - Common issues
+1. **[Quick Deploy Guide](./docs/QUICK_DEPLOY.md)** - Fast deployment
+2. **[Deployment Guide](./docs/DEPLOYMENT_GUIDE.md)** - Complete setup
+3. **[Operations Guide](./docs/OPERATIONS_GUIDE.md)** - Daily operations
+4. **[FAQ](./docs/FAQ.md)** - Common questions
 
-### Support Channels
+### Support
 
 - File an issue in the repository
 - Check FAQ for common problems
-- Review component-specific READMEs
 - Contact: platform-team@example.com
 
 ### Common Issues
@@ -490,6 +451,35 @@ aws eks update-kubeconfig --name <cluster-name> --region <region>
 
 # Validate everything?
 atmos workflow validate
+```
+
+---
+
+## Quick Reference Commands
+
+```bash
+# Create new environment
+./scripts/new-environment.sh --interactive
+
+# Deploy template
+./scripts/deploy-stack.sh --template <template> --stack <stack> --auto-approve
+
+# Validation
+atmos workflow validate                              # Validate all
+atmos workflow lint                                  # Lint code
+
+# Environment Management
+atmos workflow deploy-template -f deploy-template.yaml template=<tmpl> tenant=<t> account=<a> environment=<e>
+atmos workflow destroy-environment tenant=<t> account=<a> environment=<e>
+
+# Component Operations
+atmos terraform plan <component> -s <stack>         # Plan component
+atmos terraform apply <component> -s <stack>        # Apply component
+atmos terraform output <component> -s <stack>       # View outputs
+
+# Utilities
+./scripts/list_stacks.sh                            # List stacks
+atmos describe component <component> -s <stack>     # Component details
 ```
 
 ---
@@ -514,21 +504,6 @@ atmos workflow validate
 - Include validation blocks for inputs
 - Document all variables and outputs
 - Write comprehensive README for components
-- Add examples in component documentation
-
-See [docs/reference/terraform-development-standards.md](./docs/reference/terraform-development-standards.md) for complete standards.
-
----
-
-## Recent Improvements
-
-- ✅ **Documentation Overhaul**: Complete documentation suite with deployment, operations, and architecture guides
-- ✅ **Cost Optimization**: Detailed cost analysis and optimization strategies
-- ✅ **Stack Resolution**: Fixed component discovery issues
-- ✅ **Performance**: Intelligent caching and optimized dependencies
-- ✅ **Security**: Resolved critical vulnerabilities
-- ✅ **Developer Experience**: Comprehensive onboarding documentation
-- ✅ **Monitoring**: Built-in dashboards and alerting
 
 ---
 
@@ -538,13 +513,11 @@ See [docs/reference/terraform-development-standards.md](./docs/reference/terrafo
 - [ ] GitOps integration (ArgoCD/Flux)
 - [ ] Multi-cloud support (Azure, GCP)
 - [ ] Enhanced cost optimization automation
-- [ ] Improved disaster recovery automation
 
 ### Q2 2025
 - [ ] Service mesh integration (Istio)
 - [ ] Advanced observability (Prometheus, Grafana)
 - [ ] Policy as code (OPA)
-- [ ] Automated security scanning
 
 ---
 
@@ -559,39 +532,14 @@ MIT License - see [LICENSE](./LICENSE) file for details.
 - Built with [Terraform](https://www.terraform.io/)
 - Orchestrated with [Atmos](https://atmos.tools/)
 - Managed on [AWS](https://aws.amazon.com/)
-- Inspired by AWS Well-Architected Framework
 
 ---
 
-**Version**: 2.0.0
+**Version**: 2.1.0
 **Last Updated**: 2025-12-02
 **Maintained By**: Platform Team
 **Status**: Production Ready
 
 ---
 
-## Quick Reference Commands
-
-```bash
-# Validation
-atmos workflow validate                              # Validate all
-atmos workflow lint                                  # Lint code
-atmos workflow drift-detection                       # Check drift
-
-# Environment Management
-atmos workflow onboard-environment                   # Create new
-atmos workflow apply-environment                     # Deploy all
-atmos workflow destroy-environment                   # Teardown
-
-# Component Operations
-atmos terraform plan <component> -s <stack>         # Plan component
-atmos terraform apply <component> -s <stack>        # Apply component
-atmos terraform output <component> -s <stack>       # View outputs
-
-# Utilities
-./scripts/list_stacks.sh                            # List stacks
-gaia list stacks                                    # List (Python)
-atmos describe component <component> -s <stack>     # Component details
-```
-
-**Need help?** Start with the [Deployment Guide](./docs/DEPLOYMENT_GUIDE.md) or [FAQ](./docs/FAQ.md)
+**Need help?** Start with the [Quick Deploy Guide](./docs/QUICK_DEPLOY.md) or [Deployment Guide](./docs/DEPLOYMENT_GUIDE.md)

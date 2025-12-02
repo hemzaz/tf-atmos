@@ -1,0 +1,1306 @@
+---
+# =============================================================================
+# BATCH PROCESSING STACK TEMPLATE
+# =============================================================================
+# Complete batch processing infrastructure
+#
+# Architecture:
+#   - AWS Batch compute environment (Fargate or EC2)
+#   - SQS queues for job submission
+#   - ECS Fargate for containerized jobs
+#   - S3 for input/output data
+#   - EventBridge for scheduling
+#   - Step Functions for workflow orchestration
+#   - CloudWatch for monitoring and logging
+#   - Auto-scaling based on queue depth
+#
+# Cost Estimates (Monthly):
+#   Development:  ~$50-150/month (minimal jobs)
+#   Staging:      ~$200-500/month
+#   Production:   ~$500-5,000/month (scales with job volume)
+#
+# Key Benefits:
+#   - Managed compute - no servers to manage
+#   - Auto-scaling - scales to zero when idle
+#   - Cost-effective - pay only for compute used
+#   - Flexible - supports any container workload
+#
+# Deployment Time: 15-25 minutes
+#
+# Usage:
+#   atmos terraform plan batch-processing -s <tenant>-<account>-<environment>
+#   atmos terraform apply batch-processing -s <tenant>-<account>-<environment>
+# =============================================================================
+
+name: batch-processing
+description: "Complete batch processing infrastructure with AWS Batch, SQS, and Step Functions"
+version: "1.0.0"
+
+# Import base configurations
+import:
+  - catalog/_base/defaults
+  - catalog/vpc/defaults
+  - catalog/iam/defaults
+  - catalog/monitoring/defaults
+
+# =============================================================================
+# COMPONENT DEFINITIONS
+# =============================================================================
+
+components:
+  terraform:
+    # =========================================================================
+    # NETWORKING
+    # =========================================================================
+
+    batch-processing/vpc:
+      metadata:
+        component: vpc
+        type: real
+        inherits:
+          - vpc/defaults
+      vars:
+        name: "batch"
+
+        # VPC CIDR configuration
+        vpc_cidr: "${batch_vpc_cidr | default('10.30.0.0/16')}"
+
+        # Availability zones
+        azs:
+          - "${region}a"
+          - "${region}b"
+          - "${region}c"
+
+        # Subnets - batch jobs typically run in private subnets
+        private_subnets:
+          - "10.30.1.0/24"
+          - "10.30.2.0/24"
+          - "10.30.3.0/24"
+        public_subnets:
+          - "10.30.101.0/24"
+          - "10.30.102.0/24"
+          - "10.30.103.0/24"
+
+        # NAT Gateway - required for private subnet internet access
+        enable_nat_gateway: true
+        nat_gateway_strategy: "${nat_gateway_strategy | default('single')}"
+
+        # VPC Flow Logs
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+
+        # VPC Endpoints for cost optimization
+        enable_vpc_endpoints: true
+        vpc_endpoints:
+          - s3
+          - ecr.api
+          - ecr.dkr
+          - logs
+          - sts
+          - secretsmanager
+
+      tags:
+        Layer: "networking"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # SECURITY GROUPS
+    # =========================================================================
+
+    batch-processing/securitygroups:
+      metadata:
+        component: securitygroup
+        type: real
+      depends_on:
+        - batch-processing/vpc
+      vars:
+        vpc_id: "${output.batch-processing/vpc.vpc_id}"
+
+        security_groups:
+          # Batch compute security group
+          batch_compute:
+            name: "${tenant}-${environment}-batch-compute-sg"
+            description: "Security group for AWS Batch compute"
+            ingress_rules: []  # No inbound needed
+            egress_rules:
+              - description: "HTTPS to AWS services"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks:
+                  - "0.0.0.0/0"
+              - description: "DNS"
+                from_port: 53
+                to_port: 53
+                protocol: "udp"
+                cidr_blocks:
+                  - "0.0.0.0/0"
+
+          # EFS security group (if using shared storage)
+          efs:
+            name: "${tenant}-${environment}-batch-efs-sg"
+            description: "Security group for EFS mount targets"
+            ingress_rules:
+              - description: "NFS from batch compute"
+                from_port: 2049
+                to_port: 2049
+                protocol: "tcp"
+                source_security_group_id: "batch_compute"
+            egress_rules: []
+
+      tags:
+        Layer: "security"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # STORAGE (S3)
+    # =========================================================================
+
+    batch-processing/s3-input:
+      metadata:
+        component: s3
+        type: real
+      vars:
+        bucket_name: "${tenant}-${environment}-batch-input"
+        description: "Input data for batch jobs"
+
+        # Versioning
+        versioning_enabled: true
+
+        # Encryption
+        server_side_encryption:
+          sse_algorithm: "aws:kms"
+          kms_master_key_id: "${batch_kms_key_id}"
+
+        # Lifecycle rules
+        lifecycle_rules:
+          - id: "expire-processed"
+            enabled: true
+            prefix: "processed/"
+            expiration:
+              days: "${input_retention_days | default(30)}"
+          - id: "transition-archive"
+            enabled: true
+            prefix: "archive/"
+            transitions:
+              - days: 1
+                storage_class: "GLACIER"
+
+        # Access control
+        block_public_access: true
+
+        # Event notifications
+        event_notifications:
+          sqs:
+            - queue_arn: "${output.batch-processing/sqs.queue_arns.job_trigger}"
+              events:
+                - "s3:ObjectCreated:*"
+              filter_prefix: "incoming/"
+              filter_suffix: ""
+
+        # Logging
+        logging:
+          target_bucket: "${log_bucket_name}"
+          target_prefix: "s3-access-logs/batch-input/"
+
+      tags:
+        Layer: "storage"
+        DataType: "input"
+
+    batch-processing/s3-output:
+      metadata:
+        component: s3
+        type: real
+      vars:
+        bucket_name: "${tenant}-${environment}-batch-output"
+        description: "Output data from batch jobs"
+
+        # Versioning
+        versioning_enabled: true
+
+        # Encryption
+        server_side_encryption:
+          sse_algorithm: "aws:kms"
+          kms_master_key_id: "${batch_kms_key_id}"
+
+        # Lifecycle rules
+        lifecycle_rules:
+          - id: "transition-ia"
+            enabled: true
+            prefix: ""
+            transitions:
+              - days: "${output_ia_days | default(30)}"
+                storage_class: "STANDARD_IA"
+              - days: "${output_glacier_days | default(90)}"
+                storage_class: "GLACIER"
+          - id: "expire-temp"
+            enabled: true
+            prefix: "temp/"
+            expiration:
+              days: 7
+
+        # Access control
+        block_public_access: true
+
+        # Logging
+        logging:
+          target_bucket: "${log_bucket_name}"
+          target_prefix: "s3-access-logs/batch-output/"
+
+      tags:
+        Layer: "storage"
+        DataType: "output"
+
+    batch-processing/s3-scripts:
+      metadata:
+        component: s3
+        type: real
+      vars:
+        bucket_name: "${tenant}-${environment}-batch-scripts"
+        description: "Batch job scripts and configurations"
+
+        # Versioning (important for scripts)
+        versioning_enabled: true
+
+        # Encryption
+        server_side_encryption:
+          sse_algorithm: "aws:kms"
+          kms_master_key_id: "${batch_kms_key_id}"
+
+        # No lifecycle - keep scripts indefinitely
+
+        # Access control
+        block_public_access: true
+
+      tags:
+        Layer: "storage"
+        DataType: "scripts"
+
+    # =========================================================================
+    # MESSAGE QUEUES (SQS)
+    # =========================================================================
+
+    batch-processing/sqs:
+      metadata:
+        component: sqs
+        type: real
+      vars:
+        queues:
+          # Job submission queue (high priority)
+          job_submission_high:
+            name: "${tenant}-${environment}-batch-jobs-high"
+            visibility_timeout_seconds: 43200  # 12 hours max job time
+            message_retention_seconds: 1209600  # 14 days
+            max_message_size: 262144  # 256 KB
+            delay_seconds: 0
+            receive_wait_time_seconds: 20
+            fifo_queue: false
+            kms_master_key_id: "${sqs_kms_key_id}"
+            redrive_policy:
+              dead_letter_target_arn: "dlq"
+              max_receive_count: 3
+
+          # Job submission queue (low priority)
+          job_submission_low:
+            name: "${tenant}-${environment}-batch-jobs-low"
+            visibility_timeout_seconds: 43200
+            message_retention_seconds: 1209600
+            max_message_size: 262144
+            delay_seconds: 0
+            receive_wait_time_seconds: 20
+            fifo_queue: false
+            kms_master_key_id: "${sqs_kms_key_id}"
+            redrive_policy:
+              dead_letter_target_arn: "dlq"
+              max_receive_count: 3
+
+          # S3 event trigger queue
+          job_trigger:
+            name: "${tenant}-${environment}-batch-trigger"
+            visibility_timeout_seconds: 300
+            message_retention_seconds: 86400
+            fifo_queue: false
+            kms_master_key_id: "${sqs_kms_key_id}"
+            policy: |
+              {
+                "Version": "2012-10-17",
+                "Statement": [{
+                  "Effect": "Allow",
+                  "Principal": {"Service": "s3.amazonaws.com"},
+                  "Action": "sqs:SendMessage",
+                  "Resource": "*",
+                  "Condition": {
+                    "ArnLike": {
+                      "aws:SourceArn": "arn:aws:s3:::${tenant}-${environment}-batch-input"
+                    }
+                  }
+                }]
+              }
+
+          # Job completion notifications
+          job_notifications:
+            name: "${tenant}-${environment}-batch-notifications"
+            visibility_timeout_seconds: 60
+            message_retention_seconds: 86400
+            fifo_queue: false
+            kms_master_key_id: "${sqs_kms_key_id}"
+
+          # Dead letter queue
+          dlq:
+            name: "${tenant}-${environment}-batch-dlq"
+            visibility_timeout_seconds: 60
+            message_retention_seconds: 1209600
+            kms_master_key_id: "${sqs_kms_key_id}"
+
+      tags:
+        Layer: "messaging"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # AWS BATCH
+    # =========================================================================
+
+    batch-processing/batch-compute-fargate:
+      metadata:
+        component: batch
+        type: real
+      depends_on:
+        - batch-processing/vpc
+        - batch-processing/securitygroups
+      vars:
+        # Compute environment name
+        compute_environment_name: "${tenant}-${environment}-batch-fargate"
+        compute_environment_type: "MANAGED"
+        service_role_arn: "${batch_service_role_arn}"
+
+        # Fargate compute resources
+        compute_resources:
+          type: "FARGATE"
+          max_vcpus: "${fargate_max_vcpus | default(256)}"
+          subnets: "${output.batch-processing/vpc.private_subnet_ids}"
+          security_group_ids:
+            - "${output.batch-processing/securitygroups.security_group_ids.batch_compute}"
+
+        # State
+        state: "ENABLED"
+
+      tags:
+        ComputeType: "fargate"
+        Platform: "batch-processing"
+
+    batch-processing/batch-compute-fargate-spot:
+      metadata:
+        component: batch
+        type: real
+      depends_on:
+        - batch-processing/vpc
+        - batch-processing/securitygroups
+      vars:
+        # Compute environment name
+        compute_environment_name: "${tenant}-${environment}-batch-fargate-spot"
+        compute_environment_type: "MANAGED"
+        service_role_arn: "${batch_service_role_arn}"
+
+        # Fargate Spot compute resources (cost-optimized)
+        compute_resources:
+          type: "FARGATE_SPOT"
+          max_vcpus: "${fargate_spot_max_vcpus | default(512)}"
+          subnets: "${output.batch-processing/vpc.private_subnet_ids}"
+          security_group_ids:
+            - "${output.batch-processing/securitygroups.security_group_ids.batch_compute}"
+
+        # State
+        state: "ENABLED"
+
+      tags:
+        ComputeType: "fargate-spot"
+        Platform: "batch-processing"
+
+    batch-processing/batch-compute-ec2:
+      metadata:
+        component: batch
+        type: real
+      depends_on:
+        - batch-processing/vpc
+        - batch-processing/securitygroups
+      vars:
+        # Compute environment name
+        compute_environment_name: "${tenant}-${environment}-batch-ec2"
+        compute_environment_type: "MANAGED"
+        service_role_arn: "${batch_service_role_arn}"
+
+        # EC2 compute resources (for GPU or specific instance needs)
+        compute_resources:
+          type: "${ec2_allocation_strategy | default('BEST_FIT_PROGRESSIVE')}"
+          allocation_strategy: "BEST_FIT_PROGRESSIVE"
+          min_vcpus: "${ec2_min_vcpus | default(0)}"
+          max_vcpus: "${ec2_max_vcpus | default(256)}"
+          desired_vcpus: "${ec2_desired_vcpus | default(0)}"
+          instance_types:
+            - "${ec2_instance_types | default(['optimal'])}"
+          subnets: "${output.batch-processing/vpc.private_subnet_ids}"
+          security_group_ids:
+            - "${output.batch-processing/securitygroups.security_group_ids.batch_compute}"
+          instance_role: "${batch_instance_role_arn}"
+          tags:
+            Name: "${tenant}-${environment}-batch-ec2"
+
+        # Launch template (optional - for custom AMI, EBS, etc.)
+        launch_template:
+          launch_template_id: "${batch_launch_template_id}"
+          version: "$Latest"
+
+        # State
+        state: "${enable_ec2_compute | default('DISABLED')}"
+
+      tags:
+        ComputeType: "ec2"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # BATCH JOB QUEUES
+    # =========================================================================
+
+    batch-processing/batch-job-queues:
+      metadata:
+        component: batch-job-queue
+        type: real
+      depends_on:
+        - batch-processing/batch-compute-fargate
+        - batch-processing/batch-compute-fargate-spot
+      vars:
+        job_queues:
+          # High priority queue - Fargate only
+          high_priority:
+            name: "${tenant}-${environment}-batch-high"
+            state: "ENABLED"
+            priority: 100
+            compute_environments:
+              - compute_environment: "${output.batch-processing/batch-compute-fargate.compute_environment_arn}"
+                order: 1
+
+          # Default queue - Fargate then Spot
+          default:
+            name: "${tenant}-${environment}-batch-default"
+            state: "ENABLED"
+            priority: 50
+            compute_environments:
+              - compute_environment: "${output.batch-processing/batch-compute-fargate.compute_environment_arn}"
+                order: 1
+              - compute_environment: "${output.batch-processing/batch-compute-fargate-spot.compute_environment_arn}"
+                order: 2
+
+          # Low priority queue - Spot only (cost-optimized)
+          low_priority:
+            name: "${tenant}-${environment}-batch-low"
+            state: "ENABLED"
+            priority: 10
+            compute_environments:
+              - compute_environment: "${output.batch-processing/batch-compute-fargate-spot.compute_environment_arn}"
+                order: 1
+
+          # GPU queue (if EC2 enabled)
+          gpu:
+            name: "${tenant}-${environment}-batch-gpu"
+            state: "${enable_ec2_compute | default('DISABLED')}"
+            priority: 75
+            compute_environments:
+              - compute_environment: "${output.batch-processing/batch-compute-ec2.compute_environment_arn}"
+                order: 1
+
+      tags:
+        Layer: "compute"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # BATCH JOB DEFINITIONS
+    # =========================================================================
+
+    batch-processing/batch-job-definitions:
+      metadata:
+        component: batch-job-definition
+        type: real
+      depends_on:
+        - batch-processing/batch-job-queues
+      vars:
+        job_definitions:
+          # Data processing job
+          data_processor:
+            name: "${tenant}-${environment}-data-processor"
+            type: "container"
+            platform_capabilities:
+              - "FARGATE"
+            container_properties:
+              image: "${data_processor_image}"
+              resourceRequirements:
+                - type: "VCPU"
+                  value: "${data_processor_vcpu | default('1')}"
+                - type: "MEMORY"
+                  value: "${data_processor_memory | default('2048')}"
+              jobRoleArn: "${batch_job_role_arn}"
+              executionRoleArn: "${batch_execution_role_arn}"
+              networkConfiguration:
+                assignPublicIp: "DISABLED"
+              fargatePlatformConfiguration:
+                platformVersion: "LATEST"
+              logConfiguration:
+                logDriver: "awslogs"
+                options:
+                  awslogs-group: "/aws/batch/${tenant}-${environment}"
+                  awslogs-region: "${region}"
+                  awslogs-stream-prefix: "data-processor"
+              environment:
+                - name: "ENVIRONMENT"
+                  value: "${environment}"
+                - name: "INPUT_BUCKET"
+                  value: "${output.batch-processing/s3-input.bucket_name}"
+                - name: "OUTPUT_BUCKET"
+                  value: "${output.batch-processing/s3-output.bucket_name}"
+                - name: "AWS_REGION"
+                  value: "${region}"
+              secrets:
+                - name: "DB_PASSWORD"
+                  valueFrom: "${db_password_secret_arn}"
+            retry_strategy:
+              attempts: 3
+              evaluate_on_exit:
+                - on_status_reason: "Host EC2*"
+                  action: "RETRY"
+                - on_reason: "*error*"
+                  action: "EXIT"
+            timeout:
+              attempt_duration_seconds: "${data_processor_timeout | default(3600)}"
+
+          # ETL job
+          etl_job:
+            name: "${tenant}-${environment}-etl-job"
+            type: "container"
+            platform_capabilities:
+              - "FARGATE"
+            container_properties:
+              image: "${etl_job_image}"
+              resourceRequirements:
+                - type: "VCPU"
+                  value: "${etl_job_vcpu | default('2')}"
+                - type: "MEMORY"
+                  value: "${etl_job_memory | default('4096')}"
+              jobRoleArn: "${batch_job_role_arn}"
+              executionRoleArn: "${batch_execution_role_arn}"
+              networkConfiguration:
+                assignPublicIp: "DISABLED"
+              fargatePlatformConfiguration:
+                platformVersion: "LATEST"
+              logConfiguration:
+                logDriver: "awslogs"
+                options:
+                  awslogs-group: "/aws/batch/${tenant}-${environment}"
+                  awslogs-region: "${region}"
+                  awslogs-stream-prefix: "etl-job"
+              command:
+                - "--input"
+                - "Ref::input_path"
+                - "--output"
+                - "Ref::output_path"
+                - "--date"
+                - "Ref::processing_date"
+              environment:
+                - name: "ENVIRONMENT"
+                  value: "${environment}"
+            retry_strategy:
+              attempts: 2
+            timeout:
+              attempt_duration_seconds: "${etl_job_timeout | default(7200)}"
+
+          # Report generator
+          report_generator:
+            name: "${tenant}-${environment}-report-generator"
+            type: "container"
+            platform_capabilities:
+              - "FARGATE"
+            container_properties:
+              image: "${report_generator_image}"
+              resourceRequirements:
+                - type: "VCPU"
+                  value: "${report_vcpu | default('0.5')}"
+                - type: "MEMORY"
+                  value: "${report_memory | default('1024')}"
+              jobRoleArn: "${batch_job_role_arn}"
+              executionRoleArn: "${batch_execution_role_arn}"
+              networkConfiguration:
+                assignPublicIp: "DISABLED"
+              fargatePlatformConfiguration:
+                platformVersion: "LATEST"
+              logConfiguration:
+                logDriver: "awslogs"
+                options:
+                  awslogs-group: "/aws/batch/${tenant}-${environment}"
+                  awslogs-region: "${region}"
+                  awslogs-stream-prefix: "report-generator"
+            retry_strategy:
+              attempts: 1
+            timeout:
+              attempt_duration_seconds: "${report_timeout | default(1800)}"
+
+          # GPU job (if EC2 enabled)
+          ml_training:
+            name: "${tenant}-${environment}-ml-training"
+            type: "container"
+            platform_capabilities:
+              - "EC2"
+            container_properties:
+              image: "${ml_training_image}"
+              resourceRequirements:
+                - type: "VCPU"
+                  value: "${ml_vcpu | default('8')}"
+                - type: "MEMORY"
+                  value: "${ml_memory | default('32768')}"
+                - type: "GPU"
+                  value: "${ml_gpu | default('1')}"
+              jobRoleArn: "${batch_job_role_arn}"
+              privileged: false
+              logConfiguration:
+                logDriver: "awslogs"
+                options:
+                  awslogs-group: "/aws/batch/${tenant}-${environment}"
+                  awslogs-region: "${region}"
+                  awslogs-stream-prefix: "ml-training"
+              linuxParameters:
+                sharedMemorySize: 4096
+                devices:
+                  - hostPath: "/dev/nvidia0"
+                    containerPath: "/dev/nvidia0"
+                    permissions:
+                      - "READ"
+                      - "WRITE"
+            retry_strategy:
+              attempts: 2
+            timeout:
+              attempt_duration_seconds: "${ml_timeout | default(86400)}"
+
+      tags:
+        Layer: "compute"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # WORKFLOW ORCHESTRATION (Step Functions)
+    # =========================================================================
+
+    batch-processing/step-functions:
+      metadata:
+        component: step-functions
+        type: real
+      depends_on:
+        - batch-processing/batch-job-definitions
+        - batch-processing/sqs
+      vars:
+        state_machines:
+          # Data pipeline workflow
+          data_pipeline:
+            name: "${tenant}-${environment}-batch-data-pipeline"
+            description: "Orchestrates data processing batch jobs"
+            type: "STANDARD"
+            logging_configuration:
+              level: "ALL"
+              include_execution_data: true
+              log_destination: "arn:aws:logs:${region}:${account_id}:log-group:/aws/states/${tenant}-${environment}-batch-data-pipeline:*"
+            tracing_configuration:
+              enabled: true
+            definition:
+              Comment: "Data processing pipeline workflow"
+              StartAt: "ValidateInput"
+              States:
+                ValidateInput:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::lambda:invoke"
+                  Parameters:
+                    FunctionName: "${validation_lambda_arn}"
+                    Payload.$: "$"
+                  ResultPath: "$.validation"
+                  Next: "CheckValidation"
+                  Catch:
+                    - ErrorEquals:
+                        - "States.ALL"
+                      Next: "NotifyFailure"
+
+                CheckValidation:
+                  Type: "Choice"
+                  Choices:
+                    - Variable: "$.validation.Payload.valid"
+                      BooleanEquals: true
+                      Next: "SubmitProcessingJob"
+                  Default: "NotifyInvalidInput"
+
+                NotifyInvalidInput:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::sns:publish"
+                  Parameters:
+                    TopicArn: "${batch_sns_topic_arn}"
+                    Message:
+                      Status: "INVALID_INPUT"
+                      Input.$: "$.input_path"
+                      Errors.$: "$.validation.Payload.errors"
+                  End: true
+
+                SubmitProcessingJob:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::batch:submitJob.sync"
+                  Parameters:
+                    JobName.$: "States.Format('process-{}', $.job_id)"
+                    JobDefinition: "${output.batch-processing/batch-job-definitions.job_definition_arns.data_processor}"
+                    JobQueue: "${output.batch-processing/batch-job-queues.job_queue_arns.default}"
+                    ContainerOverrides:
+                      Command.$: "States.Array('--input', $.input_path, '--output', $.output_path)"
+                  ResultPath: "$.processing_result"
+                  Next: "CheckProcessingResult"
+                  Catch:
+                    - ErrorEquals:
+                        - "States.ALL"
+                      Next: "NotifyFailure"
+
+                CheckProcessingResult:
+                  Type: "Choice"
+                  Choices:
+                    - Variable: "$.processing_result.Status"
+                      StringEquals: "SUCCEEDED"
+                      Next: "SubmitETLJob"
+                  Default: "NotifyFailure"
+
+                SubmitETLJob:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::batch:submitJob.sync"
+                  Parameters:
+                    JobName.$: "States.Format('etl-{}', $.job_id)"
+                    JobDefinition: "${output.batch-processing/batch-job-definitions.job_definition_arns.etl_job}"
+                    JobQueue: "${output.batch-processing/batch-job-queues.job_queue_arns.default}"
+                    Parameters:
+                      input_path.$: "$.output_path"
+                      output_path.$: "$.final_output_path"
+                      processing_date.$: "$.processing_date"
+                  ResultPath: "$.etl_result"
+                  Next: "GenerateReport"
+                  Catch:
+                    - ErrorEquals:
+                        - "States.ALL"
+                      Next: "NotifyFailure"
+
+                GenerateReport:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::batch:submitJob.sync"
+                  Parameters:
+                    JobName.$: "States.Format('report-{}', $.job_id)"
+                    JobDefinition: "${output.batch-processing/batch-job-definitions.job_definition_arns.report_generator}"
+                    JobQueue: "${output.batch-processing/batch-job-queues.job_queue_arns.low_priority}"
+                  ResultPath: "$.report_result"
+                  Next: "NotifySuccess"
+                  Catch:
+                    - ErrorEquals:
+                        - "States.ALL"
+                      Next: "NotifyFailure"
+
+                NotifySuccess:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::sns:publish"
+                  Parameters:
+                    TopicArn: "${batch_sns_topic_arn}"
+                    Message:
+                      Status: "SUCCESS"
+                      JobId.$: "$.job_id"
+                      OutputPath.$: "$.final_output_path"
+                      Duration.$: "$$.State.EnteredTime"
+                  End: true
+
+                NotifyFailure:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::sns:publish"
+                  Parameters:
+                    TopicArn: "${batch_sns_topic_arn}"
+                    Message:
+                      Status: "FAILED"
+                      JobId.$: "$.job_id"
+                      Error.$: "$.error"
+                      ExecutionId.$: "$$.Execution.Id"
+                  Next: "FailState"
+
+                FailState:
+                  Type: "Fail"
+                  Error: "PipelineFailed"
+                  Cause: "Data pipeline workflow failed"
+
+          # Parallel processing workflow
+          parallel_processor:
+            name: "${tenant}-${environment}-batch-parallel"
+            description: "Processes multiple files in parallel"
+            type: "STANDARD"
+            definition:
+              Comment: "Parallel batch processing workflow"
+              StartAt: "ListInputFiles"
+              States:
+                ListInputFiles:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::lambda:invoke"
+                  Parameters:
+                    FunctionName: "${list_files_lambda_arn}"
+                    Payload.$: "$"
+                  ResultPath: "$.files"
+                  Next: "ProcessFilesInParallel"
+
+                ProcessFilesInParallel:
+                  Type: "Map"
+                  ItemsPath: "$.files.Payload"
+                  MaxConcurrency: "${max_parallel_jobs | default(10)}"
+                  Iterator:
+                    StartAt: "ProcessSingleFile"
+                    States:
+                      ProcessSingleFile:
+                        Type: "Task"
+                        Resource: "arn:aws:states:::batch:submitJob.sync"
+                        Parameters:
+                          JobName.$: "States.Format('parallel-{}', $.file_id)"
+                          JobDefinition: "${output.batch-processing/batch-job-definitions.job_definition_arns.data_processor}"
+                          JobQueue: "${output.batch-processing/batch-job-queues.job_queue_arns.low_priority}"
+                          ContainerOverrides:
+                            Command.$: "States.Array('--input', $.file_path)"
+                        End: true
+                  ResultPath: "$.processing_results"
+                  Next: "AggregateResults"
+
+                AggregateResults:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::lambda:invoke"
+                  Parameters:
+                    FunctionName: "${aggregate_lambda_arn}"
+                    Payload.$: "$"
+                  End: true
+
+      tags:
+        Layer: "orchestration"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # SCHEDULING (EventBridge)
+    # =========================================================================
+
+    batch-processing/eventbridge:
+      metadata:
+        component: eventbridge
+        type: real
+      depends_on:
+        - batch-processing/step-functions
+        - batch-processing/batch-job-queues
+      vars:
+        rules:
+          # Daily batch processing
+          daily_batch:
+            name: "${tenant}-${environment}-daily-batch"
+            description: "Triggers daily batch processing"
+            schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC
+            state: "ENABLED"
+            targets:
+              - id: "data-pipeline"
+                arn: "${output.batch-processing/step-functions.state_machine_arns.data_pipeline}"
+                role_arn: "${eventbridge_step_functions_role_arn}"
+                input:
+                  job_id.$: "aws.scheduler.scheduled-time"
+                  input_path: "s3://${output.batch-processing/s3-input.bucket_name}/incoming/"
+                  output_path: "s3://${output.batch-processing/s3-output.bucket_name}/processed/"
+                  final_output_path: "s3://${output.batch-processing/s3-output.bucket_name}/final/"
+                  processing_date.$: "aws.scheduler.scheduled-time"
+
+          # Hourly lightweight processing
+          hourly_lightweight:
+            name: "${tenant}-${environment}-hourly-batch"
+            description: "Triggers hourly lightweight batch jobs"
+            schedule_expression: "rate(1 hour)"
+            state: "${enable_hourly_batch | default('DISABLED')}"
+            targets:
+              - id: "lightweight-job"
+                arn: "arn:aws:batch:${region}:${account_id}:job-queue/${output.batch-processing/batch-job-queues.job_queue_names.low_priority}"
+                role_arn: "${eventbridge_batch_role_arn}"
+                batch_parameters:
+                  job_definition: "${output.batch-processing/batch-job-definitions.job_definition_arns.data_processor}"
+                  job_name: "hourly-process"
+
+          # S3 event processing
+          s3_trigger_processing:
+            name: "${tenant}-${environment}-s3-trigger"
+            description: "Processes new files uploaded to S3"
+            event_pattern:
+              source:
+                - "aws.s3"
+              detail-type:
+                - "Object Created"
+              detail:
+                bucket:
+                  name:
+                    - "${output.batch-processing/s3-input.bucket_name}"
+                object:
+                  key:
+                    - prefix: "incoming/"
+            state: "${enable_s3_trigger | default('ENABLED')}"
+            targets:
+              - id: "parallel-processor"
+                arn: "${output.batch-processing/step-functions.state_machine_arns.parallel_processor}"
+                role_arn: "${eventbridge_step_functions_role_arn}"
+                input_transformer:
+                  input_paths:
+                    bucket: "$.detail.bucket.name"
+                    key: "$.detail.object.key"
+                  input_template: '{"bucket": "<bucket>", "key": "<key>"}'
+
+          # Batch job status changes
+          batch_status_changes:
+            name: "${tenant}-${environment}-batch-status"
+            description: "Monitors batch job status changes"
+            event_pattern:
+              source:
+                - "aws.batch"
+              detail-type:
+                - "Batch Job State Change"
+              detail:
+                status:
+                  - "FAILED"
+                  - "SUCCEEDED"
+                jobQueue:
+                  - prefix: "${tenant}-${environment}"
+            targets:
+              - id: "notification-queue"
+                arn: "${output.batch-processing/sqs.queue_arns.job_notifications}"
+
+      tags:
+        Layer: "scheduling"
+        Platform: "batch-processing"
+
+    # =========================================================================
+    # LAMBDA FUNCTIONS (Supporting)
+    # =========================================================================
+
+    batch-processing/lambda-job-submitter:
+      metadata:
+        component: lambda
+        type: real
+      depends_on:
+        - batch-processing/sqs
+        - batch-processing/batch-job-queues
+      vars:
+        function_name: "batch-job-submitter"
+        description: "Submits batch jobs from SQS messages"
+
+        # Runtime configuration
+        runtime: "${lambda_runtime | default('python3.11')}"
+        handler: "handler.submit_job"
+        timeout: 60
+        memory_size: 256
+
+        # Reserved concurrency
+        reserved_concurrent_executions: 10
+
+        # Environment variables
+        environment_variables:
+          ENVIRONMENT: "${environment}"
+          HIGH_PRIORITY_QUEUE: "${output.batch-processing/batch-job-queues.job_queue_arns.high_priority}"
+          DEFAULT_QUEUE: "${output.batch-processing/batch-job-queues.job_queue_arns.default}"
+          LOW_PRIORITY_QUEUE: "${output.batch-processing/batch-job-queues.job_queue_arns.low_priority}"
+          JOB_DEFINITION: "${output.batch-processing/batch-job-definitions.job_definition_arns.data_processor}"
+
+        # SQS event source mapping
+        event_source_mappings:
+          sqs_high:
+            event_source_arn: "${output.batch-processing/sqs.queue_arns.job_submission_high}"
+            batch_size: 10
+            maximum_batching_window_in_seconds: 0
+          sqs_low:
+            event_source_arn: "${output.batch-processing/sqs.queue_arns.job_submission_low}"
+            batch_size: 10
+            maximum_batching_window_in_seconds: 60
+
+        # IAM permissions
+        policy_statements:
+          batch:
+            effect: "Allow"
+            actions:
+              - "batch:SubmitJob"
+              - "batch:DescribeJobs"
+            resources:
+              - "*"
+          sqs:
+            effect: "Allow"
+            actions:
+              - "sqs:ReceiveMessage"
+              - "sqs:DeleteMessage"
+              - "sqs:GetQueueAttributes"
+            resources:
+              - "${output.batch-processing/sqs.queue_arns.job_submission_high}"
+              - "${output.batch-processing/sqs.queue_arns.job_submission_low}"
+
+        # CloudWatch logs
+        log_retention_days: "${log_retention_days | default(30)}"
+
+      tags:
+        Layer: "compute"
+        Function: "job-submitter"
+
+    # =========================================================================
+    # MONITORING
+    # =========================================================================
+
+    batch-processing/monitoring:
+      metadata:
+        component: monitoring
+        type: real
+        inherits:
+          - monitoring/defaults
+      depends_on:
+        - batch-processing/batch-job-queues
+        - batch-processing/step-functions
+        - batch-processing/sqs
+      vars:
+        dashboard_name: "${tenant}-${environment}-batch-dashboard"
+
+        # Enable monitoring features
+        enable_resource_monitoring: true
+        enable_cost_monitoring: "${enable_cost_monitoring | default(true)}"
+
+        # Custom dashboard
+        dashboards:
+          batch_overview:
+            name: "${tenant}-${environment}-batch-overview"
+            widgets:
+              # Batch compute metrics
+              - type: "metric"
+                properties:
+                  title: "Compute Environment"
+                  metrics:
+                    - namespace: "AWS/Batch"
+                      metric: "DesiredvCPUs"
+                      dimensions:
+                        ComputeEnvironmentName: "${output.batch-processing/batch-compute-fargate.compute_environment_name}"
+                      stat: "Average"
+                      period: 60
+                    - namespace: "AWS/Batch"
+                      metric: "RunningvCPUs"
+                      dimensions:
+                        ComputeEnvironmentName: "${output.batch-processing/batch-compute-fargate.compute_environment_name}"
+                      stat: "Average"
+                      period: 60
+
+              # Job queue metrics
+              - type: "metric"
+                properties:
+                  title: "Job Queue Status"
+                  metrics:
+                    - namespace: "AWS/Batch"
+                      metric: "JobsSubmitted"
+                      dimensions:
+                        JobQueue: "${output.batch-processing/batch-job-queues.job_queue_names.default}"
+                      stat: "Sum"
+                      period: 300
+                    - namespace: "AWS/Batch"
+                      metric: "JobsRunning"
+                      dimensions:
+                        JobQueue: "${output.batch-processing/batch-job-queues.job_queue_names.default}"
+                      stat: "Average"
+                      period: 60
+                    - namespace: "AWS/Batch"
+                      metric: "JobsFailed"
+                      dimensions:
+                        JobQueue: "${output.batch-processing/batch-job-queues.job_queue_names.default}"
+                      stat: "Sum"
+                      period: 300
+
+              # Step Functions metrics
+              - type: "metric"
+                properties:
+                  title: "Workflow Executions"
+                  metrics:
+                    - namespace: "AWS/States"
+                      metric: "ExecutionsSucceeded"
+                      dimensions:
+                        StateMachineArn: "${output.batch-processing/step-functions.state_machine_arns.data_pipeline}"
+                      stat: "Sum"
+                      period: 300
+                    - namespace: "AWS/States"
+                      metric: "ExecutionsFailed"
+                      dimensions:
+                        StateMachineArn: "${output.batch-processing/step-functions.state_machine_arns.data_pipeline}"
+                      stat: "Sum"
+                      period: 300
+                    - namespace: "AWS/States"
+                      metric: "ExecutionTime"
+                      dimensions:
+                        StateMachineArn: "${output.batch-processing/step-functions.state_machine_arns.data_pipeline}"
+                      stat: "Average"
+                      period: 300
+
+              # SQS metrics
+              - type: "metric"
+                properties:
+                  title: "Queue Depth"
+                  metrics:
+                    - namespace: "AWS/SQS"
+                      metric: "ApproximateNumberOfMessagesVisible"
+                      dimensions:
+                        QueueName: "${output.batch-processing/sqs.queue_names.job_submission_high}"
+                      stat: "Average"
+                      period: 60
+                    - namespace: "AWS/SQS"
+                      metric: "ApproximateNumberOfMessagesVisible"
+                      dimensions:
+                        QueueName: "${output.batch-processing/sqs.queue_names.job_submission_low}"
+                      stat: "Average"
+                      period: 60
+                    - namespace: "AWS/SQS"
+                      metric: "ApproximateNumberOfMessagesVisible"
+                      dimensions:
+                        QueueName: "${output.batch-processing/sqs.queue_names.dlq}"
+                      stat: "Sum"
+                      period: 60
+
+        # Alarms
+        alarms:
+          # Batch job failures
+          batch_job_failures:
+            name: "${tenant}-${environment}-batch-job-failures"
+            metric_name: "JobsFailed"
+            namespace: "AWS/Batch"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 5
+            evaluation_periods: 1
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              JobQueue: "${output.batch-processing/batch-job-queues.job_queue_names.default}"
+
+          # Job queue depth (too many pending)
+          batch_queue_depth:
+            name: "${tenant}-${environment}-batch-queue-depth"
+            metric_name: "JobsPending"
+            namespace: "AWS/Batch"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 100
+            evaluation_periods: 3
+            period: 300
+            statistic: "Average"
+            dimensions:
+              JobQueue: "${output.batch-processing/batch-job-queues.job_queue_names.default}"
+
+          # Step Functions failures
+          workflow_failures:
+            name: "${tenant}-${environment}-workflow-failures"
+            metric_name: "ExecutionsFailed"
+            namespace: "AWS/States"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              StateMachineArn: "${output.batch-processing/step-functions.state_machine_arns.data_pipeline}"
+
+          # DLQ messages
+          dlq_messages:
+            name: "${tenant}-${environment}-batch-dlq"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            namespace: "AWS/SQS"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              QueueName: "${output.batch-processing/sqs.queue_names.dlq}"
+
+          # Compute environment not scaling
+          compute_not_scaling:
+            name: "${tenant}-${environment}-compute-stuck"
+            metric_name: "DesiredvCPUs"
+            namespace: "AWS/Batch"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: "${fargate_max_vcpus | default(256)}"
+            evaluation_periods: 3
+            period: 300
+            statistic: "Maximum"
+            dimensions:
+              ComputeEnvironmentName: "${output.batch-processing/batch-compute-fargate.compute_environment_name}"
+
+        # SNS notifications
+        alarm_notifications_enabled: true
+        alarm_email_addresses: "${alarm_email_addresses | default([])}"
+        sns_topic_name: "${tenant}-${environment}-batch-alarms"
+
+      tags:
+        Layer: "monitoring"
+        Platform: "batch-processing"
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+#
+# Development:
+#   vars:
+#     nat_gateway_strategy: "single"
+#     fargate_max_vcpus: 64
+#     fargate_spot_max_vcpus: 128
+#     enable_ec2_compute: "DISABLED"
+#     data_processor_vcpu: "0.5"
+#     data_processor_memory: "1024"
+#     data_processor_timeout: 1800
+#     max_parallel_jobs: 5
+#     input_retention_days: 7
+#     log_retention_days: 7
+#     enable_hourly_batch: "DISABLED"
+#
+# Staging:
+#   vars:
+#     nat_gateway_strategy: "single"
+#     fargate_max_vcpus: 128
+#     fargate_spot_max_vcpus: 256
+#     enable_ec2_compute: "DISABLED"
+#     data_processor_vcpu: "1"
+#     data_processor_memory: "2048"
+#     data_processor_timeout: 3600
+#     max_parallel_jobs: 10
+#     input_retention_days: 14
+#     log_retention_days: 14
+#     enable_hourly_batch: "ENABLED"
+#
+# Production:
+#   vars:
+#     nat_gateway_strategy: "one_per_az"
+#     fargate_max_vcpus: 512
+#     fargate_spot_max_vcpus: 1024
+#     enable_ec2_compute: "ENABLED"
+#     ec2_max_vcpus: 512
+#     ec2_instance_types: ["m5.xlarge", "m5.2xlarge", "c5.xlarge"]
+#     data_processor_vcpu: "2"
+#     data_processor_memory: "4096"
+#     data_processor_timeout: 7200
+#     etl_job_vcpu: "4"
+#     etl_job_memory: "8192"
+#     max_parallel_jobs: 50
+#     input_retention_days: 30
+#     output_ia_days: 60
+#     output_glacier_days: 180
+#     log_retention_days: 90
+#     enable_hourly_batch: "ENABLED"
+#     enable_s3_trigger: "ENABLED"
+
+# =============================================================================
+# REQUIRED VARIABLES
+# =============================================================================
+# batch_kms_key_id: "arn:aws:kms:..."
+# sqs_kms_key_id: "alias/aws/sqs"
+# batch_service_role_arn: "arn:aws:iam::..."
+# batch_instance_role_arn: "arn:aws:iam::..." (for EC2)
+# batch_job_role_arn: "arn:aws:iam::..."
+# batch_execution_role_arn: "arn:aws:iam::..."
+# eventbridge_step_functions_role_arn: "arn:aws:iam::..."
+# eventbridge_batch_role_arn: "arn:aws:iam::..."
+# data_processor_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/processor:latest"
+# etl_job_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/etl:latest"
+# report_generator_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/reporter:latest"
+# validation_lambda_arn: "arn:aws:lambda:..."
+# list_files_lambda_arn: "arn:aws:lambda:..."
+# aggregate_lambda_arn: "arn:aws:lambda:..."
+# batch_sns_topic_arn: "arn:aws:sns:..."
+# log_bucket_name: "my-log-bucket"
+# alarm_email_addresses: ["ops@example.com"]

@@ -1,0 +1,1024 @@
+---
+# =============================================================================
+# MICROSERVICES PLATFORM STACK TEMPLATE
+# =============================================================================
+# Complete microservices infrastructure with container orchestration
+#
+# Architecture:
+#   - VPC with isolated subnets for services
+#   - EKS cluster with managed node groups
+#   - Service mesh (AWS App Mesh or Istio-ready)
+#   - API Gateway for external access
+#   - EventBridge for async communication
+#   - DynamoDB for state management
+#   - ElastiCache for distributed caching
+#   - CloudWatch Container Insights
+#   - X-Ray for distributed tracing
+#   - External Secrets Operator for secret sync
+#
+# Cost Estimates (Monthly):
+#   Development:  ~$200-400/month
+#   Staging:      ~$500-1,000/month
+#   Production:   ~$1,500-5,000/month (depending on scale)
+#
+# Deployment Time: 30-45 minutes
+#
+# Usage:
+#   atmos terraform plan microservices-platform -s <tenant>-<account>-<environment>
+#   atmos terraform apply microservices-platform -s <tenant>-<account>-<environment>
+# =============================================================================
+
+name: microservices-platform
+description: "Complete microservices platform with EKS, service mesh, and event-driven architecture"
+version: "1.0.0"
+
+# Import base configurations
+import:
+  - catalog/_base/defaults
+  - catalog/vpc/defaults
+  - catalog/eks/defaults
+  - catalog/eks-addons/defaults
+  - catalog/monitoring/defaults
+  - catalog/secretsmanager/defaults
+
+# =============================================================================
+# COMPONENT DEFINITIONS
+# =============================================================================
+
+components:
+  terraform:
+    # =========================================================================
+    # NETWORKING LAYER
+    # =========================================================================
+
+    microservices/vpc:
+      metadata:
+        component: vpc
+        type: real
+        inherits:
+          - vpc/defaults
+      vars:
+        name: "microservices"
+
+        # Larger CIDR for microservices (many pods need IPs)
+        vpc_cidr: "${microservices_vpc_cidr | default('10.20.0.0/16')}"
+
+        # Availability zones
+        azs:
+          - "${region}a"
+          - "${region}b"
+          - "${region}c"
+
+        # Larger subnets for EKS pods
+        private_subnets:
+          - "10.20.0.0/18"    # ~16,000 IPs for pods AZ-a
+          - "10.20.64.0/18"   # ~16,000 IPs for pods AZ-b
+          - "10.20.128.0/18"  # ~16,000 IPs for pods AZ-c
+        public_subnets:
+          - "10.20.192.0/22"  # Load balancers AZ-a
+          - "10.20.196.0/22"  # Load balancers AZ-b
+          - "10.20.200.0/22"  # Load balancers AZ-c
+        database_subnets:
+          - "10.20.204.0/24"  # Data stores AZ-a
+          - "10.20.205.0/24"  # Data stores AZ-b
+          - "10.20.206.0/24"  # Data stores AZ-c
+
+        # HA NAT for production microservices
+        enable_nat_gateway: true
+        nat_gateway_strategy: "${nat_gateway_strategy | default('one_per_az')}"
+
+        # VPC Flow Logs
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+
+        # Enable DNS hostnames (required for EKS)
+        enable_dns_hostnames: true
+        enable_dns_support: true
+
+        # Subnet tags for EKS auto-discovery
+        public_subnet_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/${tenant}-${environment}-eks": "shared"
+        private_subnet_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/${tenant}-${environment}-eks": "shared"
+
+      tags:
+        Layer: "networking"
+        Platform: "microservices"
+
+    # =========================================================================
+    # EKS CLUSTER
+    # =========================================================================
+
+    microservices/eks:
+      metadata:
+        component: eks
+        type: real
+        inherits:
+          - eks/defaults
+      depends_on:
+        - microservices/vpc
+      vars:
+        cluster_name: "${tenant}-${environment}-eks"
+        kubernetes_version: "${kubernetes_version | default('1.29')}"
+
+        vpc_id: "${output.microservices/vpc.vpc_id}"
+        subnet_ids: "${output.microservices/vpc.private_subnet_ids}"
+
+        # Cluster endpoint access
+        endpoint_private_access: true
+        endpoint_public_access: "${eks_public_access | default(true)}"
+        public_access_cidrs:
+          - "${eks_allowed_cidr | default('0.0.0.0/0')}"
+
+        # Cluster encryption
+        encrypt_secrets: true
+        kms_key_arn: "${eks_kms_key_arn}"
+
+        # Cluster logging
+        enable_cluster_logging: true
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+        cloudwatch_log_group_retention_in_days: "${log_retention_days | default(30)}"
+
+        # Cluster security group rules
+        cluster_security_group_additional_rules:
+          egress_nodes_ephemeral_ports_tcp:
+            description: "Cluster API to node groups"
+            protocol: "tcp"
+            from_port: 1025
+            to_port: 65535
+            type: "egress"
+            source_node_security_group: true
+
+        # Node security group rules
+        node_security_group_additional_rules:
+          ingress_self_all:
+            description: "Node to node all ports/protocols"
+            protocol: "-1"
+            from_port: 0
+            to_port: 0
+            type: "ingress"
+            self: true
+          egress_all:
+            description: "Node all egress"
+            protocol: "-1"
+            from_port: 0
+            to_port: 0
+            type: "egress"
+            cidr_blocks:
+              - "0.0.0.0/0"
+
+        # Managed node groups
+        node_groups:
+          # System node group for cluster components
+          system:
+            name: "system"
+            instance_types:
+              - "${system_node_instance_type | default('t3.medium')}"
+            capacity_type: "ON_DEMAND"
+            min_size: "${system_node_min | default(2)}"
+            max_size: "${system_node_max | default(4)}"
+            desired_size: "${system_node_desired | default(2)}"
+            disk_size: 50
+            labels:
+              role: "system"
+              node-type: "system"
+            taints:
+              - key: "CriticalAddonsOnly"
+                value: "true"
+                effect: "NO_SCHEDULE"
+            update_config:
+              max_unavailable_percentage: 33
+            ami_type: "AL2_x86_64"
+            enable_monitoring: true
+
+          # Application node group for microservices
+          application:
+            name: "application"
+            instance_types:
+              - "${app_node_instance_type | default('t3.large')}"
+            capacity_type: "${app_capacity_type | default('ON_DEMAND')}"
+            min_size: "${app_node_min | default(3)}"
+            max_size: "${app_node_max | default(20)}"
+            desired_size: "${app_node_desired | default(3)}"
+            disk_size: 100
+            labels:
+              role: "application"
+              node-type: "application"
+            update_config:
+              max_unavailable_percentage: 25
+            ami_type: "AL2_x86_64"
+            enable_monitoring: true
+
+          # Spot node group for cost optimization (non-critical workloads)
+          spot:
+            name: "spot"
+            instance_types:
+              - "t3.large"
+              - "t3.xlarge"
+              - "m5.large"
+              - "m5.xlarge"
+            capacity_type: "SPOT"
+            min_size: "${spot_node_min | default(0)}"
+            max_size: "${spot_node_max | default(10)}"
+            desired_size: "${spot_node_desired | default(0)}"
+            disk_size: 100
+            labels:
+              role: "spot"
+              node-type: "spot"
+            taints:
+              - key: "spot"
+                value: "true"
+                effect: "NO_SCHEDULE"
+            update_config:
+              max_unavailable_percentage: 50
+            ami_type: "AL2_x86_64"
+            enable_monitoring: true
+
+        # OIDC provider for IRSA
+        enable_irsa: true
+
+        # Cluster addons
+        cluster_addons:
+          coredns:
+            most_recent: true
+            resolve_conflicts_on_create: "OVERWRITE"
+            resolve_conflicts_on_update: "OVERWRITE"
+          kube-proxy:
+            most_recent: true
+            resolve_conflicts_on_create: "OVERWRITE"
+            resolve_conflicts_on_update: "OVERWRITE"
+          vpc-cni:
+            most_recent: true
+            resolve_conflicts_on_create: "OVERWRITE"
+            resolve_conflicts_on_update: "OVERWRITE"
+            configuration_values: |
+              {
+                "env": {
+                  "ENABLE_PREFIX_DELEGATION": "true",
+                  "WARM_PREFIX_TARGET": "1"
+                }
+              }
+          aws-ebs-csi-driver:
+            most_recent: true
+            resolve_conflicts_on_create: "OVERWRITE"
+            service_account_role_arn: "${ebs_csi_role_arn}"
+
+        # Authentication mode
+        authentication_mode: "API_AND_CONFIG_MAP"
+
+        # Access entries (RBAC)
+        access_entries:
+          admin:
+            principal_arn: "${eks_admin_role_arn}"
+            type: "STANDARD"
+            policy_associations:
+              admin:
+                policy_arn: "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+                access_scope:
+                  type: "cluster"
+
+      tags:
+        Layer: "compute"
+        Platform: "microservices"
+
+    # =========================================================================
+    # EKS ADDONS (Kubernetes-level)
+    # =========================================================================
+
+    microservices/eks-addons:
+      metadata:
+        component: eks-addons
+        type: real
+        inherits:
+          - eks-addons/defaults
+      depends_on:
+        - microservices/eks
+      vars:
+        cluster_name: "${output.microservices/eks.cluster_id}"
+        cluster_endpoint: "${output.microservices/eks.cluster_endpoint}"
+        cluster_certificate_authority_data: "${output.microservices/eks.cluster_certificate_authority_data}"
+        oidc_provider_arn: "${output.microservices/eks.oidc_provider_arn}"
+
+        # AWS Load Balancer Controller
+        enable_aws_load_balancer_controller: true
+        aws_load_balancer_controller:
+          namespace: "kube-system"
+          service_account_name: "aws-load-balancer-controller"
+
+        # Cluster Autoscaler
+        enable_cluster_autoscaler: true
+        cluster_autoscaler:
+          namespace: "kube-system"
+          service_account_name: "cluster-autoscaler"
+          extra_args:
+            - "--balance-similar-node-groups"
+            - "--skip-nodes-with-system-pods=false"
+            - "--expander=least-waste"
+            - "--scale-down-delay-after-add=5m"
+            - "--scale-down-unneeded-time=5m"
+
+        # Metrics Server
+        enable_metrics_server: true
+        metrics_server:
+          namespace: "kube-system"
+
+        # External DNS
+        enable_external_dns: true
+        external_dns:
+          namespace: "kube-system"
+          service_account_name: "external-dns"
+          domain_filters:
+            - "${app_domain_name}"
+          zone_id_filters:
+            - "${route53_zone_id}"
+
+        # Cert Manager
+        enable_cert_manager: true
+        cert_manager:
+          namespace: "cert-manager"
+          service_account_name: "cert-manager"
+
+        # External Secrets Operator
+        enable_external_secrets: true
+        external_secrets:
+          namespace: "external-secrets"
+          service_account_name: "external-secrets"
+
+        # Karpenter for advanced autoscaling (optional)
+        enable_karpenter: "${enable_karpenter | default(false)}"
+        karpenter:
+          namespace: "karpenter"
+          service_account_name: "karpenter"
+
+        # AWS X-Ray for distributed tracing
+        enable_aws_xray: true
+        aws_xray:
+          namespace: "aws-otel"
+          service_account_name: "aws-otel-collector"
+
+        # CloudWatch Container Insights
+        enable_cloudwatch_container_insights: true
+        cloudwatch_container_insights:
+          namespace: "amazon-cloudwatch"
+
+      tags:
+        Layer: "addons"
+        Platform: "microservices"
+
+    # =========================================================================
+    # API GATEWAY
+    # =========================================================================
+
+    microservices/apigateway:
+      metadata:
+        component: apigateway
+        type: real
+      depends_on:
+        - microservices/eks
+      vars:
+        api_name: "${tenant}-${environment}-microservices-api"
+        description: "API Gateway for microservices platform"
+        api_type: "HTTP"
+
+        # HTTP API specific configurations
+        cors_configuration:
+          allow_origins:
+            - "https://${app_domain_name}"
+            - "https://*.${app_domain_name}"
+          allow_methods:
+            - "GET"
+            - "POST"
+            - "PUT"
+            - "DELETE"
+            - "PATCH"
+            - "OPTIONS"
+          allow_headers:
+            - "Content-Type"
+            - "Authorization"
+            - "X-Request-ID"
+            - "X-Correlation-ID"
+          expose_headers:
+            - "X-Request-ID"
+            - "X-Correlation-ID"
+          max_age: 300
+          allow_credentials: true
+
+        # VPC Link for private integration with EKS
+        enable_vpc_link: true
+        vpc_link:
+          name: "${tenant}-${environment}-eks-vpc-link"
+          subnet_ids: "${output.microservices/vpc.private_subnet_ids}"
+          security_group_ids:
+            - "${output.microservices/vpc.default_security_group_id}"
+
+        # JWT authorization via Cognito or custom authorizer
+        authorizer_type: "JWT"
+        jwt_configuration:
+          audience:
+            - "${cognito_client_id}"
+          issuer: "https://cognito-idp.${region}.amazonaws.com/${cognito_user_pool_id}"
+
+        # Logging
+        enable_logging: true
+        log_format: '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod", "routeKey":"$context.routeKey", "status":"$context.status", "protocol":"$context.protocol", "responseLength":"$context.responseLength", "integrationError":"$context.integrationErrorMessage", "correlationId":"$context.requestContext.requestId" }'
+        log_retention_days: 30
+
+        # Stage configurations
+        stage_name: "${environment}"
+        auto_deploy: true
+
+        # Routes - integrate with ALB Ingress in EKS
+        routes:
+          # Health check route
+          - route_key: "GET /health"
+            integration_type: "HTTP_PROXY"
+            integration_uri: "http://${eks_alb_dns}/health"
+            integration_method: "GET"
+
+          # Service routes (proxy to EKS ALB)
+          - route_key: "$default"
+            integration_type: "HTTP_PROXY"
+            integration_uri: "http://${eks_alb_dns}/{proxy}"
+            integration_method: "ANY"
+
+        # Throttling
+        throttling:
+          burst_limit: "${api_throttle_burst | default(5000)}"
+          rate_limit: "${api_throttle_rate | default(10000)}"
+
+        # Monitoring
+        create_dashboard: true
+        tracing_enabled: true
+
+      tags:
+        Layer: "api-gateway"
+        Platform: "microservices"
+
+    # =========================================================================
+    # EVENT BUS (EventBridge)
+    # =========================================================================
+
+    microservices/eventbridge:
+      metadata:
+        component: eventbridge
+        type: real
+      vars:
+        bus_name: "${tenant}-${environment}-microservices-bus"
+        description: "Event bus for microservices async communication"
+
+        # Event bus configuration
+        event_bus:
+          name: "${tenant}-${environment}-microservices-bus"
+          archive_enabled: true
+          archive_retention_days: "${event_archive_retention | default(30)}"
+
+        # Event rules for service-to-service communication
+        rules:
+          # Order events
+          order_created:
+            name: "${tenant}-${environment}-order-created"
+            description: "Route order created events"
+            event_pattern:
+              source:
+                - "microservices.orders"
+              detail-type:
+                - "OrderCreated"
+            targets:
+              - id: "inventory-service"
+                arn: "${inventory_service_queue_arn}"
+              - id: "notification-service"
+                arn: "${notification_service_queue_arn}"
+
+          # User events
+          user_registered:
+            name: "${tenant}-${environment}-user-registered"
+            description: "Route user registration events"
+            event_pattern:
+              source:
+                - "microservices.users"
+              detail-type:
+                - "UserRegistered"
+            targets:
+              - id: "welcome-email"
+                arn: "${email_service_lambda_arn}"
+
+          # Catch-all for auditing
+          all_events:
+            name: "${tenant}-${environment}-all-events-audit"
+            description: "Archive all events for auditing"
+            event_pattern:
+              source:
+                - prefix: "microservices."
+            targets:
+              - id: "s3-archive"
+                arn: "${event_archive_bucket_arn}"
+                input_transformer:
+                  input_paths:
+                    source: "$.source"
+                    detail-type: "$.detail-type"
+                    time: "$.time"
+                    detail: "$.detail"
+                  input_template: '{"source": <source>, "detail-type": <detail-type>, "time": <time>, "detail": <detail>}'
+
+        # Schema discovery
+        enable_schema_discovery: true
+
+        # Cross-account event sharing (optional)
+        enable_cross_account: "${enable_cross_account_events | default(false)}"
+        cross_account_principals: "${cross_account_event_principals | default([])}"
+
+      tags:
+        Layer: "messaging"
+        Platform: "microservices"
+
+    # =========================================================================
+    # STATE MANAGEMENT (DynamoDB)
+    # =========================================================================
+
+    microservices/dynamodb:
+      metadata:
+        component: dynamodb
+        type: real
+      vars:
+        tables:
+          # Service state table
+          service_state:
+            name: "${tenant}-${environment}-service-state"
+            billing_mode: "${dynamodb_billing_mode | default('PAY_PER_REQUEST')}"
+            hash_key: "pk"
+            range_key: "sk"
+            attributes:
+              - name: "pk"
+                type: "S"
+              - name: "sk"
+                type: "S"
+              - name: "gsi1pk"
+                type: "S"
+              - name: "gsi1sk"
+                type: "S"
+            global_secondary_indexes:
+              - name: "gsi1"
+                hash_key: "gsi1pk"
+                range_key: "gsi1sk"
+                projection_type: "ALL"
+            ttl:
+              enabled: true
+              attribute_name: "ttl"
+            point_in_time_recovery: true
+            server_side_encryption:
+              enabled: true
+              kms_key_arn: "${dynamodb_kms_key_arn}"
+            stream_enabled: "${enable_dynamodb_streams | default(true)}"
+            stream_view_type: "NEW_AND_OLD_IMAGES"
+
+          # Distributed locks table
+          distributed_locks:
+            name: "${tenant}-${environment}-distributed-locks"
+            billing_mode: "PAY_PER_REQUEST"
+            hash_key: "lock_key"
+            attributes:
+              - name: "lock_key"
+                type: "S"
+            ttl:
+              enabled: true
+              attribute_name: "expires_at"
+            point_in_time_recovery: false
+            server_side_encryption:
+              enabled: true
+
+          # Saga state table (for distributed transactions)
+          saga_state:
+            name: "${tenant}-${environment}-saga-state"
+            billing_mode: "PAY_PER_REQUEST"
+            hash_key: "saga_id"
+            range_key: "step_id"
+            attributes:
+              - name: "saga_id"
+                type: "S"
+              - name: "step_id"
+                type: "S"
+              - name: "status"
+                type: "S"
+            global_secondary_indexes:
+              - name: "status-index"
+                hash_key: "status"
+                projection_type: "ALL"
+            ttl:
+              enabled: true
+              attribute_name: "ttl"
+            point_in_time_recovery: true
+            server_side_encryption:
+              enabled: true
+            stream_enabled: true
+            stream_view_type: "NEW_AND_OLD_IMAGES"
+
+      tags:
+        Layer: "data"
+        Platform: "microservices"
+
+    # =========================================================================
+    # DISTRIBUTED CACHING (ElastiCache)
+    # =========================================================================
+
+    microservices/elasticache:
+      metadata:
+        component: elasticache
+        type: real
+      depends_on:
+        - microservices/vpc
+      vars:
+        cluster_id: "${tenant}-${environment}-microservices-cache"
+
+        # Redis for distributed caching
+        engine: "redis"
+        engine_version: "${redis_version | default('7.0')}"
+
+        # Cluster mode for scalability
+        cluster_mode_enabled: "${cache_cluster_mode | default(true)}"
+
+        # Node configuration
+        node_type: "${cache_node_type | default('cache.r6g.large')}"
+        num_node_groups: "${cache_num_node_groups | default(2)}"
+        replicas_per_node_group: "${cache_replicas | default(1)}"
+
+        # Network configuration
+        subnet_group_name: "${tenant}-${environment}-microservices-cache-subnet"
+        subnet_ids: "${output.microservices/vpc.private_subnet_ids}"
+        security_group_ids: []  # Will be created
+
+        # Security
+        at_rest_encryption_enabled: true
+        transit_encryption_enabled: true
+        auth_token_enabled: true
+        kms_key_id: "${cache_kms_key_id}"
+
+        # High availability
+        automatic_failover_enabled: true
+        multi_az_enabled: true
+
+        # Maintenance
+        maintenance_window: "sun:05:00-sun:06:00"
+        snapshot_retention_limit: "${cache_snapshot_retention | default(7)}"
+        snapshot_window: "04:00-05:00"
+
+        # Parameter group
+        parameter_group_family: "redis7"
+        parameters:
+          - name: "maxmemory-policy"
+            value: "volatile-lru"
+          - name: "cluster-enabled"
+            value: "yes"
+          - name: "notify-keyspace-events"
+            value: "Ex"  # Expiry events for cache invalidation
+
+        # CloudWatch alarms
+        create_cloudwatch_alarms: true
+        alarm_cpu_threshold: 75
+        alarm_memory_threshold: 80
+        alarm_connections_threshold: 5000
+
+      tags:
+        Layer: "caching"
+        Platform: "microservices"
+
+    # =========================================================================
+    # OBSERVABILITY
+    # =========================================================================
+
+    microservices/monitoring:
+      metadata:
+        component: monitoring
+        type: real
+        inherits:
+          - monitoring/defaults
+      depends_on:
+        - microservices/eks
+        - microservices/apigateway
+        - microservices/eventbridge
+        - microservices/dynamodb
+        - microservices/elasticache
+      vars:
+        dashboard_name: "${tenant}-${environment}-microservices-dashboard"
+
+        # Enable all monitoring features
+        enable_resource_monitoring: true
+        enable_cost_monitoring: true
+        enable_container_insights: true
+
+        # Container Insights metrics
+        container_insights:
+          cluster_name: "${output.microservices/eks.cluster_id}"
+          namespace_filter:
+            - "*"
+
+        # X-Ray tracing configuration
+        xray_tracing:
+          enable: true
+          sampling_rate: "${xray_sampling_rate | default(0.05)}"  # 5% sampling
+          service_graph_enabled: true
+
+        # Custom dashboards
+        dashboards:
+          # EKS cluster overview
+          eks_overview:
+            name: "${tenant}-${environment}-eks-overview"
+            widgets:
+              - type: "metric"
+                properties:
+                  metrics:
+                    - namespace: "ContainerInsights"
+                      metric: "node_cpu_utilization"
+                      dimensions:
+                        ClusterName: "${output.microservices/eks.cluster_id}"
+                    - namespace: "ContainerInsights"
+                      metric: "node_memory_utilization"
+                      dimensions:
+                        ClusterName: "${output.microservices/eks.cluster_id}"
+                  title: "Node Resource Utilization"
+                  period: 300
+
+          # API Gateway metrics
+          api_metrics:
+            name: "${tenant}-${environment}-api-metrics"
+            widgets:
+              - type: "metric"
+                properties:
+                  metrics:
+                    - namespace: "AWS/ApiGateway"
+                      metric: "Count"
+                      dimensions:
+                        ApiId: "${output.microservices/apigateway.api_id}"
+                    - namespace: "AWS/ApiGateway"
+                      metric: "Latency"
+                      dimensions:
+                        ApiId: "${output.microservices/apigateway.api_id}"
+                  title: "API Gateway Metrics"
+                  period: 60
+
+          # Event bus metrics
+          eventbridge_metrics:
+            name: "${tenant}-${environment}-eventbridge-metrics"
+            widgets:
+              - type: "metric"
+                properties:
+                  metrics:
+                    - namespace: "AWS/Events"
+                      metric: "Invocations"
+                      dimensions:
+                        EventBusName: "${output.microservices/eventbridge.bus_name}"
+                    - namespace: "AWS/Events"
+                      metric: "FailedInvocations"
+                      dimensions:
+                        EventBusName: "${output.microservices/eventbridge.bus_name}"
+                  title: "EventBridge Metrics"
+                  period: 60
+
+        # Alarms
+        alarms:
+          # EKS alarms
+          eks_node_not_ready:
+            name: "${tenant}-${environment}-eks-node-not-ready"
+            metric_name: "cluster_failed_node_count"
+            namespace: "ContainerInsights"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 2
+            period: 300
+            statistic: "Maximum"
+            dimensions:
+              ClusterName: "${output.microservices/eks.cluster_id}"
+
+          # API Gateway alarms
+          api_5xx_errors:
+            name: "${tenant}-${environment}-api-5xx-errors"
+            metric_name: "5XXError"
+            namespace: "AWS/ApiGateway"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 10
+            evaluation_periods: 2
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              ApiId: "${output.microservices/apigateway.api_id}"
+
+          api_latency_high:
+            name: "${tenant}-${environment}-api-latency-high"
+            metric_name: "Latency"
+            namespace: "AWS/ApiGateway"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 3000  # 3 seconds
+            evaluation_periods: 3
+            period: 300
+            statistic: "p99"
+            dimensions:
+              ApiId: "${output.microservices/apigateway.api_id}"
+
+          # EventBridge alarms
+          eventbridge_failed_invocations:
+            name: "${tenant}-${environment}-eventbridge-failures"
+            metric_name: "FailedInvocations"
+            namespace: "AWS/Events"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 5
+            evaluation_periods: 2
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              EventBusName: "${output.microservices/eventbridge.bus_name}"
+
+          # DynamoDB alarms
+          dynamodb_throttled:
+            name: "${tenant}-${environment}-dynamodb-throttled"
+            metric_name: "ThrottledRequests"
+            namespace: "AWS/DynamoDB"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+            dimensions:
+              TableName: "${tenant}-${environment}-service-state"
+
+          # ElastiCache alarms
+          cache_cpu_high:
+            name: "${tenant}-${environment}-cache-cpu-high"
+            metric_name: "CPUUtilization"
+            namespace: "AWS/ElastiCache"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 75
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              CacheClusterId: "${output.microservices/elasticache.cluster_id}"
+
+        # SNS notifications
+        alarm_notifications_enabled: true
+        alarm_email_addresses: "${alarm_email_addresses | default([])}"
+        sns_topic_name: "${tenant}-${environment}-microservices-alarms"
+
+        # Log insights queries
+        log_insights_queries:
+          error_analysis:
+            name: "Error Analysis"
+            log_group_name: "/aws/eks/${output.microservices/eks.cluster_id}/cluster"
+            query: |
+              fields @timestamp, @message
+              | filter @message like /error|Error|ERROR/
+              | sort @timestamp desc
+              | limit 100
+
+          slow_requests:
+            name: "Slow Requests"
+            log_group_name: "/aws/apigateway/${output.microservices/apigateway.api_id}"
+            query: |
+              fields @timestamp, @message
+              | filter responseTime > 1000
+              | sort responseTime desc
+              | limit 100
+
+      tags:
+        Layer: "observability"
+        Platform: "microservices"
+
+    # =========================================================================
+    # SECRETS MANAGEMENT
+    # =========================================================================
+
+    microservices/secrets:
+      metadata:
+        component: secretsmanager
+        type: real
+        inherits:
+          - secretsmanager/defaults
+      vars:
+        secrets:
+          # Database credentials
+          database:
+            name: "${tenant}/${environment}/microservices/database"
+            description: "Database credentials for microservices"
+            recovery_window_in_days: "${secret_recovery_window | default(7)}"
+            generate_secret_string:
+              secret_string_template: '{"username": "microservices_admin"}'
+              generate_string_key: "password"
+              password_length: 32
+              exclude_characters: "\"@/\\"
+
+          # Redis auth token
+          redis:
+            name: "${tenant}/${environment}/microservices/redis"
+            description: "Redis auth token for microservices"
+            recovery_window_in_days: "${secret_recovery_window | default(7)}"
+            generate_secret_string:
+              generate_string_key: "auth_token"
+              password_length: 64
+              exclude_characters: "\"@/\\"
+
+          # API keys
+          api_keys:
+            name: "${tenant}/${environment}/microservices/api-keys"
+            description: "API keys for microservices"
+            recovery_window_in_days: "${secret_recovery_window | default(7)}"
+            secret_string: "${api_keys_json}"
+
+          # JWT signing key
+          jwt_signing:
+            name: "${tenant}/${environment}/microservices/jwt-signing"
+            description: "JWT signing key for microservices"
+            recovery_window_in_days: "${secret_recovery_window | default(30)}"
+            generate_secret_string:
+              generate_string_key: "signing_key"
+              password_length: 64
+              exclude_characters: ""
+
+        # KMS encryption
+        kms_key_id: "${secrets_kms_key_id}"
+
+        # Secret rotation (optional)
+        enable_rotation: "${enable_secret_rotation | default(false)}"
+        rotation_lambda_arn: "${secret_rotation_lambda_arn}"
+        rotation_rules:
+          automatically_after_days: 30
+
+      tags:
+        Layer: "security"
+        Platform: "microservices"
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+#
+# Development:
+#   vars:
+#     nat_gateway_strategy: "single"
+#     kubernetes_version: "1.29"
+#     system_node_min: 1
+#     system_node_max: 2
+#     app_node_min: 1
+#     app_node_max: 5
+#     app_capacity_type: "SPOT"
+#     cache_cluster_mode: false
+#     cache_node_type: "cache.t3.micro"
+#     dynamodb_billing_mode: "PAY_PER_REQUEST"
+#     enable_karpenter: false
+#     xray_sampling_rate: 0.1
+#
+# Staging:
+#   vars:
+#     nat_gateway_strategy: "single"
+#     kubernetes_version: "1.29"
+#     system_node_min: 2
+#     system_node_max: 3
+#     app_node_min: 2
+#     app_node_max: 10
+#     app_capacity_type: "ON_DEMAND"
+#     cache_cluster_mode: true
+#     cache_node_type: "cache.r6g.large"
+#     cache_num_node_groups: 1
+#     cache_replicas: 1
+#     enable_karpenter: true
+#     xray_sampling_rate: 0.05
+#
+# Production:
+#   vars:
+#     nat_gateway_strategy: "one_per_az"
+#     kubernetes_version: "1.29"
+#     eks_public_access: false
+#     system_node_min: 3
+#     system_node_max: 6
+#     app_node_min: 5
+#     app_node_max: 50
+#     spot_node_min: 2
+#     spot_node_max: 20
+#     app_capacity_type: "ON_DEMAND"
+#     cache_cluster_mode: true
+#     cache_node_type: "cache.r6g.xlarge"
+#     cache_num_node_groups: 3
+#     cache_replicas: 2
+#     enable_karpenter: true
+#     xray_sampling_rate: 0.01
+#     log_retention_days: 90
+#     event_archive_retention: 90
+#     enable_secret_rotation: true
+
+# =============================================================================
+# REQUIRED VARIABLES
+# =============================================================================
+# eks_kms_key_arn: "arn:aws:kms:..."
+# eks_admin_role_arn: "arn:aws:iam::..."
+# ebs_csi_role_arn: "arn:aws:iam::..."
+# cognito_user_pool_id: "us-east-1_xxxxx"
+# cognito_client_id: "xxxxxxxx"
+# app_domain_name: "example.com"
+# route53_zone_id: "Z1234567890ABC"
+# dynamodb_kms_key_arn: "arn:aws:kms:..."
+# cache_kms_key_id: "arn:aws:kms:..."
+# secrets_kms_key_id: "arn:aws:kms:..."
+# alarm_email_addresses: ["ops@example.com"]

@@ -1,0 +1,984 @@
+---
+# =============================================================================
+# WEB APPLICATION STACK TEMPLATE
+# =============================================================================
+# Complete 3-tier web application infrastructure
+#
+# Architecture:
+#   - VPC with public/private/database subnets
+#   - ALB with WAF protection
+#   - ECS Fargate or EC2 Auto-scaling for compute
+#   - RDS Aurora or single instance for database
+#   - ElastiCache Redis for caching
+#   - CloudFront for CDN
+#   - Route53 for DNS
+#   - ACM for SSL/TLS certificates
+#   - CloudWatch for monitoring
+#   - Security groups and NACLs for network security
+#
+# Cost Estimates (Monthly):
+#   Development:  ~$150-300/month
+#   Staging:      ~$300-600/month
+#   Production:   ~$800-2,500/month (depending on traffic and redundancy)
+#
+# Deployment Time: 25-40 minutes
+#
+# Usage:
+#   atmos terraform plan web-application -s <tenant>-<account>-<environment>
+#   atmos terraform apply web-application -s <tenant>-<account>-<environment>
+# =============================================================================
+
+name: web-application
+description: "Complete 3-tier web application infrastructure stack"
+version: "1.0.0"
+
+# Import base configurations
+import:
+  - catalog/_base/defaults
+  - catalog/vpc/defaults
+  - catalog/securitygroup/defaults
+  - catalog/acm/defaults
+  - catalog/monitoring/defaults
+
+# =============================================================================
+# COMPONENT DEFINITIONS
+# =============================================================================
+
+components:
+  terraform:
+    # =========================================================================
+    # NETWORKING LAYER
+    # =========================================================================
+
+    web-application/vpc:
+      metadata:
+        component: vpc
+        type: real
+        inherits:
+          - vpc/defaults
+      vars:
+        name: "webapp"
+
+        # VPC CIDR configuration
+        # Development uses smaller CIDR, production uses larger
+        vpc_cidr: "${web_app_vpc_cidr | default('10.10.0.0/16')}"
+
+        # Availability zones for high availability
+        azs:
+          - "${region}a"
+          - "${region}b"
+          - "${region}c"
+
+        # Subnet configuration - 3-tier architecture
+        private_subnets:
+          - "10.10.1.0/24"   # Application tier AZ-a
+          - "10.10.2.0/24"   # Application tier AZ-b
+          - "10.10.3.0/24"   # Application tier AZ-c
+        public_subnets:
+          - "10.10.101.0/24" # ALB/NAT tier AZ-a
+          - "10.10.102.0/24" # ALB/NAT tier AZ-b
+          - "10.10.103.0/24" # ALB/NAT tier AZ-c
+        database_subnets:
+          - "10.10.201.0/24" # Database tier AZ-a
+          - "10.10.202.0/24" # Database tier AZ-b
+          - "10.10.203.0/24" # Database tier AZ-c
+
+        # NAT Gateway strategy
+        # single: cost-optimized for dev/staging
+        # one_per_az: high availability for production
+        enable_nat_gateway: true
+        nat_gateway_strategy: "${nat_gateway_strategy | default('single')}"
+
+        # VPC Flow Logs for security and troubleshooting
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+
+        # Security settings
+        default_sg_ingress_self_only: true
+        default_sg_egress_self_only: false
+
+      tags:
+        Layer: "networking"
+        Application: "web-application"
+
+    # =========================================================================
+    # SECURITY LAYER
+    # =========================================================================
+
+    web-application/securitygroups:
+      metadata:
+        component: securitygroup
+        type: real
+      depends_on:
+        - web-application/vpc
+      vars:
+        vpc_id: "${output.web-application/vpc.vpc_id}"
+
+        security_groups:
+          # ALB Security Group - allows inbound HTTP/HTTPS from anywhere
+          alb:
+            name: "${tenant}-${environment}-webapp-alb-sg"
+            description: "Security group for web application ALB"
+            ingress_rules:
+              - description: "HTTPS from CloudFront"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks:
+                  - "0.0.0.0/0"
+              - description: "HTTP redirect"
+                from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks:
+                  - "0.0.0.0/0"
+            egress_rules:
+              - description: "Allow all outbound"
+                from_port: 0
+                to_port: 0
+                protocol: "-1"
+                cidr_blocks:
+                  - "0.0.0.0/0"
+
+          # Application Security Group - allows traffic from ALB only
+          application:
+            name: "${tenant}-${environment}-webapp-app-sg"
+            description: "Security group for web application containers"
+            ingress_rules:
+              - description: "HTTP from ALB"
+                from_port: "${app_container_port | default(8080)}"
+                to_port: "${app_container_port | default(8080)}"
+                protocol: "tcp"
+                source_security_group_id: "alb"
+            egress_rules:
+              - description: "HTTPS to AWS services"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks:
+                  - "0.0.0.0/0"
+              - description: "Database access"
+                from_port: 5432
+                to_port: 5432
+                protocol: "tcp"
+                source_security_group_id: "database"
+              - description: "Redis cache access"
+                from_port: 6379
+                to_port: 6379
+                protocol: "tcp"
+                source_security_group_id: "cache"
+
+          # Database Security Group - allows traffic from application only
+          database:
+            name: "${tenant}-${environment}-webapp-db-sg"
+            description: "Security group for RDS database"
+            ingress_rules:
+              - description: "PostgreSQL from application"
+                from_port: 5432
+                to_port: 5432
+                protocol: "tcp"
+                source_security_group_id: "application"
+            egress_rules: []
+
+          # Cache Security Group - allows traffic from application only
+          cache:
+            name: "${tenant}-${environment}-webapp-cache-sg"
+            description: "Security group for ElastiCache"
+            ingress_rules:
+              - description: "Redis from application"
+                from_port: 6379
+                to_port: 6379
+                protocol: "tcp"
+                source_security_group_id: "application"
+            egress_rules: []
+
+      tags:
+        Layer: "security"
+        Application: "web-application"
+
+    # =========================================================================
+    # SSL/TLS CERTIFICATES
+    # =========================================================================
+
+    web-application/acm:
+      metadata:
+        component: acm
+        type: real
+        inherits:
+          - acm/defaults
+      vars:
+        dns_domains:
+          main:
+            domain_name: "${app_domain_name}"
+            subject_alternative_names:
+              - "*.${app_domain_name}"
+            validation_method: "DNS"
+        zone_id: "${route53_zone_id}"
+
+      tags:
+        Layer: "security"
+        Application: "web-application"
+
+    # =========================================================================
+    # LOAD BALANCER LAYER
+    # =========================================================================
+
+    web-application/alb:
+      metadata:
+        component: alb
+        type: real
+      depends_on:
+        - web-application/vpc
+        - web-application/securitygroups
+        - web-application/acm
+      vars:
+        name: "${tenant}-${environment}-webapp-alb"
+        internal: false
+        load_balancer_type: "application"
+
+        vpc_id: "${output.web-application/vpc.vpc_id}"
+        subnets: "${output.web-application/vpc.public_subnet_ids}"
+        security_groups:
+          - "${output.web-application/securitygroups.security_group_ids.alb}"
+
+        # Access logging
+        enable_access_logs: true
+        access_logs_bucket: "${tenant}-${environment}-alb-logs"
+        access_logs_prefix: "webapp"
+
+        # Idle timeout configuration
+        idle_timeout: 60
+
+        # HTTPS listener
+        listeners:
+          https:
+            port: 443
+            protocol: "HTTPS"
+            ssl_policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+            certificate_arn: "${output.web-application/acm.certificate_arns.main}"
+            default_action:
+              type: "forward"
+              target_group_arn: "${output.web-application/target-group.arn}"
+          http_redirect:
+            port: 80
+            protocol: "HTTP"
+            default_action:
+              type: "redirect"
+              redirect:
+                port: "443"
+                protocol: "HTTPS"
+                status_code: "HTTP_301"
+
+        # Target groups
+        target_groups:
+          app:
+            name: "${tenant}-${environment}-webapp-tg"
+            port: "${app_container_port | default(8080)}"
+            protocol: "HTTP"
+            target_type: "ip"  # For Fargate
+            health_check:
+              enabled: true
+              path: "${health_check_path | default('/health')}"
+              port: "traffic-port"
+              protocol: "HTTP"
+              healthy_threshold: 3
+              unhealthy_threshold: 3
+              timeout: 5
+              interval: 30
+              matcher: "200-299"
+            deregistration_delay: 30
+            stickiness:
+              enabled: false
+              type: "lb_cookie"
+              cookie_duration: 86400
+
+      tags:
+        Layer: "load-balancer"
+        Application: "web-application"
+
+    # =========================================================================
+    # WAF PROTECTION
+    # =========================================================================
+
+    web-application/waf:
+      metadata:
+        component: waf
+        type: real
+      depends_on:
+        - web-application/alb
+      vars:
+        name: "${tenant}-${environment}-webapp-waf"
+        scope: "REGIONAL"
+
+        # Associate with ALB
+        resource_arn: "${output.web-application/alb.arn}"
+
+        # WAF rules
+        managed_rule_groups:
+          - name: "AWSManagedRulesCommonRuleSet"
+            priority: 10
+            override_action: "none"
+            vendor_name: "AWS"
+          - name: "AWSManagedRulesKnownBadInputsRuleSet"
+            priority: 20
+            override_action: "none"
+            vendor_name: "AWS"
+          - name: "AWSManagedRulesSQLiRuleSet"
+            priority: 30
+            override_action: "none"
+            vendor_name: "AWS"
+          - name: "AWSManagedRulesLinuxRuleSet"
+            priority: 40
+            override_action: "none"
+            vendor_name: "AWS"
+
+        # Rate limiting
+        rate_based_rules:
+          - name: "RateLimitRule"
+            priority: 1
+            limit: "${waf_rate_limit | default(2000)}"
+            aggregate_key_type: "IP"
+            action: "block"
+
+        # Logging
+        enable_logging: true
+        log_destination_arn: "${waf_log_destination_arn}"
+
+        # CloudWatch metrics
+        cloudwatch_metrics_enabled: true
+        metric_name: "${tenant}-${environment}-webapp-waf"
+        sampled_requests_enabled: true
+
+      tags:
+        Layer: "security"
+        Application: "web-application"
+
+    # =========================================================================
+    # COMPUTE LAYER - ECS FARGATE
+    # =========================================================================
+
+    web-application/ecs-cluster:
+      metadata:
+        component: ecs
+        type: real
+      vars:
+        cluster_name: "${tenant}-${environment}-webapp"
+
+        # Fargate-only cluster (no EC2 instances to manage)
+        fargate_only: true
+        enable_container_insights: true
+
+        # Capacity providers
+        capacity_providers:
+          - "FARGATE"
+          - "FARGATE_SPOT"
+
+        default_capacity_provider_strategy:
+          - capacity_provider: "FARGATE"
+            weight: 1
+            base: 1
+          - capacity_provider: "FARGATE_SPOT"
+            weight: 4
+
+      tags:
+        Layer: "compute"
+        Application: "web-application"
+
+    web-application/ecs-service:
+      metadata:
+        component: ecs-service
+        type: real
+      depends_on:
+        - web-application/ecs-cluster
+        - web-application/alb
+        - web-application/securitygroups
+      vars:
+        name: "${tenant}-${environment}-webapp-service"
+        cluster_arn: "${output.web-application/ecs-cluster.cluster_arn}"
+
+        # Task definition
+        task_definition:
+          family: "${tenant}-${environment}-webapp"
+          cpu: "${task_cpu | default(256)}"
+          memory: "${task_memory | default(512)}"
+          network_mode: "awsvpc"
+          requires_compatibilities:
+            - "FARGATE"
+          execution_role_arn: "${ecs_execution_role_arn}"
+          task_role_arn: "${ecs_task_role_arn}"
+
+          container_definitions:
+            - name: "webapp"
+              image: "${app_container_image}"
+              essential: true
+              portMappings:
+                - containerPort: "${app_container_port | default(8080)}"
+                  protocol: "tcp"
+              environment:
+                - name: "ENVIRONMENT"
+                  value: "${environment}"
+                - name: "DATABASE_HOST"
+                  value: "${output.web-application/rds.endpoint}"
+                - name: "REDIS_HOST"
+                  value: "${output.web-application/elasticache.endpoint}"
+              secrets:
+                - name: "DATABASE_PASSWORD"
+                  valueFrom: "${database_password_secret_arn}"
+              logConfiguration:
+                logDriver: "awslogs"
+                options:
+                  awslogs-group: "/ecs/${tenant}-${environment}-webapp"
+                  awslogs-region: "${region}"
+                  awslogs-stream-prefix: "webapp"
+              healthCheck:
+                command:
+                  - "CMD-SHELL"
+                  - "curl -f http://localhost:${app_container_port | default(8080)}/health || exit 1"
+                interval: 30
+                timeout: 5
+                retries: 3
+                startPeriod: 60
+
+        # Service configuration
+        desired_count: "${desired_count | default(2)}"
+        deployment_minimum_healthy_percent: 50
+        deployment_maximum_percent: 200
+
+        # Network configuration
+        network_configuration:
+          subnets: "${output.web-application/vpc.private_subnet_ids}"
+          security_groups:
+            - "${output.web-application/securitygroups.security_group_ids.application}"
+          assign_public_ip: false
+
+        # Load balancer configuration
+        load_balancer:
+          target_group_arn: "${output.web-application/alb.target_group_arns.app}"
+          container_name: "webapp"
+          container_port: "${app_container_port | default(8080)}"
+
+        # Auto-scaling configuration
+        enable_autoscaling: true
+        autoscaling:
+          min_capacity: "${autoscaling_min | default(2)}"
+          max_capacity: "${autoscaling_max | default(10)}"
+          target_tracking_policies:
+            - name: "cpu"
+              target_value: 70
+              predefined_metric_type: "ECSServiceAverageCPUUtilization"
+              scale_in_cooldown: 300
+              scale_out_cooldown: 60
+            - name: "memory"
+              target_value: 80
+              predefined_metric_type: "ECSServiceAverageMemoryUtilization"
+              scale_in_cooldown: 300
+              scale_out_cooldown: 60
+
+        # Deployment circuit breaker
+        deployment_circuit_breaker:
+          enable: true
+          rollback: true
+
+      tags:
+        Layer: "compute"
+        Application: "web-application"
+
+    # =========================================================================
+    # DATABASE LAYER
+    # =========================================================================
+
+    web-application/rds:
+      metadata:
+        component: rds
+        type: real
+      depends_on:
+        - web-application/vpc
+        - web-application/securitygroups
+      vars:
+        identifier: "${tenant}-${environment}-webapp-db"
+
+        # Engine configuration
+        engine: "postgres"
+        engine_version: "${postgres_version | default('15.4')}"
+        family: "postgres15"
+
+        # Instance configuration
+        # dev: db.t3.micro, staging: db.t3.small, prod: db.r6g.large
+        instance_class: "${db_instance_class | default('db.t3.micro')}"
+        allocated_storage: "${db_allocated_storage | default(20)}"
+        max_allocated_storage: "${db_max_allocated_storage | default(100)}"
+        storage_type: "gp3"
+        storage_encrypted: true
+
+        # Database configuration
+        db_name: "${db_name | default('webapp')}"
+        username: "${db_username | default('webapp_admin')}"
+        port: 5432
+
+        # Network configuration
+        db_subnet_group_name: "${tenant}-${environment}-webapp-db-subnet"
+        subnet_ids: "${output.web-application/vpc.database_subnet_ids}"
+        vpc_security_group_ids:
+          - "${output.web-application/securitygroups.security_group_ids.database}"
+        publicly_accessible: false
+
+        # High availability
+        # dev/staging: false, prod: true
+        multi_az: "${db_multi_az | default(false)}"
+
+        # Backup configuration
+        backup_retention_period: "${db_backup_retention | default(7)}"
+        backup_window: "03:00-04:00"
+        maintenance_window: "sun:04:00-sun:05:00"
+        copy_tags_to_snapshot: true
+        delete_automated_backups: false
+
+        # Performance and monitoring
+        performance_insights_enabled: true
+        performance_insights_retention_period: 7
+        monitoring_interval: 60
+        enabled_cloudwatch_logs_exports:
+          - "postgresql"
+          - "upgrade"
+
+        # Deletion protection
+        # Enable for production
+        deletion_protection: "${db_deletion_protection | default(false)}"
+        skip_final_snapshot: "${db_skip_final_snapshot | default(true)}"
+        final_snapshot_identifier: "${tenant}-${environment}-webapp-db-final"
+
+        # Parameter group
+        parameters:
+          - name: "log_statement"
+            value: "all"
+          - name: "log_min_duration_statement"
+            value: "1000"
+          - name: "shared_preload_libraries"
+            value: "pg_stat_statements"
+
+      tags:
+        Layer: "database"
+        Application: "web-application"
+
+    # =========================================================================
+    # CACHING LAYER
+    # =========================================================================
+
+    web-application/elasticache:
+      metadata:
+        component: elasticache
+        type: real
+      depends_on:
+        - web-application/vpc
+        - web-application/securitygroups
+      vars:
+        cluster_id: "${tenant}-${environment}-webapp-cache"
+
+        # Engine configuration
+        engine: "redis"
+        engine_version: "${redis_version | default('7.0')}"
+
+        # Node configuration
+        # dev: cache.t3.micro, staging: cache.t3.small, prod: cache.r6g.large
+        node_type: "${cache_node_type | default('cache.t3.micro')}"
+        num_cache_nodes: "${cache_num_nodes | default(1)}"
+
+        # Network configuration
+        subnet_group_name: "${tenant}-${environment}-webapp-cache-subnet"
+        subnet_ids: "${output.web-application/vpc.private_subnet_ids}"
+        security_group_ids:
+          - "${output.web-application/securitygroups.security_group_ids.cache}"
+
+        # Port configuration
+        port: 6379
+
+        # Cluster mode (for production)
+        cluster_mode_enabled: "${cache_cluster_mode | default(false)}"
+
+        # Security
+        at_rest_encryption_enabled: true
+        transit_encryption_enabled: true
+        auth_token_enabled: true
+
+        # Maintenance
+        maintenance_window: "sun:05:00-sun:06:00"
+        snapshot_retention_limit: "${cache_snapshot_retention | default(1)}"
+        snapshot_window: "04:00-05:00"
+
+        # Auto minor version upgrade
+        auto_minor_version_upgrade: true
+
+        # Parameter group
+        parameter_group_family: "redis7"
+        parameters:
+          - name: "maxmemory-policy"
+            value: "volatile-lru"
+
+      tags:
+        Layer: "caching"
+        Application: "web-application"
+
+    # =========================================================================
+    # CDN LAYER
+    # =========================================================================
+
+    web-application/cloudfront:
+      metadata:
+        component: cloudfront
+        type: real
+      depends_on:
+        - web-application/alb
+        - web-application/acm
+      vars:
+        distribution_name: "${tenant}-${environment}-webapp-cdn"
+
+        # Origin configuration
+        origins:
+          alb:
+            domain_name: "${output.web-application/alb.dns_name}"
+            origin_id: "alb-origin"
+            custom_origin_config:
+              http_port: 80
+              https_port: 443
+              origin_protocol_policy: "https-only"
+              origin_ssl_protocols:
+                - "TLSv1.2"
+              origin_read_timeout: 60
+              origin_keepalive_timeout: 5
+
+        # Default cache behavior
+        default_cache_behavior:
+          target_origin_id: "alb-origin"
+          viewer_protocol_policy: "redirect-to-https"
+          allowed_methods:
+            - "GET"
+            - "HEAD"
+            - "OPTIONS"
+            - "PUT"
+            - "POST"
+            - "PATCH"
+            - "DELETE"
+          cached_methods:
+            - "GET"
+            - "HEAD"
+          compress: true
+          # Use managed cache policy for dynamic content
+          cache_policy_id: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # CachingDisabled
+          origin_request_policy_id: "216adef6-5c7f-47e4-b989-5492eafa07d3"  # AllViewer
+          response_headers_policy_id: "67f7725c-6f97-4210-82d7-5512b31e9d03"  # SecurityHeadersPolicy
+
+        # Additional cache behaviors for static assets
+        ordered_cache_behaviors:
+          - path_pattern: "/static/*"
+            target_origin_id: "alb-origin"
+            viewer_protocol_policy: "redirect-to-https"
+            allowed_methods:
+              - "GET"
+              - "HEAD"
+            cached_methods:
+              - "GET"
+              - "HEAD"
+            compress: true
+            cache_policy_id: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # CachingOptimized
+            ttl:
+              default: 86400
+              max: 31536000
+              min: 0
+          - path_pattern: "/api/*"
+            target_origin_id: "alb-origin"
+            viewer_protocol_policy: "redirect-to-https"
+            allowed_methods:
+              - "GET"
+              - "HEAD"
+              - "OPTIONS"
+              - "PUT"
+              - "POST"
+              - "PATCH"
+              - "DELETE"
+            cached_methods:
+              - "GET"
+              - "HEAD"
+            compress: true
+            cache_policy_id: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # CachingDisabled
+
+        # SSL/TLS configuration
+        viewer_certificate:
+          acm_certificate_arn: "${output.web-application/acm.certificate_arns.main}"
+          ssl_support_method: "sni-only"
+          minimum_protocol_version: "TLSv1.2_2021"
+
+        # Aliases (custom domains)
+        aliases:
+          - "${app_domain_name}"
+          - "www.${app_domain_name}"
+
+        # Geographic restrictions (optional)
+        geo_restriction:
+          restriction_type: "none"
+
+        # Logging
+        logging:
+          enabled: true
+          bucket: "${tenant}-${environment}-cloudfront-logs.s3.amazonaws.com"
+          prefix: "webapp/"
+          include_cookies: false
+
+        # Price class
+        price_class: "${cloudfront_price_class | default('PriceClass_100')}"
+
+        # Enable HTTP/2 and HTTP/3
+        http_version: "http2and3"
+
+        # IPv6
+        is_ipv6_enabled: true
+
+        # WAF integration (CloudFront requires scope: CLOUDFRONT in us-east-1)
+        web_acl_id: "${cloudfront_waf_acl_id}"
+
+      tags:
+        Layer: "cdn"
+        Application: "web-application"
+
+    # =========================================================================
+    # DNS LAYER
+    # =========================================================================
+
+    web-application/dns:
+      metadata:
+        component: dns
+        type: real
+      depends_on:
+        - web-application/cloudfront
+      vars:
+        zone_id: "${route53_zone_id}"
+
+        records:
+          # Root domain pointing to CloudFront
+          root:
+            name: "${app_domain_name}"
+            type: "A"
+            alias:
+              name: "${output.web-application/cloudfront.domain_name}"
+              zone_id: "${output.web-application/cloudfront.hosted_zone_id}"
+              evaluate_target_health: false
+
+          # WWW subdomain pointing to CloudFront
+          www:
+            name: "www.${app_domain_name}"
+            type: "A"
+            alias:
+              name: "${output.web-application/cloudfront.domain_name}"
+              zone_id: "${output.web-application/cloudfront.hosted_zone_id}"
+              evaluate_target_health: false
+
+      tags:
+        Layer: "dns"
+        Application: "web-application"
+
+    # =========================================================================
+    # MONITORING LAYER
+    # =========================================================================
+
+    web-application/monitoring:
+      metadata:
+        component: monitoring
+        type: real
+        inherits:
+          - monitoring/defaults
+      depends_on:
+        - web-application/ecs-service
+        - web-application/alb
+        - web-application/rds
+        - web-application/elasticache
+      vars:
+        dashboard_name: "${tenant}-${environment}-webapp-dashboard"
+
+        # Enable monitoring features
+        enable_resource_monitoring: true
+        enable_cost_monitoring: "${enable_cost_monitoring | default(false)}"
+
+        # ALB alarms
+        alb_alarms:
+          - name: "alb-5xx-errors"
+            metric_name: "HTTPCode_ELB_5XX_Count"
+            namespace: "AWS/ApplicationELB"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 10
+            evaluation_periods: 2
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              LoadBalancer: "${output.web-application/alb.arn_suffix}"
+          - name: "alb-4xx-errors"
+            metric_name: "HTTPCode_ELB_4XX_Count"
+            namespace: "AWS/ApplicationELB"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 100
+            evaluation_periods: 2
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              LoadBalancer: "${output.web-application/alb.arn_suffix}"
+          - name: "alb-target-response-time"
+            metric_name: "TargetResponseTime"
+            namespace: "AWS/ApplicationELB"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 2
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              LoadBalancer: "${output.web-application/alb.arn_suffix}"
+
+        # ECS alarms
+        ecs_alarms:
+          - name: "ecs-cpu-high"
+            metric_name: "CPUUtilization"
+            namespace: "AWS/ECS"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 80
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              ClusterName: "${output.web-application/ecs-cluster.cluster_name}"
+              ServiceName: "${output.web-application/ecs-service.service_name}"
+          - name: "ecs-memory-high"
+            metric_name: "MemoryUtilization"
+            namespace: "AWS/ECS"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 80
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              ClusterName: "${output.web-application/ecs-cluster.cluster_name}"
+              ServiceName: "${output.web-application/ecs-service.service_name}"
+
+        # RDS alarms
+        rds_alarms:
+          - name: "rds-cpu-high"
+            metric_name: "CPUUtilization"
+            namespace: "AWS/RDS"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 80
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              DBInstanceIdentifier: "${output.web-application/rds.identifier}"
+          - name: "rds-connections-high"
+            metric_name: "DatabaseConnections"
+            namespace: "AWS/RDS"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 100
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              DBInstanceIdentifier: "${output.web-application/rds.identifier}"
+          - name: "rds-free-storage-low"
+            metric_name: "FreeStorageSpace"
+            namespace: "AWS/RDS"
+            comparison_operator: "LessThanThreshold"
+            threshold: 5368709120  # 5GB in bytes
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              DBInstanceIdentifier: "${output.web-application/rds.identifier}"
+
+        # ElastiCache alarms
+        elasticache_alarms:
+          - name: "cache-cpu-high"
+            metric_name: "CPUUtilization"
+            namespace: "AWS/ElastiCache"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 75
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              CacheClusterId: "${output.web-application/elasticache.cluster_id}"
+          - name: "cache-memory-high"
+            metric_name: "DatabaseMemoryUsagePercentage"
+            namespace: "AWS/ElastiCache"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 80
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+            dimensions:
+              CacheClusterId: "${output.web-application/elasticache.cluster_id}"
+
+        # SNS for notifications
+        alarm_notifications_enabled: true
+        alarm_email_addresses: "${alarm_email_addresses | default([])}"
+        sns_topic_name: "${tenant}-${environment}-webapp-alarms"
+
+      tags:
+        Layer: "monitoring"
+        Application: "web-application"
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+
+# Development environment defaults
+# Import this file and override vars for development
+---
+# Development overrides - use with:
+# import: [catalog/templates/web-application, catalog/templates/web-application-dev]
+# Or override in your stack file:
+#
+# vars:
+#   nat_gateway_strategy: "single"
+#   db_instance_class: "db.t3.micro"
+#   db_multi_az: false
+#   cache_node_type: "cache.t3.micro"
+#   desired_count: 1
+#   autoscaling_min: 1
+#   autoscaling_max: 3
+
+# Staging environment defaults
+# vars:
+#   nat_gateway_strategy: "single"
+#   db_instance_class: "db.t3.small"
+#   db_multi_az: false
+#   cache_node_type: "cache.t3.small"
+#   desired_count: 2
+#   autoscaling_min: 2
+#   autoscaling_max: 5
+
+# Production environment defaults
+# vars:
+#   nat_gateway_strategy: "one_per_az"
+#   db_instance_class: "db.r6g.large"
+#   db_multi_az: true
+#   db_deletion_protection: true
+#   db_skip_final_snapshot: false
+#   db_backup_retention: 30
+#   cache_node_type: "cache.r6g.large"
+#   cache_num_nodes: 2
+#   cache_cluster_mode: true
+#   desired_count: 3
+#   autoscaling_min: 3
+#   autoscaling_max: 20
+#   cloudfront_price_class: "PriceClass_All"
+
+# =============================================================================
+# REQUIRED VARIABLES
+# =============================================================================
+# These must be provided when using this template:
+#
+# app_domain_name: "example.com"
+# route53_zone_id: "Z1234567890ABC"
+# app_container_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/webapp:latest"
+# database_password_secret_arn: "arn:aws:secretsmanager:..."
+# ecs_execution_role_arn: "arn:aws:iam::..."
+# ecs_task_role_arn: "arn:aws:iam::..."
+#
+# Optional:
+# alarm_email_addresses: ["ops@example.com"]
+# waf_log_destination_arn: "arn:aws:s3:::..."
+# cloudfront_waf_acl_id: "..."

@@ -4,10 +4,15 @@ Production-ready Terraform modules organized by category.
 
 ## Categories
 
+- **cicd/** - CodePipeline, CodeBuild, ECR, CodeDeploy
 - **compute/** - ECS Fargate, Lambda patterns, Auto-scaling
 - **data-layer/** - Aurora RDS, DynamoDB, ElastiCache, S3
+- **data-platform/** - Glue, Athena, EMR, data processing
+- **integration/** - SQS, SNS, EventBridge, Step Functions, API Gateway
 - **networking/** - VPC with advanced features
+- **observability/** - CloudWatch, X-Ray, monitoring
 - **security/** - WAF, KMS, Secrets Manager
+- **storage/** - EFS, FSx Lustre, Backup Vault, S3 Replication
 
 ## Usage
 
