@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  devops:
+    build:
+      context: .
+      dockerfile: Dockerfile.devops
+      args:
+        USERNAME: devops
+        USER_UID: 1000
+        USER_GID: 1000
+    image: tf-atmos-devops:latest
+    container_name: tf-atmos-devops
+    hostname: devops
+    volumes:
+      # Mount project directory
+      - .:/workspace:cached
+
+      # Mount AWS credentials (read-only)
+      - ~/.aws:/home/devops/.aws:ro
+
+      # Mount SSH keys (read-only)
+      - ~/.ssh:/home/devops/.ssh:ro
+
+      # Persist bash history
+      - devops-bash-history:/home/devops/.bash_history
+
+      # Persist Terraform plugin cache
+      - terraform-plugin-cache:/home/devops/.terraform.d/plugin-cache
+
+    working_dir: /workspace
+
+    environment:
+      # AWS Configuration
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_PROFILE=${AWS_PROFILE:-default}
+
+      # Terraform Configuration
+      - TF_PLUGIN_CACHE_DIR=/home/devops/.terraform.d/plugin-cache
+      - TF_LOG=${TF_LOG:-}
+
+      # Atmos Configuration
+      - ATMOS_CLI_CONFIG_PATH=/workspace/atmos.yaml
+
+      # Development
+      - TENANT=${TENANT:-fnx}
+      - ACCOUNT=${ACCOUNT:-dev}
+      - ENVIRONMENT=${ENVIRONMENT:-testenv-01}
+
+    networks:
+      - devops-network
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "terraform", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Optional: LocalStack for local AWS testing
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    hostname: localstack
+    ports:
+      - "4566:4566"  # LocalStack edge port
+      - "4571:4571"  # LocalStack edge port (legacy)
+    environment:
+      - SERVICES=s3,dynamodb,ec2,iam,lambda,cloudformation,sts
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - localstack-data:/tmp/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - devops-network
+    profiles:
+      - local-testing
+
+volumes:
+  devops-bash-history:
+    driver: local
+  terraform-plugin-cache:
+    driver: local
+  localstack-data:
+    driver: local
+
+networks:
+  devops-network:
+    driver: bridge

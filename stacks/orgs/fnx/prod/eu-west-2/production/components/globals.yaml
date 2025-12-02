@@ -1,0 +1,125 @@
+---
+# =============================================================================
+# Global Component Configurations for Production Environment
+# =============================================================================
+# PRODUCTION ENVIRONMENT - ALL CHANGES REQUIRE APPROVAL
+# This file defines environment-wide settings with security-first approach
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-2/_defaults
+  - mixins/production
+
+  # Import catalog defaults for all components
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+  - catalog/infrastructure/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/external-secrets/defaults
+  - catalog/ec2/defaults
+  - catalog/eks/defaults
+  - catalog/iam/defaults
+  - catalog/acm/defaults
+  - catalog/services/defaults
+  - catalog/apigateway/defaults
+  - catalog/backend/defaults
+  - catalog/monitoring/defaults
+
+metadata:
+  description: "Production Environment - Business Critical Infrastructure"
+  owner: "Platform Team"
+  version: "1.0.0"
+  stage: "production"
+  region: "eu-west-2"
+
+  # Compliance requirements
+  compliance:
+    hipaa: false
+    pci: true
+    sox: true
+    gdpr: true
+
+  # Monitoring contacts - 24/7 coverage
+  monitoring:
+    critical_alerts:
+      - "prod-critical@example.com"
+      - "oncall@example.com"
+    warning_alerts:
+      - "prod-alerts@example.com"
+    pagerduty_service_key: "${ssm:/fnx/production/pagerduty/service_key}"
+
+  # Change management - strict controls
+  change_management:
+    approval_required: true
+    change_window: "weekday-maintenance"
+    emergency_contact: "prod-emergency@example.com"
+    rollback_required: true
+
+  # SLA requirements
+  sla:
+    availability: "99.9%"
+    rpo: "1 hour"
+    rto: "4 hours"
+
+vars:
+  # Core environment identifiers
+  environment: production
+  tenant_name: production
+
+  # Domain configuration
+  domain_name: "example.com"
+  hosted_zone_id: "Z1234567890PROD"
+
+  # EKS Configuration - production hardened
+  eks_kubernetes_version: "1.28"
+  eks_public_access: false
+
+  # Database configuration
+  rds_engine: "postgres"
+  rds_engine_version: "14"
+
+  # Secrets configuration
+  use_external_secrets: true
+  secrets_manager_path_prefix: "production/fnx/certificates"
+
+  # Feature flags - production settings
+  enable_container_insights: true
+  enable_vpc_flow_logs: true
+  enable_enhanced_monitoring: true
+  enable_guard_duty: true
+  enable_security_hub: true
+
+  # Security settings - maximum security
+  security:
+    vpc_flow_logs: true
+    encryption_at_rest: true
+    encryption_in_transit: true
+    ssl_enforcement: true
+    kms_key_rotation: true
+    imdsv2_required: true
+
+  # Production-specific settings
+  enable_debug_logging: false
+  retention_days: 90
+  backup_retention_days: 30
+
+  # High availability settings
+  multi_az: true
+  cross_zone_load_balancing: true
+  min_availability_zones: 3
+
+# Environment tagging strategy - comprehensive for production
+tags:
+  Team: "Platform"
+  CostCenter: "Production"
+  Project: "Infrastructure"
+  Environment: "production"
+  ManagedBy: "Terraform"
+  Tenant: "fnx"
+  Application: "Production"
+  Provisioner: "Atmos"
+  DataClassification: "confidential"
+  Compliance: "pci-sox-gdpr"
+  CriticalityLevel: "high"
+  SLA: "99.9"
+  BackupRequired: "true"

@@ -1,0 +1,477 @@
+name: Terraform CI - Comprehensive Validation
+
+on:
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - 'components/**'
+      - 'stacks/**'
+      - 'workflows/**'
+      - '.github/workflows/**'
+  push:
+    branches: [develop, 'feature/**']
+    paths:
+      - 'components/**'
+      - 'stacks/**'
+      - 'workflows/**'
+
+env:
+  ATMOS_VERSION: "1.44.0"
+  TERRAFORM_VERSION: "1.5.7"
+  AWS_DEFAULT_REGION: us-east-1
+  PYTHON_VERSION: "3.11"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  id-token: write
+
+jobs:
+  # Job 1: Code Quality and Formatting
+  code-quality:
+    name: Code Quality & Formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: |
+          terraform fmt -check -recursive ./components/terraform/ || {
+            echo "::error::Terraform formatting issues found. Run 'terraform fmt -recursive' to fix."
+            exit 1
+          }
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          pip install black flake8 isort bandit safety mypy
+          pip install -r requirements.txt || true
+
+      - name: Python code formatting check
+        if: hashFiles('gaia/**/*.py') != ''
+        run: |
+          black --check --diff gaia/ || echo "::warning::Python formatting issues found"
+          isort --check-only --diff gaia/ || echo "::warning::Import sorting issues found"
+
+      - name: Python linting
+        if: hashFiles('gaia/**/*.py') != ''
+        run: |
+          flake8 gaia/ --max-line-length=120 --extend-ignore=E203,W503 || echo "::warning::Linting issues found"
+
+  # Job 2: Security Scanning
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: code-quality
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Checkov security scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: ./components/terraform/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          quiet: true
+          soft_fail: true
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+      - name: Run tfsec security scanner
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ./components/terraform/
+          format: sarif
+          soft_fail: true
+
+      - name: Setup Python for security checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Python security scan with Bandit
+        if: hashFiles('gaia/**/*.py') != ''
+        run: |
+          pip install bandit
+          bandit -r gaia/ -f json -o bandit-report.json || true
+          bandit -r gaia/ || echo "::warning::Security issues found in Python code"
+
+      - name: Python dependency vulnerability check
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          pip install safety
+          safety check --json --output safety-report.json || echo "::warning::Vulnerable dependencies found"
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results
+          path: |
+            trivy-results.sarif
+            checkov-results.sarif
+            bandit-report.json
+            safety-report.json
+          retention-days: 30
+
+  # Job 3: Terraform Validation
+  terraform-validate:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: code-quality
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Cache Terraform modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            **/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf', '**/versions.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      - name: Atmos Lint
+        run: |
+          atmos workflow lint -f lint.yaml fix=false
+
+      - name: Atmos Validate All Components
+        run: |
+          atmos workflow validate -f validate.yaml tenant=fnx account=dev environment=testenv-01
+
+      - name: Validate individual components
+        run: |
+          for component in vpc securitygroup iam; do
+            echo "Validating component: $component"
+            atmos terraform validate $component -s fnx-dev-testenv-01 || echo "::warning::Validation failed for $component"
+          done
+
+  # Job 4: Infrastructure Planning
+  infrastructure-plan:
+    name: Infrastructure Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [terraform-validate, security-scan]
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        environment: [dev]
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Generate Terraform Plan
+        id: plan
+        run: |
+          mkdir -p plans
+          atmos workflow plan-environment -f plan-environment.yaml \
+            tenant=fnx \
+            account=dev \
+            environment=testenv-01 \
+            output_dir=./plans || echo "::warning::Some components failed to plan"
+
+      - name: Upload plan artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terraform-plans-${{ matrix.environment }}
+          path: plans/
+          retention-days: 7
+
+      - name: Comment PR with Plan Summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planDir = './plans';
+
+            let comment = `## Terraform Plan Results for ${{ matrix.environment }}
+
+            **Status**: Plan completed
+            **Environment**: ${{ matrix.environment }}
+            **Terraform Version**: ${{ env.TERRAFORM_VERSION }}
+            **Atmos Version**: ${{ env.ATMOS_VERSION }}
+
+            ### Summary
+            - Format Check: ${{ needs.code-quality.result }}
+            - Security Scan: ${{ needs.security-scan.result }}
+            - Validation: ${{ needs.terraform-validate.result }}
+            - Plan Generation: ${{ steps.plan.outcome }}
+
+            <details>
+            <summary>View Plan Details</summary>
+
+            Plan artifacts are available for download in the workflow run.
+
+            </details>
+
+            ### Next Steps
+            - Review the plan output carefully
+            - Ensure all security checks passed
+            - Merge to trigger deployment to dev environment
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  # Job 5: Cost Estimation
+  cost-estimation:
+    name: Cost Estimation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: infrastructure-plan
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate cost estimate
+        run: |
+          # Cost estimation for key components
+          for component in vpc eks rds; do
+            if [ -d "./components/terraform/$component" ]; then
+              echo "Estimating costs for $component..."
+              infracost breakdown --path=./components/terraform/$component \
+                --format=table \
+                --out-file=cost-$component.txt || echo "Cost estimation not available for $component"
+            fi
+          done
+
+      - name: Comment PR with cost estimate
+        if: github.event_name == 'pull_request' && hashFiles('cost-*.txt') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const glob = require('glob');
+
+            const costFiles = glob.sync('cost-*.txt');
+            let comment = '## Infrastructure Cost Estimation\n\n';
+
+            costFiles.forEach(file => {
+              const content = fs.readFileSync(file, 'utf8');
+              const component = file.replace('cost-', '').replace('.txt', '');
+              comment += `### Component: ${component}\n\`\`\`\n${content}\n\`\`\`\n\n`;
+            });
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  # Job 6: Dependency Scanning
+  dependency-scan:
+    name: Dependency Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: code-quality
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan Terraform dependencies
+        run: |
+          echo "Scanning Terraform module dependencies..."
+          find ./components/terraform -name "*.tf" -exec grep -H "source.*=.*\"" {} \; > terraform-dependencies.txt || true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Check Python dependencies
+        if: hashFiles('requirements.txt') != ''
+        run: |
+          pip install pip-audit
+          pip-audit --desc || echo "::warning::Vulnerable Python dependencies detected"
+
+      - name: Upload dependency scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-scan
+          path: |
+            terraform-dependencies.txt
+          retention-days: 30
+
+  # Job 7: SAST (Static Application Security Testing)
+  sast-scan:
+    name: SAST Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: code-quality
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # Job 8: Final CI Status
+  ci-status:
+    name: CI Status Check
+    runs-on: ubuntu-latest
+    needs: [code-quality, security-scan, terraform-validate, infrastructure-plan, dependency-scan]
+    if: always()
+    steps:
+      - name: Check all job statuses
+        run: |
+          echo "Code Quality: ${{ needs.code-quality.result }}"
+          echo "Security Scan: ${{ needs.security-scan.result }}"
+          echo "Terraform Validate: ${{ needs.terraform-validate.result }}"
+          echo "Infrastructure Plan: ${{ needs.infrastructure-plan.result }}"
+          echo "Dependency Scan: ${{ needs.dependency-scan.result }}"
+
+          if [[ "${{ needs.code-quality.result }}" == "failure" ]] || \
+             [[ "${{ needs.terraform-validate.result }}" == "failure" ]]; then
+            echo "::error::Critical CI checks failed"
+            exit 1
+          fi
+
+          echo "CI checks completed successfully!"
+
+      - name: Comment PR with CI summary
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = {
+              code_quality: '${{ needs.code-quality.result }}',
+              security_scan: '${{ needs.security-scan.result }}',
+              terraform_validate: '${{ needs.terraform-validate.result }}',
+              infrastructure_plan: '${{ needs.infrastructure-plan.result }}',
+              dependency_scan: '${{ needs.dependency-scan.result }}'
+            };
+
+            const emoji = (result) => {
+              switch(result) {
+                case 'success': return '✅';
+                case 'failure': return '❌';
+                case 'skipped': return '⏭️';
+                default: return '⚠️';
+              }
+            };
+
+            const comment = `## CI Pipeline Summary
+
+            | Check | Status |
+            |-------|--------|
+            | Code Quality | ${emoji(status.code_quality)} ${status.code_quality} |
+            | Security Scan | ${emoji(status.security_scan)} ${status.security_scan} |
+            | Terraform Validation | ${emoji(status.terraform_validate)} ${status.terraform_validate} |
+            | Infrastructure Plan | ${emoji(status.infrastructure_plan)} ${status.infrastructure_plan} |
+            | Dependency Scan | ${emoji(status.dependency_scan)} ${status.dependency_scan} |
+
+            **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

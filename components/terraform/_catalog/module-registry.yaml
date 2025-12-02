@@ -1,0 +1,2629 @@
+# Alexandria Library - Module Registry
+# Version: 1.0.0
+# Last Updated: 2025-12-02
+#
+# This file serves as the master catalog for all Alexandria Library modules.
+# It provides searchable metadata, versioning, and lifecycle information.
+
+version: "1.0.0"
+registry:
+  name: "Alexandria Library"
+  description: "Enterprise Terraform Module Marketplace"
+  url: "https://github.com/yourorg/tf-atmos"
+  maintainer: "Platform Engineering Team"
+  contact: "platform-team@example.com"
+
+# Module Registry Schema
+# Each module entry follows this structure
+modules:
+
+  #############################################################################
+  # FOUNDATIONS LAYER
+  #############################################################################
+
+  # --- Networking ---
+
+  - id: "vpc-basic"
+    name: "Basic VPC"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "foundations/networking"
+    subcategory: "vpc"
+    path: "_library/foundations/networking/vpc-basic"
+
+    description: "Simple VPC with 1-2 availability zones and basic routing"
+    long_description: |
+      A lightweight VPC module for development and testing environments.
+      Creates a VPC with basic routing, internet gateway, and simple subnet structure.
+      Ideal for non-production workloads and proof-of-concept deployments.
+
+    tags:
+      - vpc
+      - networking
+      - basic
+      - dev
+      - single-az
+
+    complexity: "beginner"
+    setup_time_minutes: 5
+    variable_count: 10
+
+    cost:
+      estimated_monthly_usd: 20
+      cost_category: "low"
+      cost_factors:
+        - "Single NAT Gateway"
+        - "Data transfer"
+      cost_breakdown:
+        nat_gateway: 16
+        data_transfer: 4
+
+    features:
+      - "1-2 Availability Zones"
+      - "Public and private subnets"
+      - "Internet Gateway"
+      - "Single NAT Gateway"
+      - "Basic route tables"
+      - "DNS support"
+
+    use_cases:
+      - "Development environments"
+      - "Testing and staging"
+      - "Proof of concept"
+      - "Training and demos"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+      backup: "sre-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 48
+      oncall: "platform-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "ec2-basic"
+      - "rds-basic"
+      - "lambda-basic"
+
+    incompatible_with: []
+
+    replaces: []
+    replaced_by: null
+
+    metrics:
+      downloads: 450
+      rating: 4.5
+      rating_count: 32
+      deployments: 180
+      active_deployments: 145
+      issues_open: 2
+      issues_closed: 18
+      last_updated: "2025-11-15"
+      first_published: "2025-06-01"
+
+    lifecycle:
+      created: "2025-06-01"
+      stabilized: "2025-08-01"
+      deprecated: null
+      deprecation_reason: null
+      removed: null
+      replacement: null
+      migration_guide: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      architecture_diagram: "./docs/architecture.png"
+      migration_guides: []
+      examples:
+        - path: "./examples/complete"
+          description: "Complete VPC with all features"
+          complexity: "beginner"
+        - path: "./examples/minimal"
+          description: "Minimal viable VPC"
+          complexity: "beginner"
+
+    testing:
+      unit_tests: 8
+      integration_tests: 3
+      coverage_percent: 82
+      last_test_run: "2025-12-01T10:00:00Z"
+      test_status: "passing"
+      test_duration_seconds: 180
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      last_scan: "2025-12-01"
+      vulnerabilities:
+        critical: 0
+        high: 0
+        medium: 0
+        low: 0
+      compliance:
+        - "CIS AWS Foundations"
+
+    performance:
+      deployment_time_seconds: 300
+      resource_count: 15
+      state_size_kb: 45
+
+  # --- VPC Standard (Currently deployed as 'vpc') ---
+
+  - id: "vpc-standard"
+    name: "Standard VPC"
+    version: "2.1.0"
+    maturity: "mature"
+    category: "foundations/networking"
+    subcategory: "vpc"
+    path: "vpc"  # Legacy path for backward compatibility
+    alternate_paths:
+      - "_library/foundations/networking/vpc-standard"
+
+    description: "Production-ready VPC with 2-3 AZs, NAT gateways, and VPC endpoints"
+    long_description: |
+      A comprehensive VPC module that creates production-ready network infrastructure.
+      Includes multiple availability zones, NAT gateways per AZ, VPC endpoints,
+      complete subnet management (public, private, database), and advanced networking features.
+      This is the recommended module for production workloads.
+
+    tags:
+      - vpc
+      - networking
+      - production
+      - multi-az
+      - ha
+      - endpoints
+      - ipv6
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 35
+
+    cost:
+      estimated_monthly_usd: 150
+      cost_category: "medium"
+      cost_factors:
+        - "NAT Gateway per AZ (3x)"
+        - "VPC Endpoints (5-10)"
+        - "Data transfer"
+        - "Flow Logs storage"
+      cost_breakdown:
+        nat_gateways: 97
+        vpc_endpoints: 36
+        flow_logs: 10
+        data_transfer: 7
+
+    features:
+      - "2-3 Availability Zones"
+      - "Public, private, and database subnets"
+      - "NAT Gateway per AZ (high availability)"
+      - "Internet Gateway"
+      - "VPC Endpoints (S3, DynamoDB, ECR, etc.)"
+      - "IPv6 support (optional)"
+      - "VPC Flow Logs"
+      - "DNS support and resolution"
+      - "Network ACLs"
+      - "Automatic subnet CIDR calculation"
+
+    use_cases:
+      - "Production applications"
+      - "Multi-tier architectures"
+      - "Microservices platforms"
+      - "High availability systems"
+      - "Compliance-required workloads"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+      backup: "sre-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+      oncall: "platform-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "eks-standard"
+      - "rds-postgres"
+      - "rds-mysql"
+      - "ecs-fargate"
+      - "ec2-autoscaling"
+      - "lambda-advanced"
+
+    metrics:
+      downloads: 1250
+      rating: 4.8
+      rating_count: 156
+      deployments: 450
+      active_deployments: 428
+      issues_open: 3
+      issues_closed: 87
+      last_updated: "2025-11-30"
+      first_published: "2024-02-15"
+
+    lifecycle:
+      created: "2024-02-15"
+      stabilized: "2024-06-01"
+      matured: "2025-01-15"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      architecture_diagram: "./docs/architecture.png"
+      examples:
+        - path: "./examples/complete"
+          description: "Full-featured VPC with all options"
+          complexity: "intermediate"
+        - path: "./examples/basic"
+          description: "Standard VPC with sensible defaults"
+          complexity: "intermediate"
+        - path: "./examples/multi-region"
+          description: "Multi-region VPC with peering"
+          complexity: "advanced"
+
+    testing:
+      unit_tests: 25
+      integration_tests: 12
+      coverage_percent: 89
+      last_test_run: "2025-12-02T08:30:00Z"
+      test_status: "passing"
+      test_duration_seconds: 480
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      last_scan: "2025-12-02"
+      vulnerabilities:
+        critical: 0
+        high: 0
+        medium: 0
+        low: 0
+      compliance:
+        - "CIS AWS Foundations"
+        - "HIPAA"
+        - "PCI DSS"
+
+    performance:
+      deployment_time_seconds: 900
+      resource_count: 85
+      state_size_kb: 320
+
+  # --- Security Groups ---
+
+  - id: "securitygroup"
+    name: "Security Group"
+    version: "1.5.0"
+    maturity: "stable"
+    category: "foundations/security"
+    subcategory: "network-security"
+    path: "securitygroup"
+    alternate_paths:
+      - "_library/foundations/security/securitygroup"
+
+    description: "Security group management with comprehensive rule validation"
+    long_description: |
+      A robust security group module that creates and manages security groups
+      with extensive validation rules. Supports ingress/egress rules, rule descriptions,
+      CIDR validation, and integration with other security groups. Includes built-in
+      best practices and prevents common misconfigurations.
+
+    tags:
+      - security-group
+      - security
+      - firewall
+      - network
+      - ingress
+      - egress
+
+    complexity: "intermediate"
+    setup_time_minutes: 5
+    variable_count: 18
+
+    cost:
+      estimated_monthly_usd: 0
+      cost_category: "free"
+      cost_factors:
+        - "No direct cost"
+        - "Data transfer costs apply separately"
+
+    features:
+      - "Ingress and egress rules"
+      - "Rule validation"
+      - "CIDR block validation"
+      - "Security group references"
+      - "Rule descriptions"
+      - "Default deny-all egress (optional)"
+      - "Tag-based organization"
+
+    use_cases:
+      - "EC2 instance security"
+      - "RDS database security"
+      - "ECS task security"
+      - "Lambda function security"
+      - "Network isolation"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+
+    compatible_with:
+      - "vpc-*"
+      - "ec2-*"
+      - "rds-*"
+      - "eks-*"
+      - "ecs-*"
+
+    metrics:
+      downloads: 890
+      rating: 4.7
+      rating_count: 98
+      deployments: 654
+      active_deployments: 612
+      last_updated: "2025-11-20"
+      first_published: "2024-03-10"
+
+    lifecycle:
+      created: "2024-03-10"
+      stabilized: "2024-08-15"
+
+    testing:
+      unit_tests: 18
+      integration_tests: 8
+      coverage_percent: 85
+      test_status: "passing"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      last_scan: "2025-11-20"
+      vulnerabilities:
+        critical: 0
+        high: 0
+        medium: 0
+        low: 0
+
+  # --- IAM ---
+
+  - id: "iam"
+    name: "IAM Roles and Policies"
+    version: "1.8.0"
+    maturity: "stable"
+    category: "foundations/identity"
+    subcategory: "iam"
+    path: "iam"
+    alternate_paths:
+      - "_library/foundations/identity/iam-roles"
+
+    description: "IAM role and policy management with least privilege enforcement"
+    long_description: |
+      Comprehensive IAM module for creating roles, policies, and users with
+      built-in security best practices. Supports service roles, cross-account access,
+      policy templates, and automatic permission boundary enforcement.
+
+    tags:
+      - iam
+      - security
+      - roles
+      - policies
+      - access-control
+      - least-privilege
+
+    complexity: "intermediate"
+    setup_time_minutes: 8
+    variable_count: 22
+
+    cost:
+      estimated_monthly_usd: 0
+      cost_category: "free"
+      cost_factors:
+        - "No direct cost"
+
+    features:
+      - "IAM roles with assume role policies"
+      - "Managed and inline policies"
+      - "Service-linked roles"
+      - "Cross-account access"
+      - "Permission boundaries"
+      - "Policy templates"
+      - "Least privilege validation"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "eks-*"
+      - "ecs-*"
+      - "lambda-*"
+      - "ec2-*"
+
+    metrics:
+      downloads: 1120
+      rating: 4.6
+      rating_count: 142
+      deployments: 723
+      active_deployments: 698
+      last_updated: "2025-11-25"
+
+    testing:
+      unit_tests: 32
+      integration_tests: 15
+      coverage_percent: 88
+      test_status: "passing"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "AWS Well-Architected"
+
+  #############################################################################
+  # COMPUTE LAYER
+  #############################################################################
+
+  # --- EKS ---
+
+  - id: "eks-standard"
+    name: "EKS Standard"
+    version: "3.2.0"
+    maturity: "mature"
+    category: "compute/containers"
+    subcategory: "kubernetes"
+    path: "eks"
+    alternate_paths:
+      - "_library/compute/containers/eks-standard"
+
+    description: "Production-ready EKS cluster with managed node groups and advanced security"
+    long_description: |
+      Enterprise-grade Amazon EKS module that creates production-ready Kubernetes clusters
+      with multiple managed node groups, IRSA support, comprehensive security controls,
+      cluster autoscaling, and integration with AWS services. Battle-tested in production
+      across 200+ deployments.
+
+    tags:
+      - eks
+      - kubernetes
+      - containers
+      - production
+      - ha
+      - autoscaling
+      - irsa
+
+    complexity: "advanced"
+    setup_time_minutes: 25
+    variable_count: 48
+
+    cost:
+      estimated_monthly_usd: 450
+      cost_category: "high"
+      cost_factors:
+        - "EKS control plane: $73/month"
+        - "Worker nodes (t3.large): 3+ nodes"
+        - "NAT Gateways: $97/month (3 AZs)"
+        - "Load balancers"
+        - "Data transfer"
+      cost_breakdown:
+        control_plane: 73
+        worker_nodes: 220
+        nat_gateways: 97
+        load_balancers: 50
+        other: 10
+
+    features:
+      - "EKS control plane with automatic upgrades"
+      - "Managed node groups with multiple instance types"
+      - "IRSA (IAM Roles for Service Accounts)"
+      - "Cluster autoscaling"
+      - "Private API endpoint (optional)"
+      - "AWS VPC CNI configuration"
+      - "KMS encryption for secrets"
+      - "CloudWatch Container Insights"
+      - "Multiple node group support"
+      - "Spot instance support"
+
+    use_cases:
+      - "Microservices platforms"
+      - "Cloud-native applications"
+      - "CI/CD pipelines"
+      - "Data processing workloads"
+      - "Machine learning platforms"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+      backup: "kubernetes-team@example.com"
+
+    support:
+      channel: "#kubernetes-support"
+      sla_hours: 12
+      oncall: "kubernetes-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+        kubernetes: ">= 2.20.0"
+        helm: ">= 2.10.0"
+      required_modules:
+        - "vpc-standard"
+
+    compatible_with:
+      - "vpc-standard"
+      - "eks-addons"
+      - "eks-backend-services"
+      - "external-secrets"
+      - "monitoring"
+
+    metrics:
+      downloads: 2340
+      rating: 4.9
+      rating_count: 287
+      deployments: 856
+      active_deployments: 834
+      last_updated: "2025-12-01"
+      first_published: "2024-01-05"
+
+    lifecycle:
+      created: "2024-01-05"
+      stabilized: "2024-05-01"
+      matured: "2024-11-15"
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      architecture_diagram: "./docs/architecture.png"
+      examples:
+        - path: "./examples/complete"
+          description: "Full EKS cluster with all features"
+          complexity: "advanced"
+        - path: "./examples/basic"
+          description: "Simple EKS cluster with defaults"
+          complexity: "intermediate"
+        - path: "./examples/fargate"
+          description: "EKS with Fargate profiles"
+          complexity: "advanced"
+
+    testing:
+      unit_tests: 42
+      integration_tests: 18
+      coverage_percent: 91
+      test_status: "passing"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "CIS Kubernetes Benchmark"
+        - "PCI DSS"
+        - "HIPAA"
+
+    performance:
+      deployment_time_seconds: 1500
+      resource_count: 120
+      state_size_kb: 480
+
+  # --- EC2 ---
+
+  - id: "ec2"
+    name: "EC2 Instances"
+    version: "2.0.0"
+    maturity: "stable"
+    category: "compute/virtual-machines"
+    subcategory: "ec2"
+    path: "ec2"
+    alternate_paths:
+      - "_library/compute/virtual-machines/ec2-standard"
+
+    description: "EC2 instance management with advanced features and auto-recovery"
+    long_description: |
+      Flexible EC2 module supporting single instances, auto-scaling groups,
+      spot instances, and advanced features like instance profiles, user data,
+      EBS optimization, and CloudWatch monitoring.
+
+    tags:
+      - ec2
+      - compute
+      - virtual-machines
+      - autoscaling
+      - spot
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 32
+
+    cost:
+      estimated_monthly_usd: 75
+      cost_category: "medium"
+      cost_factors:
+        - "Instance type (t3.medium default)"
+        - "EBS volumes"
+        - "Data transfer"
+        - "Elastic IP (optional)"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+        - "securitygroup"
+
+    compatible_with:
+      - "vpc-*"
+      - "securitygroup"
+      - "iam"
+      - "monitoring"
+
+    metrics:
+      downloads: 980
+      rating: 4.6
+      rating_count: 134
+      deployments: 567
+      active_deployments: 523
+      last_updated: "2025-11-28"
+
+  # --- Lambda ---
+
+  - id: "lambda"
+    name: "Lambda Functions"
+    version: "1.7.0"
+    maturity: "stable"
+    category: "compute/serverless"
+    subcategory: "lambda"
+    path: "lambda"
+    alternate_paths:
+      - "_library/compute/serverless/lambda-standard"
+
+    description: "AWS Lambda function management with layers, triggers, and VPC support"
+    long_description: |
+      Comprehensive Lambda module supporting multiple runtimes, layers, event sources,
+      VPC configuration, environment variables, and dead letter queues.
+
+    tags:
+      - lambda
+      - serverless
+      - functions
+      - event-driven
+
+    complexity: "intermediate"
+    setup_time_minutes: 8
+    variable_count: 28
+
+    cost:
+      estimated_monthly_usd: 5
+      cost_category: "low"
+      cost_factors:
+        - "Invocations"
+        - "Duration"
+        - "Memory allocation"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "apigateway"
+      - "vpc-*"
+      - "iam"
+      - "monitoring"
+
+    metrics:
+      downloads: 1450
+      rating: 4.7
+      rating_count: 198
+      deployments: 892
+      active_deployments: 856
+      last_updated: "2025-11-22"
+
+  #############################################################################
+  # DATA LAYER
+  #############################################################################
+
+  # --- RDS ---
+
+  - id: "rds-postgres"
+    name: "RDS PostgreSQL"
+    version: "2.5.0"
+    maturity: "stable"
+    category: "data/databases"
+    subcategory: "relational"
+    path: "rds"
+    alternate_paths:
+      - "_library/data/databases/rds-postgres"
+
+    description: "Production-ready RDS PostgreSQL with multi-AZ, encryption, and automated backups"
+    long_description: |
+      Enterprise PostgreSQL database module with multi-AZ deployment, automated backups,
+      encryption at rest and in transit, parameter groups, option groups, and
+      comprehensive monitoring.
+
+    tags:
+      - rds
+      - postgres
+      - postgresql
+      - database
+      - multi-az
+      - ha
+      - encrypted
+
+    complexity: "intermediate"
+    setup_time_minutes: 20
+    variable_count: 38
+
+    cost:
+      estimated_monthly_usd: 280
+      cost_category: "high"
+      cost_factors:
+        - "DB instance (db.t3.large multi-AZ)"
+        - "Storage (100 GB gp3)"
+        - "Backup storage"
+        - "Data transfer"
+      cost_breakdown:
+        instance: 220
+        storage: 40
+        backups: 15
+        other: 5
+
+    features:
+      - "Multi-AZ deployment"
+      - "Automated backups with retention"
+      - "KMS encryption at rest"
+      - "SSL/TLS encryption in transit"
+      - "Custom parameter groups"
+      - "Enhanced monitoring"
+      - "Performance Insights"
+      - "Automatic minor version upgrades"
+      - "Snapshot management"
+
+    use_cases:
+      - "Production databases"
+      - "OLTP workloads"
+      - "High availability systems"
+      - "Compliance-required data"
+
+    maintainer:
+      team: "Database Engineering"
+      primary: "dba-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#database-support"
+      sla_hours: 24
+      oncall: "dba-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+        - "securitygroup"
+
+    compatible_with:
+      - "vpc-standard"
+      - "vpc-advanced"
+      - "securitygroup"
+      - "backup"
+      - "monitoring"
+
+    metrics:
+      downloads: 1670
+      rating: 4.8
+      rating_count: 213
+      deployments: 534
+      active_deployments: 512
+      last_updated: "2025-11-30"
+      first_published: "2024-02-20"
+
+    testing:
+      unit_tests: 28
+      integration_tests: 14
+      coverage_percent: 87
+      test_status: "passing"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "PCI DSS"
+        - "HIPAA"
+        - "SOC 2"
+
+  #############################################################################
+  # INTEGRATION LAYER
+  #############################################################################
+
+  # --- API Gateway ---
+
+  - id: "apigateway-rest"
+    name: "API Gateway REST"
+    version: "1.9.0"
+    maturity: "stable"
+    category: "integration/api-management"
+    subcategory: "apigateway"
+    path: "apigateway"
+    alternate_paths:
+      - "_library/integration/api-management/apigateway-rest"
+
+    description: "REST and HTTP API Gateway with authentication and custom domains"
+    long_description: |
+      Versatile API Gateway module supporting REST and HTTP APIs with multiple
+      authentication methods, custom domains, throttling, caching, and integrations
+      with Lambda, HTTP backends, and AWS services.
+
+    tags:
+      - apigateway
+      - api
+      - rest
+      - http
+      - authentication
+      - custom-domain
+
+    complexity: "intermediate"
+    setup_time_minutes: 12
+    variable_count: 30
+
+    cost:
+      estimated_monthly_usd: 50
+      cost_category: "medium"
+      cost_factors:
+        - "API requests (1M requests = $3.50)"
+        - "Data transfer"
+        - "Caching (optional)"
+        - "Custom domain"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "lambda"
+      - "acm"
+      - "dns"
+      - "monitoring"
+
+    metrics:
+      downloads: 1230
+      rating: 4.7
+      rating_count: 167
+      deployments: 678
+      active_deployments: 645
+      last_updated: "2025-11-18"
+
+  #############################################################################
+  # OBSERVABILITY LAYER
+  #############################################################################
+
+  # --- Monitoring ---
+
+  - id: "monitoring"
+    name: "CloudWatch Monitoring"
+    version: "2.3.0"
+    maturity: "stable"
+    category: "observability/metrics"
+    subcategory: "cloudwatch"
+    path: "monitoring"
+    alternate_paths:
+      - "_library/observability/metrics/cloudwatch"
+
+    description: "Comprehensive CloudWatch monitoring with dashboards, alarms, and log groups"
+    long_description: |
+      Full-featured monitoring solution with CloudWatch dashboards, metric alarms,
+      log groups, log subscriptions, and integration with SNS for alerting.
+      Supports custom metrics and composite alarms.
+
+    tags:
+      - monitoring
+      - cloudwatch
+      - alarms
+      - dashboards
+      - logs
+      - metrics
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 26
+
+    cost:
+      estimated_monthly_usd: 45
+      cost_category: "medium"
+      cost_factors:
+        - "Dashboards: $3/month each"
+        - "Alarms: $0.10/month each"
+        - "Log ingestion: $0.50/GB"
+        - "Log storage: $0.03/GB"
+
+    maintainer:
+      team: "SRE Team"
+      primary: "sre-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "All modules"
+
+    metrics:
+      downloads: 1890
+      rating: 4.8
+      rating_count: 245
+      deployments: 912
+      active_deployments: 889
+      last_updated: "2025-11-30"
+
+  # --- Security Monitoring ---
+
+  - id: "security-monitoring"
+    name: "Security Monitoring"
+    version: "1.6.0"
+    maturity: "stable"
+    category: "security/compliance"
+    subcategory: "threat-detection"
+    path: "security-monitoring"
+    alternate_paths:
+      - "_library/security/compliance/security-monitoring"
+
+    description: "GuardDuty, Security Hub, and Inspector for comprehensive security monitoring"
+    long_description: |
+      Complete security monitoring solution combining GuardDuty for threat detection,
+      Security Hub for centralized security findings, and Inspector V2 for
+      vulnerability scanning. Includes automated remediation workflows.
+
+    tags:
+      - security
+      - guardduty
+      - security-hub
+      - inspector
+      - threat-detection
+      - compliance
+
+    complexity: "advanced"
+    setup_time_minutes: 15
+    variable_count: 22
+
+    cost:
+      estimated_monthly_usd: 120
+      cost_category: "medium"
+      cost_factors:
+        - "GuardDuty: Event analysis"
+        - "Security Hub: Finding ingestion"
+        - "Inspector: Scans"
+
+    maintainer:
+      team: "Security Engineering"
+      primary: "security-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "All modules"
+
+    metrics:
+      downloads: 890
+      rating: 4.9
+      rating_count: 112
+      deployments: 345
+      active_deployments: 334
+      last_updated: "2025-11-25"
+
+  #############################################################################
+  # SECURITY LAYER
+  #############################################################################
+
+  # --- ACM ---
+
+  - id: "acm"
+    name: "ACM Certificates"
+    version: "1.4.0"
+    maturity: "stable"
+    category: "security/access-control"
+    subcategory: "certificates"
+    path: "acm"
+    alternate_paths:
+      - "_library/security/access-control/acm"
+
+    description: "SSL/TLS certificate management with DNS and email validation"
+    long_description: |
+      AWS Certificate Manager module for creating and managing SSL/TLS certificates
+      with automatic DNS validation via Route53 or manual email validation.
+      Supports wildcard certificates and SANs.
+
+    tags:
+      - acm
+      - certificates
+      - ssl
+      - tls
+      - https
+
+    complexity: "beginner"
+    setup_time_minutes: 8
+    variable_count: 12
+
+    cost:
+      estimated_monthly_usd: 0
+      cost_category: "free"
+      cost_factors:
+        - "No cost for public certificates"
+        - "Private certificates: $400/month per CA"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "dns"
+      - "apigateway"
+      - "alb"
+      - "cloudfront"
+
+    metrics:
+      downloads: 1120
+      rating: 4.6
+      rating_count: 145
+      deployments: 789
+      active_deployments: 756
+      last_updated: "2025-11-10"
+
+  # --- Secrets Manager ---
+
+  - id: "secretsmanager"
+    name: "Secrets Manager"
+    version: "1.8.0"
+    maturity: "stable"
+    category: "security/secrets"
+    subcategory: "secrets-management"
+    path: "secretsmanager"
+    alternate_paths:
+      - "_library/security/secrets/secretsmanager"
+
+    description: "Hierarchical secrets management with automatic rotation and access control"
+    long_description: |
+      Comprehensive secrets management solution with hierarchical organization,
+      automatic rotation for databases, KMS encryption, versioning, and
+      fine-grained IAM access control.
+
+    tags:
+      - secrets
+      - secrets-manager
+      - security
+      - encryption
+      - rotation
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 20
+
+    cost:
+      estimated_monthly_usd: 1.20
+      cost_category: "low"
+      cost_factors:
+        - "$0.40/secret/month"
+        - "$0.05 per 10,000 API calls"
+
+    maintainer:
+      team: "Security Engineering"
+      primary: "security-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "rds-*"
+      - "eks-*"
+      - "ecs-*"
+      - "lambda"
+      - "external-secrets"
+
+    metrics:
+      downloads: 1560
+      rating: 4.7
+      rating_count: 187
+      deployments: 823
+      active_deployments: 798
+      last_updated: "2025-11-20"
+
+  # --- External Secrets ---
+
+  - id: "external-secrets"
+    name: "External Secrets Operator"
+    version: "1.3.0"
+    maturity: "beta"
+    category: "security/secrets"
+    subcategory: "kubernetes-secrets"
+    path: "external-secrets"
+    alternate_paths:
+      - "_library/security/secrets/external-secrets"
+
+    description: "Kubernetes External Secrets Operator for AWS Secrets Manager integration"
+    long_description: |
+      Deploys and configures the External Secrets Operator in Kubernetes,
+      enabling secure integration between Kubernetes secrets and AWS Secrets Manager.
+      Supports automatic secret synchronization and rotation.
+
+    tags:
+      - kubernetes
+      - secrets
+      - external-secrets
+      - secrets-manager
+      - k8s
+
+    complexity: "advanced"
+    setup_time_minutes: 12
+    variable_count: 18
+
+    cost:
+      estimated_monthly_usd: 5
+      cost_category: "low"
+      cost_factors:
+        - "Secrets Manager API calls"
+        - "Kubernetes resources (minimal)"
+
+    maintainer:
+      team: "Kubernetes Team"
+      primary: "kubernetes-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+        kubernetes: ">= 2.20.0"
+        helm: ">= 2.10.0"
+      required_modules:
+        - "eks-*"
+        - "secretsmanager"
+
+    compatible_with:
+      - "eks-standard"
+      - "secretsmanager"
+      - "iam"
+
+    metrics:
+      downloads: 560
+      rating: 4.6
+      rating_count: 67
+      deployments: 234
+      active_deployments: 221
+      last_updated: "2025-11-15"
+
+  # ===========================================================================
+  # PHASE 2: NEW SECURITY MODULES (2025-12-02)
+  # ===========================================================================
+
+  # --- WAF Advanced ---
+
+  - id: "waf-advanced"
+    name: "Advanced WAF"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "security/network-security"
+    subcategory: "waf"
+    path: "_library/security/waf-advanced"
+
+    description: "Production-grade WAF with OWASP Top 10, bot control, and rate limiting"
+    long_description: |
+      Enterprise-grade AWS WAF module with pre-configured rule sets for OWASP Top 10 protection,
+      bot control, rate limiting, IP reputation lists, geo-blocking, and custom rule builder.
+      Optimized for cost-effective rule ordering and comprehensive logging to S3/CloudWatch.
+      Supports both CloudFront and Application Load Balancer deployments.
+
+    tags:
+      - waf
+      - web-application-firewall
+      - owasp
+      - bot-control
+      - rate-limiting
+      - ddos
+      - security
+      - cloudfront
+      - alb
+
+    complexity: "advanced"
+    setup_time_minutes: 15
+    variable_count: 42
+
+    cost:
+      estimated_monthly_usd: 85
+      cost_category: "medium"
+      cost_factors:
+        - "Web ACL: $5/month"
+        - "Rules: $1/month per rule"
+        - "Requests: $0.60 per 1M requests"
+        - "Bot Control: $10/month + $1 per 1M requests"
+        - "Logging: S3/CloudWatch storage costs"
+      cost_breakdown:
+        web_acl: 5
+        managed_rules: 25
+        custom_rules: 15
+        bot_control: 20
+        requests: 15
+        logging: 5
+
+    features:
+      - "OWASP Top 10 Protection (Core Rule Set)"
+      - "Bot Control with COMMON/TARGETED inspection"
+      - "Rate limiting per IP address"
+      - "IP reputation lists"
+      - "Geographic blocking/allow-listing"
+      - "Custom rule builder"
+      - "Cost-optimized rule ordering"
+      - "S3/CloudWatch/Kinesis logging"
+      - "Sensitive header redaction"
+      - "CloudWatch metrics integration"
+
+    use_cases:
+      - "Web application protection"
+      - "API security"
+      - "DDoS mitigation"
+      - "Bot management"
+      - "Compliance (PCI DSS, HIPAA)"
+
+    maintainer:
+      team: "Security Engineering"
+      primary: "security-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#security-support"
+      sla_hours: 12
+      oncall: "security-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "cloudfront"
+      - "alb"
+      - "apigateway"
+      - "monitoring"
+      - "security-monitoring"
+
+    incompatible_with: []
+    replaces: []
+    replaced_by: null
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      architecture_diagram: "./docs/architecture.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic WAF with OWASP Core Rule Set"
+          complexity: "intermediate"
+        - path: "./examples/advanced"
+          description: "Advanced WAF with bot control and custom rules"
+          complexity: "advanced"
+        - path: "./examples/multi-region"
+          description: "Multi-region WAF deployment"
+          complexity: "advanced"
+
+    testing:
+      unit_tests: 18
+      integration_tests: 8
+      coverage_percent: 85
+      last_test_run: "2025-12-02T10:00:00Z"
+      test_status: "passing"
+      test_duration_seconds: 240
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      last_scan: "2025-12-02"
+      vulnerabilities:
+        critical: 0
+        high: 0
+        medium: 0
+        low: 0
+      compliance:
+        - "OWASP Top 10"
+        - "CIS AWS Foundations"
+        - "PCI DSS"
+        - "HIPAA"
+
+    performance:
+      deployment_time_seconds: 900
+      resource_count: 25
+      state_size_kb: 120
+
+  # --- KMS Multi-Region ---
+
+  - id: "kms-multi-region"
+    name: "KMS Multi-Region"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "security/encryption"
+    subcategory: "kms"
+    path: "_library/security/kms-multi-region"
+
+    description: "Enterprise KMS key management with multi-region replication and automatic rotation"
+    long_description: |
+      Enterprise-grade AWS KMS module providing multi-region key management with automatic replication,
+      key rotation, comprehensive key policies with least privilege, alias management, grant-based
+      access control, and CloudTrail integration. Supports both single-region and multi-region keys
+      with disaster recovery capabilities.
+
+    tags:
+      - kms
+      - encryption
+      - multi-region
+      - key-management
+      - disaster-recovery
+      - dr
+      - replication
+      - rotation
+      - grants
+      - aliases
+
+    complexity: "advanced"
+    setup_time_minutes: 10
+    variable_count: 28
+
+    cost:
+      estimated_monthly_usd: 3
+      cost_category: "low"
+      cost_factors:
+        - "Primary key: $1/month"
+        - "Replica keys: $1/month each"
+        - "API requests: $0.03 per 10,000 requests"
+      cost_breakdown:
+        primary_key: 1
+        replica_keys: 2
+        api_requests: 0
+
+    features:
+      - "Multi-region key replication"
+      - "Automatic annual key rotation"
+      - "Least privilege key policies"
+      - "Key alias management"
+      - "Grant-based access control"
+      - "Symmetric and asymmetric keys"
+      - "CloudTrail integration"
+      - "Cross-account access"
+
+    use_cases:
+      - "Multi-region disaster recovery"
+      - "S3/EBS/RDS encryption"
+      - "Secrets Manager integration"
+      - "Cross-account encryption"
+      - "Compliance requirements"
+
+    maintainer:
+      team: "Security Engineering"
+      primary: "security-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#security-support"
+      sla_hours: 12
+      oncall: "security-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "s3"
+      - "rds-*"
+      - "ebs"
+      - "secrets-manager-*"
+      - "backup"
+
+    incompatible_with: []
+    replaces: ["kms-key"]
+    replaced_by: null
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic KMS key with rotation"
+          complexity: "beginner"
+        - path: "./examples/advanced"
+          description: "Advanced key with grants and complex policies"
+          complexity: "advanced"
+        - path: "./examples/multi-region"
+          description: "Multi-region key with replicas for DR"
+          complexity: "advanced"
+
+    testing:
+      unit_tests: 12
+      integration_tests: 6
+      coverage_percent: 88
+      last_test_run: "2025-12-02T10:00:00Z"
+      test_status: "passing"
+      test_duration_seconds: 180
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      last_scan: "2025-12-02"
+      vulnerabilities:
+        critical: 0
+        high: 0
+        medium: 0
+        low: 0
+      compliance:
+        - "CIS AWS Foundations"
+        - "PCI DSS"
+        - "HIPAA"
+        - "SOC 2"
+
+    performance:
+      deployment_time_seconds: 600
+      resource_count: 15
+      state_size_kb: 45
+
+  # --- Secrets Manager Advanced ---
+
+  - id: "secrets-manager-advanced"
+    name: "Secrets Manager Advanced"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "security/secrets"
+    subcategory: "secrets-management"
+    path: "_library/security/secrets-manager-advanced"
+
+    description: "Advanced secrets management with automatic rotation and disaster recovery"
+    long_description: |
+      Enterprise secrets management with automatic rotation for RDS/Aurora/DocumentDB,
+      cross-account access, replica secrets for DR, rotation monitoring and alerting,
+      and Lambda-based rotation functions. Supports database passwords, API keys, and
+      custom secrets with comprehensive rotation strategies.
+
+    tags:
+      - secrets
+      - secrets-manager
+      - rotation
+      - disaster-recovery
+      - rds
+      - lambda
+      - api-keys
+      - passwords
+      - multi-region
+
+    complexity: "advanced"
+    setup_time_minutes: 15
+    variable_count: 35
+
+    cost:
+      estimated_monthly_usd: 2
+      cost_category: "low"
+      cost_factors:
+        - "$0.40 per secret per month"
+        - "$0.05 per 10,000 API calls"
+        - "Lambda execution for rotation"
+      cost_breakdown:
+        secrets: 1.20
+        api_calls: 0.50
+        lambda: 0.30
+
+    features:
+      - "Automatic rotation (RDS, Aurora, DocumentDB, API keys)"
+      - "Multi-region replication for DR"
+      - "Lambda rotation functions (included)"
+      - "Cross-account access policies"
+      - "KMS encryption integration"
+      - "CloudWatch monitoring and alarms"
+      - "Rotation failure alerting"
+      - "Version management"
+
+    use_cases:
+      - "Database credential rotation"
+      - "API key management"
+      - "Multi-region disaster recovery"
+      - "Cross-account secrets sharing"
+      - "Compliance (SOC 2, HIPAA)"
+
+    maintainer:
+      team: "Security Engineering"
+      primary: "security-team@example.com"
+      backup: "platform-team@example.com"
+
+    support:
+      channel: "#security-support"
+      sla_hours: 12
+      oncall: "security-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules: []
+
+    compatible_with:
+      - "rds-*"
+      - "lambda"
+      - "eks-*"
+      - "ecs-*"
+      - "kms-multi-region"
+
+    incompatible_with: []
+    replaces: ["secretsmanager"]
+    replaced_by: null
+
+    metrics:
+      downloads: 0
+      rating: 0.0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Basic secret with manual rotation"
+          complexity: "beginner"
+        - path: "./examples/advanced"
+          description: "Secret with automatic rotation"
+          complexity: "advanced"
+        - path: "./examples/rds-rotation"
+          description: "RDS password with automatic rotation"
+          complexity: "advanced"
+
+    testing:
+      unit_tests: 15
+      integration_tests: 8
+      coverage_percent: 86
+      last_test_run: "2025-12-02T10:00:00Z"
+      test_status: "passing"
+      test_duration_seconds: 540
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      last_scan: "2025-12-02"
+      vulnerabilities:
+        critical: 0
+        high: 0
+        medium: 0
+        low: 0
+      compliance:
+        - "CIS AWS Foundations"
+        - "PCI DSS"
+        - "HIPAA"
+        - "SOC 2"
+
+    performance:
+      deployment_time_seconds: 900
+      resource_count: 20
+      state_size_kb: 65
+
+  #############################################################################
+  # OPERATIONS LAYER
+  #############################################################################
+
+  # --- Backup ---
+
+  - id: "backup"
+    name: "AWS Backup"
+    version: "1.5.0"
+    maturity: "stable"
+    category: "operations/backup"
+    subcategory: "disaster-recovery"
+    path: "backup"
+    alternate_paths:
+      - "_library/data/storage/backup"
+
+    description: "Automated backup and disaster recovery using AWS Backup"
+    long_description: |
+      Comprehensive AWS Backup solution with backup plans, vaults, policies,
+      and cross-region backup support. Supports multiple AWS resource types
+      including EC2, RDS, EFS, DynamoDB, and more.
+
+    tags:
+      - backup
+      - disaster-recovery
+      - dr
+      - aws-backup
+      - compliance
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 24
+
+    cost:
+      estimated_monthly_usd: 30
+      cost_category: "low"
+      cost_factors:
+        - "Backup storage: $0.05/GB/month"
+        - "Restore requests: $0.02/GB"
+        - "Cross-region transfer"
+
+    maintainer:
+      team: "SRE Team"
+      primary: "sre-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "rds-*"
+      - "ec2"
+      - "efs"
+      - "dynamodb"
+
+    metrics:
+      downloads: 780
+      rating: 4.7
+      rating_count: 89
+      deployments: 456
+      active_deployments: 432
+      last_updated: "2025-11-28"
+
+  # --- Cost Optimization ---
+
+  - id: "cost-optimization"
+    name: "Cost Optimization"
+    version: "1.4.0"
+    maturity: "stable"
+    category: "operations/cost-management"
+    subcategory: "finops"
+    path: "cost-optimization"
+    alternate_paths:
+      - "_library/patterns/governance/cost-optimization"
+
+    description: "Automated cost management with resource scheduling and unused resource cleanup"
+    long_description: |
+      FinOps automation module implementing cost management best practices.
+      Includes automated resource scheduling, unused resource detection and cleanup,
+      cost anomaly detection, savings recommendations, and budget alerts.
+
+    tags:
+      - cost
+      - finops
+      - optimization
+      - savings
+      - budget
+      - scheduling
+
+    complexity: "advanced"
+    setup_time_minutes: 15
+    variable_count: 28
+
+    cost:
+      estimated_monthly_usd: 10
+      cost_category: "low"
+      cost_factors:
+        - "Lambda execution"
+        - "CloudWatch logs"
+        - "Savings potential: $500-5000/month"
+
+    features:
+      - "Automated resource scheduling"
+      - "Unused resource detection"
+      - "Cost anomaly detection"
+      - "Savings recommendations"
+      - "Budget alerts"
+      - "Rightsizing suggestions"
+
+    maintainer:
+      team: "FinOps Team"
+      primary: "finops-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "All modules"
+
+    metrics:
+      downloads: 670
+      rating: 4.8
+      rating_count: 78
+      deployments: 289
+      active_deployments: 276
+      last_updated: "2025-11-22"
+
+  # --- IDP Platform ---
+
+  - id: "idp-platform"
+    name: "Internal Developer Platform"
+    version: "2.0.0"
+    maturity: "beta"
+    category: "operations/platform"
+    subcategory: "developer-platform"
+    path: "idp-platform"
+    alternate_paths:
+      - "_library/patterns/platform/idp-platform"
+
+    description: "Comprehensive Internal Developer Platform with EKS, CI/CD, and developer tools"
+    long_description: |
+      Complete Internal Developer Platform infrastructure including EKS clusters,
+      GitOps workflows, CI/CD pipelines, service mesh, observability stack,
+      and developer self-service portals.
+
+    tags:
+      - idp
+      - platform
+      - eks
+      - gitops
+      - cicd
+      - developer-experience
+
+    complexity: "advanced"
+    setup_time_minutes: 45
+    variable_count: 52
+
+    cost:
+      estimated_monthly_usd: 800
+      cost_category: "very-high"
+      cost_factors:
+        - "EKS cluster"
+        - "Worker nodes"
+        - "Platform services"
+        - "Storage"
+        - "Data transfer"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+        kubernetes: ">= 2.20.0"
+        helm: ">= 2.10.0"
+      required_modules:
+        - "vpc-standard"
+        - "eks-standard"
+        - "rds-postgres"
+
+    compatible_with:
+      - "vpc-standard"
+      - "eks-standard"
+      - "monitoring"
+      - "security-monitoring"
+
+    metrics:
+      downloads: 340
+      rating: 4.7
+      rating_count: 45
+      deployments: 124
+      active_deployments: 118
+      last_updated: "2025-11-30"
+
+  # --- DNS ---
+
+  - id: "dns"
+    name: "Route53 DNS"
+    version: "1.6.0"
+    maturity: "stable"
+    category: "foundations/networking"
+    subcategory: "dns"
+    path: "dns"
+    alternate_paths:
+      - "_library/foundations/networking/dns"
+
+    description: "Route53 hosted zones and DNS records with health checks"
+    long_description: |
+      Route53 DNS management module for creating hosted zones, DNS records,
+      health checks, and routing policies. Supports public and private zones,
+      alias records, and integration with AWS services.
+
+    tags:
+      - dns
+      - route53
+      - hosted-zone
+      - health-checks
+
+    complexity: "beginner"
+    setup_time_minutes: 5
+    variable_count: 16
+
+    cost:
+      estimated_monthly_usd: 2
+      cost_category: "low"
+      cost_factors:
+        - "Hosted zone: $0.50/month"
+        - "Queries: $0.40 per million"
+        - "Health checks: $0.50/month each"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "acm"
+      - "apigateway"
+      - "alb"
+      - "cloudfront"
+
+    metrics:
+      downloads: 1340
+      rating: 4.5
+      rating_count: 176
+      deployments: 823
+      active_deployments: 789
+      last_updated: "2025-11-12"
+
+  # --- Backend ---
+
+  - id: "backend"
+    name: "Terraform State Backend"
+    version: "1.9.0"
+    maturity: "mature"
+    category: "operations/infrastructure"
+    subcategory: "terraform"
+    path: "backend"
+
+    description: "S3 + DynamoDB Terraform state backend with encryption and locking"
+    long_description: |
+      Production-ready Terraform state backend using S3 for state storage
+      and DynamoDB for state locking. Includes versioning, encryption at rest,
+      access logging, and lifecycle policies.
+
+    tags:
+      - terraform
+      - state
+      - backend
+      - s3
+      - dynamodb
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 20
+
+    cost:
+      estimated_monthly_usd: 3
+      cost_category: "low"
+      cost_factors:
+        - "S3 storage"
+        - "DynamoDB (on-demand)"
+        - "S3 requests"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+
+    compatible_with:
+      - "All modules"
+
+    metrics:
+      downloads: 2340
+      rating: 4.9
+      rating_count: 312
+      deployments: 1234
+      active_deployments: 1234
+      last_updated: "2025-11-30"
+
+  # --- ECS ---
+
+  - id: "ecs"
+    name: "Amazon ECS"
+    version: "1.8.0"
+    maturity: "stable"
+    category: "compute/containers"
+    subcategory: "ecs"
+    path: "ecs"
+    alternate_paths:
+      - "_library/compute/containers/ecs-fargate"
+
+    description: "ECS cluster with Fargate and EC2 launch types"
+    long_description: |
+      Amazon ECS module supporting both Fargate and EC2 launch types.
+      Includes service definitions, task definitions, auto-scaling,
+      load balancer integration, and CloudWatch Container Insights.
+
+    tags:
+      - ecs
+      - containers
+      - fargate
+      - docker
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 32
+
+    cost:
+      estimated_monthly_usd: 120
+      cost_category: "medium"
+      cost_factors:
+        - "Fargate vCPU and memory"
+        - "Load balancer"
+        - "Data transfer"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+
+    compatible_with:
+      - "vpc-*"
+      - "monitoring"
+      - "iam"
+
+    metrics:
+      downloads: 890
+      rating: 4.6
+      rating_count: 123
+      deployments: 445
+      active_deployments: 421
+      last_updated: "2025-11-18"
+
+  # --- EKS Add-ons ---
+
+  - id: "eks-addons"
+    name: "EKS Add-ons"
+    version: "1.7.0"
+    maturity: "stable"
+    category: "compute/containers"
+    subcategory: "kubernetes-addons"
+    path: "eks-addons"
+    alternate_paths:
+      - "_library/compute/containers/eks-addons"
+
+    description: "Essential EKS add-ons including CSI drivers, CNI, and CoreDNS"
+    long_description: |
+      Collection of essential EKS add-ons including EBS CSI driver, EFS CSI driver,
+      VPC CNI, CoreDNS, kube-proxy, and AWS Load Balancer Controller.
+      Configured with production-ready defaults.
+
+    tags:
+      - eks
+      - kubernetes
+      - addons
+      - csi
+      - cni
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 20
+
+    cost:
+      estimated_monthly_usd: 10
+      cost_category: "low"
+      cost_factors:
+        - "EBS volumes"
+        - "EFS file systems"
+        - "Load balancers"
+
+    maintainer:
+      team: "Kubernetes Team"
+      primary: "kubernetes-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+        kubernetes: ">= 2.20.0"
+        helm: ">= 2.10.0"
+      required_modules:
+        - "eks-standard"
+
+    compatible_with:
+      - "eks-standard"
+
+    metrics:
+      downloads: 780
+      rating: 4.7
+      rating_count: 98
+      deployments: 356
+      active_deployments: 342
+      last_updated: "2025-11-20"
+
+  # ===========================================================================
+  # PHASE 2: NEW COMPUTE MODULES (2025-12-02)
+  # ===========================================================================
+
+  # --- ECS Fargate Service ---
+
+  - id: "ecs-fargate-service"
+    name: "ECS Fargate Service"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "compute/containers"
+    subcategory: "ecs-fargate"
+    path: "_library/compute/ecs-fargate-service"
+
+    description: "Production-ready ECS Fargate service with auto-scaling, blue-green deployments, and circuit breaker"
+    long_description: |
+      Comprehensive ECS Fargate service module with complete lifecycle management.
+      Includes auto-scaling (CPU, memory, ALB), blue-green deployments via CodeDeploy,
+      circuit breaker for automatic rollback, service discovery, load balancer integration,
+      CloudWatch Container Insights, ECS Exec, secrets management, and cost optimization
+      with Fargate Spot. Battle-tested for production workloads.
+
+    tags:
+      - ecs
+      - fargate
+      - containers
+      - docker
+      - auto-scaling
+      - blue-green
+      - circuit-breaker
+      - service-discovery
+      - codedeploy
+      - production
+
+    complexity: "intermediate"
+    setup_time_minutes: 15
+    variable_count: 85
+
+    cost:
+      estimated_monthly_usd: 120
+      cost_category: "medium"
+      cost_factors:
+        - "Fargate vCPU/memory pricing"
+        - "Load balancer (if enabled)"
+        - "CloudWatch Logs storage"
+        - "Data transfer"
+        - "Fargate Spot savings (up to 70%)"
+      cost_breakdown:
+        fargate_tasks: 78
+        load_balancer: 16
+        cloudwatch: 10
+        data_transfer: 16
+      cost_optimization:
+        - "Enable Fargate Spot for 50-70% cost reduction"
+        - "Use auto-scaling to scale down during off-peak"
+        - "Right-size CPU and memory based on metrics"
+        - "Use ARM64 architecture where supported"
+
+    features:
+      - "Complete ECS Fargate service with cluster creation"
+      - "Auto-scaling: CPU, memory, ALB request count"
+      - "Blue-green deployments via AWS CodeDeploy"
+      - "Circuit breaker for automatic rollback"
+      - "Service discovery via AWS Cloud Map"
+      - "Load balancer integration (ALB/NLB)"
+      - "CloudWatch Container Insights"
+      - "CloudWatch Logs with configurable retention"
+      - "ECS Exec for container debugging"
+      - "AWS X-Ray tracing support"
+      - "Secrets Manager and SSM Parameter Store integration"
+      - "Fargate Spot for cost optimization"
+      - "EFS volume support for persistent storage"
+      - "Capacity provider strategy"
+      - "IAM roles with least privilege"
+      - "Security group management"
+      - "Health check configuration"
+      - "Deployment strategies (rolling, blue/green)"
+
+    use_cases:
+      - "Production containerized applications"
+      - "Microservices architectures"
+      - "API services with auto-scaling"
+      - "Batch processing workloads"
+      - "Event-driven applications"
+      - "CI/CD deployment targets"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+      backup: "sre-team@example.com"
+
+    support:
+      channel: "#platform-support"
+      sla_hours: 24
+      oncall: "platform-oncall"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+
+    compatible_with:
+      - "vpc-standard"
+      - "vpc-advanced"
+      - "alb"
+      - "nlb"
+      - "service-discovery"
+      - "efs"
+      - "secretsmanager"
+      - "monitoring"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      issues_open: 0
+      issues_closed: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+      deprecated: null
+      removed: null
+      replacement: null
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Simple Fargate service with auto-scaling"
+          complexity: "intermediate"
+        - path: "./examples/complete"
+          description: "Full-featured service with all options"
+          complexity: "advanced"
+        - path: "./examples/blue-green"
+          description: "Blue-green deployment with CodeDeploy"
+          complexity: "advanced"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      terrascan_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "AWS Well-Architected"
+
+  # --- Lambda Pattern Library ---
+
+  - id: "lambda-pattern-library"
+    name: "Lambda Pattern Library"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "compute/serverless"
+    subcategory: "lambda-patterns"
+    path: "_library/compute/lambda-pattern-library"
+
+    description: "Comprehensive Lambda module with 5 deployment patterns: REST API, Event-Driven, Stream Processing, Scheduled, VPC-Integrated"
+    long_description: |
+      Production-ready Lambda function module supporting multiple deployment patterns.
+      Includes API Gateway integration (REST/HTTP), EventBridge rules, SQS/SNS triggers,
+      Kinesis/DynamoDB stream processing, VPC configuration, provisioned concurrency,
+      X-Ray tracing, dead letter queues, Lambda layers, EFS support, and comprehensive
+      IAM role management. Optimized for cost with ARM64 support and right-sizing.
+
+    tags:
+      - lambda
+      - serverless
+      - functions
+      - api-gateway
+      - eventbridge
+      - sqs
+      - sns
+      - kinesis
+      - streams
+      - event-driven
+      - rest-api
+      - vpc
+      - layers
+      - provisioned-concurrency
+
+    complexity: "intermediate"
+    setup_time_minutes: 10
+    variable_count: 95
+
+    cost:
+      estimated_monthly_usd: 10
+      cost_category: "low"
+      cost_factors:
+        - "Invocations: $0.20 per 1M requests"
+        - "Duration: $0.0000166667 per GB-second"
+        - "Provisioned concurrency (if enabled)"
+        - "Data transfer"
+      cost_breakdown:
+        invocations: 2
+        compute: 5
+        provisioned_concurrency: 0
+        other: 3
+      cost_optimization:
+        - "Use ARM64 architecture for 20% cost reduction"
+        - "Right-size memory allocation (128MB to 10GB)"
+        - "Use provisioned concurrency only for critical functions"
+        - "Optimize cold start times with SnapStart (Java/Kotlin)"
+        - "Use Lambda layers to reduce deployment package size"
+
+    features:
+      - "5 deployment patterns supported"
+      - "API Gateway integration (REST and HTTP APIs)"
+      - "EventBridge scheduled and event-driven triggers"
+      - "SQS queue processing with batch configuration"
+      - "SNS topic subscription"
+      - "Kinesis and DynamoDB stream processing"
+      - "Lambda Function URLs for public HTTPS endpoints"
+      - "VPC configuration for private resource access"
+      - "Provisioned concurrency for consistent performance"
+      - "Dead Letter Queue for failed invocations"
+      - "AWS X-Ray tracing support"
+      - "CloudWatch Logs with configurable retention"
+      - "Lambda layers management (up to 5 layers)"
+      - "Secrets Manager and SSM Parameter Store integration"
+      - "EFS file system support for persistent storage"
+      - "Code signing configuration"
+      - "SnapStart for Java/Kotlin (faster cold starts)"
+      - "IAM roles with least privilege"
+      - "Multiple runtime support (Python, Node.js, Java, Go, .NET, Ruby)"
+      - "ARM64 architecture for cost savings"
+      - "IMDSv2 enforcement"
+
+    deployment_patterns:
+      - name: "REST API Pattern"
+        description: "API Gateway → Lambda → Backend Services"
+        use_case: "RESTful APIs, HTTP endpoints"
+      - name: "Event-Driven Pattern"
+        description: "EventBridge → Lambda"
+        use_case: "Scheduled tasks, event processing"
+      - name: "Stream Processing Pattern"
+        description: "Kinesis/DynamoDB → Lambda → Processing"
+        use_case: "Real-time data processing, CDC"
+      - name: "Queue Processing Pattern"
+        description: "SQS → Lambda → Async Processing"
+        use_case: "Asynchronous task processing, job queues"
+      - name: "VPC-Integrated Pattern"
+        description: "Lambda → VPC → Private Resources"
+        use_case: "Database access, private API calls"
+
+    use_cases:
+      - "RESTful API backends"
+      - "Scheduled data processing"
+      - "Event-driven microservices"
+      - "Stream processing pipelines"
+      - "Asynchronous task processing"
+      - "Webhooks and integrations"
+      - "Data transformations"
+      - "Real-time analytics"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+        archive: ">= 2.0.0"
+
+    compatible_with:
+      - "api-gateway-rest"
+      - "eventbridge"
+      - "sqs-queue"
+      - "sns-topic"
+      - "kinesis-stream"
+      - "dynamodb-table"
+      - "vpc-*"
+      - "efs"
+      - "secretsmanager"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      examples:
+        - path: "./examples/rest-api"
+          description: "REST API with API Gateway"
+          complexity: "intermediate"
+        - path: "./examples/event-driven"
+          description: "EventBridge scheduled and event-based"
+          complexity: "beginner"
+        - path: "./examples/stream-processing"
+          description: "Kinesis stream processing"
+          complexity: "advanced"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "AWS Well-Architected"
+
+  # --- ASG Launch Template ---
+
+  - id: "asg-launch-template"
+    name: "ASG Launch Template"
+    version: "1.0.0"
+    maturity: "stable"
+    category: "compute/virtual-machines"
+    subcategory: "auto-scaling"
+    path: "_library/compute/asg-launch-template"
+
+    description: "EC2 Auto Scaling with launch template, mixed instances, multiple scaling policies, and cost optimization"
+    long_description: |
+      Production-ready EC2 Auto Scaling Group with modern launch template.
+      Supports mixed instances policy for cost optimization, multiple scaling policies
+      (target tracking, step, scheduled), instance refresh for zero-downtime updates,
+      warm pools for faster scaling, Spot instances, CloudWatch monitoring with custom
+      metrics, and comprehensive cost optimization strategies.
+
+    tags:
+      - ec2
+      - auto-scaling
+      - asg
+      - launch-template
+      - spot-instances
+      - mixed-instances
+      - scaling-policies
+      - cost-optimization
+      - imdsv2
+
+    complexity: "intermediate"
+    setup_time_minutes: 12
+    variable_count: 52
+
+    cost:
+      estimated_monthly_usd: 100
+      cost_category: "medium"
+      cost_factors:
+        - "Instance type and count"
+        - "Spot vs On-Demand ratio"
+        - "EBS volumes"
+        - "Data transfer"
+        - "CloudWatch detailed monitoring"
+      cost_breakdown:
+        instances: 72
+        ebs_volumes: 12
+        monitoring: 8
+        data_transfer: 8
+      cost_optimization:
+        - "Use 70-80% Spot instances for 45-67% savings"
+        - "Enable mixed instances policy with multiple types"
+        - "Use capacity-optimized Spot allocation strategy"
+        - "Enable warm pools for faster scaling"
+        - "Use scheduled scaling for predictable patterns"
+        - "Right-size instance types based on metrics"
+
+    features:
+      - "Launch template with IMDSv2 enforcement"
+      - "Mixed instances policy for cost optimization"
+      - "Multiple scaling policies (target tracking, step, scheduled)"
+      - "Auto-scaling: CPU, memory, ALB request count"
+      - "Instance refresh for zero-downtime updates"
+      - "Warm pool configuration for faster scaling"
+      - "Lifecycle hooks support"
+      - "CloudWatch detailed monitoring"
+      - "CloudWatch agent with custom metrics"
+      - "IAM roles with SSM and CloudWatch permissions"
+      - "Security group management"
+      - "Spot instance support with capacity-optimized allocation"
+      - "Multiple instance type support"
+      - "Encrypted EBS volumes"
+      - "CloudWatch alarms for monitoring"
+      - "Health checks (EC2 and ELB)"
+      - "Termination policies"
+      - "ALB/NLB target group integration"
+
+    scaling_strategies:
+      - name: "Target Tracking - CPU"
+        description: "Scale based on average CPU utilization"
+        recommended_for: "Most workloads"
+      - name: "Target Tracking - Memory"
+        description: "Scale based on memory usage (requires CloudWatch agent)"
+        recommended_for: "Memory-intensive applications"
+      - name: "Target Tracking - ALB"
+        description: "Scale based on requests per target"
+        recommended_for: "Web applications"
+      - name: "Scheduled Scaling"
+        description: "Scale at specific times using cron expressions"
+        recommended_for: "Predictable traffic patterns"
+
+    use_cases:
+      - "Web application servers"
+      - "API backend services"
+      - "Batch processing workloads"
+      - "Worker nodes for job processing"
+      - "Stateless application tiers"
+      - "Development and testing environments"
+
+    maintainer:
+      team: "Platform Engineering"
+      primary: "platform-team@example.com"
+
+    dependencies:
+      terraform_version: ">= 1.5.0"
+      provider_versions:
+        aws: ">= 5.0.0, < 6.0.0"
+      required_modules:
+        - "vpc-*"
+
+    compatible_with:
+      - "vpc-standard"
+      - "vpc-advanced"
+      - "alb"
+      - "nlb"
+      - "efs"
+      - "monitoring"
+      - "iam"
+
+    metrics:
+      downloads: 0
+      rating: 0
+      rating_count: 0
+      deployments: 0
+      active_deployments: 0
+      last_updated: "2025-12-02"
+      first_published: "2025-12-02"
+
+    lifecycle:
+      created: "2025-12-02"
+      stabilized: "2025-12-02"
+
+    documentation:
+      readme: "./README.md"
+      changelog: "./CHANGELOG.md"
+      examples:
+        - path: "./examples/basic"
+          description: "Simple ASG with target tracking"
+          complexity: "beginner"
+        - path: "./examples/mixed-instances"
+          description: "Mixed instances with Spot optimization"
+          complexity: "intermediate"
+        - path: "./examples/spot"
+          description: "High Spot percentage for cost savings"
+          complexity: "intermediate"
+
+    testing:
+      unit_tests: 0
+      integration_tests: 0
+      coverage_percent: 0
+      test_status: "not-tested"
+
+    security:
+      checkov_passing: true
+      tfsec_passing: true
+      compliance:
+        - "CIS AWS Foundations"
+        - "IMDSv2 enforced"
+
+# End of module registry

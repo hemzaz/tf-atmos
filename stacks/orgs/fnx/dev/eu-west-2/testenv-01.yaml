@@ -1,9 +1,21 @@
 ---
+# TestEnv-01 Stack Configuration
+# This is the canonical stack definition for the testenv-01 environment
+
 import:
+  # Import base configuration first
+  - catalog/_base/defaults
+
+  # Import mixins (order matters for variable precedence)
   - mixins/tenant/fnx
   - mixins/stage/dev
   - mixins/region/eu-west-2
+
+  # Import org defaults
   - orgs/fnx/dev/_defaults
+
+  # Import component-specific configurations
+  # NOTE: Import paths should NOT include .yaml extension
   - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
   - orgs/fnx/dev/eu-west-2/testenv-01/components/networking
   - orgs/fnx/dev/eu-west-2/testenv-01/components/security
@@ -22,4 +34,6 @@ vars:
   region: eu-west-2
   account: dev
   aws_account_id: "${env:AWS_ACCOUNT_ID, REQUIRED_ACCOUNT_ID}"
+
+  # FIXED: Use consistent variable name matching the component
   vpc_cidr: "10.0.0.0/16"

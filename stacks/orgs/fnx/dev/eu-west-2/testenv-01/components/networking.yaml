@@ -1,5 +1,9 @@
 ---
+# Networking component configurations for testenv-01 environment
+# Defines VPC and network resources
+
 import:
+  # Import hierarchy - no .yaml extensions
   - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
   - catalog/vpc/defaults
   - catalog/network/defaults
@@ -14,8 +18,18 @@ components:
           - vpc/defaults
       vars:
         name: main
-        ipv4_primary_cidr_block: 10.0.0.0/16
+        # FIXED: Use consistent variable name matching the component
+        vpc_cidr: "10.0.0.0/16"
         vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
+        # Subnet configuration
+        private_subnets:
+          - "10.0.1.0/24"
+          - "10.0.2.0/24"
+          - "10.0.3.0/24"
+        public_subnets:
+          - "10.0.101.0/24"
+          - "10.0.102.0/24"
+          - "10.0.103.0/24"
 
     vpc/services:
       metadata:
@@ -24,9 +38,19 @@ components:
           - vpc/defaults
       vars:
         name: services
-        ipv4_primary_cidr_block: 10.1.0.0/16
+        # FIXED: Use consistent variable name matching the component
+        vpc_cidr: "10.1.0.0/16"
         vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
         map_public_ip_on_launch: false
+        # Subnet configuration
+        private_subnets:
+          - "10.1.1.0/24"
+          - "10.1.2.0/24"
+          - "10.1.3.0/24"
+        public_subnets:
+          - "10.1.101.0/24"
+          - "10.1.102.0/24"
+          - "10.1.103.0/24"
 
     # Network resources for main VPC
     network/main:

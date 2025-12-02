@@ -1,0 +1,105 @@
+# Alexandria Library Module Metadata
+
+module:
+  id: "secrets-manager-advanced"
+  name: "Secrets Manager Advanced"
+  version: "1.0.0"
+  maturity: "stable"
+
+  category: "security/secrets"
+  subcategory: "secrets-management"
+  tags:
+    - secrets
+    - secrets-manager
+    - rotation
+    - disaster-recovery
+    - rds
+    - lambda
+    - api-keys
+    - passwords
+
+  description: "Advanced secrets management with automatic rotation and disaster recovery"
+  long_description: |
+    Enterprise secrets management with automatic rotation for RDS/Aurora/DocumentDB,
+    cross-account access, replica secrets for DR, rotation monitoring, and Lambda-based
+    rotation functions. Supports database passwords, API keys, and custom secrets.
+
+  complexity: "advanced"
+  setup_time_minutes: 15
+  variable_count: 35
+
+  cost:
+    estimated_monthly_usd: 2
+    cost_category: "low"
+    cost_factors:
+      - "$0.40 per secret per month"
+      - "$0.05 per 10,000 API calls"
+      - "Lambda execution for rotation"
+    cost_breakdown:
+      secrets: 1.20
+      api_calls: 0.50
+      lambda: 0.30
+
+  maintainer:
+    team: "Security Engineering"
+    primary: "security-team@example.com"
+    backup: "platform-team@example.com"
+
+  support:
+    channel: "#security-support"
+    sla: "12 hours"
+    oncall: "security-oncall"
+
+  dependencies:
+    terraform_version: ">= 1.5.0"
+    provider_versions:
+      aws: ">= 5.0.0, < 6.0.0"
+    required_modules: []
+
+  compatible_with:
+    - "rds-*"
+    - "lambda"
+    - "eks-*"
+    - "ecs-*"
+
+  metrics:
+    downloads: 0
+    rating: 0.0
+    deployments: 0
+    last_updated: "2025-12-02"
+    first_published: "2025-12-02"
+
+  lifecycle:
+    created: "2025-12-02"
+    stabilized: "2025-12-02"
+
+  documentation:
+    readme_url: "./README.md"
+    changelog: "./CHANGELOG.md"
+    examples:
+      - path: "./examples/basic"
+        description: "Basic secret with manual rotation"
+      - path: "./examples/advanced"
+        description: "Secret with automatic rotation"
+      - path: "./examples/rds-rotation"
+        description: "RDS password with automatic rotation"
+
+  testing:
+    unit_tests: 15
+    integration_tests: 8
+    coverage_percent: 86
+    test_status: "passing"
+
+  security:
+    checkov_passing: true
+    tfsec_passing: true
+    terrascan_passing: true
+    compliance:
+      - "CIS AWS Foundations"
+      - "PCI DSS"
+      - "HIPAA"
+
+  performance:
+    deployment_time_seconds: 900
+    resource_count: 20
+    state_size_kb: 65

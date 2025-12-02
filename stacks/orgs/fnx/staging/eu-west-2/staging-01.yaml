@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# Staging-01 Stack Configuration
+# =============================================================================
+# Production-like staging environment for final validation before production
+# =============================================================================
+
+import:
+  # Import base configuration first
+  - catalog/_base/defaults
+
+  # Import mixins (order matters for variable precedence)
+  - mixins/tenant/fnx
+  - mixins/stage/staging
+  - mixins/region/eu-west-2
+
+  # Import org defaults
+  - orgs/fnx/staging/_defaults
+
+  # Import component-specific configurations
+  - orgs/fnx/staging/eu-west-2/staging-01/components/globals
+  - orgs/fnx/staging/eu-west-2/staging-01/components/networking
+  - orgs/fnx/staging/eu-west-2/staging-01/components/security
+  - orgs/fnx/staging/eu-west-2/staging-01/components/compute
+  - orgs/fnx/staging/eu-west-2/staging-01/components/services
+
+vars:
+  # Core variables for stack naming
+  tenant: fnx
+  environment: staging-01
+  stage: staging
+  account: staging
+  region: eu-west-2
+
+  # AWS Account ID
+  aws_account_id: "${env:AWS_STAGING_ACCOUNT_ID, 123456789012}"
+
+  # VPC configuration - staging mirrors production structure
+  vpc_cidr: "10.10.0.0/16"
+
+  # Description
+  description: "Staging-01 Environment - Production Validation"
+  namespace: staging-01

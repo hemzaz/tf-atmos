@@ -1,0 +1,831 @@
+---
+# Pattern Deployment Workflows
+# Automated workflows for deploying infrastructure patterns
+# Version: 1.0.0
+
+name: patterns
+description: "Workflows for deploying and managing infrastructure patterns"
+
+workflows:
+  # ===========================================================================
+  # EVENT-DRIVEN PATTERN WORKFLOWS
+  # ===========================================================================
+  deploy-event-driven:
+    description: "Deploy complete event-driven architecture pattern"
+    steps:
+      # Stage 1: Foundation
+      - name: "Deploy KMS encryption key"
+        command: atmos terraform apply kms -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy IAM roles and policies"
+        command: atmos terraform apply iam -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy CloudWatch log groups"
+        command: atmos terraform apply cloudwatch-logs -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 2: Storage and Error Handling
+      - name: "Deploy audit S3 bucket"
+        command: atmos terraform apply s3-audit -s {{ .stack }}
+        timeout: "3m"
+
+      - name: "Deploy DynamoDB state table"
+        command: atmos terraform apply dynamodb-state -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy DLQ for events"
+        command: atmos terraform apply dlq-events -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 3: Messaging Infrastructure
+      - name: "Deploy SQS buffered queues"
+        command: atmos terraform apply sqs-buffered -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy SNS fanout topics"
+        command: atmos terraform apply sns-fanout -s {{ .stack }}
+        timeout: "3m"
+
+      - name: "Deploy SNS alerts topic"
+        command: atmos terraform apply sns-alerts -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 4: Event Bus and Archival
+      - name: "Deploy EventBridge event bus"
+        command: atmos terraform apply eventbridge-bus -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy Firehose audit delivery"
+        command: atmos terraform apply firehose-audit -s {{ .stack }}
+        timeout: "5m"
+
+      # Stage 5: Lambda Consumers
+      - name: "Deploy Lambda consumer functions"
+        command: atmos terraform apply lambda-consumers -s {{ .stack }}
+        timeout: "10m"
+
+      # Stage 6: Step Functions Orchestration
+      - name: "Deploy Step Functions state machines"
+        command: atmos terraform apply step-functions -s {{ .stack }}
+        timeout: "10m"
+
+      # Stage 7: Event Routing
+      - name: "Deploy EventBridge rules"
+        command: atmos terraform apply eventbridge-rules -s {{ .stack }}
+        timeout: "5m"
+
+      # Stage 8: Observability
+      - name: "Deploy monitoring dashboards and alarms"
+        command: atmos terraform apply monitoring -s {{ .stack }}
+        timeout: "5m"
+
+      # Validation
+      - name: "Validate deployment"
+        command: |
+          echo "Validating event-driven pattern deployment..."
+          atmos terraform output eventbridge-bus -s {{ .stack }}
+          atmos terraform output lambda-consumers -s {{ .stack }}
+          atmos terraform output step-functions -s {{ .stack }}
+        timeout: "2m"
+
+  destroy-event-driven:
+    description: "Destroy event-driven architecture pattern (reverse order)"
+    steps:
+      - name: "Destroy monitoring"
+        command: atmos terraform destroy monitoring -s {{ .stack }} -auto-approve
+      - name: "Destroy EventBridge rules"
+        command: atmos terraform destroy eventbridge-rules -s {{ .stack }} -auto-approve
+      - name: "Destroy Step Functions"
+        command: atmos terraform destroy step-functions -s {{ .stack }} -auto-approve
+      - name: "Destroy Lambda consumers"
+        command: atmos terraform destroy lambda-consumers -s {{ .stack }} -auto-approve
+      - name: "Destroy Firehose audit"
+        command: atmos terraform destroy firehose-audit -s {{ .stack }} -auto-approve
+      - name: "Destroy EventBridge bus"
+        command: atmos terraform destroy eventbridge-bus -s {{ .stack }} -auto-approve
+      - name: "Destroy SNS topics"
+        command: |
+          atmos terraform destroy sns-alerts -s {{ .stack }} -auto-approve
+          atmos terraform destroy sns-fanout -s {{ .stack }} -auto-approve
+      - name: "Destroy SQS queues"
+        command: atmos terraform destroy sqs-buffered -s {{ .stack }} -auto-approve
+      - name: "Destroy DLQ and storage"
+        command: |
+          atmos terraform destroy dlq-events -s {{ .stack }} -auto-approve
+          atmos terraform destroy dynamodb-state -s {{ .stack }} -auto-approve
+          atmos terraform destroy s3-audit -s {{ .stack }} -auto-approve
+      - name: "Destroy foundation"
+        command: |
+          atmos terraform destroy cloudwatch-logs -s {{ .stack }} -auto-approve
+          atmos terraform destroy iam -s {{ .stack }} -auto-approve
+          atmos terraform destroy kms -s {{ .stack }} -auto-approve
+
+  plan-event-driven:
+    description: "Plan event-driven architecture pattern deployment"
+    steps:
+      - name: "Plan all components"
+        command: |
+          echo "Planning event-driven pattern for stack: {{ .stack }}"
+          atmos terraform plan kms -s {{ .stack }}
+          atmos terraform plan iam -s {{ .stack }}
+          atmos terraform plan cloudwatch-logs -s {{ .stack }}
+          atmos terraform plan s3-audit -s {{ .stack }}
+          atmos terraform plan dynamodb-state -s {{ .stack }}
+          atmos terraform plan dlq-events -s {{ .stack }}
+          atmos terraform plan sqs-buffered -s {{ .stack }}
+          atmos terraform plan sns-fanout -s {{ .stack }}
+          atmos terraform plan sns-alerts -s {{ .stack }}
+          atmos terraform plan eventbridge-bus -s {{ .stack }}
+          atmos terraform plan firehose-audit -s {{ .stack }}
+          atmos terraform plan lambda-consumers -s {{ .stack }}
+          atmos terraform plan step-functions -s {{ .stack }}
+          atmos terraform plan eventbridge-rules -s {{ .stack }}
+          atmos terraform plan monitoring -s {{ .stack }}
+
+  # ===========================================================================
+  # API GATEWAY PATTERN WORKFLOWS
+  # ===========================================================================
+  deploy-api-gateway:
+    description: "Deploy complete API Gateway pattern"
+    steps:
+      # Stage 1: Foundation
+      - name: "Deploy IAM roles"
+        command: atmos terraform apply iam -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy CloudWatch log groups"
+        command: atmos terraform apply cloudwatch-logs -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 2: Data Storage
+      - name: "Deploy DynamoDB tables"
+        command: |
+          atmos terraform apply dynamodb -s {{ .stack }}
+          atmos terraform apply dynamodb-connections -s {{ .stack }}
+        timeout: "10m"
+
+      # Stage 3: Security
+      - name: "Deploy Cognito user pool"
+        command: atmos terraform apply cognito -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy ACM certificate"
+        command: atmos terraform apply acm-certificate -s {{ .stack }}
+        timeout: "15m"
+
+      # Stage 4: Lambda Handlers
+      - name: "Deploy REST API Lambda handlers"
+        command: atmos terraform apply lambda-handlers -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy WebSocket Lambda handlers"
+        command: atmos terraform apply lambda-websocket -s {{ .stack }}
+        timeout: "10m"
+
+      # Stage 5: API Gateways
+      - name: "Deploy REST API Gateway"
+        command: atmos terraform apply api-gateway-rest -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy HTTP API Gateway"
+        command: atmos terraform apply api-gateway-http -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy WebSocket API Gateway"
+        command: atmos terraform apply api-gateway-websocket -s {{ .stack }}
+        timeout: "5m"
+
+      # Stage 6: Security Integration
+      - name: "Deploy Cognito authorizer"
+        command: atmos terraform apply cognito-authorizer -s {{ .stack }}
+        timeout: "3m"
+
+      - name: "Deploy JWT authorizer"
+        command: atmos terraform apply jwt-authorizer -s {{ .stack }}
+        timeout: "3m"
+
+      - name: "Deploy WAF"
+        command: atmos terraform apply waf -s {{ .stack }}
+        timeout: "10m"
+
+      # Stage 7: Domain Configuration
+      - name: "Deploy custom domains"
+        command: atmos terraform apply custom-domain -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy DNS records"
+        command: atmos terraform apply dns -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy usage plans and API keys"
+        command: atmos terraform apply usage-plans -s {{ .stack }}
+        timeout: "5m"
+
+      # Stage 8: Observability
+      - name: "Deploy monitoring"
+        command: atmos terraform apply monitoring -s {{ .stack }}
+        timeout: "5m"
+
+      # Validation
+      - name: "Validate deployment"
+        command: |
+          echo "Validating API Gateway pattern deployment..."
+          atmos terraform output api-gateway-rest -s {{ .stack }}
+          atmos terraform output api-gateway-http -s {{ .stack }}
+          atmos terraform output custom-domain -s {{ .stack }}
+          echo "Testing health endpoint..."
+          curl -s https://api.{{ .domain }}/rest/health || echo "Health check pending DNS propagation"
+        timeout: "3m"
+
+  destroy-api-gateway:
+    description: "Destroy API Gateway pattern (reverse order)"
+    steps:
+      - name: "Destroy monitoring"
+        command: atmos terraform destroy monitoring -s {{ .stack }} -auto-approve
+      - name: "Destroy domain configuration"
+        command: |
+          atmos terraform destroy usage-plans -s {{ .stack }} -auto-approve
+          atmos terraform destroy dns -s {{ .stack }} -auto-approve
+          atmos terraform destroy custom-domain -s {{ .stack }} -auto-approve
+      - name: "Destroy security integration"
+        command: |
+          atmos terraform destroy waf -s {{ .stack }} -auto-approve
+          atmos terraform destroy jwt-authorizer -s {{ .stack }} -auto-approve
+          atmos terraform destroy cognito-authorizer -s {{ .stack }} -auto-approve
+      - name: "Destroy API Gateways"
+        command: |
+          atmos terraform destroy api-gateway-websocket -s {{ .stack }} -auto-approve
+          atmos terraform destroy api-gateway-http -s {{ .stack }} -auto-approve
+          atmos terraform destroy api-gateway-rest -s {{ .stack }} -auto-approve
+      - name: "Destroy Lambda handlers"
+        command: |
+          atmos terraform destroy lambda-websocket -s {{ .stack }} -auto-approve
+          atmos terraform destroy lambda-handlers -s {{ .stack }} -auto-approve
+      - name: "Destroy security"
+        command: |
+          atmos terraform destroy acm-certificate -s {{ .stack }} -auto-approve
+          atmos terraform destroy cognito -s {{ .stack }} -auto-approve
+      - name: "Destroy data storage"
+        command: |
+          atmos terraform destroy dynamodb-connections -s {{ .stack }} -auto-approve
+          atmos terraform destroy dynamodb -s {{ .stack }} -auto-approve
+      - name: "Destroy foundation"
+        command: |
+          atmos terraform destroy cloudwatch-logs -s {{ .stack }} -auto-approve
+          atmos terraform destroy iam -s {{ .stack }} -auto-approve
+
+  plan-api-gateway:
+    description: "Plan API Gateway pattern deployment"
+    steps:
+      - name: "Plan all components"
+        command: |
+          echo "Planning API Gateway pattern for stack: {{ .stack }}"
+          atmos terraform plan iam -s {{ .stack }}
+          atmos terraform plan cloudwatch-logs -s {{ .stack }}
+          atmos terraform plan dynamodb -s {{ .stack }}
+          atmos terraform plan dynamodb-connections -s {{ .stack }}
+          atmos terraform plan cognito -s {{ .stack }}
+          atmos terraform plan acm-certificate -s {{ .stack }}
+          atmos terraform plan lambda-handlers -s {{ .stack }}
+          atmos terraform plan lambda-websocket -s {{ .stack }}
+          atmos terraform plan api-gateway-rest -s {{ .stack }}
+          atmos terraform plan api-gateway-http -s {{ .stack }}
+          atmos terraform plan api-gateway-websocket -s {{ .stack }}
+          atmos terraform plan cognito-authorizer -s {{ .stack }}
+          atmos terraform plan jwt-authorizer -s {{ .stack }}
+          atmos terraform plan waf -s {{ .stack }}
+          atmos terraform plan custom-domain -s {{ .stack }}
+          atmos terraform plan dns -s {{ .stack }}
+          atmos terraform plan usage-plans -s {{ .stack }}
+          atmos terraform plan monitoring -s {{ .stack }}
+
+  # ===========================================================================
+  # STREAMING PIPELINE PATTERN WORKFLOWS
+  # ===========================================================================
+  deploy-streaming-pipeline:
+    description: "Deploy complete streaming pipeline pattern"
+    steps:
+      # Stage 1: Foundation
+      - name: "Deploy KMS encryption key"
+        command: atmos terraform apply kms -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy IAM roles"
+        command: atmos terraform apply iam -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy secrets"
+        command: atmos terraform apply secretsmanager -s {{ .stack }}
+        timeout: "5m"
+
+      - name: "Deploy CloudWatch log groups"
+        command: atmos terraform apply cloudwatch-logs -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 2: Networking (if not already deployed)
+      - name: "Ensure VPC exists"
+        command: atmos terraform apply vpc -s {{ .stack }} || echo "VPC may already exist"
+        timeout: "10m"
+
+      - name: "Ensure security groups exist"
+        command: atmos terraform apply securitygroup -s {{ .stack }} || echo "Security groups may already exist"
+        timeout: "5m"
+
+      # Stage 3: Storage
+      - name: "Deploy S3 buckets"
+        command: |
+          atmos terraform apply s3-data-lake -s {{ .stack }}
+          atmos terraform apply s3-backup -s {{ .stack }}
+          atmos terraform apply s3-staging -s {{ .stack }}
+          atmos terraform apply s3-code -s {{ .stack }}
+          atmos terraform apply s3-analytics -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy DLQ"
+        command: atmos terraform apply sqs-dlq -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 4: State Management
+      - name: "Deploy DynamoDB tables"
+        command: |
+          atmos terraform apply dynamodb-lookup -s {{ .stack }}
+          atmos terraform apply dynamodb-state -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy ElastiCache"
+        command: atmos terraform apply elasticache -s {{ .stack }}
+        timeout: "15m"
+
+      # Stage 5: Data Catalog
+      - name: "Deploy Glue database"
+        command: atmos terraform apply glue-database -s {{ .stack }}
+        timeout: "3m"
+
+      - name: "Deploy Glue table"
+        command: atmos terraform apply glue-table -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 6: Ingestion
+      - name: "Deploy Kinesis streams"
+        command: |
+          atmos terraform apply kinesis-ingest -s {{ .stack }}
+          atmos terraform apply kinesis-enriched -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy API ingestion endpoint"
+        command: atmos terraform apply api-ingest -s {{ .stack }}
+        timeout: "5m"
+
+      # Stage 7: Analytics Storage (optional)
+      - name: "Deploy OpenSearch"
+        command: atmos terraform apply opensearch -s {{ .stack }} || echo "OpenSearch deployment skipped or already exists"
+        timeout: "30m"
+
+      # Stage 8: Processing
+      - name: "Deploy Lambda processors"
+        command: |
+          atmos terraform apply lambda-stream-processor -s {{ .stack }}
+          atmos terraform apply lambda-firehose-transformer -s {{ .stack }}
+        timeout: "10m"
+
+      # Stage 9: Kinesis Analytics (optional)
+      - name: "Deploy Kinesis Analytics"
+        command: atmos terraform apply kinesis-analytics -s {{ .stack }} || echo "Kinesis Analytics deployment skipped"
+        timeout: "15m"
+
+      # Stage 10: Delivery
+      - name: "Deploy Firehose to S3"
+        command: atmos terraform apply firehose-s3 -s {{ .stack }}
+        timeout: "10m"
+
+      - name: "Deploy Firehose to OpenSearch"
+        command: atmos terraform apply firehose-opensearch -s {{ .stack }} || echo "OpenSearch Firehose skipped"
+        timeout: "10m"
+
+      # Stage 11: Alerting
+      - name: "Deploy SNS alerts"
+        command: atmos terraform apply sns-alerts -s {{ .stack }}
+        timeout: "3m"
+
+      # Stage 12: Observability
+      - name: "Deploy monitoring"
+        command: atmos terraform apply monitoring -s {{ .stack }}
+        timeout: "5m"
+
+      # Validation
+      - name: "Validate deployment"
+        command: |
+          echo "Validating streaming pipeline pattern deployment..."
+          atmos terraform output kinesis-ingest -s {{ .stack }}
+          atmos terraform output firehose-s3 -s {{ .stack }}
+          atmos terraform output lambda-stream-processor -s {{ .stack }}
+          echo "Testing ingestion endpoint..."
+          curl -s -X POST https://{{ .api_endpoint }}/stream -d '{"test": "data"}' -H 'X-Partition-Key: test' || echo "API endpoint pending deployment"
+        timeout: "3m"
+
+  destroy-streaming-pipeline:
+    description: "Destroy streaming pipeline pattern (reverse order)"
+    steps:
+      - name: "Destroy monitoring"
+        command: atmos terraform destroy monitoring -s {{ .stack }} -auto-approve
+      - name: "Destroy alerting"
+        command: atmos terraform destroy sns-alerts -s {{ .stack }} -auto-approve
+      - name: "Destroy delivery"
+        command: |
+          atmos terraform destroy firehose-opensearch -s {{ .stack }} -auto-approve || true
+          atmos terraform destroy firehose-s3 -s {{ .stack }} -auto-approve
+      - name: "Destroy analytics"
+        command: atmos terraform destroy kinesis-analytics -s {{ .stack }} -auto-approve || true
+      - name: "Destroy processing"
+        command: |
+          atmos terraform destroy lambda-firehose-transformer -s {{ .stack }} -auto-approve
+          atmos terraform destroy lambda-stream-processor -s {{ .stack }} -auto-approve
+      - name: "Destroy OpenSearch"
+        command: atmos terraform destroy opensearch -s {{ .stack }} -auto-approve || true
+      - name: "Destroy ingestion"
+        command: |
+          atmos terraform destroy api-ingest -s {{ .stack }} -auto-approve
+          atmos terraform destroy kinesis-enriched -s {{ .stack }} -auto-approve
+          atmos terraform destroy kinesis-ingest -s {{ .stack }} -auto-approve
+      - name: "Destroy catalog"
+        command: |
+          atmos terraform destroy glue-table -s {{ .stack }} -auto-approve
+          atmos terraform destroy glue-database -s {{ .stack }} -auto-approve
+      - name: "Destroy state management"
+        command: |
+          atmos terraform destroy elasticache -s {{ .stack }} -auto-approve
+          atmos terraform destroy dynamodb-state -s {{ .stack }} -auto-approve
+          atmos terraform destroy dynamodb-lookup -s {{ .stack }} -auto-approve
+      - name: "Destroy storage"
+        command: |
+          atmos terraform destroy sqs-dlq -s {{ .stack }} -auto-approve
+          atmos terraform destroy s3-analytics -s {{ .stack }} -auto-approve
+          atmos terraform destroy s3-code -s {{ .stack }} -auto-approve
+          atmos terraform destroy s3-staging -s {{ .stack }} -auto-approve
+          atmos terraform destroy s3-backup -s {{ .stack }} -auto-approve
+          atmos terraform destroy s3-data-lake -s {{ .stack }} -auto-approve
+      - name: "Destroy foundation"
+        command: |
+          atmos terraform destroy cloudwatch-logs -s {{ .stack }} -auto-approve
+          atmos terraform destroy secretsmanager -s {{ .stack }} -auto-approve
+          atmos terraform destroy iam -s {{ .stack }} -auto-approve
+          atmos terraform destroy kms -s {{ .stack }} -auto-approve
+
+  plan-streaming-pipeline:
+    description: "Plan streaming pipeline pattern deployment"
+    steps:
+      - name: "Plan all components"
+        command: |
+          echo "Planning streaming pipeline pattern for stack: {{ .stack }}"
+          atmos terraform plan kms -s {{ .stack }}
+          atmos terraform plan iam -s {{ .stack }}
+          atmos terraform plan secretsmanager -s {{ .stack }}
+          atmos terraform plan cloudwatch-logs -s {{ .stack }}
+          atmos terraform plan s3-data-lake -s {{ .stack }}
+          atmos terraform plan s3-backup -s {{ .stack }}
+          atmos terraform plan s3-staging -s {{ .stack }}
+          atmos terraform plan s3-code -s {{ .stack }}
+          atmos terraform plan sqs-dlq -s {{ .stack }}
+          atmos terraform plan dynamodb-lookup -s {{ .stack }}
+          atmos terraform plan dynamodb-state -s {{ .stack }}
+          atmos terraform plan elasticache -s {{ .stack }}
+          atmos terraform plan glue-database -s {{ .stack }}
+          atmos terraform plan glue-table -s {{ .stack }}
+          atmos terraform plan kinesis-ingest -s {{ .stack }}
+          atmos terraform plan kinesis-enriched -s {{ .stack }}
+          atmos terraform plan api-ingest -s {{ .stack }}
+          atmos terraform plan opensearch -s {{ .stack }} || echo "OpenSearch plan skipped"
+          atmos terraform plan lambda-stream-processor -s {{ .stack }}
+          atmos terraform plan lambda-firehose-transformer -s {{ .stack }}
+          atmos terraform plan kinesis-analytics -s {{ .stack }} || echo "Kinesis Analytics plan skipped"
+          atmos terraform plan firehose-s3 -s {{ .stack }}
+          atmos terraform plan firehose-opensearch -s {{ .stack }} || echo "OpenSearch Firehose plan skipped"
+          atmos terraform plan sns-alerts -s {{ .stack }}
+          atmos terraform plan monitoring -s {{ .stack }}
+
+  # ===========================================================================
+  # PATTERN VALIDATION WORKFLOWS
+  # ===========================================================================
+  validate-pattern:
+    description: "Validate pattern configuration before deployment"
+    steps:
+      - name: "Validate pattern configuration"
+        command: |
+          echo "Validating pattern: {{ .pattern }}"
+          echo "Stack: {{ .stack }}"
+
+          # Validate Terraform configurations
+          case "{{ .pattern }}" in
+            "event-driven")
+              atmos terraform validate kms -s {{ .stack }}
+              atmos terraform validate iam -s {{ .stack }}
+              atmos terraform validate eventbridge-bus -s {{ .stack }}
+              atmos terraform validate lambda-consumers -s {{ .stack }}
+              atmos terraform validate step-functions -s {{ .stack }}
+              ;;
+            "api-gateway")
+              atmos terraform validate iam -s {{ .stack }}
+              atmos terraform validate api-gateway-rest -s {{ .stack }}
+              atmos terraform validate api-gateway-http -s {{ .stack }}
+              atmos terraform validate cognito -s {{ .stack }}
+              atmos terraform validate waf -s {{ .stack }}
+              ;;
+            "streaming-pipeline")
+              atmos terraform validate kms -s {{ .stack }}
+              atmos terraform validate kinesis-ingest -s {{ .stack }}
+              atmos terraform validate lambda-stream-processor -s {{ .stack }}
+              atmos terraform validate firehose-s3 -s {{ .stack }}
+              ;;
+            *)
+              echo "Unknown pattern: {{ .pattern }}"
+              exit 1
+              ;;
+          esac
+
+          echo "Pattern validation complete!"
+
+  validate-all-patterns:
+    description: "Validate all pattern configurations"
+    steps:
+      - name: "Validate event-driven pattern"
+        command: atmos workflow validate-pattern -f patterns.yaml pattern=event-driven stack={{ .stack }}
+
+      - name: "Validate api-gateway pattern"
+        command: atmos workflow validate-pattern -f patterns.yaml pattern=api-gateway stack={{ .stack }}
+
+      - name: "Validate streaming-pipeline pattern"
+        command: atmos workflow validate-pattern -f patterns.yaml pattern=streaming-pipeline stack={{ .stack }}
+
+  # ===========================================================================
+  # PATTERN TESTING WORKFLOWS
+  # ===========================================================================
+  test-pattern-integration:
+    description: "Run integration tests for a deployed pattern"
+    steps:
+      - name: "Run integration tests"
+        command: |
+          echo "Running integration tests for pattern: {{ .pattern }}"
+          echo "Stack: {{ .stack }}"
+
+          case "{{ .pattern }}" in
+            "event-driven")
+              echo "Testing EventBridge event flow..."
+              aws events put-events --entries '[{
+                "Source": "test.integration",
+                "DetailType": "TestEvent",
+                "Detail": "{\"test\": \"data\", \"timestamp\": \"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'\"}",
+                "EventBusName": "{{ .tenant }}-{{ .environment }}-events"
+              }]'
+
+              echo "Waiting for event processing..."
+              sleep 10
+
+              echo "Checking DLQ for failures..."
+              aws sqs get-queue-attributes \
+                --queue-url "https://sqs.{{ .region }}.amazonaws.com/{{ .account_id }}/{{ .tenant }}-{{ .environment }}-events-dlq" \
+                --attribute-names ApproximateNumberOfMessages
+
+              echo "Checking Step Functions executions..."
+              aws stepfunctions list-executions \
+                --state-machine-arn "arn:aws:states:{{ .region }}:{{ .account_id }}:stateMachine:{{ .tenant }}-{{ .environment }}-workflow-orchestrator" \
+                --max-items 5
+              ;;
+
+            "api-gateway")
+              echo "Testing API Gateway endpoints..."
+
+              # Health check
+              echo "Testing health endpoint..."
+              curl -s "https://api.{{ .domain }}/rest/health" | jq .
+
+              # Test with API key
+              echo "Testing authenticated endpoint..."
+              API_KEY=$(aws apigateway get-api-keys \
+                --include-values \
+                --query "items[?name=='{{ .tenant }}-{{ .environment }}-internal-key'].value" \
+                --output text)
+
+              curl -s "https://api.{{ .domain }}/rest/v1/users" \
+                -H "x-api-key: $API_KEY" \
+                -H "Authorization: Bearer {{ .token }}" | jq .
+              ;;
+
+            "streaming-pipeline")
+              echo "Testing streaming pipeline..."
+
+              # Send test record
+              echo "Sending test record to Kinesis..."
+              aws kinesis put-record \
+                --stream-name "{{ .tenant }}-{{ .environment }}-ingest-stream" \
+                --data "$(echo '{"event_id": "test-'$(date +%s)'", "event_type": "test", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'", "payload": "integration test"}' | base64)" \
+                --partition-key "test"
+
+              echo "Waiting for processing..."
+              sleep 30
+
+              echo "Checking Firehose delivery..."
+              aws firehose describe-delivery-stream \
+                --delivery-stream-name "{{ .tenant }}-{{ .environment }}-s3-delivery" \
+                --query "DeliveryStreamDescription.DeliveryStreamStatus"
+
+              echo "Checking DLQ..."
+              aws sqs get-queue-attributes \
+                --queue-url "https://sqs.{{ .region }}.amazonaws.com/{{ .account_id }}/{{ .tenant }}-{{ .environment }}-stream-dlq" \
+                --attribute-names ApproximateNumberOfMessages
+              ;;
+
+            *)
+              echo "Unknown pattern: {{ .pattern }}"
+              exit 1
+              ;;
+          esac
+
+          echo "Integration tests complete!"
+
+  test-pattern-load:
+    description: "Run load tests for a deployed pattern"
+    steps:
+      - name: "Run load tests"
+        command: |
+          echo "Running load tests for pattern: {{ .pattern }}"
+          echo "Stack: {{ .stack }}"
+          echo "Duration: {{ .duration | default "5m" }}"
+          echo "Rate: {{ .rate | default "100" }} requests/second"
+
+          case "{{ .pattern }}" in
+            "event-driven")
+              echo "Load testing EventBridge..."
+              for i in $(seq 1 {{ .rate | default "100" }}); do
+                aws events put-events --entries '[{
+                  "Source": "test.load",
+                  "DetailType": "LoadTestEvent",
+                  "Detail": "{\"iteration\": '$i', \"timestamp\": \"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'\"}",
+                  "EventBusName": "{{ .tenant }}-{{ .environment }}-events"
+                }]' &
+              done
+              wait
+              ;;
+
+            "api-gateway")
+              echo "Load testing API Gateway with artillery..."
+              # Requires artillery to be installed
+              artillery run tests/load/api-load.yml \
+                --target "https://api.{{ .domain }}" \
+                --duration {{ .duration | default "5m" }} \
+                --rate {{ .rate | default "100" }}
+              ;;
+
+            "streaming-pipeline")
+              echo "Load testing Kinesis with data generator..."
+              # Generate load test data
+              for i in $(seq 1 {{ .rate | default "100" }}); do
+                aws kinesis put-records \
+                  --stream-name "{{ .tenant }}-{{ .environment }}-ingest-stream" \
+                  --records "[$(for j in $(seq 1 10); do echo '{\"Data\": \"'$(echo "{\"id\": \"'$i'-'$j'\"}" | base64)'\", \"PartitionKey\": \"load-test-'$i'\"}'; done | tr '\n' ',' | sed 's/,$//')]" &
+              done
+              wait
+              ;;
+
+            *)
+              echo "Unknown pattern: {{ .pattern }}"
+              exit 1
+              ;;
+          esac
+
+          echo "Load tests complete!"
+
+  # ===========================================================================
+  # PATTERN COST ESTIMATION
+  # ===========================================================================
+  estimate-pattern-cost:
+    description: "Estimate costs for a pattern deployment"
+    steps:
+      - name: "Estimate costs"
+        command: |
+          echo "Estimating costs for pattern: {{ .pattern }}"
+          echo "Stack: {{ .stack }}"
+
+          case "{{ .pattern }}" in
+            "event-driven")
+              echo ""
+              echo "=== Event-Driven Pattern Cost Estimate ==="
+              echo ""
+              echo "Component                | Min/Month | Typical/Month | Max/Month"
+              echo "------------------------|-----------|---------------|----------"
+              echo "EventBridge             | \$1        | \$10           | \$100"
+              echo "Lambda                  | \$0        | \$20           | \$200"
+              echo "SQS                     | \$0        | \$5            | \$50"
+              echo "SNS                     | \$0        | \$5            | \$50"
+              echo "Step Functions          | \$0        | \$25           | \$250"
+              echo "DynamoDB                | \$1        | \$10           | \$100"
+              echo "S3 (Audit)              | \$1        | \$10           | \$100"
+              echo "CloudWatch              | \$5        | \$25           | \$100"
+              echo "KMS                     | \$1        | \$1            | \$10"
+              echo "Firehose                | \$0        | \$20           | \$200"
+              echo "------------------------|-----------|---------------|----------"
+              echo "TOTAL                   | \$9        | \$131          | \$1,160"
+              ;;
+
+            "api-gateway")
+              echo ""
+              echo "=== API Gateway Pattern Cost Estimate ==="
+              echo ""
+              echo "Component                | Min/Month | Typical/Month | Max/Month"
+              echo "------------------------|-----------|---------------|----------"
+              echo "REST API Gateway        | \$3.50     | \$35           | \$350"
+              echo "HTTP API Gateway        | \$1        | \$10           | \$100"
+              echo "WebSocket API           | \$1        | \$10           | \$100"
+              echo "Lambda                  | \$0        | \$20           | \$200"
+              echo "WAF                     | \$6        | \$15           | \$50"
+              echo "Cognito                 | \$0        | \$10           | \$100"
+              echo "DynamoDB                | \$1        | \$10           | \$100"
+              echo "ACM                     | \$0        | \$0            | \$0"
+              echo "Route53                 | \$1        | \$2            | \$10"
+              echo "CloudWatch              | \$5        | \$25           | \$100"
+              echo "------------------------|-----------|---------------|----------"
+              echo "TOTAL                   | \$18.50    | \$137          | \$1,110"
+              ;;
+
+            "streaming-pipeline")
+              echo ""
+              echo "=== Streaming Pipeline Pattern Cost Estimate ==="
+              echo ""
+              echo "Component                | Min/Month | Typical/Month | Max/Month"
+              echo "------------------------|-----------|---------------|----------"
+              echo "Kinesis Data Streams    | \$15       | \$75           | \$500"
+              echo "Kinesis Firehose        | \$10       | \$50           | \$300"
+              echo "Kinesis Analytics       | \$0        | \$80           | \$500"
+              echo "Lambda                  | \$0        | \$30           | \$200"
+              echo "S3                      | \$5        | \$50           | \$500"
+              echo "OpenSearch              | \$70       | \$200          | \$1000"
+              echo "DynamoDB                | \$1        | \$20           | \$100"
+              echo "ElastiCache             | \$25       | \$100          | \$400"
+              echo "Glue                    | \$1        | \$5            | \$50"
+              echo "CloudWatch              | \$5        | \$30           | \$100"
+              echo "KMS                     | \$1        | \$1            | \$10"
+              echo "------------------------|-----------|---------------|----------"
+              echo "TOTAL                   | \$133      | \$641          | \$3,660"
+              ;;
+
+            *)
+              echo "Unknown pattern: {{ .pattern }}"
+              exit 1
+              ;;
+          esac
+
+          echo ""
+          echo "Note: Actual costs will vary based on usage patterns, region, and specific configurations."
+          echo "Use AWS Cost Explorer and Pricing Calculator for accurate estimates."
+
+  # ===========================================================================
+  # PATTERN DOCUMENTATION
+  # ===========================================================================
+  generate-pattern-docs:
+    description: "Generate documentation for a pattern"
+    steps:
+      - name: "Generate documentation"
+        command: |
+          echo "Generating documentation for pattern: {{ .pattern }}"
+
+          DOCS_DIR="docs/patterns"
+          mkdir -p $DOCS_DIR
+
+          case "{{ .pattern }}" in
+            "event-driven")
+              cat > "$DOCS_DIR/event-driven-deployment-{{ .stack }}.md" << 'EOF'
+          # Event-Driven Pattern Deployment
+
+          ## Stack: {{ .stack }}
+          ## Deployed: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          ### Components Deployed
+
+          - EventBridge Event Bus: {{ .tenant }}-{{ .environment }}-events
+          - Lambda Consumers: order-processor, user-processor, notification-processor
+          - Step Functions: workflow-orchestrator
+          - SQS Queues: order-events, priority-events, batch-events
+          - SNS Topics: notifications, alerts
+          - DLQ: events-dlq
+
+          ### Access Information
+
+          - Event Bus ARN: arn:aws:events:{{ .region }}:{{ .account_id }}:event-bus/{{ .tenant }}-{{ .environment }}-events
+          - CloudWatch Dashboard: {{ .tenant }}-{{ .environment }}-event-driven
+
+          ### Testing
+
+          ```bash
+          # Send test event
+          atmos workflow test-pattern-integration -f patterns.yaml pattern=event-driven stack={{ .stack }}
+          ```
+
+          EOF
+              ;;
+            *)
+              echo "Documentation template not available for pattern: {{ .pattern }}"
+              ;;
+          esac
+
+          echo "Documentation generated at $DOCS_DIR/"

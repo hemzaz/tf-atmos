@@ -1,9 +1,13 @@
 ---
+# Global component configurations for testenv-01 environment
+# This file is imported by the main stack file and provides environment-wide settings
+
 import:
+  # Import hierarchy - no .yaml extensions
   - orgs/fnx/dev/eu-west-2/_defaults
   - mixins/development
 
-  # Catalog imports with defaults
+  # Import catalog defaults for all components used in this environment
   - catalog/vpc/defaults
   - catalog/network/defaults
   - catalog/infrastructure/defaults

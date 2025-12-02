@@ -187,3 +187,86 @@ variable "tags" {
   description = "Tags to apply to resources"
   default     = {}
 }
+
+# VPC Flow Logs Variables
+variable "enable_flow_logs" {
+  type        = bool
+  description = "Enable VPC Flow Logs for network monitoring and security analysis"
+  default     = true
+}
+
+variable "flow_logs_retention_days" {
+  type        = number
+  description = "Retention period in days for VPC Flow Logs in CloudWatch"
+  default     = 30
+
+  validation {
+    condition     = contains([0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.flow_logs_retention_days)
+    error_message = "Flow logs retention days must be a valid CloudWatch Logs retention period."
+  }
+}
+
+variable "flow_logs_aggregation_interval" {
+  type        = number
+  description = "Maximum interval of time during which a flow is captured and aggregated (60 or 600 seconds)"
+  default     = 600
+
+  validation {
+    condition     = contains([60, 600], var.flow_logs_aggregation_interval)
+    error_message = "Flow logs aggregation interval must be either 60 or 600 seconds."
+  }
+}
+
+variable "flow_logs_custom_format" {
+  type        = string
+  description = "Custom log format for VPC Flow Logs. If null, uses default format"
+  default     = null
+}
+
+variable "enable_flow_logs_alarms" {
+  type        = bool
+  description = "Enable CloudWatch alarms for VPC Flow Logs security events"
+  default     = true
+}
+
+variable "flow_logs_alarm_actions" {
+  type        = list(string)
+  description = "List of SNS topic ARNs to notify when Flow Logs alarms trigger"
+  default     = []
+}
+
+variable "ssh_access_alarm_threshold" {
+  type        = number
+  description = "Number of SSH access attempts before triggering alarm"
+  default     = 50
+}
+
+variable "rdp_access_alarm_threshold" {
+  type        = number
+  description = "Number of RDP access attempts before triggering alarm"
+  default     = 50
+}
+
+variable "rejected_connections_alarm_threshold" {
+  type        = number
+  description = "Number of rejected connections before triggering alarm"
+  default     = 100
+}
+
+variable "large_data_transfer_alarm_threshold" {
+  type        = number
+  description = "Bytes transferred in 15 minutes before triggering alarm (potential data exfiltration)"
+  default     = 1073741824 # 1GB
+}
+
+variable "port_scan_alarm_threshold" {
+  type        = number
+  description = "Number of port scan attempts before triggering alarm"
+  default     = 50
+}
+
+variable "flow_logs_s3_backup" {
+  type        = bool
+  description = "Enable S3 bucket for long-term Flow Logs storage and archival"
+  default     = false
+}

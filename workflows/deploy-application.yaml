@@ -1,0 +1,427 @@
+---
+# =============================================================================
+# Deploy Application Workflow
+# =============================================================================
+# Application layer deployment - assumes infrastructure is already in place
+#
+# Usage:
+#   atmos workflow deploy-app -f deploy-application.yaml tenant=<tenant> account=<account> environment=<environment>
+#
+# This workflow deploys application-layer components only:
+#   - Lambda functions
+#   - API Gateway
+#   - ECS services
+#   - External secrets
+#   - Application monitoring
+# =============================================================================
+
+name: deploy-application
+description: "Deploy application layer components only (assumes infrastructure exists)"
+
+workflows:
+  # =============================================================================
+  # Application Deployment
+  # =============================================================================
+  deploy-app:
+    description: "Deploy application layer components"
+    steps:
+      - name: "validate-infrastructure"
+        description: "Verify that infrastructure prerequisites exist"
+        run:
+          command: |
+            set -euo pipefail
+
+            # Colors
+            RED='\033[0;31m'
+            GREEN='\033[0;32m'
+            YELLOW='\033[1;33m'
+            BLUE='\033[0;34m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+            log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+            log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
+
+            echo -e "\n${WHITE}=== Application Deployment ===${NC}\n"
+
+            # Validate parameters
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              log_error "Missing required parameters"
+              echo "Usage: atmos workflow deploy-app -f deploy-application.yaml tenant=<tenant> account=<account> environment=<environment>"
+              exit 1
+            fi
+
+            STACK="${tenant}-${account}-${environment}"
+
+            echo "Configuration:"
+            echo "  Stack:       $STACK"
+            echo "  Auto-Approve: ${auto_approve:-false}"
+            echo
+
+            # Validate AWS credentials
+            if ! aws sts get-caller-identity >/dev/null 2>&1; then
+              log_error "Invalid AWS credentials"
+              exit 1
+            fi
+
+            # Check that VPC exists (basic infrastructure check)
+            log_info "Checking infrastructure prerequisites..."
+
+            VPC_EXISTS=false
+            if atmos terraform output vpc/main -s "$STACK" 2>/dev/null | grep -q "vpc_id"; then
+              VPC_EXISTS=true
+              log_success "VPC infrastructure verified"
+            else
+              log_warning "VPC output not found - infrastructure may not be deployed"
+            fi
+
+            # Check EKS if applicable
+            if atmos list components -s "$STACK" 2>/dev/null | grep -q "^eks"; then
+              if atmos terraform output eks/main -s "$STACK" 2>/dev/null | grep -q "cluster_endpoint"; then
+                log_success "EKS cluster verified"
+              else
+                log_warning "EKS cluster output not found - may need deployment"
+              fi
+            fi
+
+            log_success "Infrastructure validation complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-secrets"
+        description: "Deploy secrets management components"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${BLUE}=== Deploying Secrets Management ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            # Deploy secrets manager components
+            SECRETS_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "secretsmanager" || echo "")
+
+            for component in $SECRETS_COMPONENTS; do
+              log_info "Deploying $component..."
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                else
+                  log_info "$component planned"
+                fi
+              fi
+            done
+
+            # Deploy external secrets operators
+            EXTERNAL_SECRETS=$(atmos list components -s "$STACK" 2>/dev/null | grep "external-secrets" || echo "")
+
+            for component in $EXTERNAL_SECRETS; do
+              log_info "Deploying $component..."
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                fi
+              fi
+            done
+
+            log_success "Secrets management deployment complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-lambda"
+        description: "Deploy Lambda functions"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${BLUE}=== Deploying Lambda Functions ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            # Deploy Lambda components
+            LAMBDA_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "lambda" || echo "")
+
+            if [[ -z "$LAMBDA_COMPONENTS" ]]; then
+              log_info "No Lambda components found in stack"
+            else
+              for component in $LAMBDA_COMPONENTS; do
+                log_info "Deploying $component..."
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  fi
+                fi
+              done
+            fi
+
+            log_success "Lambda deployment complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-api-gateway"
+        description: "Deploy API Gateway resources"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${BLUE}=== Deploying API Gateway ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            # Deploy API Gateway components
+            APIGW_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "apigateway" || echo "")
+
+            if [[ -z "$APIGW_COMPONENTS" ]]; then
+              log_info "No API Gateway components found in stack"
+            else
+              for component in $APIGW_COMPONENTS; do
+                log_info "Deploying $component..."
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  fi
+                fi
+              done
+            fi
+
+            log_success "API Gateway deployment complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-ecs-services"
+        description: "Deploy ECS services"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${BLUE}=== Deploying ECS Services ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            # Deploy ECS service components
+            ECS_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "ecs" | grep -v "cluster" || echo "")
+
+            if [[ -z "$ECS_COMPONENTS" ]]; then
+              log_info "No ECS service components found in stack"
+            else
+              for component in $ECS_COMPONENTS; do
+                log_info "Deploying $component..."
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  fi
+                fi
+              done
+            fi
+
+            log_success "ECS services deployment complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-app-monitoring"
+        description: "Deploy application monitoring"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${BLUE}=== Deploying Application Monitoring ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            # Deploy monitoring components
+            MONITORING_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "monitoring" || echo "")
+
+            for component in $MONITORING_COMPONENTS; do
+              log_info "Deploying $component..."
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                fi
+              fi
+            done
+
+            log_success "Monitoring deployment complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "application-summary"
+        description: "Print deployment summary"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            STACK="${tenant}-${account}-${environment}"
+
+            echo -e "\n${WHITE}=== Application Deployment Summary ===${NC}\n"
+
+            echo "Stack: $STACK"
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+
+            if [[ "${auto_approve:-false}" == "true" ]]; then
+              echo -e "${GREEN}Application layer deployed successfully${NC}"
+            else
+              echo "Plans generated. Set auto_approve=true to apply changes."
+            fi
+
+            echo
+            echo "Deployed Components:"
+            echo "  - Secrets Management"
+            echo "  - Lambda Functions"
+            echo "  - API Gateway"
+            echo "  - ECS Services"
+            echo "  - Application Monitoring"
+            echo
+
+            echo "Useful Commands:"
+            echo "  # View API Gateway URL"
+            echo "  atmos terraform output apigateway/main -s $STACK"
+            echo
+            echo "  # View Lambda function names"
+            echo "  atmos terraform output lambda -s $STACK"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # Hot Deploy - Fast application update
+  # =============================================================================
+  hot-deploy:
+    description: "Quick application deployment (Lambda and API Gateway only)"
+    steps:
+      - name: "hot-deploy"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            echo -e "\n${WHITE}=== Hot Deploy (Quick Application Update) ===${NC}\n"
+
+            STACK="${tenant:-}-${account:-}-${environment:-}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            if [[ "$STACK" == "--" ]]; then
+              echo "ERROR: Missing parameters"
+              echo "Usage: atmos workflow hot-deploy -f deploy-application.yaml tenant=<t> account=<a> environment=<e> auto_approve=true"
+              exit 1
+            fi
+
+            echo "Stack: $STACK"
+            echo
+
+            # Deploy only Lambda and API Gateway
+            for pattern in lambda apigateway; do
+              COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^$pattern" || echo "")
+
+              for component in $COMPONENTS; do
+                echo -e "${BLUE}Deploying $component...${NC}"
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    echo -e "${GREEN}Deployed: $component${NC}"
+                  fi
+                fi
+              done
+            done
+
+            echo -e "\n${GREEN}Hot deploy complete${NC}"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # Deploy Specific Application Component
+  # =============================================================================
+  component:
+    description: "Deploy a specific application component"
+    steps:
+      - name: "deploy-component"
+        run:
+          command: |
+            set -euo pipefail
+
+            STACK="${tenant:-}-${account:-}-${environment:-}"
+            COMPONENT="${component:-}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            if [[ -z "$COMPONENT" ]] || [[ "$STACK" == "--" ]]; then
+              echo "ERROR: Missing parameters"
+              echo "Usage: atmos workflow component -f deploy-application.yaml tenant=<t> account=<a> environment=<e> component=<component> auto_approve=true"
+              exit 1
+            fi
+
+            echo "Deploying component: $COMPONENT"
+            echo "Stack: $STACK"
+            echo
+
+            if atmos terraform plan "$COMPONENT" -s "$STACK"; then
+              if [[ "$AUTO_APPROVE" == "true" ]]; then
+                atmos terraform apply "$COMPONENT" -s "$STACK" -auto-approve
+                echo "Deployed: $COMPONENT"
+              else
+                echo "Plan generated. Set auto_approve=true to apply."
+              fi
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1

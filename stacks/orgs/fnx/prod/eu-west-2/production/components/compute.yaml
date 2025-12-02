@@ -1,0 +1,317 @@
+---
+# =============================================================================
+# Compute Component Configurations for Production Environment
+# =============================================================================
+# Production compute with high availability, auto-scaling, and full monitoring
+# Multi-AZ deployments, reserved capacity, enhanced security
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-2/production/components/globals
+  - catalog/eks/defaults
+  - catalog/ec2/defaults
+  - catalog/external-secrets/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # EKS Cluster - Main Application Workloads (Production HA)
+    # ==========================================================================
+    eks/main:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        cluster_name: "production-main"
+        kubernetes_version: "${eks_kubernetes_version}"
+
+        # Network configuration
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_ids: "${output.vpc/main.private_subnet_ids}"
+
+        # Private-only endpoint for production
+        endpoint_private_access: true
+        endpoint_public_access: false
+
+        # Security settings - maximum protection
+        encrypt_secrets: true
+        secrets_encryption_kms_key_arn: "${output.kms/main.key_arn}"
+
+        # Comprehensive logging
+        enable_cluster_logging: true
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+        log_retention_days: 90
+
+        # IRSA for fine-grained pod permissions
+        enable_irsa: true
+
+        # Node groups - production sizing with HA
+        node_groups:
+          # General purpose workers
+          workers:
+            enabled: true
+            instance_types: ["m5.xlarge"]
+            desired_size: 6
+            min_size: 3
+            max_size: 12
+            labels:
+              role: worker
+              environment: production
+            capacity_type: "ON_DEMAND"  # Stable capacity for production
+            disk_size: 100
+            disk_type: "gp3"
+            disk_encrypted: true
+
+            # Spread across AZs
+            subnet_ids: "${output.vpc/main.private_subnet_ids}"
+
+            tags:
+              NodeGroup: workers
+
+          # Monitoring and observability
+          monitoring:
+            enabled: true
+            instance_types: ["m5.large"]
+            desired_size: 3
+            min_size: 2
+            max_size: 4
+            labels:
+              role: monitoring
+            taints:
+              - key: dedicated
+                value: monitoring
+                effect: "NO_SCHEDULE"
+            capacity_type: "ON_DEMAND"
+            disk_size: 200  # Extra space for metrics
+
+          # High-memory workloads
+          memory-optimized:
+            enabled: true
+            instance_types: ["r5.xlarge"]
+            desired_size: 3
+            min_size: 2
+            max_size: 6
+            labels:
+              role: memory-optimized
+            capacity_type: "ON_DEMAND"
+            disk_size: 100
+
+        # Cluster addons
+        cluster_addons:
+          coredns:
+            most_recent: true
+          kube-proxy:
+            most_recent: true
+          vpc-cni:
+            most_recent: true
+            configuration_values:
+              enableNetworkPolicy: "true"
+
+      tags:
+        Cluster: production-main
+        Purpose: "application-workloads"
+        CriticalityLevel: "high"
+        SLA: "99.9"
+
+    # ==========================================================================
+    # EKS Cluster - Data Processing Workloads (Production HA)
+    # ==========================================================================
+    eks/data:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        cluster_name: "production-data"
+        kubernetes_version: "${eks_kubernetes_version}"
+
+        vpc_id: "${output.vpc/services.vpc_id}"
+        subnet_ids: "${output.vpc/services.private_subnet_ids}"
+
+        endpoint_private_access: true
+        endpoint_public_access: false
+
+        encrypt_secrets: true
+        secrets_encryption_kms_key_arn: "${output.kms/main.key_arn}"
+
+        enable_cluster_logging: true
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+        log_retention_days: 90
+
+        enable_irsa: true
+
+        node_groups:
+          # Data processing workers
+          data-workers:
+            enabled: true
+            instance_types: ["r5.2xlarge"]
+            desired_size: 4
+            min_size: 3
+            max_size: 8
+            labels:
+              role: data-processing
+            capacity_type: "ON_DEMAND"
+            disk_size: 200
+            disk_type: "gp3"
+            disk_encrypted: true
+
+          # Batch processing (can use spot for cost savings)
+          batch-workers:
+            enabled: true
+            instance_types: ["m5.2xlarge", "m5.xlarge"]
+            desired_size: 2
+            min_size: 0
+            max_size: 10
+            labels:
+              role: batch
+            taints:
+              - key: workload
+                value: batch
+                effect: "NO_SCHEDULE"
+            capacity_type: "SPOT"
+            disk_size: 100
+
+      tags:
+        Cluster: production-data
+        Purpose: "data-processing"
+
+    # ==========================================================================
+    # EC2 Bastion Host (Production Hardened)
+    # ==========================================================================
+    ec2/bastion:
+      metadata:
+        component: ec2
+      vars:
+        name: "production-bastion"
+        instance_type: "t3.small"
+
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_id: "${output.vpc/main.private_subnet_ids[0]}"  # Private subnet in production
+
+        # SSH key management
+        create_ssh_keys: true
+        store_ssh_keys_in_secrets_manager: true
+        ssh_key_algorithm: "ED25519"  # Stronger algorithm
+        key_name: "production-bastion-key"
+
+        # IMDSv2 required
+        metadata_options:
+          http_endpoint: "enabled"
+          http_tokens: "required"  # IMDSv2 required
+          http_put_response_hop_limit: 1
+
+        # Security groups - highly restrictive
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal VPN only"
+
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.20.0.0/16", "10.21.0.0/16"]
+            description: "SSH to VPC resources"
+
+        # Monitoring
+        monitoring_enabled: true
+        ebs_optimized: true
+
+        # Root volume - encrypted
+        root_block_device:
+          volume_type: "gp3"
+          volume_size: 20
+          encrypted: true
+          kms_key_id: "${output.kms/main.key_arn}"
+          delete_on_termination: true
+
+        # CloudWatch agent
+        enable_cloudwatch_agent: true
+
+      tags:
+        Role: bastion
+        Access: restricted
+        CriticalityLevel: "high"
+
+    # ==========================================================================
+    # External Secrets Operator - Main Cluster
+    # ==========================================================================
+    external-secrets/main:
+      metadata:
+        component: external-secrets
+      vars:
+        enabled: true
+        cluster_name: "${output.eks/main.cluster_name}"
+        host: "${output.eks/main.cluster_endpoint}"
+        cluster_ca_certificate: "${output.eks/main.cluster_ca_certificate}"
+        oidc_provider_arn: "${output.eks/main.oidc_provider_arn}"
+        oidc_provider_url: "${output.eks/main.oidc_provider_url}"
+
+        namespace:
+          name: "external-secrets"
+          create: true
+        serviceaccount:
+          name: "external-secrets"
+        helm:
+          chart_version: "0.9.9"
+
+        path_prefix: "production/${secrets_manager_path_prefix}"
+
+        # Create multiple secret stores
+        secret_stores:
+          default_cluster:
+            create: true
+          certificate:
+            create: true
+          database:
+            create: true
+
+        # Rate limiting for production
+        refresh_interval: "1h"
+
+    # ==========================================================================
+    # External Secrets Operator - Data Cluster
+    # ==========================================================================
+    external-secrets/data:
+      metadata:
+        component: external-secrets
+      vars:
+        enabled: true
+        cluster_name: "${output.eks/data.cluster_name}"
+        host: "${output.eks/data.cluster_endpoint}"
+        cluster_ca_certificate: "${output.eks/data.cluster_ca_certificate}"
+        oidc_provider_arn: "${output.eks/data.oidc_provider_arn}"
+        oidc_provider_url: "${output.eks/data.oidc_provider_url}"
+
+        namespace:
+          name: "external-secrets"
+          create: true
+        serviceaccount:
+          name: "external-secrets"
+        helm:
+          chart_version: "0.9.9"
+
+        path_prefix: "production/data/${secrets_manager_path_prefix}"
+
+        secret_stores:
+          default_cluster:
+            create: true
+          database:
+            create: true
+
+        refresh_interval: "1h"

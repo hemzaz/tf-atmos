@@ -21,10 +21,20 @@ vars:
     guardrails_enabled: true
 
 # Production-specific defaults for terraform components
-terraform:
-  vars:
-    environment_type: "production"
-    multi_az: true
-    deletion_protection: true
-    automatic_backup_retention: 30
-    create_alarms: true
+# FIXED: Moved terraform block under components
+components:
+  terraform:
+    # These settings apply to all Terraform components in production
+    _environment_defaults:
+      metadata:
+        type: abstract
+      vars:
+        environment_type: "production"
+        multi_az: true
+        deletion_protection: true
+        automatic_backup_retention: 30
+        create_alarms: true
+        # Production sizing
+        instance_size: "large"
+        min_capacity: 2
+        max_capacity: 10

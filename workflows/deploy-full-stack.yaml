@@ -1,0 +1,647 @@
+---
+# =============================================================================
+# Deploy Full Stack Workflow
+# =============================================================================
+# Complete environment deployment with proper dependency ordering
+#
+# Usage:
+#   atmos workflow deploy-full-stack -f deploy-full-stack.yaml tenant=<tenant> account=<account> environment=<environment>
+#
+# This workflow deploys:
+#   1. Backend (Terraform state)
+#   2. IAM roles and policies
+#   3. VPC and networking
+#   4. Security groups
+#   5. Compute resources (EC2, EKS)
+#   6. Data resources (RDS, DynamoDB)
+#   7. Services (API Gateway, Lambda)
+#   8. Monitoring and alerting
+# =============================================================================
+
+name: deploy-full-stack
+description: "Complete infrastructure stack deployment with dependency ordering"
+
+workflows:
+  # =============================================================================
+  # Full Stack Deployment
+  # =============================================================================
+  deploy:
+    description: "Deploy complete infrastructure stack in dependency order"
+    steps:
+      - name: "validate-and-init"
+        description: "Validate parameters and initialize deployment"
+        run:
+          command: |
+            set -euo pipefail
+
+            # Colors
+            RED='\033[0;31m'
+            GREEN='\033[0;32m'
+            YELLOW='\033[1;33m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            WHITE='\033[1;37m'
+            BOLD='\033[1m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+            log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+            log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
+            log_step() { echo -e "\n${CYAN}${BOLD}>>> $* <<<${NC}\n"; }
+
+            echo -e "\n${WHITE}${BOLD}========================================${NC}"
+            echo -e "${WHITE}${BOLD}    FULL STACK DEPLOYMENT WORKFLOW${NC}"
+            echo -e "${WHITE}${BOLD}========================================${NC}\n"
+
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+            # Validate required parameters
+            MISSING_PARAMS=()
+            [[ -z "${tenant:-}" ]] && MISSING_PARAMS+=("tenant")
+            [[ -z "${account:-}" ]] && MISSING_PARAMS+=("account")
+            [[ -z "${environment:-}" ]] && MISSING_PARAMS+=("environment")
+
+            if [[ ${#MISSING_PARAMS[@]} -gt 0 ]]; then
+              log_error "Missing required parameters: ${MISSING_PARAMS[*]}"
+              echo
+              echo "Usage:"
+              echo "  atmos workflow deploy-full-stack -f deploy-full-stack.yaml tenant=<tenant> account=<account> environment=<environment>"
+              echo
+              echo "Required parameters:"
+              echo "  tenant=<name>        Tenant name (e.g., 'fnx')"
+              echo "  account=<name>       Account name (e.g., 'dev', 'prod')"
+              echo "  environment=<name>   Environment name (e.g., 'testenv-01')"
+              echo
+              echo "Optional parameters:"
+              echo "  auto_approve=true    Auto-approve all applies"
+              echo "  skip_backend=true    Skip backend deployment"
+              echo "  skip_validation=true Skip pre-deployment validation"
+              echo "  dry_run=true         Show what would be deployed"
+              echo "  components=<list>    Comma-separated list of components to deploy"
+              exit 1
+            fi
+
+            STACK="${tenant}-${account}-${environment}"
+            REGION="${region:-eu-west-2}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            echo "Deployment Configuration:"
+            echo "  Stack:        $STACK"
+            echo "  Tenant:       ${tenant}"
+            echo "  Account:      ${account}"
+            echo "  Environment:  ${environment}"
+            echo "  Region:       $REGION"
+            echo "  Auto-Approve: $AUTO_APPROVE"
+            echo "  Dry Run:      $DRY_RUN"
+
+            # Validate AWS credentials
+            log_info "Validating AWS credentials..."
+            if ! aws sts get-caller-identity >/dev/null 2>&1; then
+              log_error "Invalid AWS credentials"
+              exit 1
+            fi
+
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+            echo "  AWS Account:  $AWS_ACCOUNT_ID"
+
+            # Validate stack exists
+            log_info "Validating stack configuration..."
+            if ! atmos list stacks 2>/dev/null | grep -q "$STACK"; then
+              log_error "Stack '$STACK' not found in Atmos configuration"
+              echo "Available stacks:"
+              atmos list stacks 2>/dev/null || echo "  (none found)"
+              exit 1
+            fi
+
+            log_success "Validation complete - ready to deploy"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-layer-1-foundation"
+        description: "Deploy foundation layer: backend and IAM"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            YELLOW='\033[1;33m'
+            CYAN='\033[0;36m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+            log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
+
+            echo -e "\n${CYAN}=== Layer 1: Foundation (Backend, IAM) ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+            SKIP_BACKEND="${skip_backend:-false}"
+
+            # Deploy backend
+            if [[ "$SKIP_BACKEND" != "true" ]]; then
+              BACKEND_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^backend" || echo "")
+
+              for component in $BACKEND_COMPONENTS; do
+                log_info "Processing $component..."
+
+                if [[ "$DRY_RUN" == "true" ]]; then
+                  echo "[DRY RUN] Would deploy: $component"
+                  continue
+                fi
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  else
+                    log_info "$component planned - set auto_approve=true to apply"
+                  fi
+                fi
+              done
+            else
+              log_info "Skipping backend deployment (skip_backend=true)"
+            fi
+
+            # Deploy IAM
+            IAM_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^iam" || echo "")
+
+            for component in $IAM_COMPONENTS; do
+              log_info "Processing $component..."
+
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "[DRY RUN] Would deploy: $component"
+                continue
+              fi
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                else
+                  log_info "$component planned - set auto_approve=true to apply"
+                fi
+              fi
+            done
+
+            log_success "Layer 1 (Foundation) complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-layer-2-networking"
+        description: "Deploy networking layer: VPC, subnets, NAT"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${CYAN}=== Layer 2: Networking (VPC, Subnets) ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            # Deploy VPC components
+            VPC_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^vpc" || echo "")
+
+            for component in $VPC_COMPONENTS; do
+              log_info "Processing $component..."
+
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "[DRY RUN] Would deploy: $component"
+                continue
+              fi
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                else
+                  log_info "$component planned"
+                fi
+              fi
+            done
+
+            # Deploy network components
+            NETWORK_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^network" || echo "")
+
+            for component in $NETWORK_COMPONENTS; do
+              log_info "Processing $component..."
+
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "[DRY RUN] Would deploy: $component"
+                continue
+              fi
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                fi
+              fi
+            done
+
+            log_success "Layer 2 (Networking) complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-layer-3-security"
+        description: "Deploy security layer: security groups, secrets, ACM"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${CYAN}=== Layer 3: Security (SG, Secrets, ACM) ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            # Security components (in order)
+            SECURITY_PATTERNS="securitygroup secretsmanager acm"
+
+            for pattern in $SECURITY_PATTERNS; do
+              COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^$pattern" || echo "")
+
+              for component in $COMPONENTS; do
+                log_info "Processing $component..."
+
+                if [[ "$DRY_RUN" == "true" ]]; then
+                  echo "[DRY RUN] Would deploy: $component"
+                  continue
+                fi
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  fi
+                fi
+              done
+            done
+
+            log_success "Layer 3 (Security) complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-layer-4-compute"
+        description: "Deploy compute layer: EC2, EKS, ECS"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${CYAN}=== Layer 4: Compute (EC2, EKS, ECS) ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            # Compute components (in order)
+            COMPUTE_PATTERNS="ec2 eks ecs"
+
+            for pattern in $COMPUTE_PATTERNS; do
+              COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^$pattern" | grep -v "addons" || echo "")
+
+              for component in $COMPONENTS; do
+                log_info "Processing $component..."
+
+                if [[ "$DRY_RUN" == "true" ]]; then
+                  echo "[DRY RUN] Would deploy: $component"
+                  continue
+                fi
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  fi
+                fi
+              done
+            done
+
+            # Deploy EKS addons after EKS clusters
+            ADDON_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "eks-addons" || echo "")
+
+            for component in $ADDON_COMPONENTS; do
+              log_info "Processing $component..."
+
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "[DRY RUN] Would deploy: $component"
+                continue
+              fi
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                fi
+              fi
+            done
+
+            log_success "Layer 4 (Compute) complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-layer-5-data"
+        description: "Deploy data layer: RDS, DynamoDB, ElastiCache"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${CYAN}=== Layer 5: Data (RDS, DynamoDB) ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            # Data components
+            DATA_PATTERNS="rds dynamodb elasticache infrastructure"
+
+            for pattern in $DATA_PATTERNS; do
+              COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^$pattern" || echo "")
+
+              for component in $COMPONENTS; do
+                log_info "Processing $component..."
+
+                if [[ "$DRY_RUN" == "true" ]]; then
+                  echo "[DRY RUN] Would deploy: $component"
+                  continue
+                fi
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  fi
+                fi
+              done
+            done
+
+            log_success "Layer 5 (Data) complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-layer-6-services"
+        description: "Deploy services layer: API Gateway, Lambda, external-secrets"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${CYAN}=== Layer 6: Services (API GW, Lambda) ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            # Service components
+            SERVICE_PATTERNS="apigateway lambda external-secrets"
+
+            for pattern in $SERVICE_PATTERNS; do
+              COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^$pattern" || echo "")
+
+              for component in $COMPONENTS; do
+                log_info "Processing $component..."
+
+                if [[ "$DRY_RUN" == "true" ]]; then
+                  echo "[DRY RUN] Would deploy: $component"
+                  continue
+                fi
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    log_success "$component deployed"
+                  fi
+                fi
+              done
+            done
+
+            log_success "Layer 6 (Services) complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deploy-layer-7-monitoring"
+        description: "Deploy monitoring layer: CloudWatch, alarms, dashboards"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            CYAN='\033[0;36m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${CYAN}=== Layer 7: Monitoring (CloudWatch, Alarms) ===${NC}\n"
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            # Monitoring components
+            MONITORING_COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^monitoring" || echo "")
+
+            for component in $MONITORING_COMPONENTS; do
+              log_info "Processing $component..."
+
+              if [[ "$DRY_RUN" == "true" ]]; then
+                echo "[DRY RUN] Would deploy: $component"
+                continue
+              fi
+
+              if atmos terraform plan "$component" -s "$STACK"; then
+                if [[ "$AUTO_APPROVE" == "true" ]]; then
+                  atmos terraform apply "$component" -s "$STACK" -auto-approve
+                  log_success "$component deployed"
+                fi
+              fi
+            done
+
+            log_success "Layer 7 (Monitoring) complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "deployment-summary"
+        description: "Print deployment summary and next steps"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            WHITE='\033[1;37m'
+            CYAN='\033[0;36m'
+            NC='\033[0m'
+
+            STACK="${tenant}-${account}-${environment}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            echo -e "\n${WHITE}========================================${NC}"
+            echo -e "${WHITE}     DEPLOYMENT SUMMARY${NC}"
+            echo -e "${WHITE}========================================${NC}\n"
+
+            echo "Stack: $STACK"
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Mode: DRY RUN - No changes were made"
+            elif [[ "$AUTO_APPROVE" == "true" ]]; then
+              echo -e "Mode: ${GREEN}FULL DEPLOYMENT${NC}"
+              echo
+              echo "Deployed Layers:"
+              echo "  1. Foundation (Backend, IAM)"
+              echo "  2. Networking (VPC, Subnets)"
+              echo "  3. Security (Security Groups, Secrets)"
+              echo "  4. Compute (EC2, EKS)"
+              echo "  5. Data (RDS, DynamoDB)"
+              echo "  6. Services (API Gateway, Lambda)"
+              echo "  7. Monitoring (CloudWatch, Alarms)"
+            else
+              echo "Mode: PLAN ONLY - Set auto_approve=true to apply"
+            fi
+
+            echo
+            echo "Useful Commands:"
+            echo "  # View outputs for a component"
+            echo "  atmos terraform output vpc/main -s $STACK"
+            echo
+            echo "  # Plan changes"
+            echo "  atmos terraform plan <component> -s $STACK"
+            echo
+            echo "  # Apply changes"
+            echo "  atmos terraform apply <component> -s $STACK -auto-approve"
+
+            if [[ "$AUTO_APPROVE" == "true" ]] && [[ "$DRY_RUN" != "true" ]]; then
+              echo
+              echo -e "${GREEN}Deployment completed successfully!${NC}"
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # Deploy Specific Layer
+  # =============================================================================
+  layer:
+    description: "Deploy a specific infrastructure layer"
+    steps:
+      - name: "deploy-layer"
+        run:
+          command: |
+            set -euo pipefail
+
+            STACK="${tenant:-}-${account:-}-${environment:-}"
+            LAYER="${layer:-}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            if [[ -z "$LAYER" ]]; then
+              echo "ERROR: layer parameter required"
+              echo "Usage: atmos workflow layer -f deploy-full-stack.yaml tenant=<t> account=<a> environment=<e> layer=<layer>"
+              echo
+              echo "Available layers:"
+              echo "  foundation  - Backend, IAM"
+              echo "  networking  - VPC, Subnets"
+              echo "  security    - Security Groups, Secrets, ACM"
+              echo "  compute     - EC2, EKS, ECS"
+              echo "  data        - RDS, DynamoDB"
+              echo "  services    - API Gateway, Lambda"
+              echo "  monitoring  - CloudWatch, Alarms"
+              exit 1
+            fi
+
+            case "$LAYER" in
+              foundation)
+                PATTERNS="backend iam"
+                ;;
+              networking)
+                PATTERNS="vpc network"
+                ;;
+              security)
+                PATTERNS="securitygroup secretsmanager acm"
+                ;;
+              compute)
+                PATTERNS="ec2 eks ecs"
+                ;;
+              data)
+                PATTERNS="rds dynamodb elasticache infrastructure"
+                ;;
+              services)
+                PATTERNS="apigateway lambda external-secrets"
+                ;;
+              monitoring)
+                PATTERNS="monitoring"
+                ;;
+              *)
+                echo "ERROR: Unknown layer: $LAYER"
+                exit 1
+                ;;
+            esac
+
+            echo "Deploying layer: $LAYER"
+            echo "Stack: $STACK"
+            echo
+
+            for pattern in $PATTERNS; do
+              COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | grep "^$pattern" || echo "")
+
+              for component in $COMPONENTS; do
+                echo "Processing $component..."
+
+                if atmos terraform plan "$component" -s "$STACK"; then
+                  if [[ "$AUTO_APPROVE" == "true" ]]; then
+                    atmos terraform apply "$component" -s "$STACK" -auto-approve
+                    echo "Deployed: $component"
+                  fi
+                fi
+              done
+            done
+
+            echo "Layer $LAYER deployment complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1

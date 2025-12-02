@@ -1,0 +1,377 @@
+---
+# Three-Tier Web Application Stack Template
+# Pre-configured stack for typical web application deployments
+# Version: 1.0.0
+
+name: web-app-stack
+description: "Production-ready three-tier web application infrastructure"
+version: "1.0.0"
+maturity: "production"
+
+template:
+  category: "patterns/web-apps"
+  use_cases:
+    - "Traditional web applications"
+    - "Content management systems"
+    - "E-commerce platforms"
+    - "Internal business applications"
+
+  architecture:
+    tiers:
+      - name: "Presentation"
+        components: ["alb", "waf", "cloudfront"]
+        description: "Load balancing and CDN"
+      - name: "Application"
+        components: ["eks", "eks-addons"]
+        description: "Kubernetes-based application tier"
+      - name: "Data"
+        components: ["rds", "elasticache"]
+        description: "Database and caching layer"
+
+  estimated_cost:
+    minimum: "$300/month"
+    typical: "$800/month"
+    maximum: "$3000+/month"
+
+  deployment_time: "45-60 minutes"
+
+# Stack configuration
+import:
+  - catalog/_base/defaults
+  - catalog/vpc/defaults
+  - catalog/securitygroup/defaults
+  - catalog/eks/defaults
+  - catalog/rds/defaults
+  - catalog/monitoring/defaults
+
+components:
+  terraform:
+    # ===========================================
+    # NETWORK LAYER
+    # ===========================================
+    vpc:
+      component: "vpc"
+      vars:
+        enabled: true
+        name: "web-app"
+        vpc_cidr: "10.0.0.0/16"
+
+        # Multi-AZ for high availability
+        azs:
+          - "${region}a"
+          - "${region}b"
+          - "${region}c"
+
+        # Subnet configuration
+        private_subnets:
+          - "10.0.1.0/24"
+          - "10.0.2.0/24"
+          - "10.0.3.0/24"
+        public_subnets:
+          - "10.0.101.0/24"
+          - "10.0.102.0/24"
+          - "10.0.103.0/24"
+        database_subnets:
+          - "10.0.201.0/24"
+          - "10.0.202.0/24"
+          - "10.0.203.0/24"
+
+        # NAT Gateway - High Availability
+        enable_nat_gateway: true
+        nat_gateway_strategy: "one_per_az"  # HA configuration
+
+        # VPC Flow Logs
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+
+      tags:
+        StackType: "web-app"
+        Layer: "network"
+
+    # ===========================================
+    # SECURITY LAYER
+    # ===========================================
+    securitygroup:
+      component: "securitygroup"
+      depends_on:
+        - vpc
+      vars:
+        enabled: true
+        vpc_id: "${output.vpc.vpc_id}"
+
+        security_groups:
+          # ALB Security Group
+          alb-sg:
+            name: "${tenant}-${environment}-alb-sg"
+            description: "Application Load Balancer security group"
+            ingress_rules:
+              - from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "HTTPS from internet"
+              - from_port: 80
+                to_port: 80
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "HTTP from internet (redirect to HTTPS)"
+            egress_rules:
+              - from_port: 0
+                to_port: 0
+                protocol: "-1"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "All outbound traffic"
+
+          # Application Security Group
+          app-sg:
+            name: "${tenant}-${environment}-app-sg"
+            description: "Application tier security group"
+            ingress_rules:
+              - from_port: 8080
+                to_port: 8080
+                protocol: "tcp"
+                source_security_group_id: "${security_group.alb-sg.id}"
+                description: "Traffic from ALB"
+            egress_rules:
+              - from_port: 0
+                to_port: 0
+                protocol: "-1"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "All outbound traffic"
+
+          # Database Security Group
+          db-sg:
+            name: "${tenant}-${environment}-db-sg"
+            description: "Database tier security group"
+            ingress_rules:
+              - from_port: 5432
+                to_port: 5432
+                protocol: "tcp"
+                source_security_group_id: "${security_group.app-sg.id}"
+                description: "PostgreSQL from app tier"
+            egress_rules: []
+
+          # Redis Security Group
+          cache-sg:
+            name: "${tenant}-${environment}-cache-sg"
+            description: "Cache tier security group"
+            ingress_rules:
+              - from_port: 6379
+                to_port: 6379
+                protocol: "tcp"
+                source_security_group_id: "${security_group.app-sg.id}"
+                description: "Redis from app tier"
+            egress_rules: []
+
+      tags:
+        StackType: "web-app"
+        Layer: "security"
+
+    # ===========================================
+    # COMPUTE LAYER
+    # ===========================================
+    eks:
+      component: "eks"
+      depends_on:
+        - vpc
+        - securitygroup
+        - iam
+      vars:
+        enabled: true
+        cluster_name: "${tenant}-${environment}-web-app"
+        kubernetes_version: "1.28"
+
+        # Network configuration
+        vpc_id: "${output.vpc.vpc_id}"
+        subnet_ids: "${output.vpc.private_subnet_ids}"
+
+        # Endpoint access
+        endpoint_private_access: true
+        endpoint_public_access: false
+
+        # Security
+        encrypt_secrets: true
+        enable_cluster_logging: true
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+
+        # Node groups
+        node_groups:
+          general:
+            name: "general"
+            instance_types: ["m5.large"]
+            desired_size: 3
+            min_size: 2
+            max_size: 10
+            disk_size: 50
+            capacity_type: "ON_DEMAND"
+            labels:
+              workload-type: "general"
+
+          spot:
+            name: "spot"
+            instance_types: ["m5.large", "m5.xlarge", "m4.large"]
+            desired_size: 2
+            min_size: 0
+            max_size: 20
+            disk_size: 50
+            capacity_type: "SPOT"
+            labels:
+              workload-type: "batch"
+            taints:
+              - key: "spot"
+                value: "true"
+                effect: "NO_SCHEDULE"
+
+      tags:
+        StackType: "web-app"
+        Layer: "compute"
+
+    eks-addons:
+      component: "eks-addons"
+      depends_on:
+        - eks
+      vars:
+        enabled: true
+        cluster_name: "${output.eks.cluster_id}"
+
+        # Enable standard addons
+        enable_metrics_server: true
+        enable_cluster_autoscaler: true
+        enable_aws_load_balancer_controller: true
+        enable_external_dns: true
+        enable_cert_manager: true
+        enable_external_secrets: true
+
+      tags:
+        StackType: "web-app"
+        Layer: "compute"
+
+    # ===========================================
+    # DATA LAYER
+    # ===========================================
+    rds:
+      component: "rds"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: true
+        identifier: "${tenant}-${environment}-web-app-db"
+
+        # Engine configuration
+        engine: "postgres"
+        engine_version: "15.4"
+        instance_class: "db.t3.medium"
+
+        # Storage
+        allocated_storage: 50
+        max_allocated_storage: 200
+        storage_type: "gp3"
+        storage_encrypted: true
+
+        # Database settings
+        db_name: "webapp"
+        username: "dbadmin"
+        port: 5432
+
+        # High availability
+        multi_az: true
+
+        # Backup
+        backup_retention_period: 14
+        backup_window: "03:00-04:00"
+        maintenance_window: "sun:04:30-sun:05:30"
+
+        # Security
+        deletion_protection: true
+        skip_final_snapshot: false
+        final_snapshot_identifier: "${tenant}-${environment}-web-app-db-final"
+
+        # Network
+        subnet_ids: "${output.vpc.database_subnet_ids}"
+        vpc_security_group_ids:
+          - "${output.securitygroup.security_group_ids['db-sg']}"
+
+        # Performance
+        performance_insights_enabled: true
+        performance_insights_retention_period: 7
+        monitoring_interval: 60
+
+      tags:
+        StackType: "web-app"
+        Layer: "data"
+
+    # ===========================================
+    # OBSERVABILITY
+    # ===========================================
+    monitoring:
+      component: "monitoring"
+      depends_on:
+        - vpc
+        - eks
+        - rds
+      vars:
+        enabled: true
+
+        # Dashboard
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-web-app"
+
+        # Alarms
+        alarm_notifications_enabled: true
+        sns_topic_name: "${tenant}-${environment}-web-app-alarms"
+
+        # Enable monitoring features
+        enable_resource_monitoring: true
+        enable_cost_monitoring: true
+
+        # EKS monitoring
+        eks_cluster_name: "${output.eks.cluster_id}"
+
+        # Certificate monitoring
+        enable_certificate_monitoring: true
+
+      tags:
+        StackType: "web-app"
+        Layer: "observability"
+
+# Deployment order
+deployment_order:
+  - stage: 1
+    components:
+      - vpc
+      - vpc-flow-logs-bucket
+    parallel: true
+  - stage: 2
+    components:
+      - iam
+      - securitygroup
+    parallel: true
+  - stage: 3
+    components:
+      - eks
+      - rds
+    parallel: true
+  - stage: 4
+    components:
+      - eks-addons
+      - monitoring
+    parallel: true
+
+# Validation rules
+validation:
+  pre_deployment:
+    - check: "vpc_cidr_available"
+      description: "Verify VPC CIDR doesn't conflict with existing networks"
+    - check: "eks_version_supported"
+      description: "Verify EKS version is supported in the region"
+  post_deployment:
+    - check: "eks_cluster_healthy"
+      description: "Verify EKS cluster is in ACTIVE state"
+    - check: "rds_available"
+      description: "Verify RDS instance is available"

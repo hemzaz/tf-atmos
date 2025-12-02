@@ -1,0 +1,326 @@
+---
+name: validate-enhanced
+description: "Enhanced validation workflow with comprehensive checks for Atmos best practices"
+
+workflows:
+  validate-all:
+    description: "Run comprehensive validation across all stacks and components"
+    steps:
+    - name: "environment-check"
+      description: "Validate execution environment and dependencies"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo "=== Atmos Enhanced Validation Workflow ==="
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Working Directory: $(pwd)"
+
+          # Check required tools
+          MISSING_TOOLS=""
+
+          if ! command -v terraform >/dev/null 2>&1; then
+            MISSING_TOOLS="$MISSING_TOOLS terraform"
+          fi
+
+          if [ -n "$MISSING_TOOLS" ]; then
+            echo "ERROR: Missing required tools:$MISSING_TOOLS"
+            exit 1
+          fi
+
+          # Validate atmos configuration exists
+          if [ ! -f "atmos.yaml" ]; then
+            echo "ERROR: atmos.yaml not found"
+            exit 1
+          fi
+
+          echo "Environment validation passed"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "yaml-syntax-check"
+      description: "Validate YAML syntax across all stack files"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Step: YAML Syntax Validation ==="
+
+          YAML_ERRORS=0
+
+          # Check all YAML files in stacks directory
+          while IFS= read -r file; do
+            if ! python3 -c "import yaml; yaml.safe_load(open('$file'))" 2>/dev/null; then
+              echo "ERROR: Invalid YAML syntax in $file"
+              YAML_ERRORS=$((YAML_ERRORS + 1))
+            fi
+          done < <(find ./stacks -name "*.yaml" -type f)
+
+          if [ $YAML_ERRORS -gt 0 ]; then
+            echo "Found $YAML_ERRORS YAML syntax errors"
+            exit 1
+          fi
+
+          echo "All YAML files have valid syntax"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "import-path-check"
+      description: "Validate import paths follow best practices"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Step: Import Path Validation ==="
+
+          ISSUES=0
+
+          # Check for .yaml extensions in imports (should be omitted)
+          while IFS= read -r file; do
+            if grep -E "^\s*-\s+.*\.yaml\s*$" "$file" >/dev/null 2>&1; then
+              echo "WARNING: Found .yaml extension in imports in $file"
+              echo "  Best practice: Omit .yaml extension in import paths"
+              ISSUES=$((ISSUES + 1))
+            fi
+          done < <(find ./stacks -name "*.yaml" -type f)
+
+          if [ $ISSUES -gt 0 ]; then
+            echo ""
+            echo "Found $ISSUES files with .yaml extensions in imports"
+            echo "Consider removing extensions for consistency"
+          else
+            echo "All import paths follow best practices"
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "duplicate-stack-check"
+      description: "Check for duplicate stack definitions"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Step: Duplicate Stack Detection ==="
+
+          # Look for directories with both main.yaml and environment-specific files
+          DUPLICATES=0
+
+          while IFS= read -r dir; do
+            if [ -f "$dir/main.yaml" ]; then
+              # Count other yaml files in the same directory
+              OTHER_YAMLS=$(find "$dir" -maxdepth 1 -name "*.yaml" ! -name "main.yaml" ! -name "_defaults.yaml" ! -name "README.yaml" | wc -l | tr -d ' ')
+              if [ "$OTHER_YAMLS" -gt 0 ]; then
+                echo "WARNING: Potential duplicate stack in $dir"
+                echo "  Found main.yaml alongside other stack files"
+                DUPLICATES=$((DUPLICATES + 1))
+              fi
+            fi
+          done < <(find ./stacks/orgs -type d)
+
+          if [ $DUPLICATES -gt 0 ]; then
+            echo ""
+            echo "Found $DUPLICATES potential duplicate stack definitions"
+            echo "Consider consolidating to a single stack file per environment"
+          else
+            echo "No duplicate stack definitions found"
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "terraform-format-check"
+      description: "Validate Terraform formatting"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Step: Terraform Format Check ==="
+
+          if ! terraform fmt -check -recursive ./components/terraform; then
+            echo "ERROR: Terraform formatting issues found"
+            echo "Run 'terraform fmt -recursive ./components/terraform' to fix"
+            exit 1
+          fi
+
+          echo "Terraform formatting check passed"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "component-validation"
+      description: "Validate all Terraform components"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Step: Component Validation ==="
+
+          VALIDATION_ERRORS=0
+
+          # Validate each component directory
+          for component_dir in ./components/terraform/*/; do
+            component_name=$(basename "$component_dir")
+            echo "Validating component: $component_name"
+
+            cd "$component_dir"
+
+            # Initialize and validate
+            if terraform init -backend=false >/dev/null 2>&1; then
+              if terraform validate >/dev/null 2>&1; then
+                echo "  Component $component_name: OK"
+              else
+                echo "  Component $component_name: VALIDATION FAILED"
+                VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+              fi
+            else
+              echo "  Component $component_name: INIT FAILED"
+              VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+            fi
+
+            cd - >/dev/null
+          done
+
+          if [ $VALIDATION_ERRORS -gt 0 ]; then
+            echo ""
+            echo "ERROR: $VALIDATION_ERRORS component(s) failed validation"
+            exit 1
+          fi
+
+          echo "All components validated successfully"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "variable-consistency-check"
+      description: "Check for variable naming consistency between stacks and components"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Step: Variable Consistency Check ==="
+
+          # Known variable name mappings that should be aligned
+          # Format: stack_name:component_name
+          KNOWN_MISMATCHES="ipv4_primary_cidr_block:vpc_cidr"
+
+          for mismatch in $KNOWN_MISMATCHES; do
+            stack_var=$(echo "$mismatch" | cut -d: -f1)
+            component_var=$(echo "$mismatch" | cut -d: -f2)
+
+            # Check if stack files use the old name
+            if grep -r "$stack_var" ./stacks/ >/dev/null 2>&1; then
+              echo "WARNING: Found '$stack_var' in stacks - should be '$component_var' for consistency"
+            fi
+          done
+
+          echo "Variable consistency check complete"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "metadata-completeness-check"
+      description: "Check component metadata completeness"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Step: Metadata Completeness Check ==="
+
+          INCOMPLETE=0
+
+          while IFS= read -r file; do
+            # Check for required metadata fields
+            if ! grep -q "version:" "$file" 2>/dev/null; then
+              echo "WARNING: Missing 'version' in metadata: $file"
+              INCOMPLETE=$((INCOMPLETE + 1))
+            fi
+            if ! grep -q "description:" "$file" 2>/dev/null; then
+              echo "WARNING: Missing 'description' in metadata: $file"
+              INCOMPLETE=$((INCOMPLETE + 1))
+            fi
+          done < <(find ./stacks/catalog -name "defaults.yaml" -type f)
+
+          if [ $INCOMPLETE -gt 0 ]; then
+            echo ""
+            echo "Found $INCOMPLETE incomplete metadata entries"
+            echo "Consider adding version and description to all component metadata"
+          else
+            echo "All component metadata is complete"
+          fi
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "validation-summary"
+      description: "Provide validation summary"
+      run:
+        command: |
+          set -euo pipefail
+
+          echo ""
+          echo "=== Validation Summary ==="
+          echo "Enhanced validation completed successfully"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "All critical checks passed."
+          echo "Review any warnings above for potential improvements."
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+  validate-stack:
+    description: "Validate a specific stack with all checks"
+    steps:
+    - name: "validate-stack-inputs"
+      description: "Validate required parameters"
+      run:
+        command: |
+          set -euo pipefail
+
+          if [ -z "${tenant:-}" ] || [ -z "${account:-}" ] || [ -z "${environment:-}" ]; then
+            echo "ERROR: Missing required parameters"
+            echo "Usage: atmos workflow validate-stack -f validate-enhanced.yaml tenant=<tenant> account=<account> environment=<environment>"
+            exit 1
+          fi
+
+          STACK="${tenant}-${account}-${environment}"
+          echo "Validating stack: $STACK"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1
+
+    - name: "validate-stack-components"
+      description: "Validate all components in the stack"
+      run:
+        command: |
+          set -euo pipefail
+
+          STACK="${tenant}-${account}-${environment}"
+
+          # Get components for this stack
+          COMPONENTS=$(atmos list components -s "$STACK" 2>/dev/null | tr '\n' ' ' || echo "")
+
+          if [ -z "$COMPONENTS" ]; then
+            echo "No components found for stack $STACK"
+            exit 0
+          fi
+
+          echo "Validating components: $COMPONENTS"
+
+          ERRORS=0
+          for component in $COMPONENTS; do
+            echo "Validating $component..."
+            if ! atmos terraform validate "$component" -s "$STACK"; then
+              echo "ERROR: $component validation failed"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "ERROR: $ERRORS component(s) failed validation"
+            exit 1
+          fi
+
+          echo "All components validated for stack $STACK"
+        env:
+          AWS_SDK_LOAD_CONFIG: 1

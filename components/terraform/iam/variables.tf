@@ -31,3 +31,87 @@ variable "tags" {
   description = "Tags to apply to the IAM resources"
   default     = {}
 }
+
+# Resource-Specific Permissions (Least Privilege)
+variable "managed_s3_bucket_arns" {
+  type        = list(string)
+  description = "List of S3 bucket ARNs that the role can manage"
+  default     = null
+
+  validation {
+    condition = var.managed_s3_bucket_arns == null || alltrue([
+      for arn in var.managed_s3_bucket_arns : can(regex("^arn:aws:s3:::[a-z0-9.-]+$", arn))
+    ])
+    error_message = "Each S3 bucket ARN must be valid (e.g., arn:aws:s3:::bucket-name)."
+  }
+}
+
+variable "managed_dynamodb_table_arns" {
+  type        = list(string)
+  description = "List of DynamoDB table ARNs that the role can manage"
+  default     = null
+
+  validation {
+    condition = var.managed_dynamodb_table_arns == null || alltrue([
+      for arn in var.managed_dynamodb_table_arns : can(regex("^arn:aws:dynamodb:", arn))
+    ])
+    error_message = "Each DynamoDB table ARN must be valid."
+  }
+}
+
+variable "managed_sns_topic_arns" {
+  type        = list(string)
+  description = "List of SNS topic ARNs that the role can publish to"
+  default     = null
+
+  validation {
+    condition = var.managed_sns_topic_arns == null || alltrue([
+      for arn in var.managed_sns_topic_arns : can(regex("^arn:aws:sns:", arn))
+    ])
+    error_message = "Each SNS topic ARN must be valid."
+  }
+}
+
+variable "log_group_arns" {
+  type        = list(string)
+  description = "List of CloudWatch Log Group ARNs that the role can write to"
+  default     = null
+
+  validation {
+    condition = var.log_group_arns == null || alltrue([
+      for arn in var.log_group_arns : can(regex("^arn:aws:logs:", arn))
+    ])
+    error_message = "Each log group ARN must be valid."
+  }
+}
+
+variable "allowed_cloudwatch_namespaces" {
+  type        = list(string)
+  description = "List of CloudWatch namespaces the role can write metrics to"
+  default     = ["AWS/Lambda", "AWS/EC2", "Custom"]
+
+  validation {
+    condition     = length(var.allowed_cloudwatch_namespaces) > 0
+    error_message = "At least one CloudWatch namespace must be specified."
+  }
+}
+
+variable "account_id" {
+  type        = string
+  description = "AWS Account ID for resource ARN construction"
+
+  validation {
+    condition     = can(regex("^\\d{12}$", var.account_id))
+    error_message = "Account ID must be a 12-digit number."
+  }
+}
+
+variable "environment" {
+  type        = string
+  description = "Environment name (dev, staging, prod)"
+
+  validation {
+    condition     = contains(["dev", "development", "staging", "stage", "prod", "production"], lower(var.environment))
+    error_message = "Environment must be one of: dev, development, staging, stage, prod, production."
+  }
+}

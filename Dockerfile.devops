@@ -1,0 +1,157 @@
+# =============================================================================
+# DevOps Development Container
+# =============================================================================
+# Complete development environment with all required tools pre-installed
+
+FROM ubuntu:22.04
+
+LABEL maintainer="DevOps Team"
+LABEL description="Terraform/Atmos development environment with all tools"
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Tool versions
+ENV TERRAFORM_VERSION=1.5.7
+ENV ATMOS_VERSION=1.44.0
+ENV AWS_CLI_VERSION=2.13.0
+ENV KUBECTL_VERSION=1.28.0
+ENV HELM_VERSION=3.13.0
+ENV TFLINT_VERSION=0.48.0
+ENV CHECKOV_VERSION=3.0.0
+ENV PYTHON_VERSION=3.11
+
+# Install base packages
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    unzip \
+    jq \
+    vim \
+    nano \
+    bash-completion \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    software-properties-common \
+    make \
+    gcc \
+    g++ \
+    python3 \
+    python3-pip \
+    python3-dev \
+    groff \
+    less \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Terraform
+RUN wget -q https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
+    && unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
+    && mv terraform /usr/local/bin/ \
+    && rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
+    && terraform --version
+
+# Install Atmos
+RUN wget -q https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_${ATMOS_VERSION}_linux_amd64 \
+    && chmod +x atmos_${ATMOS_VERSION}_linux_amd64 \
+    && mv atmos_${ATMOS_VERSION}_linux_amd64 /usr/local/bin/atmos \
+    && atmos version
+
+# Install AWS CLI v2
+RUN curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+    && unzip awscliv2.zip \
+    && ./aws/install \
+    && rm -rf aws awscliv2.zip \
+    && aws --version
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl \
+    && rm kubectl \
+    && kubectl version --client
+
+# Install Helm
+RUN curl -fsSL https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz -o helm.tar.gz \
+    && tar -zxvf helm.tar.gz \
+    && mv linux-amd64/helm /usr/local/bin/helm \
+    && rm -rf linux-amd64 helm.tar.gz \
+    && helm version
+
+# Install tflint
+RUN curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash \
+    && tflint --version
+
+# Install Python tools
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir \
+    checkov==${CHECKOV_VERSION} \
+    bandit \
+    safety \
+    black \
+    flake8 \
+    isort \
+    mypy \
+    pytest \
+    pytest-cov \
+    boto3 \
+    awscli-local \
+    pre-commit \
+    pip-audit \
+    detect-secrets
+
+# Install Trivy (security scanner)
+RUN wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor -o /usr/share/keyrings/trivy.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/trivy.list \
+    && apt-get update \
+    && apt-get install -y trivy \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install tfsec
+RUN curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install_linux.sh | bash
+
+# Install infracost
+RUN curl -s https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | bash
+
+# Install shellcheck
+RUN apt-get update && apt-get install -y shellcheck && rm -rf /var/lib/apt/lists/*
+
+# Setup workspace
+WORKDIR /workspace
+
+# Create user for development
+ARG USERNAME=devops
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
+
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
+    && apt-get update \
+    && apt-get install -y sudo \
+    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME \
+    && rm -rf /var/lib/apt/lists/*
+
+# Switch to non-root user
+USER $USERNAME
+
+# Setup bash completion
+RUN echo 'source /usr/share/bash-completion/bash_completion' >> ~/.bashrc \
+    && echo 'complete -C /usr/local/bin/terraform terraform' >> ~/.bashrc \
+    && echo 'complete -C /usr/local/bin/aws aws' >> ~/.bashrc
+
+# Add helpful aliases
+RUN echo 'alias tf=terraform' >> ~/.bashrc \
+    && echo 'alias k=kubectl' >> ~/.bashrc \
+    && echo 'alias ll="ls -la"' >> ~/.bashrc
+
+# Set prompt
+RUN echo 'export PS1="\[\033[01;32m\]\u@devops\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> ~/.bashrc
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD terraform --version && atmos version && aws --version || exit 1
+
+# Default command
+CMD ["/bin/bash"]

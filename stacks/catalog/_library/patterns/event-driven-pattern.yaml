@@ -1,0 +1,1433 @@
+---
+# Event-Driven Architecture Pattern
+# Complete event-driven infrastructure with EventBridge, Lambda, SQS, SNS, and Step Functions
+# Version: 1.0.0
+
+name: event-driven-pattern
+description: "Enterprise event-driven architecture with EventBridge orchestration, Lambda consumers, SQS buffering, and Step Functions workflows"
+version: "1.0.0"
+maturity: "production"
+
+# =============================================================================
+# PATTERN METADATA
+# =============================================================================
+pattern:
+  category: "patterns/event-driven"
+  tier: "enterprise"
+
+  use_cases:
+    - "Microservices event communication"
+    - "Asynchronous workflow orchestration"
+    - "Event sourcing patterns"
+    - "CQRS implementations"
+    - "Saga pattern for distributed transactions"
+    - "Fan-out/fan-in processing"
+    - "Real-time notifications"
+    - "Audit logging and compliance"
+
+  architecture:
+    overview: |
+      This pattern implements a complete event-driven architecture using AWS
+      serverless services. Events flow from producers through EventBridge,
+      get routed to appropriate consumers via rules, and are processed by
+      Lambda functions with SQS buffering for reliability. Step Functions
+      orchestrate complex multi-step workflows, while DLQs ensure no events
+      are lost.
+
+    components:
+      - name: "Event Bus Layer"
+        components: ["eventbridge", "eventbridge-rules"]
+        description: "Central event routing and filtering"
+      - name: "Consumer Layer"
+        components: ["lambda-consumers", "sqs-queues"]
+        description: "Event processing with buffering"
+      - name: "Fanout Layer"
+        components: ["sns-topics", "sns-subscriptions"]
+        description: "Event distribution to multiple subscribers"
+      - name: "Orchestration Layer"
+        components: ["step-functions", "lambda-orchestration"]
+        description: "Complex workflow orchestration"
+      - name: "Error Handling"
+        components: ["dlq-queues", "lambda-dlq-processor"]
+        description: "Dead letter handling and retry"
+      - name: "Observability"
+        components: ["cloudwatch-dashboards", "xray-tracing", "alarms"]
+        description: "Monitoring and tracing"
+
+    data_flow:
+      - step: 1
+        name: "Event Production"
+        description: "Services publish events to EventBridge"
+      - step: 2
+        name: "Event Routing"
+        description: "EventBridge rules route events to targets"
+      - step: 3
+        name: "Queue Buffering"
+        description: "SQS queues buffer events for processing"
+      - step: 4
+        name: "Event Processing"
+        description: "Lambda consumers process events"
+      - step: 5
+        name: "Workflow Orchestration"
+        description: "Step Functions coordinate multi-step processes"
+      - step: 6
+        name: "Error Recovery"
+        description: "DLQs capture failed events for retry"
+
+  estimated_cost:
+    minimum: "$25/month"
+    typical: "$150/month"
+    maximum: "$1500+/month"
+    breakdown:
+      eventbridge: "$1/million events"
+      lambda: "$0.20/million requests + compute"
+      sqs: "$0.40/million requests"
+      sns: "$0.50/million requests"
+      step_functions: "$25/million state transitions"
+      cloudwatch: "$3/dashboard + logs"
+    optimization_tips:
+      - "Use SQS batching to reduce Lambda invocations"
+      - "Implement event filtering at EventBridge level"
+      - "Use Express workflows for high-volume, short-duration flows"
+      - "Archive events to S3 for long-term storage"
+
+  deployment_time: "20-30 minutes"
+
+  complexity: "advanced"
+
+  prerequisites:
+    - "VPC with private subnets (optional, for VPC-connected resources)"
+    - "IAM permissions for EventBridge, Lambda, SQS, SNS, Step Functions"
+    - "KMS key for encryption (recommended)"
+
+# =============================================================================
+# STACK CONFIGURATION
+# =============================================================================
+import:
+  - catalog/_base/defaults
+  - catalog/iam/defaults
+  - catalog/monitoring/defaults
+
+vars:
+  # Common pattern variables
+  pattern_name: "event-driven"
+  enable_xray_tracing: true
+  enable_dlq_processing: true
+  event_retention_days: 30
+  log_retention_days: 30
+
+components:
+  terraform:
+    # =========================================================================
+    # EVENT BUS LAYER
+    # =========================================================================
+    eventbridge-bus:
+      component: "eventbridge"
+      vars:
+        enabled: true
+
+        # Event Bus Configuration
+        event_bus_name: "${tenant}-${environment}-events"
+        description: "Central event bus for ${tenant} ${environment}"
+
+        # Schema Discovery
+        enable_schema_discovery: true
+
+        # Archive Configuration
+        enable_archive: true
+        archive_name: "${tenant}-${environment}-event-archive"
+        archive_retention_days: 90
+        archive_description: "Archive for compliance and replay"
+
+        # Encryption
+        kms_key_arn: "${output.kms.key_arn}"
+
+        # Resource Policy
+        enable_resource_policy: true
+        allowed_source_accounts:
+          - "${aws_account_id}"
+
+        # Partner Event Sources (optional)
+        partner_event_sources: []
+
+      tags:
+        StackType: "event-driven"
+        Layer: "event-bus"
+        Pattern: "event-driven-architecture"
+
+    eventbridge-rules:
+      component: "eventbridge-rules"
+      depends_on:
+        - eventbridge-bus
+        - lambda-consumers
+        - sqs-buffered
+        - step-functions
+      vars:
+        enabled: true
+        event_bus_name: "${output.eventbridge-bus.event_bus_name}"
+
+        # Event Rules
+        rules:
+          # Route order events to processing queue
+          order-events:
+            name: "${tenant}-${environment}-order-events"
+            description: "Route order domain events"
+            event_pattern:
+              source:
+                - "com.${tenant}.orders"
+              detail-type:
+                - "OrderCreated"
+                - "OrderUpdated"
+                - "OrderCancelled"
+            targets:
+              - id: "order-processing-queue"
+                arn: "${output.sqs-buffered.order_queue_arn}"
+                input_transformer:
+                  input_paths_map:
+                    orderId: "$.detail.orderId"
+                    eventType: "$.detail-type"
+                    timestamp: "$.time"
+                  input_template: |
+                    {
+                      "orderId": <orderId>,
+                      "eventType": <eventType>,
+                      "timestamp": <timestamp>,
+                      "source": "eventbridge"
+                    }
+                dead_letter_arn: "${output.dlq-events.queue_arn}"
+                retry_policy:
+                  maximum_event_age_in_seconds: 3600
+                  maximum_retry_attempts: 3
+
+          # Route user events to Lambda
+          user-events:
+            name: "${tenant}-${environment}-user-events"
+            description: "Route user domain events"
+            event_pattern:
+              source:
+                - "com.${tenant}.users"
+              detail-type:
+                - "UserRegistered"
+                - "UserUpdated"
+                - "UserDeleted"
+            targets:
+              - id: "user-event-processor"
+                arn: "${output.lambda-consumers.user_processor_arn}"
+                dead_letter_arn: "${output.dlq-events.queue_arn}"
+
+          # Route complex workflows to Step Functions
+          workflow-events:
+            name: "${tenant}-${environment}-workflow-events"
+            description: "Trigger complex workflow orchestration"
+            event_pattern:
+              source:
+                - "com.${tenant}.workflows"
+              detail-type:
+                - "WorkflowStarted"
+                - "WorkflowRetry"
+            targets:
+              - id: "workflow-orchestrator"
+                arn: "${output.step-functions.state_machine_arn}"
+                role_arn: "${output.iam.eventbridge_role_arn}"
+                dead_letter_arn: "${output.dlq-events.queue_arn}"
+
+          # Fan-out notifications
+          notification-events:
+            name: "${tenant}-${environment}-notification-events"
+            description: "Fan-out notification events"
+            event_pattern:
+              source:
+                - "com.${tenant}.notifications"
+              detail-type:
+                - prefix: "Notification"
+            targets:
+              - id: "notification-fanout"
+                arn: "${output.sns-fanout.topic_arn}"
+                dead_letter_arn: "${output.dlq-events.queue_arn}"
+
+          # Scheduled maintenance events
+          scheduled-cleanup:
+            name: "${tenant}-${environment}-scheduled-cleanup"
+            description: "Daily cleanup job"
+            schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC daily
+            targets:
+              - id: "cleanup-lambda"
+                arn: "${output.lambda-consumers.cleanup_processor_arn}"
+
+          # Audit logging - capture all events
+          audit-logging:
+            name: "${tenant}-${environment}-audit-logging"
+            description: "Capture all events for audit"
+            event_pattern:
+              source:
+                - prefix: "com.${tenant}"
+            targets:
+              - id: "audit-log-group"
+                arn: "${output.cloudwatch-logs.audit_log_group_arn}"
+              - id: "audit-firehose"
+                arn: "${output.firehose-audit.delivery_stream_arn}"
+                role_arn: "${output.iam.eventbridge_role_arn}"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "event-routing"
+
+    # =========================================================================
+    # CONSUMER LAYER
+    # =========================================================================
+    lambda-consumers:
+      component: "lambda"
+      depends_on:
+        - iam
+        - sqs-buffered
+      vars:
+        enabled: true
+
+        functions:
+          # Order Event Processor
+          order-processor:
+            function_name: "${tenant}-${environment}-order-processor"
+            description: "Process order domain events"
+            runtime: "python3.11"
+            handler: "handlers/order.handler"
+            memory_size: 512
+            timeout: 30
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              LOG_LEVEL: "INFO"
+              EVENT_BUS_NAME: "${output.eventbridge-bus.event_bus_name}"
+              POWERTOOLS_SERVICE_NAME: "order-processor"
+              POWERTOOLS_METRICS_NAMESPACE: "${tenant}-${environment}"
+
+            # SQS trigger
+            event_source_mapping:
+              sqs:
+                event_source_arn: "${output.sqs-buffered.order_queue_arn}"
+                batch_size: 10
+                maximum_batching_window_in_seconds: 5
+                function_response_types:
+                  - "ReportBatchItemFailures"
+
+            tracing_config:
+              mode: "Active"
+
+            reserved_concurrent_executions: 50
+
+          # User Event Processor
+          user-processor:
+            function_name: "${tenant}-${environment}-user-processor"
+            description: "Process user domain events"
+            runtime: "python3.11"
+            handler: "handlers/user.handler"
+            memory_size: 256
+            timeout: 30
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              LOG_LEVEL: "INFO"
+              EVENT_BUS_NAME: "${output.eventbridge-bus.event_bus_name}"
+
+            tracing_config:
+              mode: "Active"
+
+            # Direct EventBridge invocation
+            reserved_concurrent_executions: 100
+
+          # Notification Processor
+          notification-processor:
+            function_name: "${tenant}-${environment}-notification-processor"
+            description: "Process notification events from SNS"
+            runtime: "python3.11"
+            handler: "handlers/notification.handler"
+            memory_size: 256
+            timeout: 30
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              LOG_LEVEL: "INFO"
+
+            # SNS trigger
+            event_source_mapping:
+              sns:
+                topic_arn: "${output.sns-fanout.topic_arn}"
+
+            tracing_config:
+              mode: "Active"
+
+          # Cleanup Processor (Scheduled)
+          cleanup-processor:
+            function_name: "${tenant}-${environment}-cleanup-processor"
+            description: "Scheduled cleanup tasks"
+            runtime: "python3.11"
+            handler: "handlers/cleanup.handler"
+            memory_size: 512
+            timeout: 300
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              LOG_LEVEL: "INFO"
+              RETENTION_DAYS: "${event_retention_days}"
+
+            tracing_config:
+              mode: "Active"
+
+          # DLQ Processor
+          dlq-processor:
+            function_name: "${tenant}-${environment}-dlq-processor"
+            description: "Process failed events from DLQ"
+            runtime: "python3.11"
+            handler: "handlers/dlq.handler"
+            memory_size: 256
+            timeout: 60
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              LOG_LEVEL: "INFO"
+              EVENT_BUS_NAME: "${output.eventbridge-bus.event_bus_name}"
+              ALERT_SNS_TOPIC: "${output.sns-alerts.topic_arn}"
+
+            event_source_mapping:
+              sqs:
+                event_source_arn: "${output.dlq-events.queue_arn}"
+                batch_size: 5
+                maximum_batching_window_in_seconds: 30
+
+            tracing_config:
+              mode: "Active"
+
+        # Common Lambda settings
+        common_environment_variables:
+          AWS_XRAY_CONTEXT_MISSING: "LOG_ERROR"
+          POWERTOOLS_TRACER_CAPTURE_RESPONSE: "false"
+          POWERTOOLS_TRACER_CAPTURE_ERROR: "true"
+
+        # Lambda Layers
+        layers:
+          - arn: "arn:aws:lambda:${region}:017000801446:layer:AWSLambdaPowertoolsPythonV2-Arm64:51"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "consumers"
+
+    # =========================================================================
+    # SQS BUFFERING LAYER
+    # =========================================================================
+    sqs-buffered:
+      component: "sqs"
+      vars:
+        enabled: true
+
+        queues:
+          # Order Processing Queue
+          order-queue:
+            name: "${tenant}-${environment}-order-events"
+            visibility_timeout_seconds: 180  # 3x Lambda timeout
+            message_retention_seconds: 1209600  # 14 days
+            delay_seconds: 0
+            max_message_size: 262144
+            receive_wait_time_seconds: 20  # Long polling
+
+            # DLQ configuration
+            redrive_policy:
+              dead_letter_target_arn: "${output.dlq-events.queue_arn}"
+              max_receive_count: 3
+
+            # Encryption
+            kms_master_key_id: "alias/aws/sqs"
+
+            # FIFO for ordering (optional)
+            fifo_queue: false
+
+          # High-priority queue
+          priority-queue:
+            name: "${tenant}-${environment}-priority-events"
+            visibility_timeout_seconds: 60
+            message_retention_seconds: 345600  # 4 days
+
+            redrive_policy:
+              dead_letter_target_arn: "${output.dlq-events.queue_arn}"
+              max_receive_count: 5
+
+            kms_master_key_id: "alias/aws/sqs"
+
+          # Batch processing queue
+          batch-queue:
+            name: "${tenant}-${environment}-batch-events"
+            visibility_timeout_seconds: 900  # 15 minutes
+            message_retention_seconds: 1209600
+            delay_seconds: 60  # Delay for batching
+
+            redrive_policy:
+              dead_letter_target_arn: "${output.dlq-events.queue_arn}"
+              max_receive_count: 3
+
+            kms_master_key_id: "alias/aws/sqs"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "buffering"
+
+    # =========================================================================
+    # SNS FANOUT LAYER
+    # =========================================================================
+    sns-fanout:
+      component: "sns"
+      vars:
+        enabled: true
+
+        topics:
+          # Notification Fanout Topic
+          notifications:
+            name: "${tenant}-${environment}-notifications"
+            display_name: "Event Notifications"
+
+            # Encryption
+            kms_master_key_id: "alias/aws/sns"
+
+            # FIFO for ordering (optional)
+            fifo_topic: false
+
+            # Delivery policy
+            delivery_policy:
+              http:
+                defaultHealthyRetryPolicy:
+                  minDelayTarget: 1
+                  maxDelayTarget: 60
+                  numRetries: 10
+                  numNoDelayRetries: 0
+                  numMinDelayRetries: 3
+                  numMaxDelayRetries: 3
+                  backoffFunction: "exponential"
+                disableSubscriptionOverrides: false
+
+            # Subscriptions
+            subscriptions:
+              # Email notifications (environment-specific)
+              - protocol: "lambda"
+                endpoint: "${output.lambda-consumers.notification_processor_arn}"
+                filter_policy:
+                  channel:
+                    - "in-app"
+                    - "push"
+              - protocol: "sqs"
+                endpoint: "${output.sqs-buffered.priority_queue_arn}"
+                filter_policy:
+                  priority:
+                    - "high"
+                    - "urgent"
+              - protocol: "email"
+                endpoint: "alerts@${domain}"
+                filter_policy:
+                  severity:
+                    - "critical"
+
+          # Alert Topic
+          alerts:
+            name: "${tenant}-${environment}-alerts"
+            display_name: "System Alerts"
+            kms_master_key_id: "alias/aws/sns"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "fanout"
+
+    sns-alerts:
+      component: "sns"
+      vars:
+        enabled: true
+        topic_name: "${tenant}-${environment}-event-alerts"
+        display_name: "Event Processing Alerts"
+        kms_master_key_id: "alias/aws/sns"
+
+        subscriptions:
+          - protocol: "email"
+            endpoint: "ops-team@${domain}"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "alerting"
+
+    # =========================================================================
+    # DEAD LETTER QUEUE LAYER
+    # =========================================================================
+    dlq-events:
+      component: "sqs"
+      vars:
+        enabled: true
+        queue_name: "${tenant}-${environment}-events-dlq"
+
+        # Long retention for debugging
+        message_retention_seconds: 1209600  # 14 days
+        visibility_timeout_seconds: 300
+
+        # Encryption
+        kms_master_key_id: "alias/aws/sqs"
+
+        # CloudWatch alarm for DLQ messages
+        create_cloudwatch_alarm: true
+        alarm_actions:
+          - "${output.sns-alerts.topic_arn}"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "error-handling"
+
+    # =========================================================================
+    # STEP FUNCTIONS ORCHESTRATION
+    # =========================================================================
+    step-functions:
+      component: "step-functions"
+      depends_on:
+        - lambda-consumers
+        - sns-alerts
+      vars:
+        enabled: true
+
+        state_machines:
+          # Main Workflow Orchestrator
+          workflow-orchestrator:
+            name: "${tenant}-${environment}-workflow-orchestrator"
+            type: "STANDARD"  # Use EXPRESS for high-volume, short-duration
+
+            # State Machine Definition
+            definition:
+              Comment: "Main workflow orchestration state machine"
+              StartAt: "ValidateInput"
+              States:
+                ValidateInput:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::lambda:invoke"
+                  Parameters:
+                    FunctionName: "${output.lambda-consumers.order_processor_arn}"
+                    Payload.$: "$"
+                  ResultPath: "$.validation"
+                  Retry:
+                    - ErrorEquals: ["Lambda.ServiceException", "Lambda.TooManyRequestsException"]
+                      IntervalSeconds: 2
+                      MaxAttempts: 6
+                      BackoffRate: 2
+                  Catch:
+                    - ErrorEquals: ["States.ALL"]
+                      ResultPath: "$.error"
+                      Next: "HandleError"
+                  Next: "ProcessingChoice"
+
+                ProcessingChoice:
+                  Type: "Choice"
+                  Choices:
+                    - Variable: "$.validation.requiresApproval"
+                      BooleanEquals: true
+                      Next: "WaitForApproval"
+                    - Variable: "$.validation.priority"
+                      StringEquals: "high"
+                      Next: "ParallelProcessing"
+                  Default: "SequentialProcessing"
+
+                WaitForApproval:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::sqs:sendMessage.waitForTaskToken"
+                  Parameters:
+                    QueueUrl: "${output.sqs-buffered.priority_queue_url}"
+                    MessageBody:
+                      TaskToken.$: "$$.Task.Token"
+                      Input.$: "$"
+                  TimeoutSeconds: 86400  # 24 hours
+                  Catch:
+                    - ErrorEquals: ["States.Timeout"]
+                      ResultPath: "$.error"
+                      Next: "HandleTimeout"
+                  Next: "ParallelProcessing"
+
+                ParallelProcessing:
+                  Type: "Parallel"
+                  Branches:
+                    - StartAt: "UpdateDatabase"
+                      States:
+                        UpdateDatabase:
+                          Type: "Task"
+                          Resource: "arn:aws:states:::dynamodb:putItem"
+                          Parameters:
+                            TableName: "${output.dynamodb-state.table_name}"
+                            Item:
+                              pk:
+                                S.$: "$.workflowId"
+                              status:
+                                S: "PROCESSING"
+                              timestamp:
+                                S.$: "$$.State.EnteredTime"
+                          End: true
+                    - StartAt: "SendNotification"
+                      States:
+                        SendNotification:
+                          Type: "Task"
+                          Resource: "arn:aws:states:::sns:publish"
+                          Parameters:
+                            TopicArn: "${output.sns-fanout.notifications_topic_arn}"
+                            Message.$: "$.notification"
+                            MessageAttributes:
+                              channel:
+                                DataType: "String"
+                                StringValue: "in-app"
+                          End: true
+                  ResultPath: "$.parallelResults"
+                  Catch:
+                    - ErrorEquals: ["States.ALL"]
+                      ResultPath: "$.error"
+                      Next: "HandleError"
+                  Next: "SequentialProcessing"
+
+                SequentialProcessing:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::lambda:invoke"
+                  Parameters:
+                    FunctionName: "${output.lambda-consumers.order_processor_arn}"
+                    Payload.$: "$"
+                  Retry:
+                    - ErrorEquals: ["Lambda.ServiceException"]
+                      IntervalSeconds: 2
+                      MaxAttempts: 3
+                      BackoffRate: 2
+                  Catch:
+                    - ErrorEquals: ["States.ALL"]
+                      ResultPath: "$.error"
+                      Next: "HandleError"
+                  Next: "PublishResult"
+
+                PublishResult:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::events:putEvents"
+                  Parameters:
+                    Entries:
+                      - Source: "com.${tenant}.workflows"
+                        DetailType: "WorkflowCompleted"
+                        Detail.$: "$"
+                        EventBusName: "${output.eventbridge-bus.event_bus_name}"
+                  End: true
+
+                HandleError:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::sns:publish"
+                  Parameters:
+                    TopicArn: "${output.sns-alerts.topic_arn}"
+                    Subject: "Workflow Error"
+                    Message.$: "States.Format('Workflow failed: {}', $.error)"
+                  Next: "FailWorkflow"
+
+                HandleTimeout:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::sns:publish"
+                  Parameters:
+                    TopicArn: "${output.sns-alerts.topic_arn}"
+                    Subject: "Workflow Timeout"
+                    Message: "Approval timeout exceeded"
+                  Next: "FailWorkflow"
+
+                FailWorkflow:
+                  Type: "Fail"
+                  Error: "WorkflowFailed"
+                  Cause: "Workflow execution failed"
+
+            # Logging
+            logging_configuration:
+              level: "ALL"
+              include_execution_data: true
+              log_destination: "${output.cloudwatch-logs.stepfunctions_log_group_arn}"
+
+            # Tracing
+            tracing_configuration:
+              enabled: true
+
+          # Express workflow for high-volume processing
+          express-processor:
+            name: "${tenant}-${environment}-express-processor"
+            type: "EXPRESS"
+
+            definition:
+              Comment: "High-volume express workflow"
+              StartAt: "ProcessEvent"
+              States:
+                ProcessEvent:
+                  Type: "Task"
+                  Resource: "arn:aws:states:::lambda:invoke"
+                  Parameters:
+                    FunctionName: "${output.lambda-consumers.order_processor_arn}"
+                    Payload.$: "$"
+                  Retry:
+                    - ErrorEquals: ["States.ALL"]
+                      IntervalSeconds: 1
+                      MaxAttempts: 2
+                      BackoffRate: 2
+                  End: true
+
+            logging_configuration:
+              level: "ERROR"
+              include_execution_data: false
+              log_destination: "${output.cloudwatch-logs.stepfunctions_log_group_arn}"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "orchestration"
+
+    # =========================================================================
+    # STATE STORAGE
+    # =========================================================================
+    dynamodb-state:
+      component: "dynamodb"
+      vars:
+        enabled: true
+        table_name: "${tenant}-${environment}-workflow-state"
+        billing_mode: "PAY_PER_REQUEST"
+
+        hash_key: "pk"
+        range_key: "sk"
+
+        attributes:
+          - name: "pk"
+            type: "S"
+          - name: "sk"
+            type: "S"
+          - name: "gsi1pk"
+            type: "S"
+          - name: "gsi1sk"
+            type: "S"
+
+        global_secondary_indexes:
+          - name: "gsi1"
+            hash_key: "gsi1pk"
+            range_key: "gsi1sk"
+            projection_type: "ALL"
+
+        ttl_enabled: true
+        ttl_attribute_name: "ttl"
+
+        point_in_time_recovery_enabled: true
+        server_side_encryption_enabled: true
+
+        stream_enabled: true
+        stream_view_type: "NEW_AND_OLD_IMAGES"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "state"
+
+    # =========================================================================
+    # AUDIT AND ARCHIVAL
+    # =========================================================================
+    firehose-audit:
+      component: "firehose"
+      vars:
+        enabled: true
+        delivery_stream_name: "${tenant}-${environment}-event-audit"
+
+        s3_configuration:
+          bucket_arn: "${output.s3-audit.bucket_arn}"
+          prefix: "events/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+          error_output_prefix: "errors/!{firehose:error-output-type}/"
+          buffering_size: 64
+          buffering_interval: 300
+          compression_format: "GZIP"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "audit"
+
+    s3-audit:
+      component: "s3"
+      vars:
+        enabled: true
+        bucket_name: "${tenant}-${environment}-event-audit"
+        versioning_enabled: true
+        sse_algorithm: "aws:kms"
+
+        lifecycle_rules:
+          - id: "archive-old-events"
+            enabled: true
+            transitions:
+              - days: 30
+                storage_class: "STANDARD_IA"
+              - days: 90
+                storage_class: "GLACIER"
+            expiration:
+              days: 2555  # 7 years for compliance
+
+        block_public_access: true
+
+      tags:
+        StackType: "event-driven"
+        Layer: "audit"
+
+    # =========================================================================
+    # OBSERVABILITY
+    # =========================================================================
+    cloudwatch-logs:
+      component: "cloudwatch-logs"
+      vars:
+        enabled: true
+
+        log_groups:
+          audit:
+            name: "/aws/events/${tenant}-${environment}/audit"
+            retention_in_days: 365
+          stepfunctions:
+            name: "/aws/stepfunctions/${tenant}-${environment}"
+            retention_in_days: 30
+          lambda:
+            name: "/aws/lambda/${tenant}-${environment}/event-processors"
+            retention_in_days: 30
+
+      tags:
+        StackType: "event-driven"
+        Layer: "observability"
+
+    monitoring:
+      component: "monitoring"
+      depends_on:
+        - eventbridge-bus
+        - lambda-consumers
+        - sqs-buffered
+        - step-functions
+      vars:
+        enabled: true
+
+        # Dashboard
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-event-driven"
+
+        dashboard_widgets:
+          - type: "metric"
+            title: "EventBridge - Events Matched"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/Events"
+                metric_name: "MatchedEvents"
+                dimensions:
+                  EventBusName: "${output.eventbridge-bus.event_bus_name}"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "EventBridge - Failed Invocations"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/Events"
+                metric_name: "FailedInvocations"
+                dimensions:
+                  EventBusName: "${output.eventbridge-bus.event_bus_name}"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "Lambda - Invocations"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/Lambda"
+                metric_name: "Invocations"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "Lambda - Errors"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/Lambda"
+                metric_name: "Errors"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "SQS - Messages Visible"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/SQS"
+                metric_name: "ApproximateNumberOfMessagesVisible"
+                stat: "Average"
+                period: 300
+
+          - type: "metric"
+            title: "Step Functions - Executions"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/States"
+                metric_name: "ExecutionsStarted"
+                stat: "Sum"
+                period: 300
+              - namespace: "AWS/States"
+                metric_name: "ExecutionsFailed"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "DLQ - Message Count"
+            width: 24
+            height: 6
+            metrics:
+              - namespace: "AWS/SQS"
+                metric_name: "ApproximateNumberOfMessagesVisible"
+                dimensions:
+                  QueueName: "${output.dlq-events.queue_name}"
+                stat: "Sum"
+                period: 60
+
+        # Alarms
+        alarm_notifications_enabled: true
+        sns_topic_name: "${output.sns-alerts.topic_name}"
+
+        alarms:
+          # EventBridge Alarms
+          eventbridge-failed-invocations:
+            alarm_name: "${tenant}-${environment}-eventbridge-failed-invocations"
+            metric_name: "FailedInvocations"
+            namespace: "AWS/Events"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 2
+            threshold: 10
+            comparison_operator: "GreaterThanThreshold"
+            dimensions:
+              EventBusName: "${output.eventbridge-bus.event_bus_name}"
+            alarm_description: "EventBridge failed invocations exceeded threshold"
+            treat_missing_data: "notBreaching"
+
+          # Lambda Alarms
+          lambda-error-rate:
+            alarm_name: "${tenant}-${environment}-lambda-error-rate"
+            metric_name: "Errors"
+            namespace: "AWS/Lambda"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 3
+            threshold: 10
+            comparison_operator: "GreaterThanThreshold"
+            alarm_description: "Lambda error rate exceeded threshold"
+
+          lambda-duration-p99:
+            alarm_name: "${tenant}-${environment}-lambda-duration"
+            metric_name: "Duration"
+            namespace: "AWS/Lambda"
+            extended_statistic: "p99"
+            period: 300
+            evaluation_periods: 3
+            threshold: 10000
+            comparison_operator: "GreaterThanThreshold"
+            alarm_description: "Lambda p99 duration exceeded 10 seconds"
+
+          # SQS Alarms
+          sqs-queue-depth:
+            alarm_name: "${tenant}-${environment}-sqs-queue-depth"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            namespace: "AWS/SQS"
+            statistic: "Average"
+            period: 300
+            evaluation_periods: 3
+            threshold: 10000
+            comparison_operator: "GreaterThanThreshold"
+            alarm_description: "SQS queue depth exceeded threshold"
+
+          dlq-messages:
+            alarm_name: "${tenant}-${environment}-dlq-messages"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            namespace: "AWS/SQS"
+            statistic: "Sum"
+            period: 60
+            evaluation_periods: 1
+            threshold: 1
+            comparison_operator: "GreaterThanOrEqualToThreshold"
+            dimensions:
+              QueueName: "${output.dlq-events.queue_name}"
+            alarm_description: "Messages present in DLQ - immediate attention required"
+            alarm_actions:
+              - "${output.sns-alerts.topic_arn}"
+
+          # Step Functions Alarms
+          stepfunctions-failed:
+            alarm_name: "${tenant}-${environment}-stepfunctions-failed"
+            metric_name: "ExecutionsFailed"
+            namespace: "AWS/States"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 1
+            threshold: 1
+            comparison_operator: "GreaterThanOrEqualToThreshold"
+            alarm_description: "Step Functions execution failed"
+
+          stepfunctions-throttled:
+            alarm_name: "${tenant}-${environment}-stepfunctions-throttled"
+            metric_name: "ExecutionThrottled"
+            namespace: "AWS/States"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 2
+            threshold: 5
+            comparison_operator: "GreaterThanThreshold"
+            alarm_description: "Step Functions throttling detected"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "observability"
+
+    # =========================================================================
+    # IAM
+    # =========================================================================
+    iam:
+      component: "iam"
+      vars:
+        enabled: true
+
+        roles:
+          # Lambda Execution Role
+          lambda-execution:
+            name: "${tenant}-${environment}-event-lambda-role"
+            assume_role_policy:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Principal:
+                    Service: "lambda.amazonaws.com"
+                  Action: "sts:AssumeRole"
+
+            managed_policy_arns:
+              - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              - "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+
+            inline_policies:
+              eventbridge:
+                - Effect: "Allow"
+                  Action:
+                    - "events:PutEvents"
+                  Resource:
+                    - "arn:aws:events:${region}:${aws_account_id}:event-bus/${tenant}-${environment}-events"
+              sqs:
+                - Effect: "Allow"
+                  Action:
+                    - "sqs:ReceiveMessage"
+                    - "sqs:DeleteMessage"
+                    - "sqs:GetQueueAttributes"
+                    - "sqs:SendMessage"
+                  Resource:
+                    - "arn:aws:sqs:${region}:${aws_account_id}:${tenant}-${environment}-*"
+              sns:
+                - Effect: "Allow"
+                  Action:
+                    - "sns:Publish"
+                  Resource:
+                    - "arn:aws:sns:${region}:${aws_account_id}:${tenant}-${environment}-*"
+              dynamodb:
+                - Effect: "Allow"
+                  Action:
+                    - "dynamodb:GetItem"
+                    - "dynamodb:PutItem"
+                    - "dynamodb:UpdateItem"
+                    - "dynamodb:Query"
+                  Resource:
+                    - "arn:aws:dynamodb:${region}:${aws_account_id}:table/${tenant}-${environment}-*"
+              kms:
+                - Effect: "Allow"
+                  Action:
+                    - "kms:Decrypt"
+                    - "kms:GenerateDataKey"
+                  Resource:
+                    - "*"
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": "sqs.${region}.amazonaws.com"
+
+          # EventBridge Role
+          eventbridge:
+            name: "${tenant}-${environment}-eventbridge-role"
+            assume_role_policy:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Principal:
+                    Service: "events.amazonaws.com"
+                  Action: "sts:AssumeRole"
+
+            inline_policies:
+              targets:
+                - Effect: "Allow"
+                  Action:
+                    - "states:StartExecution"
+                  Resource:
+                    - "arn:aws:states:${region}:${aws_account_id}:stateMachine:${tenant}-${environment}-*"
+                - Effect: "Allow"
+                  Action:
+                    - "firehose:PutRecord"
+                    - "firehose:PutRecordBatch"
+                  Resource:
+                    - "arn:aws:firehose:${region}:${aws_account_id}:deliverystream/${tenant}-${environment}-*"
+
+          # Step Functions Role
+          stepfunctions:
+            name: "${tenant}-${environment}-stepfunctions-role"
+            assume_role_policy:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Principal:
+                    Service: "states.amazonaws.com"
+                  Action: "sts:AssumeRole"
+
+            inline_policies:
+              lambda:
+                - Effect: "Allow"
+                  Action:
+                    - "lambda:InvokeFunction"
+                  Resource:
+                    - "arn:aws:lambda:${region}:${aws_account_id}:function:${tenant}-${environment}-*"
+              events:
+                - Effect: "Allow"
+                  Action:
+                    - "events:PutEvents"
+                  Resource:
+                    - "arn:aws:events:${region}:${aws_account_id}:event-bus/${tenant}-${environment}-*"
+              sqs:
+                - Effect: "Allow"
+                  Action:
+                    - "sqs:SendMessage"
+                  Resource:
+                    - "arn:aws:sqs:${region}:${aws_account_id}:${tenant}-${environment}-*"
+              sns:
+                - Effect: "Allow"
+                  Action:
+                    - "sns:Publish"
+                  Resource:
+                    - "arn:aws:sns:${region}:${aws_account_id}:${tenant}-${environment}-*"
+              dynamodb:
+                - Effect: "Allow"
+                  Action:
+                    - "dynamodb:PutItem"
+                    - "dynamodb:GetItem"
+                    - "dynamodb:UpdateItem"
+                  Resource:
+                    - "arn:aws:dynamodb:${region}:${aws_account_id}:table/${tenant}-${environment}-*"
+              logs:
+                - Effect: "Allow"
+                  Action:
+                    - "logs:CreateLogDelivery"
+                    - "logs:GetLogDelivery"
+                    - "logs:UpdateLogDelivery"
+                    - "logs:DeleteLogDelivery"
+                    - "logs:ListLogDeliveries"
+                    - "logs:PutResourcePolicy"
+                    - "logs:DescribeResourcePolicies"
+                    - "logs:DescribeLogGroups"
+                  Resource: "*"
+              xray:
+                - Effect: "Allow"
+                  Action:
+                    - "xray:PutTraceSegments"
+                    - "xray:PutTelemetryRecords"
+                    - "xray:GetSamplingRules"
+                    - "xray:GetSamplingTargets"
+                  Resource: "*"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "security"
+
+    # =========================================================================
+    # ENCRYPTION
+    # =========================================================================
+    kms:
+      component: "kms"
+      vars:
+        enabled: true
+        alias: "alias/${tenant}-${environment}-events"
+        description: "KMS key for event-driven architecture encryption"
+        deletion_window_in_days: 30
+        enable_key_rotation: true
+
+        key_policy:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: "Enable IAM User Permissions"
+              Effect: "Allow"
+              Principal:
+                AWS: "arn:aws:iam::${aws_account_id}:root"
+              Action: "kms:*"
+              Resource: "*"
+            - Sid: "Allow EventBridge"
+              Effect: "Allow"
+              Principal:
+                Service: "events.amazonaws.com"
+              Action:
+                - "kms:Decrypt"
+                - "kms:GenerateDataKey"
+              Resource: "*"
+
+      tags:
+        StackType: "event-driven"
+        Layer: "security"
+
+# =============================================================================
+# DEPLOYMENT CONFIGURATION
+# =============================================================================
+deployment_order:
+  - stage: 1
+    name: "Foundation"
+    components: [kms, iam, cloudwatch-logs]
+    parallel: true
+    description: "Deploy encryption, IAM, and logging infrastructure"
+
+  - stage: 2
+    name: "Storage"
+    components: [s3-audit, dynamodb-state, dlq-events]
+    parallel: true
+    description: "Deploy storage and error handling"
+
+  - stage: 3
+    name: "Messaging"
+    components: [sqs-buffered, sns-fanout, sns-alerts]
+    parallel: true
+    description: "Deploy queuing and notification infrastructure"
+
+  - stage: 4
+    name: "Event Bus"
+    components: [eventbridge-bus, firehose-audit]
+    parallel: true
+    description: "Deploy central event bus and archival"
+
+  - stage: 5
+    name: "Consumers"
+    components: [lambda-consumers]
+    parallel: false
+    description: "Deploy event consumer functions"
+
+  - stage: 6
+    name: "Orchestration"
+    components: [step-functions]
+    parallel: false
+    description: "Deploy workflow orchestration"
+
+  - stage: 7
+    name: "Routing"
+    components: [eventbridge-rules]
+    parallel: false
+    description: "Deploy event routing rules"
+
+  - stage: 8
+    name: "Observability"
+    components: [monitoring]
+    parallel: false
+    description: "Deploy monitoring and alerting"
+
+# =============================================================================
+# VALIDATION RULES
+# =============================================================================
+validation:
+  pre_deployment:
+    - check: "iam_permissions"
+      description: "Verify IAM permissions for all services"
+    - check: "kms_key_exists"
+      description: "Verify KMS key is available or will be created"
+    - check: "lambda_code_exists"
+      description: "Verify Lambda deployment packages exist"
+
+  post_deployment:
+    - check: "eventbridge_rules_active"
+      description: "Verify EventBridge rules are active"
+    - check: "lambda_functions_healthy"
+      description: "Verify Lambda functions are invokable"
+    - check: "stepfunctions_executable"
+      description: "Verify Step Functions state machines are valid"
+    - check: "dlq_empty"
+      description: "Verify DLQ is empty after initial deployment"
+
+# =============================================================================
+# TESTING STRATEGY
+# =============================================================================
+testing:
+  unit_tests:
+    - name: "Lambda handler tests"
+      path: "tests/unit/lambda/"
+      command: "pytest tests/unit/lambda/ -v"
+
+    - name: "Step Functions definition validation"
+      path: "tests/unit/stepfunctions/"
+      command: "aws stepfunctions validate-state-machine-definition"
+
+  integration_tests:
+    - name: "Event flow test"
+      description: "Send test event through complete flow"
+      command: |
+        aws events put-events --entries '[{
+          "Source": "com.${tenant}.test",
+          "DetailType": "TestEvent",
+          "Detail": "{\"test\": \"data\"}",
+          "EventBusName": "${tenant}-${environment}-events"
+        }]'
+
+    - name: "DLQ test"
+      description: "Verify failed events go to DLQ"
+      command: "tests/integration/dlq_test.sh"
+
+  load_tests:
+    - name: "Event throughput test"
+      description: "Test event processing at scale"
+      tool: "artillery"
+      config: "tests/load/event-throughput.yml"
+
+# =============================================================================
+# ENVIRONMENT OVERRIDES
+# =============================================================================
+environment_overrides:
+  development:
+    vars:
+      log_retention_days: 7
+      event_retention_days: 7
+    components:
+      lambda-consumers:
+        vars:
+          functions:
+            order-processor:
+              memory_size: 256
+              reserved_concurrent_executions: 10
+      step-functions:
+        vars:
+          state_machines:
+            workflow-orchestrator:
+              logging_configuration:
+                level: "ALL"
+
+  staging:
+    vars:
+      log_retention_days: 14
+      event_retention_days: 14
+    components:
+      lambda-consumers:
+        vars:
+          functions:
+            order-processor:
+              memory_size: 512
+              reserved_concurrent_executions: 25
+
+  production:
+    vars:
+      log_retention_days: 90
+      event_retention_days: 30
+    components:
+      lambda-consumers:
+        vars:
+          functions:
+            order-processor:
+              memory_size: 1024
+              reserved_concurrent_executions: 100
+              provisioned_concurrency: 5
+      step-functions:
+        vars:
+          state_machines:
+            workflow-orchestrator:
+              logging_configuration:
+                level: "ERROR"

@@ -1,0 +1,514 @@
+---
+# Streaming Pipeline Stack Template
+# Real-time data streaming and processing infrastructure
+# Version: 1.0.0
+
+name: streaming-pipeline-stack
+description: "Real-time data streaming infrastructure with Kinesis and Flink"
+version: "1.0.0"
+maturity: "stable"
+
+template:
+  category: "patterns/data-pipelines"
+  use_cases:
+    - "Real-time analytics"
+    - "Event streaming"
+    - "IoT data processing"
+    - "Log aggregation"
+    - "Clickstream analysis"
+    - "Fraud detection"
+
+  architecture:
+    components:
+      - name: "Ingestion"
+        components: ["kinesis-data-streams", "api-gateway"]
+        description: "Data ingestion endpoints"
+      - name: "Processing"
+        components: ["kinesis-data-analytics", "lambda"]
+        description: "Stream processing"
+      - name: "Delivery"
+        components: ["firehose", "sns", "sqs"]
+        description: "Data delivery"
+      - name: "Storage"
+        components: ["s3", "elasticsearch", "timestream"]
+        description: "Data persistence"
+
+  estimated_cost:
+    minimum: "$50/month"
+    typical: "$300/month"
+    maximum: "$2000+/month"
+
+  deployment_time: "25-35 minutes"
+
+import:
+  - catalog/_base/defaults
+  - catalog/iam/defaults
+
+components:
+  terraform:
+    # ===========================================
+    # INGESTION LAYER
+    # ===========================================
+    kinesis-ingest:
+      component: "kinesis"
+      vars:
+        enabled: true
+        stream_name: "${tenant}-${environment}-ingest-stream"
+        stream_mode: "ON_DEMAND"
+        retention_period: 168  # 7 days
+        enable_enhanced_fanout: true
+        encryption_type: "KMS"
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "ingestion"
+
+    api-ingest:
+      component: "apigateway"
+      vars:
+        enabled: true
+        api_name: "${tenant}-${environment}-stream-api"
+        api_type: "HTTP"
+        endpoint_type: ["REGIONAL"]
+
+        # Kinesis integration
+        routes:
+          - route_key: "POST /events"
+            integration_type: "AWS_PROXY"
+            integration_subtype: "Kinesis-PutRecord"
+            integration_credentials_arn: "${output.iam.api_role_arn}"
+            request_parameters:
+              StreamName: "${output.kinesis-ingest.stream_name}"
+              Data: "$request.body"
+              PartitionKey: "$request.header.X-Partition-Key"
+
+          - route_key: "POST /events/batch"
+            integration_type: "AWS_PROXY"
+            integration_subtype: "Kinesis-PutRecords"
+            integration_credentials_arn: "${output.iam.api_role_arn}"
+            request_parameters:
+              StreamName: "${output.kinesis-ingest.stream_name}"
+              Records: "$request.body.records"
+
+        # Throttling
+        default_route_settings:
+          throttling_burst_limit: 10000
+          throttling_rate_limit: 5000
+
+        enable_logging: true
+        log_retention_days: 14
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "ingestion"
+
+    # ===========================================
+    # PROCESSING LAYER
+    # ===========================================
+    kinesis-analytics:
+      component: "kinesis-analytics"
+      depends_on:
+        - kinesis-ingest
+        - kinesis-output
+      vars:
+        enabled: true
+        application_name: "${tenant}-${environment}-stream-processor"
+        runtime_environment: "FLINK-1_18"
+
+        # Application configuration
+        application_configuration:
+          application_code_configuration:
+            code_content:
+              s3_content_location:
+                bucket_arn: "${output.s3-code.bucket_arn}"
+                file_key: "flink/stream-processor.jar"
+            code_content_type: "ZIPFILE"
+
+          flink_application_configuration:
+            checkpoint_configuration:
+              configuration_type: "DEFAULT"
+            monitoring_configuration:
+              configuration_type: "CUSTOM"
+              metrics_level: "APPLICATION"
+              log_level: "INFO"
+            parallelism_configuration:
+              configuration_type: "CUSTOM"
+              auto_scaling_enabled: true
+              parallelism: 4
+              parallelism_per_kpu: 1
+
+          environment_properties:
+            - property_group_id: "kinesis"
+              property_map:
+                input.stream.name: "${output.kinesis-ingest.stream_name}"
+                output.stream.name: "${output.kinesis-output.stream_name}"
+                aws.region: "${region}"
+            - property_group_id: "application"
+              property_map:
+                window.size.seconds: "60"
+                late.arrival.seconds: "30"
+
+          vpc_configuration:
+            security_group_ids:
+              - "${output.securitygroup.analytics_sg_id}"
+            subnet_ids: "${output.vpc.private_subnet_ids}"
+
+        # Auto-scaling
+        auto_scaling_enabled: true
+        parallelism_count: 4
+        min_parallelism: 2
+        max_parallelism: 32
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "processing"
+
+    lambda-enrichment:
+      component: "lambda"
+      depends_on:
+        - kinesis-ingest
+      vars:
+        enabled: true
+
+        functions:
+          stream-enrichment:
+            function_name: "${tenant}-${environment}-stream-enrichment"
+            description: "Enrich streaming data with reference data"
+            runtime: "python3.11"
+            handler: "enrichment.handler"
+            memory_size: 1024
+            timeout: 60
+            architecture: "arm64"
+
+            # Kinesis trigger
+            event_source_mapping:
+              kinesis:
+                event_source_arn: "${output.kinesis-ingest.stream_arn}"
+                starting_position: "LATEST"
+                batch_size: 100
+                maximum_batching_window_in_seconds: 5
+                parallelization_factor: 2
+                maximum_retry_attempts: 3
+                bisect_batch_on_function_error: true
+                destination_config:
+                  on_failure:
+                    destination_arn: "${output.sqs-dlq.queue_arn}"
+
+            environment_variables:
+              OUTPUT_STREAM: "${output.kinesis-output.stream_name}"
+              DYNAMODB_TABLE: "${output.dynamodb-lookup.table_name}"
+
+            reserved_concurrent_executions: 50
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "processing"
+
+    # ===========================================
+    # OUTPUT STREAMS
+    # ===========================================
+    kinesis-output:
+      component: "kinesis"
+      vars:
+        enabled: true
+        stream_name: "${tenant}-${environment}-processed-stream"
+        stream_mode: "ON_DEMAND"
+        retention_period: 24
+        enable_enhanced_fanout: true
+        encryption_type: "KMS"
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "output"
+
+    # ===========================================
+    # DELIVERY LAYER
+    # ===========================================
+    firehose-s3:
+      component: "firehose"
+      depends_on:
+        - kinesis-output
+        - s3-archive
+      vars:
+        enabled: true
+        delivery_stream_name: "${tenant}-${environment}-archive-delivery"
+
+        kinesis_source_configuration:
+          kinesis_stream_arn: "${output.kinesis-output.stream_arn}"
+
+        s3_configuration:
+          bucket_arn: "${output.s3-archive.bucket_arn}"
+          prefix: "events/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
+          error_output_prefix: "errors/!{firehose:error-output-type}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+          buffering_size: 128
+          buffering_interval: 300
+          compression_format: "GZIP"
+
+        data_format_conversion:
+          enabled: true
+          output_format_configuration:
+            serializer: "PARQUET"
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "delivery"
+
+    firehose-opensearch:
+      component: "firehose"
+      depends_on:
+        - kinesis-output
+        - opensearch
+      vars:
+        enabled: true
+        delivery_stream_name: "${tenant}-${environment}-opensearch-delivery"
+
+        kinesis_source_configuration:
+          kinesis_stream_arn: "${output.kinesis-output.stream_arn}"
+
+        opensearch_configuration:
+          domain_arn: "${output.opensearch.domain_arn}"
+          index_name: "events"
+          index_rotation_period: "OneDay"
+          buffering_size: 5
+          buffering_interval: 60
+          retry_duration: 300
+          s3_backup_mode: "FailedDocumentsOnly"
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "delivery"
+
+    # ===========================================
+    # STORAGE LAYER
+    # ===========================================
+    s3-archive:
+      component: "s3"
+      vars:
+        enabled: true
+        bucket_name: "${tenant}-${environment}-stream-archive"
+        versioning_enabled: false
+        sse_algorithm: "aws:kms"
+
+        lifecycle_rules:
+          - id: "archive"
+            enabled: true
+            transitions:
+              - days: 30
+                storage_class: "STANDARD_IA"
+              - days: 90
+                storage_class: "GLACIER"
+            expiration:
+              days: 365
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "storage"
+
+    s3-code:
+      component: "s3"
+      vars:
+        enabled: true
+        bucket_name: "${tenant}-${environment}-stream-code"
+        versioning_enabled: true
+        sse_algorithm: "aws:kms"
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "code"
+
+    opensearch:
+      component: "opensearch"
+      vars:
+        enabled: true
+        domain_name: "${tenant}-${environment}-analytics"
+        engine_version: "OpenSearch_2.11"
+
+        cluster_config:
+          instance_type: "r6g.large.search"
+          instance_count: 2
+          dedicated_master_enabled: false
+          zone_awareness_enabled: true
+          zone_awareness_config:
+            availability_zone_count: 2
+
+        ebs_options:
+          ebs_enabled: true
+          volume_type: "gp3"
+          volume_size: 100
+          iops: 3000
+          throughput: 125
+
+        encrypt_at_rest:
+          enabled: true
+
+        node_to_node_encryption:
+          enabled: true
+
+        vpc_options:
+          security_group_ids:
+            - "${output.securitygroup.opensearch_sg_id}"
+          subnet_ids:
+            - "${output.vpc.private_subnet_ids[0]}"
+            - "${output.vpc.private_subnet_ids[1]}"
+
+        # Index management
+        auto_tune_options:
+          desired_state: "ENABLED"
+          rollback_on_disable: "NO_ROLLBACK"
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "storage"
+
+    dynamodb-lookup:
+      component: "dynamodb"
+      vars:
+        enabled: true
+        table_name: "${tenant}-${environment}-lookup"
+        billing_mode: "PAY_PER_REQUEST"
+        hash_key: "pk"
+
+        attributes:
+          - name: "pk"
+            type: "S"
+
+        # DAX for low-latency lookups
+        dax_enabled: true
+        dax_cluster_name: "${tenant}-${environment}-lookup-cache"
+        dax_node_type: "dax.r5.large"
+        dax_replication_factor: 2
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "storage"
+
+    timestream:
+      component: "timestream"
+      vars:
+        enabled: true
+        database_name: "${tenant}-${environment}-metrics"
+
+        tables:
+          - name: "events"
+            retention_properties:
+              memory_store_retention_period_in_hours: 24
+              magnetic_store_retention_period_in_days: 365
+            magnetic_store_write_properties:
+              enable_magnetic_store_writes: true
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "storage"
+
+    # ===========================================
+    # ERROR HANDLING
+    # ===========================================
+    sqs-dlq:
+      component: "sqs"
+      vars:
+        enabled: true
+        queue_name: "${tenant}-${environment}-stream-dlq"
+        message_retention_seconds: 1209600  # 14 days
+        visibility_timeout_seconds: 300
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "error-handling"
+
+    # ===========================================
+    # OBSERVABILITY
+    # ===========================================
+    monitoring:
+      component: "monitoring"
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-streaming"
+
+        dashboard_widgets:
+          - type: "metric"
+            title: "Kinesis Input Throughput"
+            metrics:
+              - namespace: "AWS/Kinesis"
+                metric_name: "IncomingRecords"
+                dimensions:
+                  StreamName: "${output.kinesis-ingest.stream_name}"
+          - type: "metric"
+            title: "Kinesis Analytics Lag"
+            metrics:
+              - namespace: "AWS/KinesisAnalytics"
+                metric_name: "millisBehindLatest"
+          - type: "metric"
+            title: "Lambda Errors"
+            metrics:
+              - namespace: "AWS/Lambda"
+                metric_name: "Errors"
+          - type: "metric"
+            title: "Firehose Delivery Success"
+            metrics:
+              - namespace: "AWS/Firehose"
+                metric_name: "DeliveryToS3.Success"
+
+        alarms:
+          kinesis-throughput-exceeded:
+            metric_name: "WriteProvisionedThroughputExceeded"
+            namespace: "AWS/Kinesis"
+            statistic: "Sum"
+            period: 60
+            evaluation_periods: 3
+            threshold: 0
+            comparison_operator: "GreaterThanThreshold"
+
+          analytics-downtime:
+            metric_name: "downtime"
+            namespace: "AWS/KinesisAnalytics"
+            statistic: "Sum"
+            period: 60
+            evaluation_periods: 1
+            threshold: 0
+            comparison_operator: "GreaterThanThreshold"
+
+          processing-lag:
+            metric_name: "millisBehindLatest"
+            namespace: "AWS/KinesisAnalytics"
+            statistic: "Maximum"
+            period: 300
+            evaluation_periods: 3
+            threshold: 300000  # 5 minutes
+            comparison_operator: "GreaterThanThreshold"
+
+          dlq-messages:
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            namespace: "AWS/SQS"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 1
+            threshold: 1
+            comparison_operator: "GreaterThanOrEqualToThreshold"
+
+        alarm_notifications_enabled: true
+        sns_topic_name: "${tenant}-${environment}-streaming-alarms"
+
+      tags:
+        StackType: "streaming-pipeline"
+        Layer: "observability"
+
+# Deployment order
+deployment_order:
+  - stage: 1
+    components: [iam, s3-archive, s3-code, sqs-dlq]
+    parallel: true
+  - stage: 2
+    components: [kinesis-ingest, kinesis-output, dynamodb-lookup]
+    parallel: true
+  - stage: 3
+    components: [opensearch, timestream]
+    parallel: true
+  - stage: 4
+    components: [lambda-enrichment, kinesis-analytics, api-ingest]
+    parallel: true
+  - stage: 5
+    components: [firehose-s3, firehose-opensearch]
+    parallel: true
+  - stage: 6
+    components: [monitoring]

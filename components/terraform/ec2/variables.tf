@@ -137,3 +137,131 @@ variable "tags" {
     error_message = "The Environment tag must not be an empty string."
   }
 }
+
+# Network Security Variables
+variable "vpc_endpoint_prefix_list_ids" {
+  type        = list(string)
+  description = "List of VPC endpoint prefix list IDs for AWS services (replaces 0.0.0.0/0 in default egress)"
+  default     = []
+
+  validation {
+    condition     = length(var.vpc_endpoint_prefix_list_ids) > 0
+    error_message = "VPC endpoint prefix list IDs are required for secure egress. Use data source: data.aws_prefix_list.s3 or create VPC endpoints."
+  }
+}
+
+# Launch Template Variables
+variable "enable_launch_templates" {
+  type        = bool
+  description = "Enable creation of EC2 launch templates for advanced configuration"
+  default     = true
+}
+
+variable "create_instances_from_templates" {
+  type        = bool
+  description = "Create EC2 instances from launch templates (vs standalone instances)"
+  default     = false
+}
+
+variable "enforce_imdsv2" {
+  type        = bool
+  description = "Enforce IMDSv2 (Instance Metadata Service v2) for security"
+  default     = true
+}
+
+variable "imds_hop_limit" {
+  type        = number
+  description = "The desired HTTP PUT response hop limit for instance metadata requests"
+  default     = 1
+
+  validation {
+    condition     = var.imds_hop_limit >= 1 && var.imds_hop_limit <= 64
+    error_message = "IMDS hop limit must be between 1 and 64."
+  }
+}
+
+variable "enable_instance_metadata_tags" {
+  type        = bool
+  description = "Enable access to instance tags via instance metadata"
+  default     = false
+}
+
+variable "enable_network_interface_config" {
+  type        = bool
+  description = "Configure network interfaces in launch template (vs instance level)"
+  default     = true
+}
+
+variable "default_ebs_optimized" {
+  type        = bool
+  description = "Default EBS optimization setting for instances"
+  default     = true
+}
+
+variable "default_block_devices" {
+  type = list(object({
+    device_name           = string
+    volume_size           = optional(number, 20)
+    volume_type           = optional(string, "gp3")
+    iops                  = optional(number)
+    throughput            = optional(number)
+    encrypted             = optional(bool, true)
+    kms_key_id            = optional(string)
+    delete_on_termination = optional(bool, true)
+    snapshot_id           = optional(string)
+  }))
+  description = "Default block device mappings for launch templates"
+  default     = []
+}
+
+variable "default_iam_instance_profile" {
+  type        = string
+  description = "Default IAM instance profile for instances"
+  default     = null
+}
+
+variable "default_kms_key_id" {
+  type        = string
+  description = "Default KMS key ID for EBS volume encryption"
+  default     = null
+}
+
+variable "enable_detailed_monitoring" {
+  type        = bool
+  description = "Enable detailed CloudWatch monitoring by default"
+  default     = true
+}
+
+variable "default_disable_api_termination" {
+  type        = bool
+  description = "Default setting to prevent accidental instance termination"
+  default     = false
+
+  validation {
+    condition     = var.environment != "prod" || var.default_disable_api_termination == true
+    error_message = "API termination protection should be enabled for production environments."
+  }
+}
+
+variable "enable_resource_name_dns" {
+  type        = bool
+  description = "Enable resource-based DNS naming"
+  default     = true
+}
+
+variable "create_launch_template_dashboard" {
+  type        = bool
+  description = "Create CloudWatch dashboard for launch template metrics"
+  default     = false
+}
+
+variable "environment" {
+  type        = string
+  description = "Environment name (dev, staging, prod) for validation rules"
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be one of: dev, staging, prod."
+  }
+}

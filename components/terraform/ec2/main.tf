@@ -320,6 +320,14 @@ resource "aws_instance" "instances" {
     }
   }
 
+  # SECURITY: Enforce IMDSv2 to prevent SSRF attacks
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required" # Enforce IMDSv2 (not optional)
+    http_put_response_hop_limit = 1          # Limit to instance itself
+    instance_metadata_tags      = "enabled"  # Allow instance tags in metadata
+  }
+
   tags = merge(
     var.tags,
     lookup(each.value, "tags", {}),
@@ -372,11 +380,11 @@ resource "aws_security_group" "instances" {
 
   dynamic "egress" {
     for_each = lookup(each.value, "allowed_egress_rules", [{
-      from_port   = 443
-      to_port     = 443
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-      description = "Allow HTTPS outbound traffic"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      prefix_list_ids = var.vpc_endpoint_prefix_list_ids
+      description     = "Allow HTTPS outbound traffic to AWS services via VPC endpoints"
     }])
 
     content {
@@ -384,6 +392,7 @@ resource "aws_security_group" "instances" {
       to_port         = egress.value.to_port
       protocol        = egress.value.protocol
       cidr_blocks     = lookup(egress.value, "cidr_blocks", null)
+      prefix_list_ids = lookup(egress.value, "prefix_list_ids", null)
       security_groups = lookup(egress.value, "security_groups", null)
       description     = lookup(egress.value, "description", null)
     }

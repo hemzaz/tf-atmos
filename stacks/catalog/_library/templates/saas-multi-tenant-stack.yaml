@@ -1,0 +1,686 @@
+---
+# SaaS Multi-Tenant Stack Template
+# Multi-tenant SaaS application infrastructure
+# Version: 1.0.0
+
+name: saas-multi-tenant-stack
+description: "Multi-tenant SaaS platform with tenant isolation and shared infrastructure"
+version: "1.0.0"
+maturity: "stable"
+
+template:
+  category: "patterns/saas"
+  use_cases:
+    - "B2B SaaS applications"
+    - "Multi-tenant platforms"
+    - "White-label solutions"
+    - "Managed services"
+
+  architecture:
+    isolation_models:
+      - name: "Siloed"
+        description: "Dedicated resources per tenant"
+        cost: "High"
+        isolation: "Complete"
+      - name: "Pooled"
+        description: "Shared resources with logical isolation"
+        cost: "Low"
+        isolation: "Logical"
+      - name: "Hybrid"
+        description: "Mix of siloed and pooled based on tier"
+        cost: "Medium"
+        isolation: "Tiered"
+
+    components:
+      - name: "Control Plane"
+        components: ["tenant-management", "billing", "onboarding"]
+        description: "Tenant lifecycle management"
+      - name: "Application Plane"
+        components: ["api", "web", "workers"]
+        description: "Application services"
+      - name: "Data Plane"
+        components: ["database", "storage", "cache"]
+        description: "Data layer with tenant isolation"
+
+  estimated_cost:
+    minimum: "$500/month"
+    typical: "$2000/month"
+    maximum: "$20000+/month"
+
+  deployment_time: "60-90 minutes"
+
+import:
+  - catalog/_base/defaults
+  - catalog/vpc/defaults
+  - catalog/eks/defaults
+
+components:
+  terraform:
+    # ===========================================
+    # NETWORK LAYER
+    # ===========================================
+    vpc:
+      component: "vpc"
+      vars:
+        enabled: true
+        name: "saas-platform"
+        vpc_cidr: "10.0.0.0/16"
+
+        azs:
+          - "${region}a"
+          - "${region}b"
+          - "${region}c"
+
+        private_subnets:
+          - "10.0.0.0/18"   # Application tier (16k IPs)
+          - "10.0.64.0/18"  # Database tier
+        public_subnets:
+          - "10.0.200.0/24"
+          - "10.0.201.0/24"
+          - "10.0.202.0/24"
+
+        enable_nat_gateway: true
+        nat_gateway_strategy: "one_per_az"
+
+        vpc_flow_logs_enabled: true
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "network"
+
+    # ===========================================
+    # CONTROL PLANE - TENANT MANAGEMENT
+    # ===========================================
+    tenant-management-db:
+      component: "rds"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: true
+        identifier: "${tenant}-${environment}-tenant-mgmt"
+        engine: "postgres"
+        engine_version: "15.4"
+        instance_class: "db.t3.medium"
+        allocated_storage: 50
+        db_name: "tenant_management"
+        multi_az: true
+
+        # This database stores tenant metadata
+        # Use strong encryption
+        storage_encrypted: true
+        deletion_protection: true
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "control-plane"
+
+    tenant-provisioning-lambda:
+      component: "lambda"
+      vars:
+        enabled: true
+
+        functions:
+          tenant-provisioner:
+            function_name: "${tenant}-${environment}-tenant-provisioner"
+            description: "Provisions new tenant resources"
+            runtime: "python3.11"
+            handler: "provisioner.handler"
+            memory_size: 512
+            timeout: 300
+
+            environment_variables:
+              TENANT_DB_HOST: "${output.tenant-management-db.endpoint}"
+              TENANT_DB_NAME: "tenant_management"
+              AWS_REGION: "${region}"
+
+          tenant-deprovisioner:
+            function_name: "${tenant}-${environment}-tenant-deprovisioner"
+            description: "Deprovisions tenant resources"
+            runtime: "python3.11"
+            handler: "deprovisioner.handler"
+            memory_size: 512
+            timeout: 600
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "control-plane"
+
+    step-functions-onboarding:
+      component: "step-functions"
+      depends_on:
+        - tenant-provisioning-lambda
+      vars:
+        enabled: true
+        state_machine_name: "${tenant}-${environment}-tenant-onboarding"
+        state_machine_type: "STANDARD"
+
+        definition:
+          Comment: "Tenant onboarding workflow"
+          StartAt: "ValidateTenant"
+          States:
+            ValidateTenant:
+              Type: "Task"
+              Resource: "${output.tenant-provisioning-lambda.functions['tenant-provisioner'].arn}"
+              Parameters:
+                action: "validate"
+                tenant_id.$: "$.tenant_id"
+              Next: "ProvisionDatabase"
+
+            ProvisionDatabase:
+              Type: "Task"
+              Resource: "${output.tenant-provisioning-lambda.functions['tenant-provisioner'].arn}"
+              Parameters:
+                action: "provision_database"
+                tenant_id.$: "$.tenant_id"
+                tier.$: "$.tier"
+              Next: "ProvisionStorage"
+
+            ProvisionStorage:
+              Type: "Task"
+              Resource: "${output.tenant-provisioning-lambda.functions['tenant-provisioner'].arn}"
+              Parameters:
+                action: "provision_storage"
+                tenant_id.$: "$.tenant_id"
+              Next: "ConfigureAccess"
+
+            ConfigureAccess:
+              Type: "Task"
+              Resource: "${output.tenant-provisioning-lambda.functions['tenant-provisioner'].arn}"
+              Parameters:
+                action: "configure_access"
+                tenant_id.$: "$.tenant_id"
+              Next: "NotifyTenant"
+
+            NotifyTenant:
+              Type: "Task"
+              Resource: "arn:aws:states:::sns:publish"
+              Parameters:
+                TopicArn: "${output.sns-notifications.topic_arn}"
+                Message.$: "$.message"
+              End: true
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "control-plane"
+
+    # ===========================================
+    # APPLICATION PLANE
+    # ===========================================
+    eks:
+      component: "eks"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: true
+        cluster_name: "${tenant}-${environment}-saas-platform"
+        kubernetes_version: "1.28"
+
+        vpc_id: "${output.vpc.vpc_id}"
+        subnet_ids: "${output.vpc.private_subnet_ids}"
+
+        endpoint_private_access: true
+        endpoint_public_access: false
+
+        # Multi-tenant node groups
+        node_groups:
+          system:
+            name: "system"
+            instance_types: ["m5.large"]
+            desired_size: 3
+            min_size: 2
+            max_size: 5
+            labels:
+              workload-type: "system"
+            taints:
+              - key: "CriticalAddonsOnly"
+                value: "true"
+                effect: "NO_SCHEDULE"
+
+          shared:
+            name: "shared"
+            instance_types: ["m5.xlarge", "m5.2xlarge"]
+            desired_size: 5
+            min_size: 3
+            max_size: 50
+            labels:
+              workload-type: "shared"
+              tenant-tier: "standard"
+
+          premium:
+            name: "premium"
+            instance_types: ["m5.2xlarge", "m5.4xlarge"]
+            desired_size: 2
+            min_size: 0
+            max_size: 20
+            labels:
+              workload-type: "dedicated"
+              tenant-tier: "premium"
+            taints:
+              - key: "tenant-tier"
+                value: "premium"
+                effect: "NO_SCHEDULE"
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "application-plane"
+
+    eks-addons:
+      component: "eks-addons"
+      depends_on:
+        - eks
+      vars:
+        enabled: true
+        cluster_name: "${output.eks.cluster_id}"
+
+        enable_metrics_server: true
+        enable_cluster_autoscaler: true
+        enable_aws_load_balancer_controller: true
+        enable_external_dns: true
+        enable_cert_manager: true
+        enable_external_secrets: true
+
+        # Multi-tenancy addons
+        enable_kyverno: true  # Policy engine for tenant isolation
+        kyverno_config:
+          policies:
+            - name: "require-tenant-label"
+              spec:
+                rules:
+                  - name: "require-tenant-label"
+                    match:
+                      resources:
+                        kinds: ["Pod"]
+                    validate:
+                      message: "Pods must have a tenant label"
+                      pattern:
+                        metadata:
+                          labels:
+                            tenant: "?*"
+
+            - name: "restrict-namespace-access"
+              spec:
+                rules:
+                  - name: "restrict-namespace"
+                    match:
+                      resources:
+                        kinds: ["Pod"]
+                    validate:
+                      message: "Pods can only run in tenant namespaces"
+                      deny:
+                        conditions:
+                          - key: "{{request.namespace}}"
+                            operator: NotIn
+                            value: ["{{request.object.metadata.labels.tenant}}-*"]
+
+        enable_hierarchical_namespaces: true  # HNC for namespace hierarchy
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "application-plane"
+
+    # ===========================================
+    # API GATEWAY - TENANT ROUTING
+    # ===========================================
+    apigateway:
+      component: "apigateway"
+      vars:
+        enabled: true
+        api_name: "${tenant}-${environment}-saas-api"
+        api_type: "HTTP"
+        endpoint_type: ["REGIONAL"]
+
+        # Custom domain with tenant subdomains
+        create_custom_domain: true
+        domain_name: "api.${domain}"
+        certificate_arn: "${output.acm.certificate_arn}"
+
+        routes:
+          # Tenant-aware routing
+          - route_key: "ANY /{tenant_id}/{proxy+}"
+            integration_type: "HTTP_PROXY"
+            integration_uri: "http://${output.eks.cluster_endpoint}/{tenant_id}/{proxy}"
+            request_parameters:
+              "overwrite:header.X-Tenant-ID": "$request.path.tenant_id"
+
+          # Public routes
+          - route_key: "POST /signup"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.tenant-provisioning-lambda.functions['tenant-provisioner'].invoke_arn}"
+
+        # Authorizer
+        authorizers:
+          - name: "jwt-authorizer"
+            type: "JWT"
+            identity_sources: ["$request.header.Authorization"]
+            issuer: "https://cognito-idp.${region}.amazonaws.com/${output.cognito.user_pool_id}"
+            audiences:
+              - "${output.cognito.app_client_id}"
+
+        # Rate limiting per tenant
+        default_route_settings:
+          throttling_burst_limit: 1000
+          throttling_rate_limit: 500
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "application-plane"
+
+    # ===========================================
+    # DATA PLANE - TENANT DATABASES
+    # ===========================================
+    rds-shared:
+      component: "rds"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: true
+        identifier: "${tenant}-${environment}-shared-db"
+        engine: "postgres"
+        engine_version: "15.4"
+        instance_class: "db.r5.xlarge"
+        allocated_storage: 500
+        max_allocated_storage: 2000
+
+        # Shared database for standard tier tenants
+        db_name: "saas_shared"
+
+        multi_az: true
+        backup_retention_period: 14
+        storage_encrypted: true
+        deletion_protection: true
+
+        # Row-level security enabled
+        parameters:
+          - name: "row_security"
+            value: "on"
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "data-plane"
+        IsolationModel: "pooled"
+
+    # Premium tenant isolated databases (template)
+    rds-premium-template:
+      component: "rds"
+      vars:
+        enabled: false  # Template only, provisioned per tenant
+        identifier_prefix: "${tenant}-${environment}-premium-"
+        engine: "postgres"
+        engine_version: "15.4"
+        instance_class: "db.r5.large"
+        allocated_storage: 100
+        multi_az: true
+        storage_encrypted: true
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "data-plane"
+        IsolationModel: "siloed"
+
+    # ===========================================
+    # STORAGE - TENANT ISOLATION
+    # ===========================================
+    s3-tenant-data:
+      component: "s3"
+      vars:
+        enabled: true
+        bucket_name: "${tenant}-${environment}-tenant-data"
+        versioning_enabled: true
+        sse_algorithm: "aws:kms"
+
+        # Tenant isolation via bucket policies and prefixes
+        # Each tenant gets prefix: tenants/{tenant_id}/
+
+        # Object-level ACLs disabled
+        object_ownership: "BucketOwnerEnforced"
+
+        lifecycle_rules:
+          - id: "tenant-data-lifecycle"
+            enabled: true
+            transitions:
+              - days: 90
+                storage_class: "STANDARD_IA"
+            noncurrent_version_expiration:
+              days: 30
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "data-plane"
+
+    # ===========================================
+    # CACHING - SHARED REDIS
+    # ===========================================
+    elasticache:
+      component: "elasticache"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: true
+        cluster_id: "${tenant}-${environment}-cache"
+        engine: "redis"
+        engine_version: "7.0"
+        node_type: "cache.r6g.large"
+        num_cache_nodes: 2
+
+        # Cluster mode for tenant key isolation
+        cluster_mode_enabled: true
+        num_node_groups: 2
+        replicas_per_node_group: 1
+
+        # Tenant isolation via key prefixes
+        # Key format: tenant:{tenant_id}:{key}
+
+        at_rest_encryption_enabled: true
+        transit_encryption_enabled: true
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "data-plane"
+
+    # ===========================================
+    # AUTHENTICATION
+    # ===========================================
+    cognito:
+      component: "cognito"
+      vars:
+        enabled: true
+        user_pool_name: "${tenant}-${environment}-saas-users"
+
+        # Multi-tenant user pool
+        custom_attributes:
+          - name: "tenant_id"
+            attribute_data_type: "String"
+            mutable: false
+            required: true
+          - name: "role"
+            attribute_data_type: "String"
+            mutable: true
+
+        # Per-tenant app clients will be created dynamically
+
+        # Lambda triggers for tenant validation
+        lambda_config:
+          pre_sign_up: "${output.auth-lambdas.functions['validate-tenant'].arn}"
+          pre_token_generation: "${output.auth-lambdas.functions['add-tenant-claims'].arn}"
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "authentication"
+
+    auth-lambdas:
+      component: "lambda"
+      vars:
+        enabled: true
+
+        functions:
+          validate-tenant:
+            function_name: "${tenant}-${environment}-validate-tenant"
+            description: "Validate tenant during signup"
+            runtime: "python3.11"
+            handler: "auth.validate_tenant"
+            memory_size: 256
+            timeout: 10
+
+          add-tenant-claims:
+            function_name: "${tenant}-${environment}-add-tenant-claims"
+            description: "Add tenant claims to JWT"
+            runtime: "python3.11"
+            handler: "auth.add_tenant_claims"
+            memory_size: 256
+            timeout: 10
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "authentication"
+
+    # ===========================================
+    # BILLING AND METERING
+    # ===========================================
+    usage-metering:
+      component: "kinesis"
+      vars:
+        enabled: true
+        stream_name: "${tenant}-${environment}-usage-metering"
+        stream_mode: "ON_DEMAND"
+        retention_period: 168
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "billing"
+
+    billing-processor:
+      component: "lambda"
+      depends_on:
+        - usage-metering
+      vars:
+        enabled: true
+
+        functions:
+          process-usage:
+            function_name: "${tenant}-${environment}-process-usage"
+            description: "Process tenant usage for billing"
+            runtime: "python3.11"
+            handler: "billing.process_usage"
+            memory_size: 512
+            timeout: 300
+
+            event_source_mapping:
+              kinesis:
+                event_source_arn: "${output.usage-metering.stream_arn}"
+                starting_position: "LATEST"
+                batch_size: 100
+
+          generate-invoice:
+            function_name: "${tenant}-${environment}-generate-invoice"
+            description: "Generate tenant invoices"
+            runtime: "python3.11"
+            handler: "billing.generate_invoice"
+            memory_size: 512
+            timeout: 300
+
+            # Monthly schedule
+            schedule_expression: "cron(0 0 1 * ? *)"
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "billing"
+
+    # ===========================================
+    # NOTIFICATIONS
+    # ===========================================
+    sns-notifications:
+      component: "sns"
+      vars:
+        enabled: true
+        topic_name: "${tenant}-${environment}-tenant-notifications"
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "notifications"
+
+    # ===========================================
+    # OBSERVABILITY - PER-TENANT METRICS
+    # ===========================================
+    monitoring:
+      component: "monitoring"
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-saas-platform"
+
+        # Multi-tenant metrics
+        custom_metrics:
+          - namespace: "SaaS/Tenants"
+            metric_name: "RequestCount"
+            dimensions:
+              - name: "TenantId"
+              - name: "ApiEndpoint"
+          - namespace: "SaaS/Tenants"
+            metric_name: "ErrorRate"
+            dimensions:
+              - name: "TenantId"
+          - namespace: "SaaS/Tenants"
+            metric_name: "Latency"
+            dimensions:
+              - name: "TenantId"
+          - namespace: "SaaS/Tenants"
+            metric_name: "StorageUsage"
+            dimensions:
+              - name: "TenantId"
+          - namespace: "SaaS/Tenants"
+            metric_name: "DatabaseConnections"
+            dimensions:
+              - name: "TenantId"
+
+        alarms:
+          tenant-error-rate:
+            metric_name: "ErrorRate"
+            namespace: "SaaS/Tenants"
+            statistic: "Average"
+            period: 300
+            evaluation_periods: 3
+            threshold: 5
+            comparison_operator: "GreaterThanThreshold"
+
+          database-connections:
+            metric_name: "DatabaseConnections"
+            namespace: "AWS/RDS"
+            statistic: "Maximum"
+            period: 300
+            evaluation_periods: 3
+            threshold: 80
+            comparison_operator: "GreaterThanThreshold"
+
+        alarm_notifications_enabled: true
+        sns_topic_name: "${tenant}-${environment}-saas-alarms"
+
+      tags:
+        StackType: "saas-multi-tenant"
+        Layer: "observability"
+
+# Deployment order
+deployment_order:
+  - stage: 1
+    components: [vpc, iam]
+    parallel: true
+  - stage: 2
+    components: [securitygroup, s3-tenant-data, sns-notifications]
+    parallel: true
+  - stage: 3
+    components: [tenant-management-db, rds-shared, elasticache]
+    parallel: true
+  - stage: 4
+    components: [eks, cognito, usage-metering]
+    parallel: true
+  - stage: 5
+    components: [eks-addons, auth-lambdas, tenant-provisioning-lambda]
+    parallel: true
+  - stage: 6
+    components: [apigateway, step-functions-onboarding, billing-processor]
+    parallel: true
+  - stage: 7
+    components: [monitoring]

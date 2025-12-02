@@ -1,0 +1,232 @@
+---
+# =============================================================================
+# Networking Component Configurations for Production Environment
+# =============================================================================
+# VPC and network resources with full high availability
+# Multi-AZ deployment, redundant NAT Gateways, comprehensive flow logging
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-2/production/components/globals
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # Primary VPC - Main Application Workloads (High Availability)
+    # ==========================================================================
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        name: main
+        vpc_cidr: "10.20.0.0/16"
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+        vpc_flow_logs_log_destination_type: "s3"
+
+        # Subnet configuration - 3 AZs for maximum availability
+        azs:
+          - eu-west-2a
+          - eu-west-2b
+          - eu-west-2c
+
+        # Private subnets - application tier
+        private_subnets:
+          - "10.20.1.0/24"
+          - "10.20.2.0/24"
+          - "10.20.3.0/24"
+
+        # Public subnets - load balancers, NAT
+        public_subnets:
+          - "10.20.101.0/24"
+          - "10.20.102.0/24"
+          - "10.20.103.0/24"
+
+        # Database subnets - isolated tier
+        database_subnets:
+          - "10.20.201.0/24"
+          - "10.20.202.0/24"
+          - "10.20.203.0/24"
+
+        # Elasticache subnets
+        elasticache_subnets:
+          - "10.20.211.0/24"
+          - "10.20.212.0/24"
+          - "10.20.213.0/24"
+
+        # NAT Gateway - one per AZ for high availability
+        enable_nat_gateway: true
+        nat_gateway_strategy: "one_per_az"
+
+        # DNS settings
+        enable_dns_hostnames: true
+        enable_dns_support: true
+
+        # Security - no public IPs for instances
+        map_public_ip_on_launch: false
+
+        # VPC endpoints for secure AWS service access
+        enable_s3_endpoint: true
+        enable_dynamodb_endpoint: true
+
+        # Default security group - restrictive
+        default_sg_ingress_self_only: true
+        default_sg_egress_self_only: false
+        default_sg_allow_all_outbound: true
+
+      tags:
+        NetworkTier: "primary"
+        HighAvailability: "true"
+        CriticalityLevel: "high"
+
+    # ==========================================================================
+    # Services VPC - Dedicated Backend Services (High Availability)
+    # ==========================================================================
+    vpc/services:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        name: services
+        vpc_cidr: "10.21.0.0/16"
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+
+        azs:
+          - eu-west-2a
+          - eu-west-2b
+          - eu-west-2c
+
+        private_subnets:
+          - "10.21.1.0/24"
+          - "10.21.2.0/24"
+          - "10.21.3.0/24"
+
+        public_subnets:
+          - "10.21.101.0/24"
+          - "10.21.102.0/24"
+          - "10.21.103.0/24"
+
+        database_subnets:
+          - "10.21.201.0/24"
+          - "10.21.202.0/24"
+          - "10.21.203.0/24"
+
+        # One NAT per AZ for HA
+        enable_nat_gateway: true
+        nat_gateway_strategy: "one_per_az"
+
+        map_public_ip_on_launch: false
+
+        enable_s3_endpoint: true
+        enable_dynamodb_endpoint: true
+
+      tags:
+        NetworkTier: "services"
+        HighAvailability: "true"
+
+    # ==========================================================================
+    # VPC Peering - Connect Main and Services VPCs
+    # ==========================================================================
+    network/vpc-peering:
+      metadata:
+        component: network
+      vars:
+        create_vpc_peering: true
+        requester_vpc_id: "${output.vpc/main.vpc_id}"
+        accepter_vpc_id: "${output.vpc/services.vpc_id}"
+
+        auto_accept: true
+
+        requester_routes:
+          - destination_cidr_block: "10.21.0.0/16"
+        accepter_routes:
+          - destination_cidr_block: "10.20.0.0/16"
+
+    # ==========================================================================
+    # Network Resources - DNS for Main VPC
+    # ==========================================================================
+    network/main:
+      metadata:
+        component: network
+      vars:
+        vpc_id: "${output.vpc/main.vpc_id}"
+        dns_create_root_zone: false
+        dns_multi_account: false
+
+        dns_zones:
+          main:
+            name: "fnx.example.com"
+            comment: "Production main zone"
+            force_destroy: false  # Protected in production
+            enable_query_logging: true
+          internal:
+            name: "internal.fnx.example.com"
+            comment: "Production internal DNS"
+            force_destroy: false
+            enable_query_logging: true
+
+        dns_records:
+          www_main:
+            zone_name: "main"
+            name: "www.fnx.example.com"
+            type: "A"
+            ttl: 300
+            alias:
+              name: "${output.alb/main.dns_name}"
+              zone_id: "${output.alb/main.zone_id}"
+              evaluate_target_health: true
+          api:
+            zone_name: "main"
+            name: "api.fnx.example.com"
+            type: "A"
+            alias:
+              name: "${output.apigateway/main.domain_name}"
+              zone_id: "${output.apigateway/main.zone_id}"
+              evaluate_target_health: true
+          db_internal:
+            zone_name: "internal"
+            name: "db.internal.fnx.example.com"
+            type: "CNAME"
+            ttl: 60
+            records: ["${output.infrastructure/main.rds_endpoint}"]
+
+    # ==========================================================================
+    # Network Resources - DNS for Services VPC
+    # ==========================================================================
+    network/services:
+      metadata:
+        component: network
+      vars:
+        vpc_id: "${output.vpc/services.vpc_id}"
+        dns_create_root_zone: false
+
+        dns_zones:
+          services:
+            name: "services.fnx.example.com"
+            comment: "Production services zone"
+            force_destroy: false
+            enable_query_logging: true
+          data:
+            name: "data.services.fnx.example.com"
+            comment: "Data services DNS"
+            force_destroy: false
+
+        dns_records:
+          api_services:
+            zone_name: "services"
+            name: "api.services.fnx.example.com"
+            type: "CNAME"
+            ttl: 300
+            records: ["api-internal.services.fnx.example.com"]
+          data_db:
+            zone_name: "data"
+            name: "postgres.data.services.fnx.example.com"
+            type: "CNAME"
+            ttl: 60
+            records: ["${output.infrastructure/data.rds_endpoint}"]

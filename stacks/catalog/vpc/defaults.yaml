@@ -1,4 +1,11 @@
 ---
+name: vpc
+description: "VPC component defaults with comprehensive network configuration"
+
+# Import base configuration
+import:
+  - catalog/_base/defaults
+
 components:
   terraform:
     vpc/defaults:
@@ -6,6 +13,9 @@ components:
         # Abstract components can't be provisioned and serve as base components (blueprints) for real components
         component: vpc
         type: abstract
+        version: "1.0.0"
+        description: "Manages VPC with subnets, NAT gateways, and routing"
+        category: "networking"
       settings:
         # Validation
         # Supports JSON Schema and OPA policies
@@ -16,6 +26,7 @@ components:
             # 'schema_path' can be an absolute path or a path relative to 'schemas.jsonschema.base_path' defined in `atmos.yaml`
             schema_path: "vpc/validate-vpc-component.json"
             description: Validate 'vpc' component variables using JSON Schema
+            # Enable in staging/production by setting to false
             disabled: true
           check-vpc-component-config-with-opa-policy:
             schema_type: opa
@@ -27,22 +38,95 @@ components:
             module_paths:
               - "catalog/constants"
             description: Check 'vpc' component configuration using OPA policy
-            # Set `disabled` to `true` to skip the validation step
-            # `disabled` is set to `false` by default, the step is allowed if `disabled` is not declared
+            # Enable in staging/production by setting to false
             disabled: true
             # Validation timeout in seconds
             timeout: 10
       vars:
         enabled: true
         name: "common"
+
+        # FIXED: Use consistent variable names that match the component
+        # The component uses 'vpc_cidr' not 'ipv4_primary_cidr_block'
+        vpc_cidr: "10.0.0.0/16"
+
+        # Availability zones - will be overridden per region
+        azs:
+          - "${region}a"
+          - "${region}b"
+          - "${region}c"
+
+        # Subnet configuration
         max_subnet_count: 3
+        private_subnets:
+          - "10.0.1.0/24"
+          - "10.0.2.0/24"
+          - "10.0.3.0/24"
+        public_subnets:
+          - "10.0.101.0/24"
+          - "10.0.102.0/24"
+          - "10.0.103.0/24"
+        database_subnets: []
+
+        # Public subnet settings
         map_public_ip_on_launch: true
         assign_generated_ipv6_cidr_block: false
-        nat_gateway_enabled: true
-        nat_instance_enabled: false
+
+        # NAT Gateway configuration
+        enable_nat_gateway: true
+        nat_gateway_strategy: "single"  # "single" or "one_per_az"
+
+        # VPN/Transit Gateway (disabled by default)
+        enable_vpn_gateway: false
+        enable_transit_gateway: false
+        transit_gateway_id: ""
+        ram_resource_share_arn: ""
+
+        # VPC Flow Logs
         vpc_flow_logs_enabled: true
         vpc_flow_logs_traffic_type: "ALL"
         vpc_flow_logs_log_destination_type: "s3"
+
+        # Security settings
         nat_eip_aws_shield_protection_enabled: false
-        subnet_type_tag_key: "fnx/subnet/type"
-        ipv4_primary_cidr_block: 10.9.0.0/18
+        create_vpc_iam_role: true
+
+        # Default security group configuration
+        default_sg_ingress_self_only: true
+        default_sg_egress_self_only: true
+        default_sg_allow_all_outbound: false
+
+        # Tagging
+        subnet_type_tag_key: "${tenant}/subnet/type"
+
+      # Component-specific tags
+      tags:
+        Component: "VPC"
+        NetworkTier: "core"
+
+      # Define outputs
+      outputs:
+        vpc_id:
+          description: "The ID of the VPC"
+          value: "${output.vpc_id}"
+        vpc_cidr_block:
+          description: "The CIDR block of the VPC"
+          value: "${output.vpc_cidr_block}"
+        private_subnet_ids:
+          description: "List of private subnet IDs"
+          value: "${output.private_subnet_ids}"
+        public_subnet_ids:
+          description: "List of public subnet IDs"
+          value: "${output.public_subnet_ids}"
+        database_subnet_ids:
+          description: "List of database subnet IDs"
+          value: "${output.database_subnet_ids}"
+        nat_gateway_ids:
+          description: "List of NAT Gateway IDs"
+          value: "${output.nat_gateway_ids}"
+        availability_zones:
+          description: "List of availability zones used"
+          value: "${output.availability_zones}"
+
+# Note: Backend configuration is handled by atmos.yaml
+# Redundant vars block removed - inherit from parent stacks

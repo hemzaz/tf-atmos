@@ -60,20 +60,25 @@ resource "aws_security_group" "lambda" {
   vpc_id      = var.vpc_id
 
   # More restrictive egress rules for better security
+  # Use VPC endpoints instead of 0.0.0.0/0 for AWS services
   egress {
-    description = "HTTPS to AWS services"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description     = "HTTPS to AWS services via VPC endpoints"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = var.vpc_endpoint_prefix_list_ids
   }
 
-  egress {
-    description = "HTTP for package downloads (temporary)"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Only allow HTTP if explicitly enabled (not recommended for production)
+  dynamic "egress" {
+    for_each = var.allow_http_egress ? [1] : []
+    content {
+      description     = "HTTP for package downloads (only if explicitly enabled)"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      prefix_list_ids = var.vpc_endpoint_prefix_list_ids
+    }
   }
 
   # Database access (if needed)

@@ -1,0 +1,256 @@
+---
+# Component Catalog - Atmos Module Library
+# This file defines the organizational structure for the module library
+# Version: 1.0.0
+# Last Updated: 2025-12-02
+
+library:
+  name: "tf-atmos-module-library"
+  version: "1.0.0"
+  description: "Comprehensive Terraform module library for AWS infrastructure"
+  maintainers:
+    - name: "Platform Team"
+      email: "platform@example.com"
+
+  # Category definitions for organizing modules
+  categories:
+    # Foundations - Base infrastructure components
+    - name: "foundations"
+      description: "Base infrastructure components that form the foundation of cloud deployments"
+      icon: "building"
+      subcategories:
+        - name: "networking"
+          description: "VPC, subnets, routing, and network connectivity"
+          components:
+            - vpc
+            - vpc-flow-logs-bucket
+            - network
+        - name: "security"
+          description: "Security groups, NACLs, and network security"
+          components:
+            - securitygroup
+            - security-monitoring
+        - name: "identity"
+          description: "IAM roles, policies, and identity management"
+          components:
+            - iam
+        - name: "state-management"
+          description: "Terraform state backend and locking"
+          components:
+            - backend
+
+    # Compute - Compute layer components
+    - name: "compute"
+      description: "Compute layer components for running workloads"
+      icon: "server"
+      subcategories:
+        - name: "containers"
+          description: "Container orchestration and management"
+          components:
+            - eks
+            - eks-addons
+            - eks-backend-services
+            - ecs
+        - name: "serverless"
+          description: "Serverless compute services"
+          components:
+            - lambda
+        - name: "virtual-machines"
+          description: "EC2 instances and AMI management"
+          components:
+            - ec2
+
+    # Data - Data layer components
+    - name: "data"
+      description: "Data storage, databases, and caching"
+      icon: "database"
+      subcategories:
+        - name: "databases"
+          description: "Relational and NoSQL databases"
+          components:
+            - rds
+        - name: "caching"
+          description: "In-memory caching solutions"
+          components: []
+        - name: "storage"
+          description: "Object and file storage"
+          components:
+            - backup
+
+    # Integration - API and messaging components
+    - name: "integration"
+      description: "Integration patterns and API management"
+      icon: "exchange"
+      subcategories:
+        - name: "api-management"
+          description: "API Gateway and API management"
+          components:
+            - apigateway
+        - name: "messaging"
+          description: "Message queues and event buses"
+          components: []
+        - name: "event-streaming"
+          description: "Event streaming and processing"
+          components: []
+
+    # Observability - Monitoring and logging
+    - name: "observability"
+      description: "Monitoring, logging, and observability"
+      icon: "chart-line"
+      subcategories:
+        - name: "logging"
+          description: "Centralized logging and log management"
+          components:
+            - vpc-flow-logs-bucket
+        - name: "metrics"
+          description: "Metrics collection and dashboards"
+          components:
+            - monitoring
+            - cost-monitoring
+            - cost-optimization
+        - name: "tracing"
+          description: "Distributed tracing"
+          components: []
+        - name: "alerting"
+          description: "Alerting and incident management"
+          components:
+            - monitoring
+
+    # Security - Security and compliance
+    - name: "security"
+      description: "Security, compliance, and governance components"
+      icon: "shield-alt"
+      subcategories:
+        - name: "access-control"
+          description: "Access management and authentication"
+          components:
+            - iam
+            - idp-platform
+        - name: "secrets"
+          description: "Secrets management"
+          components:
+            - secretsmanager
+            - external-secrets
+        - name: "certificates"
+          description: "SSL/TLS certificate management"
+          components:
+            - acm
+        - name: "compliance"
+          description: "Compliance and security monitoring"
+          components:
+            - security-monitoring
+
+    # DNS and Routing
+    - name: "dns"
+      description: "DNS and traffic routing"
+      icon: "globe"
+      subcategories:
+        - name: "dns-management"
+          description: "DNS zones and records"
+          components:
+            - dns
+
+    # Patterns - Pre-built architecture patterns
+    - name: "patterns"
+      description: "Pre-built architecture patterns and reference implementations"
+      icon: "puzzle-piece"
+      subcategories:
+        - name: "web-apps"
+          description: "Web application patterns"
+          blueprints:
+            - three-tier-web-app
+        - name: "microservices"
+          description: "Microservices architecture patterns"
+          blueprints:
+            - microservices-platform
+        - name: "serverless-apps"
+          description: "Serverless application patterns"
+          blueprints:
+            - serverless-api
+        - name: "data-pipelines"
+          description: "Data processing pipelines"
+          blueprints:
+            - data-lake
+            - streaming-pipeline
+        - name: "ml-ops"
+          description: "Machine learning operations"
+          blueprints:
+            - ml-platform
+        - name: "saas"
+          description: "SaaS multi-tenant patterns"
+          blueprints:
+            - saas-multi-tenant
+
+  # Maturity levels for modules
+  maturity_levels:
+    - name: "experimental"
+      description: "Early development, not production ready"
+      color: "red"
+      production_ready: false
+    - name: "beta"
+      description: "Feature complete but not fully tested"
+      color: "yellow"
+      production_ready: false
+    - name: "stable"
+      description: "Production ready with active maintenance"
+      color: "green"
+      production_ready: true
+    - name: "production"
+      description: "Battle-tested in production environments"
+      color: "blue"
+      production_ready: true
+    - name: "deprecated"
+      description: "No longer recommended, will be removed"
+      color: "gray"
+      production_ready: false
+
+  # Complexity levels for modules
+  complexity_levels:
+    - name: "basic"
+      description: "Simple configuration, minimal dependencies"
+      estimated_time: "5-10 minutes"
+    - name: "intermediate"
+      description: "Moderate configuration, some dependencies"
+      estimated_time: "15-30 minutes"
+    - name: "advanced"
+      description: "Complex configuration, multiple dependencies"
+      estimated_time: "30-60 minutes"
+    - name: "expert"
+      description: "Highly complex, requires deep expertise"
+      estimated_time: "1+ hours"
+
+  # Tagging schema for modules
+  tag_schema:
+    required:
+      - "category"
+      - "maturity"
+      - "complexity"
+    recommended:
+      - "cloud-provider"
+      - "use-case"
+      - "cost-tier"
+    optional:
+      - "author"
+      - "team"
+      - "compliance"
+
+  # Search configuration
+  search:
+    indexed_fields:
+      - "name"
+      - "description"
+      - "category"
+      - "tags"
+      - "features"
+    weights:
+      name: 10
+      description: 5
+      category: 3
+      tags: 2
+      features: 1
+
+  # Default configurations
+  defaults:
+    cloud_provider: "aws"
+    terraform_version: ">=1.5.0"
+    atmos_version: ">=1.50.0"

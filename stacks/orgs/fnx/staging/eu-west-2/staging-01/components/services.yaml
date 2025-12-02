@@ -1,0 +1,290 @@
+---
+# =============================================================================
+# Services Component Configurations for Staging-01 Environment
+# =============================================================================
+# API Gateway, Lambda, monitoring, and infrastructure services
+# =============================================================================
+
+import:
+  - orgs/fnx/staging/eu-west-2/staging-01/components/globals
+  - catalog/apigateway/defaults
+  - catalog/monitoring/defaults
+  - catalog/infrastructure/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # API Gateway - Main API
+    # ==========================================================================
+    apigateway/main:
+      metadata:
+        component: apigateway
+      vars:
+        name: "main-api"
+        description: "Main API Gateway for staging environment"
+        stage_name: "v1"
+
+        # API resources
+        api_resources:
+          - path_part: "api"
+          - path_part: "auth"
+          - path_part: "health"
+
+        # API methods
+        api_methods:
+          - resource_id: "${output.apigateway_rest.rest_api_root_resource_id}"
+            http_method: "GET"
+            authorization: "NONE"
+          - resource_id: "${resource_ids.api}"
+            http_method: "ANY"
+            authorization: "COGNITO_USER_POOLS"
+
+        # Domain Configuration
+        domain_name: "api.staging.${domain_name}"
+        certificate_arn: "${output.acm/main.certificate_arns.main_wildcard}"
+        route53_zone_id: "${output.network/main.zone_ids.main}"
+
+        # Throttling
+        throttling_burst_limit: 500
+        throttling_rate_limit: 1000
+
+        # Logging and monitoring
+        enable_logging: true
+        log_retention_days: 14
+        create_dashboard: true
+
+        # CORS
+        enable_cors: true
+        cors_allow_origins: ["*"]
+        cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+
+      tags:
+        Service: api-gateway
+        Tier: edge
+
+    # ==========================================================================
+    # API Gateway - Data API
+    # ==========================================================================
+    apigateway/data:
+      metadata:
+        component: apigateway
+      vars:
+        name: "data-api"
+        description: "Data API Gateway for staging"
+        stage_name: "v1"
+
+        api_resources:
+          - path_part: "data"
+          - path_part: "metrics"
+          - path_part: "analytics"
+
+        domain_name: "data.services.staging.${domain_name}"
+        certificate_arn: "${output.acm/services.certificate_arns.services_wildcard}"
+        route53_zone_id: "${output.network/services.zone_ids.data}"
+
+        throttling_burst_limit: 300
+        throttling_rate_limit: 500
+
+        enable_logging: true
+        log_retention_days: 14
+        create_dashboard: true
+
+      tags:
+        Service: data-api
+        Tier: backend
+
+    # ==========================================================================
+    # Infrastructure - Main Application Stack
+    # ==========================================================================
+    infrastructure/main:
+      metadata:
+        component: infrastructure
+      vars:
+        # ECS Fargate cluster
+        ecs:
+          enabled: true
+          fargate_only: true
+          cluster_name: "staging-main-apps"
+          vpc_id: "${output.vpc/main.vpc_id}"
+          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+          enable_container_insights: true
+
+        # RDS PostgreSQL
+        rds:
+          enabled: true
+          identifier: "staging-main-db"
+          engine: "${rds_engine}"
+          engine_version: "${rds_engine_version}"
+          instance_class: "db.t3.medium"
+          allocated_storage: 20
+          max_allocated_storage: 100
+          db_name: "stagingapp"
+          multi_az: false  # Single AZ for staging
+          deletion_protection: false
+          skip_final_snapshot: true
+
+          # Security
+          storage_encrypted: true
+          iam_database_authentication_enabled: true
+
+          # Backup
+          backup_retention_period: 7
+          backup_window: "03:00-04:00"
+          maintenance_window: "Mon:04:00-Mon:05:00"
+
+          # Performance
+          performance_insights_enabled: true
+          performance_insights_retention_period: 7
+
+          # Network
+          vpc_id: "${output.vpc/main.vpc_id}"
+          subnet_ids: "${output.vpc/main.database_subnet_ids}"
+
+      tags:
+        Stack: main
+        Tier: application
+
+    # ==========================================================================
+    # Infrastructure - Data Processing Stack
+    # ==========================================================================
+    infrastructure/data:
+      metadata:
+        component: infrastructure
+      vars:
+        # ECS disabled for data stack
+        ecs:
+          enabled: false
+
+        # Data-specific RDS
+        rds:
+          enabled: true
+          identifier: "staging-data-db"
+          engine: "${rds_engine}"
+          engine_version: "${rds_engine_version}"
+          instance_class: "db.r5.large"
+          allocated_storage: 50
+          max_allocated_storage: 200
+          db_name: "stagingdata"
+          multi_az: false
+
+          storage_encrypted: true
+          backup_retention_period: 7
+
+          vpc_id: "${output.vpc/services.vpc_id}"
+          subnet_ids: "${output.vpc/services.private_subnet_ids}"
+
+        # Lambda for data processing
+        lambda:
+          enabled: true
+          functions:
+            data_processor:
+              function_name: "staging-data-processor"
+              runtime: "python3.11"
+              handler: "main.handler"
+              memory_size: 512
+              timeout: 300
+              vpc_id: "${output.vpc/services.vpc_id}"
+              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+            data_transformer:
+              function_name: "staging-data-transformer"
+              runtime: "python3.11"
+              handler: "transform.handler"
+              memory_size: 1024
+              timeout: 600
+              vpc_id: "${output.vpc/services.vpc_id}"
+              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+
+      tags:
+        Stack: data
+        Tier: data-processing
+
+    # ==========================================================================
+    # Monitoring - Main Dashboard and Alarms
+    # ==========================================================================
+    monitoring/main:
+      metadata:
+        component: monitoring
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "staging-main-dashboard"
+
+        # Feature flags
+        enable_certificate_monitoring: true
+        enable_container_insights: true
+        enable_resource_monitoring: true
+        enable_vpc_flow_logs: true
+
+        # Certificate monitoring
+        certificate_arns: "${output.acm/main.certificate_arns | {}}"
+        certificate_names: "${keys(output.acm/main.certificate_domains) | []}"
+        certificate_domains: "${values(output.acm/main.certificate_domains) | []}"
+        certificate_expiry_threshold: 30
+
+        # SNS Topics for alerts
+        sns_topic_name: "staging-main-alarms"
+        alarm_notifications_enabled: true
+        alarm_email_addresses:
+          - "staging-alerts@example.com"
+          - "oncall@example.com"
+
+        # CloudWatch Alarms
+        alarms:
+          high_cpu:
+            metric_name: "CPUUtilization"
+            namespace: "AWS/EC2"
+            statistic: "Average"
+            period: 300
+            threshold: 80
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+          high_memory:
+            metric_name: "MemoryUtilization"
+            namespace: "CWAgent"
+            statistic: "Average"
+            period: 300
+            threshold: 85
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+
+    # ==========================================================================
+    # Monitoring - Data Stack Dashboard
+    # ==========================================================================
+    monitoring/data:
+      metadata:
+        component: monitoring
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "staging-data-dashboard"
+
+        enable_resource_monitoring: true
+        enable_vpc_flow_logs: true
+        enable_certificate_monitoring: true
+
+        certificate_arns: "${output.acm/services.certificate_arns | {}}"
+        certificate_expiry_threshold: 30
+
+        sns_topic_name: "staging-data-alarms"
+        alarm_notifications_enabled: true
+        alarm_email_addresses:
+          - "staging-alerts@example.com"
+
+        # Data-specific alarms
+        alarms:
+          rds_connections:
+            metric_name: "DatabaseConnections"
+            namespace: "AWS/RDS"
+            statistic: "Average"
+            period: 300
+            threshold: 100
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+          rds_storage:
+            metric_name: "FreeStorageSpace"
+            namespace: "AWS/RDS"
+            statistic: "Average"
+            period: 300
+            threshold: 5368709120  # 5GB in bytes
+            comparison_operator: "LessThanThreshold"
+            evaluation_periods: 2

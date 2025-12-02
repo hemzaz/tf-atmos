@@ -387,3 +387,29 @@ variable "schedule_input" {
   description = "JSON input for scheduled Lambda invocation"
   default     = null
 }
+
+# Network Security Variables
+variable "vpc_endpoint_prefix_list_ids" {
+  type        = list(string)
+  description = "List of VPC endpoint prefix list IDs for AWS services (replaces 0.0.0.0/0)"
+  default     = []
+
+  validation {
+    condition     = length(var.vpc_endpoint_prefix_list_ids) > 0 || length(var.subnet_ids) == 0
+    error_message = "VPC endpoint prefix list IDs are required when deploying Lambda in a VPC. Use data source: data.aws_prefix_list.s3 or create VPC endpoints."
+  }
+}
+
+variable "allow_http_egress" {
+  type        = bool
+  description = "Allow HTTP (port 80) egress for package downloads. Not recommended for production."
+  default     = false
+
+  validation {
+    condition = (
+      !var.allow_http_egress ||
+      !contains(["prod", "production"], lower(lookup(var.tags, "Environment", "dev")))
+    )
+    error_message = "HTTP egress is not allowed in production environments. Use HTTPS (port 443) only."
+  }
+}

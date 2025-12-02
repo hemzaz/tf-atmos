@@ -1,0 +1,214 @@
+name: Daily Security Scan
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
+  AWS_DEFAULT_REGION: us-east-1
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+jobs:
+  comprehensive-security-scan:
+    name: Comprehensive Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+
+      - name: Run Checkov comprehensive scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          output_format: sarif,cli
+          output_file_path: checkov-full-results.sarif
+          download_external_modules: true
+
+      - name: Upload Checkov results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-full-results.sarif
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Python security and license checks
+        run: |
+          pip install bandit safety pip-audit licensecheck
+
+          # Security checks
+          bandit -r gaia/ -f json -o bandit-daily-report.json || true
+          safety check --json --output safety-daily-report.json || true
+          pip-audit --desc --format json --output pip-audit-report.json || true
+
+      - name: Secrets scanning
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --all-files --force-use-all-plugins > secrets-scan-results.json || true
+
+      - name: Check for AWS GuardDuty findings
+        if: github.event_name == 'schedule'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # Install AWS CLI
+          pip install awscli
+
+          # Check GuardDuty findings (last 24 hours)
+          echo "Checking GuardDuty findings..."
+          aws guardduty list-detectors --region $AWS_DEFAULT_REGION > guardduty-detectors.json || echo "GuardDuty not available"
+
+          # Check Security Hub findings
+          echo "Checking Security Hub findings..."
+          aws securityhub get-findings --region $AWS_DEFAULT_REGION \
+            --filters '{"SeverityLabel":[{"Value":"CRITICAL","Comparison":"EQUALS"}]}' \
+            --max-items 50 > securityhub-findings.json || echo "Security Hub not available"
+
+      - name: Generate security report
+        run: |
+          cat > security-daily-report.md << 'EOF'
+          # Daily Security Scan Report
+
+          **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Repository**: ${{ github.repository }}
+          **Branch**: ${{ github.ref_name }}
+
+          ## Summary
+
+          This is an automated daily security scan report.
+
+          ### Scans Performed
+          - Trivy filesystem vulnerability scan
+          - Checkov IaC security analysis
+          - Python dependency vulnerability check
+          - Secrets detection scan
+          - AWS GuardDuty findings review
+          - AWS Security Hub compliance check
+
+          ### Results
+
+          Detailed results are available in the workflow artifacts.
+
+          ### Action Items
+
+          Review the uploaded SARIF files in the Security tab of this repository.
+
+          EOF
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-security-scan-${{ github.run_number }}
+          path: |
+            trivy-fs-results.sarif
+            checkov-full-results.sarif
+            bandit-daily-report.json
+            safety-daily-report.json
+            pip-audit-report.json
+            secrets-scan-results.json
+            guardduty-detectors.json
+            securityhub-findings.json
+            security-daily-report.md
+          retention-days: 90
+
+      - name: Create issue for critical findings
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Daily Security Scan - Critical Findings Detected (${new Date().toISOString().split('T')[0]})`,
+              body: `## Critical Security Findings Detected
+
+              The automated daily security scan has detected critical security issues.
+
+              **Scan Date**: ${new Date().toUTCString()}
+              **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+              ### Action Required
+
+              1. Review the security scan results in the workflow artifacts
+              2. Check the Security tab for SARIF analysis
+              3. Address critical and high severity findings immediately
+              4. Update dependencies with known vulnerabilities
+
+              ### Resources
+
+              - [Security Scan Artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+              - [Security Advisories](${{ github.server_url }}/${{ github.repository }}/security/advisories)
+
+              This issue was automatically created by the daily security scan workflow.
+              `,
+              labels: ['security', 'automated', 'critical']
+            });
+            console.log(`Created issue #${issue.data.number}`);
+
+  license-compliance:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Check Python license compliance
+        run: |
+          pip install pip-licenses
+          pip install -r requirements.txt || true
+          pip-licenses --format=json --output-file=python-licenses.json
+          pip-licenses --format=markdown --output-file=python-licenses.md
+
+      - name: Terraform module license check
+        run: |
+          echo "# Terraform Module Licenses" > terraform-licenses.md
+          find ./components/terraform -name "*.tf" -exec grep -H "source.*=" {} \; | \
+            grep -E "(github|registry.terraform.io)" | \
+            sort -u >> terraform-licenses.md || true
+
+      - name: Upload license reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-compliance-${{ github.run_number }}
+          path: |
+            python-licenses.json
+            python-licenses.md
+            terraform-licenses.md
+          retention-days: 90

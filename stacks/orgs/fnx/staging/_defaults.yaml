@@ -1,0 +1,36 @@
+---
+# =============================================================================
+# Staging Account Defaults
+# =============================================================================
+# Default configuration for all environments in the staging account
+# =============================================================================
+
+import:
+  - orgs/fnx/_defaults
+  - mixins/tenant/fnx
+  - mixins/stage/staging
+
+vars:
+  # Account identification
+  account: staging
+  account_id: "${env:AWS_STAGING_ACCOUNT_ID, 123456789012}"  # Replace with actual account ID
+  aws_profile: "staging"
+
+  # Staging-specific defaults
+  stage: staging
+
+  # Cost optimization for staging
+  instance_type_default: "t3.medium"
+  rds_instance_class_default: "db.t3.medium"
+
+  # Reduced retention for staging
+  log_retention_days: 14
+  backup_retention_days: 7
+
+  # Security settings - more relaxed than prod but still secure
+  enable_deletion_protection: false
+  enable_multi_az: false
+
+tags:
+  Stage: staging
+  CostCenter: "staging-infra"

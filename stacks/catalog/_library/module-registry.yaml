@@ -1,0 +1,1409 @@
+---
+# Module Registry - Comprehensive catalog of all available modules
+# Version: 1.1.0
+# Last Updated: 2025-12-02
+
+registry:
+  version: "1.1.0"
+  generated_at: "2025-12-02T00:00:00Z"
+
+modules:
+  # =============================================================================
+  # FOUNDATIONS - NETWORKING
+  # =============================================================================
+
+  vpc:
+    name: "VPC"
+    display_name: "Virtual Private Cloud"
+    category: "foundations/networking"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "intermediate"
+    description: "Production-ready VPC with public/private subnets, NAT gateways, and routing"
+    short_description: "AWS VPC with multi-AZ networking"
+    features:
+      - Multi-AZ public and private subnets
+      - NAT Gateway with single or HA configuration
+      - VPC Flow Logs integration
+      - Transit Gateway support
+      - VPN Gateway support
+      - Custom subnet CIDR configuration
+      - Route table management
+      - Default security group hardening
+    cost_estimate:
+      minimum: "$35/month"
+      typical: "$100/month"
+      maximum: "$350/month"
+      factors:
+        - "NAT Gateway hourly and data processing"
+        - "VPC Flow Logs storage"
+        - "Number of AZs"
+    dependencies: []
+    dependents:
+      - eks
+      - rds
+      - ec2
+      - securitygroup
+    inputs:
+      - name: "vpc_cidr"
+        type: "string"
+        description: "CIDR block for VPC"
+        default: "10.0.0.0/16"
+        required: true
+      - name: "azs"
+        type: "list(string)"
+        description: "List of availability zones"
+        required: true
+      - name: "enable_nat_gateway"
+        type: "bool"
+        description: "Enable NAT Gateway for private subnets"
+        default: true
+      - name: "nat_gateway_strategy"
+        type: "string"
+        description: "NAT Gateway strategy: single or one_per_az"
+        default: "single"
+    outputs:
+      - name: "vpc_id"
+        description: "The ID of the VPC"
+      - name: "vpc_cidr_block"
+        description: "The CIDR block of the VPC"
+      - name: "private_subnet_ids"
+        description: "List of private subnet IDs"
+      - name: "public_subnet_ids"
+        description: "List of public subnet IDs"
+    deployment_time: "5-10 minutes"
+    examples:
+      - name: "basic-vpc"
+        description: "Simple VPC with default settings"
+      - name: "production-vpc"
+        description: "HA VPC with multiple NAT gateways"
+      - name: "multi-region-vpc"
+        description: "VPC with Transit Gateway connectivity"
+    tags:
+      - "vpc"
+      - "networking"
+      - "core-infrastructure"
+      - "aws"
+    author: "Platform Team"
+    documentation_url: "docs/components/vpc.md"
+    source_url: "components/terraform/vpc"
+    last_updated: "2025-12-02"
+
+  vpc-flow-logs-bucket:
+    name: "VPC Flow Logs Bucket"
+    display_name: "VPC Flow Logs S3 Bucket"
+    category: "foundations/networking"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "basic"
+    description: "S3 bucket for VPC Flow Logs with lifecycle management"
+    short_description: "S3 bucket for network flow logs"
+    features:
+      - S3 bucket with encryption
+      - Lifecycle rules for cost optimization
+      - IAM policy for VPC Flow Logs
+      - Cross-region replication support
+    cost_estimate:
+      minimum: "$5/month"
+      typical: "$25/month"
+      maximum: "$100/month"
+      factors:
+        - "Log volume"
+        - "Retention period"
+        - "Storage class"
+    dependencies: []
+    dependents:
+      - vpc
+    inputs:
+      - name: "name"
+        type: "string"
+        description: "Bucket name suffix"
+        required: true
+      - name: "traffic_type"
+        type: "string"
+        description: "Type of traffic to log: ALL, ACCEPT, REJECT"
+        default: "ALL"
+      - name: "force_destroy"
+        type: "bool"
+        description: "Force destroy bucket on deletion"
+        default: false
+    outputs:
+      - name: "bucket_id"
+        description: "The ID of the S3 bucket"
+      - name: "bucket_arn"
+        description: "The ARN of the S3 bucket"
+    deployment_time: "2-3 minutes"
+    tags:
+      - "s3"
+      - "logging"
+      - "vpc"
+      - "observability"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  network:
+    name: "Network"
+    display_name: "Network Configuration Bundle"
+    category: "foundations/networking"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "Bundled network configuration including VPC and routing"
+    short_description: "Complete network stack bundle"
+    features:
+      - VPC configuration
+      - Subnet management
+      - Routing configuration
+      - Network tagging
+    cost_estimate:
+      minimum: "$35/month"
+      typical: "$100/month"
+      maximum: "$350/month"
+    dependencies: []
+    deployment_time: "5-10 minutes"
+    tags:
+      - "networking"
+      - "vpc"
+      - "bundle"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # FOUNDATIONS - SECURITY
+  # =============================================================================
+
+  securitygroup:
+    name: "Security Group"
+    display_name: "AWS Security Groups"
+    category: "foundations/security"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "intermediate"
+    description: "Security group management with predefined rule sets"
+    short_description: "Manage AWS security groups"
+    features:
+      - Default security group management
+      - Database security group templates
+      - Application security group templates
+      - Custom rule definitions
+      - CIDR-based access control
+      - Security group referencing
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$0/month"
+      maximum: "$0/month"
+      factors:
+        - "No direct cost - included with VPC"
+    dependencies:
+      - vpc
+    inputs:
+      - name: "vpc_id"
+        type: "string"
+        description: "VPC ID for security groups"
+        required: true
+      - name: "security_groups"
+        type: "map(object)"
+        description: "Map of security group configurations"
+        required: false
+    outputs:
+      - name: "security_group_ids"
+        description: "Map of security group IDs"
+      - name: "database_security_group_id"
+        description: "Database security group ID"
+    deployment_time: "2-5 minutes"
+    tags:
+      - "security"
+      - "networking"
+      - "firewall"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  security-monitoring:
+    name: "Security Monitoring"
+    display_name: "Security Monitoring and Compliance"
+    category: "foundations/security"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "advanced"
+    description: "Security monitoring, threat detection, and compliance checks"
+    short_description: "Security and compliance monitoring"
+    features:
+      - GuardDuty integration
+      - Security Hub dashboards
+      - Config rules for compliance
+      - CloudTrail analysis
+      - Automated alerting
+    cost_estimate:
+      minimum: "$50/month"
+      typical: "$200/month"
+      maximum: "$1000/month"
+      factors:
+        - "Number of AWS accounts"
+        - "Volume of events"
+        - "Config rule evaluations"
+    dependencies:
+      - iam
+    deployment_time: "15-20 minutes"
+    tags:
+      - "security"
+      - "compliance"
+      - "monitoring"
+      - "guardduty"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # FOUNDATIONS - IDENTITY
+  # =============================================================================
+
+  iam:
+    name: "IAM"
+    display_name: "Identity and Access Management"
+    category: "foundations/identity"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "intermediate"
+    description: "IAM roles, policies, and cross-account access management"
+    short_description: "AWS IAM role and policy management"
+    features:
+      - Cross-account role management
+      - Service-linked roles
+      - Custom policy creation
+      - Role assumption configuration
+      - Instance profiles
+      - OIDC provider integration
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$0/month"
+      maximum: "$0/month"
+      factors:
+        - "No direct cost for IAM"
+    dependencies:
+      - backend
+    inputs:
+      - name: "cross_account_role_name"
+        type: "string"
+        description: "Name for cross-account IAM role"
+        required: true
+      - name: "policy_name"
+        type: "string"
+        description: "Name for IAM policy"
+        required: true
+    outputs:
+      - name: "cross_account_role_arn"
+        description: "ARN of the cross-account role"
+      - name: "policy_arn"
+        description: "ARN of the IAM policy"
+    deployment_time: "2-5 minutes"
+    tags:
+      - "iam"
+      - "security"
+      - "identity"
+      - "access-control"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # FOUNDATIONS - STATE MANAGEMENT
+  # =============================================================================
+
+  backend:
+    name: "Backend"
+    display_name: "Terraform State Backend"
+    category: "foundations/state-management"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "basic"
+    description: "S3 backend with DynamoDB locking for Terraform state"
+    short_description: "Terraform state management backend"
+    features:
+      - S3 bucket for state storage
+      - DynamoDB table for locking
+      - KMS encryption
+      - Cross-account access
+      - State file versioning
+    cost_estimate:
+      minimum: "$5/month"
+      typical: "$10/month"
+      maximum: "$25/month"
+      factors:
+        - "State file size"
+        - "Number of locks"
+        - "DynamoDB capacity"
+    dependencies: []
+    inputs:
+      - name: "bucket_name"
+        type: "string"
+        description: "S3 bucket name for state"
+        required: true
+      - name: "dynamodb_table_name"
+        type: "string"
+        description: "DynamoDB table name for locking"
+        required: true
+    outputs:
+      - name: "backend_bucket_name"
+        description: "Name of the state bucket"
+      - name: "backend_dynamodb_table_name"
+        description: "Name of the lock table"
+    deployment_time: "3-5 minutes"
+    tags:
+      - "backend"
+      - "terraform"
+      - "state"
+      - "s3"
+      - "dynamodb"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # COMPUTE - CONTAINERS
+  # =============================================================================
+
+  eks:
+    name: "EKS"
+    display_name: "Elastic Kubernetes Service"
+    category: "compute/containers"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "advanced"
+    description: "Managed Kubernetes cluster with node groups and IRSA"
+    short_description: "AWS EKS Kubernetes cluster"
+    features:
+      - Managed control plane
+      - Multiple node group support
+      - IRSA (IAM Roles for Service Accounts)
+      - Private/public endpoint options
+      - Cluster autoscaling
+      - Logging to CloudWatch
+      - KMS encryption for secrets
+      - OIDC provider configuration
+    cost_estimate:
+      minimum: "$75/month"
+      typical: "$300/month"
+      maximum: "$2000+/month"
+      factors:
+        - "Control plane: $0.10/hour"
+        - "Node instances"
+        - "Data transfer"
+        - "Load balancers"
+    dependencies:
+      - vpc
+      - iam
+    dependents:
+      - eks-addons
+      - eks-backend-services
+    inputs:
+      - name: "cluster_name"
+        type: "string"
+        description: "Name of the EKS cluster"
+        required: true
+      - name: "kubernetes_version"
+        type: "string"
+        description: "Kubernetes version"
+        default: "1.28"
+      - name: "node_groups"
+        type: "map(object)"
+        description: "Node group configurations"
+        required: true
+    outputs:
+      - name: "cluster_id"
+        description: "EKS cluster ID"
+      - name: "cluster_endpoint"
+        description: "EKS cluster endpoint"
+      - name: "cluster_security_group_id"
+        description: "Cluster security group ID"
+      - name: "oidc_provider_arn"
+        description: "OIDC provider ARN for IRSA"
+    deployment_time: "15-25 minutes"
+    examples:
+      - name: "basic-cluster"
+        description: "Simple EKS cluster"
+      - name: "production-cluster"
+        description: "HA cluster with multiple node groups"
+    tags:
+      - "eks"
+      - "kubernetes"
+      - "containers"
+      - "compute"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  eks-addons:
+    name: "EKS Addons"
+    display_name: "EKS Cluster Addons"
+    category: "compute/containers"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "advanced"
+    description: "EKS cluster addons including ingress, monitoring, and autoscaling"
+    short_description: "Kubernetes addons for EKS"
+    features:
+      - AWS Load Balancer Controller
+      - Cluster Autoscaler
+      - Metrics Server
+      - External DNS
+      - Cert Manager
+      - External Secrets Operator
+      - Custom Helm chart deployments
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$50/month"
+      maximum: "$200/month"
+      factors:
+        - "Most addons are free"
+        - "Load balancer costs"
+        - "DNS query costs"
+    dependencies:
+      - eks
+    inputs:
+      - name: "cluster_name"
+        type: "string"
+        description: "EKS cluster name"
+        required: true
+      - name: "enable_metrics_server"
+        type: "bool"
+        description: "Enable metrics server"
+        default: true
+      - name: "enable_cluster_autoscaler"
+        type: "bool"
+        description: "Enable cluster autoscaler"
+        default: true
+    outputs:
+      - name: "addon_versions"
+        description: "Map of addon versions"
+    deployment_time: "10-15 minutes"
+    tags:
+      - "eks"
+      - "kubernetes"
+      - "addons"
+      - "helm"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  eks-backend-services:
+    name: "EKS Backend Services"
+    display_name: "EKS Backend Services"
+    category: "compute/containers"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "Backend services for EKS including service mesh and observability"
+    short_description: "Backend services for Kubernetes"
+    features:
+      - Service mesh integration
+      - Backend service deployments
+      - Service discovery
+      - Load balancing configuration
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$25/month"
+      maximum: "$100/month"
+    dependencies:
+      - eks
+      - eks-addons
+    deployment_time: "5-10 minutes"
+    tags:
+      - "eks"
+      - "kubernetes"
+      - "services"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  ecs:
+    name: "ECS"
+    display_name: "Elastic Container Service"
+    category: "compute/containers"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "ECS cluster with Fargate and EC2 capacity providers"
+    short_description: "AWS ECS container orchestration"
+    features:
+      - Fargate capacity provider
+      - EC2 capacity provider
+      - Service auto-scaling
+      - Task definitions
+      - Service discovery
+      - Load balancer integration
+    cost_estimate:
+      minimum: "$25/month"
+      typical: "$150/month"
+      maximum: "$1000+/month"
+      factors:
+        - "Fargate vCPU and memory"
+        - "EC2 instance costs"
+        - "Load balancer"
+    dependencies:
+      - vpc
+      - iam
+    inputs:
+      - name: "cluster_name"
+        type: "string"
+        description: "ECS cluster name"
+        required: true
+      - name: "capacity_providers"
+        type: "list(string)"
+        description: "Capacity providers to enable"
+        default: ["FARGATE", "FARGATE_SPOT"]
+    outputs:
+      - name: "cluster_id"
+        description: "ECS cluster ID"
+      - name: "cluster_arn"
+        description: "ECS cluster ARN"
+    deployment_time: "5-10 minutes"
+    tags:
+      - "ecs"
+      - "containers"
+      - "fargate"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # COMPUTE - SERVERLESS
+  # =============================================================================
+
+  lambda:
+    name: "Lambda"
+    display_name: "AWS Lambda Functions"
+    category: "compute/serverless"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "Lambda function management with VPC integration and layers"
+    short_description: "Serverless function deployment"
+    features:
+      - Multiple runtime support
+      - VPC integration
+      - Lambda layers
+      - Environment variables
+      - CloudWatch logging
+      - X-Ray tracing
+      - Event source mappings
+      - Provisioned concurrency
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$10/month"
+      maximum: "$500/month"
+      factors:
+        - "Request count"
+        - "Duration"
+        - "Memory allocation"
+        - "Provisioned concurrency"
+    dependencies:
+      - iam
+    inputs:
+      - name: "function_name"
+        type: "string"
+        description: "Lambda function name"
+        required: true
+      - name: "runtime"
+        type: "string"
+        description: "Lambda runtime"
+        default: "python3.11"
+      - name: "handler"
+        type: "string"
+        description: "Function handler"
+        required: true
+    outputs:
+      - name: "function_arn"
+        description: "Lambda function ARN"
+      - name: "invoke_arn"
+        description: "Lambda invoke ARN"
+    deployment_time: "2-5 minutes"
+    tags:
+      - "lambda"
+      - "serverless"
+      - "compute"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # COMPUTE - VIRTUAL MACHINES
+  # =============================================================================
+
+  ec2:
+    name: "EC2"
+    display_name: "EC2 Instances"
+    category: "compute/virtual-machines"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "EC2 instance management with SSH key generation and user data"
+    short_description: "AWS EC2 virtual machines"
+    features:
+      - Instance provisioning
+      - SSH key generation and storage
+      - User data scripts
+      - EBS volume management
+      - Instance profiles
+      - Placement groups
+      - Spot instance support
+    cost_estimate:
+      minimum: "$10/month"
+      typical: "$100/month"
+      maximum: "$1000+/month"
+      factors:
+        - "Instance type"
+        - "EBS storage"
+        - "Data transfer"
+    dependencies:
+      - vpc
+      - securitygroup
+    inputs:
+      - name: "instances"
+        type: "map(object)"
+        description: "Map of instance configurations"
+        required: true
+      - name: "create_ssh_keys"
+        type: "bool"
+        description: "Create SSH keys"
+        default: true
+    outputs:
+      - name: "instance_ids"
+        description: "Map of instance IDs"
+      - name: "private_ips"
+        description: "Map of private IPs"
+    deployment_time: "5-10 minutes"
+    tags:
+      - "ec2"
+      - "compute"
+      - "instances"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # DATA - DATABASES
+  # =============================================================================
+
+  rds:
+    name: "RDS"
+    display_name: "Relational Database Service"
+    category: "data/databases"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "intermediate"
+    description: "RDS instance management with Multi-AZ and read replicas"
+    short_description: "AWS RDS database instances"
+    features:
+      - PostgreSQL, MySQL, MariaDB support
+      - Multi-AZ deployment
+      - Read replica support
+      - Automated backups
+      - Performance Insights
+      - Enhanced monitoring
+      - KMS encryption
+      - Parameter groups
+      - Option groups
+    cost_estimate:
+      minimum: "$15/month"
+      typical: "$100/month"
+      maximum: "$2000+/month"
+      factors:
+        - "Instance class"
+        - "Storage type and size"
+        - "Multi-AZ"
+        - "Read replicas"
+    dependencies:
+      - vpc
+      - securitygroup
+    inputs:
+      - name: "identifier"
+        type: "string"
+        description: "RDS instance identifier"
+        required: true
+      - name: "engine"
+        type: "string"
+        description: "Database engine"
+        default: "postgres"
+      - name: "instance_class"
+        type: "string"
+        description: "Instance class"
+        default: "db.t3.micro"
+    outputs:
+      - name: "endpoint"
+        description: "RDS endpoint"
+      - name: "port"
+        description: "Database port"
+      - name: "database_name"
+        description: "Database name"
+    deployment_time: "10-20 minutes"
+    tags:
+      - "rds"
+      - "database"
+      - "postgresql"
+      - "mysql"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # DATA - STORAGE
+  # =============================================================================
+
+  backup:
+    name: "Backup"
+    display_name: "AWS Backup"
+    category: "data/storage"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "AWS Backup vault and plans for data protection"
+    short_description: "Centralized backup management"
+    features:
+      - Backup vault creation
+      - Backup plans
+      - Backup rules
+      - Cross-region copy
+      - Lifecycle management
+      - Resource selection by tags
+    cost_estimate:
+      minimum: "$5/month"
+      typical: "$50/month"
+      maximum: "$500/month"
+      factors:
+        - "Backup storage"
+        - "Data transfer"
+        - "Restore operations"
+    dependencies: []
+    inputs:
+      - name: "vault_name"
+        type: "string"
+        description: "Backup vault name"
+        required: true
+      - name: "backup_plans"
+        type: "map(object)"
+        description: "Backup plan configurations"
+        required: true
+    outputs:
+      - name: "vault_arn"
+        description: "Backup vault ARN"
+      - name: "plan_ids"
+        description: "Map of backup plan IDs"
+    deployment_time: "5-10 minutes"
+    tags:
+      - "backup"
+      - "disaster-recovery"
+      - "data-protection"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # INTEGRATION - API MANAGEMENT
+  # =============================================================================
+
+  apigateway:
+    name: "API Gateway"
+    display_name: "AWS API Gateway"
+    category: "integration/api-management"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "REST and HTTP API Gateway with Lambda integration"
+    short_description: "API Gateway management"
+    features:
+      - REST API support
+      - HTTP API support
+      - Lambda integration
+      - Cognito authorization
+      - API keys and usage plans
+      - Custom domains
+      - Request/response transformation
+      - Access logging
+    cost_estimate:
+      minimum: "$5/month"
+      typical: "$50/month"
+      maximum: "$500/month"
+      factors:
+        - "API calls"
+        - "Data transfer"
+        - "Caching"
+    dependencies:
+      - iam
+    inputs:
+      - name: "api_name"
+        type: "string"
+        description: "API Gateway name"
+        required: true
+      - name: "api_type"
+        type: "string"
+        description: "API type: REST or HTTP"
+        default: "REST"
+    outputs:
+      - name: "api_id"
+        description: "API Gateway ID"
+      - name: "invoke_url"
+        description: "API invoke URL"
+    deployment_time: "5-10 minutes"
+    tags:
+      - "api"
+      - "gateway"
+      - "rest"
+      - "http"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # OBSERVABILITY - METRICS
+  # =============================================================================
+
+  monitoring:
+    name: "Monitoring"
+    display_name: "CloudWatch Monitoring"
+    category: "observability/metrics"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "CloudWatch dashboards, alarms, and metrics configuration"
+    short_description: "AWS CloudWatch monitoring"
+    features:
+      - CloudWatch dashboards
+      - Metric alarms
+      - SNS notifications
+      - Log metric filters
+      - Composite alarms
+      - Custom metrics
+      - Certificate monitoring
+      - Cost monitoring
+    cost_estimate:
+      minimum: "$5/month"
+      typical: "$50/month"
+      maximum: "$500/month"
+      factors:
+        - "Custom metrics"
+        - "Dashboard widgets"
+        - "Alarm evaluations"
+    dependencies:
+      - vpc
+    inputs:
+      - name: "dashboard_name"
+        type: "string"
+        description: "Dashboard name"
+        required: true
+      - name: "alarm_email_addresses"
+        type: "list(string)"
+        description: "Email addresses for alerts"
+        required: false
+    outputs:
+      - name: "dashboard_arn"
+        description: "Dashboard ARN"
+      - name: "sns_topic_arn"
+        description: "SNS topic ARN for alarms"
+    deployment_time: "5-10 minutes"
+    tags:
+      - "monitoring"
+      - "cloudwatch"
+      - "alarms"
+      - "dashboards"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  cost-monitoring:
+    name: "Cost Monitoring"
+    display_name: "AWS Cost Monitoring"
+    category: "observability/metrics"
+    version: "1.0.0"
+    maturity: "beta"
+    complexity: "intermediate"
+    description: "Cost and usage monitoring with budgets and alerts"
+    short_description: "AWS cost tracking and alerts"
+    features:
+      - Budget creation
+      - Cost alerts
+      - Usage tracking
+      - Cost allocation tags
+      - Cost Explorer integration
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$0/month"
+      maximum: "$0/month"
+      factors:
+        - "Budgets are free"
+        - "Cost Explorer API calls have costs"
+    dependencies: []
+    deployment_time: "2-5 minutes"
+    tags:
+      - "cost"
+      - "billing"
+      - "budgets"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  cost-optimization:
+    name: "Cost Optimization"
+    display_name: "Cost Optimization Tools"
+    category: "observability/metrics"
+    version: "1.0.0"
+    maturity: "beta"
+    complexity: "advanced"
+    description: "Cost optimization recommendations and automation"
+    short_description: "AWS cost optimization"
+    features:
+      - Trusted Advisor integration
+      - Right-sizing recommendations
+      - Reserved instance analysis
+      - Savings plans recommendations
+      - Automated resource scheduling
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$0/month"
+      maximum: "$10/month"
+    dependencies:
+      - iam
+    deployment_time: "5-10 minutes"
+    tags:
+      - "cost"
+      - "optimization"
+      - "savings"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # SECURITY - ACCESS CONTROL
+  # =============================================================================
+
+  idp-platform:
+    name: "IDP Platform"
+    display_name: "Identity Provider Platform"
+    category: "security/access-control"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "advanced"
+    description: "Identity provider integration for SSO and federation"
+    short_description: "Identity federation and SSO"
+    features:
+      - SAML integration
+      - OIDC provider
+      - AWS SSO integration
+      - Role mapping
+      - User attribute mapping
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$50/month"
+      maximum: "$500/month"
+      factors:
+        - "AWS SSO is free"
+        - "Third-party IdP costs vary"
+    dependencies:
+      - iam
+    deployment_time: "10-15 minutes"
+    tags:
+      - "identity"
+      - "sso"
+      - "federation"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # SECURITY - SECRETS
+  # =============================================================================
+
+  secretsmanager:
+    name: "Secrets Manager"
+    display_name: "AWS Secrets Manager"
+    category: "security/secrets"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "basic"
+    description: "Secrets Manager for secure credential storage and rotation"
+    short_description: "Secure secret storage"
+    features:
+      - Secret creation
+      - Automatic rotation
+      - KMS encryption
+      - Cross-account access
+      - Version tracking
+      - Random password generation
+    cost_estimate:
+      minimum: "$1/month"
+      typical: "$10/month"
+      maximum: "$100/month"
+      factors:
+        - "$0.40 per secret/month"
+        - "$0.05 per 10,000 API calls"
+    dependencies: []
+    inputs:
+      - name: "secrets"
+        type: "map(object)"
+        description: "Map of secrets to create"
+        required: true
+    outputs:
+      - name: "secret_arns"
+        description: "Map of secret ARNs"
+    deployment_time: "2-5 minutes"
+    tags:
+      - "secrets"
+      - "security"
+      - "credentials"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  external-secrets:
+    name: "External Secrets"
+    display_name: "External Secrets Operator"
+    category: "security/secrets"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "intermediate"
+    description: "External Secrets Operator for Kubernetes secret management"
+    short_description: "K8s external secrets integration"
+    features:
+      - AWS Secrets Manager integration
+      - AWS Parameter Store integration
+      - Secret sync to Kubernetes
+      - Multiple secret stores
+      - Certificate management
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$5/month"
+      maximum: "$50/month"
+      factors:
+        - "Secrets Manager API calls"
+        - "No cost for the operator itself"
+    dependencies:
+      - eks
+    deployment_time: "5-10 minutes"
+    tags:
+      - "secrets"
+      - "kubernetes"
+      - "external-secrets"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # SECURITY - CERTIFICATES
+  # =============================================================================
+
+  acm:
+    name: "ACM"
+    display_name: "AWS Certificate Manager"
+    category: "security/certificates"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "basic"
+    description: "SSL/TLS certificate management with DNS validation"
+    short_description: "SSL certificate management"
+    features:
+      - Certificate creation
+      - DNS validation
+      - Auto-renewal
+      - Cross-region replication
+      - Multiple domain support
+      - Wildcard certificates
+    cost_estimate:
+      minimum: "$0/month"
+      typical: "$0/month"
+      maximum: "$0/month"
+      factors:
+        - "Public certificates are free"
+        - "Private CA has additional costs"
+    dependencies: []
+    inputs:
+      - name: "dns_domains"
+        type: "map(object)"
+        description: "Map of domain configurations"
+        required: true
+      - name: "zone_id"
+        type: "string"
+        description: "Route53 hosted zone ID for validation"
+        required: true
+    outputs:
+      - name: "certificate_arns"
+        description: "Map of certificate ARNs"
+    deployment_time: "5-15 minutes"
+    tags:
+      - "acm"
+      - "ssl"
+      - "certificates"
+      - "tls"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  # =============================================================================
+  # DNS
+  # =============================================================================
+
+  dns:
+    name: "DNS"
+    display_name: "Route53 DNS Management"
+    category: "dns/dns-management"
+    version: "1.0.0"
+    maturity: "stable"
+    complexity: "basic"
+    description: "Route53 hosted zones and DNS record management"
+    short_description: "AWS Route53 DNS management"
+    features:
+      - Hosted zone creation
+      - DNS record management
+      - Alias records
+      - Health checks
+      - Routing policies
+      - DNSSEC support
+    cost_estimate:
+      minimum: "$1/month"
+      typical: "$5/month"
+      maximum: "$50/month"
+      factors:
+        - "$0.50 per hosted zone/month"
+        - "$0.40 per million queries"
+        - "Health checks extra"
+    dependencies: []
+    inputs:
+      - name: "zone_name"
+        type: "string"
+        description: "DNS zone name"
+        required: true
+      - name: "records"
+        type: "map(object)"
+        description: "DNS records to create"
+        required: false
+    outputs:
+      - name: "zone_id"
+        description: "Hosted zone ID"
+      - name: "name_servers"
+        description: "Zone name servers"
+    deployment_time: "2-5 minutes"
+    tags:
+      - "dns"
+      - "route53"
+      - "networking"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+# =============================================================================
+# PATTERNS - ARCHITECTURE PATTERNS
+# =============================================================================
+
+patterns:
+  event-driven-pattern:
+    name: "Event-Driven Architecture"
+    display_name: "Event-Driven Architecture Pattern"
+    category: "patterns/event-driven"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "advanced"
+    description: "Complete event-driven architecture with EventBridge, Lambda, SQS, SNS, and Step Functions"
+    short_description: "Enterprise event-driven architecture"
+    features:
+      - EventBridge event bus with rules
+      - Lambda event consumers
+      - SQS queues for buffering
+      - DLQ configuration
+      - SNS fanout pattern
+      - Step Functions orchestration
+      - CloudWatch dashboards
+      - X-Ray tracing
+      - Event archival to S3
+      - Comprehensive monitoring
+    cost_estimate:
+      minimum: "$9/month"
+      typical: "$131/month"
+      maximum: "$1,160/month"
+      factors:
+        - "EventBridge events"
+        - "Lambda invocations"
+        - "SQS messages"
+        - "Step Functions transitions"
+    components:
+      - eventbridge-bus
+      - eventbridge-rules
+      - lambda-consumers
+      - sqs-buffered
+      - sns-fanout
+      - step-functions
+      - dynamodb-state
+      - s3-audit
+      - monitoring
+      - iam
+      - kms
+    use_cases:
+      - "Microservices communication"
+      - "Workflow orchestration"
+      - "Event sourcing"
+      - "CQRS patterns"
+      - "Saga pattern"
+    deployment_time: "20-30 minutes"
+    documentation_url: "docs/patterns/EVENT_DRIVEN_ARCHITECTURE.md"
+    source_url: "stacks/catalog/_library/patterns/event-driven-pattern.yaml"
+    tags:
+      - "event-driven"
+      - "eventbridge"
+      - "lambda"
+      - "step-functions"
+      - "serverless"
+      - "pattern"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  api-gateway-pattern:
+    name: "API Gateway"
+    display_name: "Enterprise API Gateway Pattern"
+    category: "patterns/api-management"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "intermediate"
+    description: "Enterprise API Gateway with REST/HTTP/WebSocket APIs, WAF protection, and comprehensive monitoring"
+    short_description: "Enterprise API management"
+    features:
+      - REST API Gateway
+      - HTTP API Gateway
+      - WebSocket API Gateway
+      - Lambda integration
+      - VPC Link for private APIs
+      - Custom domains and certificates
+      - Cognito authentication
+      - JWT authorization
+      - Usage plans and API keys
+      - WAF integration
+      - CloudWatch logging
+      - X-Ray tracing
+      - Throttling and quotas
+    cost_estimate:
+      minimum: "$18.50/month"
+      typical: "$137/month"
+      maximum: "$1,110/month"
+      factors:
+        - "API requests"
+        - "WAF rules"
+        - "Lambda compute"
+        - "Data transfer"
+    components:
+      - api-gateway-rest
+      - api-gateway-http
+      - api-gateway-websocket
+      - custom-domain
+      - acm-certificate
+      - waf
+      - cognito
+      - lambda-handlers
+      - dynamodb
+      - monitoring
+      - iam
+    use_cases:
+      - "Public REST APIs"
+      - "Internal microservices APIs"
+      - "WebSocket real-time apps"
+      - "API monetization"
+      - "Partner integrations"
+    deployment_time: "15-25 minutes"
+    documentation_url: "docs/patterns/API_GATEWAY_PATTERNS.md"
+    source_url: "stacks/catalog/_library/patterns/api-gateway-pattern.yaml"
+    tags:
+      - "api-gateway"
+      - "rest"
+      - "http"
+      - "websocket"
+      - "waf"
+      - "cognito"
+      - "pattern"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+  streaming-pipeline-pattern:
+    name: "Streaming Pipeline"
+    display_name: "Real-Time Streaming Pipeline Pattern"
+    category: "patterns/data-pipelines"
+    version: "1.0.0"
+    maturity: "production"
+    complexity: "advanced"
+    description: "Real-time data streaming pipeline with Kinesis, Lambda processing, and multi-destination delivery"
+    short_description: "Real-time data streaming"
+    features:
+      - Kinesis Data Streams (On-Demand)
+      - Enhanced Fan-Out consumers
+      - Lambda stream processing
+      - Kinesis Data Analytics (Flink)
+      - Kinesis Firehose to S3/OpenSearch/Redshift
+      - DynamoDB for state
+      - ElastiCache for lookups
+      - Glue Data Catalog
+      - Parquet format conversion
+      - Dynamic partitioning
+      - CloudWatch monitoring
+      - Auto-scaling
+    cost_estimate:
+      minimum: "$133/month"
+      typical: "$641/month"
+      maximum: "$3,660/month"
+      factors:
+        - "Kinesis shard hours"
+        - "Firehose data volume"
+        - "Lambda compute"
+        - "OpenSearch instances"
+        - "S3 storage"
+    components:
+      - kinesis-ingest
+      - kinesis-enriched
+      - lambda-stream-processor
+      - kinesis-analytics
+      - firehose-s3
+      - firehose-opensearch
+      - s3-data-lake
+      - opensearch
+      - dynamodb-state
+      - elasticache
+      - glue-database
+      - monitoring
+      - iam
+      - kms
+    use_cases:
+      - "Real-time analytics"
+      - "Event streaming"
+      - "IoT data processing"
+      - "Log aggregation"
+      - "Clickstream analysis"
+      - "Fraud detection"
+    deployment_time: "25-40 minutes"
+    documentation_url: "docs/patterns/STREAMING_PIPELINES.md"
+    source_url: "stacks/catalog/_library/patterns/streaming-pipeline-pattern.yaml"
+    tags:
+      - "streaming"
+      - "kinesis"
+      - "firehose"
+      - "lambda"
+      - "opensearch"
+      - "data-lake"
+      - "pattern"
+    author: "Platform Team"
+    last_updated: "2025-12-02"
+
+# =============================================================================
+# STATISTICS
+# =============================================================================
+
+statistics:
+  total_modules: 24
+  total_patterns: 3
+  by_category:
+    foundations:
+      networking: 3
+      security: 2
+      identity: 1
+      state-management: 1
+    compute:
+      containers: 4
+      serverless: 1
+      virtual-machines: 1
+    data:
+      databases: 1
+      storage: 1
+    integration:
+      api-management: 1
+    observability:
+      metrics: 3
+    security:
+      access-control: 1
+      secrets: 2
+      certificates: 1
+    dns:
+      dns-management: 1
+    patterns:
+      event-driven: 1
+      api-management: 1
+      data-pipelines: 1
+  by_maturity:
+    production: 11
+    stable: 13
+    beta: 3
+  by_complexity:
+    basic: 6
+    intermediate: 15
+    advanced: 6

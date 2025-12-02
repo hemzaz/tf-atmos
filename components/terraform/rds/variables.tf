@@ -78,6 +78,14 @@ variable "instance_class" {
   type        = string
   description = "Instance class for the RDS instance"
   default     = "db.t3.small"
+
+  validation {
+    condition = (
+      var.environment != "prod" ||
+      can(regex("^db\\.(t3\\.(medium|large|xlarge|2xlarge)|r5\\.|r6\\.|m5\\.|m6\\.)", var.instance_class))
+    )
+    error_message = "Production environment requires at least db.t3.medium or production-grade instance classes (r5, r6, m5, m6)."
+  }
 }
 
 variable "allocated_storage" {
@@ -100,8 +108,13 @@ variable "storage_type" {
 
 variable "storage_encrypted" {
   type        = bool
-  description = "Enable storage encryption"
+  description = "Enable storage encryption (always required)"
   default     = true
+
+  validation {
+    condition     = var.storage_encrypted == true
+    error_message = "Storage encryption must be enabled for all RDS instances for security compliance."
+  }
 }
 
 variable "kms_key_id" {
@@ -149,14 +162,24 @@ variable "availability_zone" {
 
 variable "multi_az" {
   type        = bool
-  description = "Enable Multi-AZ deployment"
+  description = "Enable Multi-AZ deployment (required for production)"
   default     = false
+
+  validation {
+    condition     = var.environment != "prod" || var.multi_az == true
+    error_message = "Multi-AZ deployment must be enabled for production environments for high availability."
+  }
 }
 
 variable "publicly_accessible" {
   type        = bool
-  description = "Make the RDS instance publicly accessible"
+  description = "Make the RDS instance publicly accessible (prohibited in production)"
   default     = false
+
+  validation {
+    condition     = var.environment != "prod" || var.publicly_accessible == false
+    error_message = "RDS instances must not be publicly accessible in production environments for security."
+  }
 }
 
 variable "allow_major_version_upgrade" {
@@ -173,8 +196,18 @@ variable "auto_minor_version_upgrade" {
 
 variable "backup_retention_period" {
   type        = number
-  description = "Backup retention period in days"
+  description = "Backup retention period in days (minimum 7 for production)"
   default     = 7
+
+  validation {
+    condition     = var.backup_retention_period >= 0 && var.backup_retention_period <= 35
+    error_message = "Backup retention period must be between 0 and 35 days."
+  }
+
+  validation {
+    condition     = var.environment != "prod" || var.backup_retention_period >= 7
+    error_message = "Production environments must have a backup retention period of at least 7 days."
+  }
 }
 
 variable "backup_window" {
@@ -232,8 +265,13 @@ variable "performance_insights_enabled" {
 
 variable "deletion_protection" {
   type        = bool
-  description = "Enable deletion protection"
+  description = "Enable deletion protection (required for production)"
   default     = true
+
+  validation {
+    condition     = var.environment != "prod" || var.deletion_protection == true
+    error_message = "Deletion protection must be enabled for production environments to prevent accidental deletion."
+  }
 }
 
 variable "prevent_destroy" {
@@ -416,4 +454,87 @@ variable "sns_topic_arn" {
   type        = string
   description = "SNS topic ARN for sending alarm notifications"
   default     = null
+}
+
+# Secrets Rotation Variables
+variable "enable_secrets_rotation" {
+  type        = bool
+  description = "Enable automatic rotation of RDS database credentials"
+  default     = true
+}
+
+variable "rotation_days" {
+  type        = number
+  description = "Number of days between automatic secret rotations"
+  default     = 30
+
+  validation {
+    condition     = var.rotation_days >= 1 && var.rotation_days <= 365
+    error_message = "Rotation days must be between 1 and 365."
+  }
+}
+
+variable "rotation_logs_retention_days" {
+  type        = number
+  description = "Retention period in days for rotation Lambda logs"
+  default     = 7
+
+  validation {
+    condition     = contains([0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.rotation_logs_retention_days)
+    error_message = "Rotation logs retention days must be a valid CloudWatch Logs retention period."
+  }
+}
+
+variable "enable_rotation_alarms" {
+  type        = bool
+  description = "Enable CloudWatch alarms for rotation failures"
+  default     = true
+}
+
+variable "rotation_alarm_actions" {
+  type        = list(string)
+  description = "List of SNS topic ARNs to notify when rotation alarms trigger"
+  default     = []
+}
+
+variable "rotation_duration_alarm_threshold" {
+  type        = number
+  description = "Maximum duration in milliseconds for rotation before alarming"
+  default     = 60000 # 60 seconds
+}
+
+variable "create_rotation_sns_topic" {
+  type        = bool
+  description = "Create SNS topic for rotation notifications"
+  default     = false
+}
+
+variable "sns_kms_key_id" {
+  type        = string
+  description = "KMS key ID for SNS topic encryption"
+  default     = null
+}
+
+variable "rotation_notification_emails" {
+  type        = list(string)
+  description = "List of email addresses to notify on rotation events"
+  default     = []
+}
+
+variable "enable_rotation_events" {
+  type        = bool
+  description = "Enable EventBridge events for rotation success/failure"
+  default     = true
+}
+
+# Environment variable for production validations
+variable "environment" {
+  type        = string
+  description = "Environment name (dev, staging, prod) - used for production-specific validations"
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be one of: dev, staging, prod."
+  }
 }

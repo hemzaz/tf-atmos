@@ -1,0 +1,245 @@
+name: Infrastructure Drift Detection
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+          - all
+        default: dev
+
+env:
+  ATMOS_VERSION: "1.44.0"
+  TERRAFORM_VERSION: "1.5.7"
+  AWS_DEFAULT_REGION: us-east-1
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  detect-drift:
+    name: Detect Drift - ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        environment: ${{ github.event.inputs.environment == 'all' && fromJSON('["dev", "staging", "prod"]') || fromJSON(format('["{0}"]', github.event.inputs.environment || 'dev')) }}
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Atmos
+        uses: cloudposse/github-action-setup-atmos@v1
+        with:
+          atmos-version: ${{ env.ATMOS_VERSION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', upper(matrix.environment))] }}
+          role-session-name: GitHubActions-Drift-${{ matrix.environment }}
+
+      - name: Determine tenant and account
+        id: config
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "tenant=fnx" >> $GITHUB_OUTPUT
+              echo "account=dev" >> $GITHUB_OUTPUT
+              ;;
+            staging)
+              echo "tenant=fnx" >> $GITHUB_OUTPUT
+              echo "account=staging" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "tenant=fnx" >> $GITHUB_OUTPUT
+              echo "account=prod" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Run drift detection
+        id: drift
+        run: |
+          TENANT=${{ steps.config.outputs.tenant }}
+          ACCOUNT=${{ steps.config.outputs.account }}
+          ENV=${{ matrix.environment }}
+
+          echo "Running drift detection for $TENANT-$ACCOUNT-$ENV"
+
+          # Create drift report directory
+          mkdir -p drift-reports
+
+          # Run drift detection workflow
+          atmos workflow drift-detection -f drift-detection.yaml \
+            tenant=$TENANT \
+            account=$ACCOUNT \
+            environment=$ENV \
+            report_format=both > drift-reports/$ENV-drift-report.txt 2>&1 || {
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+            echo "Drift detected in $ENV environment"
+          }
+
+          # Check if drift was detected
+          if grep -q "Plan:" drift-reports/$ENV-drift-report.txt; then
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+            echo "DRIFT DETECTED in $ENV environment!"
+          else
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+            echo "No drift detected in $ENV environment"
+          fi
+
+      - name: Generate drift summary
+        if: steps.drift.outputs.drift_detected == 'true'
+        run: |
+          cat > drift-reports/${{ matrix.environment }}-drift-summary.md << EOF
+          # Infrastructure Drift Report - ${{ matrix.environment }}
+
+          **Environment**: ${{ matrix.environment }}
+          **Tenant**: ${{ steps.config.outputs.tenant }}
+          **Account**: ${{ steps.config.outputs.account }}
+          **Detected**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ## Drift Detected
+
+          Configuration drift has been detected in the ${{ matrix.environment }} environment.
+          This means the actual infrastructure state differs from the Terraform configuration.
+
+          ### Possible Causes
+          - Manual changes made via AWS Console
+          - External automation or scripts
+          - Incomplete Terraform applies
+          - Resource deletion outside Terraform
+
+          ### Recommended Actions
+          1. Review the detailed drift report
+          2. Identify the root cause of changes
+          3. Update Terraform configuration if changes are intentional
+          4. Apply Terraform to restore desired state if changes are unintentional
+          5. Implement preventive measures
+
+          ### Detailed Report
+
+          See attached artifact for full drift analysis.
+          EOF
+
+      - name: Upload drift reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report-${{ matrix.environment }}-${{ github.run_number }}
+          path: drift-reports/
+          retention-days: 30
+
+      - name: Create issue for drift
+        if: steps.drift.outputs.drift_detected == 'true' && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Check if there's already an open drift issue for this environment
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'drift-detection,${{ matrix.environment }}'
+            });
+
+            if (issues.data.length > 0) {
+              // Update existing issue
+              const issue = issues.data[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `## Drift Still Detected - ${new Date().toUTCString()}
+
+                Configuration drift continues to be detected in the **${{ matrix.environment }}** environment.
+
+                **Latest Detection**: [Workflow Run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+                Please review and remediate the drift.`
+              });
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Infrastructure Drift Detected - ${{ matrix.environment }} (${new Date().toISOString().split('T')[0]})`,
+                body: `## Infrastructure Drift Detected
+
+                **Environment**: ${{ matrix.environment }}
+                **Tenant**: ${{ steps.config.outputs.tenant }}
+                **Account**: ${{ steps.config.outputs.account }}
+                **Detected**: ${new Date().toUTCString()}
+                **Workflow Run**: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+                ### Description
+
+                Configuration drift has been detected in the ${{ matrix.environment }} environment.
+                The actual infrastructure state differs from the Terraform configuration.
+
+                ### Possible Causes
+
+                - Manual changes made via AWS Console
+                - External automation or scripts
+                - Incomplete Terraform applies
+                - Resource deletion outside Terraform
+
+                ### Action Required
+
+                1. Download and review the drift report from the workflow artifacts
+                2. Identify the root cause of the changes
+                3. If changes are intentional: Update Terraform configuration
+                4. If changes are unintentional: Apply Terraform to restore desired state
+                5. Implement preventive measures to avoid future drift
+
+                ### Resources
+
+                - [Drift Detection Report](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+                - [Drift Detection Workflow](${{ github.server_url }}/${{ github.repository }}/actions/workflows/drift-detection.yml)
+
+                This issue was automatically created by the drift detection workflow.
+                It will be updated with new detections until the drift is resolved.
+                `,
+                labels: ['drift-detection', '${{ matrix.environment }}', 'infrastructure', 'automated']
+              });
+            }
+
+      - name: Post drift status
+        if: always()
+        run: |
+          if [ "${{ steps.drift.outputs.drift_detected }}" == "true" ]; then
+            echo "::warning::Drift detected in ${{ matrix.environment }} environment"
+          else
+            echo "::notice::No drift detected in ${{ matrix.environment }} environment"
+          fi
+
+  drift-summary:
+    name: Drift Detection Summary
+    runs-on: ubuntu-latest
+    needs: detect-drift
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "Drift detection completed for all environments"
+          echo "Check individual job results for detailed information"

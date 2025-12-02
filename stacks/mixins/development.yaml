@@ -21,10 +21,20 @@ vars:
     guardrails_enabled: false
 
 # Development-specific defaults for terraform components
-terraform:
-  vars:
-    environment_type: "development"
-    multi_az: false
-    deletion_protection: false
-    automatic_backup_retention: 7
-    create_alarms: false
+# FIXED: Moved terraform block under components
+components:
+  terraform:
+    # These settings apply to all Terraform components in development
+    _environment_defaults:
+      metadata:
+        type: abstract
+      vars:
+        environment_type: "development"
+        multi_az: false
+        deletion_protection: false
+        automatic_backup_retention: 7
+        create_alarms: false
+        # Cost optimization for dev environments
+        instance_size: "small"
+        min_capacity: 1
+        max_capacity: 2

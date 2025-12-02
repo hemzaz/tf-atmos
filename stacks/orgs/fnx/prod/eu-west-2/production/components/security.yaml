@@ -1,0 +1,270 @@
+---
+# =============================================================================
+# Security Component Configurations for Production Environment
+# =============================================================================
+# PRODUCTION SECURITY - Maximum protection for business-critical data
+# IAM with least privilege, KMS encryption, secrets rotation enabled
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-2/production/components/globals
+  - catalog/iam/defaults
+  - catalog/backend/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/acm/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # IAM Roles - Production with Strict Permissions
+    # ==========================================================================
+    iam/main:
+      metadata:
+        component: iam
+      vars:
+        management_account_id: "${management_account_id}"
+        account_id: "${aws_account_id}"
+        target_account_id: "${aws_account_id}"
+
+        # Cross-account access configuration
+        cross_account_role_name: "production-prod-fnx-CrossAccountRole"
+        policy_name: "production-prod-fnx-CrossAccountPolicy"
+        trusted_account_ids:
+          - "${management_account_id}"
+
+        # MFA required for production access
+        require_mfa: true
+        max_session_duration: 3600  # 1 hour max
+
+        # Restrictive permissions
+        managed_policy_arns:
+          - "arn:aws:iam::aws:policy/ReadOnlyAccess"
+
+        # Permission boundary
+        permissions_boundary: "arn:aws:iam::${aws_account_id}:policy/ProductionPermissionBoundary"
+
+    iam/ci:
+      metadata:
+        component: iam
+      vars:
+        create_ci_role: true
+        ci_role_name: "production-ci-role"
+        # Minimal permissions for CI/CD
+        ci_permissions:
+          - "ec2:Describe*"
+          - "eks:Describe*"
+          - "eks:List*"
+          - "s3:GetObject"
+          - "s3:ListBucket"
+          - "ecr:GetAuthorizationToken"
+          - "ecr:BatchCheckLayerAvailability"
+          - "ecr:GetDownloadUrlForLayer"
+          - "ecr:BatchGetImage"
+
+        # Condition keys for additional security
+        ci_role_conditions:
+          IpAddress:
+            "aws:SourceIp":
+              - "10.0.0.0/8"  # Internal network only
+
+    iam/eks-node:
+      metadata:
+        component: iam
+      vars:
+        create_node_role: true
+        node_role_name: "production-eks-node-role"
+        node_role_policies:
+          - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+          - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+          - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+          - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+
+    iam/eks-cluster:
+      metadata:
+        component: iam
+      vars:
+        create_cluster_role: true
+        cluster_role_name: "production-eks-cluster-role"
+        cluster_role_policies:
+          - "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+          - "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+
+    # ==========================================================================
+    # Terraform Backend - Production State
+    # ==========================================================================
+    backend/main:
+      metadata:
+        component: backend
+      vars:
+        bucket_name: "fnx-production-terraform-state"
+        dynamodb_table_name: "fnx-production-terraform-locks"
+        iam_role_name: "fnx-production-terraform-backend-role"
+        iam_role_arn: "arn:aws:iam::${management_account_id}:role/fnx-production-terraform-backend-role"
+        state_file_key: "${environment}/${component}/terraform.tfstate"
+        workspace: "default"
+
+        # Enhanced security for production backend
+        enable_versioning: true
+        enable_encryption: true
+        block_public_access: true
+        enable_access_logging: true
+
+        # Cross-region replication for DR
+        enable_replication: true
+        replication_region: "us-east-1"
+
+        # Lifecycle policies
+        noncurrent_version_expiration: 90
+        abort_incomplete_multipart_upload_days: 7
+
+    # ==========================================================================
+    # KMS Keys for Production Encryption
+    # ==========================================================================
+    kms/main:
+      metadata:
+        component: kms
+      vars:
+        description: "Production main encryption key"
+        key_usage: "ENCRYPT_DECRYPT"
+        customer_master_key_spec: "SYMMETRIC_DEFAULT"
+        enable_key_rotation: true
+        deletion_window_in_days: 30
+
+        # Key policy
+        key_administrators:
+          - "arn:aws:iam::${aws_account_id}:role/Admin"
+        key_users:
+          - "arn:aws:iam::${aws_account_id}:role/production-eks-node-role"
+          - "arn:aws:iam::${aws_account_id}:role/production-ci-role"
+
+        aliases:
+          - "alias/production-main"
+
+    # ==========================================================================
+    # ACM Certificates - Production
+    # ==========================================================================
+    acm/main:
+      metadata:
+        component: acm
+      vars:
+        zone_id: "${hosted_zone_id}"
+        dns_domains:
+          main_wildcard:
+            domain_name: "*.${domain_name}"
+            subject_alternative_names:
+              - "${domain_name}"
+              - "*.api.${domain_name}"
+            validation_method: "DNS"
+            wait_for_validation: true
+
+    acm/services:
+      metadata:
+        component: acm
+      vars:
+        zone_id: "${hosted_zone_id}"
+        dns_domains:
+          services_wildcard:
+            domain_name: "*.services.${domain_name}"
+            subject_alternative_names:
+              - "api.services.${domain_name}"
+              - "data.services.${domain_name}"
+            validation_method: "DNS"
+            wait_for_validation: true
+
+    # ==========================================================================
+    # Secrets Manager - Production with Rotation
+    # ==========================================================================
+    secretsmanager/app:
+      metadata:
+        component: secretsmanager
+      vars:
+        create_kms_key: true
+        kms_key_alias: "alias/production-secrets"
+        name_prefix: "production/app"
+        recovery_window_in_days: 30  # Extended for production
+
+        secrets:
+          app_credentials:
+            name: "credentials"
+            description: "Production application credentials"
+            path: "production/app"
+            generate_random_password: true
+            password_length: 48
+            # Enable rotation
+            enable_rotation: true
+            rotation_lambda_arn: "${output.lambda/secret-rotation.function_arn}"
+            rotation_days: 30
+          api_keys:
+            name: "api-keys"
+            description: "Production API integration keys"
+            path: "production/app/api"
+            generate_random_password: true
+            password_length: 64
+            enable_rotation: true
+            rotation_days: 90
+          database_credentials:
+            name: "db-credentials"
+            description: "Production database credentials"
+            path: "production/app/database"
+            generate_random_password: true
+            password_length: 32
+            enable_rotation: true
+            rotation_lambda_arn: "${output.lambda/rds-secret-rotation.function_arn}"
+            rotation_days: 14
+
+    secretsmanager/infra:
+      metadata:
+        component: secretsmanager
+      vars:
+        create_kms_key: true
+        kms_key_alias: "alias/production-infra-secrets"
+        name_prefix: "production/infra"
+        recovery_window_in_days: 30
+
+        secrets:
+          tls_certificates:
+            name: "tls-certificates"
+            description: "Production TLS certificates"
+            path: "production/certificates"
+          ssh_keys:
+            name: "ssh-keys"
+            description: "Production SSH keys"
+            path: "production/ssh"
+          service_accounts:
+            name: "service-accounts"
+            description: "Production service account credentials"
+            path: "production/service-accounts"
+
+    # ==========================================================================
+    # GuardDuty Configuration
+    # ==========================================================================
+    guardduty/main:
+      metadata:
+        component: guardduty
+      vars:
+        enable: true
+        enable_s3_protection: true
+        enable_kubernetes_protection: true
+        enable_malware_protection: true
+        finding_publishing_frequency: "FIFTEEN_MINUTES"
+
+        # Auto-archive low severity findings
+        auto_archive_filter:
+          - severity: 1
+            criteria:
+              type:
+                - "Recon:EC2/Portscan"
+
+    # ==========================================================================
+    # Security Hub Configuration
+    # ==========================================================================
+    securityhub/main:
+      metadata:
+        component: securityhub
+      vars:
+        enable: true
+        enable_default_standards: true
+        standards:
+          - "aws-foundational-security-best-practices/v/1.0.0"
+          - "cis-aws-foundations-benchmark/v/1.2.0"
+          - "pci-dss/v/3.2.1"

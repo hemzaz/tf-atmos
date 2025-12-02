@@ -415,11 +415,134 @@ variable "backup_retention_days" {
   type        = number
   description = "Number of days to retain backups"
   default     = 30
-  
+
   validation {
     condition     = var.backup_retention_days >= 7 && var.backup_retention_days <= 365
     error_message = "Backup retention must be between 7 and 365 days."
   }
+}
+
+# AWS Backup Vault Configuration
+variable "enable_backup_vault" {
+  type        = bool
+  description = "Enable AWS Backup vault for DynamoDB table backups"
+  default     = true
+}
+
+variable "backup_schedule_daily" {
+  type        = string
+  description = "Cron expression for daily backups"
+  default     = "cron(0 2 * * ? *)" # 2 AM UTC daily
+}
+
+variable "backup_schedule_weekly" {
+  type        = string
+  description = "Cron expression for weekly backups"
+  default     = "cron(0 3 ? * SUN *)" # 3 AM UTC every Sunday
+}
+
+variable "backup_schedule_monthly" {
+  type        = string
+  description = "Cron expression for monthly backups"
+  default     = "cron(0 4 1 * ? *)" # 4 AM UTC on 1st of month
+}
+
+variable "backup_retention_days_daily" {
+  type        = number
+  description = "Retention period for daily backups in days"
+  default     = 30
+
+  validation {
+    condition     = var.backup_retention_days_daily >= 1 && var.backup_retention_days_daily <= 365
+    error_message = "Daily backup retention must be between 1 and 365 days."
+  }
+}
+
+variable "backup_retention_days_weekly" {
+  type        = number
+  description = "Retention period for weekly backups in days"
+  default     = 90
+
+  validation {
+    condition     = var.backup_retention_days_weekly >= 1 && var.backup_retention_days_weekly <= 365
+    error_message = "Weekly backup retention must be between 1 and 365 days."
+  }
+}
+
+variable "backup_retention_days_monthly" {
+  type        = number
+  description = "Retention period for monthly backups in days"
+  default     = 365
+
+  validation {
+    condition     = var.backup_retention_days_monthly >= 1 && var.backup_retention_days_monthly <= 3650
+    error_message = "Monthly backup retention must be between 1 and 3650 days."
+  }
+}
+
+variable "backup_cold_storage_after_days" {
+  type        = number
+  description = "Days before moving daily backups to cold storage"
+  default     = 7
+
+  validation {
+    condition     = var.backup_cold_storage_after_days >= 0
+    error_message = "Cold storage transition days must be non-negative."
+  }
+}
+
+variable "backup_cold_storage_after_days_weekly" {
+  type        = number
+  description = "Days before moving weekly backups to cold storage"
+  default     = 30
+}
+
+variable "backup_cold_storage_after_days_monthly" {
+  type        = number
+  description = "Days before moving monthly backups to cold storage"
+  default     = 90
+}
+
+variable "enable_weekly_backups" {
+  type        = bool
+  description = "Enable weekly backup schedule"
+  default     = true
+}
+
+variable "enable_monthly_backups" {
+  type        = bool
+  description = "Enable monthly backup schedule"
+  default     = true
+}
+
+variable "enable_backup_alarms" {
+  type        = bool
+  description = "Enable CloudWatch alarms for backup job monitoring"
+  default     = true
+}
+
+variable "backup_alarm_actions" {
+  type        = list(string)
+  description = "List of SNS topic ARNs for backup alarm notifications"
+  default     = []
+}
+
+variable "enable_backup_events" {
+  type        = bool
+  description = "Enable EventBridge events for backup status changes"
+  default     = true
+}
+
+variable "backup_event_sns_topics" {
+  type        = list(string)
+  description = "List of SNS topics for backup event notifications"
+  default     = []
+}
+
+variable "enable_backup_lifecycle_tags" {
+  type        = bool
+  description = "Enable backup lifecycle tracking in DynamoDB table"
+  default     = false
 }
 
 # Common tags

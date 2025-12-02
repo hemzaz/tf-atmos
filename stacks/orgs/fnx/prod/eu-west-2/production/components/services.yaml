@@ -1,0 +1,463 @@
+---
+# =============================================================================
+# Services Component Configurations for Production Environment
+# =============================================================================
+# Production services with full monitoring, alerting, and compliance
+# Multi-AZ RDS, comprehensive CloudWatch, PagerDuty integration
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/eu-west-2/production/components/globals
+  - catalog/apigateway/defaults
+  - catalog/monitoring/defaults
+  - catalog/infrastructure/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # API Gateway - Main API (Production)
+    # ==========================================================================
+    apigateway/main:
+      metadata:
+        component: apigateway
+      vars:
+        name: "production-main-api"
+        description: "Production Main API Gateway"
+        stage_name: "v1"
+
+        # API resources
+        api_resources:
+          - path_part: "api"
+          - path_part: "auth"
+          - path_part: "health"
+          - path_part: "users"
+          - path_part: "products"
+
+        # Domain Configuration
+        domain_name: "api.${domain_name}"
+        certificate_arn: "${output.acm/main.certificate_arns.main_wildcard}"
+        route53_zone_id: "${output.network/main.zone_ids.main}"
+
+        # Production throttling
+        throttling_burst_limit: 5000
+        throttling_rate_limit: 10000
+
+        # Method-level throttling for critical endpoints
+        method_throttling:
+          - path: "/api"
+            method: "POST"
+            burst_limit: 1000
+            rate_limit: 2000
+
+        # Logging and monitoring - comprehensive
+        enable_logging: true
+        log_retention_days: 90
+        create_dashboard: true
+        enable_xray_tracing: true
+        enable_access_logging: true
+
+        # WAF integration
+        web_acl_arn: "${output.waf/main.web_acl_arn}"
+
+        # CORS - restrictive for production
+        enable_cors: true
+        cors_allow_origins:
+          - "https://${domain_name}"
+          - "https://www.${domain_name}"
+        cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        cors_allow_headers:
+          - "Content-Type"
+          - "Authorization"
+          - "X-Api-Key"
+          - "X-Request-Id"
+
+        # Cache settings
+        enable_caching: true
+        cache_cluster_size: "1.6"
+        cache_ttl: 300
+
+      tags:
+        Service: api-gateway
+        Tier: edge
+        CriticalityLevel: "high"
+
+    # ==========================================================================
+    # API Gateway - Data API (Production)
+    # ==========================================================================
+    apigateway/data:
+      metadata:
+        component: apigateway
+      vars:
+        name: "production-data-api"
+        description: "Production Data API Gateway"
+        stage_name: "v1"
+
+        api_resources:
+          - path_part: "data"
+          - path_part: "metrics"
+          - path_part: "analytics"
+          - path_part: "reports"
+
+        domain_name: "data.services.${domain_name}"
+        certificate_arn: "${output.acm/services.certificate_arns.services_wildcard}"
+        route53_zone_id: "${output.network/services.zone_ids.data}"
+
+        throttling_burst_limit: 2000
+        throttling_rate_limit: 5000
+
+        enable_logging: true
+        log_retention_days: 90
+        create_dashboard: true
+        enable_xray_tracing: true
+
+      tags:
+        Service: data-api
+        Tier: backend
+
+    # ==========================================================================
+    # Infrastructure - Main Application Stack (Production HA)
+    # ==========================================================================
+    infrastructure/main:
+      metadata:
+        component: infrastructure
+      vars:
+        # ECS Fargate cluster
+        ecs:
+          enabled: true
+          fargate_only: true
+          cluster_name: "production-main-apps"
+          vpc_id: "${output.vpc/main.vpc_id}"
+          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+          enable_container_insights: true
+          enable_execute_command: false  # Disabled in production
+
+        # RDS PostgreSQL - Multi-AZ Production
+        rds:
+          enabled: true
+          identifier: "production-main-db"
+          engine: "${rds_engine}"
+          engine_version: "${rds_engine_version}"
+          instance_class: "db.r5.xlarge"
+          allocated_storage: 100
+          max_allocated_storage: 500
+          db_name: "productionapp"
+
+          # High availability - CRITICAL
+          multi_az: true
+          availability_zone: null  # Let AWS choose
+
+          # Security
+          storage_encrypted: true
+          kms_key_id: "${output.kms/main.key_arn}"
+          iam_database_authentication_enabled: true
+          deletion_protection: true
+
+          # Backup - extended retention
+          backup_retention_period: 30
+          backup_window: "03:00-04:00"
+          maintenance_window: "Sun:04:00-Sun:05:00"
+          copy_tags_to_snapshot: true
+
+          # Performance
+          performance_insights_enabled: true
+          performance_insights_retention_period: 7
+          performance_insights_kms_key_id: "${output.kms/main.key_arn}"
+
+          # Monitoring
+          monitoring_interval: 60
+          monitoring_role_arn: "${output.iam/rds-monitoring.role_arn}"
+          enabled_cloudwatch_logs_exports:
+            - "postgresql"
+            - "upgrade"
+
+          # Network
+          vpc_id: "${output.vpc/main.vpc_id}"
+          subnet_ids: "${output.vpc/main.database_subnet_ids}"
+
+          # Parameter group for production tuning
+          parameter_group_family: "postgres14"
+          parameters:
+            - name: "log_statement"
+              value: "all"
+            - name: "log_min_duration_statement"
+              value: "1000"  # Log queries > 1s
+            - name: "shared_preload_libraries"
+              value: "pg_stat_statements"
+
+        # ElastiCache Redis for caching
+        elasticache:
+          enabled: true
+          cluster_id: "production-cache"
+          engine: "redis"
+          engine_version: "7.0"
+          node_type: "cache.r5.large"
+          num_cache_nodes: 3
+          automatic_failover_enabled: true
+          multi_az_enabled: true
+          at_rest_encryption_enabled: true
+          transit_encryption_enabled: true
+          auth_token: "${ssm:/production/elasticache/auth_token}"
+          vpc_id: "${output.vpc/main.vpc_id}"
+          subnet_ids: "${output.vpc/main.elasticache_subnet_ids}"
+
+      tags:
+        Stack: main
+        Tier: application
+        CriticalityLevel: "high"
+
+    # ==========================================================================
+    # Infrastructure - Data Processing Stack (Production HA)
+    # ==========================================================================
+    infrastructure/data:
+      metadata:
+        component: infrastructure
+      vars:
+        # ECS disabled for data stack
+        ecs:
+          enabled: false
+
+        # Data RDS - Large Instance for Analytics
+        rds:
+          enabled: true
+          identifier: "production-data-db"
+          engine: "${rds_engine}"
+          engine_version: "${rds_engine_version}"
+          instance_class: "db.r5.2xlarge"
+          allocated_storage: 200
+          max_allocated_storage: 1000
+          db_name: "productiondata"
+
+          multi_az: true
+          storage_encrypted: true
+          kms_key_id: "${output.kms/main.key_arn}"
+          deletion_protection: true
+
+          backup_retention_period: 30
+          performance_insights_enabled: true
+
+          vpc_id: "${output.vpc/services.vpc_id}"
+          subnet_ids: "${output.vpc/services.database_subnet_ids}"
+
+          # Read replica for analytics
+          create_read_replica: true
+          replica_instance_class: "db.r5.xlarge"
+
+        # Lambda for data processing
+        lambda:
+          enabled: true
+          functions:
+            data_processor:
+              function_name: "production-data-processor"
+              runtime: "python3.11"
+              handler: "main.handler"
+              memory_size: 1024
+              timeout: 600
+              reserved_concurrent_executions: 100
+              vpc_id: "${output.vpc/services.vpc_id}"
+              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+              environment:
+                LOG_LEVEL: "INFO"
+                ENVIRONMENT: "production"
+            data_transformer:
+              function_name: "production-data-transformer"
+              runtime: "python3.11"
+              handler: "transform.handler"
+              memory_size: 2048
+              timeout: 900
+              reserved_concurrent_executions: 50
+              vpc_id: "${output.vpc/services.vpc_id}"
+              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+            report_generator:
+              function_name: "production-report-generator"
+              runtime: "python3.11"
+              handler: "reports.handler"
+              memory_size: 3008
+              timeout: 900
+              vpc_id: "${output.vpc/services.vpc_id}"
+              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+
+      tags:
+        Stack: data
+        Tier: data-processing
+
+    # ==========================================================================
+    # Monitoring - Main Dashboard (Production)
+    # ==========================================================================
+    monitoring/main:
+      metadata:
+        component: monitoring
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "production-main-dashboard"
+
+        # All monitoring features enabled
+        enable_certificate_monitoring: true
+        enable_container_insights: true
+        enable_resource_monitoring: true
+        enable_vpc_flow_logs: true
+        enable_cost_monitoring: true
+
+        # Certificate monitoring
+        certificate_arns: "${output.acm/main.certificate_arns | {}}"
+        certificate_expiry_threshold: 30
+        certificate_critical_threshold: 7
+
+        # SNS Topics for production alerts
+        sns_topic_name: "production-main-alarms"
+        alarm_notifications_enabled: true
+        alarm_email_addresses:
+          - "prod-critical@example.com"
+          - "oncall@example.com"
+
+        # PagerDuty integration
+        pagerduty_endpoint: "${ssm:/production/pagerduty/endpoint}"
+
+        # Comprehensive CloudWatch Alarms
+        alarms:
+          # CPU Alarms
+          high_cpu_warning:
+            metric_name: "CPUUtilization"
+            namespace: "AWS/EC2"
+            statistic: "Average"
+            period: 300
+            threshold: 70
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+            alarm_actions: ["${sns_topic_arn}"]
+          high_cpu_critical:
+            metric_name: "CPUUtilization"
+            namespace: "AWS/EC2"
+            statistic: "Average"
+            period: 300
+            threshold: 90
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+            alarm_actions: ["${pagerduty_topic_arn}"]
+
+          # Memory Alarms
+          high_memory_warning:
+            metric_name: "MemoryUtilization"
+            namespace: "CWAgent"
+            statistic: "Average"
+            period: 300
+            threshold: 80
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+          high_memory_critical:
+            metric_name: "MemoryUtilization"
+            namespace: "CWAgent"
+            statistic: "Average"
+            period: 300
+            threshold: 95
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 1
+            alarm_actions: ["${pagerduty_topic_arn}"]
+
+          # RDS Alarms
+          rds_cpu_high:
+            metric_name: "CPUUtilization"
+            namespace: "AWS/RDS"
+            statistic: "Average"
+            period: 300
+            threshold: 80
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+          rds_connections_high:
+            metric_name: "DatabaseConnections"
+            namespace: "AWS/RDS"
+            statistic: "Average"
+            period: 300
+            threshold: 400
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+          rds_free_storage_low:
+            metric_name: "FreeStorageSpace"
+            namespace: "AWS/RDS"
+            statistic: "Average"
+            period: 300
+            threshold: 10737418240  # 10GB
+            comparison_operator: "LessThanThreshold"
+            evaluation_periods: 2
+            alarm_actions: ["${pagerduty_topic_arn}"]
+
+          # EKS Alarms
+          eks_node_not_ready:
+            metric_name: "cluster_failed_node_count"
+            namespace: "ContainerInsights"
+            statistic: "Average"
+            period: 60
+            threshold: 0
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 5
+            alarm_actions: ["${pagerduty_topic_arn}"]
+
+          # API Gateway Alarms
+          api_5xx_errors:
+            metric_name: "5XXError"
+            namespace: "AWS/ApiGateway"
+            statistic: "Sum"
+            period: 60
+            threshold: 10
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 3
+            alarm_actions: ["${pagerduty_topic_arn}"]
+          api_latency_high:
+            metric_name: "Latency"
+            namespace: "AWS/ApiGateway"
+            statistic: "p99"
+            period: 300
+            threshold: 5000
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+
+    # ==========================================================================
+    # Monitoring - Data Stack Dashboard (Production)
+    # ==========================================================================
+    monitoring/data:
+      metadata:
+        component: monitoring
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "production-data-dashboard"
+
+        enable_resource_monitoring: true
+        enable_vpc_flow_logs: true
+        enable_certificate_monitoring: true
+
+        certificate_arns: "${output.acm/services.certificate_arns | {}}"
+        certificate_expiry_threshold: 30
+
+        sns_topic_name: "production-data-alarms"
+        alarm_notifications_enabled: true
+        alarm_email_addresses:
+          - "prod-critical@example.com"
+          - "data-team@example.com"
+
+        alarms:
+          # Data-specific alarms
+          rds_replica_lag:
+            metric_name: "ReplicaLag"
+            namespace: "AWS/RDS"
+            statistic: "Average"
+            period: 60
+            threshold: 30
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 5
+          lambda_errors:
+            metric_name: "Errors"
+            namespace: "AWS/Lambda"
+            statistic: "Sum"
+            period: 300
+            threshold: 5
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2
+          lambda_duration:
+            metric_name: "Duration"
+            namespace: "AWS/Lambda"
+            statistic: "p99"
+            period: 300
+            threshold: 500000  # 500 seconds
+            comparison_operator: "GreaterThanThreshold"
+            evaluation_periods: 2

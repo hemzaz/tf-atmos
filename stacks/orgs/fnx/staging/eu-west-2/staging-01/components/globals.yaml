@@ -1,0 +1,97 @@
+---
+# =============================================================================
+# Global Component Configurations for Staging-01 Environment
+# =============================================================================
+# This file defines environment-wide settings that apply to all components
+# =============================================================================
+
+import:
+  - orgs/fnx/staging/eu-west-2/_defaults
+  - mixins/development
+
+  # Import catalog defaults for all components
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+  - catalog/infrastructure/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/external-secrets/defaults
+  - catalog/ec2/defaults
+  - catalog/eks/defaults
+  - catalog/iam/defaults
+  - catalog/acm/defaults
+  - catalog/services/defaults
+  - catalog/apigateway/defaults
+  - catalog/backend/defaults
+  - catalog/monitoring/defaults
+
+metadata:
+  description: "Staging environment for production validation"
+  owner: "Platform Team"
+  version: "1.0.0"
+  stage: "staging"
+  region: "eu-west-2"
+
+  # Compliance requirements - staging should match prod
+  compliance:
+    hipaa: false
+    pci: false
+    sox: false
+    gdpr: true
+
+  # Monitoring contacts
+  monitoring:
+    critical_alerts: ["staging-alerts@example.com"]
+    warning_alerts: ["team@example.com"]
+
+  # Change management
+  change_management:
+    approval_required: true
+    change_window: "business-hours"
+
+vars:
+  # Core environment identifiers
+  environment: staging-01
+  tenant_name: staging-01
+
+  # Domain configuration
+  domain_name: "staging.example.com"
+  hosted_zone_id: "Z0987654321STAGING"
+
+  # EKS Configuration - mirrors production
+  eks_kubernetes_version: "1.28"
+  eks_public_access: false
+
+  # Database configuration
+  rds_engine: "postgres"
+  rds_engine_version: "14"
+
+  # Secrets configuration
+  use_external_secrets: true
+  secrets_manager_path_prefix: "staging/fnx/certificates"
+
+  # Feature flags - staging enables features before prod
+  enable_container_insights: true
+  enable_vpc_flow_logs: true
+  enable_enhanced_monitoring: true
+
+  # Security settings
+  security:
+    vpc_flow_logs: true
+    encryption_at_rest: true
+    ssl_enforcement: true
+
+  # Staging-specific settings
+  enable_debug_logging: true
+  retention_days: 14
+
+# Environment tagging strategy
+tags:
+  Team: "Platform"
+  CostCenter: "Staging"
+  Project: "Infrastructure"
+  Environment: "staging-01"
+  ManagedBy: "Terraform"
+  Tenant: "fnx"
+  Application: "Staging"
+  Provisioner: "Atmos"
+  DataClassification: "internal"

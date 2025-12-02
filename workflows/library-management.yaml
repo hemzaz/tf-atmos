@@ -1,0 +1,374 @@
+---
+# Library Management Workflows
+# Atmos workflows for managing the component library and module catalog
+# Version: 1.0.0
+
+name: library-management
+description: "Workflows for managing the Terraform module library"
+
+workflows:
+  # =============================================================================
+  # MODULE DISCOVERY
+  # =============================================================================
+
+  list-modules:
+    description: "List all available modules in the library"
+    steps:
+      - command: |
+          echo "=== Module Library ===" && \
+          echo "" && \
+          yq eval '.modules | keys | .[]' stacks/catalog/_library/module-registry.yaml | \
+          while read module; do
+            name=$(yq eval ".modules.${module}.display_name" stacks/catalog/_library/module-registry.yaml)
+            category=$(yq eval ".modules.${module}.category" stacks/catalog/_library/module-registry.yaml)
+            maturity=$(yq eval ".modules.${module}.maturity" stacks/catalog/_library/module-registry.yaml)
+            printf "%-25s %-30s %-15s %s\n" "$module" "$name" "[$maturity]" "$category"
+          done
+
+  list-categories:
+    description: "List all module categories"
+    steps:
+      - command: |
+          echo "=== Module Categories ===" && \
+          echo "" && \
+          yq eval '.library.categories[] | .name + " - " + .description' stacks/catalog/_library/catalog.yaml
+
+  list-by-category:
+    description: "List modules in a specific category"
+    inputs:
+      - name: category
+        description: "Category path (e.g., foundations/networking)"
+        required: true
+    steps:
+      - command: |
+          echo "=== Modules in ${category} ===" && \
+          echo "" && \
+          yq eval '.modules | to_entries | .[] | select(.value.category == "${category}") | .key + " - " + .value.display_name' \
+            stacks/catalog/_library/module-registry.yaml
+
+  search-modules:
+    description: "Search modules by name or description"
+    inputs:
+      - name: query
+        description: "Search query"
+        required: true
+    steps:
+      - command: |
+          echo "=== Search Results for '${query}' ===" && \
+          echo "" && \
+          yq eval '.modules | to_entries | .[] | select(.value.name | test("${query}"; "i")) or select(.value.description | test("${query}"; "i")) | .key + ": " + .value.short_description' \
+            stacks/catalog/_library/module-registry.yaml
+
+  module-info:
+    description: "Show detailed information about a module"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Module: ${module} ===" && \
+          echo "" && \
+          yq eval '.modules.${module}' stacks/catalog/_library/module-registry.yaml
+
+  module-inputs:
+    description: "Show module input variables"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Inputs for ${module} ===" && \
+          echo "" && \
+          yq eval '.modules.${module}.inputs[] | "- " + .name + " (" + .type + "): " + .description' \
+            stacks/catalog/_library/module-registry.yaml
+
+  module-outputs:
+    description: "Show module outputs"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Outputs for ${module} ===" && \
+          echo "" && \
+          yq eval '.modules.${module}.outputs[] | "- " + .name + ": " + .description' \
+            stacks/catalog/_library/module-registry.yaml
+
+  module-dependencies:
+    description: "Show module dependencies"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Dependencies for ${module} ===" && \
+          echo "" && \
+          echo "Depends on:" && \
+          yq eval '.modules.${module}.dependencies // ["None"]' stacks/catalog/_library/module-registry.yaml && \
+          echo "" && \
+          echo "Dependents:" && \
+          yq eval '.modules.${module}.dependents // ["None"]' stacks/catalog/_library/module-registry.yaml
+
+  module-cost:
+    description: "Show estimated costs for a module"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Cost Estimate for ${module} ===" && \
+          echo "" && \
+          yq eval '.modules.${module}.cost_estimate' stacks/catalog/_library/module-registry.yaml
+
+  # =============================================================================
+  # BLUEPRINT MANAGEMENT
+  # =============================================================================
+
+  list-blueprints:
+    description: "List all available blueprint templates"
+    steps:
+      - command: |
+          echo "=== Blueprint Templates ===" && \
+          echo "" && \
+          for file in stacks/catalog/_library/templates/*.yaml; do
+            name=$(yq eval '.name' "$file")
+            desc=$(yq eval '.description' "$file")
+            maturity=$(yq eval '.maturity' "$file")
+            echo "[$maturity] $name"
+            echo "  $desc"
+            echo ""
+          done
+
+  blueprint-info:
+    description: "Show detailed blueprint information"
+    inputs:
+      - name: blueprint
+        description: "Blueprint name (e.g., web-app-stack)"
+        required: true
+    steps:
+      - command: |
+          echo "=== Blueprint: ${blueprint} ===" && \
+          echo "" && \
+          yq eval '.' stacks/catalog/_library/templates/${blueprint}.yaml
+
+  blueprint-components:
+    description: "List components in a blueprint"
+    inputs:
+      - name: blueprint
+        description: "Blueprint name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Components in ${blueprint} ===" && \
+          echo "" && \
+          yq eval '.components.terraform | keys | .[]' stacks/catalog/_library/templates/${blueprint}.yaml
+
+  blueprint-cost:
+    description: "Show estimated costs for a blueprint"
+    inputs:
+      - name: blueprint
+        description: "Blueprint name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Cost Estimate for ${blueprint} ===" && \
+          echo "" && \
+          yq eval '.template.estimated_cost' stacks/catalog/_library/templates/${blueprint}.yaml
+
+  # =============================================================================
+  # MODULE VALIDATION
+  # =============================================================================
+
+  validate-module:
+    description: "Validate a module's Terraform configuration"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Validating ${module} ===" && \
+          cd components/terraform/${module} && \
+          terraform init -backend=false && \
+          terraform validate
+      - command: |
+          echo "" && \
+          echo "=== Format Check ===" && \
+          terraform fmt -check -recursive components/terraform/${module}/
+
+  validate-all-modules:
+    description: "Validate all modules in the library"
+    steps:
+      - command: |
+          echo "=== Validating All Modules ===" && \
+          echo "" && \
+          failed=0 && \
+          for dir in components/terraform/*/; do
+            module=$(basename "$dir")
+            echo "Validating: $module" && \
+            cd "$dir" && \
+            terraform init -backend=false > /dev/null 2>&1 && \
+            if terraform validate > /dev/null 2>&1; then
+              echo "  [OK] $module"
+            else
+              echo "  [FAILED] $module"
+              failed=$((failed + 1))
+            fi
+            cd - > /dev/null
+          done && \
+          echo "" && \
+          echo "Validation complete. Failed: $failed"
+
+  lint-module:
+    description: "Run linting on a module"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Linting ${module} ===" && \
+          echo "" && \
+          echo "Running terraform fmt..." && \
+          terraform fmt -check -recursive -diff components/terraform/${module}/
+      - command: |
+          echo "" && \
+          echo "Running tflint..." && \
+          cd components/terraform/${module} && \
+          tflint --init > /dev/null 2>&1 && \
+          tflint
+
+  security-scan-module:
+    description: "Run security scan on a module"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Security Scan for ${module} ===" && \
+          echo "" && \
+          checkov -d components/terraform/${module}/ --quiet
+
+  # =============================================================================
+  # CATALOG MANAGEMENT
+  # =============================================================================
+
+  update-registry:
+    description: "Update module registry from component directories"
+    steps:
+      - command: |
+          echo "=== Updating Module Registry ===" && \
+          echo "" && \
+          echo "Scanning components..." && \
+          scripts/library/update-registry.sh
+
+  generate-docs:
+    description: "Generate documentation for all modules"
+    steps:
+      - command: |
+          echo "=== Generating Module Documentation ===" && \
+          echo "" && \
+          for dir in components/terraform/*/; do
+            module=$(basename "$dir")
+            echo "Generating docs for: $module"
+            terraform-docs markdown table "$dir" > "$dir/README.md"
+          done && \
+          echo "Documentation generated."
+
+  catalog-stats:
+    description: "Show catalog statistics"
+    steps:
+      - command: |
+          echo "=== Catalog Statistics ===" && \
+          echo "" && \
+          yq eval '.statistics' stacks/catalog/_library/module-registry.yaml
+
+  # =============================================================================
+  # MODULE COMPOSITION
+  # =============================================================================
+
+  recommend-modules:
+    description: "Recommend modules based on use case"
+    inputs:
+      - name: use_case
+        description: "Use case (web-app, api, data-pipeline, microservices)"
+        required: true
+    steps:
+      - command: |
+          echo "=== Recommended Modules for ${use_case} ===" && \
+          echo "" && \
+          scripts/library/recommend-modules.sh "${use_case}"
+
+  generate-stack:
+    description: "Generate a stack configuration from a blueprint"
+    inputs:
+      - name: blueprint
+        description: "Blueprint name"
+        required: true
+      - name: tenant
+        description: "Tenant name"
+        required: true
+      - name: environment
+        description: "Environment name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Generating Stack from ${blueprint} ===" && \
+          echo "" && \
+          scripts/library/generate-stack.sh "${blueprint}" "${tenant}" "${environment}"
+
+  # =============================================================================
+  # DEPENDENCY MANAGEMENT
+  # =============================================================================
+
+  show-dependency-graph:
+    description: "Show module dependency graph"
+    steps:
+      - command: |
+          echo "=== Module Dependency Graph ===" && \
+          echo "" && \
+          scripts/library/dependency-graph.sh
+
+  check-circular-deps:
+    description: "Check for circular dependencies"
+    steps:
+      - command: |
+          echo "=== Checking for Circular Dependencies ===" && \
+          echo "" && \
+          scripts/library/check-circular-deps.sh
+
+  # =============================================================================
+  # VERSION MANAGEMENT
+  # =============================================================================
+
+  list-versions:
+    description: "List module versions"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Versions for ${module} ===" && \
+          echo "" && \
+          yq eval '.modules.${module}.version' stacks/catalog/_library/module-registry.yaml && \
+          echo "" && \
+          echo "Last updated: $(yq eval '.modules.${module}.last_updated' stacks/catalog/_library/module-registry.yaml)"
+
+  compare-versions:
+    description: "Compare module versions across environments"
+    inputs:
+      - name: module
+        description: "Module name"
+        required: true
+    steps:
+      - command: |
+          echo "=== Version Comparison for ${module} ===" && \
+          echo "" && \
+          scripts/library/compare-versions.sh "${module}"

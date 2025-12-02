@@ -1,0 +1,1713 @@
+---
+# Enterprise API Gateway Pattern
+# Production-ready API Gateway with Lambda integration, WAF, and observability
+# Version: 1.0.0
+
+name: api-gateway-pattern
+description: "Enterprise API Gateway pattern with REST/HTTP/WebSocket APIs, Lambda integration, WAF protection, and comprehensive monitoring"
+version: "1.0.0"
+maturity: "production"
+
+# =============================================================================
+# PATTERN METADATA
+# =============================================================================
+pattern:
+  category: "patterns/api-management"
+  tier: "enterprise"
+
+  use_cases:
+    - "Public REST APIs"
+    - "Internal microservices APIs"
+    - "GraphQL API endpoints"
+    - "WebSocket real-time applications"
+    - "API monetization"
+    - "Partner integrations"
+    - "Mobile backend APIs"
+    - "B2B API platforms"
+
+  architecture:
+    overview: |
+      This pattern implements a complete enterprise API Gateway solution using
+      AWS API Gateway with multiple protocol support (REST, HTTP, WebSocket).
+      It includes WAF protection, custom domains with ACM certificates, usage
+      plans for API key management, VPC Links for private integrations, and
+      comprehensive observability with X-Ray tracing.
+
+    components:
+      - name: "API Layer"
+        components: ["api-gateway-rest", "api-gateway-http", "api-gateway-websocket"]
+        description: "Multi-protocol API endpoints"
+      - name: "Security Layer"
+        components: ["waf", "cognito", "api-keys"]
+        description: "Authentication, authorization, and protection"
+      - name: "Integration Layer"
+        components: ["lambda-handlers", "vpc-link", "service-integrations"]
+        description: "Backend integrations"
+      - name: "Domain Layer"
+        components: ["custom-domain", "acm-certificate", "route53"]
+        description: "Custom domain management"
+      - name: "Management Layer"
+        components: ["usage-plans", "api-keys", "throttling"]
+        description: "API consumption management"
+      - name: "Observability"
+        components: ["cloudwatch-logs", "xray-tracing", "dashboards", "alarms"]
+        description: "Monitoring and tracing"
+
+    data_flow:
+      - step: 1
+        name: "Request Ingress"
+        description: "Client request hits API Gateway custom domain"
+      - step: 2
+        name: "WAF Inspection"
+        description: "WAF rules inspect and filter requests"
+      - step: 3
+        name: "Authentication"
+        description: "Cognito/Lambda authorizer validates identity"
+      - step: 4
+        name: "Rate Limiting"
+        description: "Usage plan enforces quotas and throttling"
+      - step: 5
+        name: "Request Processing"
+        description: "Lambda/VPC Link processes the request"
+      - step: 6
+        name: "Response"
+        description: "Transformed response returned to client"
+
+  estimated_cost:
+    minimum: "$15/month"
+    typical: "$100/month"
+    maximum: "$2000+/month"
+    breakdown:
+      rest_api: "$3.50/million requests"
+      http_api: "$1.00/million requests"
+      websocket: "$1.00/million messages + $0.25/million connection minutes"
+      waf: "$5/month + $1/million requests"
+      lambda: "$0.20/million requests + compute"
+      custom_domain: "$0/month (only certificate cost)"
+      cloudwatch: "$3/dashboard + logs"
+    optimization_tips:
+      - "Use HTTP APIs instead of REST APIs when possible (70% cheaper)"
+      - "Implement caching for frequently accessed data"
+      - "Use request validation to reject invalid requests early"
+      - "Enable compression to reduce data transfer costs"
+
+  deployment_time: "15-25 minutes"
+
+  complexity: "intermediate"
+
+  prerequisites:
+    - "VPC with private subnets (for VPC Link integrations)"
+    - "Route53 hosted zone (for custom domain)"
+    - "ACM certificate in us-east-1 (for edge-optimized) or regional"
+
+# =============================================================================
+# STACK CONFIGURATION
+# =============================================================================
+import:
+  - catalog/_base/defaults
+  - catalog/iam/defaults
+  - catalog/monitoring/defaults
+
+vars:
+  # Common pattern variables
+  pattern_name: "api-gateway"
+  api_version: "v1"
+  enable_waf: true
+  enable_xray: true
+  enable_caching: false
+  cache_size: "0.5"
+  cache_ttl: 300
+  log_retention_days: 30
+
+components:
+  terraform:
+    # =========================================================================
+    # REST API GATEWAY
+    # =========================================================================
+    api-gateway-rest:
+      component: "apigateway"
+      vars:
+        enabled: true
+
+        # API Configuration
+        api_name: "${tenant}-${environment}-rest-api"
+        description: "REST API for ${tenant} ${environment}"
+        api_type: "REST"
+
+        # Endpoint Configuration
+        endpoint_type: ["REGIONAL"]  # REGIONAL, EDGE, or PRIVATE
+        # For PRIVATE endpoints:
+        # vpc_endpoint_ids:
+        #   - "${output.vpc-endpoints.execute_api_endpoint_id}"
+
+        # Binary Media Types
+        binary_media_types:
+          - "application/octet-stream"
+          - "image/*"
+          - "multipart/form-data"
+
+        # Minimum Compression Size (in bytes)
+        minimum_compression_size: 10240
+
+        # API Key Source
+        api_key_source: "HEADER"
+
+        # Disable Execute API Endpoint (when using custom domain)
+        disable_execute_api_endpoint: false
+
+        # OpenAPI Specification (optional)
+        # body: "${file("openapi/api-spec.yaml")}"
+
+        # Resources and Methods
+        resources:
+          # Health Check
+          health:
+            path: "health"
+            methods:
+              GET:
+                authorization: "NONE"
+                api_key_required: false
+                integration_type: "MOCK"
+                request_templates:
+                  "application/json": '{"statusCode": 200}'
+                integration_responses:
+                  - status_code: "200"
+                    response_templates:
+                      "application/json": '{"status": "healthy", "timestamp": "$context.requestTime"}'
+
+          # Version endpoint
+          version:
+            path: "version"
+            methods:
+              GET:
+                authorization: "NONE"
+                api_key_required: false
+                integration_type: "MOCK"
+                request_templates:
+                  "application/json": '{"statusCode": 200}'
+                integration_responses:
+                  - status_code: "200"
+                    response_templates:
+                      "application/json": '{"version": "${api_version}", "environment": "${environment}"}'
+
+          # API v1 resources
+          api-v1:
+            path: "${api_version}"
+            children:
+              # Users resource
+              users:
+                path: "users"
+                methods:
+                  GET:
+                    authorization: "COGNITO_USER_POOLS"
+                    authorizer_id: "${output.cognito-authorizer.authorizer_id}"
+                    api_key_required: true
+                    integration_type: "AWS_PROXY"
+                    integration_uri: "${output.lambda-handlers.list_users_invoke_arn}"
+                    request_parameters:
+                      "method.request.querystring.limit": false
+                      "method.request.querystring.offset": false
+                    request_validator_id: "${output.api-gateway-rest.request_validator_id}"
+
+                  POST:
+                    authorization: "COGNITO_USER_POOLS"
+                    authorizer_id: "${output.cognito-authorizer.authorizer_id}"
+                    api_key_required: true
+                    integration_type: "AWS_PROXY"
+                    integration_uri: "${output.lambda-handlers.create_user_invoke_arn}"
+                    request_models:
+                      "application/json": "CreateUserModel"
+
+                children:
+                  user-id:
+                    path: "{userId}"
+                    methods:
+                      GET:
+                        authorization: "COGNITO_USER_POOLS"
+                        authorizer_id: "${output.cognito-authorizer.authorizer_id}"
+                        api_key_required: true
+                        integration_type: "AWS_PROXY"
+                        integration_uri: "${output.lambda-handlers.get_user_invoke_arn}"
+                        request_parameters:
+                          "method.request.path.userId": true
+
+                      PUT:
+                        authorization: "COGNITO_USER_POOLS"
+                        authorizer_id: "${output.cognito-authorizer.authorizer_id}"
+                        api_key_required: true
+                        integration_type: "AWS_PROXY"
+                        integration_uri: "${output.lambda-handlers.update_user_invoke_arn}"
+                        request_parameters:
+                          "method.request.path.userId": true
+
+                      DELETE:
+                        authorization: "COGNITO_USER_POOLS"
+                        authorizer_id: "${output.cognito-authorizer.authorizer_id}"
+                        api_key_required: true
+                        integration_type: "AWS_PROXY"
+                        integration_uri: "${output.lambda-handlers.delete_user_invoke_arn}"
+                        request_parameters:
+                          "method.request.path.userId": true
+
+              # Private VPC-integrated resource
+              internal:
+                path: "internal"
+                methods:
+                  GET:
+                    authorization: "AWS_IAM"
+                    api_key_required: false
+                    integration_type: "HTTP_PROXY"
+                    integration_uri: "http://${output.vpc-link.nlb_dns_name}/internal"
+                    connection_type: "VPC_LINK"
+                    connection_id: "${output.vpc-link.vpc_link_id}"
+
+        # Request Validators
+        request_validators:
+          - name: "validate-all"
+            validate_request_body: true
+            validate_request_parameters: true
+          - name: "validate-params-only"
+            validate_request_body: false
+            validate_request_parameters: true
+
+        # Models
+        models:
+          CreateUserModel:
+            name: "CreateUserModel"
+            content_type: "application/json"
+            schema:
+              type: "object"
+              required:
+                - "email"
+                - "name"
+              properties:
+                email:
+                  type: "string"
+                  format: "email"
+                name:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 100
+
+        # Gateway Responses
+        gateway_responses:
+          DEFAULT_4XX:
+            response_type: "DEFAULT_4XX"
+            response_templates:
+              "application/json": |
+                {
+                  "error": true,
+                  "message": "$context.error.messageString",
+                  "requestId": "$context.requestId"
+                }
+            response_parameters:
+              "gatewayresponse.header.Access-Control-Allow-Origin": "'*'"
+
+          DEFAULT_5XX:
+            response_type: "DEFAULT_5XX"
+            response_templates:
+              "application/json": |
+                {
+                  "error": true,
+                  "message": "Internal server error",
+                  "requestId": "$context.requestId"
+                }
+            response_parameters:
+              "gatewayresponse.header.Access-Control-Allow-Origin": "'*'"
+
+          UNAUTHORIZED:
+            response_type: "UNAUTHORIZED"
+            status_code: "401"
+            response_templates:
+              "application/json": |
+                {
+                  "error": true,
+                  "message": "Unauthorized",
+                  "requestId": "$context.requestId"
+                }
+
+          ACCESS_DENIED:
+            response_type: "ACCESS_DENIED"
+            status_code: "403"
+            response_templates:
+              "application/json": |
+                {
+                  "error": true,
+                  "message": "Access denied",
+                  "requestId": "$context.requestId"
+                }
+
+          THROTTLED:
+            response_type: "THROTTLED"
+            status_code: "429"
+            response_templates:
+              "application/json": |
+                {
+                  "error": true,
+                  "message": "Rate limit exceeded",
+                  "requestId": "$context.requestId",
+                  "retryAfter": 60
+                }
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "api"
+        Protocol: "REST"
+
+    # =========================================================================
+    # HTTP API GATEWAY (Lower cost alternative)
+    # =========================================================================
+    api-gateway-http:
+      component: "apigateway-http"
+      vars:
+        enabled: true
+
+        # API Configuration
+        api_name: "${tenant}-${environment}-http-api"
+        description: "HTTP API for ${tenant} ${environment}"
+        protocol_type: "HTTP"
+
+        # CORS Configuration
+        cors_configuration:
+          allow_origins:
+            - "https://${domain}"
+            - "https://*.${domain}"
+          allow_methods:
+            - "GET"
+            - "POST"
+            - "PUT"
+            - "DELETE"
+            - "OPTIONS"
+          allow_headers:
+            - "Content-Type"
+            - "Authorization"
+            - "X-Amz-Date"
+            - "X-Api-Key"
+            - "X-Amz-Security-Token"
+          expose_headers:
+            - "X-Request-Id"
+          max_age: 86400
+          allow_credentials: true
+
+        # Routes
+        routes:
+          # Health check
+          health:
+            route_key: "GET /health"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-handlers.health_invoke_arn}"
+            authorization_type: "NONE"
+
+          # API routes with JWT authorization
+          list-items:
+            route_key: "GET /items"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-handlers.list_items_invoke_arn}"
+            authorization_type: "JWT"
+            authorizer_id: "${output.jwt-authorizer.authorizer_id}"
+
+          create-item:
+            route_key: "POST /items"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-handlers.create_item_invoke_arn}"
+            authorization_type: "JWT"
+            authorizer_id: "${output.jwt-authorizer.authorizer_id}"
+
+          get-item:
+            route_key: "GET /items/{itemId}"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-handlers.get_item_invoke_arn}"
+            authorization_type: "JWT"
+            authorizer_id: "${output.jwt-authorizer.authorizer_id}"
+
+        # JWT Authorizer
+        authorizers:
+          jwt:
+            name: "${tenant}-${environment}-jwt-authorizer"
+            authorizer_type: "JWT"
+            identity_sources:
+              - "$request.header.Authorization"
+            jwt_configuration:
+              issuer: "https://cognito-idp.${region}.amazonaws.com/${output.cognito.user_pool_id}"
+              audience:
+                - "${output.cognito.client_id}"
+
+        # Stage Configuration
+        stages:
+          default:
+            name: "$default"
+            auto_deploy: true
+            access_log_settings:
+              destination_arn: "${output.cloudwatch-logs.http_api_log_group_arn}"
+              format: '{ "requestId":"$context.requestId", "ip":"$context.identity.sourceIp", "requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod", "routeKey":"$context.routeKey", "status":"$context.status", "protocol":"$context.protocol", "responseLength":"$context.responseLength", "integrationLatency":"$context.integrationLatency" }'
+            default_route_settings:
+              throttling_burst_limit: 1000
+              throttling_rate_limit: 500
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "api"
+        Protocol: "HTTP"
+
+    # =========================================================================
+    # WEBSOCKET API GATEWAY
+    # =========================================================================
+    api-gateway-websocket:
+      component: "apigateway-websocket"
+      vars:
+        enabled: true
+
+        # API Configuration
+        api_name: "${tenant}-${environment}-websocket-api"
+        description: "WebSocket API for ${tenant} ${environment}"
+        protocol_type: "WEBSOCKET"
+
+        # Route Selection Expression
+        route_selection_expression: "$request.body.action"
+
+        # Routes
+        routes:
+          connect:
+            route_key: "$connect"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-websocket.connect_invoke_arn}"
+            authorization_type: "NONE"
+
+          disconnect:
+            route_key: "$disconnect"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-websocket.disconnect_invoke_arn}"
+            authorization_type: "NONE"
+
+          default:
+            route_key: "$default"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-websocket.default_invoke_arn}"
+            authorization_type: "NONE"
+
+          # Custom actions
+          sendmessage:
+            route_key: "sendmessage"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-websocket.sendmessage_invoke_arn}"
+            authorization_type: "NONE"
+
+          subscribe:
+            route_key: "subscribe"
+            integration_type: "AWS_PROXY"
+            integration_uri: "${output.lambda-websocket.subscribe_invoke_arn}"
+            authorization_type: "NONE"
+
+        # Stage
+        stages:
+          production:
+            name: "production"
+            auto_deploy: true
+            default_route_settings:
+              throttling_burst_limit: 500
+              throttling_rate_limit: 100
+              logging_level: "INFO"
+              data_trace_enabled: true
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "api"
+        Protocol: "WebSocket"
+
+    # =========================================================================
+    # CUSTOM DOMAIN
+    # =========================================================================
+    custom-domain:
+      component: "apigateway-domain"
+      depends_on:
+        - acm-certificate
+        - api-gateway-rest
+        - api-gateway-http
+      vars:
+        enabled: true
+
+        domains:
+          # REST API domain
+          rest-api:
+            domain_name: "api.${domain}"
+            certificate_arn: "${output.acm-certificate.certificate_arn}"
+            endpoint_configuration:
+              types:
+                - "REGIONAL"
+            security_policy: "TLS_1_2"
+            mutual_tls_authentication:
+              truststore_uri: ""  # Enable for mTLS
+            base_path_mappings:
+              - api_id: "${output.api-gateway-rest.api_id}"
+                stage: "${environment}"
+                base_path: "rest"
+
+          # HTTP API domain
+          http-api:
+            domain_name: "api.${domain}"
+            certificate_arn: "${output.acm-certificate.certificate_arn}"
+            endpoint_configuration:
+              types:
+                - "REGIONAL"
+            security_policy: "TLS_1_2"
+            base_path_mappings:
+              - api_id: "${output.api-gateway-http.api_id}"
+                stage: "$default"
+                base_path: "http"
+
+          # WebSocket domain
+          websocket:
+            domain_name: "ws.${domain}"
+            certificate_arn: "${output.acm-certificate.certificate_arn}"
+            endpoint_configuration:
+              types:
+                - "REGIONAL"
+            security_policy: "TLS_1_2"
+            base_path_mappings:
+              - api_id: "${output.api-gateway-websocket.api_id}"
+                stage: "production"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "domain"
+
+    acm-certificate:
+      component: "acm"
+      vars:
+        enabled: true
+
+        certificates:
+          api:
+            domain_name: "api.${domain}"
+            subject_alternative_names:
+              - "*.api.${domain}"
+              - "ws.${domain}"
+            validation_method: "DNS"
+            zone_id: "${output.dns.zone_id}"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "security"
+
+    dns:
+      component: "dns"
+      depends_on:
+        - custom-domain
+      vars:
+        enabled: true
+        zone_name: "${domain}"
+
+        records:
+          api:
+            name: "api"
+            type: "A"
+            alias:
+              name: "${output.custom-domain.rest_api_domain_name}"
+              zone_id: "${output.custom-domain.rest_api_hosted_zone_id}"
+              evaluate_target_health: true
+
+          websocket:
+            name: "ws"
+            type: "A"
+            alias:
+              name: "${output.custom-domain.websocket_domain_name}"
+              zone_id: "${output.custom-domain.websocket_hosted_zone_id}"
+              evaluate_target_health: true
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "dns"
+
+    # =========================================================================
+    # USAGE PLANS AND API KEYS
+    # =========================================================================
+    usage-plans:
+      component: "apigateway-usage-plans"
+      depends_on:
+        - api-gateway-rest
+      vars:
+        enabled: true
+
+        usage_plans:
+          # Free tier
+          free:
+            name: "${tenant}-${environment}-free"
+            description: "Free tier with limited access"
+            quota_settings:
+              limit: 1000
+              period: "MONTH"
+            throttle_settings:
+              burst_limit: 10
+              rate_limit: 5
+            api_stages:
+              - api_id: "${output.api-gateway-rest.api_id}"
+                stage: "${environment}"
+
+          # Basic tier
+          basic:
+            name: "${tenant}-${environment}-basic"
+            description: "Basic tier for standard users"
+            quota_settings:
+              limit: 50000
+              period: "MONTH"
+            throttle_settings:
+              burst_limit: 100
+              rate_limit: 50
+            api_stages:
+              - api_id: "${output.api-gateway-rest.api_id}"
+                stage: "${environment}"
+
+          # Premium tier
+          premium:
+            name: "${tenant}-${environment}-premium"
+            description: "Premium tier for enterprise users"
+            quota_settings:
+              limit: 1000000
+              period: "MONTH"
+            throttle_settings:
+              burst_limit: 2000
+              rate_limit: 1000
+            api_stages:
+              - api_id: "${output.api-gateway-rest.api_id}"
+                stage: "${environment}"
+
+          # Internal tier (unlimited)
+          internal:
+            name: "${tenant}-${environment}-internal"
+            description: "Internal services - unlimited"
+            throttle_settings:
+              burst_limit: 5000
+              rate_limit: 2500
+            api_stages:
+              - api_id: "${output.api-gateway-rest.api_id}"
+                stage: "${environment}"
+
+        # API Keys
+        api_keys:
+          internal-service:
+            name: "${tenant}-${environment}-internal-key"
+            description: "API key for internal services"
+            enabled: true
+            usage_plan: "internal"
+
+          partner-integration:
+            name: "${tenant}-${environment}-partner-key"
+            description: "API key for partner integrations"
+            enabled: true
+            usage_plan: "premium"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "management"
+
+    # =========================================================================
+    # WAF PROTECTION
+    # =========================================================================
+    waf:
+      component: "waf"
+      depends_on:
+        - api-gateway-rest
+      vars:
+        enabled: "${enable_waf}"
+
+        web_acl_name: "${tenant}-${environment}-api-waf"
+        description: "WAF for API Gateway protection"
+        scope: "REGIONAL"
+
+        # Associate with API Gateway
+        resource_arns:
+          - "${output.api-gateway-rest.stage_arn}"
+
+        # Default action
+        default_action: "ALLOW"
+
+        # Rules
+        rules:
+          # AWS Managed Rules - Core Rule Set
+          aws-managed-common:
+            name: "AWS-AWSManagedRulesCommonRuleSet"
+            priority: 10
+            override_action: "NONE"
+            statement:
+              managed_rule_group_statement:
+                vendor_name: "AWS"
+                name: "AWSManagedRulesCommonRuleSet"
+                excluded_rules: []
+
+          # AWS Managed Rules - Known Bad Inputs
+          aws-managed-known-bad-inputs:
+            name: "AWS-AWSManagedRulesKnownBadInputsRuleSet"
+            priority: 20
+            override_action: "NONE"
+            statement:
+              managed_rule_group_statement:
+                vendor_name: "AWS"
+                name: "AWSManagedRulesKnownBadInputsRuleSet"
+
+          # AWS Managed Rules - SQL Injection
+          aws-managed-sqli:
+            name: "AWS-AWSManagedRulesSQLiRuleSet"
+            priority: 30
+            override_action: "NONE"
+            statement:
+              managed_rule_group_statement:
+                vendor_name: "AWS"
+                name: "AWSManagedRulesSQLiRuleSet"
+
+          # Rate limiting
+          rate-limit:
+            name: "RateLimit"
+            priority: 40
+            action: "BLOCK"
+            statement:
+              rate_based_statement:
+                limit: 2000
+                aggregate_key_type: "IP"
+
+          # Geo blocking (optional)
+          # geo-block:
+          #   name: "GeoBlock"
+          #   priority: 50
+          #   action: "BLOCK"
+          #   statement:
+          #     geo_match_statement:
+          #       country_codes:
+          #         - "CN"
+          #         - "RU"
+
+          # Block bad bots
+          bot-control:
+            name: "AWS-AWSManagedRulesBotControlRuleSet"
+            priority: 60
+            override_action: "NONE"
+            statement:
+              managed_rule_group_statement:
+                vendor_name: "AWS"
+                name: "AWSManagedRulesBotControlRuleSet"
+                managed_rule_group_configs:
+                  - aws_managed_rules_bot_control_rule_set:
+                      inspection_level: "COMMON"
+
+        # Logging
+        logging_configuration:
+          log_destination_configs:
+            - "${output.cloudwatch-logs.waf_log_group_arn}"
+          redacted_fields:
+            - single_header:
+                name: "authorization"
+
+        # CloudWatch metrics
+        visibility_config:
+          cloudwatch_metrics_enabled: true
+          metric_name: "${tenant}-${environment}-api-waf"
+          sampled_requests_enabled: true
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "security"
+
+    # =========================================================================
+    # COGNITO AUTHENTICATION
+    # =========================================================================
+    cognito:
+      component: "cognito"
+      vars:
+        enabled: true
+
+        user_pool_name: "${tenant}-${environment}-api-users"
+
+        # Password policy
+        password_policy:
+          minimum_length: 12
+          require_lowercase: true
+          require_uppercase: true
+          require_numbers: true
+          require_symbols: true
+          temporary_password_validity_days: 7
+
+        # MFA
+        mfa_configuration: "OPTIONAL"
+        software_token_mfa_enabled: true
+
+        # Account recovery
+        account_recovery_setting:
+          - name: "verified_email"
+            priority: 1
+
+        # Schema attributes
+        schema:
+          - name: "email"
+            attribute_data_type: "String"
+            required: true
+            mutable: true
+          - name: "tenant_id"
+            attribute_data_type: "String"
+            required: false
+            mutable: false
+          - name: "role"
+            attribute_data_type: "String"
+            required: false
+            mutable: true
+
+        # App clients
+        app_clients:
+          api-client:
+            name: "${tenant}-${environment}-api-client"
+            generate_secret: true
+            allowed_oauth_flows:
+              - "client_credentials"
+            allowed_oauth_flows_user_pool_client: true
+            allowed_oauth_scopes:
+              - "${tenant}-${environment}-api/read"
+              - "${tenant}-${environment}-api/write"
+            supported_identity_providers:
+              - "COGNITO"
+
+          web-client:
+            name: "${tenant}-${environment}-web-client"
+            generate_secret: false
+            allowed_oauth_flows:
+              - "code"
+              - "implicit"
+            allowed_oauth_flows_user_pool_client: true
+            allowed_oauth_scopes:
+              - "email"
+              - "openid"
+              - "profile"
+            callback_urls:
+              - "https://app.${domain}/callback"
+            logout_urls:
+              - "https://app.${domain}/logout"
+            supported_identity_providers:
+              - "COGNITO"
+
+        # Resource server
+        resource_servers:
+          api:
+            identifier: "${tenant}-${environment}-api"
+            name: "API Resource Server"
+            scopes:
+              - scope_name: "read"
+                scope_description: "Read access"
+              - scope_name: "write"
+                scope_description: "Write access"
+              - scope_name: "admin"
+                scope_description: "Admin access"
+
+        # Domain
+        domain: "${tenant}-${environment}-auth"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "security"
+
+    cognito-authorizer:
+      component: "apigateway-authorizer"
+      depends_on:
+        - api-gateway-rest
+        - cognito
+      vars:
+        enabled: true
+
+        authorizer_name: "${tenant}-${environment}-cognito-authorizer"
+        api_id: "${output.api-gateway-rest.api_id}"
+        authorizer_type: "COGNITO_USER_POOLS"
+        provider_arns:
+          - "${output.cognito.user_pool_arn}"
+        identity_source: "method.request.header.Authorization"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "security"
+
+    jwt-authorizer:
+      component: "apigateway-authorizer"
+      depends_on:
+        - api-gateway-http
+        - cognito
+      vars:
+        enabled: true
+
+        authorizer_name: "${tenant}-${environment}-jwt-authorizer"
+        api_id: "${output.api-gateway-http.api_id}"
+        authorizer_type: "JWT"
+        identity_sources:
+          - "$request.header.Authorization"
+        jwt_configuration:
+          issuer: "https://cognito-idp.${region}.amazonaws.com/${output.cognito.user_pool_id}"
+          audience:
+            - "${output.cognito.web_client_id}"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "security"
+
+    # =========================================================================
+    # LAMBDA HANDLERS
+    # =========================================================================
+    lambda-handlers:
+      component: "lambda"
+      depends_on:
+        - iam
+      vars:
+        enabled: true
+
+        functions:
+          # Health check handler
+          health:
+            function_name: "${tenant}-${environment}-api-health"
+            description: "API health check handler"
+            runtime: "python3.11"
+            handler: "handlers/health.handler"
+            memory_size: 128
+            timeout: 5
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+
+            tracing_config:
+              mode: "Active"
+
+          # User handlers
+          list-users:
+            function_name: "${tenant}-${environment}-api-list-users"
+            description: "List users handler"
+            runtime: "python3.11"
+            handler: "handlers/users.list_handler"
+            memory_size: 512
+            timeout: 30
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          get-user:
+            function_name: "${tenant}-${environment}-api-get-user"
+            description: "Get user handler"
+            runtime: "python3.11"
+            handler: "handlers/users.get_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          create-user:
+            function_name: "${tenant}-${environment}-api-create-user"
+            description: "Create user handler"
+            runtime: "python3.11"
+            handler: "handlers/users.create_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          update-user:
+            function_name: "${tenant}-${environment}-api-update-user"
+            description: "Update user handler"
+            runtime: "python3.11"
+            handler: "handlers/users.update_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          delete-user:
+            function_name: "${tenant}-${environment}-api-delete-user"
+            description: "Delete user handler"
+            runtime: "python3.11"
+            handler: "handlers/users.delete_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          # Item handlers (for HTTP API)
+          list-items:
+            function_name: "${tenant}-${environment}-api-list-items"
+            description: "List items handler"
+            runtime: "python3.11"
+            handler: "handlers/items.list_handler"
+            memory_size: 512
+            timeout: 30
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          create-item:
+            function_name: "${tenant}-${environment}-api-create-item"
+            description: "Create item handler"
+            runtime: "python3.11"
+            handler: "handlers/items.create_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          get-item:
+            function_name: "${tenant}-${environment}-api-get-item"
+            description: "Get item handler"
+            runtime: "python3.11"
+            handler: "handlers/items.get_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              TABLE_NAME: "${output.dynamodb.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+        # Lambda Layers
+        layers:
+          - arn: "arn:aws:lambda:${region}:017000801446:layer:AWSLambdaPowertoolsPythonV2-Arm64:51"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "compute"
+
+    # WebSocket handlers
+    lambda-websocket:
+      component: "lambda"
+      depends_on:
+        - iam
+        - dynamodb-connections
+      vars:
+        enabled: true
+
+        functions:
+          connect:
+            function_name: "${tenant}-${environment}-ws-connect"
+            description: "WebSocket connect handler"
+            runtime: "python3.11"
+            handler: "handlers/websocket.connect_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              CONNECTIONS_TABLE: "${output.dynamodb-connections.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          disconnect:
+            function_name: "${tenant}-${environment}-ws-disconnect"
+            description: "WebSocket disconnect handler"
+            runtime: "python3.11"
+            handler: "handlers/websocket.disconnect_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              CONNECTIONS_TABLE: "${output.dynamodb-connections.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+          default:
+            function_name: "${tenant}-${environment}-ws-default"
+            description: "WebSocket default handler"
+            runtime: "python3.11"
+            handler: "handlers/websocket.default_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              CONNECTIONS_TABLE: "${output.dynamodb-connections.table_name}"
+              WEBSOCKET_API_ENDPOINT: "${output.api-gateway-websocket.endpoint}"
+
+            tracing_config:
+              mode: "Active"
+
+          sendmessage:
+            function_name: "${tenant}-${environment}-ws-sendmessage"
+            description: "WebSocket send message handler"
+            runtime: "python3.11"
+            handler: "handlers/websocket.sendmessage_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              CONNECTIONS_TABLE: "${output.dynamodb-connections.table_name}"
+              WEBSOCKET_API_ENDPOINT: "${output.api-gateway-websocket.endpoint}"
+
+            tracing_config:
+              mode: "Active"
+
+          subscribe:
+            function_name: "${tenant}-${environment}-ws-subscribe"
+            description: "WebSocket subscribe handler"
+            runtime: "python3.11"
+            handler: "handlers/websocket.subscribe_handler"
+            memory_size: 256
+            timeout: 10
+            architecture: "arm64"
+
+            environment_variables:
+              ENVIRONMENT: "${environment}"
+              CONNECTIONS_TABLE: "${output.dynamodb-connections.table_name}"
+
+            tracing_config:
+              mode: "Active"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "compute"
+
+    # =========================================================================
+    # VPC LINK (for private integrations)
+    # =========================================================================
+    vpc-link:
+      component: "apigateway-vpc-link"
+      vars:
+        enabled: true
+
+        vpc_link_name: "${tenant}-${environment}-vpc-link"
+        description: "VPC Link for private API integrations"
+
+        # Target NLB
+        target_arns:
+          - "${output.nlb.arn}"
+
+        # Security groups (for HTTP API VPC Links)
+        security_group_ids:
+          - "${output.securitygroup.vpc_link_sg_id}"
+        subnet_ids: "${output.vpc.private_subnet_ids}"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "networking"
+
+    # =========================================================================
+    # DATA STORAGE
+    # =========================================================================
+    dynamodb:
+      component: "dynamodb"
+      vars:
+        enabled: true
+        table_name: "${tenant}-${environment}-api-data"
+        billing_mode: "PAY_PER_REQUEST"
+
+        hash_key: "pk"
+        range_key: "sk"
+
+        attributes:
+          - name: "pk"
+            type: "S"
+          - name: "sk"
+            type: "S"
+          - name: "gsi1pk"
+            type: "S"
+          - name: "gsi1sk"
+            type: "S"
+
+        global_secondary_indexes:
+          - name: "gsi1"
+            hash_key: "gsi1pk"
+            range_key: "gsi1sk"
+            projection_type: "ALL"
+
+        ttl_enabled: true
+        ttl_attribute_name: "ttl"
+        point_in_time_recovery_enabled: true
+        server_side_encryption_enabled: true
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "data"
+
+    dynamodb-connections:
+      component: "dynamodb"
+      vars:
+        enabled: true
+        table_name: "${tenant}-${environment}-ws-connections"
+        billing_mode: "PAY_PER_REQUEST"
+
+        hash_key: "connectionId"
+
+        attributes:
+          - name: "connectionId"
+            type: "S"
+
+        ttl_enabled: true
+        ttl_attribute_name: "ttl"
+        server_side_encryption_enabled: true
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "data"
+
+    # =========================================================================
+    # OBSERVABILITY
+    # =========================================================================
+    cloudwatch-logs:
+      component: "cloudwatch-logs"
+      vars:
+        enabled: true
+
+        log_groups:
+          rest-api:
+            name: "/aws/apigateway/${tenant}-${environment}-rest-api"
+            retention_in_days: "${log_retention_days}"
+          http-api:
+            name: "/aws/apigateway/${tenant}-${environment}-http-api"
+            retention_in_days: "${log_retention_days}"
+          websocket-api:
+            name: "/aws/apigateway/${tenant}-${environment}-websocket-api"
+            retention_in_days: "${log_retention_days}"
+          waf:
+            name: "aws-waf-logs-${tenant}-${environment}"
+            retention_in_days: "${log_retention_days}"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "observability"
+
+    monitoring:
+      component: "monitoring"
+      depends_on:
+        - api-gateway-rest
+        - api-gateway-http
+        - lambda-handlers
+        - waf
+      vars:
+        enabled: true
+
+        # Dashboard
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-api-gateway"
+
+        dashboard_widgets:
+          - type: "metric"
+            title: "REST API - Request Count"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/ApiGateway"
+                metric_name: "Count"
+                dimensions:
+                  ApiName: "${output.api-gateway-rest.api_name}"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "REST API - Latency"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/ApiGateway"
+                metric_name: "Latency"
+                dimensions:
+                  ApiName: "${output.api-gateway-rest.api_name}"
+                stat: "p99"
+                period: 300
+              - namespace: "AWS/ApiGateway"
+                metric_name: "Latency"
+                dimensions:
+                  ApiName: "${output.api-gateway-rest.api_name}"
+                stat: "p50"
+                period: 300
+
+          - type: "metric"
+            title: "REST API - Errors"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/ApiGateway"
+                metric_name: "4XXError"
+                dimensions:
+                  ApiName: "${output.api-gateway-rest.api_name}"
+                stat: "Sum"
+                period: 300
+              - namespace: "AWS/ApiGateway"
+                metric_name: "5XXError"
+                dimensions:
+                  ApiName: "${output.api-gateway-rest.api_name}"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "HTTP API - Request Count"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/ApiGateway"
+                metric_name: "Count"
+                dimensions:
+                  ApiId: "${output.api-gateway-http.api_id}"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "WAF - Blocked Requests"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/WAFV2"
+                metric_name: "BlockedRequests"
+                dimensions:
+                  WebACL: "${output.waf.web_acl_name}"
+                  Rule: "ALL"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "Lambda - Backend Invocations"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/Lambda"
+                metric_name: "Invocations"
+                stat: "Sum"
+                period: 300
+
+          - type: "metric"
+            title: "WebSocket - Connection Count"
+            width: 12
+            height: 6
+            metrics:
+              - namespace: "AWS/ApiGateway"
+                metric_name: "ConnectCount"
+                dimensions:
+                  ApiId: "${output.api-gateway-websocket.api_id}"
+                stat: "Sum"
+                period: 300
+              - namespace: "AWS/ApiGateway"
+                metric_name: "MessageCount"
+                dimensions:
+                  ApiId: "${output.api-gateway-websocket.api_id}"
+                stat: "Sum"
+                period: 300
+
+        # Alarms
+        alarm_notifications_enabled: true
+        sns_topic_name: "${tenant}-${environment}-api-alarms"
+
+        alarms:
+          # REST API Alarms
+          rest-api-5xx-errors:
+            alarm_name: "${tenant}-${environment}-rest-api-5xx"
+            metric_name: "5XXError"
+            namespace: "AWS/ApiGateway"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 2
+            threshold: 10
+            comparison_operator: "GreaterThanThreshold"
+            dimensions:
+              ApiName: "${output.api-gateway-rest.api_name}"
+            alarm_description: "REST API 5XX errors exceeded threshold"
+
+          rest-api-4xx-errors:
+            alarm_name: "${tenant}-${environment}-rest-api-4xx"
+            metric_name: "4XXError"
+            namespace: "AWS/ApiGateway"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 3
+            threshold: 100
+            comparison_operator: "GreaterThanThreshold"
+            dimensions:
+              ApiName: "${output.api-gateway-rest.api_name}"
+            alarm_description: "REST API 4XX errors exceeded threshold"
+
+          rest-api-latency:
+            alarm_name: "${tenant}-${environment}-rest-api-latency"
+            metric_name: "Latency"
+            namespace: "AWS/ApiGateway"
+            extended_statistic: "p99"
+            period: 300
+            evaluation_periods: 3
+            threshold: 3000
+            comparison_operator: "GreaterThanThreshold"
+            dimensions:
+              ApiName: "${output.api-gateway-rest.api_name}"
+            alarm_description: "REST API p99 latency exceeded 3 seconds"
+
+          # WAF Alarms
+          waf-blocked-requests:
+            alarm_name: "${tenant}-${environment}-waf-blocked"
+            metric_name: "BlockedRequests"
+            namespace: "AWS/WAFV2"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 2
+            threshold: 1000
+            comparison_operator: "GreaterThanThreshold"
+            dimensions:
+              WebACL: "${output.waf.web_acl_name}"
+              Rule: "ALL"
+            alarm_description: "High number of blocked requests by WAF"
+
+          # Lambda Alarms
+          lambda-errors:
+            alarm_name: "${tenant}-${environment}-api-lambda-errors"
+            metric_name: "Errors"
+            namespace: "AWS/Lambda"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 2
+            threshold: 10
+            comparison_operator: "GreaterThanThreshold"
+            alarm_description: "API Lambda errors exceeded threshold"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "observability"
+
+    # =========================================================================
+    # IAM
+    # =========================================================================
+    iam:
+      component: "iam"
+      vars:
+        enabled: true
+
+        roles:
+          # Lambda Execution Role
+          lambda-api:
+            name: "${tenant}-${environment}-api-lambda-role"
+            assume_role_policy:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Principal:
+                    Service: "lambda.amazonaws.com"
+                  Action: "sts:AssumeRole"
+
+            managed_policy_arns:
+              - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+              - "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+
+            inline_policies:
+              dynamodb:
+                - Effect: "Allow"
+                  Action:
+                    - "dynamodb:GetItem"
+                    - "dynamodb:PutItem"
+                    - "dynamodb:UpdateItem"
+                    - "dynamodb:DeleteItem"
+                    - "dynamodb:Query"
+                    - "dynamodb:Scan"
+                  Resource:
+                    - "arn:aws:dynamodb:${region}:${aws_account_id}:table/${tenant}-${environment}-*"
+                    - "arn:aws:dynamodb:${region}:${aws_account_id}:table/${tenant}-${environment}-*/index/*"
+
+              # For WebSocket management API
+              execute-api:
+                - Effect: "Allow"
+                  Action:
+                    - "execute-api:ManageConnections"
+                  Resource:
+                    - "arn:aws:execute-api:${region}:${aws_account_id}:*/*"
+
+          # API Gateway CloudWatch Logs Role
+          apigateway-logs:
+            name: "${tenant}-${environment}-apigateway-logs-role"
+            assume_role_policy:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Principal:
+                    Service: "apigateway.amazonaws.com"
+                  Action: "sts:AssumeRole"
+
+            managed_policy_arns:
+              - "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+      tags:
+        StackType: "api-gateway"
+        Layer: "security"
+
+# =============================================================================
+# DEPLOYMENT CONFIGURATION
+# =============================================================================
+deployment_order:
+  - stage: 1
+    name: "Foundation"
+    components: [iam, cloudwatch-logs]
+    parallel: true
+    description: "Deploy IAM roles and logging"
+
+  - stage: 2
+    name: "Data"
+    components: [dynamodb, dynamodb-connections]
+    parallel: true
+    description: "Deploy data storage"
+
+  - stage: 3
+    name: "Security"
+    components: [cognito, acm-certificate]
+    parallel: true
+    description: "Deploy authentication and certificates"
+
+  - stage: 4
+    name: "Compute"
+    components: [lambda-handlers, lambda-websocket]
+    parallel: true
+    description: "Deploy Lambda handlers"
+
+  - stage: 5
+    name: "API"
+    components: [api-gateway-rest, api-gateway-http, api-gateway-websocket]
+    parallel: true
+    description: "Deploy API Gateways"
+
+  - stage: 6
+    name: "Security Integration"
+    components: [cognito-authorizer, jwt-authorizer, waf]
+    parallel: true
+    description: "Deploy authorizers and WAF"
+
+  - stage: 7
+    name: "Domain"
+    components: [custom-domain, dns, usage-plans]
+    parallel: false
+    description: "Deploy custom domains and usage plans"
+
+  - stage: 8
+    name: "Observability"
+    components: [monitoring]
+    parallel: false
+    description: "Deploy monitoring"
+
+# =============================================================================
+# VALIDATION RULES
+# =============================================================================
+validation:
+  pre_deployment:
+    - check: "route53_zone_exists"
+      description: "Verify Route53 hosted zone exists"
+    - check: "iam_permissions"
+      description: "Verify IAM permissions for deployment"
+    - check: "lambda_code_exists"
+      description: "Verify Lambda code packages exist"
+
+  post_deployment:
+    - check: "api_gateway_accessible"
+      description: "Verify API Gateway responds to requests"
+    - check: "custom_domain_resolves"
+      description: "Verify custom domain DNS resolution"
+    - check: "waf_rules_active"
+      description: "Verify WAF rules are active"
+    - check: "cognito_configured"
+      description: "Verify Cognito user pool is accessible"
+
+# =============================================================================
+# TESTING STRATEGY
+# =============================================================================
+testing:
+  unit_tests:
+    - name: "Lambda handler tests"
+      path: "tests/unit/"
+      command: "pytest tests/unit/ -v"
+
+  integration_tests:
+    - name: "API endpoint tests"
+      description: "Test all API endpoints"
+      command: "pytest tests/integration/api/ -v"
+
+    - name: "Authentication tests"
+      description: "Test Cognito authentication flow"
+      command: "pytest tests/integration/auth/ -v"
+
+    - name: "WebSocket tests"
+      description: "Test WebSocket connectivity"
+      command: "pytest tests/integration/websocket/ -v"
+
+  load_tests:
+    - name: "API load test"
+      description: "Load test API endpoints"
+      tool: "artillery"
+      config: "tests/load/api-load.yml"
+
+# =============================================================================
+# ENVIRONMENT OVERRIDES
+# =============================================================================
+environment_overrides:
+  development:
+    vars:
+      enable_waf: false
+      log_retention_days: 7
+    components:
+      lambda-handlers:
+        vars:
+          functions:
+            list-users:
+              memory_size: 256
+      usage-plans:
+        vars:
+          usage_plans:
+            free:
+              quota_settings:
+                limit: 10000
+
+  staging:
+    vars:
+      enable_waf: true
+      log_retention_days: 14
+
+  production:
+    vars:
+      enable_waf: true
+      log_retention_days: 90
+      enable_caching: true
+      cache_size: "1.6"
+      cache_ttl: 300
+    components:
+      lambda-handlers:
+        vars:
+          functions:
+            list-users:
+              memory_size: 1024
+              provisioned_concurrency: 5

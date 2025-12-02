@@ -1,0 +1,617 @@
+---
+# ML Platform Stack Template
+# Machine learning platform infrastructure
+# Version: 1.0.0
+
+name: ml-platform-stack
+description: "End-to-end machine learning platform with SageMaker and MLflow"
+version: "1.0.0"
+maturity: "stable"
+
+template:
+  category: "patterns/ml-ops"
+  use_cases:
+    - "ML model training"
+    - "Model deployment and inference"
+    - "MLOps pipelines"
+    - "Feature stores"
+    - "Experiment tracking"
+
+  architecture:
+    components:
+      - name: "Training"
+        components: ["sagemaker", "step-functions"]
+        description: "Model training infrastructure"
+      - name: "Inference"
+        components: ["sagemaker-endpoints", "lambda"]
+        description: "Model serving"
+      - name: "Feature Store"
+        components: ["sagemaker-feature-store", "dynamodb"]
+        description: "Feature engineering"
+      - name: "Experiment Tracking"
+        components: ["mlflow", "s3"]
+        description: "Experiment management"
+
+  estimated_cost:
+    minimum: "$200/month"
+    typical: "$1000/month"
+    maximum: "$10000+/month"
+
+  deployment_time: "45-60 minutes"
+
+import:
+  - catalog/_base/defaults
+  - catalog/vpc/defaults
+  - catalog/iam/defaults
+
+components:
+  terraform:
+    # ===========================================
+    # NETWORK LAYER
+    # ===========================================
+    vpc:
+      component: "vpc"
+      vars:
+        enabled: true
+        name: "ml-platform"
+        vpc_cidr: "10.0.0.0/16"
+
+        azs:
+          - "${region}a"
+          - "${region}b"
+          - "${region}c"
+
+        private_subnets:
+          - "10.0.0.0/20"
+          - "10.0.16.0/20"
+          - "10.0.32.0/20"
+        public_subnets:
+          - "10.0.100.0/24"
+          - "10.0.101.0/24"
+          - "10.0.102.0/24"
+
+        enable_nat_gateway: true
+        nat_gateway_strategy: "one_per_az"
+
+        # VPC Endpoints for SageMaker
+        enable_vpc_endpoints: true
+        vpc_endpoints:
+          - "sagemaker.api"
+          - "sagemaker.runtime"
+          - "s3"
+          - "ecr.api"
+          - "ecr.dkr"
+          - "logs"
+          - "sts"
+          - "kms"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "network"
+
+    # ===========================================
+    # STORAGE LAYER
+    # ===========================================
+    s3-data:
+      component: "s3"
+      vars:
+        enabled: true
+        bucket_name: "${tenant}-${environment}-ml-data"
+        versioning_enabled: true
+        sse_algorithm: "aws:kms"
+
+        # Organize data by stage
+        folders:
+          - "raw/"
+          - "processed/"
+          - "features/"
+          - "training/"
+          - "validation/"
+          - "test/"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "storage"
+
+    s3-models:
+      component: "s3"
+      vars:
+        enabled: true
+        bucket_name: "${tenant}-${environment}-ml-models"
+        versioning_enabled: true
+        sse_algorithm: "aws:kms"
+
+        lifecycle_rules:
+          - id: "archive-old-models"
+            enabled: true
+            transitions:
+              - days: 90
+                storage_class: "STANDARD_IA"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "storage"
+
+    s3-artifacts:
+      component: "s3"
+      vars:
+        enabled: true
+        bucket_name: "${tenant}-${environment}-ml-artifacts"
+        versioning_enabled: true
+        sse_algorithm: "aws:kms"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "storage"
+
+    # ===========================================
+    # SAGEMAKER DOMAIN
+    # ===========================================
+    sagemaker-domain:
+      component: "sagemaker"
+      depends_on:
+        - vpc
+        - s3-data
+        - s3-models
+      vars:
+        enabled: true
+        domain_name: "${tenant}-${environment}-ml-domain"
+        auth_mode: "IAM"
+
+        vpc_id: "${output.vpc.vpc_id}"
+        subnet_ids: "${output.vpc.private_subnet_ids}"
+
+        default_user_settings:
+          execution_role: "${output.iam.sagemaker_execution_role_arn}"
+          security_groups:
+            - "${output.securitygroup.sagemaker_sg_id}"
+
+          jupyter_server_app_settings:
+            default_resource_spec:
+              instance_type: "system"
+              sagemaker_image_arn: null
+
+          kernel_gateway_app_settings:
+            default_resource_spec:
+              instance_type: "ml.t3.medium"
+
+          sharing_settings:
+            notebook_output_option: "Allowed"
+            s3_output_path: "s3://${output.s3-artifacts.bucket_name}/sharing/"
+
+        # Enable SageMaker Canvas
+        canvas_enabled: true
+
+        # Enable Data Wrangler
+        data_wrangler_enabled: true
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "sagemaker"
+
+    # ===========================================
+    # FEATURE STORE
+    # ===========================================
+    sagemaker-feature-store:
+      component: "sagemaker-feature-store"
+      depends_on:
+        - sagemaker-domain
+        - s3-data
+      vars:
+        enabled: true
+
+        feature_groups:
+          - name: "customer-features"
+            description: "Customer feature group"
+            record_identifier_feature_name: "customer_id"
+            event_time_feature_name: "event_time"
+            online_store_config:
+              enable_online_store: true
+            offline_store_config:
+              s3_storage_config:
+                s3_uri: "s3://${output.s3-data.bucket_name}/features/customer/"
+              disable_glue_table_creation: false
+              data_catalog_config:
+                database: "${output.glue-database.database_name}"
+                table_name: "customer_features"
+
+          - name: "transaction-features"
+            description: "Transaction feature group"
+            record_identifier_feature_name: "transaction_id"
+            event_time_feature_name: "event_time"
+            online_store_config:
+              enable_online_store: true
+            offline_store_config:
+              s3_storage_config:
+                s3_uri: "s3://${output.s3-data.bucket_name}/features/transaction/"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "feature-store"
+
+    # ===========================================
+    # ML PIPELINES
+    # ===========================================
+    sagemaker-pipelines:
+      component: "sagemaker-pipelines"
+      depends_on:
+        - sagemaker-domain
+        - s3-data
+        - s3-models
+      vars:
+        enabled: true
+
+        pipelines:
+          - name: "${tenant}-${environment}-training-pipeline"
+            description: "Standard ML training pipeline"
+            role_arn: "${output.iam.sagemaker_execution_role_arn}"
+
+            # Pipeline definition will be loaded from S3
+            definition_s3_location:
+              bucket: "${output.s3-artifacts.bucket_name}"
+              key: "pipelines/training-pipeline.json"
+
+            parameters:
+              - name: "TrainingInstanceType"
+                type: "String"
+                default_value: "ml.m5.xlarge"
+              - name: "TrainingInstanceCount"
+                type: "Integer"
+                default_value: 1
+              - name: "ModelApprovalStatus"
+                type: "String"
+                default_value: "PendingManualApproval"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "pipelines"
+
+    # ===========================================
+    # MODEL REGISTRY
+    # ===========================================
+    sagemaker-model-registry:
+      component: "sagemaker-model-registry"
+      depends_on:
+        - sagemaker-domain
+      vars:
+        enabled: true
+
+        model_package_groups:
+          - name: "${tenant}-${environment}-models"
+            description: "Production model registry"
+
+        # Model approval workflow
+        model_approval_enabled: true
+        approval_notification_topic: "${output.sns.topic_arn}"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "model-registry"
+
+    # ===========================================
+    # INFERENCE ENDPOINTS
+    # ===========================================
+    sagemaker-endpoints:
+      component: "sagemaker-endpoints"
+      depends_on:
+        - sagemaker-domain
+        - sagemaker-model-registry
+      vars:
+        enabled: true
+
+        endpoints:
+          - name: "${tenant}-${environment}-realtime"
+            description: "Real-time inference endpoint"
+            endpoint_config:
+              production_variants:
+                - variant_name: "primary"
+                  model_name: "${tenant}-${environment}-model"
+                  instance_type: "ml.m5.large"
+                  initial_instance_count: 2
+                  initial_variant_weight: 1.0
+
+              # Auto-scaling
+              auto_scaling:
+                min_capacity: 2
+                max_capacity: 10
+                target_invocations_per_instance: 1000
+                scale_in_cooldown: 300
+                scale_out_cooldown: 60
+
+            # Data capture for monitoring
+            data_capture_config:
+              enable_capture: true
+              initial_sampling_percentage: 100
+              destination_s3_uri: "s3://${output.s3-artifacts.bucket_name}/data-capture/"
+              capture_options:
+                - capture_mode: "Input"
+                - capture_mode: "Output"
+
+          - name: "${tenant}-${environment}-serverless"
+            description: "Serverless inference endpoint"
+            endpoint_config:
+              production_variants:
+                - variant_name: "serverless"
+                  model_name: "${tenant}-${environment}-model"
+                  serverless_config:
+                    memory_size_in_mb: 2048
+                    max_concurrency: 50
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "inference"
+
+    # ===========================================
+    # MLFLOW TRACKING
+    # ===========================================
+    mlflow:
+      component: "eks-app"
+      depends_on:
+        - eks
+        - rds
+        - s3-artifacts
+      vars:
+        enabled: true
+        app_name: "mlflow"
+        namespace: "mlflow"
+
+        helm_release:
+          name: "mlflow"
+          repository: "https://community-charts.github.io/helm-charts"
+          chart: "mlflow"
+          version: "0.7.0"
+
+          values:
+            backendStore:
+              databaseConnectionCheck: true
+              postgres:
+                enabled: true
+                host: "${output.rds.endpoint}"
+                port: 5432
+                database: "mlflow"
+                user: "mlflow"
+                password:
+                  valueFrom:
+                    secretKeyRef:
+                      name: "mlflow-db-secret"
+                      key: "password"
+
+            artifactRoot:
+              s3:
+                enabled: true
+                bucket: "${output.s3-artifacts.bucket_name}"
+                path: "mlflow/"
+
+            serviceAccount:
+              create: true
+              annotations:
+                eks.amazonaws.com/role-arn: "${output.iam.mlflow_role_arn}"
+
+            ingress:
+              enabled: true
+              className: "alb"
+              annotations:
+                alb.ingress.kubernetes.io/scheme: "internal"
+                alb.ingress.kubernetes.io/target-type: "ip"
+              hosts:
+                - host: "mlflow.${domain}"
+                  paths:
+                    - path: "/"
+                      pathType: "Prefix"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "tracking"
+
+    # ===========================================
+    # EKS FOR MLFLOW
+    # ===========================================
+    eks:
+      component: "eks"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: true
+        cluster_name: "${tenant}-${environment}-ml-platform"
+        kubernetes_version: "1.28"
+
+        vpc_id: "${output.vpc.vpc_id}"
+        subnet_ids: "${output.vpc.private_subnet_ids}"
+
+        endpoint_private_access: true
+        endpoint_public_access: false
+
+        node_groups:
+          system:
+            name: "system"
+            instance_types: ["m5.large"]
+            desired_size: 2
+            min_size: 2
+            max_size: 5
+            labels:
+              workload-type: "system"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "compute"
+
+    # ===========================================
+    # RDS FOR MLFLOW
+    # ===========================================
+    rds:
+      component: "rds"
+      depends_on:
+        - vpc
+        - securitygroup
+      vars:
+        enabled: true
+        identifier: "${tenant}-${environment}-mlflow-db"
+        engine: "postgres"
+        engine_version: "15.4"
+        instance_class: "db.t3.medium"
+        allocated_storage: 50
+        db_name: "mlflow"
+        username: "mlflow"
+        port: 5432
+        multi_az: false
+        subnet_ids: "${output.vpc.database_subnet_ids}"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "storage"
+
+    # ===========================================
+    # GLUE FOR FEATURE STORE
+    # ===========================================
+    glue-database:
+      component: "glue"
+      vars:
+        enabled: true
+        database_name: "${tenant}_${environment}_ml_features"
+        description: "ML feature store catalog"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "catalog"
+
+    # ===========================================
+    # NOTIFICATIONS
+    # ===========================================
+    sns:
+      component: "sns"
+      vars:
+        enabled: true
+        topic_name: "${tenant}-${environment}-ml-notifications"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "notifications"
+
+    # ===========================================
+    # IAM
+    # ===========================================
+    iam:
+      component: "iam"
+      vars:
+        enabled: true
+
+        roles:
+          sagemaker-execution-role:
+            name: "${tenant}-${environment}-sagemaker-execution"
+            assume_role_policy:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Principal:
+                    Service: "sagemaker.amazonaws.com"
+                  Action: "sts:AssumeRole"
+            managed_policy_arns:
+              - "arn:aws:iam::aws:policy/AmazonSageMakerFullAccess"
+            inline_policies:
+              s3-access:
+                - Effect: "Allow"
+                  Action:
+                    - "s3:GetObject"
+                    - "s3:PutObject"
+                    - "s3:DeleteObject"
+                    - "s3:ListBucket"
+                  Resource:
+                    - "${output.s3-data.bucket_arn}"
+                    - "${output.s3-data.bucket_arn}/*"
+                    - "${output.s3-models.bucket_arn}"
+                    - "${output.s3-models.bucket_arn}/*"
+                    - "${output.s3-artifacts.bucket_arn}"
+                    - "${output.s3-artifacts.bucket_arn}/*"
+
+          mlflow-role:
+            name: "${tenant}-${environment}-mlflow"
+            assume_role_policy:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Principal:
+                    Service: "eks.amazonaws.com"
+                  Action: "sts:AssumeRole"
+            inline_policies:
+              s3-artifacts:
+                - Effect: "Allow"
+                  Action:
+                    - "s3:GetObject"
+                    - "s3:PutObject"
+                    - "s3:DeleteObject"
+                    - "s3:ListBucket"
+                  Resource:
+                    - "${output.s3-artifacts.bucket_arn}"
+                    - "${output.s3-artifacts.bucket_arn}/*"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "security"
+
+    # ===========================================
+    # OBSERVABILITY
+    # ===========================================
+    monitoring:
+      component: "monitoring"
+      vars:
+        enabled: true
+        create_dashboard: true
+        dashboard_name: "${tenant}-${environment}-ml-platform"
+
+        alarms:
+          endpoint-invocation-errors:
+            metric_name: "InvocationModelErrors"
+            namespace: "AWS/SageMaker"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 3
+            threshold: 10
+            comparison_operator: "GreaterThanThreshold"
+
+          endpoint-latency:
+            metric_name: "ModelLatency"
+            namespace: "AWS/SageMaker"
+            statistic: "p99"
+            period: 300
+            evaluation_periods: 3
+            threshold: 1000000  # 1 second in microseconds
+            comparison_operator: "GreaterThanThreshold"
+
+          training-job-failures:
+            metric_name: "TrainingJobsInError"
+            namespace: "AWS/SageMaker"
+            statistic: "Sum"
+            period: 300
+            evaluation_periods: 1
+            threshold: 0
+            comparison_operator: "GreaterThanThreshold"
+
+        alarm_notifications_enabled: true
+        sns_topic_name: "${tenant}-${environment}-ml-alarms"
+
+      tags:
+        StackType: "ml-platform"
+        Layer: "observability"
+
+# Deployment order
+deployment_order:
+  - stage: 1
+    components: [vpc, iam]
+    parallel: true
+  - stage: 2
+    components: [s3-data, s3-models, s3-artifacts, securitygroup, sns]
+    parallel: true
+  - stage: 3
+    components: [rds, eks, glue-database]
+    parallel: true
+  - stage: 4
+    components: [sagemaker-domain]
+  - stage: 5
+    components: [sagemaker-feature-store, sagemaker-model-registry, mlflow]
+    parallel: true
+  - stage: 6
+    components: [sagemaker-pipelines, sagemaker-endpoints]
+    parallel: true
+  - stage: 7
+    components: [monitoring]

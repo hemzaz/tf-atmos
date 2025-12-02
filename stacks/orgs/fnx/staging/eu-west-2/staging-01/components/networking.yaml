@@ -1,0 +1,158 @@
+---
+# =============================================================================
+# Networking Component Configurations for Staging-01 Environment
+# =============================================================================
+# VPC and network resources - mirrors production architecture
+# =============================================================================
+
+import:
+  - orgs/fnx/staging/eu-west-2/staging-01/components/globals
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # Primary VPC - Main application workloads
+    # ==========================================================================
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        name: main
+        vpc_cidr: "10.10.0.0/16"
+        vpc_flow_logs_enabled: true
+        vpc_flow_logs_traffic_type: "ALL"
+
+        # Subnet configuration - 3 AZs for high availability
+        azs:
+          - eu-west-2a
+          - eu-west-2b
+          - eu-west-2c
+
+        private_subnets:
+          - "10.10.1.0/24"
+          - "10.10.2.0/24"
+          - "10.10.3.0/24"
+        public_subnets:
+          - "10.10.101.0/24"
+          - "10.10.102.0/24"
+          - "10.10.103.0/24"
+        database_subnets:
+          - "10.10.201.0/24"
+          - "10.10.202.0/24"
+          - "10.10.203.0/24"
+
+        # NAT Gateway - single for staging (cost optimization)
+        enable_nat_gateway: true
+        nat_gateway_strategy: "single"
+
+        # DNS settings
+        enable_dns_hostnames: true
+        enable_dns_support: true
+
+        # Security
+        map_public_ip_on_launch: false
+
+      tags:
+        NetworkTier: "primary"
+
+    # ==========================================================================
+    # Services VPC - Dedicated for backend services
+    # ==========================================================================
+    vpc/services:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        name: services
+        vpc_cidr: "10.11.0.0/16"
+        vpc_flow_logs_enabled: true
+
+        azs:
+          - eu-west-2a
+          - eu-west-2b
+          - eu-west-2c
+
+        private_subnets:
+          - "10.11.1.0/24"
+          - "10.11.2.0/24"
+          - "10.11.3.0/24"
+        public_subnets:
+          - "10.11.101.0/24"
+          - "10.11.102.0/24"
+          - "10.11.103.0/24"
+
+        enable_nat_gateway: true
+        nat_gateway_strategy: "single"
+        map_public_ip_on_launch: false
+
+      tags:
+        NetworkTier: "services"
+
+    # ==========================================================================
+    # Network Resources - DNS and routing for main VPC
+    # ==========================================================================
+    network/main:
+      metadata:
+        component: network
+      vars:
+        vpc_id: "${output.vpc/main.vpc_id}"
+        dns_create_root_zone: false
+        dns_multi_account: false
+
+        dns_zones:
+          main:
+            name: "staging.fnx.example.com"
+            comment: "Main zone for staging environment"
+            force_destroy: true
+            enable_query_logging: true
+          internal:
+            name: "internal.staging.fnx.example.com"
+            comment: "Internal DNS for staging"
+            force_destroy: true
+
+        dns_records:
+          www_main:
+            zone_name: "main"
+            name: "www.staging.fnx.example.com"
+            type: "A"
+            ttl: 300
+            records: ["10.10.101.100"]
+          db_internal:
+            zone_name: "internal"
+            name: "db.internal.staging.fnx.example.com"
+            type: "A"
+            ttl: 60
+            records: ["10.10.201.50"]
+
+    # ==========================================================================
+    # Network Resources - DNS and routing for services VPC
+    # ==========================================================================
+    network/services:
+      metadata:
+        component: network
+      vars:
+        vpc_id: "${output.vpc/services.vpc_id}"
+        dns_create_root_zone: false
+
+        dns_zones:
+          services:
+            name: "services.staging.fnx.example.com"
+            comment: "Services zone for staging"
+            force_destroy: true
+          data:
+            name: "data.services.staging.fnx.example.com"
+            comment: "Data services DNS"
+            force_destroy: true
+
+        dns_records:
+          api_services:
+            zone_name: "services"
+            name: "api.services.staging.fnx.example.com"
+            type: "CNAME"
+            ttl: 300
+            records: ["api-internal.services.staging.fnx.example.com"]

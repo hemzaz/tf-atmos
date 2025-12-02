@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# Production Stack Configuration
+# =============================================================================
+# Production environment with full high availability, security, and compliance
+# ALL CHANGES REQUIRE CHANGE MANAGEMENT APPROVAL
+# =============================================================================
+
+import:
+  # Import base configuration first
+  - catalog/_base/defaults
+
+  # Import mixins (order matters for variable precedence)
+  - mixins/tenant/fnx
+  - mixins/stage/prod
+  - mixins/region/eu-west-2
+  - mixins/production  # Production-specific overrides
+
+  # Import org defaults
+  - orgs/fnx/prod/_defaults
+
+  # Import component-specific configurations
+  - orgs/fnx/prod/eu-west-2/production/components/globals
+  - orgs/fnx/prod/eu-west-2/production/components/networking
+  - orgs/fnx/prod/eu-west-2/production/components/security
+  - orgs/fnx/prod/eu-west-2/production/components/compute
+  - orgs/fnx/prod/eu-west-2/production/components/services
+
+vars:
+  # Core variables for stack naming
+  tenant: fnx
+  environment: production
+  stage: prod
+  account: prod
+  region: eu-west-2
+
+  # AWS Account ID
+  aws_account_id: "${env:AWS_PROD_ACCOUNT_ID, 123456789012}"
+
+  # VPC configuration - production CIDR ranges
+  vpc_cidr: "10.20.0.0/16"
+
+  # Description
+  description: "Production Environment - Business Critical"
+  namespace: production

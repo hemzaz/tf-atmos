@@ -1,0 +1,93 @@
+---
+# =============================================================================
+# Minimal Deployment Stack Configuration
+# =============================================================================
+# This is the simplest possible configuration for getting started
+# Use this for testing, learning, or as a starting point
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - catalog/vpc/defaults
+  - catalog/iam/defaults
+  - catalog/backend/defaults
+
+vars:
+  # Core identifiers - CHANGE THESE
+  tenant: example
+  account: dev
+  environment: minimal
+  region: us-east-1
+
+  # AWS Account - will be auto-detected if not set
+  aws_account_id: "${env:AWS_ACCOUNT_ID, CHANGE_ME}"
+
+  # VPC configuration
+  vpc_cidr: "10.100.0.0/16"
+
+  # Description
+  description: "Minimal deployment for testing"
+
+tags:
+  Environment: minimal
+  ManagedBy: atmos
+  Example: minimal-deployment
+
+components:
+  terraform:
+    # ==========================================================================
+    # VPC - Basic networking
+    # ==========================================================================
+    vpc/main:
+      metadata:
+        component: vpc
+      vars:
+        name: main
+        vpc_cidr: "10.100.0.0/16"
+
+        # Single AZ for minimal cost
+        azs:
+          - us-east-1a
+
+        # Minimal subnets
+        private_subnets:
+          - "10.100.1.0/24"
+        public_subnets:
+          - "10.100.101.0/24"
+
+        # Single NAT Gateway
+        enable_nat_gateway: true
+        nat_gateway_strategy: "single"
+
+        # Basic settings
+        enable_dns_hostnames: true
+        enable_dns_support: true
+        map_public_ip_on_launch: false
+
+        # Flow logs disabled for minimal cost
+        vpc_flow_logs_enabled: false
+
+    # ==========================================================================
+    # IAM - Basic roles
+    # ==========================================================================
+    iam/main:
+      metadata:
+        component: iam
+      vars:
+        management_account_id: "${aws_account_id}"
+        account_id: "${aws_account_id}"
+        target_account_id: "${aws_account_id}"
+        cross_account_role_name: "minimal-CrossAccountRole"
+        policy_name: "minimal-CrossAccountPolicy"
+
+    # ==========================================================================
+    # Backend - Terraform state
+    # ==========================================================================
+    backend/main:
+      metadata:
+        component: backend
+      vars:
+        bucket_name: "example-dev-minimal-terraform-state"
+        dynamodb_table_name: "example-dev-minimal-terraform-locks"
+        enable_versioning: true
+        enable_encryption: true

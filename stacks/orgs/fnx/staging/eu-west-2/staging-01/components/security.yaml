@@ -1,0 +1,160 @@
+---
+# =============================================================================
+# Security Component Configurations for Staging-01 Environment
+# =============================================================================
+# IAM, secrets, certificates, and security configurations
+# =============================================================================
+
+import:
+  - orgs/fnx/staging/eu-west-2/staging-01/components/globals
+  - catalog/iam/defaults
+  - catalog/backend/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/acm/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # IAM Roles
+    # ==========================================================================
+    iam/main:
+      metadata:
+        component: iam
+      vars:
+        management_account_id: "${management_account_id}"
+        account_id: "${aws_account_id}"
+        target_account_id: "${aws_account_id}"
+
+        # Cross-account access configuration
+        cross_account_role_name: "staging-01-staging-fnx-CrossAccountRole"
+        policy_name: "staging-01-staging-fnx-CrossAccountPolicy"
+        trusted_account_ids:
+          - "${management_account_id}"
+
+        # Additional IAM policies
+        managed_policy_arns:
+          - "arn:aws:iam::aws:policy/ReadOnlyAccess"
+
+    iam/ci:
+      metadata:
+        component: iam
+      vars:
+        create_ci_role: true
+        ci_role_name: "staging-01-ci-role"
+        ci_permissions:
+          - "ec2:Describe*"
+          - "eks:Describe*"
+          - "eks:List*"
+          - "s3:GetObject"
+          - "s3:ListBucket"
+          - "ecr:GetAuthorizationToken"
+          - "ecr:BatchCheckLayerAvailability"
+          - "ecr:GetDownloadUrlForLayer"
+          - "ecr:BatchGetImage"
+
+    iam/eks-node:
+      metadata:
+        component: iam
+      vars:
+        create_node_role: true
+        node_role_name: "staging-01-eks-node-role"
+        node_role_policies:
+          - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+          - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+          - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+
+    # ==========================================================================
+    # Terraform Backend
+    # ==========================================================================
+    backend/main:
+      metadata:
+        component: backend
+      vars:
+        bucket_name: "fnx-staging-terraform-state"
+        dynamodb_table_name: "fnx-staging-terraform-locks"
+        iam_role_name: "fnx-staging-terraform-backend-role"
+        iam_role_arn: "arn:aws:iam::${management_account_id}:role/fnx-staging-terraform-backend-role"
+        state_file_key: "${environment}/${component}/terraform.tfstate"
+        workspace: "default"
+
+        # Backend security settings
+        enable_versioning: true
+        enable_encryption: true
+        block_public_access: true
+
+    # ==========================================================================
+    # ACM Certificates
+    # ==========================================================================
+    acm/main:
+      metadata:
+        component: acm
+      vars:
+        zone_id: "${hosted_zone_id}"
+        dns_domains:
+          main_wildcard:
+            domain_name: "*.staging.${domain_name}"
+            subject_alternative_names:
+              - "staging.${domain_name}"
+            validation_method: "DNS"
+            wait_for_validation: true
+
+    acm/services:
+      metadata:
+        component: acm
+      vars:
+        zone_id: "${hosted_zone_id}"
+        dns_domains:
+          services_wildcard:
+            domain_name: "*.services.staging.${domain_name}"
+            subject_alternative_names:
+              - "api.services.staging.${domain_name}"
+            validation_method: "DNS"
+            wait_for_validation: true
+
+    # ==========================================================================
+    # Secrets Manager
+    # ==========================================================================
+    secretsmanager/app:
+      metadata:
+        component: secretsmanager
+      vars:
+        create_kms_key: true
+        name_prefix: "staging/app"
+        recovery_window_in_days: 7
+
+        secrets:
+          app_credentials:
+            name: "credentials"
+            description: "Application credentials for staging"
+            path: "staging/app"
+            generate_random_password: true
+            password_length: 32
+          api_keys:
+            name: "api-keys"
+            description: "API integration keys for staging"
+            path: "staging/app/api"
+            generate_random_password: true
+          database_credentials:
+            name: "db-credentials"
+            description: "Database connection credentials"
+            path: "staging/app/database"
+            generate_random_password: true
+            password_length: 24
+
+    secretsmanager/infra:
+      metadata:
+        component: secretsmanager
+      vars:
+        create_kms_key: true
+        name_prefix: "staging/infra"
+        recovery_window_in_days: 7
+
+        secrets:
+          tls_certificates:
+            name: "tls-certificates"
+            description: "TLS certificates for services"
+            path: "staging/certificates"
+          ssh_keys:
+            name: "ssh-keys"
+            description: "SSH keys for infrastructure access"
+            path: "staging/ssh"

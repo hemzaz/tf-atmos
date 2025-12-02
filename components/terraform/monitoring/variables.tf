@@ -3,6 +3,63 @@ variable "region" {
   description = "AWS region"
 }
 
+variable "environment" {
+  type        = string
+  description = "Environment name (dev, staging, prod)"
+  default     = "dev"
+}
+
+# Dashboard Configuration Variables
+variable "create_infrastructure_dashboard" {
+  type        = bool
+  description = "Create infrastructure overview dashboard"
+  default     = true
+}
+
+variable "create_security_dashboard" {
+  type        = bool
+  description = "Create security monitoring dashboard"
+  default     = true
+}
+
+variable "create_cost_dashboard" {
+  type        = bool
+  description = "Create cost optimization dashboard"
+  default     = false
+}
+
+variable "create_performance_dashboard" {
+  type        = bool
+  description = "Create performance metrics dashboard"
+  default     = true
+}
+
+variable "create_application_dashboard" {
+  type        = bool
+  description = "Create application metrics dashboard"
+  default     = false
+}
+
+variable "create_backend_dashboard" {
+  type        = bool
+  description = "Create backend services dashboard"
+  default     = false
+}
+
+variable "create_certificate_dashboard" {
+  type        = bool
+  description = "Create certificate monitoring dashboard"
+  default     = false
+}
+
+variable "custom_dashboards" {
+  type = map(object({
+    body = string
+  }))
+  description = "Custom CloudWatch dashboards (name => dashboard JSON body)"
+  default     = {}
+}
+
 variable "log_groups" {
   type = map(object({
     retention_days = number
@@ -140,9 +197,11 @@ variable "enable_certificate_monitoring" {
   default     = false
 }
 
+# FIXED: Removed duplicate eks_cluster_name declaration
+# This variable is used for both certificate and backend monitoring
 variable "eks_cluster_name" {
   type        = string
-  description = "EKS cluster name for certificate management monitoring"
+  description = "EKS cluster name for monitoring (certificate and backend services)"
   default     = ""
 }
 
@@ -217,12 +276,6 @@ variable "api_gateway_error_threshold" {
   type        = number
   description = "API Gateway error count alarm threshold"
   default     = 10
-}
-
-variable "eks_cluster_name" {
-  type        = string
-  description = "EKS cluster name for monitoring"
-  default     = null
 }
 
 variable "backend_services_namespace" {
@@ -320,10 +373,10 @@ variable "business_metric_alarms" {
   type = map(object({
     comparison_operator = string
     evaluation_periods  = number
-    period             = number
-    statistic          = string
-    threshold          = number
-    description        = string
+    period              = number
+    statistic           = string
+    threshold           = number
+    description         = string
   }))
   description = "Business metric alarm configurations"
   default     = {}

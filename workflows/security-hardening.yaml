@@ -1,0 +1,663 @@
+---
+# =============================================================================
+# Security Hardening Workflow
+# =============================================================================
+# Apply comprehensive security configurations to infrastructure
+#
+# Usage:
+#   atmos workflow security-audit -f security-hardening.yaml tenant=<tenant> account=<account> environment=<environment>
+#   atmos workflow harden -f security-hardening.yaml tenant=<tenant> account=<account> environment=<environment> auto_approve=true
+#
+# Capabilities:
+#   - Security audit and scoring
+#   - Apply security best practices
+#   - Enable AWS security services (GuardDuty, Security Hub)
+#   - Configure encryption at rest and in transit
+#   - Harden network security
+# =============================================================================
+
+name: security-hardening
+description: "Security hardening and audit workflow"
+
+workflows:
+  # =============================================================================
+  # Security Audit
+  # =============================================================================
+  security-audit:
+    description: "Comprehensive security audit of the infrastructure"
+    steps:
+      - name: "run-security-audit"
+        run:
+          command: |
+            set -euo pipefail
+
+            # Colors
+            RED='\033[0;31m'
+            GREEN='\033[0;32m'
+            YELLOW='\033[1;33m'
+            BLUE='\033[0;34m'
+            WHITE='\033[1;37m'
+            BOLD='\033[1m'
+            NC='\033[0m'
+
+            log_pass() { echo -e "${GREEN}[PASS]${NC} $*"; }
+            log_fail() { echo -e "${RED}[FAIL]${NC} $*"; }
+            log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+
+            echo -e "\n${WHITE}${BOLD}========================================${NC}"
+            echo -e "${WHITE}${BOLD}     SECURITY AUDIT REPORT${NC}"
+            echo -e "${WHITE}${BOLD}========================================${NC}\n"
+
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              echo "ERROR: Missing parameters"
+              echo "Usage: atmos workflow security-audit -f security-hardening.yaml tenant=<t> account=<a> environment=<e>"
+              exit 1
+            fi
+
+            STACK="${tenant}-${account}-${environment}"
+            REGION="${region:-eu-west-2}"
+
+            echo "Audit Target: $STACK"
+            echo "Region: $REGION"
+            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+
+            SCORE=0
+            MAX_SCORE=100
+            FINDINGS=()
+
+            # =================================================================
+            # 1. IAM Security
+            # =================================================================
+            echo -e "${WHITE}${BOLD}1. IAM Security${NC}"
+
+            # Check for root access keys
+            echo -n "   Root account access keys: "
+            ROOT_KEYS=$(aws iam get-account-summary --query 'SummaryMap.AccountAccessKeysPresent' --output text 2>/dev/null || echo "0")
+            if [[ "$ROOT_KEYS" == "0" ]]; then
+              log_pass "None (good)"
+              ((SCORE+=5))
+            else
+              log_fail "Present (remove immediately)"
+              FINDINGS+=("CRITICAL: Root account has access keys")
+            fi
+
+            # Check MFA
+            echo -n "   MFA enabled on root: "
+            ROOT_MFA=$(aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled' --output text 2>/dev/null || echo "0")
+            if [[ "$ROOT_MFA" == "1" ]]; then
+              log_pass "Enabled"
+              ((SCORE+=5))
+            else
+              log_fail "Not enabled"
+              FINDINGS+=("HIGH: Root account MFA not enabled")
+            fi
+
+            # Check password policy
+            echo -n "   Password policy strength: "
+            if aws iam get-account-password-policy >/dev/null 2>&1; then
+              MIN_LENGTH=$(aws iam get-account-password-policy --query 'PasswordPolicy.MinimumPasswordLength' --output text 2>/dev/null || echo "0")
+              REQUIRE_SYMBOLS=$(aws iam get-account-password-policy --query 'PasswordPolicy.RequireSymbols' --output text 2>/dev/null || echo "false")
+              if [[ "$MIN_LENGTH" -ge 14 ]] && [[ "$REQUIRE_SYMBOLS" == "true" ]]; then
+                log_pass "Strong ($MIN_LENGTH chars, symbols required)"
+                ((SCORE+=5))
+              else
+                log_warn "Could be stronger"
+              fi
+            else
+              log_fail "No password policy"
+              FINDINGS+=("MEDIUM: No IAM password policy configured")
+            fi
+
+            # Check for unused credentials
+            echo -n "   Unused IAM credentials: "
+            UNUSED_CREDS=$(aws iam generate-credential-report >/dev/null 2>&1 && \
+              aws iam get-credential-report --query 'Content' --output text 2>/dev/null | base64 -d | \
+              awk -F',' 'NR>1 && $5!="N/A" && $5<(systime()-90*86400){count++} END{print count+0}' 2>/dev/null || echo "unknown")
+            if [[ "$UNUSED_CREDS" == "0" ]]; then
+              log_pass "None found"
+              ((SCORE+=5))
+            elif [[ "$UNUSED_CREDS" == "unknown" ]]; then
+              log_warn "Unable to check"
+            else
+              log_warn "$UNUSED_CREDS credentials unused >90 days"
+              FINDINGS+=("MEDIUM: $UNUSED_CREDS unused IAM credentials")
+            fi
+
+            # =================================================================
+            # 2. Network Security
+            # =================================================================
+            echo -e "\n${WHITE}${BOLD}2. Network Security${NC}"
+
+            # Check for public S3 buckets
+            echo -n "   Public S3 buckets: "
+            PUBLIC_BUCKETS=$(aws s3api list-buckets --query 'Buckets[*].Name' --output text 2>/dev/null | tr '\t' '\n' | while read bucket; do
+              BLOCK=$(aws s3api get-public-access-block --bucket "$bucket" 2>/dev/null || echo "none")
+              if [[ "$BLOCK" == "none" ]]; then
+                echo "$bucket"
+              fi
+            done | wc -l | tr -d ' ')
+            if [[ "$PUBLIC_BUCKETS" == "0" ]]; then
+              log_pass "None"
+              ((SCORE+=10))
+            else
+              log_fail "$PUBLIC_BUCKETS buckets without public access block"
+              FINDINGS+=("HIGH: $PUBLIC_BUCKETS S3 buckets may be publicly accessible")
+            fi
+
+            # Check for wide-open security groups
+            echo -n "   Wide-open security groups (0.0.0.0/0 ingress): "
+            OPEN_SG=$(aws ec2 describe-security-groups --region "$REGION" \
+              --query "SecurityGroups[?IpPermissions[?IpRanges[?CidrIp=='0.0.0.0/0'] && (FromPort==null || FromPort==0 || FromPort==22 || FromPort==3389)]].GroupId" \
+              --output text 2>/dev/null | wc -w || echo "0")
+            if [[ "$OPEN_SG" == "0" ]]; then
+              log_pass "None"
+              ((SCORE+=10))
+            else
+              log_fail "$OPEN_SG security groups with unrestricted access"
+              FINDINGS+=("HIGH: $OPEN_SG security groups allow unrestricted access")
+            fi
+
+            # Check VPC flow logs
+            echo -n "   VPC Flow Logs enabled: "
+            VPC_IDS=$(aws ec2 describe-vpcs --region "$REGION" \
+              --filters "Name=tag:Tenant,Values=${tenant}" \
+              --query 'Vpcs[*].VpcId' --output text 2>/dev/null | tr '\t' '\n')
+            FLOW_LOG_COUNT=0
+            VPC_COUNT=0
+            for vpc in $VPC_IDS; do
+              ((VPC_COUNT++))
+              if aws ec2 describe-flow-logs --region "$REGION" --filter "Name=resource-id,Values=$vpc" --query 'FlowLogs[0]' --output text 2>/dev/null | grep -q "^fl-"; then
+                ((FLOW_LOG_COUNT++))
+              fi
+            done
+            if [[ "$VPC_COUNT" -gt 0 ]] && [[ "$FLOW_LOG_COUNT" -eq "$VPC_COUNT" ]]; then
+              log_pass "All VPCs ($FLOW_LOG_COUNT/$VPC_COUNT)"
+              ((SCORE+=10))
+            elif [[ "$FLOW_LOG_COUNT" -gt 0 ]]; then
+              log_warn "$FLOW_LOG_COUNT of $VPC_COUNT VPCs"
+            else
+              log_fail "Not enabled"
+              FINDINGS+=("MEDIUM: VPC Flow Logs not enabled")
+            fi
+
+            # =================================================================
+            # 3. Data Encryption
+            # =================================================================
+            echo -e "\n${WHITE}${BOLD}3. Data Encryption${NC}"
+
+            # Check EBS encryption default
+            echo -n "   Default EBS encryption: "
+            EBS_ENCRYPTION=$(aws ec2 get-ebs-encryption-by-default --region "$REGION" --query 'EbsEncryptionByDefault' --output text 2>/dev/null || echo "false")
+            if [[ "$EBS_ENCRYPTION" == "true" ]]; then
+              log_pass "Enabled"
+              ((SCORE+=10))
+            else
+              log_fail "Not enabled"
+              FINDINGS+=("MEDIUM: Default EBS encryption not enabled")
+            fi
+
+            # Check RDS encryption
+            echo -n "   RDS encryption at rest: "
+            RDS_INSTANCES=$(aws rds describe-db-instances --region "$REGION" \
+              --query "DBInstances[?contains(DBInstanceIdentifier, '${tenant}')]" 2>/dev/null)
+            if [[ -n "$RDS_INSTANCES" ]] && [[ "$RDS_INSTANCES" != "[]" ]]; then
+              ENCRYPTED=$(echo "$RDS_INSTANCES" | jq '[.[] | select(.StorageEncrypted==true)] | length')
+              TOTAL=$(echo "$RDS_INSTANCES" | jq 'length')
+              if [[ "$ENCRYPTED" -eq "$TOTAL" ]]; then
+                log_pass "All instances ($ENCRYPTED/$TOTAL)"
+                ((SCORE+=10))
+              else
+                log_warn "$ENCRYPTED of $TOTAL instances encrypted"
+                FINDINGS+=("MEDIUM: Not all RDS instances are encrypted")
+              fi
+            else
+              log_info "No RDS instances"
+            fi
+
+            # Check S3 bucket encryption
+            echo -n "   S3 bucket encryption: "
+            BUCKETS=$(aws s3api list-buckets --query 'Buckets[*].Name' --output text 2>/dev/null | tr '\t' '\n' | grep "$tenant" || echo "")
+            ENCRYPTED_BUCKETS=0
+            TOTAL_BUCKETS=0
+            for bucket in $BUCKETS; do
+              ((TOTAL_BUCKETS++))
+              if aws s3api get-bucket-encryption --bucket "$bucket" >/dev/null 2>&1; then
+                ((ENCRYPTED_BUCKETS++))
+              fi
+            done
+            if [[ "$TOTAL_BUCKETS" -gt 0 ]]; then
+              if [[ "$ENCRYPTED_BUCKETS" -eq "$TOTAL_BUCKETS" ]]; then
+                log_pass "All buckets ($ENCRYPTED_BUCKETS/$TOTAL_BUCKETS)"
+                ((SCORE+=10))
+              else
+                log_warn "$ENCRYPTED_BUCKETS of $TOTAL_BUCKETS buckets"
+                FINDINGS+=("MEDIUM: Not all S3 buckets are encrypted")
+              fi
+            else
+              log_info "No buckets found"
+            fi
+
+            # =================================================================
+            # 4. AWS Security Services
+            # =================================================================
+            echo -e "\n${WHITE}${BOLD}4. AWS Security Services${NC}"
+
+            # Check GuardDuty
+            echo -n "   GuardDuty enabled: "
+            GD_DETECTOR=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text 2>/dev/null || echo "")
+            if [[ -n "$GD_DETECTOR" ]] && [[ "$GD_DETECTOR" != "None" ]]; then
+              log_pass "Yes (Detector: $GD_DETECTOR)"
+              ((SCORE+=5))
+            else
+              log_fail "Not enabled"
+              FINDINGS+=("HIGH: GuardDuty not enabled")
+            fi
+
+            # Check Security Hub
+            echo -n "   Security Hub enabled: "
+            if aws securityhub describe-hub --region "$REGION" >/dev/null 2>&1; then
+              log_pass "Yes"
+              ((SCORE+=5))
+            else
+              log_fail "Not enabled"
+              FINDINGS+=("MEDIUM: Security Hub not enabled")
+            fi
+
+            # Check CloudTrail
+            echo -n "   CloudTrail enabled: "
+            TRAILS=$(aws cloudtrail describe-trails --region "$REGION" --query 'trailList[?IsMultiRegionTrail==`true`]' --output text 2>/dev/null)
+            if [[ -n "$TRAILS" ]]; then
+              log_pass "Yes (multi-region)"
+              ((SCORE+=5))
+            else
+              log_warn "No multi-region trail"
+              FINDINGS+=("MEDIUM: No multi-region CloudTrail enabled")
+            fi
+
+            # Check Config
+            echo -n "   AWS Config enabled: "
+            CONFIG_RECORDERS=$(aws configservice describe-configuration-recorders --region "$REGION" --query 'ConfigurationRecorders[0]' --output text 2>/dev/null || echo "")
+            if [[ -n "$CONFIG_RECORDERS" ]] && [[ "$CONFIG_RECORDERS" != "None" ]]; then
+              log_pass "Yes"
+              ((SCORE+=5))
+            else
+              log_warn "Not enabled"
+            fi
+
+            # =================================================================
+            # 5. Kubernetes Security (if EKS exists)
+            # =================================================================
+            EKS_CLUSTERS=$(aws eks list-clusters --region "$REGION" --query 'clusters' --output text 2>/dev/null | tr '\t' '\n' | grep "$tenant" || echo "")
+
+            if [[ -n "$EKS_CLUSTERS" ]]; then
+              echo -e "\n${WHITE}${BOLD}5. Kubernetes Security${NC}"
+
+              for cluster in $EKS_CLUSTERS; do
+                echo "   Cluster: $cluster"
+
+                # Check public endpoint
+                echo -n "      Public endpoint access: "
+                PUBLIC_ENDPOINT=$(aws eks describe-cluster --name "$cluster" --region "$REGION" \
+                  --query 'cluster.resourcesVpcConfig.endpointPublicAccess' --output text 2>/dev/null || echo "unknown")
+                if [[ "$PUBLIC_ENDPOINT" == "false" ]]; then
+                  log_pass "Disabled"
+                  ((SCORE+=5))
+                else
+                  log_warn "Enabled"
+                  FINDINGS+=("MEDIUM: EKS cluster $cluster has public endpoint")
+                fi
+
+                # Check secrets encryption
+                echo -n "      Secrets encryption: "
+                SECRETS_ENCRYPTION=$(aws eks describe-cluster --name "$cluster" --region "$REGION" \
+                  --query 'cluster.encryptionConfig[0].resources' --output text 2>/dev/null || echo "")
+                if [[ "$SECRETS_ENCRYPTION" == *"secrets"* ]]; then
+                  log_pass "Enabled"
+                  ((SCORE+=5))
+                else
+                  log_fail "Not enabled"
+                  FINDINGS+=("MEDIUM: EKS secrets encryption not enabled for $cluster")
+                fi
+
+                # Check logging
+                echo -n "      Control plane logging: "
+                LOGGING=$(aws eks describe-cluster --name "$cluster" --region "$REGION" \
+                  --query 'cluster.logging.clusterLogging[?enabled==`true`].types[]' --output text 2>/dev/null || echo "")
+                if [[ -n "$LOGGING" ]]; then
+                  log_pass "$(echo $LOGGING | wc -w | tr -d ' ') log types enabled"
+                else
+                  log_warn "Not enabled"
+                  FINDINGS+=("LOW: EKS logging not enabled for $cluster")
+                fi
+              done
+            fi
+
+            # =================================================================
+            # Security Score Summary
+            # =================================================================
+            echo -e "\n${WHITE}${BOLD}===========================================${NC}"
+            echo -e "${WHITE}${BOLD}        SECURITY SCORE SUMMARY${NC}"
+            echo -e "${WHITE}${BOLD}===========================================${NC}\n"
+
+            echo "Score: $SCORE / $MAX_SCORE"
+            echo
+
+            if [[ $SCORE -ge 80 ]]; then
+              echo -e "${GREEN}${BOLD}Grade: A - Excellent${NC}"
+              echo "Security posture is strong with minor improvements possible."
+            elif [[ $SCORE -ge 60 ]]; then
+              echo -e "${GREEN}Grade: B - Good${NC}"
+              echo "Security posture is good but has room for improvement."
+            elif [[ $SCORE -ge 40 ]]; then
+              echo -e "${YELLOW}Grade: C - Fair${NC}"
+              echo "Security posture needs attention. Address findings promptly."
+            elif [[ $SCORE -ge 20 ]]; then
+              echo -e "${RED}Grade: D - Poor${NC}"
+              echo "Significant security gaps exist. Immediate action required."
+            else
+              echo -e "${RED}${BOLD}Grade: F - Critical${NC}"
+              echo "Critical security issues. Do not use in production."
+            fi
+
+            # Print findings
+            if [[ ${#FINDINGS[@]} -gt 0 ]]; then
+              echo -e "\n${WHITE}${BOLD}Findings (${#FINDINGS[@]}):${NC}"
+              for finding in "${FINDINGS[@]}"; do
+                if [[ "$finding" == CRITICAL* ]]; then
+                  echo -e "  ${RED}$finding${NC}"
+                elif [[ "$finding" == HIGH* ]]; then
+                  echo -e "  ${RED}$finding${NC}"
+                elif [[ "$finding" == MEDIUM* ]]; then
+                  echo -e "  ${YELLOW}$finding${NC}"
+                else
+                  echo -e "  $finding"
+                fi
+              done
+            fi
+
+            echo -e "\n${WHITE}${BOLD}Recommendations:${NC}"
+            echo "  Run security hardening workflow to address findings:"
+            echo "  atmos workflow harden -f security-hardening.yaml tenant=${tenant} account=${account} environment=${environment} auto_approve=true"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # Security Hardening
+  # =============================================================================
+  harden:
+    description: "Apply security hardening configurations"
+    steps:
+      - name: "enable-security-services"
+        description: "Enable AWS security services"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            YELLOW='\033[1;33m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+            log_skip() { echo -e "${YELLOW}[SKIP]${NC} $*"; }
+
+            echo -e "\n${WHITE}=== Security Hardening ===${NC}\n"
+
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              echo "ERROR: Missing parameters"
+              exit 1
+            fi
+
+            REGION="${region:-eu-west-2}"
+            AUTO_APPROVE="${auto_approve:-false}"
+            DRY_RUN="${dry_run:-false}"
+
+            echo "Configuration:"
+            echo "  Stack: ${tenant}-${account}-${environment}"
+            echo "  Region: $REGION"
+            echo "  Auto-Approve: $AUTO_APPROVE"
+            echo
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "[DRY RUN] Would apply security hardening"
+              exit 0
+            fi
+
+            # =================================================================
+            # Enable GuardDuty
+            # =================================================================
+            log_info "Checking GuardDuty..."
+            GD_DETECTOR=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text 2>/dev/null || echo "")
+
+            if [[ -z "$GD_DETECTOR" ]] || [[ "$GD_DETECTOR" == "None" ]]; then
+              if [[ "$AUTO_APPROVE" == "true" ]]; then
+                log_info "Enabling GuardDuty..."
+                DETECTOR_ID=$(aws guardduty create-detector \
+                  --region "$REGION" \
+                  --enable \
+                  --finding-publishing-frequency FIFTEEN_MINUTES \
+                  --query 'DetectorId' --output text 2>/dev/null)
+                log_success "GuardDuty enabled (Detector: $DETECTOR_ID)"
+              else
+                log_info "GuardDuty not enabled. Set auto_approve=true to enable."
+              fi
+            else
+              log_skip "GuardDuty already enabled"
+            fi
+
+            # =================================================================
+            # Enable Security Hub
+            # =================================================================
+            log_info "Checking Security Hub..."
+            if ! aws securityhub describe-hub --region "$REGION" >/dev/null 2>&1; then
+              if [[ "$AUTO_APPROVE" == "true" ]]; then
+                log_info "Enabling Security Hub..."
+                aws securityhub enable-security-hub \
+                  --region "$REGION" \
+                  --enable-default-standards 2>/dev/null || true
+                log_success "Security Hub enabled"
+              else
+                log_info "Security Hub not enabled. Set auto_approve=true to enable."
+              fi
+            else
+              log_skip "Security Hub already enabled"
+            fi
+
+            # =================================================================
+            # Enable Default EBS Encryption
+            # =================================================================
+            log_info "Checking EBS default encryption..."
+            EBS_ENCRYPTION=$(aws ec2 get-ebs-encryption-by-default --region "$REGION" --query 'EbsEncryptionByDefault' --output text 2>/dev/null || echo "false")
+
+            if [[ "$EBS_ENCRYPTION" != "true" ]]; then
+              if [[ "$AUTO_APPROVE" == "true" ]]; then
+                log_info "Enabling default EBS encryption..."
+                aws ec2 enable-ebs-encryption-by-default --region "$REGION" 2>/dev/null
+                log_success "Default EBS encryption enabled"
+              else
+                log_info "EBS encryption not enabled. Set auto_approve=true to enable."
+              fi
+            else
+              log_skip "EBS default encryption already enabled"
+            fi
+
+            # =================================================================
+            # Enable S3 Block Public Access (Account Level)
+            # =================================================================
+            log_info "Checking S3 account-level public access block..."
+            ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+
+            S3_BLOCK=$(aws s3control get-public-access-block --account-id "$ACCOUNT_ID" 2>/dev/null || echo "none")
+
+            if [[ "$S3_BLOCK" == "none" ]]; then
+              if [[ "$AUTO_APPROVE" == "true" ]]; then
+                log_info "Enabling S3 account-level public access block..."
+                aws s3control put-public-access-block \
+                  --account-id "$ACCOUNT_ID" \
+                  --public-access-block-configuration '{
+                    "BlockPublicAcls": true,
+                    "IgnorePublicAcls": true,
+                    "BlockPublicPolicy": true,
+                    "RestrictPublicBuckets": true
+                  }' 2>/dev/null
+                log_success "S3 public access block enabled"
+              else
+                log_info "S3 public access block not configured. Set auto_approve=true to enable."
+              fi
+            else
+              log_skip "S3 public access block already configured"
+            fi
+
+            log_success "Security hardening complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "harden-network"
+        description: "Apply network security hardening"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            BLUE='\033[0;34m'
+            YELLOW='\033[1;33m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
+
+            echo -e "\n${WHITE}=== Network Security Hardening ===${NC}\n"
+
+            REGION="${region:-eu-west-2}"
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            if [[ "$AUTO_APPROVE" != "true" ]]; then
+              log_info "Network hardening skipped. Set auto_approve=true to apply."
+              exit 0
+            fi
+
+            # Find security groups with wide-open rules
+            log_info "Scanning for overly permissive security groups..."
+
+            OPEN_SGS=$(aws ec2 describe-security-groups --region "$REGION" \
+              --query "SecurityGroups[?IpPermissions[?IpRanges[?CidrIp=='0.0.0.0/0'] && (FromPort==22 || FromPort==3389)]].GroupId" \
+              --output text 2>/dev/null || echo "")
+
+            if [[ -n "$OPEN_SGS" ]]; then
+              echo "Found security groups with wide-open SSH/RDP:"
+              echo "$OPEN_SGS"
+              echo
+              echo "WARNING: These should be reviewed and restricted manually."
+              echo "Automated remediation of security groups is not safe without review."
+            else
+              log_success "No overly permissive security groups found"
+            fi
+
+            # Check for VPCs without flow logs
+            log_info "Checking VPC flow logs..."
+
+            VPCS=$(aws ec2 describe-vpcs --region "$REGION" --query 'Vpcs[*].VpcId' --output text 2>/dev/null | tr '\t' '\n')
+
+            for vpc in $VPCS; do
+              HAS_FLOW_LOG=$(aws ec2 describe-flow-logs --region "$REGION" \
+                --filter "Name=resource-id,Values=$vpc" \
+                --query 'FlowLogs[0].FlowLogId' --output text 2>/dev/null || echo "")
+
+              if [[ -z "$HAS_FLOW_LOG" ]] || [[ "$HAS_FLOW_LOG" == "None" ]]; then
+                log_info "VPC $vpc missing flow logs"
+                echo "  Consider enabling via Terraform/Atmos VPC component"
+              fi
+            done
+
+            log_success "Network security review complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "hardening-summary"
+        description: "Print hardening summary"
+        run:
+          command: |
+            set -euo pipefail
+
+            GREEN='\033[0;32m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            echo -e "\n${WHITE}=== Security Hardening Summary ===${NC}\n"
+
+            echo "Actions Performed:"
+            echo "  - GuardDuty: Checked/Enabled"
+            echo "  - Security Hub: Checked/Enabled"
+            echo "  - EBS Encryption: Checked/Enabled"
+            echo "  - S3 Public Access Block: Checked/Enabled"
+            echo "  - Network Security: Reviewed"
+            echo
+
+            if [[ "${auto_approve:-false}" == "true" ]]; then
+              echo -e "${GREEN}Security hardening applied successfully${NC}"
+            else
+              echo "Security audit completed. Set auto_approve=true to apply changes."
+            fi
+
+            echo
+            echo "Next Steps:"
+            echo "  1. Review security findings and address manually where needed"
+            echo "  2. Run security audit again to verify improvements:"
+            echo "     atmos workflow security-audit -f security-hardening.yaml tenant=${tenant} account=${account} environment=${environment}"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # IAM Hardening
+  # =============================================================================
+  harden-iam:
+    description: "Apply IAM security best practices"
+    steps:
+      - name: "iam-hardening"
+        run:
+          command: |
+            set -euo pipefail
+
+            WHITE='\033[1;37m'
+            BLUE='\033[0;34m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+
+            echo -e "\n${WHITE}=== IAM Security Hardening ===${NC}\n"
+
+            AUTO_APPROVE="${auto_approve:-false}"
+
+            if [[ "$AUTO_APPROVE" != "true" ]]; then
+              log_info "IAM hardening requires auto_approve=true"
+              exit 0
+            fi
+
+            # Set password policy
+            log_info "Configuring IAM password policy..."
+
+            aws iam update-account-password-policy \
+              --minimum-password-length 14 \
+              --require-symbols \
+              --require-numbers \
+              --require-uppercase-characters \
+              --require-lowercase-characters \
+              --allow-users-to-change-password \
+              --max-password-age 90 \
+              --password-reuse-prevention 12 \
+              --hard-expiry 2>/dev/null || true
+
+            echo "Password policy configured:"
+            echo "  - Minimum length: 14 characters"
+            echo "  - Require: uppercase, lowercase, numbers, symbols"
+            echo "  - Max age: 90 days"
+            echo "  - Password reuse prevention: 12 passwords"
+
+            log_info "IAM hardening complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1

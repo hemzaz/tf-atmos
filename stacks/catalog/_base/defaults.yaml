@@ -1,0 +1,48 @@
+---
+# Base Catalog Defaults
+# This file contains common settings that all components should inherit
+# Import this file first in other catalog defaults to reduce duplication
+
+name: base-defaults
+description: "Base configuration defaults for all Atmos components"
+
+# Common component settings that apply to all Terraform components
+components:
+  terraform:
+    _base:
+      metadata:
+        type: abstract
+      # Common tags applied to all resources
+      tags:
+        Tenant: "${tenant}"
+        Account: "${account}"
+        Environment: "${environment}"
+        ManagedBy: "Terraform"
+        Provisioner: "Atmos"
+        Project: "tf-atmos"
+
+      # Common variables inherited by all components
+      vars:
+        enabled: true
+        region: "${region}"
+
+      # Provider configuration inherited by all components
+      providers:
+        aws:
+          region: "${region}"
+
+# Note: Backend configuration is centralized in atmos.yaml
+# Components should NOT define their own backend settings
+# The backend is auto-generated based on atmos.yaml configuration
+
+# Common global variables
+vars:
+  # These are inherited from parent stacks and should NOT be overridden here
+  # tenant: "${tenant}"     # Inherited from org defaults
+  # account: "${account}"   # Inherited from account defaults
+  # environment: "${environment}"  # Inherited from environment stack
+
+  # Default feature flags that can be overridden per environment
+  default_tags_enabled: true
+  encryption_enabled: true
+  monitoring_enabled: true

@@ -1,0 +1,48 @@
+---
+# =============================================================================
+# Production Account Defaults
+# =============================================================================
+# Default configuration for all production environments
+# Security and reliability are paramount in production
+# =============================================================================
+
+import:
+  - orgs/fnx/_defaults
+  - mixins/tenant/fnx
+  - mixins/stage/prod
+
+vars:
+  # Account identification
+  account: prod
+  account_id: "${env:AWS_PROD_ACCOUNT_ID, 123456789012}"  # Replace with actual account ID
+  aws_profile: "prod"
+
+  # Production-specific defaults
+  stage: prod
+
+  # Instance sizing for production
+  instance_type_default: "m5.large"
+  rds_instance_class_default: "db.r5.large"
+
+  # Production retention requirements
+  log_retention_days: 90
+  backup_retention_days: 30
+
+  # Security settings - strict for production
+  enable_deletion_protection: true
+  enable_multi_az: true
+  enable_encryption: true
+  enable_enhanced_monitoring: true
+
+  # Performance settings
+  enable_performance_insights: true
+  performance_insights_retention: 7
+
+  # High availability
+  min_availability_zones: 3
+
+tags:
+  Stage: production
+  CostCenter: "prod-infra"
+  DataClassification: "confidential"
+  Compliance: "required"

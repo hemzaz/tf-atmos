@@ -2,60 +2,53 @@
 name: iam
 description: "Reusable IAM configuration for cross-account access"
 
+# Import base configuration
+import:
+  - catalog/_base/defaults
+
 components:
   terraform:
     iam:
       metadata:
         component: iam
         type: abstract
+        version: "1.0.0"
+        description: "Manages IAM roles for cross-account access and CI/CD"
+        category: "security"
+      depends_on:
+        - backend
       vars:
-        tenant: "${tenant}"
+        # Component-specific variables only
+        # Base variables (tenant, account, environment, region) inherited from _base
         enabled: true
-        region: ${region}
-        management_account_id: ${management_account_id}
-        target_account_id: ${target_account_id}
+        management_account_id: "${management_account_id}"
+        target_account_id: "${target_account_id}"
         cross_account_role_name: "${tenant}-${account}-${environment}-CrossAccountRole"
         policy_name: "${tenant}-${account}-${environment}-CrossAccountPolicy"
 
-      # Define common tags
+      # Component-specific tags (merged with base tags)
       tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
         Component: "IAM"
-        ManagedBy: "Terraform"
 
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/iam/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
+      # Provider configuration - inherits region from base
       providers:
         aws:
-          profile: ${aws_profile}
-          region: ${region}
+          profile: "${aws_profile}"
+          region: "${region}"
           assume_role:
-            role_arn: arn:aws:iam::${target_account_id}:role/${tenant}-${account}-${environment}-TerraformExecutionRole
+            role_arn: "arn:aws:iam::${target_account_id}:role/${tenant}-${account}-${environment}-TerraformExecutionRole"
 
-      # Define common outputs
+      # Define component outputs with correct spelling
       outputs:
         cross_account_role_arn:
           description: "ARN of the created cross-account IAM role"
-          value: ${output.cross_account_role_arn}
-        cross_accounr_role_name:
+          value: "${output.cross_account_role_arn}"
+        cross_account_role_name:
           description: "Name of the created cross-account IAM role"
-          value: ${output.cross_account_role_name}
+          value: "${output.cross_account_role_name}"
+        policy_arn:
+          description: "ARN of the IAM policy attached to the role"
+          value: "${output.policy_arn}"
 
-# You can add more components or configurations as needed
-
-vars:
-  tenant: "${tenant}"
-  account: "${account}"
-  environment: "${environment}"
+# Note: Removed redundant vars block that was self-referential
+# Variables like tenant, account, environment are inherited from parent stacks

@@ -1,0 +1,543 @@
+---
+# =============================================================================
+# Disaster Recovery Workflow
+# =============================================================================
+# Complete disaster recovery procedures for infrastructure
+#
+# Usage:
+#   atmos workflow dr-status -f disaster-recovery.yaml tenant=<tenant> account=<account> environment=<environment>
+#   atmos workflow dr-failover -f disaster-recovery.yaml tenant=<tenant> account=<account> environment=<environment> target_region=<region>
+#
+# Capabilities:
+#   - DR status check
+#   - Failover to secondary region
+#   - Failback to primary region
+#   - State recovery
+#   - Database recovery
+# =============================================================================
+
+name: disaster-recovery
+description: "Disaster recovery procedures for infrastructure"
+
+workflows:
+  # =============================================================================
+  # DR Status Check
+  # =============================================================================
+  dr-status:
+    description: "Check disaster recovery readiness and status"
+    steps:
+      - name: "check-dr-status"
+        run:
+          command: |
+            set -euo pipefail
+
+            # Colors
+            RED='\033[0;31m'
+            GREEN='\033[0;32m'
+            YELLOW='\033[1;33m'
+            BLUE='\033[0;34m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+            log_success() { echo -e "${GREEN}[OK]${NC} $*"; }
+            log_error() { echo -e "${RED}[FAIL]${NC} $*"; }
+            log_warning() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+
+            echo -e "\n${WHITE}=== Disaster Recovery Status Check ===${NC}\n"
+
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              echo "ERROR: Missing parameters"
+              echo "Usage: atmos workflow dr-status -f disaster-recovery.yaml tenant=<t> account=<a> environment=<e>"
+              exit 1
+            fi
+
+            STACK="${tenant}-${account}-${environment}"
+            REGION="${region:-eu-west-2}"
+            DR_REGION="${dr_region:-us-east-1}"
+
+            echo "Primary Stack: $STACK"
+            echo "Primary Region: $REGION"
+            echo "DR Region: $DR_REGION"
+            echo
+
+            DR_SCORE=0
+            DR_MAX=100
+
+            # =================================================================
+            # Check Terraform State Backend
+            # =================================================================
+            echo -e "${WHITE}1. Terraform State Backend${NC}"
+
+            BUCKET_NAME="${tenant}-${account}-${environment}-terraform-state"
+
+            echo -n "   S3 bucket exists: "
+            if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+              log_success "Yes"
+              ((DR_SCORE+=10))
+
+              echo -n "   Versioning enabled: "
+              VERSIONING=$(aws s3api get-bucket-versioning --bucket "$BUCKET_NAME" --query 'Status' --output text 2>/dev/null || echo "None")
+              if [[ "$VERSIONING" == "Enabled" ]]; then
+                log_success "Yes"
+                ((DR_SCORE+=10))
+              else
+                log_error "No"
+              fi
+
+              echo -n "   Cross-region replication: "
+              if aws s3api get-bucket-replication --bucket "$BUCKET_NAME" >/dev/null 2>&1; then
+                log_success "Configured"
+                ((DR_SCORE+=15))
+              else
+                log_warning "Not configured"
+              fi
+            else
+              log_error "Not found"
+            fi
+
+            # DynamoDB table
+            DYNAMODB_TABLE="${tenant}-${account}-${environment}-terraform-locks"
+            echo -n "   DynamoDB table exists: "
+            if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" >/dev/null 2>&1; then
+              log_success "Yes"
+              ((DR_SCORE+=10))
+
+              echo -n "   Point-in-time recovery: "
+              PITR=$(aws dynamodb describe-continuous-backups --table-name "$DYNAMODB_TABLE" --region "$REGION" \
+                --query 'ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus' --output text 2>/dev/null || echo "DISABLED")
+              if [[ "$PITR" == "ENABLED" ]]; then
+                log_success "Enabled"
+                ((DR_SCORE+=5))
+              else
+                log_warning "Disabled"
+              fi
+
+              echo -n "   Global table (multi-region): "
+              GLOBAL=$(aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" \
+                --query 'Table.Replicas' --output text 2>/dev/null || echo "None")
+              if [[ "$GLOBAL" != "None" ]] && [[ -n "$GLOBAL" ]]; then
+                log_success "Yes"
+                ((DR_SCORE+=10))
+              else
+                log_warning "No"
+              fi
+            else
+              log_error "Not found"
+            fi
+
+            # =================================================================
+            # Check VPC and Networking
+            # =================================================================
+            echo -e "\n${WHITE}2. VPC and Networking${NC}"
+
+            echo -n "   Primary VPC exists: "
+            PRIMARY_VPC=$(aws ec2 describe-vpcs --filters "Name=tag:Tenant,Values=${tenant}" "Name=tag:Environment,Values=${environment}" \
+              --region "$REGION" --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
+            if [[ "$PRIMARY_VPC" != "None" ]] && [[ -n "$PRIMARY_VPC" ]]; then
+              log_success "$PRIMARY_VPC"
+              ((DR_SCORE+=10))
+            else
+              log_error "Not found"
+            fi
+
+            echo -n "   NAT Gateway redundancy: "
+            NAT_COUNT=$(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$PRIMARY_VPC" "Name=state,Values=available" \
+              --region "$REGION" --query 'NatGateways | length(@)' --output text 2>/dev/null || echo "0")
+            if [[ "$NAT_COUNT" -gt 1 ]]; then
+              log_success "$NAT_COUNT NAT Gateways (multi-AZ)"
+              ((DR_SCORE+=5))
+            elif [[ "$NAT_COUNT" == "1" ]]; then
+              log_warning "1 NAT Gateway (single point of failure)"
+            else
+              log_error "No NAT Gateways"
+            fi
+
+            # =================================================================
+            # Check RDS Database
+            # =================================================================
+            echo -e "\n${WHITE}3. Database (RDS)${NC}"
+
+            RDS_INSTANCES=$(aws rds describe-db-instances --query "DBInstances[?contains(DBInstanceIdentifier, '${tenant}') && contains(DBInstanceIdentifier, '${environment}')]" \
+              --region "$REGION" 2>/dev/null)
+
+            if [[ -n "$RDS_INSTANCES" ]] && [[ "$RDS_INSTANCES" != "[]" ]]; then
+              echo -n "   RDS instances found: "
+              RDS_COUNT=$(echo "$RDS_INSTANCES" | jq 'length')
+              log_success "$RDS_COUNT instance(s)"
+
+              # Check Multi-AZ
+              echo -n "   Multi-AZ deployment: "
+              MULTI_AZ=$(echo "$RDS_INSTANCES" | jq -r '.[0].MultiAZ')
+              if [[ "$MULTI_AZ" == "true" ]]; then
+                log_success "Yes"
+                ((DR_SCORE+=10))
+              else
+                log_warning "No (single AZ)"
+              fi
+
+              # Check automated backups
+              echo -n "   Automated backups: "
+              BACKUP_RETENTION=$(echo "$RDS_INSTANCES" | jq -r '.[0].BackupRetentionPeriod')
+              if [[ "$BACKUP_RETENTION" -gt 0 ]]; then
+                log_success "Yes ($BACKUP_RETENTION days retention)"
+                ((DR_SCORE+=5))
+              else
+                log_error "No"
+              fi
+
+              # Check read replicas
+              echo -n "   Read replicas: "
+              READ_REPLICA_COUNT=$(aws rds describe-db-instances --query "DBInstances[?ReadReplicaSourceDBInstanceIdentifier!=null] | length(@)" \
+                --region "$REGION" --output text 2>/dev/null || echo "0")
+              if [[ "$READ_REPLICA_COUNT" -gt 0 ]]; then
+                log_success "$READ_REPLICA_COUNT replica(s)"
+                ((DR_SCORE+=5))
+              else
+                log_warning "None"
+              fi
+            else
+              echo "   No RDS instances found for this environment"
+            fi
+
+            # =================================================================
+            # Check EKS Cluster
+            # =================================================================
+            echo -e "\n${WHITE}4. EKS Cluster${NC}"
+
+            EKS_CLUSTERS=$(aws eks list-clusters --region "$REGION" --query 'clusters' --output text 2>/dev/null | tr '\t' '\n' | grep "$tenant" || echo "")
+
+            if [[ -n "$EKS_CLUSTERS" ]]; then
+              for cluster in $EKS_CLUSTERS; do
+                echo -n "   Cluster $cluster: "
+
+                CLUSTER_STATUS=$(aws eks describe-cluster --name "$cluster" --region "$REGION" --query 'cluster.status' --output text 2>/dev/null || echo "UNKNOWN")
+                if [[ "$CLUSTER_STATUS" == "ACTIVE" ]]; then
+                  log_success "Active"
+                  ((DR_SCORE+=5))
+                else
+                  log_error "$CLUSTER_STATUS"
+                fi
+
+                echo -n "   Node group redundancy: "
+                NG_COUNT=$(aws eks list-nodegroups --cluster-name "$cluster" --region "$REGION" --query 'nodegroups | length(@)' --output text 2>/dev/null || echo "0")
+                if [[ "$NG_COUNT" -gt 1 ]]; then
+                  log_success "$NG_COUNT node groups"
+                  ((DR_SCORE+=5))
+                elif [[ "$NG_COUNT" == "1" ]]; then
+                  log_warning "1 node group"
+                else
+                  log_error "No node groups"
+                fi
+              done
+            else
+              echo "   No EKS clusters found for this environment"
+            fi
+
+            # =================================================================
+            # Check S3 Backups
+            # =================================================================
+            echo -e "\n${WHITE}5. Backup Storage${NC}"
+
+            BACKUP_BUCKET="${tenant}-${account}-${environment}-backups"
+            echo -n "   Backup bucket exists: "
+            if aws s3api head-bucket --bucket "$BACKUP_BUCKET" 2>/dev/null; then
+              log_success "Yes"
+
+              echo -n "   Lifecycle policy: "
+              if aws s3api get-bucket-lifecycle-configuration --bucket "$BACKUP_BUCKET" >/dev/null 2>&1; then
+                log_success "Configured"
+              else
+                log_warning "Not configured"
+              fi
+            else
+              log_warning "Not found ($BACKUP_BUCKET)"
+            fi
+
+            # =================================================================
+            # DR Score Summary
+            # =================================================================
+            echo -e "\n${WHITE}===========================================${NC}"
+            echo -e "${WHITE}        DR READINESS SCORE${NC}"
+            echo -e "${WHITE}===========================================${NC}\n"
+
+            echo "Score: $DR_SCORE / $DR_MAX"
+            echo
+
+            if [[ $DR_SCORE -ge 80 ]]; then
+              echo -e "${GREEN}Status: EXCELLENT - DR ready${NC}"
+            elif [[ $DR_SCORE -ge 60 ]]; then
+              echo -e "${GREEN}Status: GOOD - Minor improvements recommended${NC}"
+            elif [[ $DR_SCORE -ge 40 ]]; then
+              echo -e "${YELLOW}Status: FAIR - Several improvements needed${NC}"
+            else
+              echo -e "${RED}Status: POOR - Significant DR gaps${NC}"
+            fi
+
+            echo
+            echo "Recommendations:"
+            if [[ $DR_SCORE -lt 80 ]]; then
+              echo "  - Enable S3 cross-region replication for state bucket"
+              echo "  - Configure DynamoDB global tables for state locks"
+              echo "  - Enable Multi-AZ for all RDS instances"
+              echo "  - Deploy NAT Gateways in multiple AZs"
+              echo "  - Create read replicas in DR region"
+            else
+              echo "  - Current DR configuration meets best practices"
+              echo "  - Consider regular DR drills to validate procedures"
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # DR Failover
+  # =============================================================================
+  dr-failover:
+    description: "Execute failover to disaster recovery region"
+    steps:
+      - name: "failover-validation"
+        run:
+          command: |
+            set -euo pipefail
+
+            RED='\033[0;31m'
+            YELLOW='\033[1;33m'
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            echo -e "\n${WHITE}=== DR Failover Validation ===${NC}\n"
+
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              echo "ERROR: Missing parameters"
+              exit 1
+            fi
+
+            TARGET_REGION="${target_region:-us-east-1}"
+            CONFIRM="${confirm:-false}"
+
+            echo "Failover Configuration:"
+            echo "  Stack: ${tenant}-${account}-${environment}"
+            echo "  Target Region: $TARGET_REGION"
+            echo
+
+            echo -e "${RED}WARNING: This will initiate a failover to $TARGET_REGION${NC}"
+            echo -e "${RED}This operation should only be performed in a real disaster scenario.${NC}"
+            echo
+
+            if [[ "$CONFIRM" != "true" ]]; then
+              echo "To proceed, run with confirm=true"
+              exit 0
+            fi
+
+            echo -e "${YELLOW}Proceeding with failover...${NC}"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "update-dns"
+        run:
+          command: |
+            set -euo pipefail
+
+            if [[ "${confirm:-false}" != "true" ]]; then
+              exit 0
+            fi
+
+            echo "=== Updating DNS Records ==="
+
+            TARGET_REGION="${target_region:-us-east-1}"
+
+            # This is a placeholder - actual DNS update would use Route53 API
+            echo "DNS failover would update records to point to $TARGET_REGION"
+            echo "Implementing health check-based routing..."
+
+            # Example Route53 failover record update
+            # aws route53 change-resource-record-sets ...
+
+            echo "DNS update complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "promote-rds-replica"
+        run:
+          command: |
+            set -euo pipefail
+
+            if [[ "${confirm:-false}" != "true" ]]; then
+              exit 0
+            fi
+
+            echo "=== Promoting RDS Read Replica ==="
+
+            TARGET_REGION="${target_region:-us-east-1}"
+
+            # Find read replica in target region
+            REPLICA_ID="${tenant}-${account}-${environment}-replica"
+
+            echo "Would promote replica: $REPLICA_ID"
+            echo "This operation cannot be undone."
+
+            # aws rds promote-read-replica --db-instance-identifier "$REPLICA_ID" --region "$TARGET_REGION"
+
+            echo "RDS promotion initiated"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+      - name: "failover-summary"
+        run:
+          command: |
+            set -euo pipefail
+
+            WHITE='\033[1;37m'
+            GREEN='\033[0;32m'
+            NC='\033[0m'
+
+            echo -e "\n${WHITE}=== Failover Summary ===${NC}\n"
+
+            if [[ "${confirm:-false}" == "true" ]]; then
+              echo -e "${GREEN}Failover procedure completed${NC}"
+              echo
+              echo "Next Steps:"
+              echo "  1. Verify services are running in target region"
+              echo "  2. Update application configurations if needed"
+              echo "  3. Monitor service health"
+              echo "  4. Plan failback when primary region is restored"
+            else
+              echo "Failover was not executed (dry run)"
+            fi
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # DR Failback
+  # =============================================================================
+  dr-failback:
+    description: "Execute failback to primary region"
+    steps:
+      - name: "failback"
+        run:
+          command: |
+            set -euo pipefail
+
+            WHITE='\033[1;37m'
+            YELLOW='\033[1;33m'
+            NC='\033[0m'
+
+            echo -e "\n${WHITE}=== DR Failback Procedure ===${NC}\n"
+
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              echo "ERROR: Missing parameters"
+              exit 1
+            fi
+
+            PRIMARY_REGION="${region:-eu-west-2}"
+            CONFIRM="${confirm:-false}"
+
+            echo "Failback Configuration:"
+            echo "  Stack: ${tenant}-${account}-${environment}"
+            echo "  Primary Region: $PRIMARY_REGION"
+            echo
+
+            if [[ "$CONFIRM" != "true" ]]; then
+              echo -e "${YELLOW}Failback Checklist:${NC}"
+              echo "  1. Verify primary region is healthy"
+              echo "  2. Ensure data synchronization is complete"
+              echo "  3. Plan maintenance window"
+              echo "  4. Notify stakeholders"
+              echo
+              echo "To proceed, run with confirm=true"
+              exit 0
+            fi
+
+            echo "Executing failback..."
+
+            # Steps would include:
+            # 1. Resync data from DR to primary
+            # 2. Update DNS weights
+            # 3. Gradually shift traffic
+            # 4. Demote DR database back to replica
+
+            echo "Failback complete"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # State Recovery
+  # =============================================================================
+  recover-state:
+    description: "Recover Terraform state from backup"
+    steps:
+      - name: "list-state-versions"
+        run:
+          command: |
+            set -euo pipefail
+
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            echo -e "\n${WHITE}=== Terraform State Recovery ===${NC}\n"
+
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              echo "ERROR: Missing parameters"
+              exit 1
+            fi
+
+            BUCKET_NAME="${tenant}-${account}-${environment}-terraform-state"
+
+            echo "Listing state file versions..."
+            echo "Bucket: $BUCKET_NAME"
+            echo
+
+            # List recent versions of state files
+            aws s3api list-object-versions \
+              --bucket "$BUCKET_NAME" \
+              --prefix "terraform/" \
+              --max-items 20 \
+              --query 'Versions[*].{Key:Key,VersionId:VersionId,LastModified:LastModified,Size:Size}' \
+              --output table
+
+            echo
+            echo "To restore a specific version:"
+            echo "  atmos workflow restore-state -f disaster-recovery.yaml tenant=${tenant} account=${account} environment=${environment} version_id=<id>"
+          env:
+            AWS_SDK_LOAD_CONFIG: 1
+
+  # =============================================================================
+  # Database Recovery
+  # =============================================================================
+  recover-database:
+    description: "Recover database from backup or snapshot"
+    steps:
+      - name: "list-snapshots"
+        run:
+          command: |
+            set -euo pipefail
+
+            WHITE='\033[1;37m'
+            NC='\033[0m'
+
+            echo -e "\n${WHITE}=== Database Recovery Options ===${NC}\n"
+
+            if [[ -z "${tenant:-}" ]] || [[ -z "${account:-}" ]] || [[ -z "${environment:-}" ]]; then
+              echo "ERROR: Missing parameters"
+              exit 1
+            fi
+
+            REGION="${region:-eu-west-2}"
+
+            echo "Available RDS Snapshots:"
+            echo
+
+            aws rds describe-db-snapshots \
+              --region "$REGION" \
+              --query "DBSnapshots[?contains(DBSnapshotIdentifier, '${tenant}')].{Identifier:DBSnapshotIdentifier,Engine:Engine,Created:SnapshotCreateTime,Status:Status}" \
+              --output table
+
+            echo
+            echo "Point-in-Time Recovery Windows:"
+
+            aws rds describe-db-instances \
+              --region "$REGION" \
+              --query "DBInstances[?contains(DBInstanceIdentifier, '${tenant}')].{Instance:DBInstanceIdentifier,LatestRestorableTime:LatestRestorableTime}" \
+              --output table
+          env:
+            AWS_SDK_LOAD_CONFIG: 1

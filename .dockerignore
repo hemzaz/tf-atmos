@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+.github
+
+# Terraform
+.terraform
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Documentation
+docs/
+*.md
+
+# Tests
+tests/
+.coverage
+htmlcov/
+
+# Sensitive
+*.pem
+*.key
+.env
+.env.local
+secrets/

@@ -1,0 +1,281 @@
+---
+# =============================================================================
+# Compute Component Configurations for Staging-01 Environment
+# =============================================================================
+# EC2, EKS, and compute resources - mirrors production setup
+# =============================================================================
+
+import:
+  - orgs/fnx/staging/eu-west-2/staging-01/components/globals
+  - catalog/eks/defaults
+  - catalog/ec2/defaults
+  - catalog/external-secrets/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # EKS Cluster - Main Application Workloads
+    # ==========================================================================
+    eks/main:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        cluster_name: "main"
+        kubernetes_version: "${eks_kubernetes_version}"
+
+        # Network configuration
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_ids: "${output.vpc/main.private_subnet_ids}"
+
+        # Endpoint access - private only for staging
+        endpoint_private_access: true
+        endpoint_public_access: false
+
+        # Security settings
+        encrypt_secrets: true
+        enable_cluster_logging: true
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+
+        # Node groups
+        node_groups:
+          workers:
+            enabled: true
+            instance_types: ["t3.medium"]
+            desired_size: 3
+            min_size: 2
+            max_size: 6
+            labels:
+              role: worker
+              environment: staging
+            tags:
+              NodeGroup: workers
+          monitoring:
+            enabled: true
+            instance_types: ["t3.large"]
+            desired_size: 1
+            min_size: 1
+            max_size: 2
+            labels:
+              role: monitoring
+            taints:
+              - key: dedicated
+                value: monitoring
+                effect: "NO_SCHEDULE"
+
+        # OIDC provider for IAM roles for service accounts
+        enable_irsa: true
+
+      tags:
+        Cluster: main
+        Purpose: "application-workloads"
+
+    # ==========================================================================
+    # EKS Cluster - Data Processing Workloads
+    # ==========================================================================
+    eks/data:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        cluster_name: "data"
+        kubernetes_version: "${eks_kubernetes_version}"
+
+        vpc_id: "${output.vpc/services.vpc_id}"
+        subnet_ids: "${output.vpc/services.private_subnet_ids}"
+
+        endpoint_private_access: true
+        endpoint_public_access: false
+
+        encrypt_secrets: true
+        enable_cluster_logging: true
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+
+        node_groups:
+          data-workers:
+            enabled: true
+            instance_types: ["m5.large"]
+            desired_size: 2
+            min_size: 2
+            max_size: 4
+            labels:
+              role: data-processing
+            disk_size: 100
+
+        enable_irsa: true
+
+      tags:
+        Cluster: data
+        Purpose: "data-processing"
+
+    # ==========================================================================
+    # EC2 Bastion Host
+    # ==========================================================================
+    ec2/bastion:
+      metadata:
+        component: ec2
+      vars:
+        name: "bastion"
+        instance_type: "t3.small"
+
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_id: "${output.vpc/main.public_subnet_ids[0]}"
+
+        # SSH key management
+        create_ssh_keys: true
+        store_ssh_keys_in_secrets_manager: true
+        ssh_key_algorithm: "RSA"
+        ssh_key_rsa_bits: 4096
+        key_name: "staging-bastion-key"
+
+        # Security groups
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal networks"
+
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH to internal hosts"
+
+        # Monitoring
+        monitoring_enabled: true
+        ebs_optimized: true
+
+        # Root volume
+        root_block_device:
+          volume_type: "gp3"
+          volume_size: 20
+          encrypted: true
+          delete_on_termination: true
+
+      tags:
+        Role: bastion
+        Access: restricted
+
+    # ==========================================================================
+    # EC2 Application Server
+    # ==========================================================================
+    ec2/app-server:
+      metadata:
+        component: ec2
+      vars:
+        name: "app-server"
+        instance_type: "t3.medium"
+
+        vpc_id: "${output.vpc/main.vpc_id}"
+        subnet_id: "${output.vpc/main.private_subnet_ids[0]}"
+
+        key_name: "${output.ec2/bastion.ssh_key_name}"
+
+        # Root volume
+        root_volume_size: 50
+        root_volume_type: "gp3"
+        root_volume_encrypted: true
+
+        # Security
+        allowed_ingress_rules:
+          - from_port: 8080
+            to_port: 8080
+            protocol: "tcp"
+            cidr_blocks: ["10.10.0.0/16"]
+            description: "Application port"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            source_security_group_id: "${output.ec2/bastion.security_group_id}"
+            description: "SSH from bastion"
+
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 5432
+            to_port: 5432
+            protocol: "tcp"
+            cidr_blocks: ["10.10.201.0/24", "10.10.202.0/24", "10.10.203.0/24"]
+            description: "PostgreSQL to database subnets"
+
+        monitoring_enabled: true
+
+      tags:
+        Role: app-server
+        Tier: application
+
+    # ==========================================================================
+    # External Secrets Operator for EKS
+    # ==========================================================================
+    external-secrets/main:
+      metadata:
+        component: external-secrets
+      vars:
+        enabled: true
+        cluster_name: "${output.eks/main.cluster_name}"
+        host: "${output.eks/main.cluster_endpoint}"
+        cluster_ca_certificate: "${output.eks/main.cluster_ca_certificate}"
+        oidc_provider_arn: "${output.eks/main.oidc_provider_arn}"
+        oidc_provider_url: "${output.eks/main.oidc_provider_url}"
+
+        namespace:
+          name: "external-secrets"
+          create: true
+        serviceaccount:
+          name: "external-secrets"
+        helm:
+          chart_version: "0.9.9"
+
+        path_prefix: "staging/${secrets_manager_path_prefix}"
+
+        secret_stores:
+          default_cluster:
+            create: true
+          certificate:
+            create: true
+
+    external-secrets/data:
+      metadata:
+        component: external-secrets
+      vars:
+        enabled: true
+        cluster_name: "${output.eks/data.cluster_name}"
+        host: "${output.eks/data.cluster_endpoint}"
+        cluster_ca_certificate: "${output.eks/data.cluster_ca_certificate}"
+        oidc_provider_arn: "${output.eks/data.oidc_provider_arn}"
+        oidc_provider_url: "${output.eks/data.oidc_provider_url}"
+
+        namespace:
+          name: "external-secrets"
+          create: true
+        serviceaccount:
+          name: "external-secrets"
+        helm:
+          chart_version: "0.9.9"
+
+        path_prefix: "staging/data/${secrets_manager_path_prefix}"
+
+        secret_stores:
+          default_cluster:
+            create: true
+          certificate:
+            create: false
