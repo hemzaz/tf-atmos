@@ -1,5 +1,13 @@
 # Internal Developer Platform (IDP) Platform Component
 
+> **Status: unsupported.** This component nests the `eks`, `rds` and `acm` root components,
+> each of which declares its own `provider` block (a legacy-module pattern that blocks
+> `for_each`/`count`/`depends_on` on those calls and couples provider configuration to them).
+> No stack deploys it, and `terraform plan` fails unless `acknowledge_unsupported = true`.
+> Follow-up: move the shared EKS/RDS/ACM logic into provider-less modules under
+> `modules/terraform/` and call those instead.
+
+
 This Terraform component deploys a comprehensive Internal Developer Platform infrastructure including EKS clusters, storage buckets, networking, and supporting services.
 
 ## Architecture

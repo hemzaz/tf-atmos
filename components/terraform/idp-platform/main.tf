@@ -9,6 +9,18 @@ locals {
   storage_buckets = toset(["artifacts", "backups", "logs", "techdocs", "uploads"])
 }
 
+# UNSUPPORTED: this component nests the eks, rds and acm root components (each with its
+# own provider block), a legacy-module pattern. No stack deploys it; planning fails
+# unless acknowledge_unsupported is set, until the shared logic moves to modules/terraform.
+resource "terraform_data" "unsupported" {
+  lifecycle {
+    precondition {
+      condition     = var.acknowledge_unsupported
+      error_message = "idp-platform is unsupported: it nests root components with their own provider blocks. See README.md; set acknowledge_unsupported = true only for experiments."
+    }
+  }
+}
+
 # EKS cluster for IDP platform (via the eks component; EKS addons and public-access CIDRs
 # are not supported by that component and are managed by eks-addons instead)
 module "eks_cluster" {
@@ -195,7 +207,7 @@ resource "aws_elasticache_replication_group" "redis" {
   # Security
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
-  auth_token_wo              = ephemeral.random_password.redis_auth_token.result
+  auth_token_wo              = ephemeral.aws_secretsmanager_secret_version.redis_auth.secret_string
   auth_token_wo_version      = var.secrets_version
   auth_token_update_strategy = "ROTATE"
 
@@ -448,26 +460,49 @@ resource "aws_secretsmanager_secret" "idp_config" {
   })
 }
 
-# Write-only: generated credentials reach Secrets Manager without being stored in state.
-# The database password is write-only in the rds component, so the config points to its secret.
+# Config consumers resolve credentials from their own secrets instead of copies
 resource "aws_secretsmanager_secret_version" "idp_config" {
   secret_id = aws_secretsmanager_secret.idp_config.id
   secret_string_wo = jsonencode({
-    database_url        = "postgresql://${module.idp_database.instance_endpoint}/${module.idp_database.instance_name}"
-    database_secret_arn = module.idp_database.password_secret_arn
-    redis_url           = "rediss://:${ephemeral.random_password.redis_auth_token.result}@${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379"
-    jwt_secret          = ephemeral.random_password.jwt_secret.result
+    database_url          = "postgresql://${module.idp_database.instance_endpoint}/${module.idp_database.instance_name}"
+    database_secret_arn   = module.idp_database.password_secret_arn
+    redis_url             = "rediss://${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379"
+    redis_auth_secret_arn = aws_secretsmanager_secret.redis_auth.arn
+    jwt_secret            = ephemeral.aws_secretsmanager_random_password.jwt_secret.random_password
   })
   secret_string_wo_version = var.secrets_version
 }
 
-# Ephemeral secrets: bump secrets_version to generate and push new values
-ephemeral "random_password" "redis_auth_token" {
-  length  = 32
-  special = false # ElastiCache rejects "@", "/" and '"' in AUTH tokens
+# Redis AUTH token: generated once into Secrets Manager (the single source of truth) and
+# read back ephemerally for ElastiCache. Bump secrets_version to rotate it.
+resource "aws_secretsmanager_secret" "redis_auth" {
+  name                    = "${local.name_prefix}/idp-platform/redis-auth-token"
+  description             = "ElastiCache AUTH token for the IDP platform Redis"
+  recovery_window_in_days = var.environment == "prod" ? 30 : 0
+
+  tags = merge(local.tags, {
+    Component = "secrets"
+    Service   = "idp-platform"
+  })
 }
 
-ephemeral "random_password" "jwt_secret" {
-  length  = 64
-  special = true
+resource "aws_secretsmanager_secret_version" "redis_auth" {
+  secret_id                = aws_secretsmanager_secret.redis_auth.id
+  secret_string_wo         = ephemeral.aws_secretsmanager_random_password.redis_auth_token.random_password
+  secret_string_wo_version = var.secrets_version
+}
+
+ephemeral "aws_secretsmanager_random_password" "redis_auth_token" {
+  password_length     = 32
+  exclude_punctuation = true # ElastiCache rejects "@", "/" and '"' in AUTH tokens
+}
+
+ephemeral "aws_secretsmanager_secret_version" "redis_auth" {
+  secret_id = aws_secretsmanager_secret.redis_auth.id
+
+  depends_on = [aws_secretsmanager_secret_version.redis_auth]
+}
+
+ephemeral "aws_secretsmanager_random_password" "jwt_secret" {
+  password_length = 64
 }

@@ -32,6 +32,12 @@ variable "enable_github_integration" {
   default     = false
 }
 
+variable "acknowledge_unsupported" {
+  type        = bool
+  description = "Acknowledge that idp-platform is unsupported (nests root components with provider blocks); planning fails while false"
+  default     = false
+}
+
 variable "secrets_version" {
   type        = number
   description = "Version of the write-only Redis auth token and JWT secret; increment to rotate both"

@@ -107,8 +107,8 @@ output "redis_port" {
 }
 
 output "redis_auth_token_secret_arn" {
-  description = "ARN of the Secrets Manager secret holding the Redis auth token (write-only, not in state)"
-  value       = aws_secretsmanager_secret.idp_config.arn
+  description = "ARN of the Secrets Manager secret holding the Redis AUTH token"
+  value       = aws_secretsmanager_secret.redis_auth.arn
 }
 
 # Storage Outputs
