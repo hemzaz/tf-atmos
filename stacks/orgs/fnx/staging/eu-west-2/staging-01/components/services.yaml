@@ -65,6 +65,10 @@ components:
           expose_headers: []
           max_age: 300
           allow_credentials: false
+      dependencies:
+        components:
+          - component: network/main
+          - component: acm/main
     apigateway/data:
       metadata:
         component: apigateway
@@ -95,6 +99,10 @@ components:
     # ==========================================================================
         api_name: "data-api"
         zone_id: !terraform.state network/services .zone_ids.data
+      dependencies:
+        components:
+          - component: network/services
+          - component: acm/services
     infrastructure/main:
       metadata:
         component: infrastructure
