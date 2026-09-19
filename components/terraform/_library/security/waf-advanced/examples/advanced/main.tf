@@ -24,12 +24,12 @@ module "waf_advanced" {
   scope       = "REGIONAL"
 
   # Full managed rule protection
-  enable_core_rule_set             = true
-  enable_known_bad_inputs          = true
-  enable_sql_database_protection   = true
-  enable_linux_os_protection       = true
-  enable_ip_reputation             = true
-  enable_anonymous_ip_list         = false  # Set to true if you want to block VPNs
+  enable_core_rule_set           = true
+  enable_known_bad_inputs        = true
+  enable_sql_database_protection = true
+  enable_linux_os_protection     = true
+  enable_ip_reputation           = true
+  enable_anonymous_ip_list       = false # Set to true if you want to block VPNs
 
   # Bot control with targeted detection (ML-based)
   enable_bot_control = var.enable_bot_control
@@ -37,8 +37,8 @@ module "waf_advanced" {
 
   # Aggressive rate limiting
   enable_rate_limiting = true
-  rate_limit_per_ip    = 1000  # 1000 requests per 5 minutes
-  rate_limit_window    = 300   # 5 minutes
+  rate_limit_per_ip    = 1000 # 1000 requests per 5 minutes
+  rate_limit_window    = 300  # 5 minutes
 
   # Geo-blocking for high-risk countries
   enable_geo_blocking = var.enable_geo_blocking
@@ -88,7 +88,7 @@ module "waf_advanced" {
         byte_match_statement = null
         size_constraint_statement = {
           comparison_operator = "GT"
-          size                = 8192  # 8KB
+          size                = 8192 # 8KB
           field_to_match = {
             uri_path = false
             body     = true

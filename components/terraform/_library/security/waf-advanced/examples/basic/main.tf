@@ -30,8 +30,8 @@ module "waf_basic" {
 
   # Enable rate limiting to prevent abuse
   enable_rate_limiting = true
-  rate_limit_per_ip    = 2000  # 2000 requests per 5 minutes
-  rate_limit_window    = 300   # 5 minutes
+  rate_limit_per_ip    = 2000 # 2000 requests per 5 minutes
+  rate_limit_window    = 300  # 5 minutes
 
   # Enable logging to S3 (auto-creates bucket)
   enable_logging       = true

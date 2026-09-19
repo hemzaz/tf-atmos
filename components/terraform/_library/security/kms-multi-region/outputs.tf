@@ -59,7 +59,7 @@ output "grants" {
   description = "Map of grants created"
   value = {
     for name, grant in aws_kms_grant.grants : name => {
-      grant_id   = grant.grant_id
+      grant_id    = grant.grant_id
       grant_token = grant.grant_token
     }
   }

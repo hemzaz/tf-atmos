@@ -1,6 +1,11 @@
 variable "name_prefix" {
   type        = string
   description = "Prefix for resource names"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9/_+=.@-]{1,500}$", var.name_prefix))
+    error_message = "name_prefix may only contain alphanumerics and /_+=.@- characters."
+  }
 }
 
 variable "description" {
@@ -11,16 +16,32 @@ variable "description" {
 
 variable "secret_string" {
   type        = string
-  description = "Secret value (JSON string)"
+  description = "Secret value (JSON string). Sent via the write-only secret_string_wo argument, so it is never stored in state"
   default     = null
   sensitive   = true
 }
 
+variable "secret_string_version" {
+  type        = number
+  description = "Version of secret_string; increment it to push a changed secret_string (write-only values are not diffed)"
+  default     = 1
+
+  validation {
+    condition     = var.secret_string_version >= 1
+    error_message = "secret_string_version must be >= 1."
+  }
+}
+
 variable "secret_binary" {
   type        = string
-  description = "Binary secret value (base64)"
+  description = "Binary secret value (base64-encoded)"
   default     = null
   sensitive   = true
+
+  validation {
+    condition     = var.secret_binary == null || can(base64decode(var.secret_binary))
+    error_message = "secret_binary must be base64-encoded."
+  }
 }
 
 variable "kms_key_id" {
@@ -33,6 +54,11 @@ variable "enable_rotation" {
   type        = bool
   description = "Enable automatic rotation"
   default     = false
+
+  validation {
+    condition     = !var.enable_rotation || var.create_rotation_lambda || var.rotation_lambda_arn != ""
+    error_message = "enable_rotation requires create_rotation_lambda = true or a rotation_lambda_arn."
+  }
 }
 
 variable "rotation_days" {
