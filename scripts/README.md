@@ -7,12 +7,7 @@ scaffolding, local setup and certificate operations.
 Stacks are named by `name_template` as `<tenant>-<stage>-<environment>`
 (e.g. `fnx-dev-testenv-01`); naming context lives in `settings.context`.
 
-## Directory Structure
-
-- **certificates/**: TLS certificate and SSH key operations (see its README)
-- **dr/**: Disaster-recovery backup procedures (Velero, S3)
-
-## Common Scripts
+## Scripts
 
 | Script | Purpose |
 |--------|---------|
@@ -22,6 +17,28 @@ Stacks are named by `name_template` as `<tenant>-<stage>-<environment>`
 | `quickstart.sh` | Check prerequisites, create a stack, bootstrap the backend, deploy |
 | `install-dependencies.sh` | Install CLI tools at the versions pinned in `.atmos.env` |
 | `update-versions.sh` | Check or bump the versions in `.atmos.env` |
+| `dev-setup.sh` | Local dev environment setup |
+| `onboard-developer.sh` | Onboarding checklist for a new developer |
+| `validate-terraform.sh` | Ad hoc Terraform validation helper |
+| `check-shell-compat.sh` | Check scripts for bash/POSIX portability issues |
+| `collect-dx-feedback.sh` | Collect developer-experience feedback |
+| `utils.sh` | Shared shell functions sourced by the scripts above |
+
+`dr/` holds disaster-recovery backup procedures (Velero, S3).
+
+## Certificates
+
+`certificates/` has the TLS certificate and SSH key operations against AWS Secrets Manager, ACM and
+Kubernetes (`rotate-cert.sh`, `rotate-ssh-key.sh`, `generate-ssh-key.sh`, `export-cert.sh`,
+`export-ssh-key.sh`, `monitor-certificates.sh`, plus shared `certificate-utils.sh`). Run them
+directly or through the workflow:
+
+```bash
+atmos workflow rotate -f rotate-certificate
+./scripts/certificates/rotate-cert.sh -s <secret_name> -n <namespace> [-a <acm_cert_arn>]
+```
+
+Each script prints its options with `-h`.
 
 ## Usage
 
@@ -32,5 +49,4 @@ atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 ```
 
 Scripts that only applied to the pre-migration layout (DynamoDB locking,
-`vars.tenant`-style catalogs) exit immediately with a pointer to their
-replacement.
+`vars.tenant`-style catalogs) exit immediately with a pointer to their replacement.

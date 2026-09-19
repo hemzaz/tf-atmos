@@ -124,7 +124,7 @@ ${WHITE}Environment Variables:${NC}
     AWS_REGION                  AWS region (overridden by --region)
 
 ${WHITE}For more information:${NC}
-    See docs/DEPLOYMENT_GUIDE.md
+    See docs/DEPLOYMENT.md
 EOF
 }
 
@@ -679,8 +679,8 @@ print_summary() {
     echo
 
     echo -e "${WHITE}Documentation:${NC}"
-    echo "  - Deployment Guide:  docs/DEPLOYMENT_GUIDE.md"
-    echo "  - Operations Guide:  docs/operations/README.md"
+    echo "  - Deployment Guide:  docs/DEPLOYMENT.md"
+    echo "  - Operations Guide:  docs/OPERATIONS.md"
     echo "  - Runbooks:          docs/runbooks/"
     echo
 
