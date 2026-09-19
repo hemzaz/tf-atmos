@@ -13,6 +13,7 @@ variable "clusters" {
     kubernetes_version        = optional(string)
     endpoint_private_access   = optional(bool, true)
     endpoint_public_access    = optional(bool, false)
+    public_access_cidrs       = optional(list(string))
     subnet_ids                = optional(list(string))
     security_group_ids        = optional(list(string), [])
     kms_key_arn               = optional(string)
@@ -65,6 +66,18 @@ variable "clusters" {
       lookup(v, "endpoint_private_access", true) == true || lookup(v, "endpoint_public_access", false) == true
     ])
     error_message = "At least one of endpoint_private_access or endpoint_public_access must be enabled for the cluster."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters :
+      v.endpoint_public_access != true || (
+        v.public_access_cidrs != null &&
+        length(coalesce(v.public_access_cidrs, [])) > 0 &&
+        !contains(coalesce(v.public_access_cidrs, []), "0.0.0.0/0")
+      )
+    ])
+    error_message = "A cluster with endpoint_public_access must set public_access_cidrs to a non-empty list that does not contain 0.0.0.0/0."
   }
 }
 
