@@ -210,12 +210,12 @@ data "aws_iam_policy_document" "state_machine_policy" {
   dynamic "statement" {
     for_each = var.additional_policy_statements
     content {
-      sid       = lookup(statement.value, "sid", null)
+      sid       = statement.value.sid
       effect    = statement.value.effect
       actions   = statement.value.actions
       resources = statement.value.resources
       dynamic "condition" {
-        for_each = lookup(statement.value, "conditions", [])
+        for_each = statement.value.conditions
         content {
           test     = condition.value.test
           variable = condition.value.variable

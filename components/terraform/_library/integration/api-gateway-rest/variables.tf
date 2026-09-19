@@ -65,6 +65,10 @@ variable "minimum_compression_size" {
   description = "Minimum response size to compress (bytes)"
   type        = number
   default     = 1024
+  validation {
+    condition     = var.minimum_compression_size >= 0 && var.minimum_compression_size <= 10485760
+    error_message = "Minimum compression size must be between 0 and 10485760 bytes."
+  }
 }
 
 variable "deployment_trigger" {
@@ -153,6 +157,10 @@ variable "cache_cluster_size" {
   description = "Cache cluster size (0.5, 1.6, 6.1, 13.5, 28.4, 58.2, 118, 237)"
   type        = string
   default     = "0.5"
+  validation {
+    condition     = contains(["0.5", "1.6", "6.1", "13.5", "28.4", "58.2", "118", "237"], var.cache_cluster_size)
+    error_message = "Cache cluster size must be one of 0.5, 1.6, 6.1, 13.5, 28.4, 58.2, 118, 237."
+  }
 }
 
 variable "cache_ttl_seconds" {
@@ -217,6 +225,10 @@ variable "usage_plans" {
     api_key_names        = optional(list(string), [])
   }))
   default = []
+  validation {
+    condition     = alltrue([for p in var.usage_plans : contains(["DAY", "WEEK", "MONTH"], p.quota_period)])
+    error_message = "Usage plan quota_period must be DAY, WEEK, or MONTH."
+  }
 }
 
 ##############################################
@@ -255,6 +267,10 @@ variable "custom_domain_security_policy" {
   description = "Security policy for custom domain (TLS_1_0, TLS_1_2)"
   type        = string
   default     = "TLS_1_2"
+  validation {
+    condition     = contains(["TLS_1_0", "TLS_1_2"], var.custom_domain_security_policy)
+    error_message = "Custom domain security policy must be TLS_1_0 or TLS_1_2."
+  }
 }
 
 ##############################################

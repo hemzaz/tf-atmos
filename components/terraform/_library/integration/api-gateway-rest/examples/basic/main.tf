@@ -17,10 +17,10 @@ module "api" {
 
   usage_plans = [
     {
-      name              = "basic"
-      quota_limit       = 1000
-      quota_period      = "DAY"
-      api_key_names     = ["test-key"]
+      name          = "basic"
+      quota_limit   = 1000
+      quota_period  = "DAY"
+      api_key_names = ["test-key"]
     }
   ]
 

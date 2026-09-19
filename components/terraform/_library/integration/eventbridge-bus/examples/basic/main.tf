@@ -6,8 +6,8 @@ module "event_bus" {
 
   event_rules = [
     {
-      name          = "scheduled-task"
-      description   = "Run task every 5 minutes"
+      name                = "scheduled-task"
+      description         = "Run task every 5 minutes"
       schedule_expression = "rate(5 minutes)"
       lambda_targets = [
         {
@@ -17,7 +17,7 @@ module "event_bus" {
     }
   ]
 
-  enable_archive = true
+  enable_archive           = true
   enable_cloudwatch_alarms = true
 
   tags = {

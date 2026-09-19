@@ -60,6 +60,10 @@ variable "kms_deletion_window_days" {
   description = "KMS key deletion window in days"
   type        = number
   default     = 30
+  validation {
+    condition     = var.kms_deletion_window_days >= 7 && var.kms_deletion_window_days <= 30
+    error_message = "KMS deletion window must be between 7 and 30 days."
+  }
 }
 
 ##############################################
@@ -158,6 +162,10 @@ variable "sqs_subscriptions" {
     redrive_policy       = optional(string, null)
   }))
   default = []
+  validation {
+    condition     = alltrue([for s in var.sqs_subscriptions : contains(["MessageAttributes", "MessageBody"], s.filter_policy_scope)])
+    error_message = "filter_policy_scope must be MessageAttributes or MessageBody."
+  }
 }
 
 variable "lambda_subscriptions" {
@@ -169,6 +177,10 @@ variable "lambda_subscriptions" {
     redrive_policy      = optional(string, null)
   }))
   default = []
+  validation {
+    condition     = alltrue([for s in var.lambda_subscriptions : contains(["MessageAttributes", "MessageBody"], s.filter_policy_scope)])
+    error_message = "filter_policy_scope must be MessageAttributes or MessageBody."
+  }
 }
 
 variable "http_subscriptions" {
@@ -182,6 +194,10 @@ variable "http_subscriptions" {
     redrive_policy       = optional(string, null)
   }))
   default = []
+  validation {
+    condition     = alltrue([for s in var.http_subscriptions : contains(["MessageAttributes", "MessageBody"], s.filter_policy_scope)])
+    error_message = "filter_policy_scope must be MessageAttributes or MessageBody."
+  }
 }
 
 variable "email_subscriptions" {

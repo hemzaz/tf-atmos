@@ -96,9 +96,9 @@ resource "aws_kms_alias" "topic" {
 ##############################################
 
 resource "aws_sns_topic" "main" {
-  name              = local.topic_name
-  display_name      = var.display_name
-  fifo_topic        = var.fifo_topic
+  name                        = local.topic_name
+  display_name                = var.display_name
+  fifo_topic                  = var.fifo_topic
   content_based_deduplication = var.fifo_topic ? var.content_based_deduplication : null
 
   # Encryption
@@ -241,33 +241,33 @@ resource "aws_sns_topic_subscription" "sqs" {
   topic_arn            = aws_sns_topic.main.arn
   protocol             = "sqs"
   endpoint             = each.value.queue_arn
-  raw_message_delivery = lookup(each.value, "raw_message_delivery", false)
-  filter_policy        = lookup(each.value, "filter_policy", null)
-  filter_policy_scope  = lookup(each.value, "filter_policy_scope", "MessageAttributes")
-  redrive_policy       = lookup(each.value, "redrive_policy", null)
+  raw_message_delivery = each.value.raw_message_delivery
+  filter_policy        = each.value.filter_policy
+  filter_policy_scope  = each.value.filter_policy_scope
+  redrive_policy       = each.value.redrive_policy
 }
 
 resource "aws_sns_topic_subscription" "lambda" {
   for_each = { for idx, sub in var.lambda_subscriptions : idx => sub }
 
-  topic_arn     = aws_sns_topic.main.arn
-  protocol      = "lambda"
-  endpoint      = each.value.function_arn
-  filter_policy = lookup(each.value, "filter_policy", null)
-  filter_policy_scope = lookup(each.value, "filter_policy_scope", "MessageAttributes")
-  redrive_policy = lookup(each.value, "redrive_policy", null)
+  topic_arn           = aws_sns_topic.main.arn
+  protocol            = "lambda"
+  endpoint            = each.value.function_arn
+  filter_policy       = each.value.filter_policy
+  filter_policy_scope = each.value.filter_policy_scope
+  redrive_policy      = each.value.redrive_policy
 }
 
 resource "aws_sns_topic_subscription" "http" {
   for_each = { for idx, sub in var.http_subscriptions : idx => sub }
 
   topic_arn            = aws_sns_topic.main.arn
-  protocol             = lookup(each.value, "use_https", true) ? "https" : "http"
+  protocol             = each.value.use_https ? "https" : "http"
   endpoint             = each.value.endpoint_url
-  raw_message_delivery = lookup(each.value, "raw_message_delivery", false)
-  filter_policy        = lookup(each.value, "filter_policy", null)
-  filter_policy_scope  = lookup(each.value, "filter_policy_scope", "MessageAttributes")
-  redrive_policy       = lookup(each.value, "redrive_policy", null)
+  raw_message_delivery = each.value.raw_message_delivery
+  filter_policy        = each.value.filter_policy
+  filter_policy_scope  = each.value.filter_policy_scope
+  redrive_policy       = each.value.redrive_policy
 }
 
 resource "aws_sns_topic_subscription" "email" {
