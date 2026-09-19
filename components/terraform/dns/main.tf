@@ -1,11 +1,20 @@
 locals {
+  # Public zones move to the DNS account when multi-account delegation is enabled;
+  # private zones stay with their VPCs in this account
+  dns_account_zone_keys = toset([
+    for k, z in var.zones : k if var.multi_account_dns_delegation && length(z.vpc_associations) == 0
+  ])
+
+  # All managed zones, regardless of which account's provider created them
+  managed_zones = merge(aws_route53_zone.zones, aws_route53_zone.dns_account_zones)
+
   # Default zone name pattern from root domain
   zone_name_pattern = trimsuffix(var.root_domain, ".")
 
   # Get the normalized record list
   normalized_records = {
     for id, record in var.records : id => {
-      zone_id                          = try(aws_route53_zone.zones[record.zone_name].zone_id, try(data.aws_route53_zone.existing_zones[record.zone_name].zone_id))
+      zone_id                          = try(local.managed_zones[record.zone_name].zone_id, try(data.aws_route53_zone.existing_zones[record.zone_name].zone_id))
       name                             = try(trimsuffix(record.name, "."), null)
       type                             = record.type
       ttl                              = try(record.ttl, var.zones[record.zone_name].default_ttl, 300)
@@ -48,16 +57,16 @@ resource "aws_route53_zone" "root_zone" {
 
 # Data source for existing zones (if not created)
 data "aws_route53_zone" "existing_zones" {
-  for_each = { for k, z in var.zones : k => z if !contains(keys(aws_route53_zone.zones), k) }
+  for_each = { for k, z in var.zones : k => z if !contains(keys(local.managed_zones), k) }
 
   name         = each.value.name
   private_zone = length(each.value.vpc_associations) > 0
-  provider     = var.multi_account_dns_delegation ? aws.dns_account : aws
 }
 
-# Create all the requested zones
+# Create all the requested zones (provider meta-arguments must be static, so zones
+# hosted in the DNS account are split into dns_account_zones below)
 resource "aws_route53_zone" "zones" {
-  for_each = var.zones
+  for_each = { for k, z in var.zones : k => z if !contains(local.dns_account_zone_keys, k) }
 
   name          = each.value.name
   comment       = each.value.comment
@@ -83,9 +92,25 @@ resource "aws_route53_zone" "zones" {
       Name = each.value.name
     }
   )
+}
 
-  # Use DNS account if multi-account setup
-  provider = var.multi_account_dns_delegation && !length(each.value.vpc_associations) > 0 ? aws.dns_account : aws
+resource "aws_route53_zone" "dns_account_zones" {
+  provider = aws.dns_account
+  for_each = { for k, z in var.zones : k => z if contains(local.dns_account_zone_keys, k) }
+
+  name          = each.value.name
+  comment       = each.value.comment
+  force_destroy = each.value.force_destroy
+
+  delegation_set_id = each.value.delegation_set_id
+
+  tags = merge(
+    var.tags,
+    each.value.tags,
+    {
+      Name = each.value.name
+    }
+  )
 }
 
 # Setup DNS query logging if enabled
@@ -95,7 +120,7 @@ resource "aws_route53_query_log" "query_logging" {
     if zone.enable_query_logging
   }
 
-  depends_on = [aws_route53_zone.zones]
+  depends_on = [aws_route53_zone.zones, aws_route53_zone.dns_account_zones]
 
   cloudwatch_log_group_arn = lookup(
     each.value.query_logging_config,
@@ -103,7 +128,7 @@ resource "aws_route53_query_log" "query_logging" {
     aws_cloudwatch_log_group.dns_query_logs[each.key].arn
   )
 
-  zone_id = aws_route53_zone.zones[each.key].zone_id
+  zone_id = local.managed_zones[each.key].zone_id
 }
 
 # Create log groups for DNS query logging if needed
@@ -199,12 +224,7 @@ resource "aws_route53_health_check" "health_checks" {
   measure_latency    = each.value.measure_latency
   invert_healthcheck = each.value.invert_healthcheck
 
-  dynamic "regions" {
-    for_each = each.value.regions
-    content {
-      name = regions.value
-    }
-  }
+  regions = length(each.value.regions) > 0 ? each.value.regions : null
 
   tags = merge(
     var.tags,
@@ -215,21 +235,14 @@ resource "aws_route53_health_check" "health_checks" {
   )
 }
 
-# Route53 Traffic Policy - for complex routing scenarios
+# Route53 Traffic Policy - for complex routing scenarios. Updating the document creates
+# a new policy version (aws_route53_traffic_policy_version does not exist in the provider).
 resource "aws_route53_traffic_policy" "traffic_policies" {
   for_each = var.traffic_policies
 
   name     = each.value.name
   comment  = each.value.comment
   document = each.value.document
-}
-
-resource "aws_route53_traffic_policy_version" "policy_versions" {
-  for_each = var.traffic_policies
-
-  traffic_policy_id = aws_route53_traffic_policy.traffic_policies[each.key].id
-  document          = each.value.document
-  comment           = each.value.version_comment
 }
 
 # VPC associations for private hosted zones
@@ -239,12 +252,13 @@ resource "aws_route53_zone_association" "vpc_associations" {
   vpc_id     = each.value.vpc_id
   vpc_region = each.value.vpc_region != null ? each.value.vpc_region : var.region
   zone_id = try(
-    aws_route53_zone.zones[each.value.associated_zones[0]].id,
+    local.managed_zones[each.value.associated_zones[0]].id,
     data.aws_route53_zone.existing_zones[each.value.associated_zones[0]].id
   )
 
   depends_on = [
     aws_route53_zone.zones,
+    aws_route53_zone.dns_account_zones,
     data.aws_route53_zone.existing_zones
   ]
 }

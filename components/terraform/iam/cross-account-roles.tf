@@ -1,14 +1,19 @@
-resource "aws_iam_role" "cross_account_role" {
-  name = var.cross_account_role_name
+data "aws_iam_policy_document" "cross_account_assume_role" {
+  statement {
+    sid     = "TrustedAccountsAssumeRole"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
 
-  # Use templatefile instead of file to enable customization
-  assume_role_policy = templatefile(
-    "${path.module}/policies/assume-role-policy.json.tpl",
-    {
-      trusted_account_ids = var.trusted_account_ids
-      # Additional variables can be passed in as needed
+    principals {
+      type        = "AWS"
+      identifiers = [for id in var.trusted_account_ids : "arn:aws:iam::${id}:root"]
     }
-  )
+  }
+}
+
+resource "aws_iam_role" "cross_account_role" {
+  name               = var.cross_account_role_name
+  assume_role_policy = data.aws_iam_policy_document.cross_account_assume_role.json
 }
 
 resource "aws_iam_policy" "cross_account_policy" {
@@ -16,14 +21,7 @@ resource "aws_iam_policy" "cross_account_policy" {
   path        = "/"
   description = "Cross-account access policy"
 
-  # Use templatefile instead of file to enable customization
-  policy = templatefile(
-    "${path.module}/policies/account-setup-policies.json.tpl",
-    {
-      resources = var.policy_resources
-      # Additional variables can be passed in as needed
-    }
-  )
+  policy = file("${path.module}/policies/account-setup-policies.json")
 }
 
 resource "aws_iam_role_policy_attachment" "cross_account_policy_attachment" {

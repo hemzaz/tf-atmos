@@ -61,8 +61,6 @@ resource "tls_private_key" "ssh_key" {
     # Prevent recreation of keys, which helps with idempotency
     # Terraform will error if this can't be achieved rather than replacing the key
     prevent_destroy = true
-    # Mark the key as sensitive
-    sensitive = true
 
     # Add preconditions to validate that key parameters haven't changed
     precondition {
@@ -88,8 +86,6 @@ resource "tls_private_key" "global_ssh_key" {
     # Prevent recreation of keys, which helps with idempotency
     # Terraform will error if this can't be achieved rather than replacing the key
     prevent_destroy = true
-    # Mark the key as sensitive
-    sensitive = true
 
     # Add preconditions to validate that key parameters haven't changed
     precondition {
@@ -218,14 +214,12 @@ resource "aws_secretsmanager_secret_version" "global_ssh_key" {
 }
 
 # Update global key with instance details after instances are created
-resource "null_resource" "update_global_key_instance_info" {
+resource "terraform_data" "update_global_key_instance_info" {
   count = var.store_ssh_keys_in_secrets_manager && local.create_global_key && length(local.instances_using_global_key) > 0 ? 1 : 0
 
-  triggers = {
-    # Use instance IDs as triggers so this runs when instances change
+  # Re-run when the set of instances using the global key changes
+  triggers_replace = {
     instance_ids = join(",", [for k, v in local.instances_using_global_key : aws_instance.instances[k].id])
-    # Use constant secret name to avoid circular dependencies
-    secret_name = local.create_global_key ? aws_secretsmanager_secret.global_ssh_key[0].name : ""
   }
 
   provisioner "local-exec" {
@@ -273,11 +267,6 @@ depends_on = [
   aws_instance.instances,
   aws_secretsmanager_secret_version.global_ssh_key
 ]
-
-lifecycle {
-  # Ignore changes to secret_name to prevent recreation when secret metadata changes
-  ignore_changes = [triggers.secret_name]
-}
 }
 
 locals {
@@ -337,9 +326,9 @@ resource "aws_instance" "instances" {
   )
 
   lifecycle {
-    # Use more specific configuration for handling AMIs
-    # Only ignore AMI changes if explicitly configured
-    ignore_changes = lookup(each.value, "enable_ami_updates", false) ? [] : [ami]
+    # ignore_changes must be static: AMI updates never replace instances in place
+    # (the per-instance enable_ami_updates flag cannot be honored here)
+    ignore_changes = [ami]
 
     # Check that we have a valid key_name
     precondition {

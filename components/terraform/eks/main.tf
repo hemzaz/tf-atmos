@@ -40,10 +40,10 @@ resource "aws_eks_cluster" "clusters" {
 
   name     = "${var.tags["Environment"]}-${each.key}"
   role_arn = aws_iam_role.cluster[each.key].arn
-  version  = lookup(each.value, "kubernetes_version", var.default_kubernetes_version)
+  version  = coalesce(each.value.kubernetes_version, var.default_kubernetes_version)
 
   vpc_config {
-    subnet_ids              = lookup(each.value, "subnet_ids", var.subnet_ids)
+    subnet_ids              = coalesce(each.value.subnet_ids, var.subnet_ids)
     endpoint_private_access = lookup(each.value, "endpoint_private_access", true)
     endpoint_public_access  = lookup(each.value, "endpoint_public_access", false)
     security_group_ids      = lookup(each.value, "security_group_ids", [])
@@ -84,18 +84,18 @@ resource "aws_eks_cluster" "clusters" {
     aws_cloudwatch_log_group.eks
   ]
 
-  lifecycle {
-    # Only prevent destroy in production environments or when explicitly enabled
-    prevent_destroy = var.enable_cluster_protection && contains(["prod", "production"], lower(var.tags["Environment"]))
+  # prevent_destroy only accepts literals, so production protection uses EKS deletion protection instead
+  deletion_protection = var.enable_cluster_protection && contains(["prod", "production"], lower(var.tags["Environment"]))
 
+  lifecycle {
     # Add preconditions for various cluster requirements
     precondition {
-      condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) >= 2
+      condition     = length(coalesce(each.value.subnet_ids, var.subnet_ids)) >= 2
       error_message = "At least 2 subnet IDs are required for the EKS cluster ${each.key} to ensure high availability."
     }
 
     precondition {
-      condition     = can(regex("^\\d+\\.(\\d+)$", lookup(each.value, "kubernetes_version", var.default_kubernetes_version)))
+      condition     = can(regex("^\\d+\\.(\\d+)$", coalesce(each.value.kubernetes_version, var.default_kubernetes_version)))
       error_message = "Kubernetes version for cluster ${each.key} must be in the format 'X.Y' (e.g., 1.28)."
     }
 
@@ -139,7 +139,7 @@ resource "aws_kms_key" "eks" {
           "kms:ScheduleKeyDeletion",
           "kms:CancelKeyDeletion"
         ],
-        Resource = aws_kms_key.eks_cluster_key.arn
+        Resource = "*"
       },
       {
         Sid    = "Allow EKS Service to use the key",
@@ -154,7 +154,7 @@ resource "aws_kms_key" "eks" {
           "kms:GenerateDataKey*",
           "kms:DescribeKey"
         ],
-        Resource = aws_kms_key.eks_cluster_key.arn,
+        Resource = "*",
         Condition = {
           StringEquals = {
             "kms:CallerAccount" = data.aws_caller_identity.current.account_id,
@@ -250,17 +250,6 @@ resource "aws_eks_node_group" "node_groups" {
     }
   }
 
-  # Add validation for taint effect values
-  lifecycle {
-    precondition {
-      condition = length(lookup(each.value, "taints", [])) == 0 || alltrue([
-        for taint in lookup(each.value, "taints", []) :
-        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], lookup(taint, "effect", "NO_SCHEDULE"))
-      ])
-      error_message = "Taint effect must be one of: NO_SCHEDULE, PREFER_NO_SCHEDULE, or NO_EXECUTE."
-    }
-  }
-
   dynamic "update_config" {
     for_each = lookup(each.value, "update_config", null) != null ? [1] : []
     content {
@@ -309,6 +298,15 @@ resource "aws_eks_node_group" "node_groups" {
       labels,
       tags
     ]
+
+    # Validate taint effect values
+    precondition {
+      condition = length(lookup(each.value, "taints", [])) == 0 || alltrue([
+        for taint in lookup(each.value, "taints", []) :
+        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], lookup(taint, "effect", "NO_SCHEDULE"))
+      ])
+      error_message = "Taint effect must be one of: NO_SCHEDULE, PREFER_NO_SCHEDULE, or NO_EXECUTE."
+    }
 
     # Add precondition to check for required values
     precondition {
@@ -399,15 +397,9 @@ resource "aws_iam_openid_connect_provider" "oidc_provider" {
 
   lifecycle {
     # Thumbprint list may be updated by AWS, but we want to trigger rotation only
-    # when URL changes to avoid needless redeployments
+    # when URL changes to avoid needless redeployments. To force rotation, update the URL
+    # or replace the resource.
     ignore_changes = [thumbprint_list]
-
-    # Add explicit message for maintainers about why thumbprint changes are ignored
-    # This isn't functional but helps document the decision
-    precondition {
-      condition     = true
-      error_message = "NOTE: thumbprint_list changes are ignored as AWS rotates these regularly. To force rotation, update the URL or use terraform taint."
-    }
   }
 }
 

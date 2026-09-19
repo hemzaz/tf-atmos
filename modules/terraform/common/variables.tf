@@ -5,12 +5,12 @@
 variable "namespace" {
   type        = string
   description = "Namespace for resource naming (e.g., 'myorg', 'platform')"
-  
+
   validation {
     condition     = can(regex("^[a-z0-9][a-z0-9-]*[a-z0-9]$", var.namespace))
     error_message = "Namespace must contain only lowercase letters, numbers, and hyphens, and cannot start or end with a hyphen."
   }
-  
+
   validation {
     condition     = length(var.namespace) >= 2 && length(var.namespace) <= 20
     error_message = "Namespace must be between 2 and 20 characters long."
@@ -20,7 +20,7 @@ variable "namespace" {
 variable "environment" {
   type        = string
   description = "Environment name (dev, staging, prod)"
-  
+
   validation {
     condition     = contains(["dev", "staging", "prod"], var.environment)
     error_message = "Environment must be one of: dev, staging, prod."
@@ -31,7 +31,7 @@ variable "stage" {
   type        = string
   description = "Stage/instance of the environment (e.g., '01', '02', 'blue', 'green')"
   default     = "01"
-  
+
   validation {
     condition     = can(regex("^[a-z0-9][a-z0-9-]*[a-z0-9]$", var.stage))
     error_message = "Stage must contain only lowercase letters, numbers, and hyphens."
@@ -41,7 +41,7 @@ variable "stage" {
 variable "component_name" {
   type        = string
   description = "Name of the component (e.g., 'vpc', 'eks', 'rds')"
-  
+
   validation {
     condition     = can(regex("^[a-z][a-z0-9-]*[a-z0-9]$", var.component_name))
     error_message = "Component name must start with a letter and contain only lowercase letters, numbers, and hyphens."
@@ -58,7 +58,7 @@ variable "custom_name_prefix" {
 variable "region" {
   type        = string
   description = "AWS region where resources will be created"
-  
+
   validation {
     condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
     error_message = "Must be a valid AWS region format (e.g., us-west-2, eu-central-1)."
@@ -69,7 +69,7 @@ variable "availability_zones" {
   type        = list(string)
   description = "List of availability zones to use"
   default     = []
-  
+
   validation {
     condition     = length(var.availability_zones) == 0 || length(var.availability_zones) >= 2
     error_message = "If specified, at least 2 availability zones must be provided for high availability."
@@ -81,7 +81,7 @@ variable "project_name" {
   type        = string
   description = "Name of the project this infrastructure supports"
   default     = "infrastructure"
-  
+
   validation {
     condition     = length(var.project_name) >= 1 && length(var.project_name) <= 64
     error_message = "Project name must be between 1 and 64 characters."
@@ -110,7 +110,7 @@ variable "owner" {
   type        = string
   description = "Owner/team responsible for this infrastructure"
   default     = "platform-team"
-  
+
   validation {
     condition     = length(var.owner) >= 1 && length(var.owner) <= 64
     error_message = "Owner must be between 1 and 64 characters."
@@ -122,7 +122,7 @@ variable "data_classification" {
   type        = string
   description = "Data classification level (public, internal, confidential, restricted)"
   default     = "internal"
-  
+
   validation {
     condition     = contains(["public", "internal", "confidential", "restricted"], var.data_classification)
     error_message = "Data classification must be one of: public, internal, confidential, restricted."
@@ -133,7 +133,7 @@ variable "compliance_frameworks" {
   type        = list(string)
   description = "List of compliance frameworks this infrastructure must adhere to"
   default     = []
-  
+
   validation {
     condition = alltrue([
       for framework in var.compliance_frameworks :
@@ -154,7 +154,7 @@ variable "allowed_cidr_blocks" {
   type        = list(string)
   description = "CIDR blocks allowed to access resources"
   default     = []
-  
+
   validation {
     condition = alltrue([
       for cidr in var.allowed_cidr_blocks :
@@ -193,7 +193,7 @@ variable "log_retention_days" {
   type        = number
   description = "Number of days to retain logs"
   default     = 30
-  
+
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.log_retention_days)
     error_message = "Log retention must be one of the allowed CloudWatch log retention values."
@@ -217,7 +217,7 @@ variable "kms_key_deletion_window" {
   type        = number
   description = "KMS key deletion window in days"
   default     = 30
-  
+
   validation {
     condition     = var.kms_key_deletion_window >= 7 && var.kms_key_deletion_window <= 30
     error_message = "KMS key deletion window must be between 7 and 30 days."
@@ -241,7 +241,7 @@ variable "backup_retention_days" {
   type        = number
   description = "Number of days to retain backups"
   default     = 7
-  
+
   validation {
     condition     = var.backup_retention_days >= 1 && var.backup_retention_days <= 35
     error_message = "Backup retention must be between 1 and 35 days."
@@ -266,7 +266,7 @@ variable "additional_tags" {
   type        = map(string)
   description = "Additional tags to apply to resources"
   default     = {}
-  
+
   validation {
     condition = alltrue([
       for k, v in var.additional_tags :
@@ -300,7 +300,7 @@ variable "instance_types" {
   type        = list(string)
   description = "List of EC2 instance types"
   default     = []
-  
+
   validation {
     condition = alltrue([
       for type in var.instance_types :
@@ -327,9 +327,9 @@ variable "maintenance_window" {
   type        = string
   description = "Maintenance window for updates (day:hour:min-day:hour:min format)"
   default     = ""
-  
+
   validation {
-    condition = var.maintenance_window == "" || can(regex("^(sun|mon|tue|wed|thu|fri|sat):[0-2][0-9]:[0-5][0-9]-(sun|mon|tue|wed|thu|fri|sat):[0-2][0-9]:[0-5][0-9]$", var.maintenance_window))
+    condition     = var.maintenance_window == "" || can(regex("^(sun|mon|tue|wed|thu|fri|sat):[0-2][0-9]:[0-5][0-9]-(sun|mon|tue|wed|thu|fri|sat):[0-2][0-9]:[0-5][0-9]$", var.maintenance_window))
     error_message = "Maintenance window must be in format 'day:hh:mm-day:hh:mm' (e.g., 'sun:03:00-sun:04:00')."
   }
 }
@@ -338,9 +338,9 @@ variable "backup_window" {
   type        = string
   description = "Backup window (hh:mm-hh:mm format)"
   default     = ""
-  
+
   validation {
-    condition = var.backup_window == "" || can(regex("^[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]$", var.backup_window))
+    condition     = var.backup_window == "" || can(regex("^[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]$", var.backup_window))
     error_message = "Backup window must be in format 'hh:mm-hh:mm' (e.g., '03:00-05:00')."
   }
 }
@@ -355,10 +355,10 @@ variable "feature_flags" {
 # Resource quotas and limits
 variable "resource_limits" {
   type = object({
-    max_instances     = optional(number, 10)
-    max_storage_gb    = optional(number, 1000)
-    max_cpu_units     = optional(number, 100)
-    max_memory_mb     = optional(number, 10240)
+    max_instances  = optional(number, 10)
+    max_storage_gb = optional(number, 1000)
+    max_cpu_units  = optional(number, 100)
+    max_memory_mb  = optional(number, 10240)
   })
   description = "Resource limits for safety and cost control"
   default     = {}

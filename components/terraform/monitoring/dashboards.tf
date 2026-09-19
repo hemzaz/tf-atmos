@@ -2,10 +2,25 @@
 # Provides comprehensive visibility into infrastructure, security, cost, and performance
 
 locals {
+  # Superset of the variables referenced by the templates/ dashboards
   dashboard_vars = {
-    region      = var.region
-    environment = var.environment
-    account_id  = data.aws_caller_identity.current.account_id
+    region               = var.region
+    environment          = var.environment
+    account_id           = data.aws_caller_identity.current.account_id
+    vpc_id               = var.vpc_id
+    cluster_name         = var.eks_cluster_name
+    api_gateway_name     = var.api_gateway_name
+    rds_instances        = var.rds_instances
+    ecs_clusters         = var.ecs_clusters
+    lambda_functions     = var.lambda_functions
+    load_balancers       = var.load_balancers
+    elasticache_clusters = var.elasticache_clusters
+    cert_arns            = local.default_cert_arns
+    cert_names           = local.default_cert_names
+    cert_domains         = local.default_cert_domains
+    cert_statuses        = local.default_cert_statuses
+    cert_expiry_dates    = local.default_cert_expiry_dates
+    cert_alarm_arns      = var.certificate_alarm_arns
   }
 }
 
@@ -108,12 +123,12 @@ output "dashboard_urls" {
   description = "URLs to access CloudWatch Dashboards"
   value = {
     infrastructure = var.create_infrastructure_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.infrastructure[0].dashboard_name}" : null
-    security      = var.create_security_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.security[0].dashboard_name}" : null
-    cost          = var.create_cost_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.cost[0].dashboard_name}" : null
-    performance   = var.create_performance_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.performance[0].dashboard_name}" : null
-    application   = var.create_application_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.application[0].dashboard_name}" : null
-    backend       = var.create_backend_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.backend[0].dashboard_name}" : null
-    certificates  = var.create_certificate_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.certificates[0].dashboard_name}" : null
+    security       = var.create_security_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.security[0].dashboard_name}" : null
+    cost           = var.create_cost_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.cost[0].dashboard_name}" : null
+    performance    = var.create_performance_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.performance[0].dashboard_name}" : null
+    application    = var.create_application_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.application[0].dashboard_name}" : null
+    backend        = var.create_backend_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.backend[0].dashboard_name}" : null
+    certificates   = var.create_certificate_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.certificates[0].dashboard_name}" : null
   }
 }
 
@@ -122,12 +137,12 @@ output "dashboard_names" {
   description = "Names of created CloudWatch Dashboards"
   value = {
     infrastructure = var.create_infrastructure_dashboard ? aws_cloudwatch_dashboard.infrastructure[0].dashboard_name : null
-    security      = var.create_security_dashboard ? aws_cloudwatch_dashboard.security[0].dashboard_name : null
-    cost          = var.create_cost_dashboard ? aws_cloudwatch_dashboard.cost[0].dashboard_name : null
-    performance   = var.create_performance_dashboard ? aws_cloudwatch_dashboard.performance[0].dashboard_name : null
-    application   = var.create_application_dashboard ? aws_cloudwatch_dashboard.application[0].dashboard_name : null
-    backend       = var.create_backend_dashboard ? aws_cloudwatch_dashboard.backend[0].dashboard_name : null
-    certificates  = var.create_certificate_dashboard ? aws_cloudwatch_dashboard.certificates[0].dashboard_name : null
-    custom        = { for k, v in aws_cloudwatch_dashboard.custom : k => v.dashboard_name }
+    security       = var.create_security_dashboard ? aws_cloudwatch_dashboard.security[0].dashboard_name : null
+    cost           = var.create_cost_dashboard ? aws_cloudwatch_dashboard.cost[0].dashboard_name : null
+    performance    = var.create_performance_dashboard ? aws_cloudwatch_dashboard.performance[0].dashboard_name : null
+    application    = var.create_application_dashboard ? aws_cloudwatch_dashboard.application[0].dashboard_name : null
+    backend        = var.create_backend_dashboard ? aws_cloudwatch_dashboard.backend[0].dashboard_name : null
+    certificates   = var.create_certificate_dashboard ? aws_cloudwatch_dashboard.certificates[0].dashboard_name : null
+    custom         = { for k, v in aws_cloudwatch_dashboard.custom : k => v.dashboard_name }
   }
 }

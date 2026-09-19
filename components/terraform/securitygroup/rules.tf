@@ -198,8 +198,6 @@ resource "aws_cloudwatch_event_rule" "security_group_changes" {
       ]
     }
   })
-
-  tags = var.tags
 }
 
 # CloudWatch Log Stream for security group changes
@@ -225,8 +223,6 @@ resource "aws_cloudwatch_metric_alarm" "permissive_sg_rules" {
   alarm_description   = "Alert on overly permissive security group rules (0.0.0.0/0). Found in: ${local.permissive_rule_warning}"
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.security_alarm_actions
-
-  tags = var.tags
 }
 
 # Custom metric for tracking permissive rules
@@ -238,20 +234,17 @@ resource "aws_cloudwatch_log_metric_filter" "permissive_rules" {
   pattern        = "[...CidrIp=0.0.0.0/0...]"
 
   metric_transformation {
-    name      = "PermissiveSecurityGroupRules"
-    namespace = "Custom/SecurityGroups"
-    value     = "1"
+    name          = "PermissiveSecurityGroupRules"
+    namespace     = "Custom/SecurityGroups"
+    value         = "1"
     default_value = "0"
   }
 }
 
 # Validation: Prevent 0.0.0.0/0 in production
-resource "null_resource" "validate_no_permissive_rules" {
-  count = var.enforce_no_public_ingress && local.has_permissive_rules ? 1 : 0
-
-  provisioner "local-exec" {
-    command = "echo 'ERROR: Security groups have overly permissive rules (0.0.0.0/0): ${local.permissive_rule_warning}' && exit 1"
-  }
+# (the precondition fails the plan; no provisioner or null provider needed)
+resource "terraform_data" "validate_no_permissive_rules" {
+  count = var.enforce_no_public_ingress ? 1 : 0
 
   lifecycle {
     precondition {

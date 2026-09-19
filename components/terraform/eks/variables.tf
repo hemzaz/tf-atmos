@@ -26,8 +26,8 @@ variable "clusters" {
   validation {
     condition = alltrue([
       for k, v in var.clusters :
-      lookup(v, "kubernetes_version", "") == "" ||
-      can(regex("^\\d+\\.(\\d+)$", lookup(v, "kubernetes_version", var.default_kubernetes_version)))
+      v.kubernetes_version == null ||
+      can(regex("^\\d+\\.(\\d+)$", v.kubernetes_version))
     ])
     error_message = "Kubernetes version must be valid and in the format 'X.Y' (e.g., 1.28)."
   }
@@ -42,8 +42,8 @@ variable "clusters" {
   validation {
     condition = alltrue([
       for k, v in var.clusters :
-      lookup(v, "kms_key_arn", "") == "" ||
-      can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", lookup(v, "kms_key_arn", "")))
+      v.kms_key_arn == null ||
+      can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", v.kms_key_arn))
     ])
     error_message = "KMS key ARN must be in a valid format (e.g., arn:aws:kms:region:account-id:key/key-id)."
   }
@@ -107,7 +107,7 @@ variable "oidc_provider_arn" {
 
 variable "enable_cluster_protection" {
   type        = bool
-  description = "Enable prevent_destroy lifecycle for EKS clusters in production environments"
+  description = "Enable EKS deletion protection for clusters in production environments"
   default     = true
 }
 

@@ -359,6 +359,12 @@ resource "aws_wafv2_web_acl" "api_waf" {
     allow {}
   }
 
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${local.name_prefix}-waf"
+    sampled_requests_enabled   = true
+  }
+
   # Rate limiting rule
   rule {
     name     = "RateLimitRule"
@@ -457,16 +463,15 @@ resource "aws_api_gateway_method_settings" "cache_settings" {
     # Enable caching
     caching_enabled      = true
     cache_ttl_in_seconds = var.cache_ttl_seconds
-    cache_key_parameters = var.cache_key_parameters
 
     # Throttling settings
     throttling_rate_limit  = var.throttling_rate_limit
     throttling_burst_limit = var.throttling_burst_limit
 
     # Logging settings
-    logging_level   = var.logging_level
+    logging_level      = var.logging_level
     data_trace_enabled = var.data_trace_enabled
-    metrics_enabled = var.metrics_enabled
+    metrics_enabled    = var.metrics_enabled
   }
 }
 

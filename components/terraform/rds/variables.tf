@@ -276,8 +276,19 @@ variable "deletion_protection" {
 
 variable "prevent_destroy" {
   type        = bool
-  description = "Prevent destroy of the RDS instance through the lifecycle"
+  description = "Protect the RDS instance from deletion (enforced via deletion_protection, since lifecycle.prevent_destroy cannot use variables)"
   default     = true
+}
+
+variable "password_version" {
+  type        = number
+  description = "Version of the write-only master password; increment to generate a new password and push it to RDS and Secrets Manager"
+  default     = 1
+
+  validation {
+    condition     = var.password_version >= 1 && floor(var.password_version) == var.password_version
+    error_message = "password_version must be a positive integer."
+  }
 }
 
 variable "tags" {

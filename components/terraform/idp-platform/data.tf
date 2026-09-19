@@ -60,19 +60,6 @@ data "aws_route53_zone" "parent" {
 }
 
 # IAM policy documents
-data "aws_iam_policy_document" "rds_enhanced_monitoring" {
-  statement {
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["monitoring.rds.amazonaws.com"]
-    }
-
-    actions = ["sts:AssumeRole"]
-  }
-}
-
 data "aws_iam_policy_document" "alb_logs" {
   statement {
     effect = "Allow"
@@ -83,7 +70,7 @@ data "aws_iam_policy_document" "alb_logs" {
     }
 
     actions   = ["s3:PutObject"]
-    resources = ["${module.idp_storage["logs"].bucket_arn}/alb-access-logs/*"]
+    resources = ["${aws_s3_bucket.idp_storage["logs"].arn}/alb-access-logs/*"]
   }
 
   statement {
@@ -95,7 +82,7 @@ data "aws_iam_policy_document" "alb_logs" {
     }
 
     actions   = ["s3:PutObject"]
-    resources = ["${module.idp_storage["logs"].bucket_arn}/alb-access-logs/*"]
+    resources = ["${aws_s3_bucket.idp_storage["logs"].arn}/alb-access-logs/*"]
 
     condition {
       test     = "StringEquals"
@@ -113,7 +100,7 @@ data "aws_iam_policy_document" "alb_logs" {
     }
 
     actions   = ["s3:GetBucketAcl"]
-    resources = [module.idp_storage["logs"].bucket_arn]
+    resources = [aws_s3_bucket.idp_storage["logs"].arn]
   }
 }
 
@@ -158,15 +145,6 @@ data "aws_default_tags" "current" {}
 
 # Partition for cross-region support
 data "aws_partition" "current" {}
-
-# Certificate validation records (if using DNS validation)
-data "aws_route53_record" "cert_validation" {
-  count = var.domain_name != "" ? 1 : 0
-
-  zone_id = aws_route53_zone.main.zone_id
-  name    = tolist(module.acm_certificate.domain_validation_options)[0].resource_record_name
-  type    = tolist(module.acm_certificate.domain_validation_options)[0].resource_record_type
-}
 
 # Existing security groups (if any)
 data "aws_security_groups" "default" {

@@ -1,12 +1,21 @@
 # Backend Component
 
-_Last Updated: February 28, 2025_
+_Last Updated: September 19, 2026_
 
 ## Overview
 
-The Backend component provisions and manages AWS infrastructure for secure and scalable Terraform state management, including S3 buckets for state storage and DynamoDB tables for state locking.
+The Backend component provisions and manages AWS infrastructure for secure and scalable Terraform state management: an S3 bucket for state storage with S3-native state locking.
 
-This component establishes a robust and secure backend infrastructure for Terraform state management in AWS. It creates an S3 bucket for state storage with proper encryption, versioning, and access controls, as well as a DynamoDB table for state locking to prevent concurrent operations conflicts. The component also sets up appropriate IAM roles and policies for secure access.
+This component creates an S3 bucket for state storage with KMS encryption, versioning, ownership controls and a TLS-only bucket policy. State locking uses Terraform's S3-native lockfiles (`use_lockfile = true`, Terraform >= 1.10), which write a `<key>.tflock` object next to the state, so no DynamoDB lock table is created. The component also sets up an IAM role whose policy covers both the state and lock objects.
+
+## Requirements
+
+| Name | Version |
+|------|---------|
+| terraform | >= 1.16.0, < 2.0.0 |
+| aws | ~> 6.65 |
+
+Backends that use this bucket should set `use_lockfile = true` and drop `dynamodb_table`.
 
 ## Architecture
 
@@ -18,10 +27,10 @@ This component establishes a robust and secure backend infrastructure for Terraf
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
-│  ┌─────────────────┐      ┌─────────────────────────┐   │
-│  │  DynamoDB Table │      │     S3 Bucket           │   │
-│  │  (State Locking)│◄────►│  (State Storage)        │   │
-│  └─────────────────┘      └─────────────────────────┘   │
+│             ┌──────────────────────────────────┐        │
+│             │     S3 Bucket                    │        │
+│             │  (State + .tflock lock objects)  │        │
+│             └──────────────────────────────────┘        │
 │                                      │                   │
 │                                      ▼                   │
 │                           ┌─────────────────────────┐   │
@@ -46,15 +55,14 @@ This component establishes a robust and secure backend infrastructure for Terraf
 ## Features
 
 - S3 bucket for Terraform state storage with versioning enabled
-- DynamoDB table for state locking to prevent concurrent modifications
+- S3-native state locking (`use_lockfile`), no DynamoDB table
 - KMS-managed encryption for state files at rest
 - IAM role with least-privilege policies for backend access
 - Server-side encryption for all state files
-- Bucket policies to enforce HTTPS connections
-- Complete blocking of public access
+- Bucket policies that deny non-TLS and pre-TLS 1.2 requests
+- ACLs disabled (`BucketOwnerEnforced`) and complete blocking of public access
 - Access logging for audit and compliance
 - Lifecycle policies for managing state file versions
-- MFA delete protection for state files
 - Separate logging buckets to avoid circular dependencies
 
 ## Usage
@@ -68,7 +76,6 @@ components:
       vars:
         tenant: "mycompany"
         bucket_name: "mycompany-terraform-state"
-        dynamodb_table_name: "mycompany-terraform-locks"
         region: "us-east-1"
         iam_role_name: "terraform-backend-role"
 ```
@@ -82,7 +89,6 @@ components:
       vars:
         tenant: "mycompany"
         bucket_name: "mycompany-terraform-state-central"
-        dynamodb_table_name: "mycompany-terraform-locks"
         region: "us-east-1"
         iam_role_name: "terraform-backend-role"
         account_id: "123456789012"  # Management account
@@ -98,8 +104,9 @@ components:
 |------|-------------|------|---------|:--------:|
 | `tenant` | Tenant name for resource naming | `string` | `""` | Yes |
 | `account_id` | AWS Account ID for resource policies | `string` | `""` | Yes |
-| `bucket_name` | Name of the S3 bucket for Terraform state | `string` | `""` | Yes |
-| `dynamodb_table_name` | Name of the DynamoDB table for Terraform state locking | `string` | `""` | Yes |
+| `bucket_name` | Name of the S3 bucket for Terraform state (3-51 characters) | `string` | n/a | Yes |
+| `dynamodb_table_name` | Deprecated and ignored (S3-native locking) | `string` | `""` | No |
+| `enable_access_logging` | Create the access logs bucket and enable S3 server access logging | `bool` | `true` | No |
 | `region` | AWS region | `string` | `""` | Yes |
 | `state_file_key` | Key for the state file in S3 bucket | `string` | `"terraform.tfstate"` | No |
 | `iam_role_name` | Name of the IAM role to assume for Terraform execution | `string` | `""` | Yes |
@@ -112,8 +119,7 @@ components:
 |------|-------------|
 | `backend_bucket` | The S3 bucket used for storing Terraform state |
 | `backend_bucket_arn` | The ARN of the S3 bucket used for storing Terraform state |
-| `dynamodb_table` | The DynamoDB table used for Terraform state locking |
-| `dynamodb_table_arn` | The ARN of the DynamoDB table used for Terraform state locking |
+| `backend_kms_key_arn` | The ARN of the KMS key encrypting Terraform state |
 | `backend_role_arn` | The ARN of the IAM role for backend access |
 
 ## Examples
@@ -128,7 +134,6 @@ components:
       vars:
         tenant: "mycompany"
         bucket_name: "mycompany-terraform-state-${vars.environment}"
-        dynamodb_table_name: "mycompany-terraform-locks-${vars.environment}"
         region: ${vars.region}
         iam_role_name: "terraform-backend-role-${vars.environment}"
         
@@ -148,14 +153,12 @@ components:
       vars:
         tenant: "mycompany"
         bucket_name: "mycompany-terraform-state-prod"
-        dynamodb_table_name: "mycompany-terraform-locks-prod"
         region: "us-east-1"
         iam_role_name: "terraform-backend-role-prod"
         
         # Enable strict configurations for production
         # These are handled internally by the component
         # and just shown here for documentation
-        # - MFA delete is enabled
         # - KMS encryption is applied
         # - Versioning is enabled
         # - Lifecycle rules apply for version management
@@ -179,7 +182,6 @@ components:
       vars:
         tenant: "mycompany"
         bucket_name: "mycompany-terraform-state-mgmt"
-        dynamodb_table_name: "mycompany-terraform-locks-mgmt"
         region: "us-east-1"
         iam_role_name: "terraform-backend-central-role"
         account_id: "123456789012"  # Management account
@@ -199,12 +201,11 @@ components:
    - Always enable versioning to prevent state file loss
    - Use KMS-managed keys for encryption of state files
    - Enforce HTTPS-only access to state buckets
-   - Implement MFA delete for critical state files
    - Block all public access to state buckets
    - Enable access logging for audit purposes
 
 2. **Naming Conventions**:
-   - Use consistent naming patterns for buckets and tables
+   - Use consistent naming patterns for buckets
    - Include tenant and environment in resource names
    - Use separate state files for different environments
 
@@ -224,14 +225,15 @@ components:
 
 If you encounter state locking errors:
 
-1. Check for abandoned locks in the DynamoDB table:
+1. Release a stale lock with the lock ID from the error message (use with caution):
    ```bash
-   aws dynamodb scan --table-name your-dynamodb-table-name --attributes-to-get LockID State
+   terraform force-unlock LOCK_ID
    ```
 
-2. Manually release a lock if necessary (use with caution):
+2. If that fails, inspect and delete the lock object next to the state file:
    ```bash
-   aws dynamodb delete-item --table-name your-dynamodb-table-name --key '{"LockID": {"S": "your-state-file-path"}}'
+   aws s3api head-object --bucket your-bucket-name --key your-state-file-path.tflock
+   aws s3 rm s3://your-bucket-name/your-state-file-path.tflock
    ```
 
 ### Access Denied Errors
@@ -239,7 +241,7 @@ If you encounter state locking errors:
 1. Verify that your IAM user or role has the necessary permissions
 2. Check that the backend role trust relationships are properly configured
 3. Ensure you're using the correct AWS profile or credentials
-4. Verify that the bucket and table exist in the region you're targeting
+4. Verify that the bucket exists in the region you're targeting
 
 ### State File Corruption or Loss
 
@@ -260,6 +262,5 @@ If you encounter state locking errors:
 
 - [Terraform Backend Configuration](https://www.terraform.io/language/settings/backends/s3)
 - [AWS S3 Documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html)
-- [AWS DynamoDB Documentation](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html)
 - [Atmos Workflow Documentation](../../docs/workflows.md)
 - [Atmos Development Guide](../../docs/terraform-development-guide.md)

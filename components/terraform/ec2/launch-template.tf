@@ -25,7 +25,7 @@ resource "aws_launch_template" "instance" {
     content {
       associate_public_ip_address = try(each.value.associate_public_ip_address, false)
       delete_on_termination       = true
-      security_groups            = try(each.value.security_groups, [])
+      security_groups             = try(each.value.security_groups, [])
       subnet_id                   = try(each.value.subnet_id, null)
 
       # Enhanced networking
@@ -159,11 +159,11 @@ resource "aws_launch_template" "instance" {
         max = try(each.value.instance_requirements.vcpu_count_max, null)
       }
 
-      cpu_manufacturers             = try(each.value.instance_requirements.cpu_manufacturers, null)
-      instance_generations          = try(each.value.instance_requirements.instance_generations, ["current"])
-      accelerator_types             = try(each.value.instance_requirements.accelerator_types, null)
-      burstable_performance         = try(each.value.instance_requirements.burstable_performance, null)
-      require_hibernate_support     = try(each.value.instance_requirements.require_hibernate_support, null)
+      cpu_manufacturers                           = try(each.value.instance_requirements.cpu_manufacturers, null)
+      instance_generations                        = try(each.value.instance_requirements.instance_generations, ["current"])
+      accelerator_types                           = try(each.value.instance_requirements.accelerator_types, null)
+      burstable_performance                       = try(each.value.instance_requirements.burstable_performance, null)
+      require_hibernate_support                   = try(each.value.instance_requirements.require_hibernate_support, null)
       spot_max_price_percentage_over_lowest_price = try(each.value.instance_requirements.spot_max_price_percentage, null)
     }
   }
@@ -175,7 +175,7 @@ resource "aws_launch_template" "instance" {
   instance_initiated_shutdown_behavior = try(each.value.shutdown_behavior, "stop")
 
   # Kernel and RAM disk IDs
-  kernel_id  = try(each.value.kernel_id, null)
+  kernel_id   = try(each.value.kernel_id, null)
   ram_disk_id = try(each.value.ram_disk_id, null)
 
   # Tag specifications
@@ -185,7 +185,7 @@ resource "aws_launch_template" "instance" {
       var.tags,
       try(each.value.tags, {}),
       {
-        Name        = "${var.tags["Environment"]}-${each.key}"
+        Name           = "${var.tags["Environment"]}-${each.key}"
         LaunchTemplate = true
       }
     )
@@ -197,7 +197,7 @@ resource "aws_launch_template" "instance" {
       var.tags,
       try(each.value.tags, {}),
       {
-        Name        = "${var.tags["Environment"]}-${each.key}-volume"
+        Name           = "${var.tags["Environment"]}-${each.key}-volume"
         LaunchTemplate = true
       }
     )
@@ -209,7 +209,7 @@ resource "aws_launch_template" "instance" {
       var.tags,
       try(each.value.tags, {}),
       {
-        Name        = "${var.tags["Environment"]}-${each.key}-eni"
+        Name           = "${var.tags["Environment"]}-${each.key}-eni"
         LaunchTemplate = true
       }
     )
@@ -295,9 +295,9 @@ resource "aws_instance" "from_launch_template" {
     var.tags,
     try(each.value.tags, {}),
     {
-      Name              = "${var.tags["Environment"]}-${each.key}"
-      LaunchTemplate    = "true"
-      LaunchTemplateId  = aws_launch_template.instance[each.key].id
+      Name             = "${var.tags["Environment"]}-${each.key}"
+      LaunchTemplate   = "true"
+      LaunchTemplateId = aws_launch_template.instance[each.key].id
     }
   )
 

@@ -10,13 +10,18 @@ variable "region" {
 variable "cross_account_role_name" {
   type        = string
   description = "Name of the cross-account IAM role"
+
+  validation {
+    condition     = can(regex("^[\\w+=,.@-]{1,64}$", var.cross_account_role_name))
+    error_message = "cross_account_role_name must be 1-64 characters of alphanumerics or +=,.@_-."
+  }
 }
 
 variable "trusted_account_ids" {
   type        = list(string)
   description = "List of AWS account IDs that are allowed to assume the cross-account role"
   validation {
-    condition     = alltrue([for id in var.trusted_account_ids : can(regex("^\\d{12}$", id))])
+    condition     = length(var.trusted_account_ids) > 0 && alltrue([for id in var.trusted_account_ids : can(regex("^\\d{12}$", id))])
     error_message = "Each AWS account ID must be a 12-digit number."
   }
 }
@@ -24,6 +29,12 @@ variable "trusted_account_ids" {
 variable "policy_name" {
   type        = string
   description = "Name of the IAM policy to be attached to the cross-account role"
+
+  validation {
+    # 128 minus the "-resource-management" suffix appended in resource-management-policy.tf
+    condition     = can(regex("^[\\w+=,.@-]{1,108}$", var.policy_name))
+    error_message = "policy_name must be 1-108 characters of alphanumerics or +=,.@_-."
+  }
 }
 
 variable "tags" {
