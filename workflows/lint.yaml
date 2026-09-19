@@ -3,6 +3,7 @@
 #
 # Usage:
 #   atmos workflow lint -f lint
+#   atmos workflow tflint-init -f lint            # install tflint + its .tflint.hcl plugins (network)
 #   atmos workflow security-scan -f lint          # PR gate: SARIF reports, fails on NEW HIGH/CRITICAL
 #   atmos workflow security-scan-report -f lint   # nightly: full backlog (no baselines), never fails
 #   atmos workflow security-baseline -f lint      # regenerate .trivyignore.yaml and .checkov.baseline
@@ -38,12 +39,27 @@ workflows:
           - name: security-scan
             type: shell
             command: trivy config --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
+      # No-op when the plugins are already installed (CI runs tflint-init first,
+      # with a token for GitHub rate limits, so this step needs no network).
+      - name: tflint-plugins
+        type: shell
+        command: tflint --init --config .tflint.hcl
       - name: tflint
         type: atmos
         command: terraform lint
       - type: toast
         level: success
         content: Lint checks passed
+
+  tflint-init:
+    description: Install tflint and the provider plugins declared in .tflint.hcl
+    dependencies:
+      tools:
+        tflint: "0.64.0"
+    steps:
+      - name: tflint-plugins
+        type: shell
+        command: tflint --init --config .tflint.hcl
 
   security-scan:
     description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings
