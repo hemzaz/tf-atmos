@@ -2,8 +2,11 @@
 # (workflows/disaster-recovery.yaml). Failover and failback are guided,
 # interactive runbooks and are intentionally run by an operator, not CI.
 #
-# Required configuration: a GitHub Environment named after the stack with
-# vars.AWS_ROLE_ARN; optional vars.ATMOS_VERSION / vars.AWS_REGION.
+# Runs only on the default branch, only for a known stack, with the read-only
+# plan role (repo-level vars.AWS_PLAN_ROLE_ARN). It uses no GitHub Environment, so
+# its OIDC sub is repo:<org>/<repo>:ref:refs/heads/<default branch>; the plan
+# role's trust policy must allow that sub (see .github/workflows/terraform-cd.yml).
+# Optional: vars.ATMOS_VERSION / vars.AWS_REGION.
 name: Disaster recovery
 
 on:
@@ -15,9 +18,10 @@ on:
         type: choice
         options: [dr-status, recover-state, recover-database]
       stack:
-        description: Atmos stack (e.g. fnx-prod-production)
+        description: Atmos stack
         required: true
-        type: string
+        type: choice
+        options: [fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production]
       component_prefix:
         description: recover-state only - state key prefix to list (e.g. vpc/)
         required: false
@@ -28,10 +32,13 @@ permissions: {}
 jobs:
   disaster-recovery:
     name: ${{ inputs.action }} ${{ inputs.stack }}
+    # API callers are not bound to the choice options, so re-check the stack.
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      contains(fromJson('["fnx-dev-testenv-01","fnx-staging-staging-01","fnx-prod-production"]'), inputs.stack)
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
-    environment: ${{ inputs.stack }}
     permissions:
       contents: read
       id-token: write
@@ -45,7 +52,7 @@ jobs:
           persist-credentials: false
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
       - name: Run DR workflow
         run: atmos workflow "$ACTION" -f disaster-recovery

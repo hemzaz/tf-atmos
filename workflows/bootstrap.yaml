@@ -50,9 +50,19 @@ workflows:
       - name: create-backend
         type: atmos
         command: terraform backend create backend/main
+      - name: plan
+        type: atmos
+        command: terraform plan backend/main
+      - name: confirm
+        type: confirm
+        prompt: Apply the backend plan above?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Backend deploy cancelled after backend creation."; exit 1; }
       - name: deploy-backend
         type: atmos
-        command: terraform deploy backend/main
+        command: terraform deploy backend/main --from-plan
 
   verify:
     description: Verify the state backend exists and is configured as expected

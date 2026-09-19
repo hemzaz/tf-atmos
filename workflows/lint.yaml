@@ -3,7 +3,8 @@
 #
 # Usage:
 #   atmos workflow lint -f lint
-#   atmos workflow security-scan -f lint   # SARIF reports for GitHub code scanning
+#   atmos workflow security-scan -f lint          # PR gate: SARIF reports, fails on HIGH/CRITICAL
+#   atmos workflow security-scan-report -f lint   # nightly: same SARIF reports, never fails
 workflows:
   lint:
     description: Lint Terraform code, YAML files and run a Terraform security scan
@@ -29,7 +30,7 @@ workflows:
             command: yamllint -d relaxed stacks workflows atmos.yaml
           - name: security-scan
             type: shell
-            command: trivy config --exit-code 0 --severity HIGH,CRITICAL components/terraform
+            command: trivy config --exit-code 1 --severity HIGH,CRITICAL components/terraform
       - name: tflint
         type: atmos
         command: terraform lint
@@ -38,7 +39,35 @@ workflows:
         content: Lint checks passed
 
   security-scan:
-    description: Scan Terraform code with Trivy and Checkov, writing SARIF reports to reports/
+    description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings
+    dependencies:
+      tools:
+        trivy: "0.74.0"
+        checkov: "3.3.19"
+    steps:
+      - name: reports-dir
+        type: shell
+        command: mkdir -p reports
+      - type: parallel
+        fail:
+          mode: wait_all
+        steps:
+          - name: trivy
+            type: shell
+            command: >-
+              trivy config --format sarif --output reports/trivy.sarif
+              --severity HIGH,CRITICAL --exit-code 1 components/terraform
+          # Checkov only knows check severities with a Prisma Cloud API key; without
+          # one, a failed check matches neither list and therefore fails the gate.
+          - name: checkov
+            type: shell
+            command: >-
+              checkov --directory components/terraform --framework terraform
+              --output sarif --output-file-path reports --quiet
+              --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL
+
+  security-scan-report:
+    description: Report-only scan for the nightly workflow (SARIF in reports/); never fails on findings
     dependencies:
       tools:
         trivy: "0.74.0"

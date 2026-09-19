@@ -1,10 +1,11 @@
 # Destroys the Terraform state backend (bucket, lockfiles and every state file
-# stored in it). Irreversible - requires typing the confirmation phrase.
+# stored in it). Irreversible. The stack is typed interactively and must be
+# typed again to confirm; that typed value is the only stack the destroy targets.
 #
-# Usage: atmos workflow destroy -f destroy-backend -s <stack>
+# Usage: atmos workflow destroy -f destroy-backend   (do not pass --stack)
 workflows:
   destroy:
-    description: Destroy the Terraform state backend component (irreversible)
+    description: Destroy the Terraform state backend component (irreversible, typed stack name required)
     steps:
       - name: warning
         type: alert
@@ -12,12 +13,18 @@ workflows:
         content: >-
           This destroys the Terraform backend for the stack, including ALL state
           files. Make sure every other component in the stack is destroyed first.
+      - name: stack
+        type: input
+        prompt: Stack whose backend to destroy (e.g. fnx-dev-testenv-01)
+      - name: preview
+        type: atmos
+        command: terraform destroy backend/main -s {{ .steps.stack.value }} --dry-run
       - name: confirmation
         type: input
-        prompt: "Type 'yes-destroy-backend' to confirm"
+        prompt: "Type the stack name again to destroy its backend"
       - name: guard
         type: shell
-        command: test "{{ .steps.confirmation.value }}" = "yes-destroy-backend" || { echo "Destruction cancelled."; exit 1; }
+        command: test -n "{{ .steps.stack.value }}" && test "{{ .steps.confirmation.value }}" = "{{ .steps.stack.value }}" || { echo "Destruction cancelled."; exit 1; }
       - name: destroy
         type: atmos
-        command: terraform destroy backend/main -auto-approve
+        command: terraform destroy backend/main -s {{ .steps.stack.value }} -auto-approve
