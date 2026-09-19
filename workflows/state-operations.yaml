@@ -1,36 +1,44 @@
----
-name: state-operations
-description: "Manage Terraform state locks"
-
+# State lock operations. The S3 backend uses native lockfiles (use_lockfile),
+# so locks are `<state key>.tflock` objects rather than DynamoDB items.
+#
+# Usage:
+#   STACK=<stack> atmos workflow list-locks -f state-operations
+#   atmos workflow force-unlock -f state-operations -s <stack>
 workflows:
   list-locks:
+    description: List Terraform state lockfiles (with age) in the stack's state bucket
+    dependencies:
+      tools:
+        aws/aws-cli: "2.36.49"
+        jqlang/jq: "1.8.2"
     steps:
-    - run:
-        command: |
-          # List state locks for a stack
-          gaia state list-locks ${tenant}-${account}-${environment}
+      - name: stack
+        type: input
+        prompt: Stack
+        default: '{{ env "STACK" }}'
+      - name: list
+        type: shell
+        command: ./workflows/scripts/state/list-locks.sh
         env:
-          AWS_SDK_LOAD_CONFIG: 1
+          STACK: "{{ .steps.stack.value }}"
+          AWS_SDK_LOAD_CONFIG: "1"
 
-  detect-abandoned-locks:
+  force-unlock:
+    description: Release an abandoned state lock for one component (replaces clean-abandoned-locks)
     steps:
-    - run:
-        command: |
-          # Detect abandoned locks
-          gaia state detect-abandoned-locks \
-            ${tenant}-${account}-${environment} \
-            --older-than ${older_than:-120}
-        env:
-          AWS_SDK_LOAD_CONFIG: 1
-
-  clean-abandoned-locks:
-    steps:
-    - run:
-        command: |
-          # Clean abandoned locks
-          gaia state clean-abandoned-locks \
-            ${tenant}-${account}-${environment} \
-            --older-than ${older_than:-120} \
-            --force ${force:-false}
-        env:
-          AWS_SDK_LOAD_CONFIG: 1
+      - name: component
+        type: input
+        prompt: Component (e.g. vpc/main)
+      - name: lock_id
+        type: input
+        prompt: Lock ID (from the Terraform error message)
+      - name: confirm
+        type: confirm
+        prompt: Force-unlock only if no Terraform run is active. Continue?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Cancelled."; exit 1; }
+      - name: unlock
+        type: atmos
+        command: terraform force-unlock {{ .steps.component.value }} -force {{ .steps.lock_id.value }}

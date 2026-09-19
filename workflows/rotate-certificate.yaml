@@ -1,30 +1,29 @@
----
-name: rotate-certificate
-description: "Rotate certificates in AWS and Kubernetes"
-
+# Rotates a TLS certificate stored in AWS Secrets Manager and syncs it to the
+# Kubernetes secret consumed by the cluster (see scripts/certificates/rotate-cert.sh).
+#
+# Usage: atmos workflow rotate -f rotate-certificate
 workflows:
   rotate:
+    description: Rotate a certificate in AWS Secrets Manager / ACM and Kubernetes
     steps:
-    - run:
-        command: |
-          # Use Python-based CLI for certificate rotation with better security
-          gaia certificate rotate \
-            --secret ${secret_name} \
-            --namespace ${namespace} \
-            ${acm_arn:+"--acm-arn ${acm_arn}"} \
-            ${region:+"--region ${region}"} \
-            ${context:+"--context ${context}"} \
-            ${k8s_secret:+"--k8s-secret ${k8s_secret}"} \
-            ${profile:+"--profile ${profile}"} \
-            ${key_path:+"--key-path ${key_path}"} \
-            ${restart_pods:+"--restart-pods"} \
-            ${debug:+"--debug"}
-
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "Certificate rotation failed."
-            exit $EXIT_CODE
-          fi
+      - name: secret
+        type: input
+        prompt: Secrets Manager secret name
+      - name: namespace
+        type: input
+        prompt: Kubernetes namespace
+      - name: acm_arn
+        type: input
+        prompt: New ACM certificate ARN (optional)
+        default: ""
+      - name: rotate
+        type: shell
+        working_directory: !repo-root .
+        command: >-
+          ./scripts/certificates/rotate-cert.sh -s "$SECRET" -n "$NAMESPACE"
+          ${ACM_ARN:+-a "$ACM_ARN"}
         env:
-          AWS_SDK_LOAD_CONFIG: 1
+          SECRET: "{{ .steps.secret.value }}"
+          NAMESPACE: "{{ .steps.namespace.value }}"
+          ACM_ARN: "{{ .steps.acm_arn.value }}"
+          AWS_SDK_LOAD_CONFIG: "1"

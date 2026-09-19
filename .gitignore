@@ -167,3 +167,15 @@ temp/
 tmp/
 *.out
 *.err
+
+# Atmos-generated Terraform files and planfiles
+**/backend.tf.json
+**/providers_override.tf.json
+**/*.planfile
+**/.terraform/
+
+# Security scan reports (atmos workflow security-scan -f lint)
+reports/
+
+# Agent orchestration state
+.omc/

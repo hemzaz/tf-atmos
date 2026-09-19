@@ -24,11 +24,11 @@ components:
           - eks/defaults
       vars:
         cluster_name: "production-main"
-        kubernetes_version: "${eks_kubernetes_version}"
+        kubernetes_version: "{{ .vars.eks_kubernetes_version }}"
 
         # Network configuration
-        vpc_id: "${output.vpc/main.vpc_id}"
-        subnet_ids: "${output.vpc/main.private_subnet_ids}"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
         # Private-only endpoint for production
         endpoint_private_access: true
@@ -36,7 +36,7 @@ components:
 
         # Security settings - maximum protection
         encrypt_secrets: true
-        secrets_encryption_kms_key_arn: "${output.kms/main.key_arn}"
+        secrets_encryption_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Comprehensive logging
         enable_cluster_logging: true
@@ -69,7 +69,7 @@ components:
             disk_encrypted: true
 
             # Spread across AZs
-            subnet_ids: "${output.vpc/main.private_subnet_ids}"
+            subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
             tags:
               NodeGroup: workers
@@ -113,11 +113,11 @@ components:
             configuration_values:
               enableNetworkPolicy: "true"
 
-      tags:
-        Cluster: production-main
-        Purpose: "application-workloads"
-        CriticalityLevel: "high"
-        SLA: "99.9"
+        tags:
+          Cluster: production-main
+          Purpose: "application-workloads"
+          CriticalityLevel: "high"
+          SLA: "99.9"
 
     # ==========================================================================
     # EKS Cluster - Data Processing Workloads (Production HA)
@@ -129,16 +129,16 @@ components:
           - eks/defaults
       vars:
         cluster_name: "production-data"
-        kubernetes_version: "${eks_kubernetes_version}"
+        kubernetes_version: "{{ .vars.eks_kubernetes_version }}"
 
-        vpc_id: "${output.vpc/services.vpc_id}"
-        subnet_ids: "${output.vpc/services.private_subnet_ids}"
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
 
         endpoint_private_access: true
         endpoint_public_access: false
 
         encrypt_secrets: true
-        secrets_encryption_kms_key_arn: "${output.kms/main.key_arn}"
+        secrets_encryption_kms_key_arn: !terraform.state kms/main .key_arn
 
         enable_cluster_logging: true
         enabled_cluster_log_types:
@@ -179,9 +179,9 @@ components:
             capacity_type: "SPOT"
             disk_size: 100
 
-      tags:
-        Cluster: production-data
-        Purpose: "data-processing"
+        tags:
+          Cluster: production-data
+          Purpose: "data-processing"
 
     # ==========================================================================
     # EC2 Bastion Host (Production Hardened)
@@ -189,12 +189,14 @@ components:
     ec2/bastion:
       metadata:
         component: ec2
+        inherits:
+          - ec2
       vars:
         name: "production-bastion"
         instance_type: "t3.small"
 
-        vpc_id: "${output.vpc/main.vpc_id}"
-        subnet_id: "${output.vpc/main.private_subnet_ids[0]}"  # Private subnet in production
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_id: !terraform.state vpc/main .private_subnet_ids[0] # Private subnet in production
 
         # SSH key management
         create_ssh_keys: true
@@ -237,16 +239,16 @@ components:
           volume_type: "gp3"
           volume_size: 20
           encrypted: true
-          kms_key_id: "${output.kms/main.key_arn}"
+          kms_key_id: !terraform.state kms/main .key_arn
           delete_on_termination: true
 
         # CloudWatch agent
         enable_cloudwatch_agent: true
 
-      tags:
-        Role: bastion
-        Access: restricted
-        CriticalityLevel: "high"
+        tags:
+          Role: bastion
+          Access: restricted
+          CriticalityLevel: "high"
 
     # ==========================================================================
     # External Secrets Operator - Main Cluster
@@ -254,13 +256,15 @@ components:
     external-secrets/main:
       metadata:
         component: external-secrets
+        inherits:
+          - external-secrets/defaults
       vars:
         enabled: true
-        cluster_name: "${output.eks/main.cluster_name}"
-        host: "${output.eks/main.cluster_endpoint}"
-        cluster_ca_certificate: "${output.eks/main.cluster_ca_certificate}"
-        oidc_provider_arn: "${output.eks/main.oidc_provider_arn}"
-        oidc_provider_url: "${output.eks/main.oidc_provider_url}"
+        cluster_name: !terraform.state eks/main .cluster_name
+        host: !terraform.state eks/main .cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .cluster_ca_certificate
+        oidc_provider_arn: !terraform.state eks/main .oidc_provider_arn
+        oidc_provider_url: !terraform.state eks/main .oidc_provider_url
 
         namespace:
           name: "external-secrets"
@@ -270,7 +274,7 @@ components:
         helm:
           chart_version: "0.9.9"
 
-        path_prefix: "production/${secrets_manager_path_prefix}"
+        path_prefix: "production/{{ .vars.secrets_manager_path_prefix }}"
 
         # Create multiple secret stores
         secret_stores:
@@ -290,13 +294,15 @@ components:
     external-secrets/data:
       metadata:
         component: external-secrets
+        inherits:
+          - external-secrets/defaults
       vars:
         enabled: true
-        cluster_name: "${output.eks/data.cluster_name}"
-        host: "${output.eks/data.cluster_endpoint}"
-        cluster_ca_certificate: "${output.eks/data.cluster_ca_certificate}"
-        oidc_provider_arn: "${output.eks/data.oidc_provider_arn}"
-        oidc_provider_url: "${output.eks/data.oidc_provider_url}"
+        cluster_name: !terraform.state eks/data .cluster_name
+        host: !terraform.state eks/data .cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/data .cluster_ca_certificate
+        oidc_provider_arn: !terraform.state eks/data .oidc_provider_arn
+        oidc_provider_url: !terraform.state eks/data .oidc_provider_url
 
         namespace:
           name: "external-secrets"
@@ -306,7 +312,7 @@ components:
         helm:
           chart_version: "0.9.9"
 
-        path_prefix: "production/data/${secrets_manager_path_prefix}"
+        path_prefix: "production/data/{{ .vars.secrets_manager_path_prefix }}"
 
         secret_stores:
           default_cluster:

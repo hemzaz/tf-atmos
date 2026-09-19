@@ -1,8 +1,4 @@
 ---
-name: iam
-description: "Reusable IAM configuration for cross-account access"
-
-# Import base configuration
 import:
   - catalog/_base/defaults
 
@@ -12,43 +8,25 @@ components:
       metadata:
         component: iam
         type: abstract
-        version: "1.0.0"
-        description: "Manages IAM roles for cross-account access and CI/CD"
-        category: "security"
-      depends_on:
-        - backend
+        custom:
+          version: "1.0.0"
+          description: "Manages IAM roles for cross-account access and CI/CD"
+          category: "security"
       vars:
         # Component-specific variables only
         # Base variables (tenant, account, environment, region) inherited from _base
         enabled: true
-        management_account_id: "${management_account_id}"
-        target_account_id: "${target_account_id}"
-        cross_account_role_name: "${tenant}-${account}-${environment}-CrossAccountRole"
-        policy_name: "${tenant}-${account}-${environment}-CrossAccountPolicy"
+        cross_account_role_name: "{{ .vars.tenant }}-{{ .vars.account }}-{{ .vars.environment }}-CrossAccountRole"
+        policy_name: "{{ .vars.tenant }}-{{ .vars.account }}-{{ .vars.environment }}-CrossAccountPolicy"
 
-      # Component-specific tags (merged with base tags)
-      tags:
-        Component: "IAM"
+        tags:
+          Component: "IAM"
 
-      # Provider configuration - inherits region from base
       providers:
         aws:
-          profile: "${aws_profile}"
-          region: "${region}"
           assume_role:
-            role_arn: "arn:aws:iam::${target_account_id}:role/${tenant}-${account}-${environment}-TerraformExecutionRole"
+            role_arn: "arn:aws:iam::{{ .vars.target_account_id | default .vars.account_id }}:role/{{ .vars.tenant }}-{{ .vars.account }}-{{ .vars.environment }}-TerraformExecutionRole"
 
-      # Define component outputs with correct spelling
-      outputs:
-        cross_account_role_arn:
-          description: "ARN of the created cross-account IAM role"
-          value: "${output.cross_account_role_arn}"
-        cross_account_role_name:
-          description: "Name of the created cross-account IAM role"
-          value: "${output.cross_account_role_name}"
-        policy_arn:
-          description: "ARN of the IAM policy attached to the role"
-          value: "${output.policy_arn}"
-
-# Note: Removed redundant vars block that was self-referential
-# Variables like tenant, account, environment are inherited from parent stacks
+      dependencies:
+        components:
+          - component: backend/main

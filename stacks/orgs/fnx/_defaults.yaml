@@ -1,5 +1,40 @@
 ---
+# =============================================================================
+# fnx Organization Defaults
+# =============================================================================
+# Shared by every fnx stack: identity vars, standard tags, the Terraform
+# toolchain pin and the S3 state backend.
+# =============================================================================
+
 vars:
   namespace: fnx
   tenant: fnx
   management_account_id: "123456789012" # Replace with actual AWS management account ID
+
+  # Standard tags merged into every component's `tags` variable
+  tags:
+    Tenant: "{{ .vars.tenant }}"
+    Account: "{{ .vars.account }}"
+    Environment: "{{ .vars.environment }}"
+    ManagedBy: "Terraform"
+
+terraform:
+  # Terraform binary version installed by the Atmos toolchain for every component
+  dependencies:
+    tools:
+      terraform: "1.16.3"
+
+  # State lives in the bucket created by the `backend` component
+  # (stacks/catalog/backend/defaults.yaml). Native S3 locking replaces DynamoDB.
+  # Atmos derives `workspace_key_prefix` from the component name and the
+  # workspace from the stack name, so every instance gets its own state file.
+  backend_type: s3
+  backend:
+    s3:
+      bucket: "{{ .vars.tenant }}-terraform-state"
+      key: "terraform.tfstate"
+      region: "{{ .vars.region }}"
+      encrypt: true
+      use_lockfile: true
+      assume_role:
+        role_arn: "arn:aws:iam::{{ .vars.management_account_id }}:role/{{ .vars.tenant }}-terraform-backend-role"

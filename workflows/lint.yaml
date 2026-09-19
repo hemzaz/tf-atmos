@@ -1,142 +1,63 @@
----
-name: lint
-description: "Lint Terraform code and configuration files"
-
+# Static checks for Terraform code and YAML config. Tools are installed by the
+# Atmos toolchain from `dependencies.tools`.
+#
+# Usage:
+#   atmos workflow lint -f lint
+#   atmos workflow security-scan -f lint   # SARIF reports for GitHub code scanning
 workflows:
   lint:
-    description: "Run comprehensive linting on Terraform code, YAML files, and security checks"
+    description: Lint Terraform code, YAML files and run a Terraform security scan
+    dependencies:
+      tools:
+        terraform: "1.16.3"
+        tflint: "0.64.0"
+        wasilibs/go-yamllint: "1.38.0"
+        trivy: "0.74.0"
     steps:
-      - name: "validate-environment"
-        description: "Validate execution environment and dependencies"
-        run:
-          command: |
-            set -euo pipefail
+      - name: validate-config
+        type: atmos
+        command: validate config
+      - type: parallel
+        fail:
+          mode: wait_all
+        steps:
+          - name: terraform-fmt
+            type: shell
+            command: terraform fmt -check -recursive components/terraform
+          - name: yamllint
+            type: shell
+            command: yamllint -d relaxed stacks workflows atmos.yaml
+          - name: security-scan
+            type: shell
+            command: trivy config --exit-code 0 --severity HIGH,CRITICAL components/terraform
+      - name: tflint
+        type: atmos
+        command: terraform lint
+      - type: toast
+        level: success
+        content: Lint checks passed
 
-            echo "=== Atmos Workflow: Terraform Linting ==="
-            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            echo "Working Directory: $(pwd)"
-
-            # Validate atmos configuration
-            if [ ! -f "atmos.yaml" ]; then
-              echo "ERROR: atmos.yaml not found in current directory"
-              echo "Please run this workflow from the repository root"
-              exit 1
-            fi
-
-            # Check if required tools are available
-            command -v terraform >/dev/null 2>&1 || { echo "ERROR: terraform is required but not installed"; exit 1; }
-
-            echo "✅ Environment validation complete"
-          env:
-            AWS_SDK_LOAD_CONFIG: 1
-
-      - name: "terraform-format-check"
-        description: "Check and fix Terraform formatting"
-        run:
-          command: |
-            set -euo pipefail
-
-            echo "\n=== Step: Terraform Format Check ==="
-
-            FIX_FLAG="${fix:-false}"
-            TERRAFORM_DIR="./components/terraform"
-
-            if [ ! -d "$TERRAFORM_DIR" ]; then
-              echo "ERROR: Terraform components directory not found: $TERRAFORM_DIR"
-              exit 1
-            fi
-
-            if [ "$FIX_FLAG" = "true" ]; then
-              echo "Running terraform fmt with auto-fix..."
-              terraform fmt -recursive "$TERRAFORM_DIR"
-              echo "✅ Terraform formatting applied"
-            else
-              echo "Running terraform fmt check..."
-              if terraform fmt -check -recursive "$TERRAFORM_DIR"; then
-                echo "✅ Terraform formatting check passed"
-              else
-                echo "❌ Terraform formatting issues found"
-                echo "Run with fix=true to automatically fix formatting issues"
-                exit 1
-              fi
-            fi
-          env:
-            AWS_SDK_LOAD_CONFIG: 1
-
-      - name: "yaml-lint-check"
-        description: "Lint YAML configuration files"
-        run:
-          command: |
-            set -euo pipefail
-
-            echo "\n=== Step: YAML Lint Check ==="
-
-            # Check if yamllint is available
-            if ! command -v yamllint >/dev/null 2>&1; then
-              echo "⚠️  yamllint not found, skipping YAML linting"
-              echo "Install with: pip install yamllint"
-              exit 0
-            fi
-
-            # Use yamllint config if available, otherwise use default
-            YAMLLINT_CONFIG=""
-            if [ -f ".yamllint.yml" ]; then
-              YAMLLINT_CONFIG="-c .yamllint.yml"
-            else
-              YAMLLINT_CONFIG="-d '{extends: default, rules: {line-length: {max: 120}}}'"
-            fi
-
-            echo "Running YAML linting..."
-            if eval "yamllint $YAMLLINT_CONFIG ."; then
-              echo "✅ YAML lint check passed"
-            else
-              echo "❌ YAML lint issues found"
-              exit 1
-            fi
-          env:
-            AWS_SDK_LOAD_CONFIG: 1
-
-      - name: "security-scan"
-        description: "Run security scanning on Terraform code"
-        run:
-          command: |
-            set -euo pipefail
-
-            echo "\n=== Step: Security Scan ==="
-
-            SKIP_SECURITY="${skip_security:-false}"
-
-            if [ "$SKIP_SECURITY" = "true" ]; then
-              echo "⚠️  Security scanning skipped (skip_security=true)"
-              exit 0
-            fi
-
-            # Check if tfsec is available
-            if ! command -v tfsec >/dev/null 2>&1; then
-              echo "⚠️  tfsec not found, skipping security scanning"
-              echo "Install with: go install github.com/aquasecurity/tfsec/cmd/tfsec@latest"
-              exit 0
-            fi
-
-            echo "Running security scan with tfsec..."
-            if tfsec ./components/terraform --soft-fail --concise-output; then
-              echo "✅ Security scan completed"
-            else
-              echo "⚠️  Security issues found in Terraform code"
-              echo "Review the output above and address security concerns"
-              # Don't fail the workflow for security issues (soft-fail)
-            fi
-          env:
-            AWS_SDK_LOAD_CONFIG: 1
-
-      - name: "lint-summary"
-        description: "Provide summary of linting results"
-        run:
-          command: |
-            set -euo pipefail
-
-            echo "\n=== Linting Summary ==="
-            echo "✅ All lint checks completed successfully"
-            echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          env:
-            AWS_SDK_LOAD_CONFIG: 1
+  security-scan:
+    description: Scan Terraform code with Trivy and Checkov, writing SARIF reports to reports/
+    dependencies:
+      tools:
+        trivy: "0.74.0"
+        checkov: "3.3.19"
+    steps:
+      - name: reports-dir
+        type: shell
+        command: mkdir -p reports
+      - type: parallel
+        fail:
+          mode: wait_all
+        steps:
+          - name: trivy
+            type: shell
+            command: >-
+              trivy config --format sarif --output reports/trivy.sarif
+              --severity HIGH,CRITICAL --exit-code 0 components/terraform
+          - name: checkov
+            type: shell
+            command: >-
+              checkov --directory components/terraform --framework terraform
+              --output sarif --output-file-path reports --soft-fail --quiet

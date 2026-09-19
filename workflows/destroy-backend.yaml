@@ -1,23 +1,23 @@
----
-name: destroy-backend
-description: "Destroy the Terraform backend (use with caution)"
-
+# Destroys the Terraform state backend (bucket, lockfiles and every state file
+# stored in it). Irreversible - requires typing the confirmation phrase.
+#
+# Usage: atmos workflow destroy -f destroy-backend -s <stack>
 workflows:
   destroy:
+    description: Destroy the Terraform state backend component (irreversible)
     steps:
-    - run:
-        command: |
-          echo "WARNING: This will destroy the Terraform backend, including all state files."
-          echo "Are you absolutely sure? Type 'yes-destroy-backend' to confirm:"
-          read confirmation
-          if [ "$confirmation" != "yes-destroy-backend" ]; then
-            echo "Destruction cancelled."
-            exit 1
-          fi
-          aws s3 rm s3://${bucket_name} --recursive
-          aws s3api delete-bucket --bucket ${bucket_name}
-          aws dynamodb delete-table --table-name ${dynamodb_table_name}
-        env:
-          bucket_name: ${tenant}-${environment}-terraform-state
-          dynamodb_table_name: ${tenant}-${environment}-terraform-locks
-          region: ${region}
+      - name: warning
+        type: alert
+        level: error
+        content: >-
+          This destroys the Terraform backend for the stack, including ALL state
+          files. Make sure every other component in the stack is destroyed first.
+      - name: confirmation
+        type: input
+        prompt: "Type 'yes-destroy-backend' to confirm"
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirmation.value }}" = "yes-destroy-backend" || { echo "Destruction cancelled."; exit 1; }
+      - name: destroy
+        type: atmos
+        command: terraform destroy backend/main -auto-approve
