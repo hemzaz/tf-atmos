@@ -41,7 +41,11 @@ variable "region" {
 variable "iam_role_name" {
   type        = string
   description = "Name of the IAM role to assume for Terraform execution"
-  default     = "" # Will be set by Atmos
+
+  validation {
+    condition     = can(regex("^[\\w+=,.@-]{1,64}$", var.iam_role_name))
+    error_message = "iam_role_name must be 1-64 characters from [A-Za-z0-9+=,.@_-]."
+  }
 }
 
 # Security and operational features

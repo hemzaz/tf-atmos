@@ -18,7 +18,6 @@ components:
         create_namespace: true
         service_account_name: "external-secrets"
         chart_version: "0.9.9"
-        certificate_secret_path_template: "certificates/{name}/{name}"
         create_default_cluster_secret_store: true
         create_certificate_secret_store: true
 

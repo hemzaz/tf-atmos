@@ -6,12 +6,6 @@ locals {
     )
   ) : 0
 
-  # Create a map of AZ to public subnet ID for explicit NAT gateway placement
-  public_subnet_az_map = {
-    for i, subnet in var.public_subnets :
-    data.aws_availability_zone.available[i % length(data.aws_availability_zone.available)].name => i
-  }
-
   # Determine the list of explicit subnet IDs to use for NAT gateways based on strategy
   nat_gateway_subnet_indices = var.nat_gateway_strategy == "one_per_az" ? [for i in range(local.nat_gateway_count) : i] : (var.nat_gateway_strategy == "single" ? [0] : [])
 

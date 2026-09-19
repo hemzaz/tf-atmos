@@ -191,8 +191,12 @@ variable "log_metric_filters" {
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = contains(keys(var.tags), "Environment")
+    error_message = "tags must include an Environment key."
+  }
 }
 
 # Certificate monitoring variables
@@ -388,42 +392,8 @@ variable "business_metric_alarms" {
 }
 
 # Cost Monitoring Variables
-variable "enable_cost_monitoring" {
-  type        = bool
-  description = "Enable cost monitoring alarms"
-  default     = false
-}
-
-variable "daily_cost_threshold" {
-  type        = number
-  description = "Daily cost alarm threshold in USD"
-  default     = 100
-}
-
-variable "monthly_cost_threshold" {
-  type        = number
-  description = "Monthly cost alarm threshold in USD"
-  default     = 3000
-}
 
 # Security Monitoring Variables
-variable "enable_security_monitoring" {
-  type        = bool
-  description = "Enable security-related monitoring"
-  default     = false
-}
-
-variable "failed_login_threshold" {
-  type        = number
-  description = "Failed login attempts alarm threshold"
-  default     = 10
-}
-
-variable "suspicious_activity_threshold" {
-  type        = number
-  description = "Suspicious activity alarm threshold"
-  default     = 5
-}
 
 # Performance Baseline Variables
 variable "enable_anomaly_detection" {
@@ -439,14 +409,4 @@ variable "anomaly_detection_metrics" {
 }
 
 # Multi-Region Monitoring
-variable "enable_cross_region_monitoring" {
-  type        = bool
-  description = "Enable cross-region monitoring dashboards"
-  default     = false
-}
 
-variable "monitored_regions" {
-  type        = list(string)
-  description = "List of regions to include in cross-region monitoring"
-  default     = []
-}

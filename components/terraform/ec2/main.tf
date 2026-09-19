@@ -43,12 +43,6 @@ locals {
     var.default_key_name == null &&
     local.create_global_key
   }
-
-  # Instances using existing keys
-  instances_using_existing_keys = {
-    for k, v in local.instances_with_normalized_key_names : k => v
-    if v.normalized_key_name != null || var.default_key_name != null
-  }
 }
 
 # Generate individual keys for instances

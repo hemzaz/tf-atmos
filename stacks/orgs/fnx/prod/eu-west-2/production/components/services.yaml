@@ -293,7 +293,6 @@ components:
       vars:
         create_dashboard: true
         enable_certificate_monitoring: true
-        enable_cost_monitoring: true
 
         # Certificate monitoring
         certificate_arns: !terraform.state acm/main .certificate_arns // {}

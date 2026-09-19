@@ -72,7 +72,6 @@ components:
     # Basic monitoring with relaxed thresholds
     monitoring/defaults:
       vars:
-        enable_cost_monitoring: true
         enable_anomaly_detection: false
         enable_percentile_alarms: false
         rds_cpu_threshold: 90

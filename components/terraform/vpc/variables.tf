@@ -135,12 +135,6 @@ variable "create_vpc_iam_role" {
   default     = true
 }
 
-variable "vpc_iam_role_name" {
-  type        = string
-  description = "Name of the IAM role for VPC management"
-  default     = ""
-}
-
 variable "default_sg_ingress_self_only" {
   type        = bool
   description = "Whether to allow only self ingress in the default security group"
@@ -189,8 +183,12 @@ variable "default_security_group_egress_rules" {
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = contains(keys(var.tags), "Environment")
+    error_message = "tags must include an Environment key."
+  }
 }
 
 # VPC Flow Logs Variables

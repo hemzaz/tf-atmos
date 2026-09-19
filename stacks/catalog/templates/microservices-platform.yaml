@@ -702,7 +702,6 @@ components:
 
         # Enable all monitoring features
         enable_resource_monitoring: true
-        enable_cost_monitoring: true
         enable_container_insights: true
 
         # Container Insights metrics

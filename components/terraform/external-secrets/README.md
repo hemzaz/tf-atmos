@@ -444,7 +444,6 @@ components:
 | `create_namespace` | Whether to create the namespace | `bool` | `true` | no |
 | `service_account_name` | Name of service account for external-secrets | `string` | `"external-secrets"` | no |
 | `chart_version` | Version of the external-secrets Helm chart | `string` | `"0.9.9"` | no |
-| `certificate_secret_path_template` | Template for certificate secrets path | `string` | `"certificates/{name}"` | no |
 | `create_default_cluster_secret_store` | Create default cluster secret store | `bool` | `true` | no |
 | `create_certificate_secret_store` | Create dedicated secret store for certificates | `bool` | `true` | no |
 | `tags` | Tags to apply to resources | `map(string)` | `{}` | no |

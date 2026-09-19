@@ -1006,7 +1006,6 @@ components:
 
         # Enable monitoring features
         enable_resource_monitoring: true
-        enable_cost_monitoring: false
 
         # Custom dashboard
         dashboards:

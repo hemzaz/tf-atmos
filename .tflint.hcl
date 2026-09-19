@@ -52,7 +52,9 @@ rule "aws_instance_invalid_type" {
   enabled = true
 }
 
+# Off: every component's AWS provider sets default_tags (Environment, Tenant,
+# ManagedBy, ...), which this rule does not see, so it only reports noise. It
+# also crashes on `var.tags["..."]` when linting with an empty tags map.
 rule "aws_resource_missing_tags" {
-  enabled = true
-  tags = ["Name", "Environment", "Tenant", "ManagedBy"]
+  enabled = false
 }

@@ -233,7 +233,6 @@ components:
         oidc_provider_url: !terraform.state eks/main .oidc_provider_url
 
         namespace: "external-secrets"
-        certificate_secret_path_template: "production/{{ .settings.environment.secrets_manager_path_prefix }}/{name}"
         service_account_name: "external-secrets"
         chart_version: "0.9.9"
         create_default_cluster_secret_store: true
@@ -255,7 +254,6 @@ components:
         oidc_provider_url: !terraform.state eks/data .oidc_provider_url
 
         namespace: "external-secrets"
-        certificate_secret_path_template: "production/data/{{ .settings.environment.secrets_manager_path_prefix }}/{name}"
         service_account_name: "external-secrets"
         chart_version: "0.9.9"
         create_default_cluster_secret_store: true

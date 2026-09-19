@@ -18,7 +18,6 @@ locals {
   managed_zones = merge(aws_route53_zone.zones, aws_route53_zone.dns_account_zones)
 
   # Default zone name pattern from root domain
-  zone_name_pattern = trimsuffix(var.root_domain, ".")
 
   # Get the normalized record list
   normalized_records = {

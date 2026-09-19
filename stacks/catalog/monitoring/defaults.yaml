@@ -12,7 +12,6 @@ components:
       vars:
         environment: "{{ .settings.context.environment }}"
         enable_certificate_monitoring: true
-        enable_cost_monitoring: true
 
         # Certificate monitoring configuration
         certificate_arns: []

@@ -94,17 +94,6 @@ variable "default_kubernetes_version" {
   }
 }
 
-variable "oidc_provider_arn" {
-  type        = string
-  description = "ARN of the OIDC provider for the EKS cluster"
-  default     = ""
-
-  validation {
-    condition     = var.oidc_provider_arn == "" || can(regex("^arn:aws:iam::[0-9]{12}:oidc-provider/", var.oidc_provider_arn))
-    error_message = "OIDC provider ARN must be in a valid format (e.g., arn:aws:iam::123456789012:oidc-provider/...)."
-  }
-}
-
 variable "enable_cluster_protection" {
   type        = bool
   description = "Enable EKS deletion protection for clusters in production environments"

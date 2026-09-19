@@ -77,8 +77,6 @@ components:
     # Enhanced monitoring with stricter thresholds
     monitoring/defaults:
       vars:
-        enable_cost_monitoring: true
-        enable_security_monitoring: true
         enable_anomaly_detection: true
         enable_percentile_alarms: true
         rds_cpu_threshold: 70

@@ -69,12 +69,6 @@ variable "chart_version" {
   default     = "0.9.9"
 }
 
-variable "certificate_secret_path_template" {
-  type        = string
-  description = "Template for certificate secrets path in Secrets Manager"
-  default     = "certificates/{name}"
-}
-
 variable "create_default_cluster_secret_store" {
   type        = bool
   description = "Whether to create the default cluster secret store"
@@ -89,6 +83,10 @@ variable "create_certificate_secret_store" {
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = contains(keys(var.tags), "Environment")
+    error_message = "tags must include an Environment key."
+  }
 }

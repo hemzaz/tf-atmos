@@ -533,7 +533,6 @@ vars:
   alarm_email_addresses:
     - "ops@example.com"
     - "oncall@example.com"
-  enable_cost_monitoring: true
 ```
 
 ### 5. Use Tagging for Cost Allocation

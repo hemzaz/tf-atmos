@@ -79,8 +79,8 @@ resource "aws_eks_cluster" "clusters" {
   )
 
   depends_on = [
-    aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy,
-    aws_iam_role_policy_attachment.cluster_AmazonEKSVPCResourceController,
+    aws_iam_role_policy_attachment.cluster_eks_cluster_policy,
+    aws_iam_role_policy_attachment.cluster_eks_vpc_resource_controller,
     aws_cloudwatch_log_group.eks
   ]
 
@@ -207,14 +207,14 @@ resource "aws_iam_role" "cluster" {
   )
 }
 
-resource "aws_iam_role_policy_attachment" "cluster_AmazonEKSClusterPolicy" {
+resource "aws_iam_role_policy_attachment" "cluster_eks_cluster_policy" {
   for_each = local.clusters
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
   role       = aws_iam_role.cluster[each.key].name
 }
 
-resource "aws_iam_role_policy_attachment" "cluster_AmazonEKSVPCResourceController" {
+resource "aws_iam_role_policy_attachment" "cluster_eks_vpc_resource_controller" {
   for_each = local.clusters
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
@@ -280,9 +280,9 @@ resource "aws_eks_node_group" "node_groups" {
 
   # Explicit dependencies to avoid race conditions during creation and destruction
   depends_on = [
-    aws_iam_role_policy_attachment.node_AmazonEKSWorkerNodePolicy,
-    aws_iam_role_policy_attachment.node_AmazonEKS_CNI_Policy,
-    aws_iam_role_policy_attachment.node_AmazonEC2ContainerRegistryReadOnly,
+    aws_iam_role_policy_attachment.node_eks_worker_node_policy,
+    aws_iam_role_policy_attachment.node_eks_cni_policy,
+    aws_iam_role_policy_attachment.node_ecr_read_only,
     aws_eks_cluster.clusters, # Ensure clusters are fully created before node groups
     aws_iam_role.node         # Ensure roles are fully created before node groups
   ]
@@ -357,21 +357,21 @@ resource "aws_iam_role" "node" {
   )
 }
 
-resource "aws_iam_role_policy_attachment" "node_AmazonEKSWorkerNodePolicy" {
+resource "aws_iam_role_policy_attachment" "node_eks_worker_node_policy" {
   for_each = local.clusters
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
   role       = aws_iam_role.node[each.key].name
 }
 
-resource "aws_iam_role_policy_attachment" "node_AmazonEKS_CNI_Policy" {
+resource "aws_iam_role_policy_attachment" "node_eks_cni_policy" {
   for_each = local.clusters
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
   role       = aws_iam_role.node[each.key].name
 }
 
-resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryReadOnly" {
+resource "aws_iam_role_policy_attachment" "node_ecr_read_only" {
   for_each = local.clusters
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
@@ -418,4 +418,30 @@ data "tls_certificate" "eks" {
       error_message = "Failed to retrieve OIDC certificates for cluster ${each.key}. Check if the cluster API is accessible."
     }
   }
+}
+
+# Renamed to snake_case (tflint terraform_naming_convention); keeps existing state.
+moved {
+  from = aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy
+  to   = aws_iam_role_policy_attachment.cluster_eks_cluster_policy
+}
+
+moved {
+  from = aws_iam_role_policy_attachment.cluster_AmazonEKSVPCResourceController
+  to   = aws_iam_role_policy_attachment.cluster_eks_vpc_resource_controller
+}
+
+moved {
+  from = aws_iam_role_policy_attachment.node_AmazonEKSWorkerNodePolicy
+  to   = aws_iam_role_policy_attachment.node_eks_worker_node_policy
+}
+
+moved {
+  from = aws_iam_role_policy_attachment.node_AmazonEKS_CNI_Policy
+  to   = aws_iam_role_policy_attachment.node_eks_cni_policy
+}
+
+moved {
+  from = aws_iam_role_policy_attachment.node_AmazonEC2ContainerRegistryReadOnly
+  to   = aws_iam_role_policy_attachment.node_ecr_read_only
 }
