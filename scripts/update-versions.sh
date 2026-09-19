@@ -295,8 +295,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     -g|--group)
       BATCH_MODE=true
-      local group="$2"
-      local tools_string=""
+      group="$2"
+      tools_string=""
       
       case "$group" in
         "core")

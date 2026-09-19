@@ -705,7 +705,7 @@ generate_completion_report() {
     log STEP "Generating completion report"
     
     local end_time=$(date)
-    local duration=$(($(date +%s) - $(date -d "$start_time" +%s) 2>/dev/null || 0))
+    local duration=$(( $(date +%s) - start_time ))
     
     # Generate detailed report
     cat > "$PROJECT_ROOT/logs/onboarding-report-$(date +%Y%m%d-%H%M%S).md" << EOF
@@ -818,7 +818,7 @@ show_completion() {
 # =============================================================================
 
 main() {
-    local start_time=$(date)
+    local start_time=$(date +%s)
     
     # Change to project root
     cd "$PROJECT_ROOT"
@@ -838,7 +838,7 @@ main() {
     
     # Calculate duration
     local end_time=$(date)
-    duration=$(($(date +%s) - $(date -j -f "%a %b %d %T %Z %Y" "$start_time" +%s 2>/dev/null || $(date -d "$start_time" +%s 2>/dev/null || 0))))
+    duration=$(( $(date +%s) - start_time ))
     
     show_completion
 }

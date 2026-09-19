@@ -47,6 +47,3 @@ Each script prints its options with `-h`.
 ./scripts/new-environment.sh --tenant fnx --stage dev --environment testenv-02 --region eu-west-2
 atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 ```
-
-Scripts that only applied to the pre-migration layout (DynamoDB locking,
-`vars.tenant`-style catalogs) exit immediately with a pointer to their replacement.
