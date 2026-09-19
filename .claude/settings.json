@@ -12,8 +12,6 @@
         "atmos terraform plan*",
         "atmos terraform validate*",
         "./scripts/list_stacks.sh*",
-        "./scripts/add_tenant_to_catalog.sh*",
-        "./scripts/migrate_docs.sh*",
         "gaia*",
         "terraform fmt*",
         "python3*",

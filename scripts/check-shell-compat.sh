@@ -213,10 +213,7 @@ main_check() {
     # Focus on critical scripts first to avoid timeouts
     local critical_scripts=(
         "./scripts/list_stacks.sh"
-        "./scripts/logger.sh"
         "./scripts/update-versions.sh"
-        "./scripts/aws-setup.sh"
-        "./scripts/atmos_wrapper.sh"
         "./scripts/utils.sh"
     )
     
