@@ -155,7 +155,7 @@ variable "default_sg_allow_all_outbound" {
 
 variable "manage_default_security_group" {
   type        = bool
-  description = "Manage the VPC's AWS-created default security group and strip all of its rules"
+  description = "Manage the VPC's AWS-created default security group and strip all of its rules. One way: setting this back to false, or destroying the resource, only drops the group from state - the removed rules are not restored"
   default     = true
 }
 

@@ -25,7 +25,8 @@ locals {
     var.enable_access_logging ? { access_logs = aws_s3_bucket.terraform_state_access_logs[0] } : {}
   )
 
-  # Buckets that hold logs: versioned, expired after 90 days
+  # Buckets that hold logs: versioned, current versions expire after 90 days and
+  # noncurrent versions 30 days later (~120 days in the worst case)
   log_buckets = { for k, v in local.all_buckets : k => v if k != "state" }
 }
 

@@ -30,7 +30,7 @@ output "public_route_table_id" {
 
 output "default_security_group_id" {
   value       = aws_security_group.default.id
-  description = "The ID of the security group created by default on VPC creation"
+  description = "The ID of this component's shared default security group (aws_security_group.default), not the VPC's AWS-created default group"
 }
 
 output "nat_gateway_ids" {

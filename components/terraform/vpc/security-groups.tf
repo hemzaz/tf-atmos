@@ -72,7 +72,8 @@ resource "aws_security_group" "default" {
 }
 
 # Take over the VPC's AWS-created default security group and remove all its rules, so
-# resources launched without an explicit security group get no network access
+# resources launched without an explicit security group get no network access. Removing
+# this resource only drops the group from state; the rules stay removed in AWS.
 resource "aws_default_security_group" "this" {
   count = var.manage_default_security_group ? 1 : 0
 
