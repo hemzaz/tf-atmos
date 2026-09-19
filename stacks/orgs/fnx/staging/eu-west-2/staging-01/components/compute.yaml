@@ -71,6 +71,9 @@ components:
                     effect: "NO_SCHEDULE"
 
         # OIDC provider for IAM roles for service accounts
+      dependencies:
+        components:
+          - component: vpc/main
     eks/data:
       metadata:
         component: eks
@@ -106,6 +109,9 @@ components:
                   role: data-processing
                 disk_size: 100
 
+      dependencies:
+        components:
+          - component: vpc/services
     ec2/bastion:
       metadata:
         component: ec2
@@ -155,6 +161,9 @@ components:
             root_volume_size: 20
             root_volume_encrypted: true
             root_volume_delete_on_termination: true
+      dependencies:
+        components:
+          - component: vpc/main
     ec2/app-server:
       metadata:
         component: ec2
@@ -203,6 +212,10 @@ components:
                 description: "PostgreSQL to database subnets"
 
             detailed_monitoring: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: ec2/bastion
     external-secrets/main:
       metadata:
         component: external-secrets
@@ -222,6 +235,9 @@ components:
         chart_version: "0.9.9"
         create_default_cluster_secret_store: true
         create_certificate_secret_store: true
+      dependencies:
+        components:
+          - component: eks/main
     external-secrets/data:
       metadata:
         component: external-secrets
@@ -241,3 +257,6 @@ components:
         chart_version: "0.9.9"
         create_default_cluster_secret_store: true
         create_certificate_secret_store: false
+      dependencies:
+        components:
+          - component: eks/data

@@ -82,6 +82,9 @@ components:
             type: "A"
             ttl: 60
             records: ["10.0.1.50"]
+      dependencies:
+        components:
+          - component: vpc/main
 
     # Network resources for services VPC
     network/services:

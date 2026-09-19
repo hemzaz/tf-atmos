@@ -150,6 +150,9 @@ components:
         # an alias here would be a dependency cycle) and db_internal (the
         # disabled infrastructure/main). Re-add once those targets exist.
         records: {}
+      dependencies:
+        components:
+          - component: vpc/main
 
     # ==========================================================================
     # Network Resources - DNS for Services VPC

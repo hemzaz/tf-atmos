@@ -141,6 +141,10 @@ components:
           - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
 
         create_sns_topic: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/main
     monitoring/data:
       metadata:
         component: monitoring
@@ -158,3 +162,7 @@ components:
         alarm_email_subscriptions:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
         create_sns_topic: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/services

@@ -31,6 +31,9 @@ components:
           - "{{ .settings.environment.management_account_id }}"
 
         # Additional IAM policies
+      dependencies:
+        components:
+          - component: backend/main
     iam/ci:
       metadata:
         component: iam
