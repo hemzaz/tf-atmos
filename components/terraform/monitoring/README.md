@@ -16,14 +16,14 @@ filters/alarms from `business_metric_filters`/`business_metric_alarms`.
 
 | Inputs (required) | Inputs (behavior) | Outputs |
 |---|---|---|
-| region, tags (must include `Environment`) | create_dashboard, create_sns_topic, enable_certificate_monitoring + certificate_arns/certificate_domains, enable_synthetic_monitoring, enable_tracing, business_metric_filters/business_metric_alarms | log_group_names/arns, dashboard_name, sns_topic_arn, {cpu,memory,db_connection,lambda_error}_alarm_names — not consumed via `!terraform.state` by any other component today |
+| region, tags (must have a non-empty `Environment` value) | create_dashboard, create_sns_topic, enable_certificate_monitoring + certificate_arns/certificate_domains, enable_synthetic_monitoring, enable_tracing, business_metric_filters/business_metric_alarms | log_group_names/arns, dashboard_name, sns_topic_arn, {cpu,memory,db_connection,lambda_error}_alarm_names — not consumed via `!terraform.state` by any other component today |
 
 ## Dependencies & gotchas
 
 - Depends on `vpc/main` + `acm/main` (main instance), `vpc/main` +
   `acm/services` (data instance).
-- `tags` must include an `Environment` key (validated) — also used to build
-  the `BusinessMetrics/<Environment>` namespace.
+- `tags` must have a non-empty `Environment` value (validated) — also used to
+  build the `BusinessMetrics/<Environment>` namespace.
 - `certificate_arns`/`certificate_domains` come from acm outputs via a
   `// {}` fallback, so this still plans cleanly with empty maps if acm has
   no certs yet.

@@ -17,7 +17,7 @@ inherit abstract `vpc/defaults`; a plain abstract `vpc` catalog entry is not a r
 | Input | Notes |
 |---|---|
 | `vpc_cidr`, `azs`, `private_subnets`, `public_subnets` | required |
-| `tags` | must include an `Environment` key |
+| `tags` | must include a non-empty `Environment` value |
 | `nat_gateway_strategy` | `single` or `one_per_az` |
 
 Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
@@ -30,7 +30,7 @@ Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 - Stack configs reference `.database_subnet_ids`/`.elasticache_subnet_ids` on this
   component's state (`services.yaml`), but `outputs.tf` exports only
   `private_subnet_ids`/`public_subnet_ids` — neither exists (the latter isn't even a variable).
-- `tags` without an `Environment` key fails validation before any plan.
+- `tags` without a non-empty `Environment` value fails validation before any plan.
 
 ## Usage
 
