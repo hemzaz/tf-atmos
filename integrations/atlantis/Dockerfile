@@ -1,21 +1,22 @@
-FROM ghcr.io/runatlantis/atlantis:latest
+FROM ghcr.io/runatlantis/atlantis:v0.47.1
 
 # Install essential tools
 RUN apk add --no-cache curl jq yq bash aws-cli python3 py3-pip findutils grep
 
-# Install Atmos with specific version for consistency
-ARG ATMOS_VERSION=1.44.0
-RUN curl -L -o /tmp/atmos.tar.gz https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_linux_amd64.tar.gz && \
-    tar -xf /tmp/atmos.tar.gz -C /tmp && \
-    mv /tmp/atmos /usr/local/bin/atmos && \
-    chmod +x /usr/local/bin/atmos && \
-    rm -f /tmp/atmos.tar.gz
+# Install Atmos (version pinned in .atmos.env; atmos.yaml requires >= 1.229.0).
+# Terraform 1.16.3 is installed by the Atmos toolchain from the stack's
+# dependencies.tools on first use.
+ARG ATMOS_VERSION=1.229.0
+ARG TARGETARCH=amd64
+RUN curl -fsSL -o /usr/local/bin/atmos \
+      "https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_${ATMOS_VERSION}_linux_${TARGETARCH}" && \
+    chmod +x /usr/local/bin/atmos
 
 # Verify installation and show version
-RUN atmos --version
+RUN atmos version
 
 # Install additional tools for YAML parsing and JSON handling
-RUN pip3 install --no-cache-dir yamllint cfn-lint
+RUN pip3 install --no-cache-dir --break-system-packages yamllint cfn-lint
 
 # Create directories for plan caching and logs
 RUN mkdir -p /atlantis/plans /atlantis/logs && \
@@ -44,6 +45,7 @@ WORKDIR /atlantis
 
 # Set up environment variables
 ENV PATH="/usr/local/bin:${PATH}" \
+    ATLANTIS_DEFAULT_TF_VERSION=v1.16.3 \
     ATLANTIS_LOG_LEVEL=debug \
     ATMOS_DEBUG=true
 

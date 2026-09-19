@@ -1,26 +1,30 @@
 pipeline {
     agent {
         docker {
-            image 'cloudposse/atmos-terraform:latest'
+            // Official Atmos image (Debian); Terraform 1.16.3 and the AWS CLI are
+            // installed on demand by the Atmos toolchain
+            image 'ghcr.io/cloudposse/atmos:1.229.0'
             args '-v $HOME/.aws:/root/.aws'
         }
     }
     
     parameters {
         string(name: 'TENANT', defaultValue: '', description: 'Tenant name')
-        string(name: 'ACCOUNT', defaultValue: '', description: 'AWS account name')
-        string(name: 'ENVIRONMENT', defaultValue: '', description: 'Environment name')
+        string(name: 'STAGE', defaultValue: '', description: 'Stage (dev, staging, prod)')
+        string(name: 'ENVIRONMENT', defaultValue: '', description: 'Environment name (e.g. testenv-01)')
         choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Terraform action to execute')
-        string(name: 'COMPONENT', defaultValue: '', description: 'Specific component to target (leave empty for all)')
+        string(name: 'COMPONENT', defaultValue: '', description: 'Component instance to target, e.g. vpc/main (leave empty for all)')
         booleanParam(name: 'REQUIRE_APPROVAL', defaultValue: true, description: 'Require approval for production environments')
         choice(name: 'AWS_ROLE_SESSION_NAME', choices: ['atmos-jenkins-automation', 'atmos-jenkins-prod', 'atmos-jenkins-dev'], description: 'AWS role session name for cross-account access')
     }
     
     environment {
-        ATMOS_VERSION = '1.44.0'
+        ATMOS_VERSION = '1.229.0'
+        AWS_CLI_TOOL = 'aws/aws-cli@2.36.49'
         MAX_RETRIES = 3
-        STACK_NAME = "${params.TENANT}-${params.ACCOUNT}-${params.ENVIRONMENT}"
-        IS_PRODUCTION = "${params.ACCOUNT == 'prod' || params.ENVIRONMENT == 'prod' ? 'true' : 'false'}"
+        // atmos.yaml name_template: <tenant>-<stage>-<environment>, e.g. fnx-prod-production
+        STACK_NAME = "${params.TENANT}-${params.STAGE}-${params.ENVIRONMENT}"
+        IS_PRODUCTION = "${params.STAGE == 'prod' ? 'true' : 'false'}"
     }
     
     stages {
@@ -32,21 +36,27 @@ pipeline {
                         def atmosInstalled = sh(script: 'command -v atmos || echo "not installed"', returnStdout: true).trim()
                         if (atmosInstalled == "not installed") {
                             sh """
-                                curl -L -o /tmp/atmos.tar.gz https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_linux_amd64.tar.gz
-                                tar -xf /tmp/atmos.tar.gz -C /tmp
-                                mv /tmp/atmos /usr/local/bin/atmos
+                                curl -fsSL -o /usr/local/bin/atmos https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_${ATMOS_VERSION}_linux_amd64
                                 chmod +x /usr/local/bin/atmos
                             """
                         }
-                        sh 'atmos --version'
+                        sh 'atmos version'
+                        
+                        // The account is stack configuration (settings.environment.account),
+                        // not part of the stack name
+                        env.ACCOUNT = sh(
+                            script: "atmos describe stacks -s ${STACK_NAME} --process-functions=false --query '[.[].components.terraform[].settings.environment.account] | .[0]'",
+                            returnStdout: true
+                        ).trim()
+                        echo "Stack ${STACK_NAME} targets account ${env.ACCOUNT}"
                         
                         // Set up AWS credentials for cross-account access if needed
-                        if (params.ACCOUNT != 'dev') {
-                            withCredentials([string(credentialsId: "${params.ACCOUNT}-role-arn", variable: 'AWS_ROLE_ARN')]) {
+                        if (env.ACCOUNT != 'dev') {
+                            withCredentials([string(credentialsId: "${env.ACCOUNT}-role-arn", variable: 'AWS_ROLE_ARN')]) {
                                 sh """
                                     export AWS_ROLE_ARN=${AWS_ROLE_ARN}
                                     export AWS_ROLE_SESSION_NAME=${params.AWS_ROLE_SESSION_NAME}
-                                    aws sts get-caller-identity
+                                    atmos toolchain exec ${AWS_CLI_TOOL} -- sts get-caller-identity
                                 """
                             }
                         }
@@ -62,24 +72,18 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Auto-detect repository structure
-                        def repoStructure = sh(script: 'find . -type d -name "components" | head -1', returnStdout: true).trim()
-                        if (!repoStructure) {
-                            error "Could not detect Atmos repository structure"
+                        // Verify the stack exists (names come from atmos.yaml name_template)
+                        def stackExists = sh(script: "atmos list stacks | grep -qx '${STACK_NAME}'", returnStatus: true)
+                        if (stackExists != 0) {
+                            error "Stack ${STACK_NAME} not found. Available stacks: " + sh(script: 'atmos list stacks', returnStdout: true).trim()
                         }
                         
-                        // Verify component exists if specified
+                        // Verify the component instance exists in the stack if specified
                         if (params.COMPONENT) {
-                            def componentExists = sh(script: "find ./components -name ${params.COMPONENT} -type d | wc -l", returnStdout: true).trim()
-                            if (componentExists == "0") {
-                                error "Component ${params.COMPONENT} not found in repository"
+                            def componentExists = sh(script: "atmos describe component ${params.COMPONENT} -s ${STACK_NAME} --process-functions=false > /dev/null", returnStatus: true)
+                            if (componentExists != 0) {
+                                error "Component ${params.COMPONENT} not found in stack ${STACK_NAME}"
                             }
-                        }
-                        
-                        // Verify stack exists
-                        def stackExists = sh(script: "find ./stacks -name \"*.yaml\" -exec grep -l \"${STACK_NAME}\" {} \\; | wc -l", returnStdout: true).trim()
-                        if (stackExists == "0") {
-                            error "Stack ${STACK_NAME} not found in repository"
                         }
                     } catch (Exception e) {
                         echo "Repository detection failed: ${e.message}"
@@ -94,8 +98,8 @@ pipeline {
                 script {
                     try {
                         retry(MAX_RETRIES) {
-                            sh 'atmos workflow lint'
-                            sh 'atmos workflow validate'
+                            sh 'atmos workflow lint -f lint'
+                            sh "atmos workflow validate -f validate -s ${STACK_NAME}"
                         }
                     } catch (Exception e) {
                         echo "Validation failed: ${e.message}"
@@ -114,7 +118,7 @@ pipeline {
                     try {
                         retry(MAX_RETRIES) {
                             if (params.COMPONENT == '') {
-                                sh "atmos workflow plan-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                                sh "atmos workflow plan -f plan-environment -s ${STACK_NAME}"
                             } else {
                                 sh "atmos terraform plan ${params.COMPONENT} -s ${STACK_NAME}"
                             }
@@ -124,14 +128,8 @@ pipeline {
                         error "Failed to create plan. See logs for details."
                     }
                     
-                    // Archive the plan output for later reference
-                    sh "mkdir -p plans"
-                    if (params.COMPONENT == '') {
-                        sh "cp terraform.tfplan plans/${STACK_NAME}-all.tfplan || true"
-                    } else {
-                        sh "cp terraform.tfplan plans/${STACK_NAME}-${params.COMPONENT}.tfplan || true"
-                    }
-                    archiveArtifacts artifacts: 'plans/*.tfplan', allowEmptyArchive: true
+                    // Archive the plan files Atmos wrote into the component directories
+                    archiveArtifacts artifacts: 'components/terraform/**/*.planfile', allowEmptyArchive: true
                 }
             }
         }
@@ -159,10 +157,12 @@ pipeline {
                 script {
                     try {
                         retry(MAX_RETRIES) {
+                            // Non-interactive CI path (the apply-environment workflow prompts per plan);
+                            // approval for production is the Approval stage above
                             if (params.COMPONENT == '') {
-                                sh "atmos workflow apply-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                                sh "atmos terraform deploy -s ${STACK_NAME}"
                             } else {
-                                sh "atmos terraform apply ${params.COMPONENT} -s ${STACK_NAME}"
+                                sh "atmos terraform deploy ${params.COMPONENT} -s ${STACK_NAME}"
                             }
                         }
                     } catch (Exception e) {
@@ -181,10 +181,12 @@ pipeline {
                 script {
                     try {
                         retry(MAX_RETRIES) {
+                            // destroy-environment asks for the stack name interactively; CI runs the same
+                            // stack-wide destroy directly
                             if (params.COMPONENT == '') {
-                                sh "atmos workflow destroy-environment tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT}"
+                                sh "atmos terraform destroy -s ${STACK_NAME} -auto-approve"
                             } else {
-                                sh "atmos terraform destroy ${params.COMPONENT} -s ${STACK_NAME}"
+                                sh "atmos terraform destroy ${params.COMPONENT} -s ${STACK_NAME} -auto-approve"
                             }
                         }
                     } catch (Exception e) {
@@ -204,7 +206,7 @@ pipeline {
                     try {
                         // Run post-apply validation to ensure resources are properly deployed
                         if (params.COMPONENT == '') {
-                            sh "atmos workflow drift-detection tenant=${params.TENANT} account=${params.ACCOUNT} environment=${params.ENVIRONMENT} || true"
+                            sh "atmos workflow drift-detection -f drift-detection -s ${STACK_NAME} || true"
                         } else {
                             sh "atmos terraform plan ${params.COMPONENT} -s ${STACK_NAME} || true"
                         }

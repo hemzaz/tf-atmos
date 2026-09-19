@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Add required variables to all catalog component files
 
+# Obsolete since the settings.context / native-lockfile migration; kept until removal is decided.
+echo "scripts/add_vars_to_catalog.sh is obsolete: writes legacy \${tenant}/\${account}/\${environment} vars into catalog files; naming context now lives in settings.context" >&2
+exit 1
+
 REPO_ROOT="/Users/elad/IdeaProjects/tf-atmos"
 CATALOG_DIR="$REPO_ROOT/stacks/catalog"
 

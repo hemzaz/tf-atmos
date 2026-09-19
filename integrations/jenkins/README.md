@@ -81,11 +81,11 @@ The pipeline can be triggered manually with the following parameters:
 
 | Parameter | Description | Example Values |
 |-----------|-------------|----------------|
-| TENANT | The organizational tenant name | `acme`, `organization` |
-| ACCOUNT | The AWS account name | `dev`, `staging`, `prod` |
-| ENVIRONMENT | The environment name | `us-east-1`, `us-west-2` |
+| TENANT | The organizational tenant name | `fnx` |
+| STAGE | The stage | `dev`, `staging`, `prod` |
+| ENVIRONMENT | The environment name | `testenv-01`, `production` |
 | ACTION | The Terraform action to perform | `plan`, `apply`, `destroy` |
-| COMPONENT | Specific component to target (optional) | `vpc`, `eks`, `rds` |
+| COMPONENT | Component instance to target (optional) | `vpc/main`, `eks/main` |
 | REQUIRE_APPROVAL | Whether to require approval (default: true) | `true`, `false` |
 | AWS_ROLE_SESSION_NAME | Session name for cross-account access | `atmos-jenkins-automation` |
 
@@ -96,9 +96,9 @@ The pipeline can be triggered manually with the following parameters:
 This will run a plan for all components in the specified environment:
 
 ```
-TENANT: acme
-ACCOUNT: dev
-ENVIRONMENT: us-east-1
+TENANT: fnx
+STAGE: dev
+ENVIRONMENT: testenv-01
 ACTION: plan
 COMPONENT: (leave empty)
 REQUIRE_APPROVAL: true
@@ -110,18 +110,18 @@ AWS_ROLE_SESSION_NAME: atmos-jenkins-dev
 This will apply changes only for the specified component:
 
 ```
-TENANT: acme
-ACCOUNT: prod
-ENVIRONMENT: us-west-2
+TENANT: fnx
+STAGE: prod
+ENVIRONMENT: production
 ACTION: apply
-COMPONENT: vpc
+COMPONENT: vpc/main
 REQUIRE_APPROVAL: true
 AWS_ROLE_SESSION_NAME: atmos-jenkins-prod
 ```
 
 ## Security Considerations
 
-- The pipeline uses the cloudposse/atmos-terraform Docker image for isolation
+- The pipeline uses the official `ghcr.io/cloudposse/atmos` image for isolation
 - AWS credentials are securely managed using role assumption
 - Production environments require explicit approval before applying changes
 - No sensitive values are exposed in logs
@@ -157,17 +157,13 @@ For multi-account deployments, the integration:
    - Error: "Unable to locate credentials"
    - Solution: Ensure role ARN credentials are properly configured in Jenkins
 
-2. **Missing Atmos configuration**: 
-   - Error: "Could not detect Atmos repository structure"
-   - Solution: Verify atmos.yaml exists at the root of your repository
+2. **Component not found**: 
+   - Error: "Component X not found in stack Y"
+   - Solution: List the instances with `atmos list components -s <stack>` (e.g. `vpc/main`)
 
-3. **Component not found**: 
-   - Error: "Component X not found in repository"
-   - Solution: Check that the component exists in ./components/terraform/
-
-4. **Stack not found**:
-   - Error: "Stack X not found in repository"
-   - Solution: Verify stack configuration exists in ./stacks/
+3. **Stack not found**:
+   - Error: "Stack X not found"
+   - Solution: Stacks are `<tenant>-<stage>-<environment>`; list them with `atmos list stacks`
 
 ### Logs and Debugging
 
@@ -194,9 +190,9 @@ The Jenkinsfile can be customized for your specific needs:
 
 This integration has been tested with:
 
-- Atmos v1.44.0 or later
-- Terraform v1.5.0 or later
-- AWS Provider v4.9.0 or later
+- Atmos v1.229.0 or later
+- Terraform 1.16.3 (installed by the Atmos toolchain)
+- AWS Provider ~> 6.65
 - Jenkins v2.375.1 or later
 
 ## Related Resources

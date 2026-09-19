@@ -140,7 +140,7 @@ collect_usage_metrics() {
     local commands_file="$HOME/.bash_history"
     local top_commands=""
     if [ -f "$commands_file" ]; then
-        top_commands=$(grep -E "make|gaia|atmos" "$commands_file" 2>/dev/null | tail -20 | head -5 | tr '\n' ',' | sed 's/,$//')
+        top_commands=$(grep -E "make|atmos" "$commands_file" 2>/dev/null | tail -20 | head -5 | tr '\n' ',' | sed 's/,$//')
     fi
     
     cat << EOF
@@ -186,7 +186,7 @@ collect_interactive_feedback() {
     echo
     echo -e "${WHITE}4. Which tools do you use most? (select all that apply)${NC}"
     echo "   a) make commands"
-    echo "   b) gaia CLI"
+    echo "   b) atmos workflows"
     echo "   c) direct atmos commands"
     echo "   d) development environment (Docker)"
     read -p "   Enter letters (e.g., 'a,b'): " tools_used
@@ -287,7 +287,7 @@ generate_recommendations() {
     fi
     
     # Always include some general recommendations
-    recommendations+=("Try the new Gaia CLI for a better experience: 'gaia quick-start'")
+    recommendations+=("Discover the available Atmos workflows: 'atmos list workflows'")
     recommendations+=("Use 'make help' to discover time-saving shortcuts")
     recommendations+=("Check out the DEVELOPER_GUIDE.md for advanced tips")
     

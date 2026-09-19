@@ -5,7 +5,7 @@ set -eo pipefail
 # Usage: atmos-wrapper.sh [command] [args...]
 
 # Log file locations
-LOG_DIR="/atlantis/logs"
+LOG_DIR="${ATMOS_WRAPPER_LOG_DIR:-/atlantis/logs}"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 LOG_FILE="${LOG_DIR}/atmos-${TIMESTAMP}.log"
 
@@ -27,7 +27,7 @@ handle_error() {
 # Parse command line arguments
 if [ $# -lt 1 ]; then
     log "Usage: atmos-wrapper.sh [command] [args...]"
-    log "Example: atmos-wrapper.sh terraform plan vpc -s tenant-account-environment"
+    log "Example: atmos-wrapper.sh terraform plan vpc/main -s fnx-dev-testenv-01"
     exit 1
 fi
 
@@ -39,23 +39,24 @@ if [[ "$COMMAND" == "terraform" ]]; then
     # For terraform commands, we need at least a subcommand and a component
     if [ $# -lt 2 ]; then
         log "For terraform commands, you must specify a subcommand and component"
-        log "Example: atmos-wrapper.sh terraform plan vpc -s tenant-account-environment"
+        log "Example: atmos-wrapper.sh terraform plan vpc/main -s fnx-dev-testenv-01"
         exit 1
     fi
     
     SUBCOMMAND="$1"
     COMPONENT="$2"
     shift 2
+    # Put them back so the final atmos call receives the full command line
+    set -- "$SUBCOMMAND" "$COMPONENT" "$@"
     
     # Check if stack is specified
     STACK=""
     idx=0
     for i in "$@"; do
         if [[ "$i" == "-s" || "$i" == "--stack" ]]; then
-            STACK_IDX=$((idx+1))
-            if [ $STACK_IDX -lt $# ]; then
-                # Use array element syntax correctly
-                STACK="${@:$STACK_IDX:1}"
+            # The value follows the flag: 0-based idx+1, i.e. positional idx+2
+            if [ $((idx+1)) -lt $# ]; then
+                STACK="${*:$((idx+2)):1}"
                 break
             fi
         fi
@@ -67,13 +68,13 @@ if [[ "$COMMAND" == "terraform" ]]; then
         exit 1
     fi
     
-    # Extract account from stack name
-    ACCOUNT=$(echo "$STACK" | cut -d'-' -f2)
+    # Resolve the account from the stack configuration (settings.environment.account);
+    # stack names are <tenant>-<stage>-<environment> and do not carry it
+    ACCOUNT=$(atmos describe component "$COMPONENT" -s "$STACK" --process-functions=false --format json \
+        | jq -r '.settings.environment.account // empty')
     
-    # Validate that we got a valid account from the stack name
     if [[ -z "$ACCOUNT" ]]; then
-        log "ERROR: Could not extract account name from stack: $STACK"
-        log "Stack name should be in format: tenant-account-environment"
+        log "ERROR: Could not resolve settings.environment.account for $COMPONENT in stack: $STACK"
         exit 1
     fi
     

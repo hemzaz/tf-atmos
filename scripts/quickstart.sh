@@ -5,14 +5,14 @@
 # One-command deployment for complete infrastructure environment
 #
 # Usage:
-#   ./scripts/quickstart.sh --tenant fnx --account dev --environment testenv-01
-#   ./scripts/quickstart.sh --tenant fnx --account prod --environment production --region eu-west-2
+#   ./scripts/quickstart.sh --tenant fnx --stage dev --environment testenv-01
+#   ./scripts/quickstart.sh --tenant fnx --stage prod --environment production --region eu-west-2
 #   ./scripts/quickstart.sh --help
 #
 # This script will:
 #   1. Check all prerequisites (AWS CLI, Terraform, Atmos)
 #   2. Validate AWS credentials and permissions
-#   3. Create backend infrastructure (S3 bucket, DynamoDB table)
+#   3. Bootstrap the S3 state backend (native lockfile locking)
 #   4. Deploy complete infrastructure stack
 #   5. Run health checks and output endpoints
 # =============================================================================
@@ -27,8 +27,12 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Default values
 DEFAULT_REGION="eu-west-2"
-DEFAULT_TERRAFORM_VERSION="1.11.0"
-DEFAULT_ATMOS_VERSION="1.163.0"
+# Tool versions are pinned in .atmos.env (Terraform itself is installed by the
+# Atmos toolchain from stacks/orgs/<tenant>/_defaults.yaml dependencies.tools)
+# shellcheck source=../.atmos.env
+source "$PROJECT_ROOT/.atmos.env"
+DEFAULT_TERRAFORM_VERSION="$TERRAFORM_VERSION"
+DEFAULT_ATMOS_VERSION="$ATMOS_VERSION"
 
 # Colors for output
 RED='\033[0;31m'
@@ -81,12 +85,14 @@ EOF
 print_usage() {
     cat << EOF
 ${WHITE}Usage:${NC}
-    $SCRIPT_NAME --tenant <name> --account <name> --environment <name> [OPTIONS]
+    $SCRIPT_NAME --tenant <name> --stage <name> --environment <name> [OPTIONS]
 
 ${WHITE}Required Parameters:${NC}
-    --tenant, -t        Tenant name (e.g., 'fnx', 'acme')
-    --account, -a       Account name (e.g., 'dev', 'staging', 'prod')
+    --tenant, -t        Tenant name (e.g., 'fnx')
+    --stage, -s         Stage (e.g., 'dev', 'staging', 'prod'); --account/-a is an alias
     --environment, -e   Environment name (e.g., 'testenv-01', 'production')
+
+    The Atmos stack is <tenant>-<stage>-<environment> (e.g. fnx-dev-testenv-01).
 
 ${WHITE}Optional Parameters:${NC}
     --region, -r        AWS region (default: ${DEFAULT_REGION})
@@ -101,23 +107,21 @@ ${WHITE}Optional Parameters:${NC}
 
 ${WHITE}Examples:${NC}
     # Deploy development environment
-    $SCRIPT_NAME --tenant fnx --account dev --environment testenv-01
+    $SCRIPT_NAME --tenant fnx --stage dev --environment testenv-01
 
     # Deploy production environment with specific profile
-    $SCRIPT_NAME --tenant fnx --account prod --environment production --profile prod-admin
+    $SCRIPT_NAME --tenant fnx --stage prod --environment production --profile prod-admin
 
     # Plan only (no changes)
-    $SCRIPT_NAME --tenant fnx --account dev --environment testenv-01 --plan-only
+    $SCRIPT_NAME --tenant fnx --stage dev --environment testenv-01 --plan-only
 
     # Dry run to see what would happen
-    $SCRIPT_NAME --tenant fnx --account dev --environment testenv-01 --dry-run
+    $SCRIPT_NAME --tenant fnx --stage dev --environment testenv-01 --dry-run
 
 ${WHITE}Environment Variables:${NC}
     AWS_ACCOUNT_ID              Override AWS account ID
     AWS_PROFILE                 AWS CLI profile (overridden by --profile)
     AWS_REGION                  AWS region (overridden by --region)
-    ATMOS_TERRAFORM_VERSION     Override Terraform version
-    ATMOS_CLI_VERSION           Override Atmos version
 
 ${WHITE}For more information:${NC}
     See docs/DEPLOYMENT_GUIDE.md
@@ -127,7 +131,7 @@ EOF
 # Parse command line arguments
 parse_args() {
     TENANT=""
-    ACCOUNT=""
+    STAGE=""
     ENVIRONMENT=""
     REGION="${AWS_REGION:-$DEFAULT_REGION}"
     AWS_PROFILE_ARG=""
@@ -144,8 +148,8 @@ parse_args() {
                 TENANT="$2"
                 shift 2
                 ;;
-            --account|-a)
-                ACCOUNT="$2"
+            --stage|-s|--account|-a)
+                STAGE="$2"
                 shift 2
                 ;;
             --environment|-e)
@@ -208,7 +212,7 @@ parse_args() {
     # Validate required parameters
     local missing_params=()
     [[ -z "$TENANT" ]] && missing_params+=("--tenant")
-    [[ -z "$ACCOUNT" ]] && missing_params+=("--account")
+    [[ -z "$STAGE" ]] && missing_params+=("--stage")
     [[ -z "$ENVIRONMENT" ]] && missing_params+=("--environment")
 
     if [[ ${#missing_params[@]} -gt 0 ]]; then
@@ -218,8 +222,8 @@ parse_args() {
         exit 1
     fi
 
-    # Construct stack name
-    STACK_NAME="${TENANT}-${ACCOUNT}-${ENVIRONMENT}"
+    # Construct stack name (atmos.yaml name_template)
+    STACK_NAME="${TENANT}-${STAGE}-${ENVIRONMENT}"
 }
 
 # Check if command exists
@@ -249,7 +253,7 @@ check_prerequisites() {
     else
         echo -e "${RED}NOT FOUND${NC}"
         log_error "AWS CLI is required. Install from: https://aws.amazon.com/cli/"
-        ((errors++))
+        errors=$((errors + 1))
     fi
 
     # Check Terraform
@@ -261,12 +265,11 @@ check_prerequisites() {
             echo -e "${GREEN}OK${NC} (version: $tf_version)"
         else
             echo -e "${YELLOW}WARNING${NC} (version: $tf_version, recommended: >= $DEFAULT_TERRAFORM_VERSION)"
-            ((warnings++))
+            warnings=$((warnings + 1))
         fi
     else
-        echo -e "${RED}NOT FOUND${NC}"
-        log_error "Terraform is required. Install from: https://www.terraform.io/downloads.html"
-        ((errors++))
+        echo -e "${YELLOW}NOT ON PATH${NC}"
+        log_info "Atmos installs Terraform ${DEFAULT_TERRAFORM_VERSION} from the stack toolchain (dependencies.tools) on first use"
     fi
 
     # Check Atmos
@@ -274,11 +277,16 @@ check_prerequisites() {
     if command_exists atmos; then
         local atmos_version
         atmos_version=$(atmos version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
-        echo -e "${GREEN}OK${NC} (version: $atmos_version)"
+        if version_ge "$atmos_version" "$DEFAULT_ATMOS_VERSION"; then
+            echo -e "${GREEN}OK${NC} (version: $atmos_version)"
+        else
+            echo -e "${RED}TOO OLD${NC} (version: $atmos_version, required: >= $DEFAULT_ATMOS_VERSION)"
+            errors=$((errors + 1))
+        fi
     else
         echo -e "${RED}NOT FOUND${NC}"
         log_error "Atmos is required. Install from: https://atmos.tools/install"
-        ((errors++))
+        errors=$((errors + 1))
     fi
 
     # Check jq
@@ -289,7 +297,7 @@ check_prerequisites() {
         echo -e "${GREEN}OK${NC} (version: $jq_version)"
     else
         echo -e "${YELLOW}WARNING${NC} - jq is recommended for JSON processing"
-        ((warnings++))
+        warnings=$((warnings + 1))
     fi
 
     # Check Git
@@ -300,7 +308,7 @@ check_prerequisites() {
         echo -e "${GREEN}OK${NC} (version: $git_version)"
     else
         echo -e "${YELLOW}WARNING${NC} - Git is recommended"
-        ((warnings++))
+        warnings=$((warnings + 1))
     fi
 
     # Check kubectl (optional for EKS)
@@ -406,357 +414,41 @@ validate_aws_credentials() {
 check_stack_exists() {
     log_step "Checking Stack Configuration"
 
-    local stack_path="$PROJECT_ROOT/stacks/orgs/$TENANT/$ACCOUNT"
-
-    echo "Looking for stack configuration..."
-    echo "  Expected path: $stack_path"
-    echo "  Stack name: $STACK_NAME"
-    echo
-
-    # Check if stack directory exists
-    if [[ ! -d "$stack_path" ]]; then
-        log_warning "Stack directory not found: $stack_path"
-        echo
-        echo "Would you like to create it from a template? [y/N]"
-
-        if [[ "$DRY_RUN" == "true" ]]; then
-            echo "[DRY RUN] Would create stack directory"
-            return 0
-        fi
-
-        read -r response
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            create_stack_from_template
-        else
-            log_error "Stack configuration is required. Create it manually or use templates."
-            exit 1
-        fi
-    else
-        echo -n "Stack directory exists... "
-        echo -e "${GREEN}OK${NC}"
-    fi
-
-    # Try to list stacks
-    echo -n "Validating stack with Atmos... "
     cd "$PROJECT_ROOT"
 
-    if atmos list stacks 2>/dev/null | grep -q "$STACK_NAME" 2>/dev/null; then
+    echo -n "Looking for stack '$STACK_NAME' in Atmos... "
+    if atmos list stacks 2>/dev/null | grep -qx "$STACK_NAME"; then
         echo -e "${GREEN}OK${NC}"
-        log_success "Stack '$STACK_NAME' found in Atmos configuration"
-    else
-        echo -e "${YELLOW}WARNING${NC}"
-        log_warning "Stack '$STACK_NAME' not found in Atmos. Will attempt to create."
+        return 0
     fi
-}
-
-# Create stack from template
-create_stack_from_template() {
-    log_info "Creating stack configuration from template..."
-
-    local stack_dir="$PROJECT_ROOT/stacks/orgs/$TENANT/$ACCOUNT"
-    local env_dir="$stack_dir/$REGION/$ENVIRONMENT"
-    local components_dir="$env_dir/components"
+    echo -e "${YELLOW}NOT FOUND${NC}"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo "[DRY RUN] Would create directories:"
-        echo "  - $stack_dir"
-        echo "  - $env_dir"
-        echo "  - $components_dir"
+        echo "[DRY RUN] Would offer to create it with scripts/new-environment.sh"
         return 0
     fi
 
-    # Create directory structure
-    mkdir -p "$components_dir"
-
-    # Create tenant defaults if not exists
-    if [[ ! -f "$PROJECT_ROOT/stacks/orgs/$TENANT/_defaults.yaml" ]]; then
-        cat > "$PROJECT_ROOT/stacks/orgs/$TENANT/_defaults.yaml" << EOF
----
-vars:
-  namespace: $TENANT
-  tenant: $TENANT
-  management_account_id: "${AWS_ACCOUNT_ID}"  # Update with management account ID
-EOF
+    echo "Would you like to create it with scripts/new-environment.sh? [y/N]"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        create_stack_from_template
+    else
+        log_error "Stack configuration is required. Create it with scripts/new-environment.sh."
+        exit 1
     fi
-
-    # Create account defaults
-    if [[ ! -f "$stack_dir/_defaults.yaml" ]]; then
-        cat > "$stack_dir/_defaults.yaml" << EOF
----
-import:
-  - orgs/$TENANT/_defaults
-  - mixins/tenant/$TENANT
-  - mixins/stage/$ACCOUNT
-
-vars:
-  account: $ACCOUNT
-  account_id: "${AWS_ACCOUNT_ID}"
-  aws_profile: "$ACCOUNT"
-EOF
-    fi
-
-    # Create region defaults
-    local region_dir="$stack_dir/$REGION"
-    mkdir -p "$region_dir"
-    if [[ ! -f "$region_dir/_defaults.yaml" ]]; then
-        cat > "$region_dir/_defaults.yaml" << EOF
----
-vars:
-  region: $REGION
-EOF
-    fi
-
-    # Create main stack file
-    cat > "$env_dir.yaml" << EOF
----
-# ${ENVIRONMENT} Stack Configuration
-# Auto-generated by quickstart.sh on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-import:
-  # Import base configuration first
-  - catalog/_base/defaults
-
-  # Import mixins (order matters for variable precedence)
-  - mixins/tenant/$TENANT
-  - mixins/stage/$ACCOUNT
-  - mixins/region/$REGION
-
-  # Import org defaults
-  - orgs/$TENANT/$ACCOUNT/_defaults
-
-  # Import component-specific configurations
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/globals
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/networking
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/security
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/compute
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/services
-
-vars:
-  # Core variables for stack naming
-  tenant: $TENANT
-  environment: $ENVIRONMENT
-  stage: $ACCOUNT
-  account: $ACCOUNT
-  region: $REGION
-
-  # AWS Account ID
-  aws_account_id: "${AWS_ACCOUNT_ID}"
-
-  # VPC configuration
-  vpc_cidr: "10.0.0.0/16"
-
-  # Description
-  description: "${ENVIRONMENT} Environment"
-  namespace: $ENVIRONMENT
-EOF
-
-    # Create component files
-    create_component_files "$components_dir"
-
-    log_success "Stack configuration created at: $env_dir"
 }
 
-# Create component configuration files
-create_component_files() {
-    local dir="$1"
+# Create the stack with the shared generator (current layout, settings.context naming)
+create_stack_from_template() {
+    log_info "Creating stack configuration..."
 
-    # Create globals.yaml
-    cat > "$dir/globals.yaml" << EOF
----
-# Global component configurations for $ENVIRONMENT environment
-
-import:
-  - orgs/$TENANT/$ACCOUNT/$REGION/_defaults
-  - mixins/development
-  - catalog/vpc/defaults
-  - catalog/network/defaults
-  - catalog/iam/defaults
-  - catalog/backend/defaults
-  - catalog/monitoring/defaults
-
-metadata:
-  description: "${ENVIRONMENT} environment"
-  owner: "DevOps Team"
-  version: "1.0.0"
-  stage: "$ACCOUNT"
-  region: "$REGION"
-
-vars:
-  environment: $ENVIRONMENT
-  tenant_name: $ENVIRONMENT
-  domain_name: "example.com"
-  hosted_zone_id: "CHANGE_ME"
-
-  # Feature flags
-  enable_container_insights: false
-  enable_vpc_flow_logs: true
-  use_external_secrets: false
-  secrets_manager_path_prefix: "$TENANT/certificates"
-
-  # EKS configuration
-  eks_kubernetes_version: "1.28"
-  eks_public_access: false
-
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-  Environment: "$ENVIRONMENT"
-  ManagedBy: "Terraform"
-  Tenant: "$TENANT"
-EOF
-
-    # Create networking.yaml
-    cat > "$dir/networking.yaml" << EOF
----
-# Networking component configurations for $ENVIRONMENT environment
-
-import:
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/globals
-  - catalog/vpc/defaults
-  - catalog/network/defaults
-
-components:
-  terraform:
-    vpc/main:
-      metadata:
-        component: vpc
-        inherits:
-          - vpc/defaults
-      vars:
-        name: main
-        vpc_cidr: "10.0.0.0/16"
-        vpc_flow_logs_enabled: true
-        private_subnets:
-          - "10.0.1.0/24"
-          - "10.0.2.0/24"
-          - "10.0.3.0/24"
-        public_subnets:
-          - "10.0.101.0/24"
-          - "10.0.102.0/24"
-          - "10.0.103.0/24"
-EOF
-
-    # Create security.yaml
-    cat > "$dir/security.yaml" << EOF
----
-# Security component configurations for $ENVIRONMENT environment
-
-import:
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/globals
-  - catalog/iam/defaults
-  - catalog/backend/defaults
-
-components:
-  terraform:
-    iam/main:
-      metadata:
-        component: iam
-      vars:
-        management_account_id: "\${management_account_id}"
-        account_id: "${AWS_ACCOUNT_ID}"
-        target_account_id: "${AWS_ACCOUNT_ID}"
-        cross_account_role_name: "$ENVIRONMENT-$ACCOUNT-$TENANT-CrossAccountRole"
-        policy_name: "$ENVIRONMENT-$ACCOUNT-$TENANT-CrossAccountPolicy"
-
-    backend/main:
-      metadata:
-        component: backend
-      vars:
-        bucket_name: "$TENANT-terraform-state"
-        dynamodb_table_name: "$TENANT-terraform-locks"
-        iam_role_name: "$TENANT-terraform-backend-role"
-        state_file_key: "\${environment}/\${component}/terraform.tfstate"
-EOF
-
-    # Create compute.yaml
-    cat > "$dir/compute.yaml" << EOF
----
-# Compute component configurations for $ENVIRONMENT environment
-
-import:
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/globals
-  - catalog/eks/defaults
-  - catalog/ec2/defaults
-
-components:
-  terraform:
-    ec2/bastion:
-      metadata:
-        component: ec2
-      vars:
-        name: "bastion"
-        instance_type: "t3.small"
-        vpc_id: "\${output.vpc/main.vpc_id}"
-        subnet_id: "\${output.vpc/main.public_subnet_ids[0]}"
-        create_ssh_keys: true
-        store_ssh_keys_in_secrets_manager: true
-        allowed_ingress_rules:
-          - from_port: 22
-            to_port: 22
-            protocol: "tcp"
-            cidr_blocks: ["10.0.0.0/8"]
-            description: "SSH access from internal networks"
-EOF
-
-    # Create services.yaml
-    cat > "$dir/services.yaml" << EOF
----
-# Services component configurations for $ENVIRONMENT environment
-
-import:
-  - orgs/$TENANT/$ACCOUNT/$REGION/$ENVIRONMENT/components/globals
-  - catalog/monitoring/defaults
-
-components:
-  terraform:
-    monitoring/main:
-      metadata:
-        component: monitoring
-      vars:
-        enabled: true
-        create_dashboard: true
-        dashboard_name: "$TENANT-$ENVIRONMENT-dashboard"
-        alarm_notifications_enabled: true
-        alarm_email_addresses:
-          - "ops@example.com"
-EOF
-
-    # Create README
-    cat > "$dir/README.md" << EOF
-# ${ENVIRONMENT} Environment Components
-
-This directory contains the component configurations for the ${ENVIRONMENT} environment.
-
-## Files
-
-- \`globals.yaml\` - Global settings and feature flags
-- \`networking.yaml\` - VPC and network resources
-- \`security.yaml\` - IAM, secrets, and security configurations
-- \`compute.yaml\` - EC2, EKS, and compute resources
-- \`services.yaml\` - API Gateway, monitoring, and services
-
-## Deployment Order
-
-1. Backend (Terraform state)
-2. VPC and networking
-3. IAM and security
-4. Compute resources
-5. Services and monitoring
-
-## Quick Commands
-
-\`\`\`bash
-# Validate all components
-atmos validate stacks
-
-# Plan entire environment
-atmos workflow plan-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT
-
-# Apply entire environment
-atmos workflow apply-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT auto_approve=true
-\`\`\`
-EOF
+    "$SCRIPT_DIR/new-environment.sh" \
+        --tenant "$TENANT" \
+        --stage "$STAGE" \
+        --environment "$ENVIRONMENT" \
+        --region "$REGION" \
+        --skip-backend \
+        --no-workspace
 }
 
 # Setup backend infrastructure
@@ -768,105 +460,15 @@ setup_backend() {
         return 0
     fi
 
-    local bucket_name="${TENANT}-${ACCOUNT}-${ENVIRONMENT}-terraform-state"
-    local dynamodb_table="${TENANT}-${ACCOUNT}-${ENVIRONMENT}-terraform-locks"
+    cd "$PROJECT_ROOT"
 
-    echo "Backend Configuration:"
-    echo "  S3 Bucket:      $bucket_name"
-    echo "  DynamoDB Table: $dynamodb_table"
-    echo "  Region:         $REGION"
-    echo
-
-    # Check if bucket exists
-    echo -n "Checking if S3 bucket exists... "
-    if aws s3api head-bucket --bucket "$bucket_name" 2>/dev/null; then
-        echo -e "${GREEN}EXISTS${NC}"
-        log_info "Backend bucket already exists. Skipping creation."
-    else
-        echo -e "${YELLOW}NOT FOUND${NC}"
-
-        if [[ "$DRY_RUN" == "true" ]]; then
-            echo "[DRY RUN] Would create S3 bucket: $bucket_name"
-        else
-            log_info "Creating S3 bucket: $bucket_name"
-
-            # Create bucket with region-appropriate configuration
-            if [[ "$REGION" == "us-east-1" ]]; then
-                aws s3api create-bucket \
-                    --bucket "$bucket_name" \
-                    --region "$REGION"
-            else
-                aws s3api create-bucket \
-                    --bucket "$bucket_name" \
-                    --region "$REGION" \
-                    --create-bucket-configuration LocationConstraint="$REGION"
-            fi
-
-            # Enable versioning
-            aws s3api put-bucket-versioning \
-                --bucket "$bucket_name" \
-                --versioning-configuration Status=Enabled
-
-            # Enable encryption
-            aws s3api put-bucket-encryption \
-                --bucket "$bucket_name" \
-                --server-side-encryption-configuration '{
-                    "Rules": [{
-                        "ApplyServerSideEncryptionByDefault": {
-                            "SSEAlgorithm": "AES256"
-                        },
-                        "BucketKeyEnabled": true
-                    }]
-                }'
-
-            # Block public access
-            aws s3api put-public-access-block \
-                --bucket "$bucket_name" \
-                --public-access-block-configuration '{
-                    "BlockPublicAcls": true,
-                    "IgnorePublicAcls": true,
-                    "BlockPublicPolicy": true,
-                    "RestrictPublicBuckets": true
-                }'
-
-            log_success "S3 bucket created and configured"
-        fi
+    # S3 state bucket with native lockfile locking (no DynamoDB), managed by backend/main
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "[DRY RUN] Would run: atmos workflow backend-only -f bootstrap -s $STACK_NAME"
+        return 0
     fi
 
-    # Check if DynamoDB table exists
-    echo -n "Checking if DynamoDB table exists... "
-    if aws dynamodb describe-table --table-name "$dynamodb_table" --region "$REGION" >/dev/null 2>&1; then
-        echo -e "${GREEN}EXISTS${NC}"
-        log_info "DynamoDB table already exists. Skipping creation."
-    else
-        echo -e "${YELLOW}NOT FOUND${NC}"
-
-        if [[ "$DRY_RUN" == "true" ]]; then
-            echo "[DRY RUN] Would create DynamoDB table: $dynamodb_table"
-        else
-            log_info "Creating DynamoDB table: $dynamodb_table"
-
-            aws dynamodb create-table \
-                --table-name "$dynamodb_table" \
-                --attribute-definitions AttributeName=LockID,AttributeType=S \
-                --key-schema AttributeName=LockID,KeyType=HASH \
-                --billing-mode PAY_PER_REQUEST \
-                --region "$REGION" \
-                --tags Key=ManagedBy,Value=atmos-quickstart Key=Tenant,Value="$TENANT" Key=Environment,Value="$ENVIRONMENT"
-
-            # Wait for table to be active
-            log_info "Waiting for DynamoDB table to become active..."
-            aws dynamodb wait table-exists --table-name "$dynamodb_table" --region "$REGION"
-
-            # Enable point-in-time recovery
-            aws dynamodb update-continuous-backups \
-                --table-name "$dynamodb_table" \
-                --region "$REGION" \
-                --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true
-
-            log_success "DynamoDB table created and configured"
-        fi
-    fi
+    atmos workflow backend-only -f bootstrap -s "$STACK_NAME"
 
     log_success "Backend infrastructure ready"
 }
@@ -928,10 +530,7 @@ deploy_infrastructure() {
         log_info "Generating deployment plan (--plan-only mode)"
 
         # Run plan workflow
-        atmos workflow plan-environment -f plan-environment.yaml \
-            tenant="$TENANT" \
-            account="$ACCOUNT" \
-            environment="$ENVIRONMENT"
+        atmos workflow plan -f plan-environment -s "$STACK_NAME"
 
         log_success "Plans generated. Review and run with --auto-approve to apply."
         return 0
@@ -956,12 +555,14 @@ deploy_infrastructure() {
     # Run apply workflow
     log_info "Starting infrastructure deployment..."
 
-    local apply_args="tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT"
+    # apply-environment asks for confirmation per plan; with --auto-approve the
+    # whole stack is deployed non-interactively (the CI path of that workflow)
+    local apply_cmd=(atmos workflow apply -f apply-environment -s "$STACK_NAME")
     if [[ "$AUTO_APPROVE" == "true" ]]; then
-        apply_args="$apply_args auto_approve=true"
+        apply_cmd=(atmos terraform deploy -s "$STACK_NAME")
     fi
 
-    if atmos workflow apply -f apply-environment.yaml $apply_args; then
+    if "${apply_cmd[@]}"; then
         log_success "Infrastructure deployment completed"
     else
         log_error "Infrastructure deployment failed"
@@ -1044,7 +645,7 @@ print_summary() {
     echo -e "${WHITE}Stack Information:${NC}"
     echo "  Name:        $STACK_NAME"
     echo "  Tenant:      $TENANT"
-    echo "  Account:     $ACCOUNT"
+    echo "  Stage:       $STAGE"
     echo "  Environment: $ENVIRONMENT"
     echo "  Region:      $REGION"
     echo "  AWS Account: ${AWS_ACCOUNT_ID}"
@@ -1060,8 +661,7 @@ print_summary() {
 
     echo
     echo -e "${WHITE}Backend Resources:${NC}"
-    echo "  S3 Bucket:      ${TENANT}-${ACCOUNT}-${ENVIRONMENT}-terraform-state"
-    echo "  DynamoDB Table: ${TENANT}-${ACCOUNT}-${ENVIRONMENT}-terraform-locks"
+    echo "  S3 Bucket:      ${TENANT}-terraform-state (native lockfile locking)"
     echo
 
     echo -e "${WHITE}Useful Commands:${NC}"
@@ -1069,13 +669,13 @@ print_summary() {
     echo "  atmos terraform output vpc/main -s $STACK_NAME"
     echo
     echo "  # Plan changes"
-    echo "  atmos workflow plan-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT"
+    echo "  atmos workflow plan -f plan-environment -s $STACK_NAME"
     echo
     echo "  # Apply changes"
-    echo "  atmos workflow apply-environment tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT auto_approve=true"
+    echo "  atmos workflow apply -f apply-environment -s $STACK_NAME"
     echo
     echo "  # Destroy environment"
-    echo "  atmos workflow destroy -f destroy-environment.yaml tenant=$TENANT account=$ACCOUNT environment=$ENVIRONMENT"
+    echo "  atmos workflow destroy -f destroy-environment   # prompts for the stack name"
     echo
 
     echo -e "${WHITE}Documentation:${NC}"

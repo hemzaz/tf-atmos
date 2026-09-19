@@ -118,7 +118,7 @@ show_welcome() {
     echo
     echo -e "${WHITE}What we'll do:${NC}"
     echo -e "  🔧 Install and configure required tools"
-    echo -e "  📦 Set up Python environment and Gaia CLI"
+    echo -e "  📦 Set up Python virtual environment"
     echo -e "  🐳 Configure Docker development environment"
     echo -e "  ⚙️  Create development configuration files"
     echo -e "  🔍 Validate infrastructure access and permissions"
@@ -310,17 +310,6 @@ setup_python_environment() {
     # Upgrade pip
     pip install --upgrade pip
     
-    # Install Gaia CLI
-    log INFO "Installing Gaia CLI..."
-    cd gaia && pip install -e . && cd ..
-    
-    # Verify installation
-    if gaia --help > /dev/null 2>&1; then
-        log SUCCESS "Gaia CLI installed successfully"
-    else
-        log WARNING "Gaia CLI installation may have issues"
-    fi
-    
     show_progress
 }
 
@@ -477,7 +466,6 @@ EOF
 # Quick shortcuts
 alias tf='terraform'
 alias atm='atmos'
-alias g='gaia'
 alias k='kubectl'
 
 # Infrastructure commands
@@ -494,18 +482,19 @@ alias dev-stop='make dev-stop'
 alias dev-logs='make dev-logs'
 alias dev-reset='make dev-reset'
 
-# Gaia shortcuts
-alias g-status='gaia status'
-alias g-validate='gaia workflow validate'
-alias g-plan='gaia workflow plan-environment'
-alias g-apply='gaia workflow apply-environment'
+# Atmos shortcuts (stacks are <tenant>-<stage>-<environment>)
+alias a-stacks='atmos list stacks'
+alias a-workflows='atmos list workflows'
+alias a-validate='atmos workflow validate -f validate -s'
+alias a-plan='atmos workflow plan -f plan-environment -s'
+alias a-apply='atmos workflow apply -f apply-environment -s'
 
 # Stack management (adjust for your environment)
-alias stack-dev='gaia status -t fnx -a dev -e testenv-01'
-alias stack-staging='gaia status -t fnx -a staging -e staging-01'
+alias stack-dev='atmos list components -s fnx-dev-testenv-01'
+alias stack-staging='atmos list components -s fnx-staging-staging-01'
 
 echo "🌍 Infrastructure development aliases loaded!"
-echo "💡 Try: validate, plan, apply, g-status, stack-dev"
+echo "💡 Try: validate, plan, apply, a-stacks, stack-dev"
 EOF
     
     log SUCCESS "Development aliases created (source .dev_aliases to use)"
@@ -574,12 +563,12 @@ test_end_to_end_workflow() {
         log WARNING "Makefile may have issues"
     fi
     
-    # Test Gaia CLI
-    log INFO "Testing Gaia CLI..."
-    if gaia --help > /dev/null 2>&1; then
-        log SUCCESS "Gaia CLI is working"
+    # Test Atmos workflow discovery
+    log INFO "Testing Atmos workflows..."
+    if atmos list workflows > /dev/null 2>&1; then
+        log SUCCESS "Atmos workflows are available"
     else
-        log WARNING "Gaia CLI may have issues"
+        log WARNING "Atmos workflow listing may have issues"
     fi
     
     # Test infrastructure validation (non-destructive)
@@ -617,7 +606,7 @@ Welcome, $DEVELOPER_NAME! Your development environment is now configured.
 ### 🔍 Check Status
 \`\`\`bash
 make status                    # Show infrastructure status
-gaia status                   # Enhanced status with Gaia CLI
+atmos list stacks             # All stacks (<tenant>-<stage>-<environment>)
 make doctor                   # Run system diagnostics
 \`\`\`
 
@@ -647,18 +636,18 @@ make dev-logs                # View development logs
 make dev-stop                # Stop development environment
 \`\`\`
 
-## 🛠️ Gaia CLI (Enhanced)
+## 🛠️ Atmos CLI
 
 \`\`\`bash
-gaia --help                           # Show all commands
-gaia quick-start                      # Interactive guide
-gaia doctor                          # System diagnostics
-gaia status -t fnx -a dev -e testenv-01  # Environment status
+atmos --help                                   # Show all commands
+atmos list workflows                           # Available workflows
+atmos list components -s fnx-dev-testenv-01    # Components in a stack
+atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 \`\`\`
 
 ## 🔧 Development Workflow
 
-1. **Start your day**: \`make status\` or \`gaia doctor\`
+1. **Start your day**: \`make status\` or \`make doctor\`
 2. **Make changes**: Edit Terraform files
 3. **Validate**: \`make validate\` 
 4. **Plan**: \`make plan\` (always safe)
@@ -675,14 +664,14 @@ gaia status -t fnx -a dev -e testenv-01  # Environment status
 ## 📚 Need Help?
 
 - **Makefile help**: \`make help\`
-- **Gaia help**: \`gaia --help\`
+- **Atmos help**: \`atmos --help\`
 - **Documentation**: \`docs/\` directory
 - **Troubleshooting**: \`make doctor\`
 
 ## 🚀 Next Steps
 
 1. Explore available stacks: \`make list-stacks\`
-2. Check a specific environment: \`gaia status -t fnx -a dev -e testenv-01\`
+2. Check a specific environment: \`make status STACK=fnx-dev-testenv-01\`
 3. Try a safe plan operation: \`make plan\`
 4. Review the documentation in \`docs/\`
 
@@ -748,7 +737,6 @@ generate_completion_report() {
 - AWS CLI: $(aws --version 2>&1 | head -1 || echo "Not installed")
 - Docker: $(docker --version 2>/dev/null || echo "Not installed")
 - Python: $(python3 --version 2>/dev/null || echo "Not installed")
-- Gaia CLI: $(gaia version 2>/dev/null | head -1 || echo "Not installed")
 
 ## 📁 Created Files
 
@@ -762,8 +750,8 @@ generate_completion_report() {
 
 1. Review \`QUICK_START.md\` for essential commands
 2. Source aliases: \`source .dev_aliases\`
-3. Try: \`make status\` or \`gaia doctor\`
-4. Explore: \`make help\` and \`gaia --help\`
+3. Try: \`make status\` or \`make doctor\`
+4. Explore: \`make help\` and \`atmos list workflows\`
 5. Start development: \`make dev-start\`
 
 ## 📋 Verification Commands
@@ -772,7 +760,7 @@ Run these to verify everything is working:
 
 \`\`\`bash
 make doctor          # System diagnostics
-gaia quick-start     # Interactive guide
+atmos list workflows # Available workflows
 make validate        # Infrastructure validation
 make list-stacks     # Available environments
 \`\`\`
@@ -798,14 +786,14 @@ show_completion() {
     echo
     echo -e "${CYAN}🎯 What's Ready:${NC}"
     echo -e "   🛠️  All infrastructure tools (Terraform, Atmos, AWS CLI)"
-    echo -e "   🐍 Python environment with Gaia CLI"
+    echo -e "   🐍 Python virtual environment"
     echo -e "   🐳 Docker development environment"
     echo -e "   💻 VS Code configuration and extensions"
     echo -e "   🚀 Development shortcuts and aliases"
     echo
     echo -e "${YELLOW}🚀 Try These Commands:${NC}"
     echo -e "${WHITE}   make help           ${NC}# Show all available commands"
-    echo -e "${WHITE}   gaia quick-start    ${NC}# Interactive getting started guide"
+    echo -e "${WHITE}   atmos list workflows${NC}# Available Atmos workflows"
     echo -e "${WHITE}   make doctor         ${NC}# Run system diagnostics"
     echo -e "${WHITE}   make status         ${NC}# Show infrastructure status"
     echo
@@ -817,7 +805,7 @@ show_completion() {
     echo -e "${BLUE}🌟 Pro Tips:${NC}"
     echo -e "   ${WHITE}1.${NC} Open a new terminal to get aliases: ${CYAN}source .dev_aliases${NC}"
     echo -e "   ${WHITE}2.${NC} Start with safe commands: ${CYAN}make validate${NC}, ${CYAN}make plan${NC}"
-    echo -e "   ${WHITE}3.${NC} Use ${CYAN}make help${NC} and ${CYAN}gaia --help${NC} to explore"
+    echo -e "   ${WHITE}3.${NC} Use ${CYAN}make help${NC} and ${CYAN}atmos list workflows${NC} to explore"
     echo -e "   ${WHITE}4.${NC} Check ${CYAN}QUICK_START.md${NC} for your personalized guide"
     echo
     echo -e "${GREEN}Ready to build amazing infrastructure! 🌍✨${NC}"

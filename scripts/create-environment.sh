@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Obsolete since the settings.context / native-lockfile migration; kept until removal is decided.
+echo "scripts/create-environment.sh is obsolete: its Copier template (templates/copier-environment) does not exist; use: scripts/new-environment.sh" >&2
+exit 1
 set -e
 
 # Script to create a new environment using Copier templates

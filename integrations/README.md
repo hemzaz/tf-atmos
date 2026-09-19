@@ -96,9 +96,9 @@ All integrations are versioned with Atmos and follow semantic versioning:
 - Patch version changes include bug fixes and minor improvements
 
 Current version compatibility:
-- Atmos: v1.44.0 or later
-- Terraform: v1.5.0 or later
-- AWS Provider: v4.9.0 or later
+- Atmos: v1.229.0 or later
+- Terraform: 1.16.3 (pinned via Atmos `dependencies.tools`)
+- AWS Provider: ~> 6.65
 
 ## Support
 

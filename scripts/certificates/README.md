@@ -1,22 +1,27 @@
 # Certificate Management
 
-## Migration Status
+Bash scripts for TLS certificate and SSH key operations against AWS Secrets
+Manager, ACM and Kubernetes. They are the implementation (there is no separate
+CLI); run them directly or through the Atmos workflow.
 
-The certificate management scripts in this directory are being migrated to Python-based implementations in the Gaia CLI. The current status is:
-
-| Script | Status | Replacement Command |
-|--------|--------|---------------------|
-| `rotate-cert.sh` | ✅ Migrated | `gaia certificate rotate` |
-| `rotate-ssh-key.sh` | ⚠️ Pending | Will be replaced by `gaia certificate rotate-ssh-key` |
-| `generate-ssh-key.sh` | ⚠️ Pending | Will be replaced by `gaia certificate generate-ssh-key` |
-| `export-cert.sh` | ⚠️ Pending | Will be replaced by `gaia certificate export` |
-| `export-ssh-key.sh` | ⚠️ Pending | Will be replaced by `gaia certificate export-ssh-key` |
-| `monitor-certificates.sh` | ⚠️ Pending | Will be replaced by `gaia certificate monitor` |
+| Script | Purpose |
+|--------|---------|
+| `rotate-cert.sh` | Rotate a TLS certificate in Secrets Manager / ACM and sync the Kubernetes secret |
+| `rotate-ssh-key.sh` | Rotate an SSH key pair stored in Secrets Manager |
+| `generate-ssh-key.sh` | Generate an SSH key pair and store it in Secrets Manager |
+| `export-cert.sh` | Export a certificate from Secrets Manager / ACM |
+| `export-ssh-key.sh` | Export an SSH key from Secrets Manager |
+| `monitor-certificates.sh` | Report certificates approaching expiry |
+| `certificate-utils.sh` | Shared functions (sourced by the scripts above) |
 
 ## Usage
 
-For scripts that have been migrated, please use the corresponding Gaia command. For those still pending migration, continue using the bash scripts for now but be aware they will be deprecated once the Python implementations are complete.
+```bash
+# Certificate rotation through the workflow (prompts for secret, namespace, ACM ARN)
+atmos workflow rotate -f rotate-certificate
 
-## Future Plans
+# Or directly
+./scripts/certificates/rotate-cert.sh -s <secret_name> -n <namespace> [-a <acm_cert_arn>]
+```
 
-All of these scripts will eventually be replaced by a more robust Python-based implementation with better error handling, security, and integration with the rest of the Gaia system.
+Each script prints its options with `-h`.

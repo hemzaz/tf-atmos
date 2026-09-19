@@ -3,6 +3,11 @@
 Validate that all catalog files have a tenant value defined
 """
 
+import sys
+
+# Obsolete since the settings.context migration; kept until removal is decided.
+sys.exit("scripts/validate_catalog_tenant.py is obsolete: expects/injects legacy catalog tenant vars; tenant now comes from settings.context")
+
 import os
 import sys
 import yaml

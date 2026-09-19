@@ -13,6 +13,10 @@
 # - Comprehensive validation and error handling
 # =============================================================================
 
+# Obsolete since the settings.context / native-lockfile migration; kept until removal is decided.
+echo "scripts/aws-setup.sh is obsolete: creates a per-environment bucket plus a DynamoDB lock table; the backend is fnx-terraform-state with native lockfiles. Use: atmos workflow backend-only -f bootstrap -s <stack>" >&2
+exit 1
+
 set -euo pipefail
 
 # =============================================================================

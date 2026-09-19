@@ -3,6 +3,11 @@
 Add tenant to all Terraform components in catalog files
 """
 
+import sys
+
+# Obsolete since the settings.context migration; kept until removal is decided.
+sys.exit("scripts/add_tenant_to_catalog.py is obsolete: writes legacy ${tenant} vars into catalog files; tenant now comes from settings.context")
+
 import os
 import sys
 import yaml
