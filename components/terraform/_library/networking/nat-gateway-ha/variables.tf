@@ -22,11 +22,21 @@ variable "enable_nat_gateway" {
 variable "public_subnet_ids" {
   description = "List of public subnet IDs (one NAT Gateway per subnet/AZ)"
   type        = list(string)
+
+  validation {
+    condition     = length(var.public_subnet_ids) <= length(var.availability_zones)
+    error_message = "public_subnet_ids must not have more entries than availability_zones (positionally aligned)."
+  }
 }
 
 variable "private_subnet_ids" {
   description = "List of private subnet IDs to route through NAT Gateways"
   type        = list(string)
+
+  validation {
+    condition     = length(var.private_subnet_ids) <= length(var.availability_zones)
+    error_message = "private_subnet_ids must not have more entries than availability_zones (positionally aligned)."
+  }
 }
 
 variable "availability_zones" {
@@ -34,8 +44,8 @@ variable "availability_zones" {
   type        = list(string)
 
   validation {
-    condition     = length(var.availability_zones) > 0
-    error_message = "At least one availability zone must be specified."
+    condition     = length(var.availability_zones) > 0 && length(distinct(var.availability_zones)) == length(var.availability_zones)
+    error_message = "At least one availability zone must be specified, without duplicates."
   }
 }
 

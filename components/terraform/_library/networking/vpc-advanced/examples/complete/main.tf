@@ -93,8 +93,9 @@ module "vpc" {
 # Optional: Create a security group for VPC endpoints
 #------------------------------------------------------------------------------
 resource "aws_security_group" "vpc_endpoints" {
-  name_description = "Security group for VPC endpoints"
-  vpc_id          = module.vpc.vpc_id
+  name        = "myapp-production-vpce-sg"
+  description = "Security group for VPC endpoints"
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     description = "HTTPS from VPC"

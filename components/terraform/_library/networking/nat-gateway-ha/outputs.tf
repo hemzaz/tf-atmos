@@ -1,39 +1,36 @@
 output "nat_gateway_ids" {
   description = "List of NAT Gateway IDs"
-  value       = aws_nat_gateway.this[*].id
+  value       = [for az in local.nat_gateway_azs : aws_nat_gateway.this[az].id]
 }
 
 output "nat_gateway_public_ips" {
   description = "List of NAT Gateway public IP addresses"
-  value       = aws_eip.nat[*].public_ip
+  value       = [for az in local.nat_gateway_azs : aws_eip.nat[az].public_ip]
 }
 
 output "nat_gateway_private_ips" {
   description = "List of NAT Gateway private IP addresses"
-  value       = aws_nat_gateway.this[*].private_ip
+  value       = [for az in local.nat_gateway_azs : aws_nat_gateway.this[az].private_ip]
 }
 
 output "elastic_ip_ids" {
   description = "List of Elastic IP allocation IDs"
-  value       = aws_eip.nat[*].id
+  value       = [for az in local.nat_gateway_azs : aws_eip.nat[az].id]
 }
 
 output "elastic_ip_allocation_ids" {
   description = "List of Elastic IP allocation IDs"
-  value       = aws_eip.nat[*].allocation_id
+  value       = [for az in local.nat_gateway_azs : aws_eip.nat[az].allocation_id]
 }
 
 output "private_route_table_ids" {
   description = "List of private route table IDs"
-  value       = aws_route_table.private[*].id
+  value       = [for az in keys(local.private_subnets) : aws_route_table.private[az].id]
 }
 
 output "nat_gateway_az_mapping" {
   description = "Map of availability zones to NAT Gateway IDs"
-  value = {
-    for i, az in var.availability_zones :
-    az => aws_nat_gateway.this[i].id
-  }
+  value       = { for az, nat in aws_nat_gateway.this : az => nat.id }
 }
 
 output "cloudwatch_dashboard_arn" {
