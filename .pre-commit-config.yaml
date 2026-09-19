@@ -8,7 +8,7 @@
 repos:
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
         name: Trim trailing whitespace
@@ -36,7 +36,7 @@ repos:
 
   # Terraform formatting
   - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.88.0
+    rev: v1.109.1
     hooks:
       - id: terraform_fmt
         name: Terraform format
@@ -63,9 +63,19 @@ repos:
           - --args=--framework=terraform
           - --args=--skip-check=CKV_AWS_79,CKV_AWS_115  # Skip specific checks if needed
 
+  # Atmos stack configuration
+  - repo: local
+    hooks:
+      - id: atmos-validate-stacks
+        name: Atmos validate stacks
+        entry: atmos validate stacks
+        language: system
+        pass_filenames: false
+        files: ^(atmos\.yaml|stacks/)
+
   # Security scanning
   - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.4.0
+    rev: v1.5.0
     hooks:
       - id: detect-secrets
         name: Detect secrets
@@ -73,8 +83,8 @@ repos:
         exclude: package-lock.json
 
   # Python code quality
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.5.1
     hooks:
       - id: black
         name: Black Python formatter
@@ -82,7 +92,7 @@ repos:
         files: \.(py)$
 
   - repo: https://github.com/PyCQA/flake8
-    rev: 7.0.0
+    rev: 7.3.0
     hooks:
       - id: flake8
         name: Flake8 linting
@@ -90,7 +100,7 @@ repos:
         files: \.(py)$
 
   - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
+    rev: 9.0.1
     hooks:
       - id: isort
         name: isort import sorting
@@ -98,7 +108,7 @@ repos:
         files: \.(py)$
 
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.7
+    rev: 1.9.4
     hooks:
       - id: bandit
         name: Bandit security checks
@@ -107,7 +117,7 @@ repos:
 
   # Shell script linting
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
+    rev: v0.11.0.1
     hooks:
       - id: shellcheck
         name: Shellcheck
@@ -115,7 +125,7 @@ repos:
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
+    rev: v1.38.0
     hooks:
       - id: yamllint
         name: YAML lint
@@ -123,7 +133,7 @@ repos:
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.39.0
+    rev: v0.49.1
     hooks:
       - id: markdownlint
         name: Markdown lint
@@ -131,7 +141,7 @@ repos:
 
   # Git commit message linting
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v3.13.0
+    rev: v4.18.0
     hooks:
       - id: commitizen
         name: Check commit message

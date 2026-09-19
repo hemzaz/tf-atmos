@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Apply IAM security best practices
 # Extracted from the inline `harden-iam` workflow; run via `atmos workflow harden-iam -f security-hardening`.
-# shellcheck source=../lib/stack-context.sh
-source "$(dirname "$0")/../lib/stack-context.sh"
+# shellcheck source=../common/stack-context.sh
+source "$(dirname "$0")/../common/stack-context.sh"
 
 # --- iam-hardening ---
 WHITE='\033[1;37m'

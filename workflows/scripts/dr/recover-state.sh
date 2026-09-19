@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Recover Terraform state from backup
 # Run via `atmos workflow recover-state -f disaster-recovery`.
-# shellcheck source=../lib/stack-context.sh
-source "$(dirname "$0")/../lib/stack-context.sh"
+# shellcheck source=../common/stack-context.sh
+source "$(dirname "$0")/../common/stack-context.sh"
 
 WHITE='\033[1;37m'
 NC='\033[0m'

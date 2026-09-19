@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Check disaster recovery readiness and status
 # Extracted from the inline `dr-status` workflow; run via `atmos workflow dr-status -f disaster-recovery`.
-# shellcheck source=../lib/stack-context.sh
-source "$(dirname "$0")/../lib/stack-context.sh"
+# shellcheck source=../common/stack-context.sh
+source "$(dirname "$0")/../common/stack-context.sh"
 
 # --- check-dr-status ---
 # Colors

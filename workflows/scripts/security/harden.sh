@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Apply security hardening configurations
 # Extracted from the inline `harden` workflow; run via `atmos workflow harden -f security-hardening`.
-# shellcheck source=../lib/stack-context.sh
-source "$(dirname "$0")/../lib/stack-context.sh"
+# shellcheck source=../common/stack-context.sh
+source "$(dirname "$0")/../common/stack-context.sh"
 
 # --- enable-security-services ---
 GREEN='\033[0;32m'

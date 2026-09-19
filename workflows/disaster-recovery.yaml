@@ -1,5 +1,5 @@
 # Disaster recovery runbooks. Scripts resolve tenant/region/state bucket from
-# the stack via `atmos describe component` (workflows/scripts/lib/stack-context.sh).
+# the stack via `atmos describe component` (workflows/scripts/common/stack-context.sh).
 #
 # Usage:
 #   STACK=<stack> atmos workflow dr-status -f disaster-recovery
