@@ -215,7 +215,7 @@ resource "aws_db_proxy" "main" {
   engine_family = var.engine == "postgres" ? "POSTGRESQL" : "MYSQL"
   auth {
     auth_scheme = "SECRETS"
-    secret_arn  = aws_secretsmanager_secret.db_password.arn
+    secret_arn  = aws_db_instance.main.master_user_secret[0].secret_arn
   }
   role_arn               = aws_iam_role.rds_proxy[0].arn
   vpc_subnet_ids         = var.subnet_ids
@@ -280,16 +280,22 @@ resource "aws_iam_policy" "rds_proxy" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue",
           "secretsmanager:DescribeSecret"
         ]
-        Resource = aws_secretsmanager_secret.db_password.arn
+        Resource = aws_db_instance.main.master_user_secret[0].secret_arn
       }
-    ]
+      ], var.master_user_secret_kms_key_id == null ? [] : [
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = var.master_user_secret_kms_key_id
+      }
+    ])
   })
 }
 
@@ -298,33 +304,6 @@ resource "aws_iam_role_policy_attachment" "rds_proxy" {
 
   role       = aws_iam_role.rds_proxy[0].name
   policy_arn = aws_iam_policy.rds_proxy[0].arn
-}
-
-# Ephemeral: the password is generated per run and only sent to AWS through write-only
-# arguments, so it never lands in plan or state. Bump password_version to rotate it.
-ephemeral "random_password" "password" {
-  length  = 32
-  special = false
-}
-
-resource "aws_secretsmanager_secret" "db_password" {
-  name        = "${var.tags["Environment"]}/${var.identifier}/password"
-  description = "Password for ${var.identifier} RDS instance"
-
-  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-secret" }
-}
-
-resource "aws_secretsmanager_secret_version" "db_password" {
-  secret_id = aws_secretsmanager_secret.db_password.id
-  secret_string_wo = jsonencode({
-    username = var.username
-    password = ephemeral.random_password.password.result
-    engine   = var.engine
-    host     = aws_db_instance.main.address
-    port     = var.port
-    dbname   = var.db_name
-  })
-  secret_string_wo_version = var.password_version
 }
 
 resource "aws_iam_role" "monitoring" {
@@ -377,18 +356,19 @@ resource "aws_db_instance" "read_replica" {
 }
 
 resource "aws_db_instance" "main" {
-  identifier                            = "${var.tags["Environment"]}-${var.identifier}"
-  engine                                = var.engine
-  engine_version                        = var.engine_version
-  instance_class                        = var.instance_class
-  allocated_storage                     = var.allocated_storage
-  max_allocated_storage                 = var.max_allocated_storage
-  storage_type                          = var.storage_type
-  storage_encrypted                     = var.storage_encrypted
-  kms_key_id                            = var.kms_key_id
-  username                              = var.username
-  password_wo                           = ephemeral.random_password.password.result
-  password_wo_version                   = var.password_version
+  identifier            = "${var.tags["Environment"]}-${var.identifier}"
+  engine                = var.engine
+  engine_version        = var.engine_version
+  instance_class        = var.instance_class
+  allocated_storage     = var.allocated_storage
+  max_allocated_storage = var.max_allocated_storage
+  storage_type          = var.storage_type
+  storage_encrypted     = var.storage_encrypted
+  kms_key_id            = var.kms_key_id
+  username              = var.username
+  # RDS generates the password and stores it in a Secrets Manager secret it manages
+  manage_master_user_password           = true
+  master_user_secret_kms_key_id         = var.master_user_secret_kms_key_id
   port                                  = var.port
   db_name                               = var.db_name
   parameter_group_name                  = aws_db_parameter_group.main.name

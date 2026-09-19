@@ -61,21 +61,6 @@ locals {
   # 1. Loaded directly (legacy mode using acm_certificate_key/acm_certificate_crt)
   # 2. Managed by External Secrets (recommended approach using Secrets Manager)
 
-  # Template for Istio gateway configurations
-  istio_gateway_template = templatefile(
-    "${path.module}/kubernetes_manifests/istio-gateway.yaml",
-    {
-      domain_name = var.domain_name
-    }
-  )
-
-  # Split the multi-document template into Kind/name keyed manifests
-  istio_gateway_manifests = {
-    for doc in [
-      for raw in split("\n---", local.istio_gateway_template) : yamldecode(trimprefix(trimspace(raw), "---"))
-      if trimspace(trimprefix(trimspace(raw), "---")) != ""
-    ] : "${doc.kind}/${doc.metadata.namespace}/${doc.metadata.name}" => doc
-  }
 }
 
 # Get cluster info to validate it's accessible before proceeding
@@ -190,7 +175,8 @@ resource "aws_eks_addon" "addons" {
   addon_version = lookup(each.value, "version", null)
 
   # AWS provider v6 removed resolve_conflicts; a legacy per-addon value still seeds both settings
-  resolve_conflicts_on_create = lookup(each.value, "resolve_conflicts_on_create", lookup(each.value, "resolve_conflicts", "OVERWRITE"))
+  # resolve_conflicts_on_create only accepts NONE or OVERWRITE, so a legacy PRESERVE maps to NONE
+  resolve_conflicts_on_create = lookup(each.value, "resolve_conflicts_on_create", replace(lookup(each.value, "resolve_conflicts", "OVERWRITE"), "PRESERVE", "NONE"))
   resolve_conflicts_on_update = lookup(each.value, "resolve_conflicts_on_update", lookup(each.value, "resolve_conflicts", "OVERWRITE"))
 
   # Fix circular dependency by directly using service_account_role_arn if provided,
@@ -342,28 +328,29 @@ resource "kubernetes_manifest" "manifests" {
   ]
 }
 
-# Apply Istio gateway configuration (one kubernetes_manifest per YAML document,
-# replacing the undeclared third-party kubectl provider)
-resource "kubernetes_manifest" "istio_gateway" {
-  for_each = var.domain_name != "" && var.istio_enabled ? local.istio_gateway_manifests : {}
+# Apply Istio gateway configuration through a local Helm chart: unlike kubernetes_manifest,
+# Helm does not need the Istio CRDs at plan time, so the first apply can install Istio
+# (helm_release.releases) and the gateway resources together.
+resource "helm_release" "istio_gateway" {
+  count = var.domain_name != "" && var.istio_enabled ? 1 : 0
 
-  manifest = each.value
+  name      = "istio-gateway-config"
+  chart     = "${path.module}/charts/istio-gateway-config"
+  namespace = "istio-ingress"
+  timeout   = 300
+  wait      = true
 
-  field_manager {
-    force_conflicts = true
-  }
+  set = [
+    {
+      name  = "domainName"
+      value = var.domain_name
+    },
+  ]
 
   depends_on = [
     helm_release.releases,
     time_sleep.wait_for_helm_releases
   ]
-
-  # Add timeout to ensure adequate time for manifest creation
-  timeouts {
-    create = "5m"
-    update = "5m"
-    delete = "3m"
-  }
 }
 
 # Wait for istio-ingress namespace to be ready before proceeding with certificate-related resources
@@ -372,7 +359,7 @@ resource "time_sleep" "wait_for_istio_namespace" {
 
   depends_on = [
     time_sleep.wait_for_helm_releases,
-    kubernetes_manifest.istio_gateway
+    helm_release.istio_gateway
   ]
 
   # Increase wait time to ensure namespace is fully ready with all resources
@@ -381,7 +368,8 @@ resource "time_sleep" "wait_for_istio_namespace" {
 
 # Create a Kubernetes secret from ACM certificate content
 resource "kubernetes_secret_v1" "istio_certs" {
-  count = var.istio_enabled && !var.use_external_secrets && var.acm_certificate_crt != "" && var.acm_certificate_key != "" ? 1 : 0
+  # acm_certificate_key is ephemeral and cannot drive count; the certificate decides
+  count = var.istio_enabled && !var.use_external_secrets && var.acm_certificate_crt != "" ? 1 : 0
 
   metadata {
     name      = "istio-gateway-cert"

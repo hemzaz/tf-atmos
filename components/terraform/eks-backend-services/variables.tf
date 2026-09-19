@@ -58,6 +58,7 @@ variable "database_url" {
   type        = string
   description = "Database connection URL"
   sensitive   = true
+  ephemeral   = true
 }
 
 variable "database_username" {
@@ -70,6 +71,7 @@ variable "database_password" {
   type        = string
   description = "Database password"
   sensitive   = true
+  ephemeral   = true
 }
 
 # Redis Configuration
@@ -77,12 +79,14 @@ variable "redis_url" {
   type        = string
   description = "Redis connection URL"
   sensitive   = true
+  ephemeral   = true
 }
 
 variable "redis_password" {
   type        = string
   description = "Redis password"
   sensitive   = true
+  ephemeral   = true
 }
 
 variable "credentials_revision" {

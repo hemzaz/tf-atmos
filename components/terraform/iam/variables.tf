@@ -126,3 +126,43 @@ variable "environment" {
     error_message = "Environment must be one of: dev, development, staging, stage, prod, production."
   }
 }
+# Trust policy conditions (at least one is required when trusting another account)
+variable "trusted_principal_org_id" {
+  type        = string
+  description = "Require assuming principals to belong to this AWS Organization (aws:PrincipalOrgID)"
+  default     = null
+
+  validation {
+    condition     = var.trusted_principal_org_id == null || can(regex("^o-[a-z0-9]{10,32}$", var.trusted_principal_org_id))
+    error_message = "trusted_principal_org_id must be an AWS Organization ID (o-xxxxxxxxxx)."
+  }
+}
+
+variable "external_id" {
+  type        = string
+  description = "Require this sts:ExternalId when assuming the role"
+  default     = null
+
+  validation {
+    condition     = var.external_id == null || can(regex("^[\\w+=,.@:/-]{2,1224}$", var.external_id))
+    error_message = "external_id must be 2-1224 characters of alphanumerics or +=,.@:/-."
+  }
+}
+
+variable "require_mfa" {
+  type        = bool
+  description = "Require MFA (aws:MultiFactorAuthPresent) when assuming the role"
+  default     = false
+}
+
+variable "resource_name_prefix" {
+  type        = string
+  description = "Name prefix of the S3 buckets the role may manage (defaults to environment)"
+  default     = null
+}
+
+variable "state_bucket_names" {
+  type        = list(string)
+  description = "Terraform state bucket names whose bucket policy the role must never change (buckets matching *terraform-state* are always protected)"
+  default     = []
+}

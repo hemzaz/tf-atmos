@@ -269,6 +269,7 @@ variable "acm_certificate_key" {
   description = "Private key content from ACM"
   default     = ""
   sensitive   = true
+  ephemeral   = true
 }
 
 variable "acm_certificate_revision" {

@@ -122,6 +122,8 @@ variable "enable_alert_enrichment" {
   default     = false
 }
 
+# Not ephemeral: the value is passed to a Lambda environment variable, which is not a
+# write-only argument and is stored in state.
 variable "slack_webhook_url" {
   type        = string
   description = "Slack webhook URL for security alerts"
@@ -129,6 +131,8 @@ variable "slack_webhook_url" {
   sensitive   = true
 }
 
+# Not ephemeral: the value is passed to a Lambda environment variable, which is not a
+# write-only argument and is stored in state.
 variable "pagerduty_integration_key" {
   type        = string
   description = "PagerDuty integration key for security alerts"
