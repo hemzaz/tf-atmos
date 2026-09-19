@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Script to update tool versions in .env file
+# Script to update tool versions in .atmos.env file
 # Supports updating to latest, LTS, or specific versions
 
 # Text formatting
@@ -13,7 +13,7 @@ BLUE="\033[34m"
 RESET="\033[0m"
 
 # Paths
-ENV_FILE="$(dirname "$0")/../.env"
+ENV_FILE="$(dirname "$0")/../.atmos.env"
 
 # Default configuration
 MODE="latest"  # latest, lts, specific
@@ -33,36 +33,10 @@ TOOL_CATEGORY_CICD="YAMLLINT_VERSION PRECOMMIT_VERSION TERRAFORM_DOCS_VERSION"
 TOOL_CATEGORY_TEMPLATING="COPIER_VERSION"
 TOOL_CATEGORY_ALL="$TOOL_CATEGORY_CORE $TOOL_CATEGORY_SECURITY $TOOL_CATEGORY_AWS $TOOL_CATEGORY_PROVIDERS $TOOL_CATEGORY_CICD $TOOL_CATEGORY_TEMPLATING"
 
-# API endpoints and patterns for version lookups (bash 3.x compatible)
-# Using a lookup function instead of associative arrays
-VERSION_APIS[TERRAFORM_VERSION]="https://releases.hashicorp.com/terraform/|latest_version=\\\"([0-9]+\\.[0-9]+\\.[0-9]+)\\\""
-VERSION_APIS[TERRAFORM_VERSION_LTS]="https://releases.hashicorp.com/terraform/|latest_version=\\\"([0-9]+\\.[0-9]+\\.[0-9]+)\\\""
-VERSION_APIS[ATMOS_VERSION]="https://api.github.com/repos/cloudposse/atmos/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[ATMOS_VERSION_LTS]="https://api.github.com/repos/cloudposse/atmos/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[KUBECTL_VERSION]="https://storage.googleapis.com/kubernetes-release/release/stable.txt|v([0-9]+\\.[0-9]+\\.[0-9]+)"
-VERSION_APIS[KUBECTL_VERSION_LTS]="https://storage.googleapis.com/kubernetes-release/release/stable.txt|v([0-9]+\\.[0-9]+\\.[0-9]+)"
-VERSION_APIS[HELM_VERSION]="https://api.github.com/repos/helm/helm/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[HELM_VERSION_LTS]="https://api.github.com/repos/helm/helm/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TFSEC_VERSION]="https://api.github.com/repos/aquasecurity/tfsec/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TFLINT_VERSION]="https://api.github.com/repos/terraform-linters/tflint/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[CHECKOV_VERSION]="https://api.github.com/repos/bridgecrewio/checkov/releases/latest|\"tag_name\":\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[AWS_CLI_VERSION]="https://raw.githubusercontent.com/aws/aws-cli/v2/CHANGELOG.rst|([0-9]+\\.[0-9]+\\.[0-9]+)"
-VERSION_APIS[SESSION_MANAGER_VERSION]="https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html|([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"
-VERSION_APIS[YAMLLINT_VERSION]="https://api.github.com/repos/adrienverge/yamllint/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[PRECOMMIT_VERSION]="https://api.github.com/repos/pre-commit/pre-commit/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TERRAFORM_DOCS_VERSION]="https://api.github.com/repos/terraform-docs/terraform-docs/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[COPIER_VERSION]="curl -s https://pypi.org/pypi/copier/json | jq -r '.info.version'|([0-9]+\\.[0-9]+\\.[0-9]+)"
-VERSION_APIS[TF_PROVIDER_AWS_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-aws/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TF_PROVIDER_KUBERNETES_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-kubernetes/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TF_PROVIDER_HELM_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-helm/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TF_PROVIDER_TLS_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-tls/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TF_PROVIDER_TIME_VERSION]="https://api.github.com/repos/hashicorp/terraform-provider-time/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-VERSION_APIS[TF_PROVIDER_KUBECTL_VERSION]="https://api.github.com/repos/gavinbunney/terraform-provider-kubectl/releases/latest|\"tag_name\":\"v([0-9]+\\.[0-9]+\\.[0-9]+)\""
-
 # Help message
 show_help() {
-  echo -e "${BOLD}Version Updater for .env${RESET}"
-  echo -e "This script updates tool versions in the .env file."
+  echo -e "${BOLD}Version Updater for .atmos.env${RESET}"
+  echo -e "This script updates tool versions in the .atmos.env file."
   echo
   echo -e "${BOLD}Usage:${RESET}"
   echo "  $0 [options] [tool_names...]"
@@ -72,14 +46,14 @@ show_help() {
   echo "  -l, --latest          Update to latest versions (default)"
   echo "  -s, --lts             Update to LTS versions where available"
   echo "  -v, --version VERSION Set specific version (must specify only one tool)"
-  echo "  -c, --check           Check for updates without modifying .env"
+  echo "  -c, --check           Check for updates without modifying .atmos.env"
   echo "  -a, --all             Show all available tools and their current versions"
   echo "  -g, --group GROUP     Update all tools in the specified group:"
   echo "                        (core, security, aws, providers, cicd, templating, all)"
   echo
   echo -e "${BOLD}Examples:${RESET}"
   echo "  $0 TERRAFORM_VERSION                     # Update Terraform to latest"
-  echo "  $0 -v 1.5.7 TERRAFORM_VERSION            # Update Terraform to 1.5.7"
+  echo "  $0 -v 1.16.3 TERRAFORM_VERSION           # Update Terraform to 1.16.3"
   echo "  $0 -l TERRAFORM_VERSION KUBECTL_VERSION  # Update Terraform and Kubectl to latest"
   echo "  $0 -g core                               # Update all core tools to latest"
   echo "  $0 -g all                                # Update all tools to latest"
@@ -88,7 +62,7 @@ show_help() {
   echo
 }
 
-# Get current version from .env file
+# Get current version from .atmos.env file
 get_current_version() {
   local tool=$1
   grep -E "^$tool=" "$ENV_FILE" | cut -d'=' -f2 || echo "Not set"
@@ -173,7 +147,7 @@ fetch_latest_version() {
   echo "$result"
 }
 
-# Update version in .env file
+# Update version in .atmos.env file
 update_version() {
   local tool=$1
   local new_version=$2
@@ -194,7 +168,7 @@ update_version() {
   fi
   
   if [[ "$current_version" == "Not set" ]]; then
-    echo -e "${YELLOW}Adding $tool=$new_version to .env${RESET}"
+    echo -e "${YELLOW}Adding $tool=$new_version to .atmos.env${RESET}"
     echo "$tool=$new_version" >> "$ENV_FILE"
   else
     echo -e "${GREEN}Updating $tool: $current_version → $new_version${RESET}"
@@ -209,7 +183,7 @@ process_tool() {
   
   # Validate tool name
   if ! grep -q "^$tool=" "$ENV_FILE" && [[ "$CHECK_ONLY" == "false" ]] && [[ "$MODE" != "specific" ]]; then
-    echo -e "${YELLOW}Warning: $tool not found in .env file${RESET}"
+    echo -e "${YELLOW}Warning: $tool not found in .atmos.env file${RESET}"
     # Don't return an error, as we'll add it if updating
   fi
   
@@ -250,7 +224,7 @@ process_tools() {
 
 # Display all tools
 show_all_tools() {
-  echo -e "${BOLD}Available Tools in .env:${RESET}"
+  echo -e "${BOLD}Available Tools in .atmos.env:${RESET}"
   echo
   echo -e "${BOLD}Core Tools:${RESET}"
   for tool in $TOOL_CATEGORY_CORE; do
@@ -370,7 +344,7 @@ done
 
 # Validate inputs
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo -e "${RED}Error: .env file not found at $ENV_FILE${RESET}"
+  echo -e "${RED}Error: .atmos.env file not found at $ENV_FILE${RESET}"
   exit 1
 fi
 
@@ -395,7 +369,7 @@ process_tools
 
 # Summary output
 if [[ "$CHECK_ONLY" == "true" ]]; then
-  echo -e "${BLUE}No changes were made to .env (check-only mode)${RESET}"
+  echo -e "${BLUE}No changes were made to .atmos.env (check-only mode)${RESET}"
 else
-  echo -e "${GREEN}Updated .env successfully${RESET}"
+  echo -e "${GREEN}Updated .atmos.env successfully${RESET}"
 fi

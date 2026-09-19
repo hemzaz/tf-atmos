@@ -1,65 +1,12 @@
 #!/usr/bin/env bash
-# DEPRECATED: This script has been replaced by the Python implementation in Gaia CLI.
-# Please use "gaia certificate rotate" instead.
-# See README in /gaia directory for usage details.
+# Rotate a TLS certificate stored in AWS Secrets Manager (optionally from a new
+# ACM certificate) and sync it to the Kubernetes secret that mounts it.
 #
-# Example:
-#   gaia certificate rotate --secret <secret_name> --namespace <namespace> --acm-arn <acm_cert_arn>
+# Usage:
+#   ./scripts/certificates/rotate-cert.sh -s <secret_name> -n <namespace> [-a <acm_cert_arn>]
 #
 # Or use the workflow:
-#   gaia workflow rotate-certificate secret_name=<secret> namespace=<namespace> acm_arn=<acm_cert_arn>
-
-echo "⚠️  This script is deprecated and will be removed in a future release."
-echo "Please use 'gaia certificate rotate' instead."
-echo "For more information, run 'gaia certificate rotate --help'"
-echo "Redirecting to new command..."
-
-# Extract parameters
-SECRET_NAME=""
-NAMESPACE=""
-ACM_ARN=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --secret|-s)
-      SECRET_NAME="$2"
-      shift 2
-      ;;
-    --namespace|-n)
-      NAMESPACE="$2"
-      shift 2
-      ;;
-    --acm-arn|-a)
-      ACM_ARN="$2"
-      shift 2
-      ;;
-    *)
-      echo "Warning: Unrecognized parameter: $1"
-      shift
-      ;;
-  esac
-done
-
-# Redirect to gaia command with parameters
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-
-# Check if parameters were provided
-if [[ -n "$SECRET_NAME" && -n "$NAMESPACE" ]]; then
-  CMD="${REPO_ROOT}/bin/gaia certificate rotate --secret $SECRET_NAME --namespace $NAMESPACE"
-  
-  # Add optional ACM ARN if provided
-  if [[ -n "$ACM_ARN" ]]; then
-    CMD="$CMD --acm-arn $ACM_ARN"
-  fi
-  
-  echo "Executing: $CMD"
-  exec $CMD
-else
-  # No parameters, just show help
-  exec "${REPO_ROOT}/bin/gaia" certificate rotate --help
-fi
-echo ""
+#   atmos workflow rotate -f rotate-certificate
 
 set -euo pipefail
 
@@ -398,6 +345,9 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
                         fi
                     fi
                 fi
+            fi
+        fi
+    fi
                 
                 # Create JSON for the updated secret
                 cat > "$TEMP_DIR/secret.json" << EOF
@@ -621,25 +571,4 @@ else
     echo "No pods found that directly mount this secret."
 fi
 
-# Pass control to the new Python implementation
-if command -v gaia >/dev/null 2>&1; then
-  echo "Using Gaia CLI for certificate rotation..."
-  
-  # Convert arguments to gaia format
-  GAIA_ARGS=()
-  [[ -n "${SECRET_NAME:-}" ]] && GAIA_ARGS+=(--secret "$SECRET_NAME")
-  [[ -n "${NAMESPACE:-}" ]] && GAIA_ARGS+=(--namespace "$NAMESPACE")
-  [[ -n "${ACM_CERT_ARN:-}" ]] && GAIA_ARGS+=(--acm-arn "$ACM_CERT_ARN")
-  [[ -n "${AWS_REGION:-}" ]] && GAIA_ARGS+=(--region "$AWS_REGION")
-  [[ -n "${KUBE_CONTEXT:-}" ]] && GAIA_ARGS+=(--context "$KUBE_CONTEXT")
-  [[ -n "${K8S_SECRET:-}" ]] && GAIA_ARGS+=(--k8s-secret "$K8S_SECRET")
-  [[ -n "${AWS_PROFILE:-}" ]] && GAIA_ARGS+=(--profile "$AWS_PROFILE")
-  [[ -n "${PRIVATE_KEY_FILE:-}" ]] && GAIA_ARGS+=(--key-path "$PRIVATE_KEY_FILE")
-  [[ "${AUTO_RESTART_PODS:-false}" == "true" ]] && GAIA_ARGS+=(--restart-pods)
-  
-  # Execute gaia command
-  exec gaia certificate rotate "${GAIA_ARGS[@]}"
-else
-  echo "⚠️  Gaia CLI not found. Please install it to use the new certificate rotation functionality."
-  echo "Certificate rotation completed with legacy script. This script will be removed in a future release."
-fi
+echo "✅ Certificate rotation complete"
