@@ -105,7 +105,12 @@ dmypy.json
 # Local configuration overrides
 local.yaml
 local.yml
-*local*
+*.local
+*.local.*
+
+# Atmos toolchain resolution files (regenerated from dependencies.tools)
+.tool-versions
+.tool-versions.lock
 
 # Developer Experience Metrics (contains potentially sensitive usage data)
 .dx-metrics/
