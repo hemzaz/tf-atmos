@@ -280,17 +280,6 @@ variable "prevent_destroy" {
   default     = true
 }
 
-variable "password_version" {
-  type        = number
-  description = "Version of the write-only master password; increment to generate a new password and push it to RDS and Secrets Manager"
-  default     = 1
-
-  validation {
-    condition     = var.password_version >= 1 && floor(var.password_version) == var.password_version
-    error_message = "password_version must be a positive integer."
-  }
-}
-
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to resources"
@@ -468,6 +457,12 @@ variable "sns_topic_arn" {
 }
 
 # Secrets Rotation Variables
+variable "master_user_secret_kms_key_id" {
+  type        = string
+  description = "KMS key for the RDS-managed master user secret (defaults to aws/secretsmanager)"
+  default     = null
+}
+
 variable "enable_secrets_rotation" {
   type        = bool
   description = "Enable automatic rotation of RDS database credentials"
@@ -483,35 +478,6 @@ variable "rotation_days" {
     condition     = var.rotation_days >= 1 && var.rotation_days <= 365
     error_message = "Rotation days must be between 1 and 365."
   }
-}
-
-variable "rotation_logs_retention_days" {
-  type        = number
-  description = "Retention period in days for rotation Lambda logs"
-  default     = 7
-
-  validation {
-    condition     = contains([0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.rotation_logs_retention_days)
-    error_message = "Rotation logs retention days must be a valid CloudWatch Logs retention period."
-  }
-}
-
-variable "enable_rotation_alarms" {
-  type        = bool
-  description = "Enable CloudWatch alarms for rotation failures"
-  default     = true
-}
-
-variable "rotation_alarm_actions" {
-  type        = list(string)
-  description = "List of SNS topic ARNs to notify when rotation alarms trigger"
-  default     = []
-}
-
-variable "rotation_duration_alarm_threshold" {
-  type        = number
-  description = "Maximum duration in milliseconds for rotation before alarming"
-  default     = 60000 # 60 seconds
 }
 
 variable "create_rotation_sns_topic" {
