@@ -126,10 +126,9 @@ variable "delegation_sets" {
 
 variable "traffic_policies" {
   type = map(object({
-    name            = string
-    comment         = optional(string)
-    document        = string
-    version_comment = optional(string) # DEPRECATED: unused, the provider has no traffic policy version resource
+    name     = string
+    comment  = optional(string)
+    document = string
   }))
   description = "Map of Route53 traffic policies"
   default     = {}

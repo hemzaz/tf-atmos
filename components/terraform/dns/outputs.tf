@@ -17,14 +17,14 @@ output "zone_name_servers" {
 output "delegation_set_name_servers" {
   description = "Map of delegation set IDs to their name servers"
   value = {
-    for k, ds in aws_route53_delegation_set.delegation_sets : k => ds.name_servers
+    for k, ds in merge(aws_route53_delegation_set.delegation_sets, aws_route53_delegation_set.dns_account_delegation_sets) : k => ds.name_servers
   }
 }
 
 output "records" {
   description = "Map of created record IDs to their attributes"
   value = {
-    for k, record in aws_route53_record.records : k => {
+    for k, record in merge(aws_route53_record.records, aws_route53_record.dns_account_records) : k => {
       name    = record.name
       type    = record.type
       zone_id = record.zone_id
