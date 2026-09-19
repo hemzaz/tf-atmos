@@ -16,7 +16,7 @@ atmos list stacks / components / workflows
 atmos describe component <component> -s <stack>       # resolved config for one instance
 
 atmos validate stacks                                  # offline, no AWS credentials
-atmos workflow validate-all -f validate-enhanced        # schema, stacks, yamllint, fmt, terraform validate
+atmos workflow validate-all -f validate-enhanced        # schema, stacks, dependencies, yamllint, fmt, terraform validate
 atmos workflow lint -f lint                             # fmt, yamllint, tflint, trivy — run before committing
 
 atmos terraform plan <component> -s <stack>
@@ -36,6 +36,8 @@ atmos workflow deploy -f deploy-full-stack -s <stack>    # layered, confirmed pe
   repeat them per resource.
 - Cross-component values use YAML functions (`!terraform.state <component> .<output>`), never
   `${...}` interpolation.
+  Every such target must be listed in the reader's `dependencies.components`; `validate-all`
+  enforces it (`workflows/scripts/common/check-dependencies.py`).
 - Component naming is singular, no hyphens (`securitygroup`, not `security-groups`). Boolean
   variables prefix with `is_`, `has_`, or `enable_`.
 - Disable an instance with `metadata.enabled: false`, not by deleting it.

@@ -19,6 +19,16 @@ workflows:
       - name: validate-stacks
         type: shell
         command: atmos validate stacks
+      # Every !terraform.state/!terraform.output target must be an existing, enabled
+      # instance listed in the reader's dependencies.components (deploy ordering).
+      - name: check-dependencies
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest discover -s workflows/scripts/common -p 'test_*.py'
+          stacks_json="$(mktemp)"
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-dependencies.py < "$stacks_json"
       - name: list-stacks
         type: shell
         command: atmos list stacks

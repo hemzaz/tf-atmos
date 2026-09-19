@@ -99,7 +99,7 @@ DynamoDB lock table.
 ```bash
 atmos workflow tflint-init -f lint   # once: installs TFLint and the rulesets in .tflint.hcl
 atmos workflow lint -f lint          # terraform fmt, yamllint, TFLint, Trivy
-atmos workflow validate-all -f validate-enhanced   # schema, stacks, yamllint, fmt, terraform validate
+atmos workflow validate-all -f validate-enhanced   # schema, stacks, dependencies, yamllint, fmt, terraform validate
 atmos workflow validate -f validate -s <stack>     # same, scoped to one stack
 ```
 
