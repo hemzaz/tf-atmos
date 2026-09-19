@@ -1,8 +1,4 @@
 ---
-name: development
-description: "Development environment settings mixin"
-
-# Global vars for development environments
 vars:
   # Development-specific variables
   environment_type: "development"

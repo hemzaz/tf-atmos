@@ -1,8 +1,4 @@
 ---
-name: production
-description: "Production environment settings mixin"
-
-# Global vars for production environments
 vars:
   # Production-specific variables
   environment_type: "production"

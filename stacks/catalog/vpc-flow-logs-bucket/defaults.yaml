@@ -5,6 +5,7 @@ components:
       metadata:
         # Point to the Terraform component
         component: vpc-flow-logs-bucket
+        enabled: false  # no components/terraform/vpc-flow-logs-bucket root module yet (see PR notes)
       vars:
         enabled: true
         name: "vpc-flow-logs"

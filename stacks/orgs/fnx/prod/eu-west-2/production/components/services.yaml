@@ -34,9 +34,9 @@ components:
           - path_part: "products"
 
         # Domain Configuration
-        domain_name: "api.${domain_name}"
-        certificate_arn: "${output.acm/main.certificate_arns.main_wildcard}"
-        route53_zone_id: "${output.network/main.zone_ids.main}"
+        domain_name: "api.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
+        route53_zone_id: !terraform.state network/main .zone_ids.main
 
         # Production throttling
         throttling_burst_limit: 5000
@@ -57,13 +57,13 @@ components:
         enable_access_logging: true
 
         # WAF integration
-        web_acl_arn: "${output.waf/main.web_acl_arn}"
+        web_acl_arn: !terraform.state waf/main .web_acl_arn
 
         # CORS - restrictive for production
         enable_cors: true
         cors_allow_origins:
-          - "https://${domain_name}"
-          - "https://www.${domain_name}"
+          - "https://{{ .settings.environment.domain_name }}"
+          - "https://www.{{ .settings.environment.domain_name }}"
         cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
         cors_allow_headers:
           - "Content-Type"
@@ -76,10 +76,10 @@ components:
         cache_cluster_size: "1.6"
         cache_ttl: 300
 
-      tags:
-        Service: api-gateway
-        Tier: edge
-        CriticalityLevel: "high"
+        tags:
+          Service: api-gateway
+          Tier: edge
+          CriticalityLevel: "high"
 
     # ==========================================================================
     # API Gateway - Data API (Production)
@@ -98,9 +98,9 @@ components:
           - path_part: "analytics"
           - path_part: "reports"
 
-        domain_name: "data.services.${domain_name}"
-        certificate_arn: "${output.acm/services.certificate_arns.services_wildcard}"
-        route53_zone_id: "${output.network/services.zone_ids.data}"
+        domain_name: "data.services.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
+        route53_zone_id: !terraform.state network/services .zone_ids.data
 
         throttling_burst_limit: 2000
         throttling_rate_limit: 5000
@@ -110,9 +110,9 @@ components:
         create_dashboard: true
         enable_xray_tracing: true
 
-      tags:
-        Service: data-api
-        Tier: backend
+        tags:
+          Service: data-api
+          Tier: backend
 
     # ==========================================================================
     # Infrastructure - Main Application Stack (Production HA)
@@ -120,14 +120,15 @@ components:
     infrastructure/main:
       metadata:
         component: infrastructure
+        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
       vars:
         # ECS Fargate cluster
         ecs:
           enabled: true
           fargate_only: true
           cluster_name: "production-main-apps"
-          vpc_id: "${output.vpc/main.vpc_id}"
-          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+          vpc_id: !terraform.state vpc/main .vpc_id
+          subnet_ids: !terraform.state vpc/main .private_subnet_ids
           enable_container_insights: true
           enable_execute_command: false  # Disabled in production
 
@@ -135,8 +136,8 @@ components:
         rds:
           enabled: true
           identifier: "production-main-db"
-          engine: "${rds_engine}"
-          engine_version: "${rds_engine_version}"
+          engine: "{{ .vars.rds_engine }}"
+          engine_version: "{{ .vars.rds_engine_version }}"
           instance_class: "db.r5.xlarge"
           allocated_storage: 100
           max_allocated_storage: 500
@@ -144,11 +145,11 @@ components:
 
           # High availability - CRITICAL
           multi_az: true
-          availability_zone: null  # Let AWS choose
+          availability_zone:       # Let AWS choose
 
           # Security
           storage_encrypted: true
-          kms_key_id: "${output.kms/main.key_arn}"
+          kms_key_id: !terraform.state kms/main .key_arn
           iam_database_authentication_enabled: true
           deletion_protection: true
 
@@ -161,18 +162,18 @@ components:
           # Performance
           performance_insights_enabled: true
           performance_insights_retention_period: 7
-          performance_insights_kms_key_id: "${output.kms/main.key_arn}"
+          performance_insights_kms_key_id: !terraform.state kms/main .key_arn
 
           # Monitoring
           monitoring_interval: 60
-          monitoring_role_arn: "${output.iam/rds-monitoring.role_arn}"
+          monitoring_role_arn: !terraform.state iam/rds-monitoring .role_arn
           enabled_cloudwatch_logs_exports:
             - "postgresql"
             - "upgrade"
 
           # Network
-          vpc_id: "${output.vpc/main.vpc_id}"
-          subnet_ids: "${output.vpc/main.database_subnet_ids}"
+          vpc_id: !terraform.state vpc/main .vpc_id
+          subnet_ids: !terraform.state vpc/main .database_subnet_ids
 
           # Parameter group for production tuning
           parameter_group_family: "postgres14"
@@ -196,14 +197,15 @@ components:
           multi_az_enabled: true
           at_rest_encryption_enabled: true
           transit_encryption_enabled: true
-          auth_token: "${ssm:/production/elasticache/auth_token}"
-          vpc_id: "${output.vpc/main.vpc_id}"
-          subnet_ids: "${output.vpc/main.elasticache_subnet_ids}"
+          # Secret: export from SSM /production/elasticache/auth_token before plan/apply
+          auth_token: !env PROD_ELASTICACHE_AUTH_TOKEN
+          vpc_id: !terraform.state vpc/main .vpc_id
+          subnet_ids: !terraform.state vpc/main .elasticache_subnet_ids
 
-      tags:
-        Stack: main
-        Tier: application
-        CriticalityLevel: "high"
+        tags:
+          Stack: main
+          Tier: application
+          CriticalityLevel: "high"
 
     # ==========================================================================
     # Infrastructure - Data Processing Stack (Production HA)
@@ -211,6 +213,7 @@ components:
     infrastructure/data:
       metadata:
         component: infrastructure
+        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
       vars:
         # ECS disabled for data stack
         ecs:
@@ -220,8 +223,8 @@ components:
         rds:
           enabled: true
           identifier: "production-data-db"
-          engine: "${rds_engine}"
-          engine_version: "${rds_engine_version}"
+          engine: "{{ .vars.rds_engine }}"
+          engine_version: "{{ .vars.rds_engine_version }}"
           instance_class: "db.r5.2xlarge"
           allocated_storage: 200
           max_allocated_storage: 1000
@@ -229,14 +232,14 @@ components:
 
           multi_az: true
           storage_encrypted: true
-          kms_key_id: "${output.kms/main.key_arn}"
+          kms_key_id: !terraform.state kms/main .key_arn
           deletion_protection: true
 
           backup_retention_period: 30
           performance_insights_enabled: true
 
-          vpc_id: "${output.vpc/services.vpc_id}"
-          subnet_ids: "${output.vpc/services.database_subnet_ids}"
+          vpc_id: !terraform.state vpc/services .vpc_id
+          subnet_ids: !terraform.state vpc/services .database_subnet_ids
 
           # Read replica for analytics
           create_read_replica: true
@@ -253,8 +256,8 @@ components:
               memory_size: 1024
               timeout: 600
               reserved_concurrent_executions: 100
-              vpc_id: "${output.vpc/services.vpc_id}"
-              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+              vpc_id: !terraform.state vpc/services .vpc_id
+              subnet_ids: !terraform.state vpc/services .private_subnet_ids
               environment:
                 LOG_LEVEL: "INFO"
                 ENVIRONMENT: "production"
@@ -265,20 +268,20 @@ components:
               memory_size: 2048
               timeout: 900
               reserved_concurrent_executions: 50
-              vpc_id: "${output.vpc/services.vpc_id}"
-              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+              vpc_id: !terraform.state vpc/services .vpc_id
+              subnet_ids: !terraform.state vpc/services .private_subnet_ids
             report_generator:
               function_name: "production-report-generator"
               runtime: "python3.11"
               handler: "reports.handler"
               memory_size: 3008
               timeout: 900
-              vpc_id: "${output.vpc/services.vpc_id}"
-              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+              vpc_id: !terraform.state vpc/services .vpc_id
+              subnet_ids: !terraform.state vpc/services .private_subnet_ids
 
-      tags:
-        Stack: data
-        Tier: data-processing
+        tags:
+          Stack: data
+          Tier: data-processing
 
     # ==========================================================================
     # Monitoring - Main Dashboard (Production)
@@ -286,6 +289,8 @@ components:
     monitoring/main:
       metadata:
         component: monitoring
+        inherits:
+          - monitoring/defaults
       vars:
         enabled: true
         create_dashboard: true
@@ -299,7 +304,7 @@ components:
         enable_cost_monitoring: true
 
         # Certificate monitoring
-        certificate_arns: "${output.acm/main.certificate_arns | {}}"
+        certificate_arns: !terraform.state acm/main .certificate_arns // {}
         certificate_expiry_threshold: 30
         certificate_critical_threshold: 7
 
@@ -311,7 +316,8 @@ components:
           - "oncall@example.com"
 
         # PagerDuty integration
-        pagerduty_endpoint: "${ssm:/production/pagerduty/endpoint}"
+        # Secret: export from SSM /production/pagerduty/endpoint before plan/apply
+        pagerduty_endpoint: !env PROD_PAGERDUTY_ENDPOINT
 
         # Comprehensive CloudWatch Alarms
         alarms:
@@ -324,7 +330,7 @@ components:
             threshold: 70
             comparison_operator: "GreaterThanThreshold"
             evaluation_periods: 2
-            alarm_actions: ["${sns_topic_arn}"]
+            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
           high_cpu_critical:
             metric_name: "CPUUtilization"
             namespace: "AWS/EC2"
@@ -333,7 +339,7 @@ components:
             threshold: 90
             comparison_operator: "GreaterThanThreshold"
             evaluation_periods: 2
-            alarm_actions: ["${pagerduty_topic_arn}"]
+            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
 
           # Memory Alarms
           high_memory_warning:
@@ -352,7 +358,7 @@ components:
             threshold: 95
             comparison_operator: "GreaterThanThreshold"
             evaluation_periods: 1
-            alarm_actions: ["${pagerduty_topic_arn}"]
+            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
 
           # RDS Alarms
           rds_cpu_high:
@@ -379,7 +385,7 @@ components:
             threshold: 10737418240  # 10GB
             comparison_operator: "LessThanThreshold"
             evaluation_periods: 2
-            alarm_actions: ["${pagerduty_topic_arn}"]
+            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
 
           # EKS Alarms
           eks_node_not_ready:
@@ -390,7 +396,7 @@ components:
             threshold: 0
             comparison_operator: "GreaterThanThreshold"
             evaluation_periods: 5
-            alarm_actions: ["${pagerduty_topic_arn}"]
+            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
 
           # API Gateway Alarms
           api_5xx_errors:
@@ -401,7 +407,7 @@ components:
             threshold: 10
             comparison_operator: "GreaterThanThreshold"
             evaluation_periods: 3
-            alarm_actions: ["${pagerduty_topic_arn}"]
+            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
           api_latency_high:
             metric_name: "Latency"
             namespace: "AWS/ApiGateway"
@@ -417,6 +423,8 @@ components:
     monitoring/data:
       metadata:
         component: monitoring
+        inherits:
+          - monitoring/defaults
       vars:
         enabled: true
         create_dashboard: true
@@ -426,7 +434,7 @@ components:
         enable_vpc_flow_logs: true
         enable_certificate_monitoring: true
 
-        certificate_arns: "${output.acm/services.certificate_arns | {}}"
+        certificate_arns: !terraform.state acm/services .certificate_arns // {}
         certificate_expiry_threshold: 30
 
         sns_topic_name: "production-data-alarms"

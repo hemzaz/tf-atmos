@@ -22,21 +22,6 @@ import:
   - catalog/backend/defaults
   - catalog/monitoring/defaults
 
-metadata:
-  description: "Development test environment for infrastructure validation"
-  owner: "DevOps Team"
-  version: "1.0.0"
-  stage: "dev"
-  region: "eu-west-2"
-  compliance:
-    hipaa: false
-    pci: false
-    sox: false
-    gdpr: true
-  monitoring:
-    critical_alerts: ["ops@example.com"]
-    warning_alerts: ["team@example.com"]
-
 vars:
   # Core environment identifiers
   environment: testenv-01
@@ -62,13 +47,33 @@ vars:
   security:
     vpc_flow_logs: true  # Override development mixin default
 
-# Environment tagging strategy
-tags:
-  Team: "DevOps"
-  CostCenter: "IT"
-  Project: "Infrastructure"
-  Environment: "testenv-01"
-  ManagedBy: "Terraform"
-  Tenant: "fnx"
-  Application: "Testing"
-  Provisioner: "Atmos"
+  # Environment tagging strategy
+  tags:
+    Team: "DevOps"
+    CostCenter: "IT"
+    Project: "Infrastructure"
+    Environment: "testenv-01"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Testing"
+    Provisioner: "Atmos"
+
+# Environment metadata (not passed to Terraform). Moved here from a stack-wide
+# `metadata:` block, which Atmos no longer allows; component templates read it
+# as {{ .settings.environment.<key> }}.
+settings:
+  environment:
+    domain_name: "example.com"
+    description: "Development test environment for infrastructure validation"
+    owner: "DevOps Team"
+    version: "1.0.0"
+    stage: "dev"
+    region: "eu-west-2"
+    compliance:
+      hipaa: false
+      pci: false
+      sox: false
+      gdpr: true
+    monitoring:
+      critical_alerts: ["ops@example.com"]
+      warning_alerts: ["team@example.com"]

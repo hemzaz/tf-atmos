@@ -25,42 +25,6 @@ import:
   - catalog/backend/defaults
   - catalog/monitoring/defaults
 
-metadata:
-  description: "Production Environment - Business Critical Infrastructure"
-  owner: "Platform Team"
-  version: "1.0.0"
-  stage: "production"
-  region: "eu-west-2"
-
-  # Compliance requirements
-  compliance:
-    hipaa: false
-    pci: true
-    sox: true
-    gdpr: true
-
-  # Monitoring contacts - 24/7 coverage
-  monitoring:
-    critical_alerts:
-      - "prod-critical@example.com"
-      - "oncall@example.com"
-    warning_alerts:
-      - "prod-alerts@example.com"
-    pagerduty_service_key: "${ssm:/fnx/production/pagerduty/service_key}"
-
-  # Change management - strict controls
-  change_management:
-    approval_required: true
-    change_window: "weekday-maintenance"
-    emergency_contact: "prod-emergency@example.com"
-    rollback_required: true
-
-  # SLA requirements
-  sla:
-    availability: "99.9%"
-    rpo: "1 hour"
-    rto: "4 hours"
-
 vars:
   # Core environment identifiers
   environment: production
@@ -108,18 +72,59 @@ vars:
   cross_zone_load_balancing: true
   min_availability_zones: 3
 
-# Environment tagging strategy - comprehensive for production
-tags:
-  Team: "Platform"
-  CostCenter: "Production"
-  Project: "Infrastructure"
-  Environment: "production"
-  ManagedBy: "Terraform"
-  Tenant: "fnx"
-  Application: "Production"
-  Provisioner: "Atmos"
-  DataClassification: "confidential"
-  Compliance: "pci-sox-gdpr"
-  CriticalityLevel: "high"
-  SLA: "99.9"
-  BackupRequired: "true"
+  # Environment tagging strategy - comprehensive for production
+  tags:
+    Team: "Platform"
+    CostCenter: "Production"
+    Project: "Infrastructure"
+    Environment: "production"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Production"
+    Provisioner: "Atmos"
+    DataClassification: "confidential"
+    Compliance: "pci-sox-gdpr"
+    CriticalityLevel: "high"
+    SLA: "99.9"
+    BackupRequired: "true"
+
+# Environment metadata (not passed to Terraform). Moved here from a stack-wide
+# `metadata:` block, which Atmos no longer allows; component templates read it
+# as {{ .settings.environment.<key> }}.
+settings:
+  environment:
+    domain_name: "example.com"
+    description: "Production Environment - Business Critical Infrastructure"
+    owner: "Platform Team"
+    version: "1.0.0"
+    stage: "production"
+    region: "eu-west-2"
+
+  # Compliance requirements
+    compliance:
+      hipaa: false
+      pci: true
+      sox: true
+      gdpr: true
+
+  # Monitoring contacts - 24/7 coverage
+    monitoring:
+      critical_alerts:
+        - "prod-critical@example.com"
+        - "oncall@example.com"
+      warning_alerts:
+        - "prod-alerts@example.com"
+      pagerduty_service_key_ssm_parameter: /fnx/production/pagerduty/service_key
+
+  # Change management - strict controls
+    change_management:
+      approval_required: true
+      change_window: "weekday-maintenance"
+      emergency_contact: "prod-emergency@example.com"
+      rollback_required: true
+
+  # SLA requirements
+    sla:
+      availability: "99.9%"
+      rpo: "1 hour"
+      rto: "4 hours"

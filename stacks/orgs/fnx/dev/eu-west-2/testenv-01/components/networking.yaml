@@ -20,7 +20,7 @@ components:
         name: main
         # FIXED: Use consistent variable name matching the component
         vpc_cidr: "10.0.0.0/16"
-        vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
+        vpc_flow_logs_enabled: "{{ .vars.enable_vpc_flow_logs }}"
         # Subnet configuration
         private_subnets:
           - "10.0.1.0/24"
@@ -40,7 +40,7 @@ components:
         name: services
         # FIXED: Use consistent variable name matching the component
         vpc_cidr: "10.1.0.0/16"
-        vpc_flow_logs_enabled: "${enable_vpc_flow_logs}"
+        vpc_flow_logs_enabled: "{{ .vars.enable_vpc_flow_logs }}"
         map_public_ip_on_launch: false
         # Subnet configuration
         private_subnets:
@@ -56,8 +56,9 @@ components:
     network/main:
       metadata:
         component: network
+        enabled: false  # no components/terraform/network root module yet (see PR notes)
       vars:
-        vpc_id: "${output.vpc/main.vpc_id}"
+        vpc_id: !terraform.state vpc/main .vpc_id
         # DNS settings
         dns_create_root_zone: false
         dns_multi_account: false
@@ -94,8 +95,9 @@ components:
     network/services:
       metadata:
         component: network
+        enabled: false  # no components/terraform/network root module yet (see PR notes)
       vars:
-        vpc_id: "${output.vpc/services.vpc_id}"
+        vpc_id: !terraform.state vpc/services .vpc_id
         # DNS settings
         dns_create_root_zone: false
         dns_multi_account: false

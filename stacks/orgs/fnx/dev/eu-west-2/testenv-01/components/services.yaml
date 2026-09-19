@@ -13,7 +13,7 @@ components:
         component: apigateway
       vars:
         name: "main-api"
-        description: "Main API Gateway for ${tenant}-${environment}"
+        description: "Main API Gateway for {{ .vars.tenant }}-{{ .vars.environment }}"
         stage_name: "v1"
 
         # API resources
@@ -21,19 +21,17 @@ components:
           - path_part: "api"
           - path_part: "auth"
 
-        # API methods
-        api_methods:
-          - resource_id: "${output.apigateway_rest.rest_api_root_resource_id}"
-            http_method: "GET"
-            authorization: "NONE"
-          - resource_id: "${resource_ids.api}"
-            http_method: "ANY"
-            authorization: "COGNITO_USER_POOLS"
+        # API methods: the old config referenced this API's own resource IDs
+        # (apigateway_rest.rest_api_root_resource_id, resource_ids.api), which
+        # stack config cannot know before apply. Needs TF support for path-keyed methods.
+        # api_methods:
+        #   - resource_path: "/"      # GET, authorization NONE
+        #   - resource_path: "/api"   # ANY, authorization COGNITO_USER_POOLS
 
         # Domain Configuration
-        domain_name: "api.${domain_name}"
-        certificate_arn: "${output.acm/main.certificate_arns.main_wildcard}"
-        route53_zone_id: "${output.network/main.zone_ids.main}"
+        domain_name: "api.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
+        route53_zone_id: !terraform.state network/main .zone_ids.main
 
         # API monitoring
         enable_logging: true
@@ -45,7 +43,7 @@ components:
         component: apigateway
       vars:
         name: "data-api"
-        description: "Data API Gateway for ${tenant}-${environment}"
+        description: "Data API Gateway for {{ .vars.tenant }}-{{ .vars.environment }}"
         stage_name: "v1"
 
         # API resources
@@ -54,9 +52,9 @@ components:
           - path_part: "metrics"
 
         # Domain Configuration
-        domain_name: "data.services.${domain_name}"
-        certificate_arn: "${output.acm/services.certificate_arns.services_wildcard}"
-        route53_zone_id: "${output.network/services.zone_ids.data}"
+        domain_name: "data.services.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
+        route53_zone_id: !terraform.state network/services .zone_ids.data
 
         # API monitoring
         enable_logging: true
@@ -67,14 +65,15 @@ components:
     infrastructure/main:
       metadata:
         component: infrastructure
+        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
       vars:
         # ECS configuration
         ecs:
           enabled: true
           fargate_only: true
           cluster_name: "main-apps"
-          vpc_id: "${output.vpc/main.vpc_id}"
-          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+          vpc_id: !terraform.state vpc/main .vpc_id
+          subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
         # RDS configuration
         rds:
@@ -83,14 +82,15 @@ components:
           instance_class: "db.t3.micro"
           allocated_storage: 5
           db_name: "mainapp"
-          engine: "${rds_engine}"
-          engine_version: "${rds_engine_version}"
-          vpc_id: "${output.vpc/main.vpc_id}"
-          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+          engine: "{{ .vars.rds_engine }}"
+          engine_version: "{{ .vars.rds_engine_version }}"
+          vpc_id: !terraform.state vpc/main .vpc_id
+          subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
     infrastructure/data:
       metadata:
         component: infrastructure
+        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
       vars:
         # ECS configuration (disabled for data)
         ecs:
@@ -103,10 +103,10 @@ components:
           instance_class: "db.r5.large"
           allocated_storage: 20
           db_name: "datawarehouse"
-          engine: "${rds_engine}"
-          engine_version: "${rds_engine_version}"
-          vpc_id: "${output.vpc/services.vpc_id}"
-          subnet_ids: "${output.vpc/services.private_subnet_ids}"
+          engine: "{{ .vars.rds_engine }}"
+          engine_version: "{{ .vars.rds_engine_version }}"
+          vpc_id: !terraform.state vpc/services .vpc_id
+          subnet_ids: !terraform.state vpc/services .private_subnet_ids
 
         # Data-specific Lambda functions
         lambda:
@@ -114,41 +114,42 @@ components:
           function_name: "data-processor"
           memory_size: 512
           runtime: "python3.9"
-          vpc_id: "${output.vpc/services.vpc_id}"
-          subnet_ids: "${output.vpc/services.private_subnet_ids}"
+          vpc_id: !terraform.state vpc/services .vpc_id
+          subnet_ids: !terraform.state vpc/services .private_subnet_ids
 
     # Monitoring instances
     monitoring/main:
       metadata:
         component: monitoring
+        inherits:
+          - monitoring/defaults
       vars:
         enabled: true
         create_dashboard: true
-        dashboard_name: "${tenant}-${environment}-main-dashboard"
+        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-main-dashboard"
 
         # Enable certificate monitoring
         enable_certificate_monitoring: true
-        enable_container_insights: "${enable_container_insights}"
-
-        # Certificate monitoring configuration
-        certificate_arns: ${output.acm/main.certificate_arns | {}}
-        certificate_names: ${keys(output.acm/main.certificate_domains) | []}
-        certificate_domains: ${values(output.acm/main.certificate_domains) | []}
+        certificate_arns: !terraform.state acm/main .certificate_arns // {}
+        certificate_names: !terraform.state acm/main .certificate_domains // {} | keys
+        certificate_domains: !terraform.state acm/main [.certificate_domains // {} | .[]]
         certificate_expiry_threshold: 30
 
         # Alert emails
         alarm_notifications_enabled: true
         alarm_email_addresses:
-          - "${metadata.monitoring.critical_alerts[0]}"
-          - "${metadata.monitoring.warning_alerts[0]}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
 
     monitoring/data:
       metadata:
         component: monitoring
+        inherits:
+          - monitoring/defaults
       vars:
         enabled: true
         create_dashboard: true
-        dashboard_name: "${tenant}-${environment}-data-dashboard"
+        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-dashboard"
 
         # Data-specific monitoring settings
         enable_resource_monitoring: true
@@ -156,10 +157,10 @@ components:
         enable_certificate_monitoring: true
 
         # Certificate monitoring configuration
-        certificate_arns: ${output.acm/services.certificate_arns | {}}
+        certificate_arns: !terraform.state acm/services .certificate_arns // {}
         certificate_expiry_threshold: 30
 
         # Alert emails - only send critical alerts
         alarm_notifications_enabled: true
         alarm_email_addresses:
-          - "${metadata.monitoring.critical_alerts[0]}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"

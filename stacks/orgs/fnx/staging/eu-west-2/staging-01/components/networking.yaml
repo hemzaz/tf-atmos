@@ -56,8 +56,8 @@ components:
         # Security
         map_public_ip_on_launch: false
 
-      tags:
-        NetworkTier: "primary"
+        tags:
+          NetworkTier: "primary"
 
     # ==========================================================================
     # Services VPC - Dedicated for backend services
@@ -90,8 +90,8 @@ components:
         nat_gateway_strategy: "single"
         map_public_ip_on_launch: false
 
-      tags:
-        NetworkTier: "services"
+        tags:
+          NetworkTier: "services"
 
     # ==========================================================================
     # Network Resources - DNS and routing for main VPC
@@ -99,8 +99,9 @@ components:
     network/main:
       metadata:
         component: network
+        enabled: false  # no components/terraform/network root module yet (see PR notes)
       vars:
-        vpc_id: "${output.vpc/main.vpc_id}"
+        vpc_id: !terraform.state vpc/main .vpc_id
         dns_create_root_zone: false
         dns_multi_account: false
 
@@ -135,8 +136,9 @@ components:
     network/services:
       metadata:
         component: network
+        enabled: false  # no components/terraform/network root module yet (see PR notes)
       vars:
-        vpc_id: "${output.vpc/services.vpc_id}"
+        vpc_id: !terraform.state vpc/services .vpc_id
         dns_create_root_zone: false
 
         dns_zones:

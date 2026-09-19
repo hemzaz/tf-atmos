@@ -24,30 +24,6 @@ import:
   - catalog/backend/defaults
   - catalog/monitoring/defaults
 
-metadata:
-  description: "Staging environment for production validation"
-  owner: "Platform Team"
-  version: "1.0.0"
-  stage: "staging"
-  region: "eu-west-2"
-
-  # Compliance requirements - staging should match prod
-  compliance:
-    hipaa: false
-    pci: false
-    sox: false
-    gdpr: true
-
-  # Monitoring contacts
-  monitoring:
-    critical_alerts: ["staging-alerts@example.com"]
-    warning_alerts: ["team@example.com"]
-
-  # Change management
-  change_management:
-    approval_required: true
-    change_window: "business-hours"
-
 vars:
   # Core environment identifiers
   environment: staging-01
@@ -84,14 +60,43 @@ vars:
   enable_debug_logging: true
   retention_days: 14
 
-# Environment tagging strategy
-tags:
-  Team: "Platform"
-  CostCenter: "Staging"
-  Project: "Infrastructure"
-  Environment: "staging-01"
-  ManagedBy: "Terraform"
-  Tenant: "fnx"
-  Application: "Staging"
-  Provisioner: "Atmos"
-  DataClassification: "internal"
+  # Environment tagging strategy
+  tags:
+    Team: "Platform"
+    CostCenter: "Staging"
+    Project: "Infrastructure"
+    Environment: "staging-01"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Staging"
+    Provisioner: "Atmos"
+    DataClassification: "internal"
+
+# Environment metadata (not passed to Terraform). Moved here from a stack-wide
+# `metadata:` block, which Atmos no longer allows; component templates read it
+# as {{ .settings.environment.<key> }}.
+settings:
+  environment:
+    domain_name: "staging.example.com"
+    description: "Staging environment for production validation"
+    owner: "Platform Team"
+    version: "1.0.0"
+    stage: "staging"
+    region: "eu-west-2"
+
+  # Compliance requirements - staging should match prod
+    compliance:
+      hipaa: false
+      pci: false
+      sox: false
+      gdpr: true
+
+  # Monitoring contacts
+    monitoring:
+      critical_alerts: ["staging-alerts@example.com"]
+      warning_alerts: ["team@example.com"]
+
+  # Change management
+    change_management:
+      approval_required: true
+      change_window: "business-hours"

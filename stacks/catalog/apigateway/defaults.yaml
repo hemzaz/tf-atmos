@@ -1,7 +1,4 @@
 ---
-name: apigateway
-description: "Reusable API Gateway configuration"
-
 components:
   terraform:
     apigateway_rest:
@@ -9,11 +6,9 @@ components:
         component: apigateway
         type: abstract
       vars:
-        tenant: "${tenant}"
         enabled: true
-        region: ${region}
-        api_name: "${tenant}-${environment}-rest-api"
-        description: "REST API Gateway for ${environment} environment"
+        api_name: "{{ .vars.tenant }}-{{ .vars.environment }}-rest-api"
+        description: "REST API Gateway for {{ .vars.environment }} environment"
         api_type: "REST"
         endpoint_type: ["REGIONAL"]
 
@@ -25,7 +20,7 @@ components:
 
         # Authorization
         authorizer_type: "COGNITO_USER_POOLS"
-        cognito_user_pool_arns: ["${cognito_user_pool_arn}"]
+        cognito_user_pool_arns: [] # required: set the Cognito user pool ARN(s) per instance
         authorizer_identity_source: "method.request.header.Authorization"
 
         # API Gateway access logging
@@ -34,7 +29,7 @@ components:
         log_retention_days: 30
 
         # Stage configurations
-        stage_name: "${environment}"
+        stage_name: "{{ .vars.environment }}"
 
         # API Keys and Usage Plans
         create_api_key: false
@@ -51,40 +46,16 @@ components:
         create_dashboard: true
         tracing_enabled: true
 
-      # Define common tags
-      tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
-        Component: "ApiGateway"
-        ManagedBy: "Terraform"
-
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/apigateway_rest/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
-      providers:
-        aws:
-          region: ${region}
-
+        tags:
+          Component: "ApiGateway"
     apigateway_http:
       metadata:
         component: apigateway
         type: abstract
       vars:
-        tenant: "${tenant}"
         enabled: true
-        region: ${region}
-        api_name: "${tenant}-${environment}-http-api"
-        description: "HTTP API Gateway for ${environment} environment"
+        api_name: "{{ .vars.tenant }}-{{ .vars.environment }}-http-api"
+        description: "HTTP API Gateway for {{ .vars.environment }} environment"
         api_type: "HTTP"
 
         # HTTP API specific configurations
@@ -106,8 +77,8 @@ components:
 
         # Authentication options
         authorizer_type: "JWT"
-        jwt_audience: ["${cognito_client_id}"]
-        jwt_issuer: "https://cognito-idp.${region}.amazonaws.com/${cognito_user_pool_id}"
+        jwt_audience: [] # required: set the Cognito app client ID(s) per instance
+        jwt_issuer: null # required: https://cognito-idp.<region>.amazonaws.com/<user_pool_id>
 
         # Logging
         enable_logging: true
@@ -115,83 +86,33 @@ components:
         log_retention_days: 30
 
         # Stage configurations
-        stage_name: "${environment}"
+        stage_name: "{{ .vars.environment }}"
         auto_deploy: true
 
         # Monitoring
         create_dashboard: true
         tracing_enabled: true
 
-      # Define common tags
-      tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
-        Component: "ApiGateway"
-        ManagedBy: "Terraform"
-
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/apigateway_http/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
-      providers:
-        aws:
-          region: ${region}
-
+        tags:
+          Component: "ApiGateway"
     apigateway_domain:
       metadata:
         component: apigateway
         type: abstract
       vars:
-        tenant: "${tenant}"
         enabled: true
-        region: ${region}
-        api_name: "${tenant}-${environment}-domain"
+        api_name: "{{ .vars.tenant }}-{{ .vars.environment }}-domain"
         api_type: "REST"
-        domain_name: "api.${environment}.${root_domain}"
-        certificate_arn: "${acm_certificate_arn}"
-        zone_id: "${route53_zone_id}"
+        domain_name: null # required: e.g. api.<environment>.<root domain>
+        certificate_arn: null # required: ACM certificate ARN
+        zone_id: null # required: Route53 hosted zone ID
 
         # Stage mapping
-        stage_name: "${environment}"
+        stage_name: "{{ .vars.environment }}"
         base_path: null
 
         # Logging (minimal for domain component)
         enable_logging: false
 
-      # Define common tags
-      tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
-        Component: "ApiGateway Domain"
-        ManagedBy: "Terraform"
-
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/apigateway_domain/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
-      providers:
-        aws:
-          region: ${region}
-
-vars:
-  tenant: "${tenant}"
-  account: "${account}"
-  environment: "${environment}"
+        tags:
+          Component: "ApiGateway Domain"

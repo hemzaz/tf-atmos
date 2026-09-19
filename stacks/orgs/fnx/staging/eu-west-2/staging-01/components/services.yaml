@@ -30,19 +30,17 @@ components:
           - path_part: "auth"
           - path_part: "health"
 
-        # API methods
-        api_methods:
-          - resource_id: "${output.apigateway_rest.rest_api_root_resource_id}"
-            http_method: "GET"
-            authorization: "NONE"
-          - resource_id: "${resource_ids.api}"
-            http_method: "ANY"
-            authorization: "COGNITO_USER_POOLS"
+        # API methods: the old config referenced this API's own resource IDs
+        # (apigateway_rest.rest_api_root_resource_id, resource_ids.api), which
+        # stack config cannot know before apply. Needs TF support for path-keyed methods.
+        # api_methods:
+        #   - resource_path: "/"      # GET, authorization NONE
+        #   - resource_path: "/api"   # ANY, authorization COGNITO_USER_POOLS
 
         # Domain Configuration
-        domain_name: "api.staging.${domain_name}"
-        certificate_arn: "${output.acm/main.certificate_arns.main_wildcard}"
-        route53_zone_id: "${output.network/main.zone_ids.main}"
+        domain_name: "api.staging.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
+        route53_zone_id: !terraform.state network/main .zone_ids.main
 
         # Throttling
         throttling_burst_limit: 500
@@ -57,10 +55,9 @@ components:
         enable_cors: true
         cors_allow_origins: ["*"]
         cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-
-      tags:
-        Service: api-gateway
-        Tier: edge
+        tags:
+          Service: api-gateway
+          Tier: edge
 
     # ==========================================================================
     # API Gateway - Data API
@@ -78,9 +75,9 @@ components:
           - path_part: "metrics"
           - path_part: "analytics"
 
-        domain_name: "data.services.staging.${domain_name}"
-        certificate_arn: "${output.acm/services.certificate_arns.services_wildcard}"
-        route53_zone_id: "${output.network/services.zone_ids.data}"
+        domain_name: "data.services.staging.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
+        route53_zone_id: !terraform.state network/services .zone_ids.data
 
         throttling_burst_limit: 300
         throttling_rate_limit: 500
@@ -89,9 +86,9 @@ components:
         log_retention_days: 14
         create_dashboard: true
 
-      tags:
-        Service: data-api
-        Tier: backend
+        tags:
+          Service: data-api
+          Tier: backend
 
     # ==========================================================================
     # Infrastructure - Main Application Stack
@@ -99,22 +96,23 @@ components:
     infrastructure/main:
       metadata:
         component: infrastructure
+        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
       vars:
         # ECS Fargate cluster
         ecs:
           enabled: true
           fargate_only: true
           cluster_name: "staging-main-apps"
-          vpc_id: "${output.vpc/main.vpc_id}"
-          subnet_ids: "${output.vpc/main.private_subnet_ids}"
+          vpc_id: !terraform.state vpc/main .vpc_id
+          subnet_ids: !terraform.state vpc/main .private_subnet_ids
           enable_container_insights: true
 
         # RDS PostgreSQL
         rds:
           enabled: true
           identifier: "staging-main-db"
-          engine: "${rds_engine}"
-          engine_version: "${rds_engine_version}"
+          engine: "{{ .vars.rds_engine }}"
+          engine_version: "{{ .vars.rds_engine_version }}"
           instance_class: "db.t3.medium"
           allocated_storage: 20
           max_allocated_storage: 100
@@ -137,12 +135,12 @@ components:
           performance_insights_retention_period: 7
 
           # Network
-          vpc_id: "${output.vpc/main.vpc_id}"
-          subnet_ids: "${output.vpc/main.database_subnet_ids}"
+          vpc_id: !terraform.state vpc/main .vpc_id
+          subnet_ids: !terraform.state vpc/main .database_subnet_ids
 
-      tags:
-        Stack: main
-        Tier: application
+        tags:
+          Stack: main
+          Tier: application
 
     # ==========================================================================
     # Infrastructure - Data Processing Stack
@@ -150,6 +148,7 @@ components:
     infrastructure/data:
       metadata:
         component: infrastructure
+        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
       vars:
         # ECS disabled for data stack
         ecs:
@@ -159,8 +158,8 @@ components:
         rds:
           enabled: true
           identifier: "staging-data-db"
-          engine: "${rds_engine}"
-          engine_version: "${rds_engine_version}"
+          engine: "{{ .vars.rds_engine }}"
+          engine_version: "{{ .vars.rds_engine_version }}"
           instance_class: "db.r5.large"
           allocated_storage: 50
           max_allocated_storage: 200
@@ -170,8 +169,8 @@ components:
           storage_encrypted: true
           backup_retention_period: 7
 
-          vpc_id: "${output.vpc/services.vpc_id}"
-          subnet_ids: "${output.vpc/services.private_subnet_ids}"
+          vpc_id: !terraform.state vpc/services .vpc_id
+          subnet_ids: !terraform.state vpc/services .private_subnet_ids
 
         # Lambda for data processing
         lambda:
@@ -183,20 +182,20 @@ components:
               handler: "main.handler"
               memory_size: 512
               timeout: 300
-              vpc_id: "${output.vpc/services.vpc_id}"
-              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+              vpc_id: !terraform.state vpc/services .vpc_id
+              subnet_ids: !terraform.state vpc/services .private_subnet_ids
             data_transformer:
               function_name: "staging-data-transformer"
               runtime: "python3.11"
               handler: "transform.handler"
               memory_size: 1024
               timeout: 600
-              vpc_id: "${output.vpc/services.vpc_id}"
-              subnet_ids: "${output.vpc/services.private_subnet_ids}"
+              vpc_id: !terraform.state vpc/services .vpc_id
+              subnet_ids: !terraform.state vpc/services .private_subnet_ids
 
-      tags:
-        Stack: data
-        Tier: data-processing
+        tags:
+          Stack: data
+          Tier: data-processing
 
     # ==========================================================================
     # Monitoring - Main Dashboard and Alarms
@@ -204,6 +203,8 @@ components:
     monitoring/main:
       metadata:
         component: monitoring
+        inherits:
+          - monitoring/defaults
       vars:
         enabled: true
         create_dashboard: true
@@ -216,9 +217,9 @@ components:
         enable_vpc_flow_logs: true
 
         # Certificate monitoring
-        certificate_arns: "${output.acm/main.certificate_arns | {}}"
-        certificate_names: "${keys(output.acm/main.certificate_domains) | []}"
-        certificate_domains: "${values(output.acm/main.certificate_domains) | []}"
+        certificate_arns: !terraform.state acm/main .certificate_arns // {}
+        certificate_names: !terraform.state acm/main .certificate_domains // {} | keys
+        certificate_domains: !terraform.state acm/main [.certificate_domains // {} | .[]]
         certificate_expiry_threshold: 30
 
         # SNS Topics for alerts
@@ -253,6 +254,8 @@ components:
     monitoring/data:
       metadata:
         component: monitoring
+        inherits:
+          - monitoring/defaults
       vars:
         enabled: true
         create_dashboard: true
@@ -262,7 +265,7 @@ components:
         enable_vpc_flow_logs: true
         enable_certificate_monitoring: true
 
-        certificate_arns: "${output.acm/services.certificate_arns | {}}"
+        certificate_arns: !terraform.state acm/services .certificate_arns // {}
         certificate_expiry_threshold: 30
 
         sns_topic_name: "staging-data-alarms"

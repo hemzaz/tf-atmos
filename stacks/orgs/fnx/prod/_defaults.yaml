@@ -14,7 +14,7 @@ import:
 vars:
   # Account identification
   account: prod
-  account_id: "${env:AWS_PROD_ACCOUNT_ID, 123456789012}"  # Replace with actual account ID
+  account_id: "123456789012" # Replace with actual account ID
   aws_profile: "prod"
 
   # Production-specific defaults
@@ -41,8 +41,8 @@ vars:
   # High availability
   min_availability_zones: 3
 
-tags:
-  Stage: production
-  CostCenter: "prod-infra"
-  DataClassification: "confidential"
-  Compliance: "required"
+  tags:
+    Stage: production
+    CostCenter: "prod-infra"
+    DataClassification: "confidential"
+    Compliance: "required"
