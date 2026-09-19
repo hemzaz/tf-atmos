@@ -130,12 +130,6 @@ collect_usage_metrics() {
         fi
     fi
     
-    # Check development environment usage
-    local dev_env_used=false
-    if docker-compose ps 2>/dev/null | grep -q "Up"; then
-        dev_env_used=true
-    fi
-    
     # Most used commands (simple heuristic)
     local commands_file="$HOME/.bash_history"
     local top_commands=""
@@ -148,7 +142,6 @@ collect_usage_metrics() {
     "workflow_runs_7_days": $workflow_runs,
     "successful_runs_7_days": $successful_runs,
     "failed_runs_7_days": $failed_runs,
-    "dev_environment_active": $dev_env_used,
     "recent_commands": "$top_commands"
   },
 EOF

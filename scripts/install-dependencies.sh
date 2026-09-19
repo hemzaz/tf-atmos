@@ -37,7 +37,6 @@ INSTALL_YAMLLINT=true
 INSTALL_TFSEC=true
 INSTALL_TFLINT=true
 INSTALL_CHECKOV=false
-INSTALL_REDIS=true
 # Cookiecutter was removed in favor of Copier
 INSTALL_COPIER=true
 TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.16.3}"
@@ -80,7 +79,6 @@ show_help() {
   echo "  --skip-yamllint         Skip yamllint installation"
   echo "  --skip-tfsec            Skip tfsec installation"
   echo "  --skip-tflint           Skip tflint installation"
-  echo "  --skip-redis            Skip Redis installation"
   echo "  --install-checkov       Install checkov (not installed by default)"
   # Cookiecutter option removed
   echo "  --skip-copier           Skip copier installation"
@@ -909,69 +907,6 @@ install_copier() {
   fi
 }
 
-# Install Redis
-install_redis() {
-  if [[ "$INSTALL_REDIS" != "true" ]]; then
-    return
-  fi
-  
-  if command -v redis-server &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
-    echo -e "${GREEN}Redis is already installed: $(redis-server --version)${RESET}"
-    return
-  fi
-  
-  echo -e "${BLUE}Installing Redis...${RESET}"
-  
-  if [[ "$OS" == "darwin" ]]; then
-    if command -v brew &>/dev/null; then
-      brew install redis
-      
-      echo -e "${GREEN}Redis installed: $(redis-server --version)${RESET}"
-      echo -e "${YELLOW}To start Redis server: brew services start redis${RESET}"
-    else
-      echo -e "${RED}Homebrew not found. Unable to install Redis.${RESET}"
-    fi
-  elif [[ "$OS" == "linux" ]]; then
-    if [[ "$PKG_MANAGER" == "apt-get" ]]; then
-      if [[ "$SYSTEM_INSTALL" == "true" ]]; then
-        sudo apt-get install -y redis-server
-      else
-        apt-get install -y redis-server
-      fi
-    elif [[ "$PKG_MANAGER" == "dnf" ]]; then
-      if [[ "$SYSTEM_INSTALL" == "true" ]]; then
-        sudo dnf install -y redis
-      else
-        dnf install -y redis
-      fi
-    elif [[ "$PKG_MANAGER" == "yum" ]]; then
-      if [[ "$SYSTEM_INSTALL" == "true" ]]; then
-        sudo yum install -y redis
-      else
-        yum install -y redis
-      fi
-    fi
-    
-    if command -v redis-server &>/dev/null; then
-      echo -e "${GREEN}Redis installed: $(redis-server --version)${RESET}"
-      echo -e "${YELLOW}To start Redis server: sudo systemctl start redis${RESET}"
-    else
-      echo -e "${RED}Failed to install Redis${RESET}"
-    fi
-  fi
-  
-  # Add Redis configuration to .env file if it exists
-  local ENV_FILE="$(dirname "$0")/../.env"
-  if [[ -f "$ENV_FILE" ]] && ! grep -q "REDIS_URL=" "$ENV_FILE"; then
-    echo -e "\n# Redis configuration for async operations" >> "$ENV_FILE"
-    echo "REDIS_URL=redis://localhost:6379/0" >> "$ENV_FILE"
-    echo "CELERY_WORKERS=4" >> "$ENV_FILE" 
-    echo "ASYNC_MODE=true" >> "$ENV_FILE"
-    
-    echo -e "${GREEN}Added Redis configuration to $ENV_FILE${RESET}"
-  fi
-}
-
 # Parse command line options
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1025,10 +960,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-tflint)
       INSTALL_TFLINT=false
-      shift
-      ;;
-    --skip-redis)
-      INSTALL_REDIS=false
       shift
       ;;
     --install-checkov)
@@ -1126,7 +1057,6 @@ install_tfsec
 install_tflint
 install_checkov
 install_copier
-install_redis
 
 # Print summary
 echo
@@ -1176,16 +1106,6 @@ fi
 if [[ "$INSTALL_COPIER" == "true" ]]; then
   COPIER_VERSION_OUTPUT=$(pip3 show copier 2>/dev/null | grep -E '^Version:' | cut -d' ' -f2)
   echo -e "  • ${GREEN}copier $COPIER_VERSION_OUTPUT${RESET}" 2>/dev/null || echo -e "  • ${RED}copier not installed${RESET}"
-fi
-
-if [[ "$INSTALL_REDIS" == "true" ]]; then
-  echo -e "  • ${GREEN}$(redis-server --version)${RESET}" 2>/dev/null || echo -e "  • ${RED}Redis not installed${RESET}"
-  # Check if Redis is running
-  if redis-cli ping &>/dev/null; then
-    echo -e "    ${GREEN}Redis server is running${RESET}"
-  else
-    echo -e "    ${YELLOW}Redis server is not running. Start it with 'brew services start redis' (macOS) or 'sudo systemctl start redis' (Linux).${RESET}"
-  fi
 fi
 
 echo
