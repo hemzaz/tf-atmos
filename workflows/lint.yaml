@@ -3,8 +3,13 @@
 #
 # Usage:
 #   atmos workflow lint -f lint
-#   atmos workflow security-scan -f lint          # PR gate: SARIF reports, fails on HIGH/CRITICAL
-#   atmos workflow security-scan-report -f lint   # nightly: same SARIF reports, never fails
+#   atmos workflow security-scan -f lint          # PR gate: SARIF reports, fails on NEW HIGH/CRITICAL
+#   atmos workflow security-scan-report -f lint   # nightly: full backlog (no baselines), never fails
+#   atmos workflow security-baseline -f lint      # regenerate .trivyignore.yaml and .checkov.baseline
+#
+# The PR gates (lint, security-scan) only fail on findings that are not in the
+# committed baselines (.trivyignore.yaml, .checkov.baseline). Regenerate the
+# baselines deliberately, to burn findings down, never to make a PR pass.
 workflows:
   lint:
     description: Lint Terraform code, YAML files and run a Terraform security scan
@@ -30,7 +35,7 @@ workflows:
             command: yamllint -d relaxed stacks workflows atmos.yaml
           - name: security-scan
             type: shell
-            command: trivy config --exit-code 1 --severity HIGH,CRITICAL components/terraform
+            command: trivy config --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
       - name: tflint
         type: atmos
         command: terraform lint
@@ -56,7 +61,7 @@ workflows:
             type: shell
             command: >-
               trivy config --format sarif --output reports/trivy.sarif
-              --severity HIGH,CRITICAL --exit-code 1 components/terraform
+              --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore.yaml components/terraform
           # Checkov only knows check severities with a Prisma Cloud API key; without
           # one, a failed check matches neither list and therefore fails the gate.
           - name: checkov
@@ -64,7 +69,7 @@ workflows:
             command: >-
               checkov --directory components/terraform --framework terraform
               --output sarif --output-file-path reports --quiet
-              --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL
+              --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL --baseline .checkov.baseline
 
   security-scan-report:
     description: Report-only scan for the nightly workflow (SARIF in reports/); never fails on findings
@@ -90,3 +95,51 @@ workflows:
             command: >-
               checkov --directory components/terraform --framework terraform
               --output sarif --output-file-path reports --soft-fail --quiet
+
+  security-baseline:
+    description: Regenerate the PR-gate baselines (.trivyignore.yaml, .checkov.baseline) from the current code
+    dependencies:
+      tools:
+        trivy: "0.74.0"
+        checkov: "3.3.19"
+    steps:
+      - name: reports-dir
+        type: shell
+        command: mkdir -p reports
+      - name: trivy-findings
+        type: shell
+        output: none
+        command: >-
+          trivy config --format json --output reports/trivy-baseline.json
+          --severity HIGH,CRITICAL --exit-code 0 components/terraform
+      - name: trivy-baseline
+        type: script
+        interpreter: python3
+        script: |
+          import datetime, json
+
+          findings = set()
+          for result in json.load(open("reports/trivy-baseline.json")).get("Results") or []:
+              for m in result.get("Misconfigurations") or []:
+                  if m.get("Status") == "FAIL":
+                      findings.add((m["ID"], result["Target"]))
+          lines = [
+              f"# Trivy baseline {datetime.date.today()} - burn down, don't add.",
+              "# HIGH/CRITICAL misconfigurations present when the baseline was taken; the PR",
+              "# gate ignores exactly these (rule, file) pairs. Regenerate with",
+              "# `atmos workflow security-baseline -f lint`.",
+              "misconfigurations:",
+          ]
+          for rule, target in sorted(findings):
+              lines += [f"  - id: {rule}", "    paths:", f'      - "{target}"']
+          open(".trivyignore.yaml", "w").write("\n".join(lines) + "\n")
+          print(f"{len(findings)} trivy findings baselined")
+      - name: checkov-baseline
+        type: shell
+        output: none
+        command: >-
+          checkov --directory components/terraform --framework terraform
+          --create-baseline --soft-fail --quiet --compact
+      - name: move-checkov-baseline
+        type: shell
+        command: mv components/terraform/.checkov.baseline .checkov.baseline

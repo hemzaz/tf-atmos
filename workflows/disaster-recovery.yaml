@@ -7,6 +7,12 @@
 #   STACK=<stack> atmos workflow dr-failback -f disaster-recovery
 #   STACK=<stack> COMPONENT_PREFIX=<component>/ atmos workflow recover-state -f disaster-recovery
 #   STACK=<stack> atmos workflow recover-database -f disaster-recovery
+#
+# Interactive prompts default to their environment variable (STACK, ...). With a
+# terminal they prompt, pre-filled; without one (CI, .github/workflows/
+# disaster-recovery.yml) Atmos uses the default without prompting, so CI must
+# set STACK. dr-failover and dr-failback confirm with default false and so
+# always stop in CI; they are operator-only.
 workflows:
   dr-status:
     description: Check disaster recovery readiness and status

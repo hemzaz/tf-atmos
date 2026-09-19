@@ -13,8 +13,19 @@
 #   - Fork PRs get no OIDC token or secrets under `pull_request`; do not switch
 #     this workflow to `pull_request_target`.
 #
-# The plan runs PR-controlled code (providers, external data sources), so the
-# job's GITHUB_TOKEN is never in its environment; only the comment step gets it.
+# The plan runs PR-controlled code (providers, external data sources), and
+# Terraform inherits the plan step's environment, so a token there
+# (GITHUB_TOKEN or ATMOS_CI_GITHUB_TOKEN) would be readable by that code. The
+# job's GITHUB_TOKEN is therefore never in the plan step; only the comment step
+# gets it. Without a token Atmos Native CI still writes the job summary and step
+# outputs, and skips its own check runs and PR comment (logged at debug level,
+# not an error); the comment step posts the plan summary instead.
+#
+# Residual risk (same-repo PRs): `pull_request` runs the workflow file from the
+# PR head, so anyone who can push a branch here can edit this file to hand the
+# pull-requests: write token or the OIDC plan-role credentials to their own
+# code. Keep the plan role read-only, protect .github/** with CODEOWNERS review,
+# and require approval to run workflows for outside collaborators.
 name: Terraform CI
 
 on:
@@ -25,6 +36,8 @@ on:
       - components/**
       - stacks/**
       - workflows/**
+      - .trivyignore.yaml
+      - .checkov.baseline
       - .github/workflows/terraform-ci.yml
   merge_group:
 
