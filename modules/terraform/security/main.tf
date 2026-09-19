@@ -4,31 +4,31 @@
 # Import common module for standardized naming and tagging
 module "common" {
   source = "../common"
-  
-  namespace               = var.namespace
-  environment            = var.environment
-  stage                  = var.stage
-  component_name         = var.component_name
-  region                 = var.region
-  project_name           = var.project_name
-  cost_center            = var.cost_center
-  owner                  = var.owner
-  additional_tags        = var.additional_tags
-  data_classification    = var.data_classification
-  compliance_frameworks  = var.compliance_frameworks
-  backup_required        = var.backup_required
+
+  namespace             = var.namespace
+  environment           = var.environment
+  stage                 = var.stage
+  component_name        = var.component_name
+  region                = var.region
+  project_name          = var.project_name
+  cost_center           = var.cost_center
+  owner                 = var.owner
+  additional_tags       = var.additional_tags
+  data_classification   = var.data_classification
+  compliance_frameworks = var.compliance_frameworks
+  backup_required       = var.backup_required
 }
 
 # KMS key for encryption at rest
 resource "aws_kms_key" "main" {
   count = var.create_kms_key ? 1 : 0
-  
+
   description              = "KMS key for ${module.common.component_name}"
-  key_usage               = var.kms_key_usage
+  key_usage                = var.kms_key_usage
   customer_master_key_spec = var.kms_key_spec
-  deletion_window_in_days = var.kms_key_deletion_window
-  enable_key_rotation     = var.enable_key_rotation
-  multi_region            = var.enable_multi_region_key
+  deletion_window_in_days  = var.kms_key_deletion_window
+  enable_key_rotation      = var.enable_key_rotation
+  multi_region             = var.enable_multi_region_key
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -103,7 +103,7 @@ resource "aws_kms_key" "main" {
         Condition = {
           StringEquals = {
             "kms:CallerAccount" = data.aws_caller_identity.current.account_id,
-            "kms:ViaService"    = "eks.${data.aws_region.current.name}.amazonaws.com"
+            "kms:ViaService"    = "eks.${data.aws_region.current.region}.amazonaws.com"
           }
         }
       }] : [],
@@ -115,12 +115,12 @@ resource "aws_kms_key" "main" {
   tags = merge(
     module.common.common_tags,
     {
-      Name        = "${module.common.component_name}-kms-key"
-      Purpose     = var.kms_key_purpose
-      KeyUsage    = var.kms_key_usage
+      Name     = "${module.common.component_name}-kms-key"
+      Purpose  = var.kms_key_purpose
+      KeyUsage = var.kms_key_usage
     }
   )
-  
+
   lifecycle {
     prevent_destroy = true
   }
@@ -128,7 +128,7 @@ resource "aws_kms_key" "main" {
 
 resource "aws_kms_alias" "main" {
   count = var.create_kms_key ? 1 : 0
-  
+
   name          = "alias/${module.common.dns_name}-${var.kms_key_purpose}"
   target_key_id = aws_kms_key.main[0].key_id
 }
@@ -136,7 +136,7 @@ resource "aws_kms_alias" "main" {
 # Security Group with standardized rules
 resource "aws_security_group" "main" {
   count = var.create_security_group ? 1 : 0
-  
+
   name        = "${module.common.component_name}-sg"
   description = var.security_group_description
   vpc_id      = var.vpc_id
@@ -145,15 +145,15 @@ resource "aws_security_group" "main" {
   dynamic "ingress" {
     for_each = var.ingress_rules
     content {
-      description     = ingress.value.description
-      from_port       = ingress.value.from_port
-      to_port         = ingress.value.to_port
-      protocol        = ingress.value.protocol
-      cidr_blocks     = lookup(ingress.value, "cidr_blocks", [])
+      description      = ingress.value.description
+      from_port        = ingress.value.from_port
+      to_port          = ingress.value.to_port
+      protocol         = ingress.value.protocol
+      cidr_blocks      = lookup(ingress.value, "cidr_blocks", [])
       ipv6_cidr_blocks = lookup(ingress.value, "ipv6_cidr_blocks", [])
-      prefix_list_ids = lookup(ingress.value, "prefix_list_ids", [])
-      security_groups = lookup(ingress.value, "security_groups", [])
-      self            = lookup(ingress.value, "self", false)
+      prefix_list_ids  = lookup(ingress.value, "prefix_list_ids", [])
+      security_groups  = lookup(ingress.value, "security_groups", [])
+      self             = lookup(ingress.value, "self", false)
     }
   }
 
@@ -161,15 +161,15 @@ resource "aws_security_group" "main" {
   dynamic "egress" {
     for_each = var.egress_rules
     content {
-      description     = egress.value.description
-      from_port       = egress.value.from_port
-      to_port         = egress.value.to_port
-      protocol        = egress.value.protocol
-      cidr_blocks     = lookup(egress.value, "cidr_blocks", [])
+      description      = egress.value.description
+      from_port        = egress.value.from_port
+      to_port          = egress.value.to_port
+      protocol         = egress.value.protocol
+      cidr_blocks      = lookup(egress.value, "cidr_blocks", [])
       ipv6_cidr_blocks = lookup(egress.value, "ipv6_cidr_blocks", [])
-      prefix_list_ids = lookup(egress.value, "prefix_list_ids", [])
-      security_groups = lookup(egress.value, "security_groups", [])
-      self            = lookup(egress.value, "self", false)
+      prefix_list_ids  = lookup(egress.value, "prefix_list_ids", [])
+      security_groups  = lookup(egress.value, "security_groups", [])
+      self             = lookup(egress.value, "self", false)
     }
   }
 
@@ -189,10 +189,10 @@ resource "aws_security_group" "main" {
 # IAM role for common service permissions
 resource "aws_iam_role" "service_role" {
   count = var.create_service_role ? 1 : 0
-  
+
   name = "${module.common.component_name}-service-role"
   path = var.iam_path
-  
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat(
@@ -217,9 +217,8 @@ resource "aws_iam_role" "service_role" {
     )
   })
 
-  managed_policy_arns = var.managed_policy_arns
   max_session_duration = var.max_session_duration
-  
+
   tags = merge(
     module.common.common_tags,
     {
@@ -229,10 +228,18 @@ resource "aws_iam_role" "service_role" {
   )
 }
 
+# Managed policies (aws_iam_role.managed_policy_arns is deprecated in AWS provider v6)
+resource "aws_iam_role_policy_attachment" "managed" {
+  for_each = var.create_service_role ? toset(var.managed_policy_arns) : toset([])
+
+  role       = aws_iam_role.service_role[0].name
+  policy_arn = each.value
+}
+
 # Custom IAM policy for specific permissions
 resource "aws_iam_policy" "custom" {
   count = var.create_custom_policy && length(var.custom_policy_statements) > 0 ? 1 : 0
-  
+
   name        = "${module.common.component_name}-custom-policy"
   path        = var.iam_path
   description = "Custom policy for ${module.common.component_name}"
@@ -254,7 +261,7 @@ resource "aws_iam_policy" "custom" {
 # Attach custom policy to service role
 resource "aws_iam_role_policy_attachment" "custom" {
   count = var.create_service_role && var.create_custom_policy && length(var.custom_policy_statements) > 0 ? 1 : 0
-  
+
   role       = aws_iam_role.service_role[0].name
   policy_arn = aws_iam_policy.custom[0].arn
 }
@@ -262,7 +269,7 @@ resource "aws_iam_role_policy_attachment" "custom" {
 # CloudWatch Log Group for security-related logs
 resource "aws_cloudwatch_log_group" "security_logs" {
   count = var.create_log_group ? 1 : 0
-  
+
   name              = "/aws/${var.log_group_prefix}/${module.common.component_name}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.create_kms_key ? aws_kms_key.main[0].arn : var.existing_kms_key_arn
@@ -282,8 +289,8 @@ data "aws_iam_policy_document" "s3_bucket_policy" {
 
   # Deny insecure connections
   statement {
-    sid       = "DenyInsecureConnections"
-    effect    = "Deny"
+    sid    = "DenyInsecureConnections"
+    effect = "Deny"
     principals {
       type        = "*"
       identifiers = ["*"]
@@ -346,10 +353,10 @@ data "aws_iam_policy_document" "s3_bucket_policy" {
 # WAF Web ACL for application protection
 resource "aws_wafv2_web_acl" "main" {
   count = var.create_waf_web_acl ? 1 : 0
-  
-  name  = "${module.common.component_name}-waf"
+
+  name        = "${module.common.component_name}-waf"
   description = "WAF Web ACL for ${module.common.component_name}"
-  scope = var.waf_scope
+  scope       = var.waf_scope
 
   default_action {
     allow {}

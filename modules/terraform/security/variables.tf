@@ -163,8 +163,8 @@ variable "enable_eks_permissions" {
 
 variable "additional_kms_policy_statements" {
   type = list(object({
-    sid       = string
-    effect    = string
+    sid    = string
+    effect = string
     principals = object({
       type        = string
       identifiers = list(string)
@@ -384,7 +384,7 @@ variable "blocked_countries" {
 
   validation {
     condition = alltrue([
-      for code in var.blocked_countries : 
+      for code in var.blocked_countries :
       can(regex("^[A-Z]{2}$", code))
     ])
     error_message = "Country codes must be 2-letter uppercase codes."
