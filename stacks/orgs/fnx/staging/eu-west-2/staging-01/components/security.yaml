@@ -53,8 +53,6 @@ components:
       vars:
         bucket_name: "fnx-staging-terraform-state"
         iam_role_name: "fnx-staging-terraform-backend-role"
-        iam_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/fnx-staging-terraform-backend-role"
-        state_file_key: "{{ .settings.context.environment }}/{{ .atmos_component }}/terraform.tfstate"
     acm/main:
       metadata:
         component: acm
