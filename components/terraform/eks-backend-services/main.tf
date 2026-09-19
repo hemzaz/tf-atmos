@@ -3,7 +3,7 @@
 
 locals {
   name_prefix = "${var.tags["Environment"]}-backend-services"
-  
+
   # Service configurations with resource requirements and scaling policies
   backend_services = {
     # API Gateway microservice
@@ -27,7 +27,7 @@ locals {
         effect = "NoSchedule"
       }]
     }
-    
+
     # Platform API service
     platform_api = {
       image        = var.platform_api_image
@@ -49,7 +49,7 @@ locals {
         effect = "NoSchedule"
       }]
     }
-    
+
     # Authentication service
     auth_service = {
       image        = var.auth_service_image
@@ -71,7 +71,7 @@ locals {
         effect = "NoSchedule"
       }]
     }
-    
+
     # Background job processor
     job_processor = {
       image        = var.job_processor_image
@@ -89,7 +89,7 @@ locals {
       }
     }
   }
-  
+
   # Common environment variables for all services
   common_env_vars = [
     {
@@ -112,7 +112,7 @@ locals {
       name = "DATABASE_URL"
       value_from = {
         secret_key_ref = {
-          name = kubernetes_secret.database_credentials.metadata[0].name
+          name = kubernetes_secret_v1.database_credentials.metadata[0].name
           key  = "database_url"
         }
       }
@@ -121,7 +121,7 @@ locals {
       name = "REDIS_URL"
       value_from = {
         secret_key_ref = {
-          name = kubernetes_secret.redis_credentials.metadata[0].name
+          name = kubernetes_secret_v1.redis_credentials.metadata[0].name
           key  = "redis_url"
         }
       }
@@ -130,17 +130,17 @@ locals {
 }
 
 # Namespace for backend services
-resource "kubernetes_namespace" "backend_services" {
+resource "kubernetes_namespace_v1" "backend_services" {
   metadata {
     name = "backend-services"
-    
+
     labels = {
-      "name"                          = "backend-services"
+      "name"                               = "backend-services"
       "pod-security.kubernetes.io/enforce" = "restricted"
       "pod-security.kubernetes.io/audit"   = "restricted"
       "pod-security.kubernetes.io/warn"    = "restricted"
     }
-    
+
     annotations = {
       "managed-by" = "terraform"
     }
@@ -148,17 +148,17 @@ resource "kubernetes_namespace" "backend_services" {
 }
 
 # Network policies for service isolation
-resource "kubernetes_network_policy" "backend_services_network_policy" {
+resource "kubernetes_network_policy_v1" "backend_services_network_policy" {
   metadata {
     name      = "backend-services-network-policy"
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
 
   spec {
     pod_selector {}
-    
+
     policy_types = ["Ingress", "Egress"]
-    
+
     # Allow ingress from istio-gateway
     ingress {
       from {
@@ -168,7 +168,7 @@ resource "kubernetes_network_policy" "backend_services_network_policy" {
           }
         }
       }
-      
+
       # Allow inter-service communication
       from {
         namespace_selector {
@@ -177,7 +177,7 @@ resource "kubernetes_network_policy" "backend_services_network_policy" {
           }
         }
       }
-      
+
       ports {
         port     = "8080"
         protocol = "TCP"
@@ -195,7 +195,7 @@ resource "kubernetes_network_policy" "backend_services_network_policy" {
         protocol = "TCP"
       }
     }
-    
+
     # Allow egress to databases and external APIs
     egress {
       # Database access
@@ -209,7 +209,7 @@ resource "kubernetes_network_policy" "backend_services_network_policy" {
         protocol = "TCP"
       }
     }
-    
+
     # Allow egress to internet for external API calls
     egress {
       to {}
@@ -222,7 +222,7 @@ resource "kubernetes_network_policy" "backend_services_network_policy" {
         protocol = "TCP"
       }
     }
-    
+
     # Allow DNS resolution
     egress {
       to {}
@@ -235,81 +235,84 @@ resource "kubernetes_network_policy" "backend_services_network_policy" {
 }
 
 # Service accounts for each backend service
-resource "kubernetes_service_account" "backend_services" {
+resource "kubernetes_service_account_v1" "backend_services" {
   for_each = local.backend_services
-  
+
   metadata {
     name      = "${each.key}-service-account"
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
-    
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
+
     annotations = var.service_account_annotations
   }
-  
+
   automount_service_account_token = true
 }
 
 # Secrets management
-resource "kubernetes_secret" "database_credentials" {
+resource "kubernetes_secret_v1" "database_credentials" {
   metadata {
     name      = "database-credentials"
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
-  
+
   type = "Opaque"
-  
-  data = {
+
+  # Write-only: credentials reach the cluster but are never stored in Terraform state
+  data_wo = {
     database_url = var.database_url
     username     = var.database_username
     password     = var.database_password
   }
+  data_wo_revision = var.credentials_revision
 }
 
-resource "kubernetes_secret" "redis_credentials" {
+resource "kubernetes_secret_v1" "redis_credentials" {
   metadata {
     name      = "redis-credentials"
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
-  
+
   type = "Opaque"
-  
-  data = {
+
+  data_wo = {
     redis_url = var.redis_url
     password  = var.redis_password
   }
+  data_wo_revision = var.credentials_revision
 }
 
 # ConfigMaps for service configuration
-resource "kubernetes_config_map" "backend_services_config" {
+resource "kubernetes_config_map_v1" "backend_services_config" {
   for_each = local.backend_services
-  
+
   metadata {
     name      = "${each.key}-config"
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
-  
+
   data = merge(var.service_configs[each.key], {
     "service_name" = each.key
-    "namespace"    = kubernetes_namespace.backend_services.metadata[0].name
+    "namespace"    = kubernetes_namespace_v1.backend_services.metadata[0].name
   })
 }
 
 # Deployments for backend services
-resource "kubernetes_deployment" "backend_services" {
+resource "kubernetes_deployment_v1" "backend_services" {
   for_each = local.backend_services
-  
+
   metadata {
     name      = each.key
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
-    
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
+
     labels = {
       app     = each.key
       version = var.service_versions[each.key]
     }
   }
-  
+
   spec {
     replicas = each.value.replicas_min
-    
+
     strategy {
       type = "RollingUpdate"
       rolling_update {
@@ -317,41 +320,41 @@ resource "kubernetes_deployment" "backend_services" {
         max_unavailable = "25%"
       }
     }
-    
+
     selector {
       match_labels = {
         app = each.key
       }
     }
-    
+
     template {
       metadata {
         labels = {
           app     = each.key
           version = var.service_versions[each.key]
         }
-        
+
         annotations = {
           "prometheus.io/scrape" = "true"
           "prometheus.io/port"   = tostring(each.value.metrics_port)
           "prometheus.io/path"   = "/metrics"
         }
       }
-      
+
       spec {
-        service_account_name = kubernetes_service_account.backend_services[each.key].metadata[0].name
-        
+        service_account_name = kubernetes_service_account_v1.backend_services[each.key].metadata[0].name
+
         # Security context
         security_context {
-          run_as_non_root        = true
-          run_as_user           = 1000
-          run_as_group          = 3000
-          fs_group              = 2000
+          run_as_non_root = true
+          run_as_user     = 1000
+          run_as_group    = 3000
+          fs_group        = 2000
           seccomp_profile {
             type = "RuntimeDefault"
           }
         }
-        
+
         # Node selection and tolerations
         dynamic "toleration" {
           for_each = lookup(each.value, "tolerations", [])
@@ -362,9 +365,9 @@ resource "kubernetes_deployment" "backend_services" {
             effect   = toleration.value.effect
           }
         }
-        
+
         node_selector = lookup(each.value, "node_selector", {})
-        
+
         # Pod anti-affinity for high availability
         affinity {
           pod_anti_affinity {
@@ -383,53 +386,53 @@ resource "kubernetes_deployment" "backend_services" {
             }
           }
         }
-        
+
         # Init container for database migrations (if needed)
         dynamic "init_container" {
           for_each = var.enable_database_migrations && contains(["api_gateway", "platform_api"], each.key) ? [1] : []
           content {
             name  = "db-migrate"
             image = each.value.image
-            
+
             command = ["/bin/sh", "-c"]
             args    = ["echo 'Running database migrations...' && migrate -path /migrations -database $DATABASE_URL up"]
-            
+
             env_from {
               secret_ref {
-                name = kubernetes_secret.database_credentials.metadata[0].name
+                name = kubernetes_secret_v1.database_credentials.metadata[0].name
               }
             }
-            
+
             security_context {
               allow_privilege_escalation = false
-              run_as_non_root           = true
-              run_as_user              = 1000
+              run_as_non_root            = true
+              run_as_user                = 1000
               capabilities {
                 drop = ["ALL"]
               }
             }
           }
         }
-        
+
         # Main container
         container {
           name  = each.key
           image = each.value.image
-          
+
           image_pull_policy = "IfNotPresent"
-          
+
           port {
             name           = "http"
             container_port = each.value.port
             protocol       = "TCP"
           }
-          
+
           port {
             name           = "metrics"
             container_port = each.value.metrics_port
             protocol       = "TCP"
           }
-          
+
           # Resource requirements
           resources {
             requests = {
@@ -441,20 +444,15 @@ resource "kubernetes_deployment" "backend_services" {
               memory = each.value.mem_limit
             }
           }
-          
+
           # Environment variables
           dynamic "env" {
             for_each = local.common_env_vars
             content {
               name = env.value.name
-              
-              dynamic "value" {
-                for_each = lookup(env.value, "value", null) != null ? [env.value.value] : []
-                content {
-                  value = value.value
-                }
-              }
-              
+
+              value = lookup(env.value, "value", null)
+
               dynamic "value_from" {
                 for_each = lookup(env.value, "value_from", null) != null ? [env.value.value_from] : []
                 content {
@@ -469,14 +467,14 @@ resource "kubernetes_deployment" "backend_services" {
               }
             }
           }
-          
+
           # Configuration from ConfigMap
           env_from {
             config_map_ref {
-              name = kubernetes_config_map.backend_services_config[each.key].metadata[0].name
+              name = kubernetes_config_map_v1.backend_services_config[each.key].metadata[0].name
             }
           }
-          
+
           # Health checks
           liveness_probe {
             http_get {
@@ -488,7 +486,7 @@ resource "kubernetes_deployment" "backend_services" {
             timeout_seconds       = 5
             failure_threshold     = 3
           }
-          
+
           readiness_probe {
             http_get {
               path = each.value.health_check
@@ -499,7 +497,7 @@ resource "kubernetes_deployment" "backend_services" {
             timeout_seconds       = 3
             failure_threshold     = 3
           }
-          
+
           # Startup probe for slower starting services
           startup_probe {
             http_get {
@@ -511,24 +509,24 @@ resource "kubernetes_deployment" "backend_services" {
             timeout_seconds       = 5
             failure_threshold     = 30
           }
-          
+
           # Security context
           security_context {
             allow_privilege_escalation = false
-            run_as_non_root           = true
-            run_as_user              = 1000
+            run_as_non_root            = true
+            run_as_user                = 1000
             capabilities {
               drop = ["ALL"]
             }
           }
-          
+
           # Volume mounts for temporary storage
           volume_mount {
             name       = "tmp"
             mount_path = "/tmp"
           }
         }
-        
+
         # Volumes
         volume {
           name = "tmp"
@@ -536,7 +534,7 @@ resource "kubernetes_deployment" "backend_services" {
             size_limit = "1Gi"
           }
         }
-        
+
         # Image pull secrets if needed
         dynamic "image_pull_secrets" {
           for_each = var.image_pull_secrets
@@ -547,52 +545,52 @@ resource "kubernetes_deployment" "backend_services" {
       }
     }
   }
-  
+
   depends_on = [
-    kubernetes_secret.database_credentials,
-    kubernetes_secret.redis_credentials,
-    kubernetes_config_map.backend_services_config
+    kubernetes_secret_v1.database_credentials,
+    kubernetes_secret_v1.redis_credentials,
+    kubernetes_config_map_v1.backend_services_config
   ]
 }
 
 # Services for backend services
-resource "kubernetes_service" "backend_services" {
+resource "kubernetes_service_v1" "backend_services" {
   for_each = local.backend_services
-  
+
   metadata {
     name      = each.key
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
-    
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
+
     labels = {
       app = each.key
     }
-    
+
     annotations = {
       "service.beta.kubernetes.io/aws-load-balancer-type" = "nlb"
-      "prometheus.io/scrape" = "true"
-      "prometheus.io/port"   = tostring(each.value.metrics_port)
+      "prometheus.io/scrape"                              = "true"
+      "prometheus.io/port"                                = tostring(each.value.metrics_port)
     }
   }
-  
+
   spec {
     selector = {
       app = each.key
     }
-    
+
     port {
       name        = "http"
       port        = each.value.port
       target_port = each.value.port
       protocol    = "TCP"
     }
-    
+
     port {
       name        = "metrics"
       port        = each.value.metrics_port
       target_port = each.value.metrics_port
       protocol    = "TCP"
     }
-    
+
     type = "ClusterIP"
   }
 }
@@ -600,22 +598,22 @@ resource "kubernetes_service" "backend_services" {
 # Horizontal Pod Autoscalers
 resource "kubernetes_horizontal_pod_autoscaler_v2" "backend_services" {
   for_each = local.backend_services
-  
+
   metadata {
     name      = each.key
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
-  
+
   spec {
     scale_target_ref {
       api_version = "apps/v1"
       kind        = "Deployment"
       name        = each.key
     }
-    
+
     min_replicas = each.value.replicas_min
     max_replicas = each.value.replicas_max
-    
+
     metric {
       type = "Resource"
       resource {
@@ -626,7 +624,7 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "backend_services" {
         }
       }
     }
-    
+
     metric {
       type = "Resource"
       resource {
@@ -637,44 +635,44 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "backend_services" {
         }
       }
     }
-    
+
     # Scale down behavior
     behavior {
       scale_down {
         stabilization_window_seconds = 300
         policy {
-          type  = "Percent"
-          value = 25
+          type           = "Percent"
+          value          = 25
           period_seconds = 60
         }
       }
-      
+
       scale_up {
         stabilization_window_seconds = 0
         policy {
-          type  = "Percent"
-          value = 50
+          type           = "Percent"
+          value          = 50
           period_seconds = 60
         }
       }
     }
   }
-  
-  depends_on = [kubernetes_deployment.backend_services]
+
+  depends_on = [kubernetes_deployment_v1.backend_services]
 }
 
 # Pod Disruption Budgets
 resource "kubernetes_pod_disruption_budget_v1" "backend_services" {
   for_each = local.backend_services
-  
+
   metadata {
     name      = each.key
-    namespace = kubernetes_namespace.backend_services.metadata[0].name
+    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
-  
+
   spec {
     min_available = max(1, floor(each.value.replicas_min * 0.5))
-    
+
     selector {
       match_labels = {
         app = each.key
@@ -685,14 +683,14 @@ resource "kubernetes_pod_disruption_budget_v1" "backend_services" {
 
 # ServiceMonitor for Prometheus scraping
 resource "kubernetes_manifest" "service_monitor" {
-  for_each = var.enable_prometheus_monitoring ? local.backend_services : {}
-  
+  for_each = { for name, service in local.backend_services : name => service if var.enable_prometheus_monitoring }
+
   manifest = {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "ServiceMonitor"
     metadata = {
       name      = each.key
-      namespace = kubernetes_namespace.backend_services.metadata[0].name
+      namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
       labels = {
         app = each.key
       }
