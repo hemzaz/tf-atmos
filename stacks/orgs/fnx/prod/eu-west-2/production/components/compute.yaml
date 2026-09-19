@@ -99,6 +99,9 @@ components:
 
         # Cluster addons
         default_cluster_log_retention_days: 90
+      dependencies:
+        components:
+          - component: kms/main
     eks/data:
       metadata:
         component: eks
@@ -155,6 +158,9 @@ components:
                 disk_size: 100
 
         default_cluster_log_retention_days: 90
+      dependencies:
+        components:
+          - component: kms/main
     ec2/bastion:
       metadata:
         component: ec2
@@ -207,6 +213,9 @@ components:
             root_volume_encrypted: true
             root_volume_kms_key_id: !terraform.state kms/main .key_arn
             root_volume_delete_on_termination: true
+      dependencies:
+        components:
+          - component: kms/main
     external-secrets/main:
       metadata:
         component: external-secrets

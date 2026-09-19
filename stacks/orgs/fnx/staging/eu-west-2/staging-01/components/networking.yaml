@@ -84,14 +84,14 @@ components:
         enable_flow_logs: true
     network/main:
       metadata:
-        component: network
-        enabled: false  # no components/terraform/network root module yet (see PR notes)
+        component: dns
+        inherits:
+          - dns
       vars:
-        vpc_id: !terraform.state vpc/main .vpc_id
-        dns_create_root_zone: false
-        dns_multi_account: false
-
-        dns_zones:
+        root_domain: staging.fnx.example.com
+        create_root_zone: false
+        multi_account_dns_delegation: false
+        zones:
           main:
             name: "staging.fnx.example.com"
             comment: "Main zone for staging environment"
@@ -101,8 +101,9 @@ components:
             name: "internal.staging.fnx.example.com"
             comment: "Internal DNS for staging"
             force_destroy: true
-
-        dns_records:
+            vpc_associations:
+              - !terraform.state vpc/main .vpc_id
+        records:
           www_main:
             zone_name: "main"
             name: "www.staging.fnx.example.com"
@@ -121,13 +122,13 @@ components:
     # ==========================================================================
     network/services:
       metadata:
-        component: network
-        enabled: false  # no components/terraform/network root module yet (see PR notes)
+        component: dns
+        inherits:
+          - dns
       vars:
-        vpc_id: !terraform.state vpc/services .vpc_id
-        dns_create_root_zone: false
-
-        dns_zones:
+        root_domain: staging.fnx.example.com
+        create_root_zone: false
+        zones:
           services:
             name: "services.staging.fnx.example.com"
             comment: "Services zone for staging"
@@ -137,7 +138,7 @@ components:
             comment: "Data services DNS"
             force_destroy: true
 
-        dns_records:
+        records:
           api_services:
             zone_name: "services"
             name: "api.services.staging.fnx.example.com"

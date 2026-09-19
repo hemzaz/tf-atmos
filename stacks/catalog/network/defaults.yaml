@@ -33,38 +33,12 @@ components:
         component: dns
         type: abstract
       vars:
-        enabled: true
-        root_domain: "{{ .settings.context.tenant }}.com"
         create_root_zone: false
         multi_account_dns_delegation: false
-
-        # Configure zones
-        zones:
-          main:
-            name: '{{ .settings.context.environment }}.{{ .settings.context.tenant }}.com'
-            comment: Main zone for {{ .settings.context.environment }} environment
-            force_destroy: false
-            enable_query_logging: true
-            vpc_associations: []
-          internal:
-            name: internal.{{ .settings.context.environment }}.{{ .settings.context.tenant }}.com
-            comment: Internal DNS for {{ .settings.context.environment }} environment
-            vpc_associations:
-              - !terraform.state vpc/main .vpc_id
-            force_destroy: false
-
-        # Optional records configuration
+        # Zones (and their zone_ids output keys), records and root_domain are set
+        # per instance; a zone with vpc_associations is created as a private zone.
+        zones: {}
         records: {}
-
-        # Health checks configuration
-        health_checks: {}
-
-        # VPC DNS resolution
-        vpc_dns_resolution:
-          main_vpc:
-            vpc_id: !terraform.state vpc/main .vpc_id
-            associated_zones:
-              - internal
 
         tags:
           Component: "DNS"
