@@ -1,7 +1,7 @@
 locals {
   name_prefix = "${var.name_prefix}-${var.environment}"
   cluster_id  = "${local.name_prefix}-redis"
-  
+
   common_tags = merge(var.tags, {
     Name        = local.cluster_id
     Environment = var.environment
@@ -13,7 +13,7 @@ locals {
 resource "aws_elasticache_subnet_group" "this" {
   name       = "${local.cluster_id}-subnet-group"
   subnet_ids = var.subnet_ids
-  
+
   tags = local.common_tags
 }
 
@@ -21,11 +21,11 @@ resource "aws_security_group" "redis" {
   name_prefix = "${local.cluster_id}-"
   description = "Security group for ${local.cluster_id}"
   vpc_id      = var.vpc_id
-  
+
   tags = merge(local.common_tags, {
     Name = "${local.cluster_id}-sg"
   })
-  
+
   lifecycle {
     create_before_destroy = true
   }
@@ -33,7 +33,7 @@ resource "aws_security_group" "redis" {
 
 resource "aws_security_group_rule" "redis_ingress_cidr" {
   count = length(var.allowed_cidr_blocks) > 0 ? 1 : 0
-  
+
   type              = "ingress"
   from_port         = var.port
   to_port           = var.port
@@ -44,7 +44,7 @@ resource "aws_security_group_rule" "redis_ingress_cidr" {
 
 resource "aws_security_group_rule" "redis_ingress_sg" {
   for_each = toset(var.allowed_security_group_ids)
-  
+
   type                     = "ingress"
   from_port                = var.port
   to_port                  = var.port
@@ -63,37 +63,39 @@ resource "aws_security_group_rule" "redis_egress" {
 }
 
 resource "aws_elasticache_parameter_group" "this" {
-  name_prefix = "${local.cluster_id}-"
+  # name_prefix is not supported by this resource; embed the family so a family
+  # change produces a new name and create_before_destroy can still work.
+  name        = "${local.cluster_id}-${replace(var.parameter_group_family, ".", "-")}"
   family      = var.parameter_group_family
   description = "Parameter group for ${local.cluster_id}"
-  
+
   # Production-optimized parameters
   parameter {
     name  = "maxmemory-policy"
     value = "allkeys-lru"
   }
-  
+
   parameter {
     name  = "timeout"
     value = "300"
   }
-  
+
   parameter {
     name  = "tcp-keepalive"
     value = "300"
   }
-  
+
   tags = local.common_tags
-  
+
   lifecycle {
     create_before_destroy = true
   }
 }
 
 resource "aws_elasticache_replication_group" "this" {
-  replication_group_id       = local.cluster_id
-  replication_group_description = "Redis cluster for ${local.cluster_id}"
-  
+  replication_group_id = local.cluster_id
+  description          = "Redis cluster for ${local.cluster_id}"
+
   engine               = "redis"
   engine_version       = var.engine_version
   node_type            = var.node_type
@@ -101,34 +103,39 @@ resource "aws_elasticache_replication_group" "this" {
   parameter_group_name = aws_elasticache_parameter_group.this.name
   subnet_group_name    = aws_elasticache_subnet_group.this.name
   security_group_ids   = [aws_security_group.redis.id]
-  
+
   # Cluster configuration
-  num_cache_clusters         = var.enable_cluster_mode ? null : var.num_cache_nodes
-  num_node_groups            = var.enable_cluster_mode ? var.num_node_groups : null
-  replicas_per_node_group    = var.enable_cluster_mode ? var.replicas_per_node_group : null
-  
+  num_cache_clusters      = var.enable_cluster_mode ? null : var.num_cache_nodes
+  num_node_groups         = var.enable_cluster_mode ? var.num_node_groups : null
+  replicas_per_node_group = var.enable_cluster_mode ? var.replicas_per_node_group : null
+
   # High availability
   multi_az_enabled           = var.enable_multi_az
   automatic_failover_enabled = var.enable_automatic_failover
-  
+
   # Security
   at_rest_encryption_enabled = var.enable_encryption_at_rest
   kms_key_id                 = var.kms_key_id
   transit_encryption_enabled = var.enable_encryption_in_transit
-  auth_token                 = var.auth_token
-  
+
+  # Write-only: the token is sent to AWS but never stored in state/plan.
+  # AWS provider v6 requires auth_token_update_strategy whenever a token is set.
+  auth_token_wo              = var.auth_token
+  auth_token_wo_version      = var.auth_token != null ? var.auth_token_version : null
+  auth_token_update_strategy = var.auth_token != null ? var.auth_token_update_strategy : null
+
   # Backups
   snapshot_retention_limit = var.snapshot_retention_limit
   snapshot_window          = var.snapshot_window
-  
+
   # Maintenance
-  maintenance_window              = var.maintenance_window
-  auto_minor_version_upgrade      = var.enable_auto_minor_version_upgrade
-  apply_immediately               = var.apply_immediately
-  
+  maintenance_window         = var.maintenance_window
+  auto_minor_version_upgrade = var.enable_auto_minor_version_upgrade
+  apply_immediately          = var.apply_immediately
+
   # Notifications
   notification_topic_arn = var.notification_topic_arn
-  
+
   # Logging
   dynamic "log_delivery_configuration" {
     for_each = var.log_delivery_configuration
@@ -139,7 +146,7 @@ resource "aws_elasticache_replication_group" "this" {
       log_type         = log_delivery_configuration.value.log_type
     }
   }
-  
+
   tags = local.common_tags
 }
 
@@ -154,11 +161,11 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   statistic           = "Average"
   threshold           = "75"
   alarm_description   = "Redis CPU utilization high"
-  
+
   dimensions = {
     CacheClusterId = aws_elasticache_replication_group.this.id
   }
-  
+
   tags = local.common_tags
 }
 
@@ -172,10 +179,10 @@ resource "aws_cloudwatch_metric_alarm" "memory_high" {
   statistic           = "Average"
   threshold           = "80"
   alarm_description   = "Redis memory usage high"
-  
+
   dimensions = {
     CacheClusterId = aws_elasticache_replication_group.this.id
   }
-  
+
   tags = local.common_tags
 }

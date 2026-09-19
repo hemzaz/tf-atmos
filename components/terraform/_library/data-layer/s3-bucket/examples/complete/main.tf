@@ -7,11 +7,11 @@ module "s3_bucket" {
 
   name_prefix = "myapp"
   environment = "production"
-  bucket_name = "myapp-production-data-20251202"  # Must be globally unique
+  bucket_name = "myapp-production-data-20251202" # Must be globally unique
 
   # Security
   enable_versioning   = true
-  enable_mfa_delete   = false  # Set to true for critical buckets
+  enable_mfa_delete   = false # Set to true for critical buckets
   enable_encryption   = true
   encryption_type     = "sse-kms"
   kms_key_id          = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
@@ -75,12 +75,12 @@ module "s3_bucket" {
   ]
 
   # Logging
-  enable_logging         = true
-  logging_target_bucket  = "myapp-production-logs"
-  logging_target_prefix  = "s3-access-logs/"
+  enable_logging        = true
+  logging_target_bucket = "myapp-production-logs"
+  logging_target_prefix = "s3-access-logs/"
 
   # Replication (for disaster recovery)
-  enable_replication  = true
+  enable_replication   = true
   replication_role_arn = "arn:aws:iam::123456789012:role/s3-replication-role"
   replication_rules = [
     {
@@ -116,16 +116,16 @@ module "s3_bucket" {
   ]
 
   # Monitoring
-  enable_inventory       = true
+  enable_inventory             = true
   inventory_destination_bucket = "myapp-inventory-bucket"
-  enable_request_metrics = true
+  enable_request_metrics       = true
 
   tags = {
-    Terraform   = "true"
-    Owner       = "platform-team"
-    CostCenter  = "engineering"
-    Compliance  = "hipaa"
-    DataClass   = "sensitive"
-    Backup      = "required"
+    Terraform  = "true"
+    Owner      = "platform-team"
+    CostCenter = "engineering"
+    Compliance = "hipaa"
+    DataClass  = "sensitive"
+    Backup     = "required"
   }
 }
