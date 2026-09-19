@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Manually fix each catalog file
 
+# Obsolete since the settings.context / native-lockfile migration; kept until removal is decided.
+echo "scripts/manual_fix.sh is obsolete: writes legacy \${tenant}/\${account}/\${environment} vars into catalog files; naming context now lives in settings.context" >&2
+exit 1
+
 cd /Users/elad/IdeaProjects/tf-atmos
 
 # Add required variables to each file one by one

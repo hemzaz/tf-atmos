@@ -2,6 +2,10 @@
 # Setup script for Atmos CLI
 # This script installs the Python-based Atmos CLI
 
+# Obsolete since the settings.context / native-lockfile migration; kept until removal is decided.
+echo "scripts/setup.sh is obsolete: installs the removed gaia Python CLI; use the atmos CLI directly (atmos list workflows)" >&2
+exit 1
+
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

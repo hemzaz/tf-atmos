@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Script to validate Atmos components and stacks
 
+# Obsolete since the settings.context / native-lockfile migration; kept until removal is decided.
+echo "scripts/validate_components.sh is obsolete: checks/injects legacy catalog tenant vars and the removed stacks/account layout; use: atmos workflow validate-all -f validate-enhanced" >&2
+exit 1
+
 # Set to the repository root directory
 REPO_ROOT="/Users/elad/IdeaProjects/tf-atmos"
 cd "$REPO_ROOT" || exit 1

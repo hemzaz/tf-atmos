@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Add tenant variable to all catalog component files
 
+# Obsolete since the settings.context / native-lockfile migration; kept until removal is decided.
+echo "scripts/add_tenant_to_catalog.sh is obsolete: writes legacy \${tenant} vars into catalog files; tenant now comes from settings.context" >&2
+exit 1
+
 REPO_ROOT="/Users/elad/IdeaProjects/tf-atmos"
 CATALOG_DIR="$REPO_ROOT/stacks/catalog"
 
