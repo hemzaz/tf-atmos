@@ -6,56 +6,63 @@ This stack implements the Multiple Component Instances design pattern to provisi
 
 This environment contains multiple instances of core infrastructure components:
 
-- **Networking**: Two VPCs (main, services) with dedicated network configurations
-- **Compute**: Two EKS clusters (main, data) and multiple EC2 instances
-- **Security**: Multiple IAM roles, ACM certificates, and secrets manager instances
-- **Services**: Multiple API Gateways, databases, and monitoring configurations
+- **Networking**: Two VPCs (main, services), each with a DNS instance (`network/*`, `dns` root module)
+- **Compute**: Two EKS clusters (main, data) and two EC2 instances (bastion, app-server)
+- **Security**: IAM (`iam/dev`; `iam/ci` is disabled), ACM certificates, Secrets Manager instances and the state backend
+- **Services**: API Gateways and monitoring configurations (`infrastructure/*` is disabled: no such root module yet)
 
 ## Directory Structure
 
 ```
-testenv-01/
-├── README.md                      # This file
-├── components/                    # Component manifests by domain
-│   ├── README.md                  # Components documentation
-│   ├── globals.yaml               # Environment variables and imports
-│   ├── networking.yaml            # Network component instances
-│   ├── security.yaml              # Security component instances  
-│   ├── compute.yaml               # Compute component instances
-│   └── services.yaml              # Service component instances
-└── testenv-01.yaml                # Main stack manifest that imports all components
+eu-west-2/
+├── testenv-01.yaml                    # Main stack manifest that imports all components
+└── testenv-01/
+    ├── README.md                      # This file
+    └── components/                    # Component manifests by domain
+        ├── README.md                  # Components documentation
+        ├── globals.yaml               # Environment settings and imports
+        ├── networking.yaml            # Network component instances
+        ├── security.yaml              # Security component instances
+        ├── compute.yaml               # Compute component instances
+        └── services.yaml              # Service component instances
 ```
 
 ## Usage
 
+The stack name is `fnx-dev-testenv-01` (`tenant-stage-environment` from `settings.context`).
+
 ### Deploy the entire environment:
 
 ```bash
-atmos terraform apply -s fnx-dev-eu-west-2-testenv-01
+atmos workflow full -f bootstrap -s fnx-dev-testenv-01           # first time: state bucket, IAM, VPCs
+atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01 # layer by layer, confirmed per layer
 ```
 
-### Deploy domain-specific components:
+### Deploy one layer:
 
 ```bash
-# Deploy all networking components
-atmos terraform apply -c networking.yaml -s fnx-dev-eu-west-2-testenv-01
+# Deploy all networking components (vpc, dns, securitygroup root modules)
+atmos workflow deploy-networking -f deploy-full-stack -s fnx-dev-testenv-01
 
-# Deploy all security components
-atmos terraform apply -c security.yaml -s fnx-dev-eu-west-2-testenv-01
+# Deploy all security components (acm, secretsmanager, security-monitoring root modules)
+atmos workflow deploy-security -f deploy-full-stack -s fnx-dev-testenv-01
 ```
 
 ### Deploy individual component instances:
 
 ```bash
 # Deploy single VPC
-atmos terraform apply vpc/main -s fnx-dev-eu-west-2-testenv-01
+atmos terraform deploy vpc/main -s fnx-dev-testenv-01
 
 # Deploy single EKS cluster
-atmos terraform apply eks/data -s fnx-dev-eu-west-2-testenv-01
+atmos terraform deploy eks/data -s fnx-dev-testenv-01
 
 # Deploy single ACM certificate
-atmos terraform apply acm/services -s fnx-dev-eu-west-2-testenv-01
+atmos terraform deploy acm/services -s fnx-dev-testenv-01
 ```
+
+The dev account ID is read from the `AWS_ACCOUNT_ID` environment variable
+(`settings.environment.aws_account_id`), so export it before running Atmos against this stack.
 
 ## Implementation Pattern
 
