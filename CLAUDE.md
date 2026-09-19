@@ -39,6 +39,11 @@ atmos workflow deploy -f deploy-full-stack -s <stack>    # layered, confirmed pe
 - Component naming is singular, no hyphens (`securitygroup`, not `security-groups`). Boolean
   variables prefix with `is_`, `has_`, or `enable_`.
 - Disable an instance with `metadata.enabled: false`, not by deleting it.
+- `var.tags` must contain a non-empty `Environment` (validated) in vpc, monitoring, external-secrets,
+  rds, lambda and securitygroup: it is used in resource names. `atmos terraform lint` runs tflint
+  without stack vars, so these variables stay required (no `{}` default) to keep tflint from crashing.
+- `idp-platform` calls `../eks`, `../rds` and `../acm` as modules. Before changing their variables,
+  grep for `source = "../<component>"`; `validate-all` catches the breakage, per-component checks don't.
 
 ## Conventions
 
