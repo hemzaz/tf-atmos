@@ -102,7 +102,7 @@ resource "aws_efs_access_point" "this" {
   posix_user {
     gid            = each.value.posix_user.gid
     uid            = each.value.posix_user.uid
-    secondary_gids = lookup(each.value.posix_user, "secondary_gids", null)
+    secondary_gids = each.value.posix_user.secondary_gids
   }
 
   root_directory {
@@ -120,7 +120,7 @@ resource "aws_efs_access_point" "this" {
     {
       Name = "${local.name_prefix}-${each.key}"
     },
-    lookup(each.value, "tags", {})
+    each.value.tags
   )
 }
 

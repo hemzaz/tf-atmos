@@ -78,6 +78,11 @@ variable "vault_policy" {
   description = "Vault access policy (JSON string)"
   type        = string
   default     = null
+
+  validation {
+    condition     = var.vault_policy == null || can(jsondecode(var.vault_policy))
+    error_message = "Vault policy must be a valid JSON document."
+  }
 }
 
 variable "enable_notifications" {
@@ -113,9 +118,9 @@ variable "backup_plans" {
     rules = list(object({
       name                     = string
       schedule                 = string
-      start_window             = optional(number)
-      completion_window        = optional(number)
-      enable_continuous_backup = optional(bool)
+      start_window             = optional(number, 60)
+      completion_window        = optional(number, 120)
+      enable_continuous_backup = optional(bool, false)
       lifecycle = object({
         delete_after       = optional(number)
         cold_storage_after = optional(number)
@@ -126,36 +131,36 @@ variable "backup_plans" {
           delete_after       = optional(number)
           cold_storage_after = optional(number)
         })
-      })))
-      recovery_point_tags = optional(map(string))
+      })), [])
+      recovery_point_tags = optional(map(string), {})
     }))
     selection_tags = optional(list(object({
       key   = string
       value = string
-    })))
-    resource_arns = optional(list(string))
+    })), [])
+    resource_arns = optional(list(string), [])
     conditions = optional(list(object({
       string_equals = optional(list(object({
         key   = string
         value = string
-      })))
+      })), [])
       string_like = optional(list(object({
         key   = string
         value = string
-      })))
+      })), [])
       string_not_equals = optional(list(object({
         key   = string
         value = string
-      })))
+      })), [])
       string_not_like = optional(list(object({
         key   = string
         value = string
-      })))
-    })))
+      })), [])
+    })), [])
     advanced_backup_settings = optional(list(object({
       resource_type  = string
       backup_options = map(string)
-    })))
+    })), [])
   }))
 
   default = {

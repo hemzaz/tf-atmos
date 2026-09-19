@@ -21,10 +21,10 @@ module "log_aggregation" {
   kinesis_shard_count      = 1
   kinesis_on_demand        = false
 
-  enable_s3_export            = true
-  s3_transition_to_ia_days    = 90
+  enable_s3_export              = true
+  s3_transition_to_ia_days      = 90
   s3_transition_to_glacier_days = 180
-  s3_expiration_days          = 365
+  s3_expiration_days            = 365
 
   enable_athena_queries = true
 

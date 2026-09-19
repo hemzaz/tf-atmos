@@ -108,6 +108,10 @@ variable "kms_deletion_window_days" {
   description = "KMS key deletion window in days"
   type        = number
   default     = 30
+  validation {
+    condition     = var.kms_deletion_window_days >= 7 && var.kms_deletion_window_days <= 30
+    error_message = "KMS deletion window must be between 7 and 30 days."
+  }
 }
 
 ##############################################
@@ -124,6 +128,10 @@ variable "max_receive_count" {
   description = "Maximum receives before moving to DLQ"
   type        = number
   default     = 3
+  validation {
+    condition     = var.max_receive_count >= 1 && var.max_receive_count <= 1000
+    error_message = "Max receive count must be between 1 and 1000."
+  }
 }
 
 variable "dlq_message_retention_seconds" {

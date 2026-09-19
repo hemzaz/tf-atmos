@@ -11,23 +11,29 @@ locals {
     var.tags
   )
 
-  # Create NAT Gateway per AZ for high availability
-  nat_gateway_count = var.enable_nat_gateway ? length(var.public_subnet_ids) : 0
+  # One NAT Gateway per AZ for high availability, keyed by AZ (subnet lists
+  # are positionally aligned with availability_zones)
+  nat_gateway_azs = var.enable_nat_gateway ? slice(var.availability_zones, 0, length(var.public_subnet_ids)) : []
+  nat_gateways    = { for i, az in local.nat_gateway_azs : az => var.public_subnet_ids[i] }
+
+  private_subnets = { for i, subnet_id in var.private_subnet_ids : var.availability_zones[i] => subnet_id }
+
+  nat_gateway_count = length(local.nat_gateways)
 }
 
 #------------------------------------------------------------------------------
 # Elastic IPs for NAT Gateways
 #------------------------------------------------------------------------------
 resource "aws_eip" "nat" {
-  count = local.nat_gateway_count
+  for_each = local.nat_gateways
 
   domain = "vpc"
 
   tags = merge(
     local.common_tags,
     {
-      Name = "${local.name_prefix}-nat-eip-${count.index + 1}"
-      AZ   = var.availability_zones[count.index]
+      Name = "${local.name_prefix}-nat-eip-${each.key}"
+      AZ   = each.key
     }
   )
 
@@ -40,18 +46,18 @@ resource "aws_eip" "nat" {
 # NAT Gateways (One per AZ)
 #------------------------------------------------------------------------------
 resource "aws_nat_gateway" "this" {
-  count = local.nat_gateway_count
+  for_each = local.nat_gateways
 
-  allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = var.public_subnet_ids[count.index]
+  allocation_id = aws_eip.nat[each.key].id
+  subnet_id     = each.value
 
   connectivity_type = "public"
 
   tags = merge(
     local.common_tags,
     {
-      Name = "${local.name_prefix}-nat-${var.availability_zones[count.index]}"
-      AZ   = var.availability_zones[count.index]
+      Name = "${local.name_prefix}-nat-${each.key}"
+      AZ   = each.key
     }
   )
 
@@ -62,16 +68,16 @@ resource "aws_nat_gateway" "this" {
 # Private Route Tables (One per AZ)
 #------------------------------------------------------------------------------
 resource "aws_route_table" "private" {
-  count = length(var.private_subnet_ids)
+  for_each = local.private_subnets
 
   vpc_id = var.vpc_id
 
   tags = merge(
     local.common_tags,
     {
-      Name = "${local.name_prefix}-private-rt-${var.availability_zones[count.index]}"
+      Name = "${local.name_prefix}-private-rt-${each.key}"
       Tier = "private"
-      AZ   = var.availability_zones[count.index]
+      AZ   = each.key
     }
   )
 }
@@ -80,11 +86,11 @@ resource "aws_route_table" "private" {
 # Routes to NAT Gateways
 #------------------------------------------------------------------------------
 resource "aws_route" "private_nat_gateway" {
-  count = var.enable_nat_gateway ? length(var.private_subnet_ids) : 0
+  for_each = { for az, subnet_id in local.private_subnets : az => subnet_id if contains(keys(local.nat_gateways), az) }
 
-  route_table_id         = aws_route_table.private[count.index].id
+  route_table_id         = aws_route_table.private[each.key].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[count.index].id
+  nat_gateway_id         = aws_nat_gateway.this[each.key].id
 
   timeouts {
     create = "5m"
@@ -95,19 +101,19 @@ resource "aws_route" "private_nat_gateway" {
 # Route Table Associations
 #------------------------------------------------------------------------------
 resource "aws_route_table_association" "private" {
-  count = length(var.private_subnet_ids)
+  for_each = local.private_subnets
 
-  subnet_id      = var.private_subnet_ids[count.index]
-  route_table_id = aws_route_table.private[count.index].id
+  subnet_id      = each.value
+  route_table_id = aws_route_table.private[each.key].id
 }
 
 #------------------------------------------------------------------------------
 # CloudWatch Alarms for NAT Gateway Monitoring
 #------------------------------------------------------------------------------
 resource "aws_cloudwatch_metric_alarm" "nat_gateway_error_port_allocation" {
-  count = var.enable_cloudwatch_alarms ? local.nat_gateway_count : 0
+  for_each = var.enable_cloudwatch_alarms ? local.nat_gateways : {}
 
-  alarm_name          = "${local.name_prefix}-nat-${var.availability_zones[count.index]}-error-port-allocation"
+  alarm_name          = "${local.name_prefix}-nat-${each.key}-error-port-allocation"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "ErrorPortAllocation"
@@ -115,11 +121,11 @@ resource "aws_cloudwatch_metric_alarm" "nat_gateway_error_port_allocation" {
   period              = 300
   statistic           = "Sum"
   threshold           = 10
-  alarm_description   = "NAT Gateway port allocation errors in ${var.availability_zones[count.index]}"
+  alarm_description   = "NAT Gateway port allocation errors in ${each.key}"
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    NatGatewayId = aws_nat_gateway.this[count.index].id
+    NatGatewayId = aws_nat_gateway.this[each.key].id
   }
 
   alarm_actions = var.alarm_sns_topic_arns
@@ -128,9 +134,9 @@ resource "aws_cloudwatch_metric_alarm" "nat_gateway_error_port_allocation" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "nat_gateway_packets_drop" {
-  count = var.enable_cloudwatch_alarms ? local.nat_gateway_count : 0
+  for_each = var.enable_cloudwatch_alarms ? local.nat_gateways : {}
 
-  alarm_name          = "${local.name_prefix}-nat-${var.availability_zones[count.index]}-packets-drop"
+  alarm_name          = "${local.name_prefix}-nat-${each.key}-packets-drop"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "PacketsDropCount"
@@ -138,11 +144,11 @@ resource "aws_cloudwatch_metric_alarm" "nat_gateway_packets_drop" {
   period              = 300
   statistic           = "Sum"
   threshold           = 100
-  alarm_description   = "NAT Gateway packet drops in ${var.availability_zones[count.index]}"
+  alarm_description   = "NAT Gateway packet drops in ${each.key}"
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    NatGatewayId = aws_nat_gateway.this[count.index].id
+    NatGatewayId = aws_nat_gateway.this[each.key].id
   }
 
   alarm_actions = var.alarm_sns_topic_arns
@@ -151,9 +157,9 @@ resource "aws_cloudwatch_metric_alarm" "nat_gateway_packets_drop" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "nat_gateway_bandwidth" {
-  count = var.enable_cloudwatch_alarms && var.bandwidth_alarm_threshold_mbps > 0 ? local.nat_gateway_count : 0
+  for_each = var.enable_cloudwatch_alarms && var.bandwidth_alarm_threshold_mbps > 0 ? local.nat_gateways : {}
 
-  alarm_name          = "${local.name_prefix}-nat-${var.availability_zones[count.index]}-high-bandwidth"
+  alarm_name          = "${local.name_prefix}-nat-${each.key}-high-bandwidth"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "BytesOutToDestination"
@@ -161,11 +167,11 @@ resource "aws_cloudwatch_metric_alarm" "nat_gateway_bandwidth" {
   period              = 300
   statistic           = "Average"
   threshold           = var.bandwidth_alarm_threshold_mbps * 1048576 / 60 # Convert Mbps to bytes per second
-  alarm_description   = "NAT Gateway high bandwidth usage in ${var.availability_zones[count.index]}"
+  alarm_description   = "NAT Gateway high bandwidth usage in ${each.key}"
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    NatGatewayId = aws_nat_gateway.this[count.index].id
+    NatGatewayId = aws_nat_gateway.this[each.key].id
   }
 
   alarm_actions = var.alarm_sns_topic_arns
@@ -184,19 +190,19 @@ resource "aws_cloudwatch_dashboard" "nat_gateway" {
   dashboard_body = jsonencode({
     widgets = concat(
       [
-        for i in range(local.nat_gateway_count) : {
+        for az in local.nat_gateway_azs : {
           type = "metric"
           properties = {
             metrics = [
-              ["AWS/NATGateway", "BytesOutToDestination", { stat = "Sum", label = "Bytes Out" }],
-              [".", "BytesInFromDestination", { stat = "Sum", label = "Bytes In" }],
-              [".", "PacketsOutToDestination", { stat = "Sum", label = "Packets Out" }],
-              [".", "PacketsInFromDestination", { stat = "Sum", label = "Packets In" }]
+              ["AWS/NATGateway", "BytesOutToDestination", "NatGatewayId", aws_nat_gateway.this[az].id, { stat = "Sum", label = "Bytes Out" }],
+              [".", "BytesInFromDestination", ".", ".", { stat = "Sum", label = "Bytes In" }],
+              [".", "PacketsOutToDestination", ".", ".", { stat = "Sum", label = "Packets Out" }],
+              [".", "PacketsInFromDestination", ".", ".", { stat = "Sum", label = "Packets In" }]
             ]
-            view    = "timeSeries"
-            region  = data.aws_region.current.name
-            title   = "NAT Gateway ${var.availability_zones[i]} - Data Transfer"
-            period  = 300
+            view   = "timeSeries"
+            region = data.aws_region.current.region
+            title  = "NAT Gateway ${az} - Data Transfer"
+            period = 300
             yAxis = {
               left = {
                 label = "Bytes/Packets"
@@ -210,13 +216,13 @@ resource "aws_cloudwatch_dashboard" "nat_gateway" {
           type = "metric"
           properties = {
             metrics = [
-              for i in range(local.nat_gateway_count) : [
-                "AWS/NATGateway", "ActiveConnectionCount",
-                { stat = "Average", label = var.availability_zones[i] }
+              for az in local.nat_gateway_azs : [
+                "AWS/NATGateway", "ActiveConnectionCount", "NatGatewayId", aws_nat_gateway.this[az].id,
+                { stat = "Average", label = az }
               ]
             ]
             view   = "timeSeries"
-            region = data.aws_region.current.name
+            region = data.aws_region.current.region
             title  = "NAT Gateway - Active Connections"
             period = 300
           }

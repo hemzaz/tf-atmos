@@ -67,11 +67,11 @@ variable "deployment_pattern" {
 # ==============================================================================
 
 variable "runtime" {
-  description = "Lambda runtime (e.g., python3.11, nodejs20.x, java17, go1.x)"
+  description = "Lambda runtime (e.g., python3.13, nodejs22.x, java21, provided.al2023)"
   type        = string
 
   validation {
-    condition = can(regex("^(python3\\.(8|9|10|11|12)|nodejs(18|20)\\.x|java(11|17|21)|go1\\.x|dotnet(6|7|8)|ruby3\\.2|provided\\.al2|provided\\.al2023)$", var.runtime))
+    condition     = can(regex("^(python3\\.(9|1[0-4])|nodejs(18|20|22|24)\\.x|java(11|17|21|25)|dotnet(8|10)|ruby3\\.[2-4]|provided\\.al2|provided\\.al2023)$", var.runtime))
     error_message = "Runtime must be a valid AWS Lambda runtime identifier."
   }
 }
@@ -364,6 +364,11 @@ variable "eventbridge_rules" {
     enabled             = optional(bool, true)
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for rule in var.eventbridge_rules : rule.schedule_expression != null || rule.event_pattern != null])
+    error_message = "Each EventBridge rule needs a schedule_expression or an event_pattern."
+  }
 }
 
 variable "eventbridge_bus_name" {

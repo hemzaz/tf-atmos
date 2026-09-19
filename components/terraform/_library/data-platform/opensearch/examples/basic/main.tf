@@ -32,5 +32,5 @@ output "opensearch_endpoint" {
 }
 
 output "dashboards_endpoint" {
-  value = module.opensearch.kibana_endpoint
+  value = module.opensearch.dashboard_endpoint
 }

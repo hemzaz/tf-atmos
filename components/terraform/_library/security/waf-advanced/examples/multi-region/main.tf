@@ -2,12 +2,12 @@
 # This example shows how to deploy WAF in multiple regions and for CloudFront
 
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.16.0, < 2.0.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 5.0.0, < 6.0.0"
+      version = ">= 6.0, < 7.0"
       configuration_aliases = [
         aws.us_east_1,
         aws.us_west_2,
@@ -33,7 +33,7 @@ module "waf_cloudfront" {
   enable_known_bad_inputs = true
   enable_ip_reputation    = true
   enable_rate_limiting    = true
-  rate_limit_per_ip       = 5000  # Higher limit for CDN
+  rate_limit_per_ip       = 5000 # Higher limit for CDN
 
   # CloudFront logs to S3
   enable_logging       = true
@@ -127,7 +127,7 @@ module "waf_eu_west_1" {
 
   enable_logging       = true
   log_destination_type = "cloudwatch"
-  log_retention_days   = 90  # Longer retention for EU compliance
+  log_retention_days   = 90 # Longer retention for EU compliance
 
   resource_arns = var.eu_west_1_resource_arns
 
@@ -184,11 +184,11 @@ output "eu_west_1_waf" {
 output "total_monthly_cost_estimate" {
   description = "Total estimated monthly cost across all regions"
   value = {
-    cloudfront_base   = module.waf_cloudfront.cost_estimate_monthly.estimated_total_base
-    us_east_1_base    = module.waf_us_east_1.cost_estimate_monthly.estimated_total_base
-    us_west_2_base    = module.waf_us_west_2.cost_estimate_monthly.estimated_total_base
-    eu_west_1_base    = module.waf_eu_west_1.cost_estimate_monthly.estimated_total_base
-    total_base        = module.waf_cloudfront.cost_estimate_monthly.estimated_total_base + module.waf_us_east_1.cost_estimate_monthly.estimated_total_base + module.waf_us_west_2.cost_estimate_monthly.estimated_total_base + module.waf_eu_west_1.cost_estimate_monthly.estimated_total_base
-    note              = "Plus per-request charges based on traffic volume"
+    cloudfront_base = module.waf_cloudfront.cost_estimate_monthly.estimated_total_base
+    us_east_1_base  = module.waf_us_east_1.cost_estimate_monthly.estimated_total_base
+    us_west_2_base  = module.waf_us_west_2.cost_estimate_monthly.estimated_total_base
+    eu_west_1_base  = module.waf_eu_west_1.cost_estimate_monthly.estimated_total_base
+    total_base      = module.waf_cloudfront.cost_estimate_monthly.estimated_total_base + module.waf_us_east_1.cost_estimate_monthly.estimated_total_base + module.waf_us_west_2.cost_estimate_monthly.estimated_total_base + module.waf_eu_west_1.cost_estimate_monthly.estimated_total_base
+    note            = "Plus per-request charges based on traffic volume"
   }
 }

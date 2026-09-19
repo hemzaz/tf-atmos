@@ -1,3 +1,9 @@
+locals {
+  # Fall back to the bucket parsed from output_location when output_bucket_arn is
+  # not given (an empty ARN produced an invalid IAM policy).
+  output_bucket_arn = var.output_bucket_arn != "" ? var.output_bucket_arn : "arn:aws:s3:::${split("/", trimprefix(var.output_location, "s3://"))[0]}"
+}
+
 ##############################################
 # Athena Workgroup
 ##############################################
@@ -66,7 +72,7 @@ resource "aws_athena_named_query" "main" {
   workgroup   = aws_athena_workgroup.main.id
   database    = each.value.database
   query       = each.value.query
-  description = lookup(each.value, "description", null)
+  description = each.value.description
 }
 
 ##############################################
@@ -78,10 +84,10 @@ resource "aws_athena_data_catalog" "main" {
 
   name        = each.key
   type        = each.value.type
-  description = lookup(each.value, "description", null)
+  description = each.value.description
 
   parameters = merge(
-    lookup(each.value, "parameters", {}),
+    each.value.parameters,
     each.value.type == "GLUE" ? {
       catalog-id = data.aws_caller_identity.current.account_id
     } : {}
@@ -106,7 +112,7 @@ resource "aws_athena_prepared_statement" "main" {
   name            = each.key
   workgroup       = aws_athena_workgroup.main.name
   query_statement = each.value.query
-  description     = lookup(each.value, "description", null)
+  description     = each.value.description
 }
 
 ##############################################
@@ -270,9 +276,9 @@ data "aws_iam_policy_document" "workgroup_access" {
       "glue:BatchGetPartition"
     ]
     resources = [
-      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:catalog",
-      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:database/*",
-      "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/*"
+      "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:catalog",
+      "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:database/*",
+      "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:table/*"
     ]
   }
 
@@ -287,8 +293,8 @@ data "aws_iam_policy_document" "workgroup_access" {
       "s3:DeleteObject"
     ]
     resources = [
-      "${var.output_bucket_arn}",
-      "${var.output_bucket_arn}/*"
+      local.output_bucket_arn,
+      "${local.output_bucket_arn}/*"
     ]
   }
 

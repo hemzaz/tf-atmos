@@ -12,7 +12,7 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.name
+  region     = data.aws_region.current.region
   partition  = data.aws_partition.current.partition
 
   name_prefix = var.name
@@ -25,38 +25,92 @@ locals {
     }
   )
 
-  # Source configuration defaults
-  source_config = merge(
-    {
-      branch_name          = "main"
-      image_tag            = "latest"
-      poll_for_changes     = false
-      detect_changes       = true
-    },
-    var.source_configuration
-  )
+  # Defaults are applied through optional() attributes in the variable type.
+  source_config = var.source_configuration
 
-  # Build environment variables
-  build_env_vars = [
-    for env in var.build_environment_variables : {
-      name  = env.name
-      value = env.value
-      type  = coalesce(env.type, "PLAINTEXT")
+  # GitHub sources use CodeStar/CodeConnections (ConnectionArn + FullRepositoryId).
+  source_action_provider = var.source_provider == "GitHub" ? "CodeStarSourceConnection" : var.source_provider
+
+  # Per-provider action configuration. Every value is a string (the action
+  # configuration is map(string)); nulls are dropped below.
+  source_action_configurations = {
+    CodeCommit = {
+      RepositoryName       = local.source_config.repository_name
+      BranchName           = local.source_config.branch_name
+      PollForSourceChanges = tostring(local.source_config.poll_for_changes)
     }
-  ]
+    GitHub = {
+      ConnectionArn    = local.source_config.connection_arn
+      FullRepositoryId = local.source_config.repository_name
+      BranchName       = local.source_config.branch_name
+      DetectChanges    = tostring(local.source_config.detect_changes)
+    }
+    S3 = {
+      S3Bucket             = local.source_config.bucket_name
+      S3ObjectKey          = local.source_config.object_key
+      PollForSourceChanges = tostring(local.source_config.poll_for_changes)
+    }
+    ECR = {
+      RepositoryName = local.source_config.repository_name_ecr
+      ImageTag       = local.source_config.image_tag
+    }
+  }
+  source_action_configuration = {
+    for k, v in local.source_action_configurations[var.source_provider] : k => v if v != null
+  }
+
+  deploy_action_configurations = {
+    CodeDeploy = {
+      ApplicationName     = var.deploy_configuration.application_name
+      DeploymentGroupName = var.deploy_configuration.deployment_group
+    }
+    ECS = {
+      ClusterName = var.deploy_configuration.cluster_name
+      ServiceName = var.deploy_configuration.service_name
+      FileName    = var.deploy_configuration.file_name
+    }
+    Lambda = {
+      FunctionName = var.deploy_configuration.function_name
+    }
+    CloudFormation = {
+      ActionMode         = "CREATE_UPDATE"
+      StackName          = var.deploy_configuration.stack_name
+      TemplatePath       = var.deploy_configuration.template_path
+      Capabilities       = join(",", var.deploy_configuration.capabilities)
+      RoleArn            = var.deploy_configuration.role_arn
+      ParameterOverrides = var.deploy_configuration.parameter_overrides != null ? jsonencode(var.deploy_configuration.parameter_overrides) : null
+    }
+    S3 = {
+      BucketName = var.deploy_configuration.bucket_name
+      Extract    = tostring(var.deploy_configuration.extract)
+      ObjectKey  = var.deploy_configuration.object_key
+    }
+  }
+  deploy_action_configuration = {
+    for k, v in local.deploy_action_configurations[var.deploy_provider] : k => v if v != null
+  }
+
+  build_action_configuration = {
+    for k, v in {
+      ProjectName          = var.build_project_name
+      EnvironmentVariables = length(var.build_environment_variables) > 0 ? jsonencode(var.build_environment_variables) : null
+    } : k => v if v != null
+  }
 }
 
 ################################################################################
 # S3 Artifact Bucket
 ################################################################################
 
+# An existing bucket is looked up (and must exist) unless the module is asked
+# to create it.
 data "aws_s3_bucket" "artifact" {
-  count  = var.artifact_bucket_name != null ? 1 : 0
+  count  = var.create_artifact_bucket ? 0 : 1
   bucket = var.artifact_bucket_name
 }
 
 resource "aws_s3_bucket" "artifact" {
-  count  = var.artifact_bucket_name != null && length(data.aws_s3_bucket.artifact) == 0 ? 1 : 0
+  count  = var.create_artifact_bucket ? 1 : 0
   bucket = var.artifact_bucket_name
 
   force_destroy = var.artifact_bucket_force_destroy
@@ -70,7 +124,7 @@ resource "aws_s3_bucket" "artifact" {
 }
 
 resource "aws_s3_bucket_versioning" "artifact" {
-  count  = length(aws_s3_bucket.artifact) > 0 ? 1 : 0
+  count  = var.create_artifact_bucket ? 1 : 0
   bucket = aws_s3_bucket.artifact[0].id
 
   versioning_configuration {
@@ -79,7 +133,7 @@ resource "aws_s3_bucket_versioning" "artifact" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "artifact" {
-  count  = length(aws_s3_bucket.artifact) > 0 ? 1 : 0
+  count  = var.create_artifact_bucket ? 1 : 0
   bucket = aws_s3_bucket.artifact[0].id
 
   rule {
@@ -91,7 +145,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "artifact" {
 }
 
 resource "aws_s3_bucket_public_access_block" "artifact" {
-  count  = length(aws_s3_bucket.artifact) > 0 ? 1 : 0
+  count  = var.create_artifact_bucket ? 1 : 0
   bucket = aws_s3_bucket.artifact[0].id
 
   block_public_acls       = true
@@ -366,10 +420,13 @@ resource "aws_codepipeline" "this" {
   role_arn      = var.create_role ? aws_iam_role.pipeline[0].arn : var.role_arn
   pipeline_type = var.pipeline_type
 
+  # QUEUED and PARALLEL are only supported by V2 pipelines.
+  execution_mode = var.pipeline_type == "V2" ? var.execution_mode : "SUPERSEDED"
+
   tags = local.default_tags
 
   artifact_store {
-    location = var.artifact_bucket_name
+    location = var.create_artifact_bucket ? aws_s3_bucket.artifact[0].bucket : data.aws_s3_bucket.artifact[0].bucket
     type     = "S3"
 
     dynamic "encryption_key" {
@@ -381,14 +438,6 @@ resource "aws_codepipeline" "this" {
     }
   }
 
-  dynamic "variable" {
-    for_each = var.pipeline_type == "V2" ? [1] : []
-    content {
-      name          = "ExecutionMode"
-      default_value = var.execution_mode
-    }
-  }
-
   # Source Stage
   stage {
     name = "Source"
@@ -397,27 +446,11 @@ resource "aws_codepipeline" "this" {
       name             = "Source"
       category         = "Source"
       owner            = "AWS"
-      provider         = var.source_provider
+      provider         = local.source_action_provider
       version          = "1"
       output_artifacts = [var.source_output_artifact]
 
-      configuration = var.source_provider == "CodeCommit" ? {
-        RepositoryName       = local.source_config.repository_name
-        BranchName           = local.source_config.branch_name
-        PollForSourceChanges = local.source_config.poll_for_changes
-      } : var.source_provider == "GitHub" ? {
-        ConnectionArn    = local.source_config.connection_arn
-        FullRepositoryId = local.source_config.repository_name
-        BranchName       = local.source_config.branch_name
-        DetectChanges    = local.source_config.detect_changes
-      } : var.source_provider == "S3" ? {
-        S3Bucket             = local.source_config.bucket_name
-        S3ObjectKey          = local.source_config.object_key
-        PollForSourceChanges = local.source_config.poll_for_changes
-      } : var.source_provider == "ECR" ? {
-        RepositoryName = local.source_config.repository_name_ecr
-        ImageTag       = local.source_config.image_tag
-      } : {}
+      configuration = local.source_action_configuration
     }
   }
 
@@ -436,10 +469,7 @@ resource "aws_codepipeline" "this" {
         input_artifacts  = [var.build_input_artifact]
         output_artifacts = [var.build_output_artifact]
 
-        configuration = {
-          ProjectName = var.build_project_name
-          EnvironmentVariables = length(local.build_env_vars) > 0 ? jsonencode(local.build_env_vars) : null
-        }
+        configuration = local.build_action_configuration
       }
     }
   }
@@ -481,7 +511,7 @@ resource "aws_codepipeline" "this" {
         configuration = var.approval_sns_topic_arn != null ? {
           NotificationArn = var.approval_sns_topic_arn
           CustomData      = var.approval_notification_message
-        } : {
+          } : {
           CustomData = var.approval_notification_message
         }
       }
@@ -500,34 +530,10 @@ resource "aws_codepipeline" "this" {
       version         = "1"
       input_artifacts = [var.deploy_input_artifact]
 
-      configuration = var.deploy_provider == "CodeDeploy" ? {
-        ApplicationName     = var.deploy_configuration.application_name
-        DeploymentGroupName = var.deploy_configuration.deployment_group
-      } : var.deploy_provider == "ECS" ? {
-        ClusterName = var.deploy_configuration.cluster_name
-        ServiceName = var.deploy_configuration.service_name
-        FileName    = coalesce(var.deploy_configuration.file_name, "imagedefinitions.json")
-      } : var.deploy_provider == "Lambda" ? {
-        FunctionName = var.deploy_configuration.function_name
-      } : var.deploy_provider == "CloudFormation" ? {
-        ActionMode           = "CREATE_UPDATE"
-        StackName            = var.deploy_configuration.stack_name
-        TemplatePath         = var.deploy_configuration.template_path
-        Capabilities         = join(",", coalesce(var.deploy_configuration.capabilities, ["CAPABILITY_IAM"]))
-        RoleArn              = var.deploy_configuration.role_arn
-        ParameterOverrides   = var.deploy_configuration.parameter_overrides != null ? jsonencode(var.deploy_configuration.parameter_overrides) : null
-      } : var.deploy_provider == "S3" ? {
-        BucketName = var.deploy_configuration.bucket_name
-        Extract    = coalesce(var.deploy_configuration.extract, false)
-        ObjectKey  = var.deploy_configuration.object_key
-      } : {}
+      configuration = local.deploy_action_configuration
 
-      dynamic "role_arn" {
-        for_each = var.enable_cross_account_deployment && length(var.cross_account_role_arns) > 0 ? [1] : []
-        content {
-          role_arn = var.cross_account_role_arns[0]
-        }
-      }
+      # Cross-account deployments assume the first target-account role.
+      role_arn = var.enable_cross_account_deployment && length(var.cross_account_role_arns) > 0 ? var.cross_account_role_arns[0] : null
     }
   }
 
@@ -581,7 +587,7 @@ resource "aws_cloudwatch_event_rule" "source" {
     source      = ["aws.codecommit"]
     detail-type = ["CodeCommit Repository State Change"]
     detail = {
-      event         = ["referenceCreated", "referenceUpdated"]
+      event          = ["referenceCreated", "referenceUpdated"]
       repositoryName = [local.source_config.repository_name]
       referenceName  = [local.source_config.branch_name]
     }
@@ -599,21 +605,24 @@ resource "aws_cloudwatch_event_target" "source" {
   role_arn  = aws_iam_role.events[0].arn
 }
 
+data "aws_iam_policy_document" "events_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_iam_role" "events" {
   count = var.source_provider == "CodeCommit" && local.source_config.detect_changes ? 1 : 0
 
   name = "${local.name_prefix}-events-role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "events.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
+  assume_role_policy = data.aws_iam_policy_document.events_assume_role.json
 
   tags = local.default_tags
 }

@@ -152,10 +152,11 @@ output "kms_key_id" {
 
 output "master_password_secret_arn" {
   description = <<-EOT
-    The ARN of the Secrets Manager secret containing the master password.
+    The ARN of the Secrets Manager secret containing the master password
+    (RDS-managed secret, module-generated secret, or the supplied secret).
     Use this to grant applications access to database credentials.
   EOT
-  value       = local.create_secret ? aws_secretsmanager_secret.master_password[0].arn : var.master_password_secret_arn
+  value       = local.master_secret_arn
   sensitive   = true
 }
 
@@ -163,7 +164,7 @@ output "master_password_secret_id" {
   description = <<-EOT
     The ID of the Secrets Manager secret containing the master password.
   EOT
-  value       = local.create_secret ? aws_secretsmanager_secret.master_password[0].id : null
+  value       = local.master_secret_arn
   sensitive   = true
 }
 
@@ -171,7 +172,7 @@ output "master_password_secret_name" {
   description = <<-EOT
     The name of the Secrets Manager secret containing the master password.
   EOT
-  value       = local.create_secret ? aws_secretsmanager_secret.master_password[0].name : null
+  value       = local.master_secret_arn == null ? null : try(regex("secret:(.+)-[A-Za-z0-9]{6}$", local.master_secret_arn)[0], null)
   sensitive   = true
 }
 
@@ -306,7 +307,7 @@ output "connection_string_writer" {
     aws_rds_cluster.this.endpoint,
     aws_rds_cluster.this.port,
     aws_rds_cluster.this.database_name != null ? aws_rds_cluster.this.database_name : "postgres"
-  ) : format(
+    ) : format(
     "mysql://%s:****@%s:%d/%s",
     aws_rds_cluster.this.master_username,
     aws_rds_cluster.this.endpoint,
@@ -327,7 +328,7 @@ output "connection_string_reader" {
     aws_rds_cluster.this.reader_endpoint,
     aws_rds_cluster.this.port,
     aws_rds_cluster.this.database_name != null ? aws_rds_cluster.this.database_name : "postgres"
-  ) : format(
+    ) : format(
     "mysql://%s:****@%s:%d/%s",
     aws_rds_cluster.this.master_username,
     aws_rds_cluster.this.reader_endpoint,

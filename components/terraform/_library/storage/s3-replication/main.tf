@@ -132,7 +132,7 @@ data "aws_iam_policy_document" "replication" {
       condition {
         test     = "StringLike"
         variable = "kms:ViaService"
-        values   = ["s3.${data.aws_region.current.name}.amazonaws.com"]
+        values   = ["s3.${data.aws_region.current.region}.amazonaws.com"]
       }
 
       condition {
@@ -197,13 +197,13 @@ resource "aws_s3_bucket_replication_configuration" "this" {
       status   = "Enabled"
 
       dynamic "filter" {
-        for_each = lookup(rule.value, "filter_prefix", null) != null || lookup(rule.value, "filter_tags", null) != null ? [1] : []
+        for_each = rule.value.filter_prefix != null || length(rule.value.filter_tags) > 0 ? [1] : []
 
         content {
-          prefix = lookup(rule.value, "filter_prefix", null)
+          prefix = rule.value.filter_prefix
 
           dynamic "tag" {
-            for_each = lookup(rule.value, "filter_tags", {})
+            for_each = rule.value.filter_tags
 
             content {
               key   = tag.key
@@ -214,12 +214,12 @@ resource "aws_s3_bucket_replication_configuration" "this" {
       }
 
       delete_marker_replication {
-        status = lookup(rule.value, "delete_marker_replication_status", "Disabled")
+        status = rule.value.delete_marker_replication_status
       }
 
       destination {
         bucket        = "arn:${data.aws_partition.current.partition}:s3:::${var.destination_bucket_id}"
-        storage_class = lookup(rule.value, "destination_storage_class", "STANDARD")
+        storage_class = rule.value.destination_storage_class
 
         dynamic "encryption_configuration" {
           for_each = var.enable_kms_encryption ? [1] : []
@@ -230,23 +230,23 @@ resource "aws_s3_bucket_replication_configuration" "this" {
         }
 
         dynamic "replication_time" {
-          for_each = lookup(rule.value, "enable_replication_time_control", false) ? [1] : []
+          for_each = rule.value.enable_replication_time_control ? [1] : []
 
           content {
             status = "Enabled"
             time {
-              minutes = lookup(rule.value, "replication_time_minutes", 15)
+              minutes = rule.value.replication_time_minutes
             }
           }
         }
 
         dynamic "metrics" {
-          for_each = lookup(rule.value, "enable_metrics", false) ? [1] : []
+          for_each = rule.value.enable_metrics ? [1] : []
 
           content {
             status = "Enabled"
             event_threshold {
-              minutes = lookup(rule.value, "metrics_event_threshold_minutes", 15)
+              minutes = rule.value.metrics_event_threshold_minutes
             }
           }
         }
@@ -263,11 +263,11 @@ resource "aws_s3_bucket_replication_configuration" "this" {
       }
 
       dynamic "source_selection_criteria" {
-        for_each = lookup(rule.value, "enable_replica_modifications", false) || var.enable_kms_encryption ? [1] : []
+        for_each = rule.value.enable_replica_modifications || var.enable_kms_encryption ? [1] : []
 
         content {
           dynamic "replica_modifications" {
-            for_each = lookup(rule.value, "enable_replica_modifications", false) ? [1] : []
+            for_each = rule.value.enable_replica_modifications ? [1] : []
 
             content {
               status = "Enabled"

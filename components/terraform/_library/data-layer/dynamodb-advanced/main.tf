@@ -1,5 +1,5 @@
 locals {
-  table_name  = "${var.name_prefix}-${var.environment}-${var.table_name}"
+  table_name = "${var.name_prefix}-${var.environment}-${var.table_name}"
   common_tags = merge(var.tags, {
     Name        = local.table_name
     Environment = var.environment
@@ -9,15 +9,15 @@ locals {
 }
 
 resource "aws_dynamodb_table" "this" {
-  name             = local.table_name
-  billing_mode     = var.billing_mode
-  read_capacity    = var.billing_mode == "PROVISIONED" ? var.read_capacity : null
-  write_capacity   = var.billing_mode == "PROVISIONED" ? var.write_capacity : null
-  hash_key         = var.hash_key
-  range_key        = var.range_key
-  stream_enabled   = var.enable_streams
-  stream_view_type = var.enable_streams ? var.stream_view_type : null
-  table_class      = var.table_class
+  name                        = local.table_name
+  billing_mode                = var.billing_mode
+  read_capacity               = var.billing_mode == "PROVISIONED" ? var.read_capacity : null
+  write_capacity              = var.billing_mode == "PROVISIONED" ? var.write_capacity : null
+  hash_key                    = var.hash_key
+  range_key                   = var.range_key
+  stream_enabled              = var.enable_streams
+  stream_view_type            = var.enable_streams ? var.stream_view_type : null
+  table_class                 = var.table_class
   deletion_protection_enabled = var.enable_deletion_protection
 
   attribute {
@@ -45,11 +45,23 @@ resource "aws_dynamodb_table" "this" {
     for_each = var.global_secondary_indexes
     content {
       name            = global_secondary_index.value.name
-      hash_key        = global_secondary_index.value.hash_key
-      range_key       = global_secondary_index.value.range_key
       projection_type = global_secondary_index.value.projection_type
       read_capacity   = var.billing_mode == "PROVISIONED" ? global_secondary_index.value.read_capacity : null
       write_capacity  = var.billing_mode == "PROVISIONED" ? global_secondary_index.value.write_capacity : null
+
+      # hash_key/range_key are deprecated on GSIs in AWS provider v6; use key_schema.
+      key_schema {
+        attribute_name = global_secondary_index.value.hash_key
+        key_type       = "HASH"
+      }
+
+      dynamic "key_schema" {
+        for_each = global_secondary_index.value.range_key != null ? [global_secondary_index.value.range_key] : []
+        content {
+          attribute_name = key_schema.value
+          key_type       = "RANGE"
+        }
+      }
     }
   }
 

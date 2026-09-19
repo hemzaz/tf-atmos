@@ -23,7 +23,7 @@ resource "aws_networkfirewall_rule_group" "stateless" {
   capacity    = each.value.capacity
   name        = "${local.name_prefix}-stateless-${each.key}"
   type        = "STATELESS"
-  description = lookup(each.value, "description", "Stateless rule group ${each.key}")
+  description = coalesce(each.value.description, "Stateless rule group ${each.key}")
 
   rule_group {
     rules_source {
@@ -39,21 +39,21 @@ resource "aws_networkfirewall_rule_group" "stateless" {
 
               match_attributes {
                 dynamic "source" {
-                  for_each = lookup(stateless_rule.value, "source_cidrs", [])
+                  for_each = stateless_rule.value.source_cidrs
                   content {
                     address_definition = source.value
                   }
                 }
 
                 dynamic "destination" {
-                  for_each = lookup(stateless_rule.value, "destination_cidrs", [])
+                  for_each = stateless_rule.value.destination_cidrs
                   content {
                     address_definition = destination.value
                   }
                 }
 
                 dynamic "source_port" {
-                  for_each = lookup(stateless_rule.value, "source_ports", [])
+                  for_each = stateless_rule.value.source_ports
                   content {
                     from_port = source_port.value.from_port
                     to_port   = source_port.value.to_port
@@ -61,14 +61,14 @@ resource "aws_networkfirewall_rule_group" "stateless" {
                 }
 
                 dynamic "destination_port" {
-                  for_each = lookup(stateless_rule.value, "destination_ports", [])
+                  for_each = stateless_rule.value.destination_ports
                   content {
                     from_port = destination_port.value.from_port
                     to_port   = destination_port.value.to_port
                   }
                 }
 
-                protocols = lookup(stateless_rule.value, "protocols", null)
+                protocols = stateless_rule.value.protocols
               }
             }
           }
@@ -94,16 +94,19 @@ resource "aws_networkfirewall_rule_group" "stateful_domain" {
   capacity    = each.value.capacity
   name        = "${local.name_prefix}-stateful-domain-${each.key}"
   type        = "STATEFUL"
-  description = lookup(each.value, "description", "Stateful domain rule group ${each.key}")
+  description = coalesce(each.value.description, "Stateful domain rule group ${each.key}")
 
   rule_group {
-    rule_variables {
-      dynamic "ip_sets" {
-        for_each = lookup(each.value, "ip_sets", {})
-        content {
-          key = ip_sets.key
-          ip_set {
-            definition = ip_sets.value
+    dynamic "rule_variables" {
+      for_each = length(each.value.ip_sets) > 0 ? [1] : []
+      content {
+        dynamic "ip_sets" {
+          for_each = each.value.ip_sets
+          content {
+            key = ip_sets.key
+            ip_set {
+              definition = ip_sets.value
+            }
           }
         }
       }
@@ -118,7 +121,7 @@ resource "aws_networkfirewall_rule_group" "stateful_domain" {
     }
 
     stateful_rule_options {
-      rule_order = lookup(each.value, "rule_order", "DEFAULT_ACTION_ORDER")
+      rule_order = each.value.rule_order
     }
   }
 
@@ -139,7 +142,7 @@ resource "aws_networkfirewall_rule_group" "stateful_5tuple" {
   capacity    = each.value.capacity
   name        = "${local.name_prefix}-stateful-5tuple-${each.key}"
   type        = "STATEFUL"
-  description = lookup(each.value, "description", "Stateful 5-tuple rule group ${each.key}")
+  description = coalesce(each.value.description, "Stateful 5-tuple rule group ${each.key}")
 
   rule_group {
     rules_source {
@@ -157,7 +160,7 @@ resource "aws_networkfirewall_rule_group" "stateful_5tuple" {
             source_port      = stateful_rule.value.source_port
           }
           rule_option {
-            keyword = "sid"
+            keyword  = "sid"
             settings = [stateful_rule.value.sid]
           }
         }
@@ -165,7 +168,7 @@ resource "aws_networkfirewall_rule_group" "stateful_5tuple" {
     }
 
     stateful_rule_options {
-      rule_order = lookup(each.value, "rule_order", "DEFAULT_ACTION_ORDER")
+      rule_order = each.value.rule_order
     }
   }
 
@@ -186,7 +189,7 @@ resource "aws_networkfirewall_rule_group" "stateful_suricata" {
   capacity    = each.value.capacity
   name        = "${local.name_prefix}-stateful-suricata-${each.key}"
   type        = "STATEFUL"
-  description = lookup(each.value, "description", "Stateful Suricata rule group ${each.key}")
+  description = coalesce(each.value.description, "Stateful Suricata rule group ${each.key}")
 
   rule_group {
     rules_source {
@@ -194,7 +197,7 @@ resource "aws_networkfirewall_rule_group" "stateful_suricata" {
     }
 
     stateful_rule_options {
-      rule_order = lookup(each.value, "rule_order", "DEFAULT_ACTION_ORDER")
+      rule_order = each.value.rule_order
     }
   }
 
@@ -230,10 +233,11 @@ resource "aws_networkfirewall_firewall_policy" "this" {
 
     # Stateful rule group references
     dynamic "stateful_rule_group_reference" {
+      # Keys are prefixed per rule group type so identical keys across types don't collide
       for_each = merge(
-        { for k, v in aws_networkfirewall_rule_group.stateful_domain : k => v },
-        { for k, v in aws_networkfirewall_rule_group.stateful_5tuple : k => v },
-        { for k, v in aws_networkfirewall_rule_group.stateful_suricata : k => v }
+        { for k, v in aws_networkfirewall_rule_group.stateful_domain : "domain-${k}" => v },
+        { for k, v in aws_networkfirewall_rule_group.stateful_5tuple : "5tuple-${k}" => v },
+        { for k, v in aws_networkfirewall_rule_group.stateful_suricata : "suricata-${k}" => v }
       )
 
       content {
@@ -241,8 +245,8 @@ resource "aws_networkfirewall_firewall_policy" "this" {
       }
     }
 
-    # Stateful default actions
-    stateful_default_actions = var.stateful_default_actions
+    # Stateful default actions are only accepted by the API with STRICT_ORDER
+    stateful_default_actions = var.stateful_rule_order == "STRICT_ORDER" ? var.stateful_default_actions : null
 
     # Stateful engine options
     stateful_engine_options {
@@ -366,6 +370,8 @@ resource "aws_cloudwatch_log_group" "alert_logs" {
 }
 
 resource "aws_networkfirewall_logging_configuration" "this" {
+  count = var.enable_flow_logs_to_s3 || var.enable_flow_logs_to_cloudwatch || var.enable_alert_logs_to_cloudwatch ? 1 : 0
+
   firewall_arn = aws_networkfirewall_firewall.this.arn
 
   logging_configuration {

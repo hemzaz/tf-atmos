@@ -35,8 +35,9 @@ resource "aws_wafv2_web_acl" "main" {
 
       statement {
         rate_based_statement {
-          limit              = var.rate_limit_per_ip
-          aggregate_key_type = "IP"
+          limit                 = var.rate_limit_per_ip
+          evaluation_window_sec = var.rate_limit_window
+          aggregate_key_type    = "IP"
         }
       }
 
@@ -55,16 +56,9 @@ resource "aws_wafv2_web_acl" "main" {
       name     = "${var.name_prefix}-geo-${local.geo_block_mode}"
       priority = local.priority_geo_blocking
 
+      # Both modes block: listed countries ("block") or every country not listed ("allow")
       action {
-        dynamic "allow" {
-          for_each = local.geo_block_mode == "allow" ? [1] : []
-          content {}
-        }
-
-        dynamic "block" {
-          for_each = local.geo_block_mode == "block" ? [1] : []
-          content {}
-        }
+        block {}
       }
 
       statement {
@@ -369,11 +363,13 @@ resource "aws_wafv2_web_acl" "main" {
       statement {
         managed_rule_group_statement {
           vendor_name = "AWS"
-          name        = var.bot_control_level == "TARGETED" ? "AWSManagedRulesBotControlRuleSet" : "AWSManagedRulesBotControlRuleSet"
+          name        = "AWSManagedRulesBotControlRuleSet"
 
           managed_rule_group_configs {
             aws_managed_rules_bot_control_rule_set {
               inspection_level = var.bot_control_level
+              # AWS provider v6 changed the default to false; keep the v5 behaviour
+              enable_machine_learning = true
             }
           }
         }
@@ -489,6 +485,13 @@ resource "aws_wafv2_web_acl" "main" {
       Name = local.web_acl_name
     }
   )
+
+  lifecycle {
+    precondition {
+      condition     = length(setintersection([for r in var.custom_rules : r.priority], local.enabled_managed_rule_priorities)) == 0
+      error_message = "custom_rules priorities collide with an enabled managed rule priority (10-130 in steps of 10)."
+    }
+  }
 }
 
 ##############################################
@@ -607,8 +610,8 @@ resource "aws_wafv2_web_acl_logging_configuration" "main" {
 ##############################################
 
 resource "aws_wafv2_web_acl_association" "main" {
-  count = length(var.resource_arns)
+  for_each = toset(var.resource_arns)
 
-  resource_arn = var.resource_arns[count.index]
+  resource_arn = each.value
   web_acl_arn  = aws_wafv2_web_acl.main.arn
 }

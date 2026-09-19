@@ -231,6 +231,11 @@ variable "runtime_platform" {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
   }
+
+  validation {
+    condition     = contains(["X86_64", "ARM64"], var.runtime_platform.cpu_architecture)
+    error_message = "runtime_platform.cpu_architecture must be X86_64 or ARM64."
+  }
 }
 
 # ==============================================================================
@@ -473,13 +478,18 @@ variable "enable_efs_volumes" {
 variable "efs_volumes" {
   description = "List of EFS volume configurations"
   type = list(object({
-    name            = string
-    file_system_id  = string
-    root_directory  = optional(string, "/")
+    name               = string
+    file_system_id     = string
+    root_directory     = optional(string, "/")
     transit_encryption = optional(string, "ENABLED")
-    access_point_id = optional(string)
+    access_point_id    = optional(string)
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for v in var.efs_volumes : contains(["ENABLED", "DISABLED"], v.transit_encryption)])
+    error_message = "efs_volumes[*].transit_encryption must be ENABLED or DISABLED."
+  }
 }
 
 # ==============================================================================

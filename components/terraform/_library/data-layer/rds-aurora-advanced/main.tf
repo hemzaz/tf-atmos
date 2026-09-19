@@ -1,11 +1,32 @@
 locals {
-  name_prefix      = "${var.name_prefix}-${var.environment}"
-  cluster_id       = "${local.name_prefix}-aurora"
-  is_postgresql    = startswith(var.engine, "aurora-postgresql")
-  is_mysql         = startswith(var.engine, "aurora-mysql")
-  port             = var.port != null ? var.port : (local.is_postgresql ? 5432 : 3306)
-  create_sg        = length(var.security_group_ids) == 0
-  create_secret    = var.master_password_secret_arn == null
+  name_prefix   = "${var.name_prefix}-${var.environment}"
+  cluster_id    = "${local.name_prefix}-aurora"
+  is_postgresql = startswith(var.engine, "aurora-postgresql")
+  is_mysql      = startswith(var.engine, "aurora-mysql")
+  port          = var.port != null ? var.port : (local.is_postgresql ? 5432 : 3306)
+  create_sg     = length(var.security_group_ids) == 0
+
+  # Master password handling (in order of precedence):
+  #   external  - password read ephemerally from var.master_password_secret_arn
+  #   managed   - RDS generates and rotates the password in Secrets Manager (default)
+  #   generated - module generates an ephemeral password and stores it in its own secret
+  # Secondary clusters of a global database inherit credentials from the primary.
+  is_secondary_cluster = var.enable_global_cluster && !var.is_primary_cluster
+  password_mode = local.is_secondary_cluster ? "none" : (
+    var.master_password_secret_arn != null ? "external" : (var.manage_master_user_password ? "managed" : "generated")
+  )
+  create_secret = local.password_mode == "generated"
+  master_secret_arn = {
+    managed   = try(aws_rds_cluster.this.master_user_secret[0].secret_arn, null)
+    generated = try(aws_secretsmanager_secret.master_password[0].arn, null)
+    external  = var.master_password_secret_arn
+    none      = null
+  }[local.password_mode]
+
+  # Parameter group family derived from engine_version (falls back to the previous defaults).
+  parameter_group_family = local.is_postgresql ? (
+    var.engine_version != null ? "aurora-postgresql${split(".", var.engine_version)[0]}" : "aurora-postgresql15"
+  ) : "aurora-mysql8.0"
 
   # CloudWatch log exports based on engine
   default_log_exports = local.is_postgresql ? ["postgresql"] : ["error", "general", "slowquery"]
@@ -96,28 +117,25 @@ locals {
 }
 
 #------------------------------------------------------------------------------
-# Data Sources
+# Master Password
 #------------------------------------------------------------------------------
 
-data "aws_region" "current" {}
-data "aws_caller_identity" "current" {}
-
-#------------------------------------------------------------------------------
-# Random Password (if secret not provided)
-#------------------------------------------------------------------------------
-
-resource "random_password" "master" {
+# "generated" mode: the password is ephemeral (never stored in state) and is
+# written to the cluster and the secret via write-only arguments.
+ephemeral "random_password" "master" {
   count = local.create_secret ? 1 : 0
 
-  length  = 32
-  special = true
-  # Exclude characters that might cause issues
+  length           = 32
+  special          = true
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-#------------------------------------------------------------------------------
-# Secrets Manager Secret
-#------------------------------------------------------------------------------
+# "external" mode: read the existing secret ephemerally (never stored in state).
+ephemeral "aws_secretsmanager_secret_version" "existing_password" {
+  count = local.password_mode == "external" ? 1 : 0
+
+  secret_id = var.master_password_secret_arn
+}
 
 resource "aws_secretsmanager_secret" "master_password" {
   count = local.create_secret ? 1 : 0
@@ -138,47 +156,26 @@ resource "aws_secretsmanager_secret_version" "master_password" {
   count = local.create_secret ? 1 : 0
 
   secret_id = aws_secretsmanager_secret.master_password[0].id
-  secret_string = jsonencode({
+  secret_string_wo = jsonencode({
     username            = var.master_username
-    password            = random_password.master[0].result
+    password            = ephemeral.random_password.master[0].result
     engine              = var.engine
     host                = aws_rds_cluster.this.endpoint
     port                = local.port
     dbClusterIdentifier = aws_rds_cluster.this.cluster_identifier
   })
+  secret_string_wo_version = var.master_password_version
 }
 
-#------------------------------------------------------------------------------
-# Secrets Rotation
-#------------------------------------------------------------------------------
-
+# Rotation schedule for the RDS-managed master secret (managed rotation, no Lambda).
 resource "aws_secretsmanager_secret_rotation" "master_password" {
-  count = var.enable_secrets_rotation && local.create_secret ? 1 : 0
+  count = var.enable_secrets_rotation && local.password_mode == "managed" ? 1 : 0
 
-  secret_id           = aws_secretsmanager_secret.master_password[0].id
-  rotation_lambda_arn = aws_lambda_function.rotate_secret[0].arn
+  secret_id = aws_rds_cluster.this.master_user_secret[0].secret_arn
 
   rotation_rules {
     automatically_after_days = var.secrets_rotation_days
   }
-
-  depends_on = [
-    aws_lambda_permission.allow_secret_rotation
-  ]
-}
-
-#------------------------------------------------------------------------------
-# Get existing secret (if provided)
-#------------------------------------------------------------------------------
-
-data "aws_secretsmanager_secret" "existing_password" {
-  count = local.create_secret ? 0 : 1
-  arn   = var.master_password_secret_arn
-}
-
-data "aws_secretsmanager_secret_version" "existing_password" {
-  count     = local.create_secret ? 0 : 1
-  secret_id = data.aws_secretsmanager_secret.existing_password[0].id
 }
 
 #------------------------------------------------------------------------------
@@ -264,7 +261,7 @@ resource "aws_rds_cluster_parameter_group" "this" {
   count = var.cluster_parameter_group_name == null ? 1 : 0
 
   name_prefix = "${local.cluster_id}-cluster-"
-  family      = local.is_postgresql ? "aurora-postgresql15" : "aurora-mysql8.0"
+  family      = local.parameter_group_family
   description = "Cluster parameter group for ${local.cluster_id}"
 
   dynamic "parameter" {
@@ -296,7 +293,7 @@ resource "aws_db_parameter_group" "this" {
   count = var.db_parameter_group_name == null ? 1 : 0
 
   name_prefix = "${local.cluster_id}-db-"
-  family      = local.is_postgresql ? "aurora-postgresql15" : "aurora-mysql8.0"
+  family      = local.parameter_group_family
   description = "DB parameter group for ${local.cluster_id} instances"
 
   dynamic "parameter" {
@@ -343,11 +340,14 @@ resource "aws_iam_role" "enhanced_monitoring" {
     ]
   })
 
-  managed_policy_arns = [
-    "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-  ]
-
   tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "enhanced_monitoring" {
+  count = var.enable_enhanced_monitoring && var.monitoring_role_arn == null ? 1 : 0
+
+  role       = aws_iam_role.enhanced_monitoring[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
 #------------------------------------------------------------------------------
@@ -373,16 +373,26 @@ resource "aws_rds_global_cluster" "this" {
 #------------------------------------------------------------------------------
 
 resource "aws_rds_cluster" "this" {
-  cluster_identifier     = local.cluster_id
-  engine                 = var.engine
-  engine_version         = var.engine_version
-  engine_mode            = var.engine_mode
-  database_name          = var.database_name
-  master_username        = var.master_username
-  master_password        = local.create_secret ? random_password.master[0].result : jsondecode(data.aws_secretsmanager_secret_version.existing_password[0].secret_string)["password"]
-  port                   = local.port
-  db_subnet_group_name   = aws_db_subnet_group.this.name
-  vpc_security_group_ids = local.create_sg ? [aws_security_group.aurora[0].id] : var.security_group_ids
+  cluster_identifier = local.cluster_id
+  engine             = var.engine
+  engine_version     = var.engine_version
+  engine_mode        = var.engine_mode
+  database_name      = var.database_name
+  master_username    = local.is_secondary_cluster ? null : var.master_username
+
+  # Credentials: RDS-managed secret by default; otherwise write-only password.
+  manage_master_user_password   = local.password_mode == "managed" ? true : null
+  master_user_secret_kms_key_id = local.password_mode == "managed" ? var.kms_key_id : null
+  master_password_wo = local.password_mode == "generated" ? ephemeral.random_password.master[0].result : (
+    local.password_mode == "external" ? try(
+      jsondecode(ephemeral.aws_secretsmanager_secret_version.existing_password[0].secret_string)["password"],
+      ephemeral.aws_secretsmanager_secret_version.existing_password[0].secret_string
+    ) : null
+  )
+  master_password_wo_version = contains(["generated", "external"], local.password_mode) ? var.master_password_version : null
+  port                       = local.port
+  db_subnet_group_name       = aws_db_subnet_group.this.name
+  vpc_security_group_ids     = local.create_sg ? [aws_security_group.aurora[0].id] : var.security_group_ids
 
   # High Availability
   availability_zones = var.enable_multi_az ? null : []
@@ -397,11 +407,11 @@ resource "aws_rds_cluster" "this" {
   snapshot_identifier          = var.snapshot_identifier
 
   # Security
-  storage_encrypted               = var.storage_encrypted
-  kms_key_id                      = var.kms_key_id
+  storage_encrypted                   = var.storage_encrypted
+  kms_key_id                          = var.kms_key_id
   iam_database_authentication_enabled = var.enable_iam_database_authentication
-  deletion_protection             = var.enable_deletion_protection
-  enabled_cloudwatch_logs_exports = local.log_exports
+  deletion_protection                 = var.enable_deletion_protection
+  enabled_cloudwatch_logs_exports     = local.log_exports
 
   # Parameter Groups
   db_cluster_parameter_group_name = var.cluster_parameter_group_name != null ? var.cluster_parameter_group_name : aws_rds_cluster_parameter_group.this[0].name
@@ -416,12 +426,14 @@ resource "aws_rds_cluster" "this" {
   }
 
   # Global Cluster
-  global_cluster_identifier = var.enable_global_cluster ? var.global_cluster_identifier : null
+  global_cluster_identifier = var.enable_global_cluster ? (
+    var.is_primary_cluster ? aws_rds_global_cluster.this[0].id : var.global_cluster_identifier
+  ) : null
 
   # Updates
-  apply_immediately          = var.apply_immediately
+  apply_immediately           = var.apply_immediately
   allow_major_version_upgrade = false
-  auto_minor_version_upgrade = var.auto_minor_version_upgrade
+  auto_minor_version_upgrade  = var.auto_minor_version_upgrade
 
   tags = merge(
     local.common_tags,
@@ -460,8 +472,8 @@ resource "aws_rds_cluster_instance" "this" {
   db_parameter_group_name = var.db_parameter_group_name != null ? var.db_parameter_group_name : aws_db_parameter_group.this[0].name
 
   # Performance Insights
-  performance_insights_enabled    = var.enable_performance_insights
-  performance_insights_kms_key_id = var.enable_performance_insights ? var.performance_insights_kms_key_id : null
+  performance_insights_enabled          = var.enable_performance_insights
+  performance_insights_kms_key_id       = var.enable_performance_insights ? var.performance_insights_kms_key_id : null
   performance_insights_retention_period = var.enable_performance_insights ? var.performance_insights_retention_period : null
 
   # Enhanced Monitoring
@@ -603,125 +615,4 @@ resource "aws_cloudwatch_metric_alarm" "database_connections_high" {
   }
 
   tags = local.common_tags
-}
-
-#------------------------------------------------------------------------------
-# Lambda for Secret Rotation (simplified)
-#------------------------------------------------------------------------------
-
-# Note: In production, use AWS SecretsManager rotation lambda or custom implementation
-# This is a placeholder showing the structure
-
-resource "aws_lambda_function" "rotate_secret" {
-  count = var.enable_secrets_rotation && local.create_secret ? 1 : 0
-
-  filename      = "${path.module}/lambda_rotation_stub.zip"
-  function_name = "${local.cluster_id}-rotate-secret"
-  role          = aws_iam_role.lambda_rotation[0].arn
-  handler       = "index.handler"
-  runtime       = "python3.11"
-  timeout       = 30
-
-  environment {
-    variables = {
-      CLUSTER_ARN = aws_rds_cluster.this.arn
-    }
-  }
-
-  tags = local.common_tags
-
-  lifecycle {
-    ignore_changes = [filename]
-  }
-}
-
-resource "aws_iam_role" "lambda_rotation" {
-  count = var.enable_secrets_rotation && local.create_secret ? 1 : 0
-
-  name_prefix = "${local.cluster_id}-rotation-"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_rotation_basic" {
-  count = var.enable_secrets_rotation && local.create_secret ? 1 : 0
-
-  role       = aws_iam_role.lambda_rotation[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-resource "aws_iam_role_policy" "lambda_rotation_secrets" {
-  count = var.enable_secrets_rotation && local.create_secret ? 1 : 0
-
-  name = "${local.cluster_id}-rotation-secrets"
-  role = aws_iam_role.lambda_rotation[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:DescribeSecret",
-          "secretsmanager:GetSecretValue",
-          "secretsmanager:PutSecretValue",
-          "secretsmanager:UpdateSecretVersionStage"
-        ]
-        Resource = aws_secretsmanager_secret.master_password[0].arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "rds:DescribeDBClusters",
-          "rds:ModifyDBCluster"
-        ]
-        Resource = aws_rds_cluster.this.arn
-      }
-    ]
-  })
-}
-
-resource "aws_lambda_permission" "allow_secret_rotation" {
-  count = var.enable_secrets_rotation && local.create_secret ? 1 : 0
-
-  statement_id  = "AllowExecutionFromSecretsManager"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.rotate_secret[0].function_name
-  principal     = "secretsmanager.amazonaws.com"
-}
-
-# Create a stub lambda deployment package
-resource "null_resource" "lambda_stub" {
-  count = var.enable_secrets_rotation && local.create_secret ? 1 : 0
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      mkdir -p ${path.module}/lambda_tmp
-      cat > ${path.module}/lambda_tmp/index.py << 'EOF'
-def handler(event, context):
-    # Placeholder for secret rotation logic
-    # In production, implement actual rotation logic
-    return {"statusCode": 200}
-EOF
-      cd ${path.module}/lambda_tmp && zip ${path.module}/lambda_rotation_stub.zip index.py
-      rm -rf ${path.module}/lambda_tmp
-    EOT
-  }
-
-  triggers = {
-    always_run = timestamp()
-  }
 }

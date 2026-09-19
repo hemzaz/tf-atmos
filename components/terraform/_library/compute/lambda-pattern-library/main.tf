@@ -8,10 +8,10 @@ locals {
   common_tags = merge(
     var.tags,
     {
-      Name             = local.function_name
-      Environment      = var.environment
-      ManagedBy        = "terraform"
-      Module           = "lambda-pattern-library"
+      Name              = local.function_name
+      Environment       = var.environment
+      ManagedBy         = "terraform"
+      Module            = "lambda-pattern-library"
       DeploymentPattern = var.deployment_pattern
     }
   )
@@ -20,31 +20,42 @@ locals {
   environment_variables = merge(
     var.environment_variables,
     {
-      ENVIRONMENT = var.environment
+      ENVIRONMENT   = var.environment
       FUNCTION_NAME = local.function_name
     }
   )
+
+  dlq_arn = var.enable_dlq ? (var.dlq_target_arn != null ? var.dlq_target_arn : aws_sqs_queue.dlq[0].arn) : null
+
+  sqs_trigger_queue_arn = var.sqs_queue_arn != null ? var.sqs_queue_arn : one(aws_sqs_queue.trigger[*].arn)
+
+  source_is_zip = can(regex("\\.zip$", var.source_code_path))
 }
 
 # ==============================================================================
 # IAM ROLE FOR LAMBDA
 # ==============================================================================
 
+data "aws_partition" "current" {}
+
+data "aws_iam_policy_document" "lambda_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_iam_role" "lambda" {
   count = var.create_role ? 1 : 0
 
   name = "${local.function_name}-role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "lambda.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 
   tags = local.common_tags
 }
@@ -54,7 +65,7 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   count = var.create_role ? 1 : 0
 
   role       = aws_iam_role.lambda[0].name
-  policy_arn = var.enable_vpc ? "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole" : "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  policy_arn = var.enable_vpc ? "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole" : "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # X-Ray tracing policy
@@ -62,7 +73,7 @@ resource "aws_iam_role_policy_attachment" "lambda_xray" {
   count = var.create_role && var.enable_xray_tracing ? 1 : 0
 
   role       = aws_iam_role.lambda[0].name
-  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
 # Custom policy attachments
@@ -83,25 +94,44 @@ resource "aws_iam_role_policy" "lambda_inline" {
 }
 
 # Secrets Manager access policy
+data "aws_iam_policy_document" "secrets" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "kms:Decrypt"
+    ]
+    resources = values(var.secrets)
+  }
+}
+
 resource "aws_iam_role_policy" "secrets" {
   count = var.create_role && length(var.secrets) > 0 ? 1 : 0
 
   name = "${local.function_name}-secrets"
   role = aws_iam_role.lambda[0].id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "secretsmanager:GetSecretValue",
-        "ssm:GetParameter",
-        "ssm:GetParameters",
-        "kms:Decrypt"
-      ]
-      Resource = values(var.secrets)
-    }]
-  })
+  policy = data.aws_iam_policy_document.secrets.json
+}
+
+# The execution role must be able to deliver failed async invocations / stream
+# records to the dead letter target (SQS or SNS).
+data "aws_iam_policy_document" "dlq" {
+  statement {
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage", "sns:Publish"]
+    resources = compact([local.dlq_arn])
+  }
+}
+
+resource "aws_iam_role_policy" "dlq" {
+  count = var.create_role && var.enable_dlq ? 1 : 0
+
+  name   = "${local.function_name}-dlq"
+  role   = aws_iam_role.lambda[0].id
+  policy = data.aws_iam_policy_document.dlq.json
 }
 
 # ==============================================================================
@@ -123,7 +153,7 @@ resource "aws_sqs_queue" "dlq" {
   count = var.enable_dlq && var.dlq_target_arn == null ? 1 : 0
 
   name                       = "${local.function_name}-dlq"
-  message_retention_seconds  = 1209600  # 14 days
+  message_retention_seconds  = 1209600 # 14 days
   visibility_timeout_seconds = 300
 
   tags = local.common_tags
@@ -138,7 +168,7 @@ resource "aws_sqs_queue" "trigger" {
 
   name                       = "${local.function_name}-queue"
   message_retention_seconds  = var.sqs_message_retention_seconds
-  visibility_timeout_seconds = var.timeout * 6  # 6x Lambda timeout
+  visibility_timeout_seconds = var.timeout * 6 # 6x Lambda timeout
 
   tags = local.common_tags
 }
@@ -146,8 +176,8 @@ resource "aws_sqs_queue" "trigger" {
 resource "aws_sqs_queue" "trigger_dlq" {
   count = var.create_sqs_queue ? 1 : 0
 
-  name                       = "${local.function_name}-queue-dlq"
-  message_retention_seconds  = 1209600
+  name                      = "${local.function_name}-queue-dlq"
+  message_retention_seconds = 1209600
 
   tags = local.common_tags
 }
@@ -167,7 +197,7 @@ resource "aws_sqs_queue_redrive_policy" "trigger" {
 # ==============================================================================
 
 data "archive_file" "lambda" {
-  count = can(regex("\\.zip$", var.source_code_path)) ? 0 : 1
+  count = local.source_is_zip ? 0 : 1
 
   type        = "zip"
   source_dir  = var.source_code_path
@@ -179,8 +209,11 @@ resource "aws_lambda_function" "main" {
   description   = "Lambda function for ${var.deployment_pattern} pattern"
   role          = var.create_role ? aws_iam_role.lambda[0].arn : var.role_arn
 
-  filename         = can(regex("\\.zip$", var.source_code_path)) ? var.source_code_path : data.archive_file.lambda[0].output_path
-  source_code_hash = var.source_code_hash != null ? var.source_code_hash : (can(regex("\\.zip$", var.source_code_path)) ? filebase64sha256(var.source_code_path) : data.archive_file.lambda[0].output_base64sha256)
+  filename         = local.source_is_zip ? var.source_code_path : data.archive_file.lambda[0].output_path
+  source_code_hash = var.source_code_hash != null ? var.source_code_hash : (local.source_is_zip ? filebase64sha256(var.source_code_path) : data.archive_file.lambda[0].output_base64sha256)
+
+  # Provisioned concurrency and SnapStart both require a published version.
+  publish = var.enable_provisioned_concurrency || var.enable_snapstart
 
   handler       = var.handler
   runtime       = var.runtime
@@ -212,7 +245,7 @@ resource "aws_lambda_function" "main" {
   dynamic "dead_letter_config" {
     for_each = var.enable_dlq ? [1] : []
     content {
-      target_arn = var.dlq_target_arn != null ? var.dlq_target_arn : aws_sqs_queue.dlq[0].arn
+      target_arn = local.dlq_arn
     }
   }
 
@@ -241,7 +274,8 @@ resource "aws_lambda_function" "main" {
 
   depends_on = [
     aws_cloudwatch_log_group.lambda,
-    aws_iam_role_policy_attachment.lambda_basic
+    aws_iam_role_policy_attachment.lambda_basic,
+    aws_iam_role_policy.dlq
   ]
 }
 
@@ -294,61 +328,87 @@ resource "aws_lambda_function_url" "main" {
   }
 }
 
-# ==============================================================================
-# API GATEWAY REST API (REST API PATTERN)
-# ==============================================================================
-
-module "api_gateway" {
-  source = "./modules/api-gateway-lambda"
-  count  = var.enable_api_gateway ? 1 : 0
-
-  name_prefix            = var.name_prefix
-  function_name          = var.function_name
-  lambda_function_arn    = aws_lambda_function.main.arn
-  lambda_function_name   = aws_lambda_function.main.function_name
-  stage_name             = var.api_gateway_stage_name
-  api_type               = var.api_gateway_type
-  throttle_burst_limit   = var.api_gateway_throttle_burst_limit
-  throttle_rate_limit    = var.api_gateway_throttle_rate_limit
-  enable_access_logs     = var.enable_api_gateway_access_logs
-  authorization          = var.api_gateway_authorization
-  authorizer_id          = var.api_gateway_authorizer_id
-  cors_enabled           = var.api_gateway_cors_enabled
-  cors_allow_origins     = var.api_gateway_cors_allow_origins
-
-  tags = local.common_tags
-}
+# API Gateway (REST API pattern) resources live in api_gateway.tf.
 
 # ==============================================================================
 # EVENTBRIDGE RULES (EVENT-DRIVEN PATTERN)
 # ==============================================================================
 
-module "eventbridge" {
-  source = "./modules/eventbridge-lambda"
-  count  = var.enable_eventbridge ? 1 : 0
+# Implemented inline (previously referenced a non-existent ./modules/eventbridge-lambda).
+resource "aws_cloudwatch_event_rule" "lambda" {
+  for_each = var.enable_eventbridge ? { for rule in var.eventbridge_rules : rule.name => rule } : {}
 
-  name_prefix         = var.name_prefix
-  function_name       = var.function_name
-  lambda_function_arn = aws_lambda_function.main.arn
+  name                = "${local.function_name}-${each.key}"
+  description         = each.value.description
   event_bus_name      = var.eventbridge_bus_name
-  rules               = var.eventbridge_rules
+  schedule_expression = each.value.schedule_expression
+  event_pattern       = each.value.event_pattern
+  state               = each.value.enabled ? "ENABLED" : "DISABLED"
 
   tags = local.common_tags
+}
+
+resource "aws_cloudwatch_event_target" "lambda" {
+  for_each = aws_cloudwatch_event_rule.lambda
+
+  rule           = each.value.name
+  event_bus_name = each.value.event_bus_name
+  target_id      = "lambda"
+  arn            = aws_lambda_function.main.arn
+}
+
+resource "aws_lambda_permission" "eventbridge" {
+  for_each = aws_cloudwatch_event_rule.lambda
+
+  statement_id  = "AllowExecutionFromEventBridge-${each.key}"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.main.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = each.value.arn
 }
 
 # ==============================================================================
 # SQS TRIGGER (QUEUE PROCESSING PATTERN)
 # ==============================================================================
 
-module "sqs_trigger" {
-  source = "./modules/sqs-lambda"
-  count  = var.enable_sqs_trigger ? 1 : 0
+# Implemented inline (previously referenced a non-existent ./modules/sqs-lambda).
+resource "aws_lambda_event_source_mapping" "sqs" {
+  count = var.enable_sqs_trigger ? 1 : 0
 
-  lambda_function_arn                    = aws_lambda_function.main.arn
-  lambda_function_name                   = aws_lambda_function.main.function_name
-  sqs_queue_arn                          = var.sqs_queue_arn != null ? var.sqs_queue_arn : aws_sqs_queue.trigger[0].arn
-  batch_size                             = var.sqs_batch_size
-  maximum_batching_window_in_seconds    = var.sqs_maximum_batching_window_in_seconds
+  event_source_arn                   = local.sqs_trigger_queue_arn
+  function_name                      = aws_lambda_function.main.arn
+  batch_size                         = var.sqs_batch_size
+  maximum_batching_window_in_seconds = var.sqs_maximum_batching_window_in_seconds
+
+  lifecycle {
+    precondition {
+      condition     = var.sqs_queue_arn != null || var.create_sqs_queue
+      error_message = "enable_sqs_trigger requires sqs_queue_arn or create_sqs_queue = true."
+    }
+  }
+
+  depends_on = [aws_iam_role_policy.sqs]
+}
+
+data "aws_iam_policy_document" "sqs" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:ChangeMessageVisibility"
+    ]
+    resources = compact([local.sqs_trigger_queue_arn])
+  }
+}
+
+resource "aws_iam_role_policy" "sqs" {
+  count = var.create_role && var.enable_sqs_trigger ? 1 : 0
+
+  name   = "${local.function_name}-sqs"
+  role   = aws_iam_role.lambda[0].id
+  policy = data.aws_iam_policy_document.sqs.json
 }
 
 # ==============================================================================
@@ -380,44 +440,51 @@ resource "aws_sns_topic_subscription" "lambda" {
 resource "aws_lambda_event_source_mapping" "stream" {
   count = var.enable_stream_trigger && var.stream_arn != null ? 1 : 0
 
-  event_source_arn                   = var.stream_arn
-  function_name                      = aws_lambda_function.main.arn
-  starting_position                  = var.stream_starting_position
-  batch_size                         = var.stream_batch_size
-  parallelization_factor             = var.stream_parallelization_factor
-  maximum_retry_attempts             = var.stream_maximum_retry_attempts
-  bisect_batch_on_function_error     = true
-  maximum_record_age_in_seconds      = 86400  # 24 hours
+  event_source_arn               = var.stream_arn
+  function_name                  = aws_lambda_function.main.arn
+  starting_position              = var.stream_starting_position
+  batch_size                     = var.stream_batch_size
+  parallelization_factor         = var.stream_parallelization_factor
+  maximum_retry_attempts         = var.stream_maximum_retry_attempts
+  bisect_batch_on_function_error = true
+  maximum_record_age_in_seconds  = 86400 # 24 hours
 
-  destination_config {
-    on_failure {
-      destination_arn = var.enable_dlq ? (var.dlq_target_arn != null ? var.dlq_target_arn : aws_sqs_queue.dlq[0].arn) : null
+  dynamic "destination_config" {
+    for_each = local.dlq_arn != null ? [1] : []
+    content {
+      on_failure {
+        destination_arn = local.dlq_arn
+      }
     }
   }
+
+  depends_on = [aws_iam_role_policy.stream]
 }
 
 # IAM policy for stream access
+data "aws_iam_policy_document" "stream" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "kinesis:GetRecords",
+      "kinesis:GetShardIterator",
+      "kinesis:DescribeStream",
+      "kinesis:DescribeStreamSummary",
+      "kinesis:ListShards",
+      "dynamodb:GetRecords",
+      "dynamodb:GetShardIterator",
+      "dynamodb:DescribeStream",
+      "dynamodb:ListStreams"
+    ]
+    resources = compact([var.stream_arn])
+  }
+}
+
 resource "aws_iam_role_policy" "stream" {
   count = var.create_role && var.enable_stream_trigger && var.stream_arn != null ? 1 : 0
 
   name = "${local.function_name}-stream"
   role = aws_iam_role.lambda[0].id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "kinesis:GetRecords",
-        "kinesis:GetShardIterator",
-        "kinesis:DescribeStream",
-        "kinesis:ListShards",
-        "dynamodb:GetRecords",
-        "dynamodb:GetShardIterator",
-        "dynamodb:DescribeStream",
-        "dynamodb:ListStreams"
-      ]
-      Resource = var.stream_arn
-    }]
-  })
+  policy = data.aws_iam_policy_document.stream.json
 }

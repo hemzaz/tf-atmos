@@ -7,10 +7,10 @@ resource "aws_cloudwatch_dashboard" "main" {
 
   dashboard_body = jsonencode({
     widgets = concat(
-      var.create_infrastructure_widgets ? local.infrastructure_widgets : [],
-      var.create_application_widgets ? local.application_widgets : [],
-      var.create_cost_widgets ? local.cost_widgets : [],
-      var.create_security_widgets ? local.security_widgets : [],
+      [for w in local.infrastructure_widgets : w if var.create_infrastructure_widgets],
+      [for w in local.application_widgets : w if var.create_application_widgets],
+      [for w in local.cost_widgets : w if var.create_cost_widgets],
+      [for w in local.security_widgets : w if var.create_security_widgets],
       var.custom_widgets
     )
   })
@@ -32,13 +32,15 @@ data "aws_instances" "discovered" {
 }
 
 data "aws_lb" "discovered" {
-  count = var.enable_auto_discovery && length(var.discovery_alb_names) > 0 ? length(var.discovery_alb_names) : 0
-  name  = var.discovery_alb_names[count.index]
+  for_each = var.enable_auto_discovery ? toset(var.discovery_alb_names) : toset([])
+
+  name = each.value
 }
 
 data "aws_rds_cluster" "discovered" {
-  count              = var.enable_auto_discovery && length(var.discovery_rds_clusters) > 0 ? length(var.discovery_rds_clusters) : 0
-  cluster_identifier = var.discovery_rds_clusters[count.index]
+  for_each = var.enable_auto_discovery ? toset(var.discovery_rds_clusters) : toset([])
+
+  cluster_identifier = each.value
 }
 
 ##############################################
@@ -46,6 +48,8 @@ data "aws_rds_cluster" "discovered" {
 ##############################################
 
 locals {
+  region = coalesce(var.region, data.aws_region.current.region)
+
   # Infrastructure widgets
   infrastructure_widgets = [
     {
@@ -54,7 +58,7 @@ locals {
         metrics = [
           ["AWS/EC2", "CPUUtilization", { stat = "Average", period = 300 }]
         ]
-        region = var.region
+        region = local.region
         title  = "EC2 CPU Utilization"
         period = 300
         yAxis = {
@@ -72,7 +76,7 @@ locals {
           ["AWS/RDS", "CPUUtilization", { stat = "Average" }],
           [".", "DatabaseConnections", { stat = "Sum" }]
         ]
-        region = var.region
+        region = local.region
         title  = "RDS Metrics"
         period = 300
       }
@@ -84,7 +88,7 @@ locals {
           ["AWS/ELB", "RequestCount", { stat = "Sum" }],
           [".", "TargetResponseTime", { stat = "Average" }]
         ]
-        region = var.region
+        region = local.region
         title  = "Load Balancer Metrics"
         period = 300
       }
@@ -101,7 +105,7 @@ locals {
           [".", "Errors", { stat = "Sum" }],
           [".", "Duration", { stat = "Average" }]
         ]
-        region = var.region
+        region = local.region
         title  = "Lambda Functions"
         period = 300
       }
@@ -115,7 +119,7 @@ locals {
           [".", "5XXError", { stat = "Sum" }],
           [".", "Latency", { stat = "Average" }]
         ]
-        region = var.region
+        region = local.region
         title  = "API Gateway"
         period = 300
       }
@@ -124,7 +128,7 @@ locals {
       type = "log"
       properties = {
         query   = "SOURCE '/aws/lambda/*' | fields @timestamp, @message | sort @timestamp desc | limit 20"
-        region  = var.region
+        region  = local.region
         title   = "Recent Lambda Logs"
         stacked = false
       }
@@ -150,7 +154,7 @@ locals {
         metrics = [
           ["AWS/Usage", "ResourceCount", "Service", "EC2", "Type", "Resource", "Resource", "vCPU", { stat = "Average" }]
         ]
-        region = var.region
+        region = local.region
         title  = "Resource Usage"
         period = 3600
       }
@@ -166,7 +170,7 @@ locals {
           ["AWS/WAF", "BlockedRequests", { stat = "Sum" }],
           [".", "AllowedRequests", { stat = "Sum" }]
         ]
-        region = var.region
+        region = local.region
         title  = "WAF Metrics"
         period = 300
       }
@@ -175,7 +179,7 @@ locals {
       type = "log"
       properties = {
         query   = "fields @timestamp, eventName, userIdentity.principalId | filter eventName like /Delete/ or eventName like /Terminate/ | sort @timestamp desc | limit 20"
-        region  = var.region
+        region  = local.region
         title   = "Security Events"
         stacked = false
       }

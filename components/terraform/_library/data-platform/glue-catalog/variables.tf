@@ -28,12 +28,12 @@ variable "tables" {
     parameters  = optional(map(string), {})
     storage_descriptor = optional(object({
       location      = optional(string)
-      input_format  = optional(string)
-      output_format = optional(string)
+      input_format  = optional(string, "org.apache.hadoop.mapred.TextInputFormat")
+      output_format = optional(string, "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat")
       compressed    = optional(bool, false)
       ser_de_info = optional(object({
         name                  = optional(string)
-        serialization_library = optional(string)
+        serialization_library = optional(string, "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe")
         parameters            = optional(map(string), {})
       }))
       columns = optional(list(object({
@@ -95,6 +95,23 @@ variable "crawlers" {
   }))
   description = "Map of Glue crawlers"
   default     = {}
+
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.crawlers : v.schema_change_policy == null ? [true] : [
+        contains(["LOG", "DELETE_FROM_DATABASE", "DEPRECATE_IN_DATABASE"], v.schema_change_policy.delete_behavior),
+        contains(["LOG", "UPDATE_IN_DATABASE"], v.schema_change_policy.update_behavior),
+      ]
+    ]))
+    error_message = "schema_change_policy.delete_behavior must be LOG|DELETE_FROM_DATABASE|DEPRECATE_IN_DATABASE and update_behavior LOG|UPDATE_IN_DATABASE."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.crawlers : v.recrawl_policy == null ? true : contains(["CRAWL_EVERYTHING", "CRAWL_NEW_FOLDERS_ONLY", "CRAWL_EVENT_MODE"], v.recrawl_policy.recrawl_behavior)
+    ])
+    error_message = "recrawl_policy.recrawl_behavior must be CRAWL_EVERYTHING, CRAWL_NEW_FOLDERS_ONLY, or CRAWL_EVENT_MODE."
+  }
 }
 
 variable "s3_data_locations" {
@@ -116,13 +133,18 @@ variable "schemas" {
     schema_definition = string
     description       = optional(string)
   }))
-  description = "Map of schema definitions"
+  description = "Map of schema definitions (requires create_schema_registry = true)"
   default     = {}
+
+  validation {
+    condition     = length(var.schemas) == 0 || var.create_schema_registry
+    error_message = "schemas require create_schema_registry = true."
+  }
 
   validation {
     condition = alltrue([
       for k, v in var.schemas :
-      contains(["AVRO", "JSON", "PROTOBUF"], lookup(v, "data_format", "AVRO"))
+      contains(["AVRO", "JSON", "PROTOBUF"], v.data_format)
     ])
     error_message = "Data format must be AVRO, JSON, or PROTOBUF."
   }
@@ -130,7 +152,7 @@ variable "schemas" {
   validation {
     condition = alltrue([
       for k, v in var.schemas :
-      contains(["NONE", "DISABLED", "BACKWARD", "BACKWARD_ALL", "FORWARD", "FORWARD_ALL", "FULL", "FULL_ALL"], lookup(v, "compatibility", "BACKWARD"))
+      contains(["NONE", "DISABLED", "BACKWARD", "BACKWARD_ALL", "FORWARD", "FORWARD_ALL", "FULL", "FULL_ALL"], v.compatibility)
     ])
     error_message = "Invalid compatibility mode."
   }

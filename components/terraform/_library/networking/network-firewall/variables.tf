@@ -83,19 +83,19 @@ variable "stateless_rule_groups" {
     capacity    = number
     description = optional(string)
     rules = list(object({
-      priority           = number
-      actions            = list(string)
-      source_cidrs       = optional(list(string), [])
-      destination_cidrs  = optional(list(string), [])
-      source_ports       = optional(list(object({
+      priority          = number
+      actions           = list(string)
+      source_cidrs      = optional(list(string), [])
+      destination_cidrs = optional(list(string), [])
+      source_ports = optional(list(object({
         from_port = number
         to_port   = number
       })), [])
-      destination_ports  = optional(list(object({
+      destination_ports = optional(list(object({
         from_port = number
         to_port   = number
       })), [])
-      protocols          = optional(list(number))
+      protocols = optional(list(number))
     }))
   }))
   default = {}
@@ -104,15 +104,24 @@ variable "stateless_rule_groups" {
 variable "stateful_domain_rule_groups" {
   description = "Map of stateful domain-based rule groups"
   type = map(object({
-    capacity              = number
-    description           = optional(string)
-    generated_rules_type  = string # ALLOWLIST or DENYLIST
-    target_types          = list(string) # ["TLS_SNI", "HTTP_HOST"]
-    targets               = list(string)
-    rule_order            = optional(string, "DEFAULT_ACTION_ORDER")
-    ip_sets               = optional(map(list(string)), {})
+    capacity             = number
+    description          = optional(string)
+    generated_rules_type = string       # ALLOWLIST or DENYLIST
+    target_types         = list(string) # ["TLS_SNI", "HTTP_HOST"]
+    targets              = list(string)
+    rule_order           = optional(string, "DEFAULT_ACTION_ORDER")
+    ip_sets              = optional(map(list(string)), {})
   }))
   default = {}
+
+  validation {
+    condition = alltrue([for g in values(var.stateful_domain_rule_groups) :
+      contains(["ALLOWLIST", "DENYLIST"], g.generated_rules_type) &&
+      alltrue([for t in g.target_types : contains(["TLS_SNI", "HTTP_HOST"], t)]) &&
+      contains(["DEFAULT_ACTION_ORDER", "STRICT_ORDER"], g.rule_order)
+    ])
+    error_message = "generated_rules_type must be ALLOWLIST/DENYLIST, target_types TLS_SNI/HTTP_HOST, rule_order DEFAULT_ACTION_ORDER/STRICT_ORDER."
+  }
 }
 
 variable "stateful_5tuple_rule_groups" {
@@ -133,6 +142,17 @@ variable "stateful_5tuple_rule_groups" {
     }))
   }))
   default = {}
+
+  validation {
+    condition = alltrue([for g in values(var.stateful_5tuple_rule_groups) :
+      contains(["DEFAULT_ACTION_ORDER", "STRICT_ORDER"], g.rule_order) &&
+      alltrue([for r in g.rules :
+        contains(["PASS", "DROP", "ALERT", "REJECT"], r.action) &&
+        contains(["FORWARD", "ANY"], r.direction)
+      ])
+    ])
+    error_message = "rule_order must be DEFAULT_ACTION_ORDER/STRICT_ORDER; rule action PASS/DROP/ALERT/REJECT; direction FORWARD/ANY."
+  }
 }
 
 variable "stateful_suricata_rule_groups" {
@@ -144,6 +164,11 @@ variable "stateful_suricata_rule_groups" {
     rules_string = string
   }))
   default = {}
+
+  validation {
+    condition     = alltrue([for g in values(var.stateful_suricata_rule_groups) : contains(["DEFAULT_ACTION_ORDER", "STRICT_ORDER"], g.rule_order)])
+    error_message = "rule_order must be DEFAULT_ACTION_ORDER or STRICT_ORDER."
+  }
 }
 
 variable "enable_flow_logs_to_s3" {

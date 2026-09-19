@@ -59,12 +59,12 @@ resource "aws_xray_sampling_rule" "custom" {
   version        = 1
   reservoir_size = each.value.reservoir_size
   fixed_rate     = each.value.fixed_rate
-  url_path       = lookup(each.value, "url_path", "*")
-  host           = lookup(each.value, "host", "*")
-  http_method    = lookup(each.value, "http_method", "*")
-  service_type   = lookup(each.value, "service_type", "*")
-  service_name   = lookup(each.value, "service_name", "*")
-  resource_arn   = lookup(each.value, "resource_arn", "*")
+  url_path       = each.value.url_path
+  host           = each.value.host
+  http_method    = each.value.http_method
+  service_type   = each.value.service_type
+  service_name   = each.value.service_name
+  resource_arn   = each.value.resource_arn
 
   tags = merge(
     var.tags,
@@ -216,16 +216,16 @@ resource "aws_api_gateway_stage" "xray" {
 locals {
   # Cost-optimized sampling rates by environment
   sampling_rate = var.enable_cost_optimization ? {
-    production  = 0.05  # 5% sampling in prod
-    staging     = 0.20  # 20% sampling in staging
-    development = 1.0   # 100% sampling in dev
+    production  = 0.05 # 5% sampling in prod
+    staging     = 0.20 # 20% sampling in staging
+    development = 1.0  # 100% sampling in dev
   }[var.environment] : var.default_fixed_rate
 
   # Intelligent reservoir sizing
   reservoir_size = var.enable_cost_optimization ? {
-    production  = 1   # Keep at least 1 trace per second
-    staging     = 5   # Keep at least 5 traces per second
-    development = 10  # Keep at least 10 traces per second
+    production  = 1  # Keep at least 1 trace per second
+    staging     = 5  # Keep at least 5 traces per second
+    development = 10 # Keep at least 10 traces per second
   }[var.environment] : var.default_reservoir_size
 }
 

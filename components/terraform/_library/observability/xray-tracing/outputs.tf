@@ -35,12 +35,12 @@ output "custom_group_arns" {
 
 output "trace_console_url" {
   description = "Console URL for X-Ray traces"
-  value       = "https://console.aws.amazon.com/xray/home?region=${data.aws_region.current.name}#/traces"
+  value       = "https://console.aws.amazon.com/xray/home?region=${data.aws_region.current.region}#/traces"
 }
 
 output "service_map_url" {
   description = "Console URL for X-Ray service map"
-  value       = "https://console.aws.amazon.com/xray/home?region=${data.aws_region.current.name}#/service-map"
+  value       = "https://console.aws.amazon.com/xray/home?region=${data.aws_region.current.region}#/service-map"
 }
 
 output "sampling_rate" {

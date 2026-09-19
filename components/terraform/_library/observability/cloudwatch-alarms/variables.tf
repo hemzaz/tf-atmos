@@ -168,6 +168,11 @@ variable "create_composite_alarms" {
   type        = bool
   description = "Create composite alarms for complex conditions"
   default     = false
+
+  validation {
+    condition     = !var.create_composite_alarms || var.create_cpu_alarms || var.create_memory_alarms || var.create_disk_alarms
+    error_message = "create_composite_alarms requires at least one of create_cpu_alarms, create_memory_alarms or create_disk_alarms."
+  }
 }
 
 # Custom Alarms
@@ -181,8 +186,8 @@ variable "custom_alarms" {
     statistic           = string
     threshold           = number
     description         = string
-    treat_missing_data  = optional(string)
-    dimensions          = optional(map(string))
+    treat_missing_data  = optional(string, "notBreaching")
+    dimensions          = optional(map(string), {})
   }))
   description = "Custom alarm configurations"
   default     = {}
@@ -199,6 +204,11 @@ variable "auto_remediation_actions" {
   type        = list(string)
   description = "List of auto-remediation actions to enable"
   default     = ["restart_instance", "scale_up"]
+
+  validation {
+    condition     = alltrue([for a in var.auto_remediation_actions : contains(["restart_instance", "scale_up"], a)])
+    error_message = "Supported auto-remediation actions: restart_instance, scale_up."
+  }
 }
 
 variable "slack_webhook_url" {
