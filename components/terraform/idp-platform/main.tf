@@ -81,7 +81,6 @@ module "idp_database" {
   region      = var.region
   environment = var.environment
   vpc_id      = data.aws_vpc.selected.id
-  vpc_cidr    = data.aws_vpc.selected.cidr_block
   subnet_ids  = data.aws_subnets.private.ids
 
   allowed_security_groups = [module.eks_cluster.cluster_security_group_ids["idp"]]
