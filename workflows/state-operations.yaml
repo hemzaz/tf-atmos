@@ -7,6 +7,10 @@
 workflows:
   list-locks:
     description: List Terraform state lockfiles (with age) in the stack's state bucket
+    dependencies:
+      tools:
+        aws/aws-cli: "2.36.49"
+        jqlang/jq: "1.8.2"
     steps:
       - name: stack
         type: input

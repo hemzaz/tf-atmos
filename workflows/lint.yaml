@@ -1,7 +1,9 @@
 # Static checks for Terraform code and YAML config. Tools are installed by the
 # Atmos toolchain from `dependencies.tools`.
 #
-# Usage: atmos workflow lint -f lint
+# Usage:
+#   atmos workflow lint -f lint
+#   atmos workflow security-scan -f lint   # SARIF reports for GitHub code scanning
 workflows:
   lint:
     description: Lint Terraform code, YAML files and run a Terraform security scan
@@ -34,3 +36,28 @@ workflows:
       - type: toast
         level: success
         content: Lint checks passed
+
+  security-scan:
+    description: Scan Terraform code with Trivy and Checkov, writing SARIF reports to reports/
+    dependencies:
+      tools:
+        trivy: "0.74.0"
+        checkov: "3.3.19"
+    steps:
+      - name: reports-dir
+        type: shell
+        command: mkdir -p reports
+      - type: parallel
+        fail:
+          mode: wait_all
+        steps:
+          - name: trivy
+            type: shell
+            command: >-
+              trivy config --format sarif --output reports/trivy.sarif
+              --severity HIGH,CRITICAL --exit-code 0 components/terraform
+          - name: checkov
+            type: shell
+            command: >-
+              checkov --directory components/terraform --framework terraform
+              --output sarif --output-file-path reports --soft-fail --quiet

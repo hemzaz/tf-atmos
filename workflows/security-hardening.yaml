@@ -20,6 +20,10 @@ workflows:
 
   harden:
     description: Apply account/region security hardening (GuardDuty, Security Hub, EBS, S3)
+    dependencies:
+      tools:
+        aws/aws-cli: "2.36.49"
+        jqlang/jq: "1.8.2"
     steps:
       - name: stack
         type: input
@@ -39,6 +43,10 @@ workflows:
 
   harden-iam:
     description: Apply the IAM account password policy
+    dependencies:
+      tools:
+        aws/aws-cli: "2.36.49"
+        jqlang/jq: "1.8.2"
     steps:
       - name: stack
         type: input
