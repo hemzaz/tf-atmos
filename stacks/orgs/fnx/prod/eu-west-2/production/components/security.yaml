@@ -35,6 +35,9 @@ components:
         require_mfa: true
 
         # MFA required for production access
+      dependencies:
+        components:
+          - component: backend/main
     iam/ci:
       metadata:
         component: iam

@@ -26,6 +26,9 @@ components:
         aws:
           assume_role:
             role_arn: arn:aws:iam::234567890123:role/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-TerraformExecutionRole
+      dependencies:
+        components:
+          - component: backend/main
     iam/ci:
       metadata:
         component: iam

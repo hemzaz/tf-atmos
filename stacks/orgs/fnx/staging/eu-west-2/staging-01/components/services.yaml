@@ -244,6 +244,10 @@ components:
             period: 300
             threshold: 85
             dimensions: {}
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/main
     monitoring/data:
       metadata:
         component: monitoring
@@ -268,3 +272,7 @@ components:
             threshold: 100
         enable_rds_monitoring: true
         rds_storage_threshold: 5368709120
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/services

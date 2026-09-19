@@ -101,6 +101,7 @@ components:
         default_cluster_log_retention_days: 90
       dependencies:
         components:
+          - component: vpc/main
           - component: kms/main
     eks/data:
       metadata:
@@ -160,6 +161,7 @@ components:
         default_cluster_log_retention_days: 90
       dependencies:
         components:
+          - component: vpc/services
           - component: kms/main
     ec2/bastion:
       metadata:
@@ -215,6 +217,7 @@ components:
             root_volume_delete_on_termination: true
       dependencies:
         components:
+          - component: vpc/main
           - component: kms/main
     external-secrets/main:
       metadata:
@@ -235,6 +238,9 @@ components:
         chart_version: "0.9.9"
         create_default_cluster_secret_store: true
         create_certificate_secret_store: true
+      dependencies:
+        components:
+          - component: eks/main
     external-secrets/data:
       metadata:
         component: external-secrets
@@ -253,3 +259,6 @@ components:
         service_account_name: "external-secrets"
         chart_version: "0.9.9"
         create_default_cluster_secret_store: true
+      dependencies:
+        components:
+          - component: eks/data
