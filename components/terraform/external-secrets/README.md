@@ -17,13 +17,13 @@ deploy nothing if that flag is false.
 
 | Inputs (required) | Inputs (behavior) | Outputs |
 |---|---|---|
-| region, cluster_name, host, cluster_ca_certificate, oidc_provider_arn, oidc_provider_url, tags (must include `Environment`) | chart_version, create_default_cluster_secret_store, create_certificate_secret_store, namespace/service_account_name | external_secrets_role_arn/name, policy_arn/name (not consumed elsewhere via `!terraform.state`) |
+| region, cluster_name, host, cluster_ca_certificate, oidc_provider_arn, oidc_provider_url, tags (must have a non-empty `Environment` value) | chart_version, create_default_cluster_secret_store, create_certificate_secret_store, namespace/service_account_name | external_secrets_role_arn/name, policy_arn/name (not consumed elsewhere via `!terraform.state`) |
 
 ## Dependencies & gotchas
 
 - Depends on `eks/main` (main instance) / `eks/data` (data instance) for
   cluster_name, host, CA cert, OIDC provider.
-- `tags` must include an `Environment` key (validated).
+- `tags` must have a non-empty `Environment` value (validated).
 - The CRD-wait step shells out to `kubectl` via `local-exec`; the apply host
   needs `kubectl` configured for the target cluster.
 

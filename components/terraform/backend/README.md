@@ -18,7 +18,7 @@ Real instance `backend/main` in all 3 stacks: `fnx-dev-testenv-01` (bucket
 | Input | Notes |
 |---|---|
 | `bucket_name` | required; `-logs`/`-access-logs` bucket names derive from it |
-| `iam_role_name` | required |
+| `iam_role_name` | required; must match `^[\w+=,.@-]{1,64}$` |
 | `enable_access_logging` | default true |
 
 Outputs `backend_bucket`, `backend_bucket_arn`, `backend_kms_key_arn`, `backend_role_arn`
