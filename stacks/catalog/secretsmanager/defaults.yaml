@@ -13,9 +13,9 @@ components:
         component: secretsmanager
         type: abstract
       vars:
+        environment: "{{ .settings.context.environment }}"
         enabled: true
         context_name: "common"
-        name: "secretsmanager"
         secrets_enabled: true
 
         # Default KMS settings - should be overridden with account-specific KMS key
@@ -44,7 +44,6 @@ components:
           - secretsmanager/defaults
       vars:
         context_name: "app"
-        name: "database-secrets"
         # Example secrets definition (to be overridden per environment)
         secrets:
           db_credentials:
@@ -67,7 +66,6 @@ components:
           - secretsmanager/defaults
       vars:
         context_name: "app"
-        name: "api-secrets"
         # Example secrets definition (to be overridden per environment)
         secrets:
           api_key:
@@ -90,7 +88,6 @@ components:
           - secretsmanager/defaults
       vars:
         context_name: "infra"
-        name: "infra-secrets"
         # Default rotation settings for infrastructure
         default_rotation_days: 90
         default_rotation_automatically: true

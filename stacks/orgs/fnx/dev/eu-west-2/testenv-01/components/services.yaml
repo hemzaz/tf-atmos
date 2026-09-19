@@ -12,8 +12,7 @@ components:
       metadata:
         component: apigateway
       vars:
-        name: "main-api"
-        description: "Main API Gateway for {{ .vars.tenant }}-{{ .vars.environment }}"
+        description: "Main API Gateway for {{ .settings.context.tenant }}-{{ .settings.context.environment }}"
         stage_name: "v1"
 
         # API resources
@@ -31,19 +30,17 @@ components:
         # Domain Configuration
         domain_name: "api.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
-        route53_zone_id: !terraform.state network/main .zone_ids.main
-
-        # API monitoring
         enable_logging: true
         log_retention_days: 30
         create_dashboard: true
 
+        api_name: "main-api"
+        zone_id: !terraform.state network/main .zone_ids.main
     apigateway/data:
       metadata:
         component: apigateway
       vars:
-        name: "data-api"
-        description: "Data API Gateway for {{ .vars.tenant }}-{{ .vars.environment }}"
+        description: "Data API Gateway for {{ .settings.context.tenant }}-{{ .settings.context.environment }}"
         stage_name: "v1"
 
         # API resources
@@ -54,14 +51,13 @@ components:
         # Domain Configuration
         domain_name: "data.services.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
-        route53_zone_id: !terraform.state network/services .zone_ids.data
-
-        # API monitoring
         enable_logging: true
         log_retention_days: 30
         create_dashboard: true
 
     # Infrastructure instances
+        api_name: "data-api"
+        zone_id: !terraform.state network/services .zone_ids.data
     infrastructure/main:
       metadata:
         component: infrastructure
@@ -82,8 +78,8 @@ components:
           instance_class: "db.t3.micro"
           allocated_storage: 5
           db_name: "mainapp"
-          engine: "{{ .vars.rds_engine }}"
-          engine_version: "{{ .vars.rds_engine_version }}"
+          engine: "{{ .settings.environment.rds_engine }}"
+          engine_version: "{{ .settings.environment.rds_engine_version }}"
           vpc_id: !terraform.state vpc/main .vpc_id
           subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
@@ -103,8 +99,8 @@ components:
           instance_class: "db.r5.large"
           allocated_storage: 20
           db_name: "datawarehouse"
-          engine: "{{ .vars.rds_engine }}"
-          engine_version: "{{ .vars.rds_engine_version }}"
+          engine: "{{ .settings.environment.rds_engine }}"
+          engine_version: "{{ .settings.environment.rds_engine_version }}"
           vpc_id: !terraform.state vpc/services .vpc_id
           subnet_ids: !terraform.state vpc/services .private_subnet_ids
 
@@ -124,11 +120,7 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        enabled: true
         create_dashboard: true
-        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-main-dashboard"
-
-        # Enable certificate monitoring
         enable_certificate_monitoring: true
         certificate_arns: !terraform.state acm/main .certificate_arns // {}
         certificate_names: !terraform.state acm/main .certificate_domains // {} | keys
@@ -136,24 +128,18 @@ components:
         certificate_expiry_threshold: 30
 
         # Alert emails
-        alarm_notifications_enabled: true
-        alarm_email_addresses:
+        alarm_email_subscriptions:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
           - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
 
+        create_sns_topic: true
     monitoring/data:
       metadata:
         component: monitoring
         inherits:
           - monitoring/defaults
       vars:
-        enabled: true
         create_dashboard: true
-        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-dashboard"
-
-        # Data-specific monitoring settings
-        enable_resource_monitoring: true
-        enable_vpc_flow_logs: true
         enable_certificate_monitoring: true
 
         # Certificate monitoring configuration
@@ -161,6 +147,6 @@ components:
         certificate_expiry_threshold: 30
 
         # Alert emails - only send critical alerts
-        alarm_notifications_enabled: true
-        alarm_email_addresses:
+        alarm_email_subscriptions:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        create_sns_topic: true

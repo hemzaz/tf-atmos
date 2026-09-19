@@ -4,5 +4,4 @@ components:
     external-secrets:
       metadata:
         component: external-secrets
-      vars:
         enabled: false

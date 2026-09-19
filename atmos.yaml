@@ -29,7 +29,7 @@ stacks:
     - "**/_defaults.yaml"
     - "**/components/**"
   # e.g. fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production
-  name_template: "{{ .vars.tenant }}-{{ .vars.stage }}-{{ .vars.environment }}"
+  name_template: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-{{ .settings.context.environment }}"
 
 workflows:
   base_path: workflows

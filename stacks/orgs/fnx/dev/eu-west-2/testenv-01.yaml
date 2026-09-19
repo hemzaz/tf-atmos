@@ -24,16 +24,15 @@ import:
 
 vars:
   # Core variables for stack naming
-  tenant: fnx
-  environment: testenv-01
-  stage: dev
-
-  # Other configurations
-  description: "TestEnv-01 Environment"
-  namespace: testenv-01
   region: eu-west-2
-  account: dev
-  aws_account_id: !env AWS_ACCOUNT_ID REQUIRED_ACCOUNT_ID
-
-  # FIXED: Use consistent variable name matching the component
-  vpc_cidr: "10.0.0.0/16"
+settings:
+  environment:
+    description: "TestEnv-01 Environment"
+    namespace: testenv-01
+    account: dev
+    aws_account_id: !env AWS_ACCOUNT_ID REQUIRED_ACCOUNT_ID
+    vpc_cidr: "10.0.0.0/16"
+  context:
+    tenant: fnx
+    environment: testenv-01
+    stage: dev

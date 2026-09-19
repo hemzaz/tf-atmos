@@ -7,8 +7,8 @@ components:
         type: abstract
       vars:
         enabled: true
-        name: "{{ .vars.tenant }}-{{ .vars.environment }}-api"
-        description: "API Gateway for {{ .vars.environment }} environment"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api"
+        description: "API Gateway for {{ .settings.context.environment }} environment"
         endpoint_type: "REGIONAL"
 
         tags:
@@ -21,7 +21,7 @@ components:
         enabled: true
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .public_subnet_ids
-        name: "{{ .vars.tenant }}-{{ .vars.environment }}-alb"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-alb"
         internal: false
 
         tags:
@@ -32,7 +32,7 @@ components:
         type: abstract
       vars:
         enabled: true
-        comment: "{{ .vars.tenant }}-{{ .vars.environment }} CloudFront distribution"
+        comment: "{{ .settings.context.tenant }}-{{ .settings.context.environment }} CloudFront distribution"
         default_cache_behavior:
           allowed_methods:
             - "GET"
@@ -53,7 +53,6 @@ components:
         component: ec2
         type: abstract
       vars:
-        enabled: true
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
@@ -64,7 +63,7 @@ components:
         ssh_key_rsa_bits: 4096
 
         # Optional: Define a global key for the environment
-        # global_key_name: "{{ .vars.environment }}-shared-key" # Uncomment to use a global key
+        # global_key_name: "{{ .settings.context.environment }}-shared-key" # Uncomment to use a global key
 
         # Optional: Use an existing key as default
         # default_key_name: "existing-key-name" # Uncomment to use an existing key

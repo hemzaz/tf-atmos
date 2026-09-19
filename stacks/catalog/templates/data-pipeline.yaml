@@ -47,7 +47,7 @@ components:
         component: s3
         type: real
       vars:
-        bucket_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-lake-raw"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-raw"
         description: "Raw data landing zone"
 
         # Versioning
@@ -103,7 +103,7 @@ components:
         component: s3
         type: real
       vars:
-        bucket_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-lake-processed"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-processed"
         description: "Processed and transformed data"
 
         # Versioning
@@ -144,7 +144,7 @@ components:
         component: s3
         type: real
       vars:
-        bucket_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-lake-curated"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-curated"
         description: "Curated data ready for analytics"
 
         # Versioning
@@ -177,7 +177,7 @@ components:
         # S3 Inventory for data catalog
         inventory_configuration:
           enabled: true
-          destination_bucket: "{{ .vars.tenant }}-{{ .vars.environment }}-data-lake-inventory"
+          destination_bucket: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-inventory"
           format: "Parquet"
           frequency: "Weekly"
           included_object_versions: "Current"
@@ -200,7 +200,7 @@ components:
         component: kinesis
         type: real
       vars:
-        stream_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-ingest"
+        stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-ingest"
         description: "Main data ingestion stream"
 
         # Stream configuration
@@ -241,7 +241,7 @@ components:
         component: kinesis
         type: real
       vars:
-        stream_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-enriched"
+        stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-enriched"
         description: "Enriched data stream after transformation"
 
         # Stream configuration
@@ -293,7 +293,7 @@ components:
 
         # Environment variables
         environment_variables:
-          ENVIRONMENT: "{{ .vars.environment }}"
+          ENVIRONMENT: "{{ .settings.context.environment }}"
           OUTPUT_STREAM: !terraform.state data-pipeline/kinesis-enriched .stream_name
           ENRICHMENT_TABLE: !terraform.state data-pipeline/dynamodb-lookup .table_name
           LOG_LEVEL: "INFO"
@@ -354,7 +354,7 @@ components:
 
         # Environment variables
         environment_variables:
-          ENVIRONMENT: "{{ .vars.environment }}"
+          ENVIRONMENT: "{{ .settings.context.environment }}"
           SCHEMA_REGISTRY_URL: "{{ .vars.schema_registry_url }}"
           VALID_RECORDS_STREAM: "{{ .vars.valid_records_stream_name }}"
           INVALID_RECORDS_BUCKET: !terraform.state data-pipeline/s3-raw .bucket_name
@@ -393,7 +393,7 @@ components:
         component: firehose
         type: real
       vars:
-        delivery_stream_name: "{{ .vars.tenant }}-{{ .vars.environment }}-firehose-raw"
+        delivery_stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-raw"
         description: "Delivers raw data to S3 data lake"
 
         # Source configuration
@@ -435,7 +435,7 @@ components:
         # CloudWatch logging
         cloudwatch_logging_options:
           enabled: true
-          log_group_name: "/aws/kinesisfirehose/{{ .vars.tenant }}-{{ .vars.environment }}-firehose-raw"
+          log_group_name: "/aws/kinesisfirehose/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-raw"
           log_stream_name: "delivery"
 
         # Processing configuration (optional Lambda transformation)
@@ -464,7 +464,7 @@ components:
         component: firehose
         type: real
       vars:
-        delivery_stream_name: "{{ .vars.tenant }}-{{ .vars.environment }}-firehose-processed"
+        delivery_stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-processed"
         description: "Delivers processed data to S3 data lake"
 
         # Source configuration
@@ -511,7 +511,7 @@ components:
         # CloudWatch logging
         cloudwatch_logging_options:
           enabled: true
-          log_group_name: "/aws/kinesisfirehose/{{ .vars.tenant }}-{{ .vars.environment }}-firehose-processed"
+          log_group_name: "/aws/kinesisfirehose/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-processed"
           log_stream_name: "delivery"
 
         tags:
@@ -531,7 +531,7 @@ components:
         component: glue
         type: real
       vars:
-        database_name: "{{ .vars.tenant }}_{{ .vars.environment }}_data_lake"
+        database_name: "{{ .settings.context.tenant }}_{{ .settings.context.environment }}_data_lake"
         description: "Data lake catalog database"
 
         # Location
@@ -556,7 +556,7 @@ components:
         crawlers:
           # Raw data crawler
           raw_data:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-raw-data-crawler"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-raw-data-crawler"
             description: "Crawls raw data in S3"
             database_name: !terraform.state data-pipeline/glue-database .database_name
             role: "{{ .vars.glue_crawler_role_arn }}"
@@ -579,7 +579,7 @@ components:
 
           # Processed data crawler
           processed_data:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-processed-data-crawler"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-processed-data-crawler"
             description: "Crawls processed data in S3"
             database_name: !terraform.state data-pipeline/glue-database .database_name
             role: "{{ .vars.glue_crawler_role_arn }}"
@@ -595,7 +595,7 @@ components:
 
           # Curated data crawler
           curated_data:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-curated-data-crawler"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-curated-data-crawler"
             description: "Crawls curated data in S3"
             database_name: !terraform.state data-pipeline/glue-database .database_name
             role: "{{ .vars.glue_crawler_role_arn }}"
@@ -626,11 +626,11 @@ components:
         component: athena
         type: real
       vars:
-        workgroup_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-pipeline"
+        workgroup_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline"
         description: "Athena workgroup for data pipeline queries"
 
         # Output configuration
-        output_location: "s3://{{ .vars.tenant }}-{{ .vars.environment }}-athena-results/"
+        output_location: "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-athena-results/"
 
         # Configuration
         enforce_workgroup_configuration: true
@@ -726,13 +726,13 @@ components:
         state_machines:
           # Daily ETL workflow
           daily_etl:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-daily-etl"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-etl"
             description: "Daily ETL workflow for data processing"
             type: "STANDARD"
             logging_configuration:
               level: "ALL"
               include_execution_data: true
-              log_destination: "arn:aws:logs:{{ .vars.region }}:{{ .vars.account_id }}:log-group:/aws/states/{{ .vars.tenant }}-{{ .vars.environment }}-daily-etl:*"
+              log_destination: "arn:aws:logs:{{ .vars.region }}:{{ .vars.account_id }}:log-group:/aws/states/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-etl:*"
             tracing_configuration:
               enabled: true
             definition:
@@ -743,7 +743,7 @@ components:
                   Type: "Task"
                   Resource: "arn:aws:states:::glue:startJobRun.sync"
                   Parameters:
-                    CrawlerName: "{{ .vars.tenant }}-{{ .vars.environment }}-raw-data-crawler"
+                    CrawlerName: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-raw-data-crawler"
                   Next: "CheckRawCrawlerStatus"
                   Catch:
                     - ErrorEquals:
@@ -777,7 +777,7 @@ components:
                   Type: "Task"
                   Resource: "arn:aws:states:::glue:startJobRun.sync"
                   Parameters:
-                    CrawlerName: "{{ .vars.tenant }}-{{ .vars.environment }}-processed-data-crawler"
+                    CrawlerName: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-processed-data-crawler"
                   Next: "RunDataQualityChecks"
                   Catch:
                     - ErrorEquals:
@@ -815,7 +815,7 @@ components:
                   Type: "Task"
                   Resource: "arn:aws:states:::glue:startJobRun.sync"
                   Parameters:
-                    CrawlerName: "{{ .vars.tenant }}-{{ .vars.environment }}-curated-data-crawler"
+                    CrawlerName: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-curated-data-crawler"
                   Next: "NotifySuccess"
                   Catch:
                     - ErrorEquals:
@@ -854,7 +854,7 @@ components:
 
           # Data quality workflow
           data_quality:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-quality"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-quality"
             description: "Data quality validation workflow"
             type: "EXPRESS"
             logging_configuration:
@@ -897,7 +897,7 @@ components:
         rules:
           # Daily ETL trigger
           daily_etl_trigger:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-daily-etl-trigger"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-etl-trigger"
             description: "Triggers daily ETL workflow"
             schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC daily
             state: "ENABLED"
@@ -910,7 +910,7 @@ components:
 
           # Hourly data quality check
           hourly_quality_check:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-hourly-quality-check"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-hourly-quality-check"
             description: "Triggers hourly data quality checks"
             schedule_expression: "rate(1 hour)"
             state: "DISABLED"
@@ -921,7 +921,7 @@ components:
 
           # Crawler completion events
           crawler_completion:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-crawler-completion"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-crawler-completion"
             description: "Handle Glue crawler completion events"
             event_pattern:
               source:
@@ -933,7 +933,7 @@ components:
                   - "Succeeded"
                   - "Failed"
                 crawlerName:
-                  - prefix: "{{ .vars.tenant }}-{{ .vars.environment }}"
+                  - prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
             targets:
               - id: "process-crawler-completion"
                 arn: "{{ .vars.crawler_completion_lambda_arn }}"
@@ -956,7 +956,7 @@ components:
       vars:
         tables:
           lookup:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-lookup"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lookup"
             billing_mode: "PAY_PER_REQUEST"
             hash_key: "lookup_type"
             range_key: "lookup_key"
@@ -988,7 +988,7 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-pipeline-dashboard"
+        dashboard_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline-dashboard"
 
         # Enable all monitoring features
         enable_resource_monitoring: true
@@ -997,7 +997,7 @@ components:
         # Custom dashboard
         dashboards:
           data_pipeline_overview:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-pipeline-overview"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline-overview"
             widgets:
               # Kinesis metrics
               - type: "metric"
@@ -1075,7 +1075,7 @@ components:
         alarms:
           # Kinesis alarms
           kinesis_iterator_age:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-kinesis-iterator-age"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-kinesis-iterator-age"
             metric_name: "GetRecords.IteratorAgeMilliseconds"
             namespace: "AWS/Kinesis"
             comparison_operator: "GreaterThanThreshold"
@@ -1087,7 +1087,7 @@ components:
               StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
 
           kinesis_write_throttled:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-kinesis-write-throttled"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-kinesis-write-throttled"
             metric_name: "WriteProvisionedThroughputExceeded"
             namespace: "AWS/Kinesis"
             comparison_operator: "GreaterThanThreshold"
@@ -1100,7 +1100,7 @@ components:
 
           # Lambda alarms
           lambda_errors:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-transformer-errors"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-transformer-errors"
             metric_name: "Errors"
             namespace: "AWS/Lambda"
             comparison_operator: "GreaterThanThreshold"
@@ -1113,7 +1113,7 @@ components:
 
           # Firehose alarms
           firehose_delivery_failed:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-firehose-delivery-failed"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-delivery-failed"
             metric_name: "DeliveryToS3.DataFreshness"
             namespace: "AWS/Firehose"
             comparison_operator: "GreaterThanThreshold"
@@ -1126,7 +1126,7 @@ components:
 
           # Step Functions alarms
           etl_failed:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-etl-failed"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-etl-failed"
             metric_name: "ExecutionsFailed"
             namespace: "AWS/States"
             comparison_operator: "GreaterThanThreshold"
@@ -1140,7 +1140,7 @@ components:
         # SNS notifications
         alarm_notifications_enabled: true
         alarm_email_addresses: []
-        sns_topic_name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-pipeline-alarms"
+        sns_topic_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline-alarms"
 
         tags:
           DataPipeline: "monitoring"

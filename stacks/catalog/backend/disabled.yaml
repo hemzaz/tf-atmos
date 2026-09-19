@@ -4,5 +4,4 @@ components:
     backend:
       metadata:
         component: backend
-      vars:
         enabled: false

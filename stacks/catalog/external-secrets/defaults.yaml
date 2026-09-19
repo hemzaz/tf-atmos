@@ -14,21 +14,13 @@ components:
       vars:
         enabled: true
 
-        # Optional settings with defaults
-        namespace:
-          name: "external-secrets"
-          create: true
-        serviceaccount:
-          name: "external-secrets"
-        helm:
-          chart_version: "0.9.9"
-        certificate_store:
-          path_template: "certificates/{name}"
-        secret_stores:
-          default_cluster:
-            create: true
-          certificate:
-            create: true
+        namespace: "external-secrets"
+        create_namespace: true
+        service_account_name: "external-secrets"
+        chart_version: "0.9.9"
+        certificate_secret_path_template: "certificates/{name}/{name}"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
 
         tags:
           Component: "external-secrets"
