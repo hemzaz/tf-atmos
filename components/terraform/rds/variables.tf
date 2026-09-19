@@ -16,16 +16,6 @@ variable "vpc_id" {
   }
 }
 
-variable "vpc_cidr" {
-  type        = string
-  description = "VPC CIDR block for security group egress rules"
-
-  validation {
-    condition     = can(cidrhost(var.vpc_cidr, 0))
-    error_message = "Must be a valid IPv4 CIDR block address."
-  }
-}
-
 variable "additional_egress_rules" {
   type = list(object({
     from_port       = number
@@ -282,8 +272,12 @@ variable "prevent_destroy" {
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
 }
 
 # Performance Optimization Variables

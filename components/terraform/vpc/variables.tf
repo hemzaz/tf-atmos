@@ -186,8 +186,8 @@ variable "tags" {
   description = "Tags to apply to resources; must include Environment (used in resource names)"
 
   validation {
-    condition     = contains(keys(var.tags), "Environment")
-    error_message = "tags must include an Environment key."
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
   }
 }
 
