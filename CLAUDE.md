@@ -1,7 +1,7 @@
 # CLAUDE.md - Terraform/Atmos Infrastructure Project
 
 This is a **Terraform/Atmos infrastructure-as-code project** with:
-- **22 Terraform root modules** in `components/terraform/` (plus `_library/` and `_catalog/`)
+- **22 Terraform root modules** in `components/terraform/` (plus `_library/`, shared modules)
 - **3 stacks**: `fnx-dev-testenv-01`, `fnx-staging-staging-01`, `fnx-prod-production` (eu-west-2)
 - **Atmos workflows** in `workflows/` (`atmos list workflows`) and **Atmos Native CI** in `.github/workflows/`
 - Atmos >= 1.229.0 (enforced in `atmos.yaml`); Terraform 1.16.3 is installed by the Atmos toolchain
