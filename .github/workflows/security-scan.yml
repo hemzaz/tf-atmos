@@ -1,5 +1,6 @@
-# Nightly security scan of the Terraform code (Trivy + Checkov via the
-# `security-scan` Atmos workflow, tools pinned in workflows/lint.yaml).
+# Nightly security scan of the Terraform code (Trivy + Checkov via the report-only
+# `security-scan-report` Atmos workflow, tools pinned in workflows/lint.yaml).
+# Findings never fail this job; the PR gate (`security-scan`) fails on HIGH/CRITICAL.
 # Results are published to GitHub code scanning.
 name: Security scan
 
@@ -24,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Scan
-        run: atmos workflow security-scan -f lint
+        run: atmos workflow security-scan-report -f lint
       - uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         if: always()
         with:
