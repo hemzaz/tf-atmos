@@ -55,6 +55,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The aqua registry verifies tflint releases with GitHub artifact
+      # attestations (`gh attestation verify`), which needs a GitHub token. Install
+      # it in its own step so the read-only token never reaches the lint step,
+      # which runs PR code; the lint step then reuses this install. Keep the
+      # version in sync with workflows/lint.yaml (a mismatch fails loudly).
+      - name: Install tflint (attestation-verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: atmos toolchain install terraform-linters/tflint@0.64.0
       - name: Lint (fmt, yamllint, tflint, trivy)
         run: atmos workflow lint -f lint
       - name: Validate config, stacks and root modules
