@@ -1,6 +1,6 @@
 # Alexandria Library - Module Registry
 # Version: 1.0.0
-# Last Updated: 2025-12-02
+# Last Updated: 2026-09-19
 #
 # This file serves as the master catalog for all Alexandria Library modules.
 # It provides searchable metadata, versioning, and lifecycle information.
@@ -83,9 +83,9 @@ modules:
       oncall: "platform-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -233,9 +233,9 @@ modules:
       oncall: "platform-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -367,9 +367,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
 
@@ -460,9 +460,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "eks-*"
@@ -574,9 +574,9 @@ modules:
       oncall: "kubernetes-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
         kubernetes: ">= 2.20.0"
         helm: ">= 2.10.0"
       required_modules:
@@ -681,9 +681,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
         - "securitygroup"
@@ -742,9 +742,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "apigateway"
@@ -837,9 +837,9 @@ modules:
       oncall: "dba-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
         - "securitygroup"
@@ -923,9 +923,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "lambda"
@@ -989,9 +989,9 @@ modules:
       primary: "sre-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "All modules"
@@ -1047,9 +1047,9 @@ modules:
       primary: "security-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "All modules"
@@ -1107,9 +1107,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "dns"
@@ -1166,9 +1166,9 @@ modules:
       primary: "security-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "rds-*"
@@ -1226,9 +1226,9 @@ modules:
       primary: "kubernetes-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
         kubernetes: ">= 2.20.0"
         helm: ">= 2.10.0"
       required_modules:
@@ -1331,9 +1331,9 @@ modules:
       oncall: "security-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -1482,9 +1482,9 @@ modules:
       oncall: "security-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -1631,9 +1631,9 @@ modules:
       oncall: "security-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -1754,9 +1754,9 @@ modules:
       primary: "sre-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "rds-*"
@@ -1823,9 +1823,9 @@ modules:
       primary: "finops-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "All modules"
@@ -1883,9 +1883,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
         kubernetes: ">= 2.20.0"
         helm: ">= 2.10.0"
       required_modules:
@@ -1948,9 +1948,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "acm"
@@ -2006,9 +2006,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "All modules"
@@ -2062,9 +2062,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
 
@@ -2123,9 +2123,9 @@ modules:
       primary: "kubernetes-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
         kubernetes: ">= 2.20.0"
         helm: ">= 2.10.0"
       required_modules:
@@ -2239,9 +2239,9 @@ modules:
       oncall: "platform-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
 
@@ -2414,10 +2414,10 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
-        archive: ">= 2.0.0"
+        aws: ">= 6.0, < 7.0"
+        archive: ">= 2.0, < 3.0"
 
     compatible_with:
       - "api-gateway-rest"
@@ -2571,9 +2571,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
 
@@ -2699,9 +2699,9 @@ modules:
       oncall: "sre-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -2822,9 +2822,10 @@ modules:
       oncall: "sre-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
+        archive: ">= 2.0, < 3.0"
       required_modules: []
 
     compatible_with:
@@ -2951,9 +2952,9 @@ modules:
       oncall: "sre-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -3083,9 +3084,10 @@ modules:
       oncall: "sre-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
+        archive: ">= 2.0, < 3.0"
       required_modules: []
 
     compatible_with:
@@ -3209,9 +3211,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "vpc-*"
@@ -3310,9 +3312,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "vpc-*"
@@ -3419,9 +3421,9 @@ modules:
       sla_hours: 12
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "vpc-*"
@@ -3519,9 +3521,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "vpc-*"
@@ -3628,9 +3630,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "vpc-*"
@@ -3737,9 +3739,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "lambda-pattern-library"
@@ -3844,9 +3846,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "sqs-queue"
@@ -3955,9 +3957,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "lambda-pattern-library"
@@ -4063,9 +4065,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "lambda-pattern-library"
@@ -4179,9 +4181,9 @@ modules:
       primary: "platform-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "lambda-pattern-library"
@@ -4301,9 +4303,9 @@ modules:
       oncall: "data-oncall"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -4413,9 +4415,9 @@ modules:
       primary: "data-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "kinesis-stream"
@@ -4520,9 +4522,9 @@ modules:
       primary: "data-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "s3-bucket"
@@ -4623,9 +4625,9 @@ modules:
       primary: "data-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "glue-catalog"
@@ -4732,9 +4734,9 @@ modules:
       primary: "data-team@example.com"
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "vpc-standard"
@@ -4850,9 +4852,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
         - "securitygroup"
@@ -4960,9 +4962,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "vpc-*"
         - "securitygroup"
@@ -5068,9 +5070,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
 
     compatible_with:
       - "rds-*"
@@ -5176,9 +5178,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules:
         - "s3-bucket (source and destination)"
 
@@ -5291,9 +5293,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -5405,9 +5407,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -5517,9 +5519,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:
@@ -5630,9 +5632,9 @@ modules:
       sla_hours: 24
 
     dependencies:
-      terraform_version: ">= 1.5.0"
+      terraform_version: ">= 1.16.0, < 2.0.0"
       provider_versions:
-        aws: ">= 5.0.0, < 6.0.0"
+        aws: ">= 6.0, < 7.0"
       required_modules: []
 
     compatible_with:

@@ -125,9 +125,9 @@ Each module entry follows this structure:
     oncall: "oncall-alias"
 
   dependencies:                     # Requirements
-    terraform_version: ">= 1.5.0"
+    terraform_version: ">= 1.16.0, < 2.0.0"
     provider_versions:
-      aws: ">= 5.0.0, < 6.0.0"
+      aws: ">= 6.0, < 7.0"
     required_modules: []
 
   compatible_with:                  # Compatible modules
