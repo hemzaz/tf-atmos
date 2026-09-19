@@ -4,6 +4,17 @@
 #   vars.AWS_REGION          region for OIDC credentials (defaults to eu-west-2)
 #   vars.AWS_PLAN_ROLE_ARN   read-only IAM role trusted for this repo's GitHub OIDC tokens
 # Terraform and scanners are installed by the Atmos toolchain (dependencies.tools).
+#
+# GitHub-side controls this file relies on (they cannot be expressed in YAML):
+#   - Plan role trust (AWS_PLAN_ROLE_ARN, read-only): aud = sts.amazonaws.com, sub =
+#     repo:<org>/<repo>:pull_request (plus :ref:refs/heads/<default branch> for the
+#     drift and DR workflows). It must never be the deploy role, since plans run PR code.
+#   - Deploy roles trust only repo:<org>/<repo>:environment:<stack>; see terraform-cd.yml.
+#   - Fork PRs get no OIDC token or secrets under `pull_request`; do not switch
+#     this workflow to `pull_request_target`.
+#
+# The plan runs PR-controlled code (providers, external data sources), so the
+# job's GITHUB_TOKEN is never in its environment; only the comment step gets it.
 name: Terraform CI
 
 on:
@@ -84,13 +95,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      statuses: write
       pull-requests: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.affected.outputs.matrix) }}
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,7 +108,43 @@ jobs:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
       - name: Plan
+        id: plan
         env:
           COMPONENT: ${{ matrix.component }}
           STACK: ${{ matrix.stack }}
         run: atmos terraform plan "$COMPONENT" -s "$STACK"
+      - name: Comment plan summary on the PR
+        if: always() && github.event_name == 'pull_request' && steps.plan.outputs.summary != ''
+        shell: python3 {0}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SUMMARY: ${{ steps.plan.outputs.summary }}
+          COMPONENT: ${{ matrix.component }}
+          STACK: ${{ matrix.stack }}
+        run: |
+          import json, os, urllib.request
+
+          api = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}"
+          marker = f"<!-- atmos-plan:{os.environ['COMPONENT']}:{os.environ['STACK']} -->"
+          body = f"{marker}\n{os.environ['SUMMARY']}"
+
+          def call(method, url, data=None):
+              req = urllib.request.Request(url, method=method, data=json.dumps(data).encode() if data else None,
+                                           headers={"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                                                    "Accept": "application/vnd.github+json"})
+              with urllib.request.urlopen(req) as resp:
+                  return json.load(resp)
+
+          comments_url = f"{api}/issues/{os.environ['PR_NUMBER']}/comments"
+          existing, page = None, 1
+          while existing is None:
+              batch = call("GET", f"{comments_url}?per_page=100&page={page}")
+              existing = next((c for c in batch if c["body"].startswith(marker)), None)
+              if len(batch) < 100:
+                  break
+              page += 1
+          if existing:
+              call("PATCH", f"{api}/issues/comments/{existing['id']}", {"body": body})
+          else:
+              call("POST", comments_url, {"body": body})
