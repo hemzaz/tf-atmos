@@ -1,5 +1,48 @@
 # Variables for IDP Platform Infrastructure Component
 
+variable "region" {
+  type        = string
+  description = "AWS region"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
+}
+
+variable "environment" {
+  type        = string
+  description = "Environment name; also the name prefix, matching the <environment>-vpc VPC to deploy into"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be one of: dev, staging, prod."
+  }
+}
+
+variable "tags" {
+  type        = map(string)
+  description = "Common tags applied to all resources via the provider default_tags"
+  default     = {}
+}
+
+variable "enable_github_integration" {
+  type        = bool
+  description = "Read the GitHub token SSM parameter for the Backstage GitHub integration"
+  default     = false
+}
+
+variable "secrets_version" {
+  type        = number
+  description = "Version of the write-only Redis auth token and JWT secret; increment to rotate both"
+  default     = 1
+
+  validation {
+    condition     = var.secrets_version >= 1 && floor(var.secrets_version) == var.secrets_version
+    error_message = "secrets_version must be a positive integer."
+  }
+}
+
 variable "cluster_version" {
   type        = string
   description = "EKS cluster version"
