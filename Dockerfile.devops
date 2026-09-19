@@ -13,13 +13,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
 # Tool versions
-ENV TERRAFORM_VERSION=1.5.7
-ENV ATMOS_VERSION=1.44.0
-ENV AWS_CLI_VERSION=2.13.0
-ENV KUBECTL_VERSION=1.28.0
-ENV HELM_VERSION=3.13.0
-ENV TFLINT_VERSION=0.48.0
-ENV CHECKOV_VERSION=3.0.0
+ENV TERRAFORM_VERSION=1.16.3
+ENV ATMOS_VERSION=1.229.0
+ENV AWS_CLI_VERSION=2.36.49
+ENV KUBECTL_VERSION=1.37.0
+ENV HELM_VERSION=4.3.0
+ENV TFLINT_VERSION=0.64.0
+ENV CHECKOV_VERSION=3.3.19
 ENV PYTHON_VERSION=3.11
 
 # Install base packages
@@ -60,7 +60,7 @@ RUN wget -q https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSI
     && atmos version
 
 # Install AWS CLI v2
-RUN curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWS_CLI_VERSION}.zip" -o "awscliv2.zip" \
     && unzip awscliv2.zip \
     && ./aws/install \
     && rm -rf aws awscliv2.zip \
@@ -80,7 +80,9 @@ RUN curl -fsSL https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz -o h
     && helm version
 
 # Install tflint
-RUN curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash \
+RUN curl -fsSL "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip" -o tflint.zip \
+    && unzip tflint.zip -d /usr/local/bin \
+    && rm tflint.zip \
     && tflint --version
 
 # Install Python tools
