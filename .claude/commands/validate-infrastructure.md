@@ -13,20 +13,20 @@ Validate all Terraform configurations and ensure they are properly formatted and
 # Quick validation
 make validate
 
-# Or with Gaia CLI
-gaia workflow validate
+# Or with Atmos directly
+atmos workflow validate -f validate
 
 # Validate specific environment
-gaia workflow validate --tenant fnx --account dev --environment testenv-01
+atmos workflow validate -f validate -s fnx-dev-testenv-01
 
 # Validate with auto-fix formatting
-gaia workflow lint --fix
+terraform fmt -recursive components/terraform
 ```
 
 ## Expected output
 - ✅ All configurations should be valid
 - ❌ If errors found, review the specific files mentioned
-- 🔧 Use `make lint` or `gaia workflow lint --fix` to fix formatting issues
+- 🔧 Use `make lint` or `terraform fmt -recursive components/terraform` to fix formatting issues
 
 ## Troubleshooting
 If validation fails:

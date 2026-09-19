@@ -169,13 +169,13 @@ EOF
       }
     },
     {
-      "label": "Gaia Deploy Service",
-      "type": "shell", 
-      "command": "gaia workflow apply-component component=\${input:component} stack=\${input:stack}",
+      "label": "Atmos Apply Component",
+      "type": "shell",
+      "command": "atmos terraform apply \${input:component} -s \${input:stack}",
       "group": "build",
       "presentation": {
         "echo": true,
-        "reveal": "always", 
+        "reveal": "always",
         "focus": false,
         "panel": "shared"
       }
@@ -203,15 +203,6 @@ EOF
 {
   "version": "0.2.0",
   "configurations": [
-    {
-      "name": "Debug Gaia CLI",
-      "type": "python",
-      "request": "launch",
-      "program": "\${workspaceFolder}/gaia/cli.py",
-      "args": ["--help"],
-      "console": "integratedTerminal",
-      "cwd": "\${workspaceFolder}"
-    },
     {
       "name": "Debug Terraform Plan",
       "type": "bash",
@@ -317,13 +308,7 @@ install_cli_tools() {
             eval "$install_cmd" || log_warning "Failed to install $name"
         fi
     done
-    
-    # Install Gaia CLI
-    if [[ -f "setup.py" ]]; then
-        pip install -e . || log_warning "Failed to install Gaia CLI"
-        log_success "Gaia CLI installed"
-    fi
-    
+
     # Setup shell completions
     setup_shell_completions
 }
@@ -356,19 +341,11 @@ if command -v gh >/dev/null 2>&1; then
 fi
 
 # Platform aliases
-alias p='platform'
-alias g='gaia'
 alias k='kubectl'
 alias kx='kubectx'
 alias kn='kubens'
 alias tf='terraform'
 alias a='atmos'
-
-# Quick platform commands
-alias penv='platform env list'
-alias pdeploy='platform deploy'
-alias plogs='platform logs'
-alias pcost='platform cost current'
 EOF
     
     log_success "Shell completions configured. Restart your shell or run: source $shell_config"
@@ -532,12 +509,7 @@ jobs:
     - name: Install Atmos
       run: |
         curl -fsSL https://get.atmos.tools | bash
-        
-    - name: Install Gaia
-      run: |
-        pip install -r requirements.txt
-        pip install -e .
-        
+
     - name: Terraform Format Check
       run: terraform fmt -check=true -recursive
       
@@ -554,24 +526,6 @@ jobs:
       with:
         scan-type: 'fs'
         severity: 'HIGH,CRITICAL'
-        
-    - name: Cost Estimation
-      run: |
-        gaia cost estimate --all-components --format github-comment > cost-estimate.md
-        
-    - name: Comment PR
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const fs = require('fs');
-          const costEstimate = fs.readFileSync('cost-estimate.md', 'utf8');
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: costEstimate
-          });
 
   deploy-dev:
     name: Deploy to Development
@@ -591,10 +545,7 @@ jobs:
         
     - name: Deploy Components
       run: |
-        gaia workflow apply-environment \
-          tenant=fnx \
-          account=dev \
-          environment=testenv-01
+        atmos terraform deploy -s fnx-dev-testenv-01
 EOF
     
     # Dependency update workflow

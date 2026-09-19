@@ -9,9 +9,6 @@ Quick solutions for the most frequent problems encountered during infrastructure
 # Full system health check
 make doctor
 
-# Gaia CLI diagnostics
-gaia doctor
-
 # Check infrastructure status
 make status
 ```
@@ -118,7 +115,7 @@ make plan-component COMPONENT=vpc
 ```bash
 # List available stacks
 make list-stacks
-gaia list stacks
+atmos list stacks
 
 # Check stack configuration
 atmos describe stacks -s orgs/fnx/dev/eu-west-2/testenv-01
@@ -250,10 +247,9 @@ make apply
 ```bash
 # Show all available commands
 make help
-gaia --help
 
 # Quick start guide
-gaia quick-start
+./scripts/quickstart.sh
 
 # Read documentation
 ls docs/
@@ -282,7 +278,7 @@ tar -czf config-info.tar.gz atmos.yaml components/ stacks/
 
 | Issue | Quick Fix |
 |-------|-----------|
-| Command not found | `make install-gaia` or check PATH |
+| Command not found | `make install-toolchain` or check PATH |
 | Permission denied | Check AWS credentials: `aws sts get-caller-identity` |
 | Port in use | `make dev-stop` then `make dev-start` |
 | State locked | Wait a few minutes, then retry |

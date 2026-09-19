@@ -12,7 +12,6 @@
         "atmos terraform plan*",
         "atmos terraform validate*",
         "./scripts/list_stacks.sh*",
-        "gaia*",
         "terraform fmt*",
         "python3*",
         "ls*",

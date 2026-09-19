@@ -11,7 +11,6 @@ Stacks are named by `name_template` as `<tenant>-<stage>-<environment>`
 
 - **certificates/**: TLS certificate and SSH key operations (see its README)
 - **dr/**: Disaster-recovery backup procedures (Velero, S3)
-- **workflows/**: Legacy workflow templates for the removed `gaia` CLI (not loaded by Atmos)
 
 ## Common Scripts
 
@@ -33,5 +32,5 @@ atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 ```
 
 Scripts that only applied to the pre-migration layout (DynamoDB locking,
-`vars.tenant`-style catalogs, the `gaia` CLI) exit immediately with a pointer
-to their replacement.
+`vars.tenant`-style catalogs) exit immediately with a pointer to their
+replacement.

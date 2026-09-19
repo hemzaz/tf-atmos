@@ -26,11 +26,11 @@ make apply
 # Using make
 make apply TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01
 
-# Using Gaia CLI (with confirmation)
-gaia workflow apply-environment --tenant fnx --account dev --environment testenv-01
+# Using Atmos directly (with confirmation)
+atmos workflow apply -f apply-environment -s fnx-dev-testenv-01
 
-# Using Gaia CLI (skip confirmation - BE CAREFUL!)
-gaia workflow apply-environment --tenant fnx --account dev --environment testenv-01 --auto-approve
+# Using Atmos directly (skip confirmation - BE CAREFUL!)
+atmos terraform deploy -s fnx-dev-testenv-01
 ```
 
 ### Apply specific component only

@@ -62,45 +62,8 @@ help: ## Show this help message
 	@echo "  $(GREEN)make api-validate-stack STACK=fnx-dev-testenv-01$(NC)"
 
 # =============================================================================
-# Former Gaia Interface (the gaia CLI was removed; targets run Atmos equivalents)
+# API-Style Shortcuts (atmos wrappers)
 # =============================================================================
-
-gaia-smart: ## Removed with the gaia CLI (no natural-language interface); see 'atmos list workflows'
-	@echo "$(RED)gaia-smart was removed with the gaia CLI. Use 'make help' or 'atmos list workflows'.$(NC)"
-	@exit 1
-
-gaia-orchestrate: ## Plan (PLAN_ONLY=1) or deploy the stack layer by layer (deploy-full-stack workflow)
-	@echo "$(CYAN)🎼 Orchestrating $(STACK)$(NC)"
-	@atmos workflow $(if $(PLAN_ONLY),plan -f plan-environment,deploy -f deploy-full-stack) -s "$(STACK)"
-
-gaia-hygiene: ## Lint and validate everything (lint + validate-all workflows)
-	@echo "$(CYAN)🧹 System Hygiene$(NC)"
-	@atmos workflow lint -f lint
-	@atmos workflow validate-all -f validate-enhanced
-
-gaia-context: ## Show the current stack context (usage: make gaia-context STAGE=dev ENVIRONMENT=testenv-01)
-	@$(MAKE) --no-print-directory show-config
-
-gaia-dashboard: ## Stacks, workflows and components of the current stack
-	@atmos list stacks
-	@echo
-	@atmos list workflows
-	@echo
-	@atmos list components -s "$(STACK)"
-
-# Quick shortcuts for power users
-gaia: gaia-dashboard ## Quick alias for unified dashboard
-smart: gaia-smart ## Quick alias for smart interface  
-orchestrate: gaia-orchestrate ## Quick alias for orchestration
-hygiene: gaia-hygiene ## Quick alias for system hygiene
-
-# =============================================================================
-# Former API Features (the gaia REST API was removed; targets call atmos directly)
-# =============================================================================
-
-api-serve: ## Removed with the gaia CLI (no REST API server)
-	@echo "$(RED)api-serve was removed with the gaia CLI; use the atmos CLI or the api-* targets below.$(NC)"
-	@exit 1
 
 api-docs: ## List Atmos workflows and their descriptions
 	@atmos list workflows
@@ -390,10 +353,10 @@ apply-component: ## Apply specific component (usage: make apply-component COMPON
 setup: ## Setup development environment
 	@echo "$(BLUE)Setting up development environment...$(NC)"
 	@./scripts/dev-setup.sh
-	@$(MAKE) install-gaia
+	@$(MAKE) install-toolchain
 
-install-gaia: ## Removed with the gaia CLI; installs the Terraform toolchain Atmos uses instead
-	@echo "$(YELLOW)The gaia CLI was removed; installing Terraform $$(sed -n 's/^TERRAFORM_VERSION=//p' .atmos.env) via the Atmos toolchain.$(NC)"
+install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned in .atmos.env)
+	@echo "$(BLUE)Installing Terraform $$(sed -n 's/^TERRAFORM_VERSION=//p' .atmos.env) via the Atmos toolchain.$(NC)"
 	@atmos toolchain install hashicorp/terraform@$$(sed -n 's/^TERRAFORM_VERSION=//p' .atmos.env)
 
 dev-start: ## Start development environment with Docker Compose

@@ -7,14 +7,14 @@ Your current Terraform/Atmos repository is **highly suitable** for monorepo evol
 ### Existing Monorepo Patterns
 - **17 Terraform components** with consistent structure and shared dependencies
 - **Cross-component integration** (VPC → EKS → EKS-addons dependency chains)
-- **Unified tooling** (Gaia CLI managing all components)
+- **Unified tooling** (Atmos CLI managing all components via workflows)
 - **Consistent standards** (tagging, security, naming conventions across all components)
 - **Atomic changes** (infrastructure updates often require coordinated multi-component changes)
 
 ### Natural Integration Points
 - **Atmos catalog** → **Backstage service catalog** (direct mapping)
 - **Component templates** → **Software templates** (enhancement, not replacement)
-- **Gaia CLI** → **Backstage backend APIs** (extension of existing tooling)
+- **Atmos CLI** → **Backstage backend APIs** (extension of existing tooling)
 
 ## 🏗️ **Recommended Monorepo Structure**
 
@@ -28,8 +28,7 @@ tf-atmos/ (Enhanced Monorepo)
 │   │   ├── backstage/                # NEW: Backstage infrastructure component
 │   │   └── ...
 │   ├── stacks/                       # Existing Atmos stacks
-│   ├── workflows/                    # Existing Atmos workflows  
-│   └── gaia/                         # Enhanced Python CLI
+│   └── workflows/                    # Existing Atmos workflows
 │
 ├── catalog/                          # NEW: Service catalog for IDP
 │   ├── services/                     
@@ -80,7 +79,7 @@ tf-atmos/ (Enhanced Monorepo)
 │   │       ├── deployment.yaml
 │   │       ├── service.yaml
 │   │       └── ingress.yaml
-│   └── api/                         # NEW: Platform APIs (enhanced Gaia)
+│   └── api/                         # NEW: Platform APIs (Atmos-backed)
 │       ├── main.py                  # FastAPI server
 │       ├── routers/
 │       │   ├── atmos.py            # Atmos workflow endpoints
@@ -131,8 +130,7 @@ mkdir -p infrastructure platform catalog tools/generators
 # Move existing code (preserve git history)
 git mv components infrastructure/
 git mv stacks infrastructure/
-git mv workflows infrastructure/  
-git mv gaia infrastructure/
+git mv workflows infrastructure/
 ```
 
 ### Phase 2: Service Catalog Development (Weeks 2-4)
@@ -278,7 +276,7 @@ workflows:
 
 ### 1. **Unified Developer Experience**
 - **Single repository** for all platform interactions
-- **Consistent tooling** (enhanced Gaia CLI) across all layers
+- **Consistent tooling** (Atmos CLI) across all layers
 - **Atomic changes** across infrastructure, catalog, and platform
 
 ### 2. **Operational Excellence**  
@@ -336,7 +334,7 @@ on:
     "tools/generators"
   ],
   "scripts": {
-    "build:infrastructure": "cd infrastructure && gaia validate",
+    "build:infrastructure": "cd infrastructure && atmos validate stacks",
     "build:platform": "cd platform/backstage && npm run build",
     "build:api": "cd platform/api && python -m pytest",
     "build:all": "npm run build:infrastructure && npm run build:platform && npm run build:api"

@@ -28,18 +28,18 @@ make onboard
 # Specify custom CIDR
 make onboard-custom VPC_CIDR=10.1.0.0/16
 
-# Using Gaia CLI with full control
-gaia workflow onboard-environment \
+# Using the environment scaffolding script directly, with full control
+./scripts/new-environment.sh \
   --tenant fnx \
-  --account staging \
+  --stage staging \
   --environment staging-01 \
   --vpc-cidr 10.2.0.0/16
 ```
 
 ### Interactive onboarding
 ```bash
-# Gaia provides interactive prompts and validation
-gaia workflow onboard-environment --tenant mycompany --account dev --environment dev-01
+# The script supports an interactive mode with prompts and validation
+./scripts/new-environment.sh --tenant mycompany --stage dev --environment dev-01 --interactive
 ```
 
 ## Environment naming conventions
@@ -74,13 +74,13 @@ Examples:
 After onboarding completes:
 ```bash
 # Check the new environment status
-gaia status --tenant fnx --account staging --environment staging-01
+atmos list components -s fnx-staging-staging-01
 
 # Validate all components
 make validate TENANT=fnx ACCOUNT=staging ENVIRONMENT=staging-01
 
 # List components in the new environment
-gaia list components --stack orgs/fnx/staging/eu-west-2/staging-01
+atmos list components -s fnx-staging-staging-01
 ```
 
 ## Common issues and solutions

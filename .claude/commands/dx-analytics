@@ -441,10 +441,10 @@ run_performance_benchmark() {
     # API performance test
     echo "📡 Testing API performance..."
     local api_start=$(date +%s%N)
-    gaia --version >/dev/null 2>&1
+    atmos version >/dev/null 2>&1
     local api_end=$(date +%s%N)
     local api_latency=$(( (api_end - api_start) / 1000000 ))  # Convert to milliseconds
-    
+
     echo "   API Response Time: ${api_latency}ms"
     
     # CLI performance test
