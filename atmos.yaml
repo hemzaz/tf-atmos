@@ -41,6 +41,21 @@ logs:
 settings:
   list_merge_strategy: replace
 
+# Native CI (GitHub Actions): job summaries, $GITHUB_OUTPUT variables,
+# commit statuses and upserted PR plan comments. Inactive outside CI.
+ci:
+  enabled: true
+  output:
+    enabled: true
+  summary:
+    enabled: true
+  checks:
+    enabled: true
+    context_prefix: atmos
+  comments:
+    enabled: true
+    behavior: upsert
+
 schemas:
   atmos:
     manifest: "https://atmos.tools/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"
