@@ -147,8 +147,8 @@ resource "aws_apigatewayv2_api" "main" {
     for_each = var.api_gateway_cors_enabled ? [1] : []
     content {
       allow_origins = var.api_gateway_cors_allow_origins
-      allow_methods = ["*"]
-      allow_headers = ["*"]
+      allow_methods = var.api_gateway_cors_allow_methods
+      allow_headers = var.api_gateway_cors_allow_headers
     }
   }
 
