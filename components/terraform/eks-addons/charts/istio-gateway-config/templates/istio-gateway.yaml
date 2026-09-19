@@ -21,8 +21,8 @@ spec:
       name: https
       protocol: HTTPS
     hosts:
-    - "*.${domain_name}"
-    - "${domain_name}"
+    - "*.{{ .Values.domainName }}"
+    - "{{ .Values.domainName }}"
     tls:
       mode: SIMPLE
       privateKey: /etc/istio/ingressgateway-certs/tls.key
@@ -36,7 +36,7 @@ metadata:
   namespace: istio-system
 spec:
   hosts:
-  - "dashboard.${domain_name}"
+  - "dashboard.{{ .Values.domainName }}"
   gateways:
   - istio-ingress/default-gateway
   http:
