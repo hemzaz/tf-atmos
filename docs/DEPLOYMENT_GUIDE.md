@@ -1,762 +1,227 @@
-# Complete Deployment Guide
+# Deployment Guide
 
-## Table of Contents
+How to take one of the three stacks (`fnx-dev-testenv-01`, `fnx-staging-staging-01`,
+`fnx-prod-production`) from nothing to deployed, and how to roll back.
 
-1. [Prerequisites](#prerequisites)
-2. [AWS Account Setup](#aws-account-setup)
-3. [Backend Initialization](#backend-initialization)
-4. [VPC Deployment](#vpc-deployment)
-5. [Security Baseline](#security-baseline)
-6. [EKS Cluster Deployment](#eks-cluster-deployment)
-7. [Application Components](#application-components)
-8. [Validation & Testing](#validation--testing)
-9. [Post-Deployment Tasks](#post-deployment-tasks)
-10. [Rollback Procedures](#rollback-procedures)
-11. [Troubleshooting](#troubleshooting)
+1. [Tooling](#tooling)
+2. [Manual prerequisites before first apply](#manual-prerequisites-before-first-apply)
+3. [Validate offline](#validate-offline)
+4. [Bootstrap the state backend](#bootstrap-the-state-backend)
+5. [Deploy the stack](#deploy-the-stack)
+6. [Deploy through CI/CD](#deploy-through-cicd)
+7. [Verify](#verify)
+8. [Rollback](#rollback)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Prerequisites
+## Tooling
 
-### Required Tools
+| Tool | Version | Notes |
+|------|---------|-------|
+| Atmos | >= 1.229.0 | Enforced by `atmos.yaml` (`version.constraint`, fatal) |
+| Terraform | 1.16.3 | Installed by Atmos from `terraform.dependencies.tools` in `stacks/orgs/fnx/_defaults.yaml` |
+| AWS provider | `~> 6.65` | Root modules; shared modules accept `>= 6.0, < 7.0` |
+| kubectl | any recent | Only to inspect EKS clusters after deployment |
 
-| Tool | Minimum Version | Installation |
-|------|----------------|--------------|
-| Terraform | 1.11.0+ | `brew install terraform` |
-| Atmos CLI | 1.163.0+ | `brew install cloudposse/tap/atmos` |
-| AWS CLI | 2.0+ | `brew install awscli` |
-| Python | 3.11+ | `brew install python@3.11` |
-| kubectl | 1.28+ | `brew install kubectl` |
-| Helm | 3.12+ | `brew install helm` |
-
-### Verify Installation
+Workflows that need tflint, yamllint, trivy, checkov, the AWS CLI or jq declare them in
+`dependencies.tools`, and Atmos installs them on first use.
 
 ```bash
-# Check all tool versions
-terraform version
 atmos version
-aws --version
-python3 --version
-kubectl version --client
-helm version
-```
-
-### Prerequisites Checklist
-
-- [ ] AWS account with administrator access
-- [ ] AWS CLI configured with credentials
-- [ ] S3 bucket for Terraform state (or ability to create one)
-- [ ] DynamoDB table for state locking (or ability to create one)
-- [ ] Domain name registered in Route 53 (optional, for DNS)
-- [ ] ACM certificate for your domain (optional, for HTTPS)
-
----
-
-## AWS Account Setup
-
-### 1. Configure AWS CLI
-
-```bash
-# Configure AWS credentials
-aws configure
-
-# Verify access
-aws sts get-caller-identity
-
-# Expected output:
-# {
-#     "UserId": "AIDAI...",
-#     "Account": "123456789012",
-#     "Arn": "arn:aws:iam::123456789012:user/your-user"
-# }
-```
-
-### 2. Set Environment Variables
-
-Create a `.env` file in the project root:
-
-```bash
-# AWS Configuration
-export AWS_REGION=us-east-1
-export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
-# Terraform State Backend
-export TF_STATE_BUCKET=terraform-state-${AWS_ACCOUNT_ID}
-export TF_STATE_DYNAMODB_TABLE=terraform-state-lock
-export TF_STATE_REGION=us-east-1
-
-# Project Configuration
-export TENANT=mycompany
-export ACCOUNT=dev
-export ENVIRONMENT=use1
-export VPC_CIDR=10.0.0.0/16
-
-# Load environment
-source .env
-```
-
-### 3. Verify IAM Permissions
-
-Your AWS user/role needs these permissions:
-
-```bash
-# Check IAM permissions
-./scripts/check-iam-permissions.sh
-
-# Required permissions:
-# - EC2: Full access for VPC, subnets, security groups
-# - EKS: Full access for cluster management
-# - IAM: Create roles and policies
-# - S3: Create and manage buckets
-# - DynamoDB: Create and manage tables
-# - CloudWatch: Create log groups and metrics
-# - KMS: Create and manage keys
+atmos list stacks
+atmos list workflows
 ```
 
 ---
 
-## Backend Initialization
+## Manual prerequisites before first apply
 
-### 1. Bootstrap Backend Infrastructure
+The stack configuration still contains placeholders. Replace every item below before running
+`apply` or `deploy` against a real account.
 
-The backend stores Terraform state and provides state locking.
+| Input | Where | Placeholder today |
+|-------|-------|-------------------|
+| Workload account IDs | `settings.environment.account_id` in `stacks/orgs/fnx/{dev,staging,prod}/_defaults.yaml`; `settings.environment.aws_account_id` in `staging-01.yaml` and `production.yaml` | `123456789012` |
+| Dev account ID | `aws_account_id` in `testenv-01.yaml` is read from the `AWS_ACCOUNT_ID` environment variable | set `AWS_ACCOUNT_ID` when running Atmos for dev |
+| Management account ID | `settings.environment.management_account_id` in `stacks/orgs/fnx/_defaults.yaml` (backend role ARN and IAM trust) | `123456789012` |
+| AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` | `o-xxxxxxxxxx` |
+| Domains and hosted zones | `domain_name` and `hosted_zone_id` in each stack's `components/globals.yaml`; `root_domain` and zone names in `components/networking.yaml` | `example.com`, `fnx.example.com`, `Z1234567890EXAMPLE`, ... |
+| Alert recipients | `alarm_email_subscriptions` of the monitoring instances in each stack's `components/services.yaml`, and the notification lists in `components/globals.yaml`. The monitoring component creates the SNS topics (`create_sns_topic: true`); every address must confirm its subscription | `*@example.com` |
+| Production alarm SNS topic ARNs | Prod alarms that must reach an existing SNS topic (paging or on-call tooling) need that topic's ARN, e.g. the `rds` component's `sns_topic_arn` input | not set anywhere |
+| KMS key users | `key_users` (and `key_administrators`) of `kms/main` in `stacks/orgs/fnx/prod/eu-west-2/production/components/security.yaml`. The roles must exist before apply; `iam/ci` and `iam/eks-node` are disabled, so use the real EKS node role and CI role ARNs | `production-eks-node-role`, `production-ci-role`, `Admin` |
+| Backend role | `fnx-terraform-backend-role` in the management account. Every backend configuration (including `backend/main`'s own) assumes it, so it must exist and trust your deploy and plan roles before the first `terraform init` | created by the `backend` component |
+| GitHub Environments | One Environment per stack, named exactly like the stack, with `vars.AWS_ROLE_ARN` (deploy role). Deployment branches: the default branch only. Add required reviewers to `fnx-prod-production` | none |
+| GitHub repository variables | `AWS_PLAN_ROLE_ARN` (read-only plan role for PR plans, drift detection and DR checks); optional `ATMOS_VERSION`, `AWS_REGION` | none |
+| OIDC trust | Deploy role: `sub = repo:<org>/<repo>:environment:<stack>`. Plan role: `sub = repo:<org>/<repo>:pull_request` and `repo:<org>/<repo>:ref:refs/heads/<default branch>`. Both: `aud = sts.amazonaws.com`. See the headers of `.github/workflows/terraform-ci.yml` and `terraform-cd.yml` | none |
+| Deploy marker tags | One `deployed/<stack>` tag per stack. It must point at a commit **after** the stack-reconcile merge (`68f8153`), otherwise the first CD run diffs against pre-modernization config. Add a tag ruleset so only GitHub Actions can move `refs/tags/deployed/**` | none |
+| Existing state | If state already exists under an older bucket or key layout, migrate it first (see below) | n/a |
+
+Bootstrap the tags once per stack:
 
 ```bash
-# Initialize backend (S3 bucket + DynamoDB table)
-atmos workflow bootstrap-backend -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
+git tag deployed/fnx-dev-testenv-01 <last-deployed-sha>
+git push origin deployed/fnx-dev-testenv-01
 ```
 
-This creates:
-- S3 bucket: `terraform-state-${AWS_ACCOUNT_ID}` with versioning and encryption
-- DynamoDB table: `terraform-state-lock` with LockID key
-- KMS key for state encryption
-- Bucket policies and lifecycle rules
+### Migrating existing state
 
-### 2. Verify Backend
+The backend is now one S3 bucket, `fnx-terraform-state`, with native lockfiles and no DynamoDB
+table. Atmos computes each instance's state location. To see it:
 
 ```bash
-# Check S3 bucket
-aws s3 ls s3://${TF_STATE_BUCKET}/
-
-# Check DynamoDB table
-aws dynamodb describe-table --table-name ${TF_STATE_DYNAMODB_TABLE}
-
-# Validate backend configuration
-atmos terraform validate backend -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
+atmos describe component vpc/main -s fnx-dev-testenv-01   # see .backend (bucket, workspace_key_prefix) and .workspace
 ```
 
-### 3. Backend Configuration
+If an instance already has state under a different bucket or key, copy that state to the new
+location before the first plan. Otherwise Terraform starts from an empty state and plans to
+recreate the resources. One way to do it per instance:
 
-The backend is configured in `stacks/catalog/backend/defaults.yaml`:
-
-```yaml
-backend_type: s3
-backend:
-  s3:
-    encrypt: true
-    bucket: terraform-state-${AWS_ACCOUNT_ID}
-    key: terraform.tfstate
-    dynamodb_table: terraform-state-lock
-    region: us-east-1
+```bash
+aws s3 cp s3://<old-bucket>/<old-key> ./old.tfstate
+atmos terraform state push vpc/main -s fnx-dev-testenv-01 ./old.tfstate
+atmos terraform plan vpc/main -s fnx-dev-testenv-01   # expect no resource replacements
 ```
+
+The `network/*` instances now use the `dns` root module. State written by a different module does
+not match its resource addresses; import the existing zones instead
+(`atmos workflow import -f import -s <stack>`).
 
 ---
 
-## VPC Deployment
+## Validate offline
 
-### 1. Plan VPC Deployment
-
-```bash
-# Review VPC configuration
-cat stacks/catalog/vpc/defaults.yaml
-
-# Plan VPC changes
-atmos terraform plan vpc -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-```
-
-### 2. Deploy VPC
+None of these need AWS credentials:
 
 ```bash
-# Deploy VPC and networking
-atmos terraform apply vpc -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Deployment creates:
-# - VPC with specified CIDR block
-# - 3 public subnets (one per AZ)
-# - 3 private subnets (one per AZ)
-# - 3 database subnets (one per AZ)
-# - Internet Gateway
-# - NAT Gateways (1 or 3 depending on environment)
-# - Route tables
-# - VPC Flow Logs
+atmos validate config
+atmos validate stacks
+atmos workflow validate-all -f validate-enhanced   # schema, stacks, yamllint, fmt, terraform validate per root module
+atmos workflow lint -f lint                        # fmt, yamllint, tflint, trivy
 ```
 
-### 3. Verify VPC
-
-```bash
-# Get VPC outputs
-atmos terraform output vpc -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Verify VPC resources
-aws ec2 describe-vpcs --filters "Name=tag:Environment,Values=${ENVIRONMENT}"
-aws ec2 describe-subnets --filters "Name=tag:Environment,Values=${ENVIRONMENT}"
-
-# Test connectivity
-aws ec2 describe-nat-gateways --filter "Name=tag:Environment,Values=${ENVIRONMENT}"
-```
-
-### 4. VPC Configuration Examples
-
-**Development Environment:**
-```yaml
-vars:
-  vpc_cidr: 10.0.0.0/16
-  public_subnets_cidr:
-    - 10.0.1.0/24
-    - 10.0.2.0/24
-    - 10.0.3.0/24
-  private_subnets_cidr:
-    - 10.0.10.0/24
-    - 10.0.11.0/24
-    - 10.0.12.0/24
-  nat_gateway_count: 1  # Cost optimization
-  enable_flow_logs: true
-```
-
-**Production Environment:**
-```yaml
-vars:
-  vpc_cidr: 10.2.0.0/16
-  public_subnets_cidr:
-    - 10.2.1.0/24
-    - 10.2.2.0/24
-    - 10.2.3.0/24
-  private_subnets_cidr:
-    - 10.2.10.0/24
-    - 10.2.11.0/24
-    - 10.2.12.0/24
-  nat_gateway_count: 3  # High availability
-  enable_flow_logs: true
-```
+`atmos workflow validate -f validate -s <stack>` runs the same checks scoped to one stack.
 
 ---
 
-## Security Baseline
+## Bootstrap the state backend
 
-### 1. Deploy IAM Roles
-
-```bash
-# Plan IAM resources
-atmos terraform plan iam -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Deploy IAM roles and policies
-atmos terraform apply iam -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-```
-
-### 2. Deploy Security Groups
+`workflows/bootstrap.yaml` creates the bucket with `atmos terraform backend create backend/main`
+(versioning, encryption, public-access block), brings it under Terraform with the `backend`
+component, and then deploys the IAM and VPC instances. Each apply step asks for confirmation.
 
 ```bash
-# Plan security groups
-atmos terraform plan securitygroup -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Deploy security groups
-atmos terraform apply securitygroup -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Created security groups:
-# - eks-cluster-sg: EKS cluster security group
-# - eks-node-sg: EKS worker nodes
-# - rds-sg: RDS database instances
-# - alb-sg: Application Load Balancer
-# - bastion-sg: Bastion hosts (if enabled)
+atmos workflow full -f bootstrap -s fnx-dev-testenv-01           # backend, IAM, VPCs
+atmos workflow backend-only -f bootstrap -s fnx-dev-testenv-01   # backend only
+atmos workflow verify -f bootstrap -s fnx-dev-testenv-01         # backend describe + outputs
 ```
 
-### 3. Configure Secrets Manager
-
-```bash
-# Deploy secrets manager
-atmos terraform apply secretsmanager -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Store initial secrets
-aws secretsmanager create-secret \
-  --name /${ENVIRONMENT}/database/master-password \
-  --secret-string "$(openssl rand -base64 32)"
-
-aws secretsmanager create-secret \
-  --name /${ENVIRONMENT}/app/api-keys \
-  --secret-string '{}'
-```
-
-### 4. Enable AWS Config & GuardDuty
-
-```bash
-# Enable AWS Config for compliance
-aws configservice put-configuration-recorder \
-  --configuration-recorder name=default,roleARN=arn:aws:iam::${AWS_ACCOUNT_ID}:role/config-role \
-  --recording-group allSupported=true,includeGlobalResourceTypes=true
-
-# Enable GuardDuty for threat detection
-aws guardduty create-detector --enable
-```
+All three stacks use the same bucket name, `fnx-terraform-state`, reached through
+`fnx-terraform-backend-role` in the management account. S3 bucket names are global, so this is a
+single bucket. Every stack still defines a `backend/main` instance for it (and the foundation
+layer below includes it); create and manage the bucket from one stack only, and expect
+`backend/main` in the other stacks to conflict with it.
 
 ---
 
-## EKS Cluster Deployment
+## Deploy the stack
 
-### 1. Plan EKS Deployment
+`workflows/deploy-full-stack.yaml` deploys a stack in layers. Each layer selects instances by
+their root module (`metadata.component`), plans them, shows the plans, asks for confirmation and
+applies exactly those planfiles (`terraform deploy --from-plan`). Within a layer, Atmos orders
+instances by `dependencies.components`.
 
-```bash
-# Review EKS configuration
-cat stacks/orgs/${TENANT}/${ACCOUNT}/${REGION}/${ENVIRONMENT}/eks.yaml
-
-# Plan EKS cluster
-atmos terraform plan eks -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-```
-
-### 2. Deploy EKS Cluster
-
-```bash
-# Deploy EKS cluster (takes 15-20 minutes)
-atmos terraform apply eks -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Monitor deployment progress
-watch -n 10 aws eks describe-cluster \
-  --name ${ENVIRONMENT}-primary \
-  --query 'cluster.status'
-```
-
-### 3. Configure kubectl
+| Layer | Workflow | Root modules |
+|-------|----------|--------------|
+| foundation | `deploy-foundation` | `backend`, `iam` |
+| networking | `deploy-networking` | `vpc`, `dns`, `securitygroup` |
+| security | `deploy-security` | `acm`, `secretsmanager`, `security-monitoring` |
+| compute | `deploy-compute` | `eks`, `ec2`, `ecs` |
+| platform | `deploy-platform` | `eks-addons`, `external-secrets` |
+| data | `deploy-data` | `rds`, `backup` |
+| services | `deploy-services` | `apigateway`, `lambda`, `eks-backend-services` |
+| monitoring | `deploy-monitoring` | `monitoring`, `cost-optimization` |
 
 ```bash
-# Update kubeconfig
-aws eks update-kubeconfig \
-  --name ${ENVIRONMENT}-primary \
-  --region ${AWS_REGION}
-
-# Verify connection
-kubectl cluster-info
-kubectl get nodes
-
-# Expected output:
-# NAME                           STATUS   ROLES    AGE   VERSION
-# ip-10-0-10-123.ec2.internal   Ready    <none>   5m    v1.28.0-eks-abcd123
-# ip-10-0-11-234.ec2.internal   Ready    <none>   5m    v1.28.0-eks-abcd123
+atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01                 # all layers
+atmos workflow deploy-networking -f deploy-full-stack -s fnx-dev-testenv-01      # one layer
 ```
 
-### 4. Deploy EKS Add-ons
+The layers do not include `kms`. In production, EKS, EC2 and RDS read the key ARN from
+`kms/main`, so deploy it before the compute layer:
 
 ```bash
-# Plan add-ons
-atmos terraform plan eks-addons -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Deploy add-ons (ALB controller, Karpenter, monitoring)
-atmos terraform apply eks-addons -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Verify add-ons
-kubectl get pods -n kube-system
-kubectl get pods -n karpenter
-kubectl get pods -n aws-load-balancer-controller
+atmos terraform deploy kms/main -s fnx-prod-production
 ```
 
-### 5. Verify EKS Setup
+Other ways to deploy:
 
 ```bash
-# Check cluster health
-kubectl get --raw='/readyz?verbose'
-
-# Verify node groups
-aws eks list-nodegroups --cluster-name ${ENVIRONMENT}-primary
-
-# Check OIDC provider
-aws eks describe-cluster \
-  --name ${ENVIRONMENT}-primary \
-  --query 'cluster.identity.oidc.issuer'
+atmos workflow apply -f apply-environment -s <stack>      # whole stack: plan, one confirmation, deploy
+atmos terraform deploy <component> -s <stack>             # one instance
+atmos workflow component -f deploy-application -s <stack> # one instance, name entered at a prompt
 ```
+
+Disabled instances (`metadata.enabled: false`) are skipped: `iam/ci`, `iam/eks-node`,
+`iam/eks-cluster`, `infrastructure/*`, `vpc-flow-logs-bucket`, and in prod `guardduty/main`,
+`securityhub/main` and `network/vpc-peering`. No stack deploys `idp-platform`.
 
 ---
 
-## Application Components
+## Deploy through CI/CD
 
-### 1. Deploy RDS Database
+After the GitHub prerequisites above are in place:
 
-```bash
-# Plan RDS deployment
-atmos terraform plan rds -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
+- **Pull requests** (`terraform-ci.yml`): lint and validation, a security gate that fails on new
+  HIGH/CRITICAL Trivy/Checkov findings (findings already in `.trivyignore.yaml` and
+  `.checkov.baseline` are tolerated), and a plan of every affected component
+  (`atmos describe affected --include-dependents`) with the read-only plan role. Plan summaries
+  are posted as PR comments.
+- **Merges to the default branch** (`terraform-cd.yml`): for each stack in turn (dev, staging,
+  prod), runs `atmos terraform deploy --affected` against the stack's `deployed/<stack>` tag
+  inside the stack's GitHub Environment, then moves the tag to the deployed commit.
+- **Manual runs**: `terraform-cd.yml` can plan or deploy one stack (optionally one component)
+  from the default branch.
 
-# Deploy RDS (takes 10-15 minutes)
-atmos terraform apply rds -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Get database endpoint
-atmos terraform output rds -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT} | \
-  jq -r '.db_endpoint.value'
-```
-
-### 2. Deploy API Gateway
-
-```bash
-# Deploy API Gateway
-atmos terraform apply apigateway -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Get API Gateway URL
-atmos terraform output apigateway -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-```
-
-### 3. Deploy Lambda Functions
-
-```bash
-# Deploy Lambda functions
-atmos terraform apply lambda -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Test Lambda function
-aws lambda invoke \
-  --function-name ${ENVIRONMENT}-health-check \
-  --region ${AWS_REGION} \
-  /tmp/response.json
-```
-
-### 4. Configure DNS
-
-```bash
-# Deploy DNS records
-atmos terraform apply dns -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Verify DNS records
-dig +short ${ENVIRONMENT}.yourdomain.com
-```
+Destroy is not exposed in CI. Use `atmos workflow destroy -f destroy-environment` locally.
 
 ---
 
-## Validation & Testing
-
-### 1. Run Complete Validation
+## Verify
 
 ```bash
-# Validate all components
-atmos workflow validate tenant=${TENANT} account=${ACCOUNT} environment=${ENVIRONMENT}
-
-# Expected output: All validations pass
+atmos workflow verify -f bootstrap -s <stack>                  # backend
+atmos terraform output vpc/main -s <stack>
+atmos terraform output eks/main -s <stack>
+atmos workflow drift-detection -f drift-detection -s <stack>   # should report no changes
 ```
 
-### 2. Test Network Connectivity
-
-```bash
-# Test from EKS pod to RDS
-kubectl run test-pod --image=mysql:8.0 -it --rm -- \
-  mysql -h <rds-endpoint> -u admin -p
-
-# Test internet connectivity from private subnet
-kubectl run test-pod --image=curlimages/curl -it --rm -- \
-  curl -I https://www.google.com
-```
-
-### 3. Test Application Health
-
-```bash
-# Deploy test application
-kubectl apply -f examples/test-app.yaml
-
-# Check deployment
-kubectl get deployments
-kubectl get services
-
-# Test application endpoint
-curl https://${ENVIRONMENT}.yourdomain.com/health
-```
-
-### 4. Verify Monitoring
-
-```bash
-# Check CloudWatch dashboards
-aws cloudwatch list-dashboards
-
-# View EKS cluster metrics
-kubectl top nodes
-kubectl top pods --all-namespaces
-
-# Check Prometheus metrics (if installed)
-kubectl port-forward -n monitoring svc/prometheus 9090:9090
-# Open http://localhost:9090
-```
+To reach an EKS cluster, take the cluster name from `atmos terraform output eks/main -s <stack>`
+and run `aws eks update-kubeconfig --name <cluster> --region eu-west-2`.
 
 ---
 
-## Post-Deployment Tasks
+## Rollback
 
-### 1. Configure Backups
-
-```bash
-# Enable automated backups for RDS
-aws rds modify-db-instance \
-  --db-instance-identifier ${ENVIRONMENT}-primary \
-  --backup-retention-period 7 \
-  --preferred-backup-window "03:00-04:00"
-
-# Configure Velero for EKS backups
-helm install velero vmware-tanzu/velero \
-  --namespace velero \
-  --create-namespace \
-  --set-file credentials.secretContents.cloud=./credentials-velero \
-  --set configuration.provider=aws \
-  --set configuration.backupStorageLocation.bucket=${VELERO_BUCKET} \
-  --set configuration.backupStorageLocation.config.region=${AWS_REGION}
-```
-
-### 2. Set Up Monitoring Alerts
-
-```bash
-# Deploy monitoring stack
-atmos terraform apply monitoring -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Configure CloudWatch alarms
-aws cloudwatch put-metric-alarm \
-  --alarm-name ${ENVIRONMENT}-high-cpu \
-  --alarm-description "Alert when CPU exceeds 80%" \
-  --metric-name CPUUtilization \
-  --namespace AWS/EC2 \
-  --statistic Average \
-  --period 300 \
-  --threshold 80 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2
-```
-
-### 3. Configure Cost Monitoring
-
-```bash
-# Create budget alerts
-aws budgets create-budget \
-  --account-id ${AWS_ACCOUNT_ID} \
-  --budget file://budget.json \
-  --notifications-with-subscribers file://notifications.json
-
-# Enable Cost Explorer
-aws ce get-cost-and-usage \
-  --time-period Start=2025-01-01,End=2025-01-31 \
-  --granularity MONTHLY \
-  --metrics BlendedCost
-```
-
-### 4. Document Configuration
-
-```bash
-# Export all outputs to documentation
-./scripts/export-outputs.sh > docs/deployment-outputs.md
-
-# Generate architecture diagrams
-atmos describe stacks --format=json | \
-  python3 scripts/generate-diagram.py > docs/current-architecture.md
-```
-
-### 5. Team Access
-
-```bash
-# Add team members to AWS account
-aws iam create-user --user-name developer1
-aws iam attach-user-policy \
-  --user-name developer1 \
-  --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
-
-# Configure kubectl access
-kubectl create clusterrolebinding developer1-admin \
-  --clusterrole=cluster-admin \
-  --user=developer1
-```
-
----
-
-## Rollback Procedures
-
-### Emergency Rollback Checklist
-
-- [ ] Identify failed component
-- [ ] Check Terraform state
-- [ ] Review CloudWatch logs
-- [ ] Backup current state
-- [ ] Execute rollback
-- [ ] Verify rollback success
-- [ ] Document incident
-
-### Rollback VPC Changes
-
-```bash
-# CAUTION: This will destroy VPC resources
-# Ensure no dependencies exist
-
-# Destroy VPC
-atmos terraform destroy vpc -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Redeploy previous version
-git checkout <previous-commit>
-atmos terraform apply vpc -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-```
-
-### Rollback EKS Changes
-
-```bash
-# Scale down node groups first
-aws eks update-nodegroup-config \
-  --cluster-name ${ENVIRONMENT}-primary \
-  --nodegroup-name system \
-  --scaling-config minSize=0,maxSize=0,desiredSize=0
-
-# Rollback EKS
-atmos terraform destroy eks -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-# Redeploy from previous state
-git checkout <previous-commit>
-atmos terraform apply eks -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-```
-
-### Rollback Application Changes
-
-```bash
-# Kubernetes rollback
-kubectl rollout undo deployment/<deployment-name>
-
-# Verify rollback
-kubectl rollout status deployment/<deployment-name>
-```
-
-### Restore from Terraform State
-
-```bash
-# List state versions
-aws s3api list-object-versions \
-  --bucket ${TF_STATE_BUCKET} \
-  --prefix ${COMPONENT}/terraform.tfstate
-
-# Restore previous state version
-aws s3api get-object \
-  --bucket ${TF_STATE_BUCKET} \
-  --key ${COMPONENT}/terraform.tfstate \
-  --version-id <version-id> \
-  terraform.tfstate.backup
-
-# Copy back
-aws s3 cp terraform.tfstate.backup \
-  s3://${TF_STATE_BUCKET}/${COMPONENT}/terraform.tfstate
-```
+- **Configuration change**: revert the commit and merge; CD redeploys the affected components.
+  Locally: `atmos terraform deploy <component> -s <stack>` from the reverted checkout.
+- **State**: the state bucket is versioned. List the versions of one component's state with
+  `STACK=<stack> COMPONENT_PREFIX=<component>/ atmos workflow recover-state -f disaster-recovery`
+  and restore a version as described in the [Operations Guide](./OPERATIONS_GUIDE.md#state-recovery).
+- **Whole stack**: `atmos workflow destroy -f destroy-environment` (you type the stack name to
+  confirm) removes every component in reverse dependency order.
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+| Symptom | Cause and fix |
+|---------|---------------|
+| `This repository requires Atmos >= 1.229.0` | Upgrade Atmos |
+| `init` fails to assume `fnx-terraform-backend-role` | The role does not exist yet, or your credentials are not trusted by it. See [Manual prerequisites](#manual-prerequisites-before-first-apply) |
+| `Error acquiring the state lock` | Another run holds the lockfile. `STACK=<stack> atmos workflow list-locks -f state-operations` shows it; `atmos workflow force-unlock -f state-operations -s <stack>` releases it once you are sure no run is active |
+| `!terraform.state` returns nothing | The referenced component has not been deployed yet in that stack. Deploy in layer order |
+| `idp-platform is unsupported` | Expected; see `components/terraform/idp-platform/README.md` |
+| Plan wants to recreate existing resources | State was not migrated to the new backend layout; see [Migrating existing state](#migrating-existing-state) |
 
-#### Issue 1: Backend Initialization Fails
-
-```bash
-# Error: Failed to create S3 bucket
-# Solution: Check IAM permissions
-aws iam get-user-policy --user-name $(aws sts get-caller-identity --query Arn --output text | cut -d'/' -f2) --policy-name S3FullAccess
-
-# Solution: Manually create bucket
-aws s3 mb s3://${TF_STATE_BUCKET} --region ${AWS_REGION}
-aws s3api put-bucket-versioning \
-  --bucket ${TF_STATE_BUCKET} \
-  --versioning-configuration Status=Enabled
-```
-
-#### Issue 2: VPC Deployment Fails
-
-```bash
-# Error: Insufficient subnet space
-# Solution: Adjust CIDR blocks in configuration
-
-# Check available CIDR space
-aws ec2 describe-vpcs --filters "Name=cidr,Values=10.0.0.0/16"
-
-# Solution: Use different CIDR range
-export VPC_CIDR=10.1.0.0/16
-```
-
-#### Issue 3: EKS Cluster Creation Fails
-
-```bash
-# Error: Cluster creation failed
-# Check cluster status
-aws eks describe-cluster --name ${ENVIRONMENT}-primary
-
-# Common solutions:
-# 1. Ensure subnets span 2+ AZs
-aws ec2 describe-subnets --subnet-ids <subnet-ids> \
-  --query 'Subnets[*].AvailabilityZone'
-
-# 2. Check security group rules
-aws ec2 describe-security-groups --group-ids <sg-id>
-
-# 3. Verify IAM role trust relationship
-aws iam get-role --role-name ${ENVIRONMENT}-eks-cluster-role
-```
-
-#### Issue 4: kubectl Cannot Connect
-
-```bash
-# Error: Unable to connect to the server
-# Solution: Update kubeconfig
-aws eks update-kubeconfig \
-  --name ${ENVIRONMENT}-primary \
-  --region ${AWS_REGION} \
-  --alias ${ENVIRONMENT}
-
-# Verify AWS credentials
-aws sts get-caller-identity
-
-# Check cluster endpoint
-aws eks describe-cluster \
-  --name ${ENVIRONMENT}-primary \
-  --query 'cluster.endpoint'
-```
-
-#### Issue 5: Terraform State Lock
-
-```bash
-# Error: State locked
-# Check lock status
-aws dynamodb get-item \
-  --table-name ${TF_STATE_DYNAMODB_TABLE} \
-  --key '{"LockID": {"S": "${COMPONENT}/terraform.tfstate"}}'
-
-# Force unlock (use with caution)
-terraform force-unlock <lock-id>
-```
-
-### Getting Help
-
-1. Check logs:
-   ```bash
-   # Terraform logs
-   export TF_LOG=DEBUG
-   atmos terraform plan vpc -s ${TENANT}-${ACCOUNT}-${ENVIRONMENT}
-
-   # CloudWatch logs
-   aws logs tail /aws/eks/${ENVIRONMENT}-primary/cluster --follow
-   ```
-
-2. Review documentation:
-   - Component README: `/components/terraform/<component>/README.md`
-   - Architecture docs: `/docs/architecture/`
-   - Operations guide: `/docs/OPERATIONS_GUIDE.md`
-
-3. Contact support:
-   - File an issue in the repository
-   - Check FAQ: `/docs/FAQ.md`
-   - Review troubleshooting: `/docs/operations/TROUBLESHOOTING.md`
-
----
-
-## Next Steps
-
-After successful deployment:
-
-1. Review the [Operations Guide](./OPERATIONS_GUIDE.md) for day-to-day management
-2. Set up CI/CD pipelines (see [CI/CD Integration Guide](./workflows/cicd-integration-guide.md))
-3. Configure monitoring dashboards (see [Monitoring Guide](./components/monitoring-guide.md))
-4. Implement disaster recovery procedures (see [DR Guide](./operations/disaster-recovery-guide.md))
-5. Schedule regular security audits
-
----
-
-**Document Version**: 1.0
-**Last Updated**: 2025-12-02
-**Maintained By**: Platform Team
-**Review Cycle**: Monthly
+See the [Operations Guide](./OPERATIONS_GUIDE.md) for day-2 tasks.

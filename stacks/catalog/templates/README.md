@@ -16,45 +16,55 @@ This directory contains production-ready stack templates for common infrastructu
 
 ### 1. Import a Template
 
-Create a new stack file that imports the template:
+Create a stack manifest under `stacks/orgs/` that imports the template. The stack name comes from
+`settings.context` (`name_template` in `atmos.yaml`), so this example is `fnx-prod-webapp-01`:
 
 ```yaml
-# stacks/orgs/myorg/prod/us-east-1.yaml
+# stacks/orgs/fnx/prod/eu-west-2/webapp-01.yaml
 import:
-  - catalog/templates/web-application
+  - catalog/_base/defaults
+  - mixins/tenant/fnx
+  - mixins/stage/prod
+  - mixins/region/eu-west-2
   - mixins/production
+  - orgs/fnx/prod/_defaults
+  - catalog/templates/web-application
+
+settings:
+  context:
+    tenant: fnx
+    stage: prod
+    environment: webapp-01
 
 vars:
-  tenant: myorg
-  account: prod
-  environment: production
-  region: us-east-1
+  region: eu-west-2
 
   # Required template variables
   app_domain_name: "myapp.example.com"
   route53_zone_id: "Z1234567890ABC"
-  app_container_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp:latest"
+  app_container_image: "123456789.dkr.ecr.eu-west-2.amazonaws.com/myapp:latest"
 ```
 
 ### 2. Preview Changes
 
 ```bash
-atmos terraform plan web-application/vpc -s myorg-prod-production
-atmos terraform plan web-application/rds -s myorg-prod-production
+atmos terraform plan web-application/vpc -s fnx-prod-webapp-01
+atmos terraform plan web-application/rds -s fnx-prod-webapp-01
 ```
 
 ### 3. Deploy
 
 ```bash
-atmos terraform apply web-application/vpc -s myorg-prod-production
-atmos terraform apply web-application/securitygroups -s myorg-prod-production
+atmos terraform deploy web-application/vpc -s fnx-prod-webapp-01
+atmos terraform deploy web-application/securitygroups -s fnx-prod-webapp-01
 # ... continue with remaining components
 ```
 
-Or use the workflow:
+Or use a workflow from `workflows/deploy-template.yaml`:
 
 ```bash
-atmos workflow deploy-web-application tenant=myorg account=prod environment=production
+atmos workflow deploy -f deploy-template -s fnx-prod-webapp-01          # choose, plan, confirm, deploy, verify
+atmos workflow deploy-web-app -f deploy-template -s fnx-prod-webapp-01  # quick deploy, no confirmation
 ```
 
 ---
@@ -476,13 +486,13 @@ Always deploy to development first:
 
 ```bash
 # Deploy dev
-atmos terraform apply web-application/vpc -s myorg-dev-dev
+atmos terraform deploy web-application/vpc -s fnx-dev-webapp-01
 
 # Test thoroughly, then staging
-atmos terraform apply web-application/vpc -s myorg-staging-staging
+atmos terraform deploy web-application/vpc -s fnx-staging-webapp-01
 
 # Finally production
-atmos terraform apply web-application/vpc -s myorg-prod-production
+atmos terraform deploy web-application/vpc -s fnx-prod-webapp-01
 ```
 
 ### 2. Use Environment-Specific Overrides
@@ -490,7 +500,7 @@ atmos terraform apply web-application/vpc -s myorg-prod-production
 Create environment-specific stack files:
 
 ```yaml
-# stacks/orgs/myorg/dev/web-app.yaml
+# stacks/orgs/fnx/dev/eu-west-2/webapp-01.yaml (plus the imports and settings.context shown above)
 import:
   - catalog/templates/web-application
   - mixins/development

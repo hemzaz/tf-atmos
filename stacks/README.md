@@ -1,92 +1,84 @@
 # Atmos Stacks
 
-This directory contains the infrastructure stack configurations for our AWS environments, organized using the Atmos framework.
+This directory contains the stack configurations for the `fnx` AWS environments, organized with
+Atmos.
+
+## Stacks
+
+Stack names come from `name_template` in `atmos.yaml`:
+`{{ .settings.context.tenant }}-{{ .settings.context.stage }}-{{ .settings.context.environment }}`.
+Only files under `orgs/` are stack manifests (`included_paths`); `_defaults.yaml` files and
+`components/` directories are imported, not stacks themselves.
+
+| Stack | Manifest |
+|-------|----------|
+| `fnx-dev-testenv-01` | `orgs/fnx/dev/eu-west-2/testenv-01.yaml` |
+| `fnx-staging-staging-01` | `orgs/fnx/staging/eu-west-2/staging-01.yaml` |
+| `fnx-prod-production` | `orgs/fnx/prod/eu-west-2/production.yaml` |
+
+```bash
+atmos list stacks
+atmos list components
+atmos describe component vpc/main -s fnx-dev-testenv-01
+```
 
 ## Stack Structure
 
-The project follows the hierarchical layout structure for Atmos stacks as recommended by the Atmos documentation:
-
 ```
 stacks/
-├── catalog/                # Reusable component configurations
-│   ├── acm/                # Certificate management
-│   │   ├── defaults.yaml   # Default component configuration
-│   │   └── disabled.yaml   # Disabled configuration
-│   ├── vpc/                # VPC networking
-│   │   ├── defaults.yaml   # Default component configuration
-│   │   ├── disabled.yaml   # Disabled configuration
-│   │   ├── dev.yaml        # Dev stage specific configuration
-│   │   ├── staging.yaml    # Staging stage specific configuration
-│   │   ├── prod.yaml       # Production stage specific configuration
-│   │   ├── ue2.yaml        # us-east-2 region specific configuration
-│   │   └── uw2.yaml        # us-west-2 region specific configuration
-│   └── ...                 # Other component configurations
-├── mixins/                 # Reusable configuration sets
-│   ├── tenant/             # Tenant-specific configuration
-│   │   ├── core.yaml       # Core tenant configuration
-│   │   └── fnx.yaml        # FNX tenant configuration
-│   ├── region/             # Region-specific configuration
-│   │   ├── us-east-2.yaml  # us-east-2 region configuration
-│   │   └── us-west-2.yaml  # us-west-2 region configuration  
-│   └── stage/              # Account stage configuration
-│       ├── dev.yaml        # Development stage configuration
-│       ├── staging.yaml    # Staging stage configuration
-│       └── prod.yaml       # Production stage configuration
-├── orgs/                   # Organization hierarchy
-│   ├── acme/               # ACME Organization 
-│   │   ├── _defaults.yaml  # Organization defaults
-│   │   └── plat/           # Platform tenant
-│   │       ├── _defaults.yaml          # Tenant defaults
-│   │       ├── dev/                    # Development account
-│   │       │   ├── _defaults.yaml      # Account defaults
-│   │       │   ├── us-east-2/          # us-east-2 region
-│   │       │   │   ├── _defaults.yaml  # Region defaults
-│   │       │   │   └── test-01/        # Environment directory
-│   │       │   │       ├── main.yaml   # Main environment config
-│   │       │   │       └── components/ # Component configurations
-│   │       │   │           ├── globals.yaml    # Global settings
-│   │       │   │           ├── networking.yaml # Network config
-│   │       │   │           ├── security.yaml   # Security config
-│   │       │   │           ├── compute.yaml    # Compute config
-│   │       │   │           └── services.yaml   # Services config
-│   │       │   └── us-west-2/          # us-west-2 region
-│   │       │       ├── _defaults.yaml  # Region defaults
-│   │       │       └── test-02/        # Another environment
-│   │       ├── staging/                # Staging account
-│   │       │   ├── _defaults.yaml      # Account defaults
-│   │       │   ├── us-east-2/          # us-east-2 region
-│   │       │   └── us-west-2/          # us-west-2 region
-│   │       └── prod/                   # Production account
-│   │           ├── _defaults.yaml      # Account defaults
-│   │           ├── us-east-2/          # us-east-2 region
-│   │           └── us-west-2/          # us-west-2 region
-│   └── fnx/                # FNX Organization 
-│       ├── _defaults.yaml  # Organization defaults
-│       └── dev/            # Development account
-│           ├── _defaults.yaml          # Account defaults
-│           └── eu-west-2/              # eu-west-2 region
-│               ├── _defaults.yaml      # Region defaults
-│               └── testenv-01/         # Environment directory
-│                   ├── main.yaml       # Main environment config
-│                   └── components/     # Component configurations
-│                       ├── globals.yaml    # Global settings
-│                       ├── networking.yaml # Network config
-│                       ├── security.yaml   # Security config
-│                       ├── compute.yaml    # Compute config
-│                       └── services.yaml   # Services config
+├── catalog/                    # Reusable component configurations
+│   ├── _base/defaults.yaml     # Base settings imported by every stack
+│   ├── <component>/
+│   │   ├── defaults.yaml       # Abstract component defaults
+│   │   └── disabled.yaml       # Disabled variant
+│   ├── vpc/{dev,staging,prod,ue2,uw2}.yaml   # Stage and region overrides for vpc
+│   ├── templates/              # Opt-in stack templates (see templates/README.md)
+│   └── _library/               # Module registry metadata
+├── mixins/
+│   ├── tenant/{core,fnx}.yaml
+│   ├── stage/{dev,staging,prod}.yaml
+│   ├── region/{eu-west-2,us-east-2,us-west-2}.yaml
+│   └── development.yaml, production.yaml
+└── orgs/fnx/
+    ├── _defaults.yaml          # Tags, Terraform version, S3 backend
+    └── <account>/              # dev, staging, prod
+        ├── _defaults.yaml      # Account defaults (account_id, ...)
+        └── eu-west-2/
+            ├── _defaults.yaml  # Region defaults
+            ├── <env>.yaml      # Stack manifest: imports, settings.context, settings.environment
+            └── <env>/components/
+                ├── globals.yaml     # Environment-wide settings
+                ├── networking.yaml  # vpc/*, network/* (dns root module)
+                ├── security.yaml    # iam/*, acm/*, secretsmanager/*, backend/main, kms/main (prod)
+                ├── compute.yaml     # eks/*, ec2/*, external-secrets/*
+                └── services.yaml    # apigateway/*, monitoring/*, infrastructure/* (disabled)
 ```
+
+## Configuration conventions
+
+- **Identity** lives in `settings.context` (`tenant`, `stage`, `environment`) and drives the stack
+  name. Environment-wide knobs (account IDs, domain, hosted zone, versions) live in
+  `settings.environment`. Components only receive the `vars` they declare.
+- **Cross-component values** use YAML functions such as `!terraform.state vpc/main .vpc_id`, not
+  `${...}` interpolation.
+- **Ordering** is declared with `dependencies.components`; multi-component commands follow it.
+- **Backend and Terraform version** are set once in `orgs/fnx/_defaults.yaml`: S3 bucket
+  `fnx-terraform-state`, native lockfiles (`use_lockfile: true`), Terraform 1.16.3 through
+  `terraform.dependencies.tools`.
+- **Disabling** an instance: `metadata.enabled: false`.
+- `settings.list_merge_strategy` is `replace` (set in `atmos.yaml`): a list in a more specific file
+  replaces the inherited list instead of being appended to it.
 
 ## Usage
 
-To deploy an environment:
-
 ```bash
-# For ACME organization
-atmos terraform apply vpc -s acme-plat-dev-us-east-2-test-01
-
-# For FNX organization
-atmos terraform apply vpc -s fnx-dev-eu-west-2-testenv-01
+atmos terraform plan vpc/main -s fnx-dev-testenv-01
+atmos terraform deploy vpc/main -s fnx-dev-testenv-01
+atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01
 ```
+
+See the [Deployment Guide](../docs/DEPLOYMENT_GUIDE.md) before the first apply: the stacks still
+contain placeholder account IDs, domains and alert addresses.
 
 ## Guidelines
 
@@ -99,16 +91,3 @@ atmos terraform apply vpc -s fnx-dev-eu-west-2-testenv-01
   3. Account/stage configuration
   4. Region configuration
   5. Environment-specific overrides
-
-## Components
-
-The main components included:
-
-- VPC and networking
-- EKS clusters and addons
-- Security groups
-- IAM roles and policies
-- Monitoring and logging
-- Certificate management
-- Secrets management
-- API Gateway
