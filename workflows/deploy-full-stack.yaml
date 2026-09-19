@@ -1,6 +1,9 @@
 # Layered deployment of a whole stack. Each layer selects components by their
 # Terraform root module (metadata.component); within a layer Atmos honors
-# dependencies.components ordering.
+# dependencies.components ordering. Every layer is planned (planfiles saved),
+# shown, confirmed, and then applied from exactly those planfiles
+# (`deploy --from-plan`); a layer is planned only after the previous layer is
+# applied, so it sees the earlier layers' state. Declining any confirm stops the run.
 #
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
@@ -8,42 +11,115 @@
 #   layers: foundation, networking, security, compute, platform, data, services, monitoring
 workflows:
   deploy:
-    description: Deploy the complete stack layer by layer (foundation -> monitoring)
+    description: Deploy the complete stack layer by layer (foundation -> monitoring), each layer planned, confirmed, then applied from its saved plan
     steps:
       - name: validate
         type: atmos
         command: validate stacks
-      - name: confirm
+      - name: plan-foundation
+        type: atmos
+        command: terraform plan --query '.metadata.component == "backend" or .metadata.component == "iam"'
+      - name: confirm_foundation
         type: confirm
-        prompt: Deploy all layers? Each layer is planned and applied in order (later layers read earlier layers' state)
+        prompt: Apply the foundation layer plan above?
         default: false
-      - name: guard
+      - name: guard-foundation
         type: shell
-        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+        command: test "{{ .steps.confirm_foundation.value }}" = "true" || { echo "Deployment cancelled before the foundation layer."; exit 1; }
       - name: deploy-foundation
         type: atmos
-        command: terraform deploy --query '.metadata.component == "backend" or .metadata.component == "iam"'
+        command: terraform deploy --from-plan --query '.metadata.component == "backend" or .metadata.component == "iam"'
+      - name: plan-networking
+        type: atmos
+        command: terraform plan --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
+      - name: confirm_networking
+        type: confirm
+        prompt: Apply the networking layer plan above?
+        default: false
+      - name: guard-networking
+        type: shell
+        command: test "{{ .steps.confirm_networking.value }}" = "true" || { echo "Deployment cancelled before the networking layer."; exit 1; }
       - name: deploy-networking
         type: atmos
-        command: terraform deploy --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
+        command: terraform deploy --from-plan --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
+      - name: plan-security
+        type: atmos
+        command: terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring"'
+      - name: confirm_security
+        type: confirm
+        prompt: Apply the security layer plan above?
+        default: false
+      - name: guard-security
+        type: shell
+        command: test "{{ .steps.confirm_security.value }}" = "true" || { echo "Deployment cancelled before the security layer."; exit 1; }
       - name: deploy-security
         type: atmos
-        command: terraform deploy --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring"'
+        command: terraform deploy --from-plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring"'
+      - name: plan-compute
+        type: atmos
+        command: terraform plan --query '.metadata.component == "eks" or .metadata.component == "ec2" or .metadata.component == "ecs"'
+      - name: confirm_compute
+        type: confirm
+        prompt: Apply the compute layer plan above?
+        default: false
+      - name: guard-compute
+        type: shell
+        command: test "{{ .steps.confirm_compute.value }}" = "true" || { echo "Deployment cancelled before the compute layer."; exit 1; }
       - name: deploy-compute
         type: atmos
-        command: terraform deploy --query '.metadata.component == "eks" or .metadata.component == "ec2" or .metadata.component == "ecs"'
+        command: terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ec2" or .metadata.component == "ecs"'
+      - name: plan-platform
+        type: atmos
+        command: terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "external-secrets"'
+      - name: confirm_platform
+        type: confirm
+        prompt: Apply the platform layer plan above?
+        default: false
+      - name: guard-platform
+        type: shell
+        command: test "{{ .steps.confirm_platform.value }}" = "true" || { echo "Deployment cancelled before the platform layer."; exit 1; }
       - name: deploy-platform
         type: atmos
-        command: terraform deploy --query '.metadata.component == "eks-addons" or .metadata.component == "external-secrets"'
+        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "external-secrets"'
+      - name: plan-data
+        type: atmos
+        command: terraform plan --query '.metadata.component == "rds" or .metadata.component == "backup"'
+      - name: confirm_data
+        type: confirm
+        prompt: Apply the data layer plan above?
+        default: false
+      - name: guard-data
+        type: shell
+        command: test "{{ .steps.confirm_data.value }}" = "true" || { echo "Deployment cancelled before the data layer."; exit 1; }
       - name: deploy-data
         type: atmos
-        command: terraform deploy --query '.metadata.component == "rds" or .metadata.component == "backup"'
+        command: terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "backup"'
+      - name: plan-services
+        type: atmos
+        command: terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "lambda" or .metadata.component == "eks-backend-services"'
+      - name: confirm_services
+        type: confirm
+        prompt: Apply the services layer plan above?
+        default: false
+      - name: guard-services
+        type: shell
+        command: test "{{ .steps.confirm_services.value }}" = "true" || { echo "Deployment cancelled before the services layer."; exit 1; }
       - name: deploy-services
         type: atmos
-        command: terraform deploy --query '.metadata.component == "apigateway" or .metadata.component == "lambda" or .metadata.component == "eks-backend-services"'
+        command: terraform deploy --from-plan --query '.metadata.component == "apigateway" or .metadata.component == "lambda" or .metadata.component == "eks-backend-services"'
+      - name: plan-monitoring
+        type: atmos
+        command: terraform plan --query '.metadata.component == "monitoring" or .metadata.component == "cost-optimization"'
+      - name: confirm_monitoring
+        type: confirm
+        prompt: Apply the monitoring layer plan above?
+        default: false
+      - name: guard-monitoring
+        type: shell
+        command: test "{{ .steps.confirm_monitoring.value }}" = "true" || { echo "Deployment cancelled before the monitoring layer."; exit 1; }
       - name: deploy-monitoring
         type: atmos
-        command: terraform deploy --query '.metadata.component == "monitoring" or .metadata.component == "cost-optimization"'
+        command: terraform deploy --from-plan --query '.metadata.component == "monitoring" or .metadata.component == "cost-optimization"'
       - type: toast
         level: success
         content: All layers deployed
