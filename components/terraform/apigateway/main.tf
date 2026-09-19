@@ -135,6 +135,7 @@ resource "aws_api_gateway_domain_name" "rest_domain" {
 
   domain_name              = var.domain_name
   regional_certificate_arn = var.certificate_arn
+  security_policy          = "TLS_1_2"
 
   endpoint_configuration {
     types = var.endpoint_type
@@ -335,6 +336,7 @@ resource "aws_api_gateway_integration" "integration" {
 
 # Route53 Record for custom domain
 resource "aws_route53_record" "api_domain" {
+  #checkov:skip=CKV2_AWS_23:False positive, the alias targets this module's API Gateway custom domain
   count = local.domain_enabled && var.zone_id != null ? 1 : 0
 
   zone_id = var.zone_id
@@ -436,6 +438,29 @@ resource "aws_wafv2_web_acl" "api_waf" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name_prefix}CommonRuleSetMetric"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # Blocks request patterns of known exploits such as Log4j (CVE-2021-44228)
+  rule {
+    name     = "AWSManagedRulesKnownBadInputsRuleSet"
+    priority = 20
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}KnownBadInputsRuleSetMetric"
       sampled_requests_enabled   = true
     }
   }

@@ -62,8 +62,8 @@ variable "cluster_version" {
 
 variable "cluster_endpoint_public_access" {
   type        = bool
-  description = "Enable public API server endpoint"
-  default     = true
+  description = "Enable public API server endpoint; requires cluster_endpoint_public_access_cidrs"
+  default     = false
 }
 
 variable "cluster_endpoint_public_access_cidrs" {

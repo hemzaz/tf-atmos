@@ -19,7 +19,7 @@ component today.
 
 | Inputs (required) | Inputs (behavior) | Outputs |
 |---|---|---|
-| region, environment, domain_name (plus acknowledge_unsupported=true to plan at all) | database_instance_class, redis_node_type, cluster_version, enable_disaster_recovery/enable_cost_optimization/enable_security_scanning | 40+ outputs (eks/rds/redis/s3/alb/route53/acm/secrets) — no consumers since it's undeployed |
+| region, environment, domain_name (plus acknowledge_unsupported=true to plan at all) | database_instance_class, redis_node_type, cluster_version, cluster_endpoint_public_access (now default false; needs cluster_endpoint_public_access_cidrs when true), enable_disaster_recovery/enable_cost_optimization/enable_security_scanning | 40+ outputs (eks/rds/redis/s3/alb/route53/acm/secrets) — no consumers since it's undeployed |
 
 ## Dependencies & gotchas
 

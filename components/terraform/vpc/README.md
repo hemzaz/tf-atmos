@@ -17,8 +17,8 @@ inherit abstract `vpc/defaults`; a plain abstract `vpc` catalog entry is not a r
 | Input | Notes |
 |---|---|
 | `vpc_cidr`, `azs`, `private_subnets`, `public_subnets` | required |
-| `tags` | must include a non-empty `Environment` value |
-| `nat_gateway_strategy` | `single` or `one_per_az` |
+| `tags` / `nat_gateway_strategy` | tags must include a non-empty `Environment`; strategy is `single` or `one_per_az` |
+| `manage_default_security_group` | default true: strips every rule from the VPC's AWS-created default SG (one way) |
 
 Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 `dns`, `ec2`, `eks`, `monitoring`, `rds`, `securitygroup` and `services` catalog defaults.

@@ -156,7 +156,7 @@ variable "binary_media_types" {
 variable "tracing_enabled" {
   type        = bool
   description = "Whether to enable X-Ray tracing"
-  default     = false
+  default     = true
 }
 
 variable "create_usage_plan" {

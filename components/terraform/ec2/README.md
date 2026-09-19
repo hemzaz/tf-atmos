@@ -20,8 +20,8 @@ are only launched from them when `create_instances_from_templates = true` (defau
 |---|---|---|
 | `vpc_id`, `subnet_ids`, `instances` (each needs `instance_type`), `tags.Environment` | `create_ssh_keys`, `store_ssh_keys_in_secrets_manager`, `global_key_name` | `instance_ids`, `security_group_ids`, `generated_key_names` (all maps keyed by instance name) |
 
-`vpc_endpoint_prefix_list_ids` is required (validation fails if empty) — default
-egress uses it instead of `0.0.0.0/0`.
+`vpc_endpoint_prefix_list_ids` is required (validation fails if empty) — default egress uses it
+instead of `0.0.0.0/0`. An instance with `detailed_monitoring` unset follows `enable_detailed_monitoring` (default true).
 
 ## Dependencies & gotchas
 

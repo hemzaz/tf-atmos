@@ -6,8 +6,8 @@
  *
  * Buckets:
  *   - terraform_state:             state files (versioned, SSE-KMS, TLS-only)
- *   - terraform_state_logs:        auxiliary log bucket (SSE-KMS, TLS-only)
- *   - terraform_state_access_logs: S3 server access logs for the two buckets above
+ *   - terraform_state_logs:        auxiliary log bucket (versioned, SSE-KMS, TLS-only)
+ *   - terraform_state_access_logs: S3 server access logs for the two buckets above (versioned)
  *                                  (SSE-S3: log delivery does not support SSE-KMS targets)
  */
 
@@ -24,8 +24,17 @@ locals {
     local.kms_buckets,
     var.enable_access_logging ? { access_logs = aws_s3_bucket.terraform_state_access_logs[0] } : {}
   )
+
+  # Buckets that hold logs: versioned, current versions expire after 90 days and
+  # noncurrent versions 30 days later (~120 days in the worst case)
+  log_buckets = { for k, v in local.all_buckets : k => v if k != "state" }
 }
 
+#trivy:ignore:AWS-0086 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0087 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0091 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0093 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0132 False positive: aws_s3_bucket_server_side_encryption_configuration.kms applies the state CMK via for_each
 resource "aws_s3_bucket" "terraform_state" {
   bucket = var.bucket_name
 
@@ -34,6 +43,11 @@ resource "aws_s3_bucket" "terraform_state" {
   }
 }
 
+#trivy:ignore:AWS-0086 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0087 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0091 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0093 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0132 False positive: aws_s3_bucket_server_side_encryption_configuration.kms applies the state CMK via for_each
 resource "aws_s3_bucket" "terraform_state_logs" {
   bucket = "${var.bucket_name}-logs"
 
@@ -42,7 +56,16 @@ resource "aws_s3_bucket" "terraform_state_logs" {
   }
 }
 
+#trivy:ignore:AWS-0086 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0087 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0091 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
+#trivy:ignore:AWS-0093 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
 resource "aws_s3_bucket" "terraform_state_access_logs" {
+  #checkov:skip=CKV2_AWS_6:False positive, aws_s3_bucket_public_access_block.this covers this bucket via for_each
+  #checkov:skip=CKV2_AWS_61:False positive, aws_s3_bucket_lifecycle_configuration.logs covers this bucket via for_each
+  #checkov:skip=CKV_AWS_21:False positive, aws_s3_bucket_versioning.logs covers this bucket via for_each
+  #checkov:skip=CKV_AWS_145:S3 server access log delivery requires SSE-S3 on the target bucket
+  #checkov:skip=CKV_AWS_18:This is the access log target; logging it into itself would loop
   count = var.enable_access_logging ? 1 : 0
 
   bucket = "${var.bucket_name}-access-logs"
@@ -116,6 +139,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "kms" {
   }
 }
 
+#trivy:ignore:AWS-0132 S3 server access log delivery requires SSE-S3 on the target bucket
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state_access_logs" {
   count = var.enable_access_logging ? 1 : 0
 
@@ -130,6 +154,16 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state_a
 
 resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "logs" {
+  for_each = local.log_buckets
+
+  bucket = each.value.id
 
   versioning_configuration {
     status = "Enabled"
@@ -257,12 +291,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "logs" {
-  for_each = var.enable_access_logging ? {
-    logs        = aws_s3_bucket.terraform_state_logs
-    access_logs = aws_s3_bucket.terraform_state_access_logs[0]
-    } : {
-    logs = aws_s3_bucket.terraform_state_logs
-  }
+  for_each = local.log_buckets
 
   bucket = each.value.id
 
@@ -275,5 +304,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "logs" {
     expiration {
       days = 90
     }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
+
+  depends_on = [aws_s3_bucket_versioning.logs]
 }

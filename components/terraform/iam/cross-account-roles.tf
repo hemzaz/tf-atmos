@@ -66,17 +66,31 @@ data "aws_iam_policy_document" "cross_account_policy" {
   statement {
     sid    = "ReadOnlyDiscovery"
     effect = "Allow"
+    # These actions do not support resource-level permissions
+    actions = [
+      "iam:ListRoles",
+      "iam:ListPolicies",
+      "s3:ListAllMyBuckets",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "ReadOnlyDiscoveryScoped"
+    effect = "Allow"
     actions = [
       "iam:GetRole",
       "iam:GetPolicy",
       "iam:GetPolicyVersion",
-      "iam:ListRoles",
-      "iam:ListPolicies",
       "iam:ListAttachedRolePolicies",
-      "s3:ListAllMyBuckets",
       "s3:GetBucketLocation",
     ]
-    resources = ["*"]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/*",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/*",
+      "arn:aws:iam::aws:policy/*",
+      "arn:aws:s3:::*",
+    ]
   }
 
   statement {

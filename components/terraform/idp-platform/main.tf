@@ -34,6 +34,7 @@ module "eks_cluster" {
       kubernetes_version        = var.cluster_version
       endpoint_private_access   = true
       endpoint_public_access    = var.cluster_endpoint_public_access
+      public_access_cidrs       = var.cluster_endpoint_public_access_cidrs
       enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
       node_groups = {

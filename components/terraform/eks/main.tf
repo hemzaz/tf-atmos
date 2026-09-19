@@ -35,7 +35,9 @@ resource "aws_cloudwatch_log_group" "eks" {
   )
 }
 
+#trivy:ignore:AWS-0040 Public endpoint is off unless a cluster sets endpoint_public_access = true
 resource "aws_eks_cluster" "clusters" {
+  #checkov:skip=CKV_AWS_38:Public endpoint is off unless a cluster sets endpoint_public_access = true
   for_each = local.clusters
 
   name     = "${var.tags["Environment"]}-${each.key}"
@@ -46,6 +48,7 @@ resource "aws_eks_cluster" "clusters" {
     subnet_ids              = coalesce(each.value.subnet_ids, var.subnet_ids)
     endpoint_private_access = lookup(each.value, "endpoint_private_access", true)
     endpoint_public_access  = lookup(each.value, "endpoint_public_access", false)
+    public_access_cidrs     = each.value.public_access_cidrs
     security_group_ids      = lookup(each.value, "security_group_ids", [])
   }
 
