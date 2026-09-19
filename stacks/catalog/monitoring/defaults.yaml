@@ -10,13 +10,12 @@ components:
           description: "Manages CloudWatch dashboards, alarms, and monitoring resources"
           category: "monitoring"
       vars:
-        enabled: true
+        environment: "{{ .settings.context.environment }}"
         enable_certificate_monitoring: true
-        enable_resource_monitoring: true
         enable_cost_monitoring: true
 
         # Certificate monitoring configuration
-        certificate_arns: {}
+        certificate_arns: []
         certificate_names: []
         certificate_domains: []
         certificate_expiry_threshold: 30
@@ -25,13 +24,11 @@ components:
         eks_cluster_name: ''
 
         # Alarm notification configuration
-        alarm_notifications_enabled: true
-        alarm_email_addresses: []
-        sns_topic_name: "{{ .vars.tenant }}-{{ .vars.environment }}-alarms"
+        create_sns_topic: true
+        alarm_email_subscriptions: []
 
         # Dashboard configuration
         create_dashboard: true
-        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-dashboard"
 
         tags:
           Component: "Monitoring"

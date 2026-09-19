@@ -26,41 +26,6 @@ import:
 
 vars:
   # Core environment identifiers
-  environment: staging-01
-  tenant_name: staging-01
-
-  # Domain configuration
-  domain_name: "staging.example.com"
-  hosted_zone_id: "Z0987654321STAGING"
-
-  # EKS Configuration - mirrors production
-  eks_kubernetes_version: "1.28"
-  eks_public_access: false
-
-  # Database configuration
-  rds_engine: "postgres"
-  rds_engine_version: "14"
-
-  # Secrets configuration
-  use_external_secrets: true
-  secrets_manager_path_prefix: "staging/fnx/certificates"
-
-  # Feature flags - staging enables features before prod
-  enable_container_insights: true
-  enable_vpc_flow_logs: true
-  enable_enhanced_monitoring: true
-
-  # Security settings
-  security:
-    vpc_flow_logs: true
-    encryption_at_rest: true
-    ssl_enforcement: true
-
-  # Staging-specific settings
-  enable_debug_logging: true
-  retention_days: 14
-
-  # Environment tagging strategy
   tags:
     Team: "Platform"
     CostCenter: "Staging"
@@ -100,3 +65,24 @@ settings:
     change_management:
       approval_required: true
       change_window: "business-hours"
+    tenant_name: staging-01
+    hosted_zone_id: "Z0987654321STAGING"
+    eks_kubernetes_version: "1.28"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
+    use_external_secrets: true
+    secrets_manager_path_prefix: "staging/fnx/certificates"
+    enable_container_insights: true
+    enable_vpc_flow_logs: true
+    enable_enhanced_monitoring: true
+    security:
+      vpc_flow_logs: true
+      encryption_at_rest: true
+      ssl_enforcement: true
+
+  # Staging-specific settings
+    enable_debug_logging: true
+    retention_days: 14
+  context:
+    environment: staging-01

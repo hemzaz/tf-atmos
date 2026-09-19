@@ -14,33 +14,33 @@ components:
         inherits:
           - eks/defaults
       vars:
-        cluster_name: "main"
-        kubernetes_version: "{{ .vars.eks_kubernetes_version }}"
-        endpoint_private_access: true
-        endpoint_public_access: "{{ .vars.eks_public_access }}"
-        vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
-        node_groups:
-          workers:
-            enabled: true
-            instance_types: ["t3.medium"]
-            desired_size: 2
-            min_size: 1
-            max_size: 4
-            labels:
-              role: worker
-          monitoring:
-            enabled: true
-            instance_types: ["t3.large"]
-            desired_size: 1
-            min_size: 1
-            max_size: 2
-            labels:
-              role: monitoring
-            taints:
-              - key: dedicated
-                value: monitoring
-                effect: "NO_SCHEDULE"
+        clusters:
+          main:
+            kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+            endpoint_private_access: true
+            endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
+            node_groups:
+              workers:
+                enabled: true
+                instance_types: ["t3.medium"]
+                desired_size: 2
+                min_size: 1
+                max_size: 4
+                labels:
+                  role: worker
+              monitoring:
+                enabled: true
+                instance_types: ["t3.large"]
+                desired_size: 1
+                min_size: 1
+                max_size: 2
+                labels:
+                  role: monitoring
+                taints:
+                  - key: dedicated
+                    value: monitoring
+                    effect: "NO_SCHEDULE"
 
     eks/data:
       metadata:
@@ -48,21 +48,21 @@ components:
         inherits:
           - eks/defaults
       vars:
-        cluster_name: "data"
-        kubernetes_version: "{{ .vars.eks_kubernetes_version }}"
-        endpoint_private_access: true
-        endpoint_public_access: false
-        vpc_id: !terraform.state vpc/services .vpc_id
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
-        node_groups:
-          data-workers:
-            enabled: true
-            instance_types: ["m5.large"]
-            desired_size: 2
-            min_size: 2
-            max_size: 4
-            labels:
-              role: data
+        clusters:
+          data:
+            kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+            endpoint_private_access: true
+            endpoint_public_access: false
+            node_groups:
+              data-workers:
+                enabled: true
+                instance_types: ["m5.large"]
+                desired_size: 2
+                min_size: 2
+                max_size: 4
+                labels:
+                  role: data
 
     # EC2 instances
     ec2/bastion:
@@ -71,27 +71,28 @@ components:
         inherits:
           - ec2
       vars:
-        name: "bastion"
-        instance_type: "t3.small"
         vpc_id: !terraform.state vpc/main .vpc_id
-        subnet_id: !terraform.state vpc/main .public_subnet_ids[0]
         create_ssh_keys: true
         store_ssh_keys_in_secrets_manager: true
         ssh_key_algorithm: "RSA"
         ssh_key_rsa_bits: 4096
-        key_name: "bastion-ssh-key"
-        allowed_ingress_rules:
-          - from_port: 22
-            to_port: 22
-            protocol: "tcp"
-            cidr_blocks: ["10.0.0.0/16"]
-            description: "SSH access from company VPN"
-        allowed_egress_rules:
-          - from_port: 443
-            to_port: 443
-            protocol: "tcp"
-            cidr_blocks: ["0.0.0.0/0"]
-            description: "HTTPS outbound access"
+        instances:
+          bastion:
+            instance_type: "t3.small"
+            key_name: "bastion-ssh-key"
+            subnet_id: !terraform.state vpc/main .public_subnet_ids[0]
+            allowed_ingress_rules:
+              - from_port: 22
+                to_port: 22
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "SSH access from company VPN"
+            allowed_egress_rules:
+              - from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "HTTPS outbound access"
 
     ec2/app-server:
       metadata:
@@ -99,18 +100,19 @@ components:
         inherits:
           - ec2
       vars:
-        name: "app-server"
-        instance_type: "t3.medium"
         vpc_id: !terraform.state vpc/main .vpc_id
-        subnet_id: !terraform.state vpc/main .private_subnet_ids[0]
-        root_volume_size: 50
-        key_name: !terraform.state ec2/bastion .ssh_key_name
-        allowed_ingress_rules:
-          - from_port: 8080
-            to_port: 8080
-            protocol: "tcp"
-            cidr_blocks: ["10.0.0.0/16"]
-            description: "Application access"
+        instances:
+          app-server:
+            instance_type: "t3.medium"
+            key_name: !terraform.state ec2/bastion .ssh_key_name
+            subnet_id: !terraform.state vpc/main .private_subnet_ids[0]
+            root_volume_size: 50
+            allowed_ingress_rules:
+              - from_port: 8080
+                to_port: 8080
+                protocol: "tcp"
+                cidr_blocks: ["10.0.0.0/16"]
+                description: "Application access"
 
     # External secrets operator instances
     external-secrets/main:
@@ -119,7 +121,7 @@ components:
         inherits:
           - external-secrets/defaults
       vars:
-        enabled: "{{ .vars.use_external_secrets }}"
+        enabled: "{{ .settings.environment.use_external_secrets }}"
         cluster_name: !terraform.state eks/main .cluster_name
         host: !terraform.state eks/main .cluster_endpoint
         cluster_ca_certificate: !terraform.state eks/main .cluster_ca_certificate
@@ -127,33 +129,19 @@ components:
         oidc_provider_url: !terraform.state eks/main .oidc_provider_url
 
         # Config options
-        namespace:
-          name: "external-secrets"
-          create: true
-        serviceaccount:
-          name: "external-secrets"
-        helm:
-          chart_version: "0.9.9"
-        path_prefix: "{{ .vars.secrets_manager_path_prefix }}"
-
-        # Configure certificate store paths
-        certificate_store:
-          path_template: "certificates/{name}"
-
-        # Create both general and certificate-specific secret stores
-        secret_stores:
-          default_cluster:
-            create: true
-          certificate:
-            create: true
-
+        namespace: "external-secrets"
+        certificate_secret_path_template: "certificates/{name}"
+        service_account_name: "external-secrets"
+        chart_version: "0.9.9"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
     external-secrets/data:
       metadata:
         component: external-secrets
         inherits:
           - external-secrets/defaults
       vars:
-        enabled: "{{ .vars.use_external_secrets }}"
+        enabled: "{{ .settings.environment.use_external_secrets }}"
         cluster_name: !terraform.state eks/data .cluster_name
         host: !terraform.state eks/data .cluster_endpoint
         cluster_ca_certificate: !terraform.state eks/data .cluster_ca_certificate
@@ -161,18 +149,9 @@ components:
         oidc_provider_url: !terraform.state eks/data .oidc_provider_url
 
         # Config options
-        namespace:
-          name: "external-secrets"
-          create: true
-        serviceaccount:
-          name: "external-secrets"
-        helm:
-          chart_version: "0.9.9"
-        path_prefix: "data/{{ .vars.secrets_manager_path_prefix }}"
-
-        # Create only the default secret store (no certificates for data cluster)
-        secret_stores:
-          default_cluster:
-            create: true
-          certificate:
-            create: false
+        namespace: "external-secrets"
+        certificate_secret_path_template: "data/{{ .settings.environment.secrets_manager_path_prefix }}/{name}"
+        service_account_name: "external-secrets"
+        chart_version: "0.9.9"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: false

@@ -112,7 +112,7 @@ components:
         security_groups:
           # Batch compute security group
           batch_compute:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-compute-sg"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-compute-sg"
             description: "Security group for AWS Batch compute"
             ingress_rules: []  # No inbound needed
             egress_rules:
@@ -131,7 +131,7 @@ components:
 
           # EFS security group (if using shared storage)
           efs:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-efs-sg"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-efs-sg"
             description: "Security group for EFS mount targets"
             ingress_rules:
               - description: "NFS from batch compute"
@@ -156,7 +156,7 @@ components:
         component: s3
         type: real
       vars:
-        bucket_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-input"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
         description: "Input data for batch jobs"
 
         # Versioning
@@ -207,7 +207,7 @@ components:
         component: s3
         type: real
       vars:
-        bucket_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-output"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output"
         description: "Output data from batch jobs"
 
         # Versioning
@@ -251,7 +251,7 @@ components:
         component: s3
         type: real
       vars:
-        bucket_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-scripts"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-scripts"
         description: "Batch job scripts and configurations"
 
         # Versioning (important for scripts)
@@ -283,7 +283,7 @@ components:
         queues:
           # Job submission queue (high priority)
           job_submission_high:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-jobs-high"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-high"
             visibility_timeout_seconds: 43200  # 12 hours max job time
             message_retention_seconds: 1209600  # 14 days
             max_message_size: 262144  # 256 KB
@@ -297,7 +297,7 @@ components:
 
           # Job submission queue (low priority)
           job_submission_low:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-jobs-low"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-low"
             visibility_timeout_seconds: 43200
             message_retention_seconds: 1209600
             max_message_size: 262144
@@ -311,7 +311,7 @@ components:
 
           # S3 event trigger queue
           job_trigger:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-trigger"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-trigger"
             visibility_timeout_seconds: 300
             message_retention_seconds: 86400
             fifo_queue: false
@@ -326,7 +326,7 @@ components:
                   "Resource": "*",
                   "Condition": {
                     "ArnLike": {
-                      "aws:SourceArn": "arn:aws:s3:::{{ .vars.tenant }}-{{ .vars.environment }}-batch-input"
+                      "aws:SourceArn": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
                     }
                   }
                 }]
@@ -334,7 +334,7 @@ components:
 
           # Job completion notifications
           job_notifications:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-notifications"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-notifications"
             visibility_timeout_seconds: 60
             message_retention_seconds: 86400
             fifo_queue: false
@@ -342,7 +342,7 @@ components:
 
           # Dead letter queue
           dlq:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-dlq"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-dlq"
             visibility_timeout_seconds: 60
             message_retention_seconds: 1209600
             kms_master_key_id: "{{ .vars.sqs_kms_key_id }}"
@@ -361,7 +361,7 @@ components:
         type: real
       vars:
         # Compute environment name
-        compute_environment_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-fargate"
+        compute_environment_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-fargate"
         compute_environment_type: "MANAGED"
         service_role_arn: "{{ .vars.batch_service_role_arn }}"
 
@@ -390,7 +390,7 @@ components:
         type: real
       vars:
         # Compute environment name
-        compute_environment_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-fargate-spot"
+        compute_environment_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-fargate-spot"
         compute_environment_type: "MANAGED"
         service_role_arn: "{{ .vars.batch_service_role_arn }}"
 
@@ -419,7 +419,7 @@ components:
         type: real
       vars:
         # Compute environment name
-        compute_environment_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-ec2"
+        compute_environment_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-ec2"
         compute_environment_type: "MANAGED"
         service_role_arn: "{{ .vars.batch_service_role_arn }}"
 
@@ -437,7 +437,7 @@ components:
             - !terraform.state batch-processing/securitygroups .security_group_ids.batch_compute
           instance_role: "{{ .vars.batch_instance_role_arn }}"
           tags:
-            Name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-ec2"
+            Name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-ec2"
 
         # Launch template (optional - for custom AMI, EBS, etc.)
         launch_template:
@@ -467,7 +467,7 @@ components:
         job_queues:
           # High priority queue - Fargate only
           high_priority:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-high"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-high"
             state: "ENABLED"
             priority: 100
             compute_environments:
@@ -476,7 +476,7 @@ components:
 
           # Default queue - Fargate then Spot
           default:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-default"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-default"
             state: "ENABLED"
             priority: 50
             compute_environments:
@@ -487,7 +487,7 @@ components:
 
           # Low priority queue - Spot only (cost-optimized)
           low_priority:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-low"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-low"
             state: "ENABLED"
             priority: 10
             compute_environments:
@@ -496,7 +496,7 @@ components:
 
           # GPU queue (if EC2 enabled)
           gpu:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-gpu"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-gpu"
             state: "DISABLED"
             priority: 75
             compute_environments:
@@ -523,7 +523,7 @@ components:
         job_definitions:
           # Data processing job
           data_processor:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-data-processor"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-processor"
             type: "container"
             platform_capabilities:
               - "FARGATE"
@@ -543,12 +543,12 @@ components:
               logConfiguration:
                 logDriver: "awslogs"
                 options:
-                  awslogs-group: "/aws/batch/{{ .vars.tenant }}-{{ .vars.environment }}"
+                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
                   awslogs-region: "{{ .vars.region }}"
                   awslogs-stream-prefix: "data-processor"
               environment:
                 - name: "ENVIRONMENT"
-                  value: "{{ .vars.environment }}"
+                  value: "{{ .settings.context.environment }}"
                 - name: "INPUT_BUCKET"
                   value: !terraform.state batch-processing/s3-input .bucket_name
                 - name: "OUTPUT_BUCKET"
@@ -570,7 +570,7 @@ components:
 
           # ETL job
           etl_job:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-etl-job"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-etl-job"
             type: "container"
             platform_capabilities:
               - "FARGATE"
@@ -590,7 +590,7 @@ components:
               logConfiguration:
                 logDriver: "awslogs"
                 options:
-                  awslogs-group: "/aws/batch/{{ .vars.tenant }}-{{ .vars.environment }}"
+                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
                   awslogs-region: "{{ .vars.region }}"
                   awslogs-stream-prefix: "etl-job"
               command:
@@ -602,7 +602,7 @@ components:
                 - "Ref::processing_date"
               environment:
                 - name: "ENVIRONMENT"
-                  value: "{{ .vars.environment }}"
+                  value: "{{ .settings.context.environment }}"
             retry_strategy:
               attempts: 2
             timeout:
@@ -610,7 +610,7 @@ components:
 
           # Report generator
           report_generator:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-report-generator"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-report-generator"
             type: "container"
             platform_capabilities:
               - "FARGATE"
@@ -630,7 +630,7 @@ components:
               logConfiguration:
                 logDriver: "awslogs"
                 options:
-                  awslogs-group: "/aws/batch/{{ .vars.tenant }}-{{ .vars.environment }}"
+                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
                   awslogs-region: "{{ .vars.region }}"
                   awslogs-stream-prefix: "report-generator"
             retry_strategy:
@@ -640,7 +640,7 @@ components:
 
           # GPU job (if EC2 enabled)
           ml_training:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-ml-training"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-ml-training"
             type: "container"
             platform_capabilities:
               - "EC2"
@@ -658,7 +658,7 @@ components:
               logConfiguration:
                 logDriver: "awslogs"
                 options:
-                  awslogs-group: "/aws/batch/{{ .vars.tenant }}-{{ .vars.environment }}"
+                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
                   awslogs-region: "{{ .vars.region }}"
                   awslogs-stream-prefix: "ml-training"
               linuxParameters:
@@ -693,13 +693,13 @@ components:
         state_machines:
           # Data pipeline workflow
           data_pipeline:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-data-pipeline"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-data-pipeline"
             description: "Orchestrates data processing batch jobs"
             type: "STANDARD"
             logging_configuration:
               level: "ALL"
               include_execution_data: true
-              log_destination: "arn:aws:logs:{{ .vars.region }}:{{ .vars.account_id }}:log-group:/aws/states/{{ .vars.tenant }}-{{ .vars.environment }}-batch-data-pipeline:*"
+              log_destination: "arn:aws:logs:{{ .vars.region }}:{{ .vars.account_id }}:log-group:/aws/states/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-data-pipeline:*"
             tracing_configuration:
               enabled: true
             definition:
@@ -825,7 +825,7 @@ components:
 
           # Parallel processing workflow
           parallel_processor:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-parallel"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-parallel"
             description: "Processes multiple files in parallel"
             type: "STANDARD"
             definition:
@@ -889,7 +889,7 @@ components:
         rules:
           # Daily batch processing
           daily_batch:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-daily-batch"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-batch"
             description: "Triggers daily batch processing"
             schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC
             state: "ENABLED"
@@ -906,7 +906,7 @@ components:
 
           # Hourly lightweight processing
           hourly_lightweight:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-hourly-batch"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-hourly-batch"
             description: "Triggers hourly lightweight batch jobs"
             schedule_expression: "rate(1 hour)"
             state: "DISABLED"
@@ -920,7 +920,7 @@ components:
 
           # S3 event processing
           s3_trigger_processing:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-s3-trigger"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-s3-trigger"
             description: "Processes new files uploaded to S3"
             event_pattern:
               source:
@@ -947,7 +947,7 @@ components:
 
           # Batch job status changes
           batch_status_changes:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-status"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-status"
             description: "Monitors batch job status changes"
             event_pattern:
               source:
@@ -959,7 +959,7 @@ components:
                   - "FAILED"
                   - "SUCCEEDED"
                 jobQueue:
-                  - prefix: "{{ .vars.tenant }}-{{ .vars.environment }}"
+                  - prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
             targets:
               - id: "notification-queue"
                 arn: !terraform.state batch-processing/sqs .queue_arns.job_notifications
@@ -995,7 +995,7 @@ components:
 
         # Environment variables
         environment_variables:
-          ENVIRONMENT: "{{ .vars.environment }}"
+          ENVIRONMENT: "{{ .settings.context.environment }}"
           HIGH_PRIORITY_QUEUE: !terraform.state batch-processing/batch-job-queues .job_queue_arns.high_priority
           DEFAULT_QUEUE: !terraform.state batch-processing/batch-job-queues .job_queue_arns.default
           LOW_PRIORITY_QUEUE: !terraform.state batch-processing/batch-job-queues .job_queue_arns.low_priority
@@ -1052,7 +1052,7 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-dashboard"
+        dashboard_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-dashboard"
 
         # Enable monitoring features
         enable_resource_monitoring: true
@@ -1061,7 +1061,7 @@ components:
         # Custom dashboard
         dashboards:
           batch_overview:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-overview"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-overview"
             widgets:
               # Batch compute metrics
               - type: "metric"
@@ -1157,7 +1157,7 @@ components:
         alarms:
           # Batch job failures
           batch_job_failures:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-job-failures"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-job-failures"
             metric_name: "JobsFailed"
             namespace: "AWS/Batch"
             comparison_operator: "GreaterThanThreshold"
@@ -1170,7 +1170,7 @@ components:
 
           # Job queue depth (too many pending)
           batch_queue_depth:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-queue-depth"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-queue-depth"
             metric_name: "JobsPending"
             namespace: "AWS/Batch"
             comparison_operator: "GreaterThanThreshold"
@@ -1183,7 +1183,7 @@ components:
 
           # Step Functions failures
           workflow_failures:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-workflow-failures"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-workflow-failures"
             metric_name: "ExecutionsFailed"
             namespace: "AWS/States"
             comparison_operator: "GreaterThanThreshold"
@@ -1196,7 +1196,7 @@ components:
 
           # DLQ messages
           dlq_messages:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-dlq"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-dlq"
             metric_name: "ApproximateNumberOfMessagesVisible"
             namespace: "AWS/SQS"
             comparison_operator: "GreaterThanThreshold"
@@ -1209,7 +1209,7 @@ components:
 
           # Compute environment not scaling
           compute_not_scaling:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-compute-stuck"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-compute-stuck"
             metric_name: "DesiredvCPUs"
             namespace: "AWS/Batch"
             comparison_operator: "GreaterThanThreshold"
@@ -1223,7 +1223,7 @@ components:
         # SNS notifications
         alarm_notifications_enabled: true
         alarm_email_addresses: []
-        sns_topic_name: "{{ .vars.tenant }}-{{ .vars.environment }}-batch-alarms"
+        sns_topic_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-alarms"
 
         tags:
           Layer: "monitoring"

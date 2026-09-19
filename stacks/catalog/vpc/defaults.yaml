@@ -14,11 +14,6 @@ components:
           description: "Manages VPC with subnets, NAT gateways, and routing"
           category: "networking"
       vars:
-        enabled: true
-        name: "common"
-
-        # FIXED: Use consistent variable names that match the component
-        # The component uses 'vpc_cidr' not 'ipv4_primary_cidr_block'
         vpc_cidr: "10.0.0.0/16"
 
         # Availability zones - will be overridden per region
@@ -28,7 +23,6 @@ components:
           - "{{ .vars.region }}c"
 
         # Subnet configuration
-        max_subnet_count: 3
         private_subnets:
           - "10.0.1.0/24"
           - "10.0.2.0/24"
@@ -38,10 +32,6 @@ components:
           - "10.0.102.0/24"
           - "10.0.103.0/24"
         database_subnets: []
-
-        # Public subnet settings
-        map_public_ip_on_launch: true
-        assign_generated_ipv6_cidr_block: false
 
         # NAT Gateway configuration
         enable_nat_gateway: true
@@ -54,12 +44,9 @@ components:
         ram_resource_share_arn: ""
 
         # VPC Flow Logs
-        vpc_flow_logs_enabled: true
-        vpc_flow_logs_traffic_type: "ALL"
-        vpc_flow_logs_log_destination_type: "s3"
+        enable_flow_logs: true
 
         # Security settings
-        nat_eip_aws_shield_protection_enabled: false
         create_vpc_iam_role: true
 
         # Default security group configuration
@@ -67,8 +54,6 @@ components:
         default_sg_egress_self_only: true
         default_sg_allow_all_outbound: false
 
-        # Tagging
-        subnet_type_tag_key: "{{ .vars.tenant }}/subnet/type"
 
         tags:
           Component: "VPC"

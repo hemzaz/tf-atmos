@@ -15,11 +15,11 @@ components:
 
         # Security group configurations
         create_default_security_group: true
-        default_security_group_name: "{{ .vars.tenant }}-{{ .vars.account }}-{{ .vars.environment }}-default-sg"
+        default_security_group_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-default-sg"
 
         # Database security group
         create_database_security_group: true
-        database_security_group_name: "{{ .vars.tenant }}-{{ .vars.account }}-{{ .vars.environment }}-db-sg"
+        database_security_group_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-db-sg"
 
         # Custom security groups
         security_groups: {}

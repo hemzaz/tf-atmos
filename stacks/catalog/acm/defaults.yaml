@@ -10,19 +10,11 @@ components:
           description: "Manages ACM certificates"
           category: "security"
       vars:
-        enabled: true
+        # Required: Route53 zone used for DNS validation (set per instance)
         zone_id: ''
 
-        # Define certificates
+        # Certificates; validation_method / wait_for_validation are set per domain
         dns_domains: {}
-
-        # Cross-region certificate replication
-        enable_cross_region_replication: false
-        target_regions: []
-
-        # Certificate validation options
-        validation_method: DNS
-        wait_for_validation: true
 
         tags:
           Component: "ACM"

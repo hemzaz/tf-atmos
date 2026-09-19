@@ -28,20 +28,19 @@ import:
 
 vars:
   # Core variables for stack naming
-  tenant: fnx
-  environment: production
-  stage: prod
-  account: prod
   region: eu-west-2
 
   # AWS Account ID
   # Plain value: Go templates (e.g. IAM ARNs) are rendered before YAML functions,
   # so an !env value could not be interpolated into them.
-  aws_account_id: "123456789012" # Replace with actual account ID
-
-  # VPC configuration - production CIDR ranges
-  vpc_cidr: "10.20.0.0/16"
-
-  # Description
-  description: "Production Environment - Business Critical"
-  namespace: production
+settings:
+  environment:
+    account: prod
+    aws_account_id: "123456789012"
+    vpc_cidr: "10.20.0.0/16"
+    description: "Production Environment - Business Critical"
+    namespace: production
+  context:
+    tenant: fnx
+    environment: production
+    stage: prod

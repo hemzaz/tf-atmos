@@ -17,11 +17,7 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        name: main
-        # FIXED: Use consistent variable name matching the component
         vpc_cidr: "10.0.0.0/16"
-        vpc_flow_logs_enabled: "{{ .vars.enable_vpc_flow_logs }}"
-        # Subnet configuration
         private_subnets:
           - "10.0.1.0/24"
           - "10.0.2.0/24"
@@ -31,18 +27,14 @@ components:
           - "10.0.102.0/24"
           - "10.0.103.0/24"
 
+        enable_flow_logs: "{{ .settings.environment.enable_vpc_flow_logs }}"
     vpc/services:
       metadata:
         component: vpc
         inherits:
           - vpc/defaults
       vars:
-        name: services
-        # FIXED: Use consistent variable name matching the component
         vpc_cidr: "10.1.0.0/16"
-        vpc_flow_logs_enabled: "{{ .vars.enable_vpc_flow_logs }}"
-        map_public_ip_on_launch: false
-        # Subnet configuration
         private_subnets:
           - "10.1.1.0/24"
           - "10.1.2.0/24"
@@ -53,6 +45,7 @@ components:
           - "10.1.103.0/24"
 
     # Network resources for main VPC
+        enable_flow_logs: "{{ .settings.environment.enable_vpc_flow_logs }}"
     network/main:
       metadata:
         component: network

@@ -20,7 +20,6 @@ components:
       metadata:
         component: apigateway
       vars:
-        name: "main-api"
         description: "Main API Gateway for staging environment"
         stage_name: "v1"
 
@@ -40,9 +39,6 @@ components:
         # Domain Configuration
         domain_name: "api.staging.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
-        route53_zone_id: !terraform.state network/main .zone_ids.main
-
-        # Throttling
         throttling_burst_limit: 500
         throttling_rate_limit: 1000
 
@@ -52,9 +48,6 @@ components:
         create_dashboard: true
 
         # CORS
-        enable_cors: true
-        cors_allow_origins: ["*"]
-        cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
         tags:
           Service: api-gateway
           Tier: edge
@@ -62,11 +55,20 @@ components:
     # ==========================================================================
     # API Gateway - Data API
     # ==========================================================================
+        api_name: "main-api"
+        zone_id: !terraform.state network/main .zone_ids.main
+        cors_configuration:
+          allow_origins: ["*"]
+          allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+          allow_headers:
+            - '*'
+          expose_headers: []
+          max_age: 300
+          allow_credentials: false
     apigateway/data:
       metadata:
         component: apigateway
       vars:
-        name: "data-api"
         description: "Data API Gateway for staging"
         stage_name: "v1"
 
@@ -77,8 +79,6 @@ components:
 
         domain_name: "data.services.staging.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
-        route53_zone_id: !terraform.state network/services .zone_ids.data
-
         throttling_burst_limit: 300
         throttling_rate_limit: 500
 
@@ -93,6 +93,8 @@ components:
     # ==========================================================================
     # Infrastructure - Main Application Stack
     # ==========================================================================
+        api_name: "data-api"
+        zone_id: !terraform.state network/services .zone_ids.data
     infrastructure/main:
       metadata:
         component: infrastructure
@@ -111,8 +113,8 @@ components:
         rds:
           enabled: true
           identifier: "staging-main-db"
-          engine: "{{ .vars.rds_engine }}"
-          engine_version: "{{ .vars.rds_engine_version }}"
+          engine: "{{ .settings.environment.rds_engine }}"
+          engine_version: "{{ .settings.environment.rds_engine_version }}"
           instance_class: "db.t3.medium"
           allocated_storage: 20
           max_allocated_storage: 100
@@ -158,8 +160,8 @@ components:
         rds:
           enabled: true
           identifier: "staging-data-db"
-          engine: "{{ .vars.rds_engine }}"
-          engine_version: "{{ .vars.rds_engine_version }}"
+          engine: "{{ .settings.environment.rds_engine }}"
+          engine_version: "{{ .settings.environment.rds_engine_version }}"
           instance_class: "db.r5.large"
           allocated_storage: 50
           max_allocated_storage: 200
@@ -206,88 +208,55 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        enabled: true
         create_dashboard: true
-        dashboard_name: "staging-main-dashboard"
-
-        # Feature flags
         enable_certificate_monitoring: true
-        enable_container_insights: true
-        enable_resource_monitoring: true
-        enable_vpc_flow_logs: true
-
-        # Certificate monitoring
         certificate_arns: !terraform.state acm/main .certificate_arns // {}
         certificate_names: !terraform.state acm/main .certificate_domains // {} | keys
         certificate_domains: !terraform.state acm/main [.certificate_domains // {} | .[]]
         certificate_expiry_threshold: 30
 
         # SNS Topics for alerts
-        sns_topic_name: "staging-main-alarms"
-        alarm_notifications_enabled: true
-        alarm_email_addresses:
+        alarm_email_subscriptions:
           - "staging-alerts@example.com"
           - "oncall@example.com"
 
         # CloudWatch Alarms
-        alarms:
+        create_sns_topic: true
+        cpu_alarms:
           high_cpu:
-            metric_name: "CPUUtilization"
             namespace: "AWS/EC2"
-            statistic: "Average"
+            evaluation_periods: 2
             period: 300
             threshold: 80
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
+            dimensions: {}
+        memory_alarms:
           high_memory:
-            metric_name: "MemoryUtilization"
             namespace: "CWAgent"
-            statistic: "Average"
+            evaluation_periods: 2
             period: 300
             threshold: 85
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-
-    # ==========================================================================
-    # Monitoring - Data Stack Dashboard
-    # ==========================================================================
+            dimensions: {}
     monitoring/data:
       metadata:
         component: monitoring
         inherits:
           - monitoring/defaults
       vars:
-        enabled: true
         create_dashboard: true
-        dashboard_name: "staging-data-dashboard"
-
-        enable_resource_monitoring: true
-        enable_vpc_flow_logs: true
         enable_certificate_monitoring: true
 
         certificate_arns: !terraform.state acm/services .certificate_arns // {}
         certificate_expiry_threshold: 30
 
-        sns_topic_name: "staging-data-alarms"
-        alarm_notifications_enabled: true
-        alarm_email_addresses:
+        alarm_email_subscriptions:
           - "staging-alerts@example.com"
 
         # Data-specific alarms
-        alarms:
+        create_sns_topic: true
+        db_connection_alarms:
           rds_connections:
-            metric_name: "DatabaseConnections"
-            namespace: "AWS/RDS"
-            statistic: "Average"
+            evaluation_periods: 2
             period: 300
             threshold: 100
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-          rds_storage:
-            metric_name: "FreeStorageSpace"
-            namespace: "AWS/RDS"
-            statistic: "Average"
-            period: 300
-            threshold: 5368709120  # 5GB in bytes
-            comparison_operator: "LessThanThreshold"
-            evaluation_periods: 2
+        enable_rds_monitoring: true
+        rds_storage_threshold: 5368709120

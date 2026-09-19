@@ -21,7 +21,6 @@ components:
       metadata:
         component: apigateway
       vars:
-        name: "production-main-api"
         description: "Production Main API Gateway"
         stage_name: "v1"
 
@@ -36,46 +35,14 @@ components:
         # Domain Configuration
         domain_name: "api.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
-        route53_zone_id: !terraform.state network/main .zone_ids.main
-
-        # Production throttling
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000
 
         # Method-level throttling for critical endpoints
-        method_throttling:
-          - path: "/api"
-            method: "POST"
-            burst_limit: 1000
-            rate_limit: 2000
-
-        # Logging and monitoring - comprehensive
         enable_logging: true
         log_retention_days: 90
         create_dashboard: true
-        enable_xray_tracing: true
-        enable_access_logging: true
-
-        # WAF integration
-        web_acl_arn: !terraform.state waf/main .web_acl_arn
-
-        # CORS - restrictive for production
-        enable_cors: true
-        cors_allow_origins:
-          - "https://{{ .settings.environment.domain_name }}"
-          - "https://www.{{ .settings.environment.domain_name }}"
-        cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-        cors_allow_headers:
-          - "Content-Type"
-          - "Authorization"
-          - "X-Api-Key"
-          - "X-Request-Id"
-
-        # Cache settings
         enable_caching: true
-        cache_cluster_size: "1.6"
-        cache_ttl: 300
-
         tags:
           Service: api-gateway
           Tier: edge
@@ -84,11 +51,30 @@ components:
     # ==========================================================================
     # API Gateway - Data API (Production)
     # ==========================================================================
+        api_name: "production-main-api"
+        zone_id: !terraform.state network/main .zone_ids.main
+        tracing_enabled: true
+        cache_ttl_seconds: 300
+        cors_configuration:
+          allow_origins:
+            - "https://{{ .settings.environment.domain_name }}"
+            - "https://www.{{ .settings.environment.domain_name }}"
+          allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+          allow_headers:
+            - "Content-Type"
+            - "Authorization"
+            - "X-Api-Key"
+            - "X-Request-Id"
+
+        # Cache settings
+          expose_headers: []
+          max_age: 300
+          allow_credentials: false
+        enable_waf: true
     apigateway/data:
       metadata:
         component: apigateway
       vars:
-        name: "production-data-api"
         description: "Production Data API Gateway"
         stage_name: "v1"
 
@@ -100,16 +86,12 @@ components:
 
         domain_name: "data.services.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
-        route53_zone_id: !terraform.state network/services .zone_ids.data
-
         throttling_burst_limit: 2000
         throttling_rate_limit: 5000
 
         enable_logging: true
         log_retention_days: 90
         create_dashboard: true
-        enable_xray_tracing: true
-
         tags:
           Service: data-api
           Tier: backend
@@ -117,6 +99,9 @@ components:
     # ==========================================================================
     # Infrastructure - Main Application Stack (Production HA)
     # ==========================================================================
+        api_name: "production-data-api"
+        zone_id: !terraform.state network/services .zone_ids.data
+        tracing_enabled: true
     infrastructure/main:
       metadata:
         component: infrastructure
@@ -136,8 +121,8 @@ components:
         rds:
           enabled: true
           identifier: "production-main-db"
-          engine: "{{ .vars.rds_engine }}"
-          engine_version: "{{ .vars.rds_engine_version }}"
+          engine: "{{ .settings.environment.rds_engine }}"
+          engine_version: "{{ .settings.environment.rds_engine_version }}"
           instance_class: "db.r5.xlarge"
           allocated_storage: 100
           max_allocated_storage: 500
@@ -223,8 +208,8 @@ components:
         rds:
           enabled: true
           identifier: "production-data-db"
-          engine: "{{ .vars.rds_engine }}"
-          engine_version: "{{ .vars.rds_engine_version }}"
+          engine: "{{ .settings.environment.rds_engine }}"
+          engine_version: "{{ .settings.environment.rds_engine_version }}"
           instance_class: "db.r5.2xlarge"
           allocated_storage: 200
           max_allocated_storage: 1000
@@ -292,180 +277,76 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        enabled: true
         create_dashboard: true
-        dashboard_name: "production-main-dashboard"
-
-        # All monitoring features enabled
         enable_certificate_monitoring: true
-        enable_container_insights: true
-        enable_resource_monitoring: true
-        enable_vpc_flow_logs: true
         enable_cost_monitoring: true
 
         # Certificate monitoring
         certificate_arns: !terraform.state acm/main .certificate_arns // {}
         certificate_expiry_threshold: 30
-        certificate_critical_threshold: 7
-
-        # SNS Topics for production alerts
-        sns_topic_name: "production-main-alarms"
-        alarm_notifications_enabled: true
-        alarm_email_addresses:
+        alarm_email_subscriptions:
           - "prod-critical@example.com"
           - "oncall@example.com"
 
         # PagerDuty integration
         # Secret: export from SSM /production/pagerduty/endpoint before plan/apply
-        pagerduty_endpoint: !env PROD_PAGERDUTY_ENDPOINT
-
-        # Comprehensive CloudWatch Alarms
-        alarms:
-          # CPU Alarms
+        create_sns_topic: true
+        cpu_alarms:
           high_cpu_warning:
-            metric_name: "CPUUtilization"
             namespace: "AWS/EC2"
-            statistic: "Average"
+            evaluation_periods: 2
             period: 300
             threshold: 70
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
+            dimensions: {}
           high_cpu_critical:
-            metric_name: "CPUUtilization"
             namespace: "AWS/EC2"
-            statistic: "Average"
+            evaluation_periods: 2
             period: 300
             threshold: 90
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
-
-          # Memory Alarms
+            dimensions: {}
+        memory_alarms:
           high_memory_warning:
-            metric_name: "MemoryUtilization"
             namespace: "CWAgent"
-            statistic: "Average"
+            evaluation_periods: 2
             period: 300
             threshold: 80
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
+            dimensions: {}
           high_memory_critical:
-            metric_name: "MemoryUtilization"
             namespace: "CWAgent"
-            statistic: "Average"
+            evaluation_periods: 1
             period: 300
             threshold: 95
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 1
-            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
-
-          # RDS Alarms
-          rds_cpu_high:
-            metric_name: "CPUUtilization"
-            namespace: "AWS/RDS"
-            statistic: "Average"
-            period: 300
-            threshold: 80
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
+            dimensions: {}
+        enable_rds_monitoring: true
+        rds_cpu_threshold: 80
+        db_connection_alarms:
           rds_connections_high:
-            metric_name: "DatabaseConnections"
-            namespace: "AWS/RDS"
-            statistic: "Average"
+            evaluation_periods: 2
             period: 300
             threshold: 400
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-          rds_free_storage_low:
-            metric_name: "FreeStorageSpace"
-            namespace: "AWS/RDS"
-            statistic: "Average"
-            period: 300
-            threshold: 10737418240  # 10GB
-            comparison_operator: "LessThanThreshold"
-            evaluation_periods: 2
-            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
-
-          # EKS Alarms
-          eks_node_not_ready:
-            metric_name: "cluster_failed_node_count"
-            namespace: "ContainerInsights"
-            statistic: "Average"
-            period: 60
-            threshold: 0
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 5
-            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
-
-          # API Gateway Alarms
-          api_5xx_errors:
-            metric_name: "5XXError"
-            namespace: "AWS/ApiGateway"
-            statistic: "Sum"
-            period: 60
-            threshold: 10
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 3
-            alarm_actions: [] # TODO: SNS/PagerDuty topic ARNs (were undefined sns_topic_arn/pagerduty_topic_arn)
-          api_latency_high:
-            metric_name: "Latency"
-            namespace: "AWS/ApiGateway"
-            statistic: "p99"
-            period: 300
-            threshold: 5000
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-
-    # ==========================================================================
-    # Monitoring - Data Stack Dashboard (Production)
-    # ==========================================================================
+        rds_storage_threshold: 10737418240
+        api_gateway_error_threshold: 10
+        api_gateway_latency_threshold: 5000
     monitoring/data:
       metadata:
         component: monitoring
         inherits:
           - monitoring/defaults
       vars:
-        enabled: true
         create_dashboard: true
-        dashboard_name: "production-data-dashboard"
-
-        enable_resource_monitoring: true
-        enable_vpc_flow_logs: true
         enable_certificate_monitoring: true
 
         certificate_arns: !terraform.state acm/services .certificate_arns // {}
         certificate_expiry_threshold: 30
 
-        sns_topic_name: "production-data-alarms"
-        alarm_notifications_enabled: true
-        alarm_email_addresses:
+        alarm_email_subscriptions:
           - "prod-critical@example.com"
           - "data-team@example.com"
 
-        alarms:
-          # Data-specific alarms
-          rds_replica_lag:
-            metric_name: "ReplicaLag"
-            namespace: "AWS/RDS"
-            statistic: "Average"
-            period: 60
-            threshold: 30
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 5
+        create_sns_topic: true
+        lambda_error_alarms:
           lambda_errors:
-            metric_name: "Errors"
-            namespace: "AWS/Lambda"
-            statistic: "Sum"
+            evaluation_periods: 2
             period: 300
             threshold: 5
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
-          lambda_duration:
-            metric_name: "Duration"
-            namespace: "AWS/Lambda"
-            statistic: "p99"
-            period: 300
-            threshold: 500000  # 500 seconds
-            comparison_operator: "GreaterThanThreshold"
-            evaluation_periods: 2
+        lambda_duration_threshold: 500000

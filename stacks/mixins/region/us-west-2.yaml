@@ -7,6 +7,6 @@ import:
 
 vars:
   region: us-west-2
-  environment: uw2
-
-# Other defaults for the `us-west-2` region
+settings:
+  context:
+    environment: uw2

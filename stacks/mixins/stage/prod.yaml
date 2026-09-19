@@ -1,7 +1,4 @@
 ---
-vars:
-  stage: prod
-
 components:
   terraform:
     vpc:
@@ -10,3 +7,6 @@ components:
         # In `prod`, don't map public IPs on launch
         # Override `map_public_ip_on_launch` from the defaults
         map_public_ip_on_launch: false
+settings:
+  context:
+    stage: prod
