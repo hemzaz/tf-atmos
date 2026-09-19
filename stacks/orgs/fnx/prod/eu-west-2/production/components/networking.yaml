@@ -141,7 +141,8 @@ components:
             name: "internal.fnx.example.com"
             comment: "Production internal DNS"
             force_destroy: false
-            enable_query_logging: true
+            # Private zone: Route53 query logging only supports public zones (use Resolver query logging)
+            enable_query_logging: false
             vpc_associations:
               - !terraform.state vpc/main .vpc_id
         # Records removed in the dns remap: www (alias to alb/main, which does
