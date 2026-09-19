@@ -7,15 +7,10 @@
 # =============================================================================
 
 vars:
-  namespace: fnx
-  tenant: fnx
-  management_account_id: "123456789012" # Replace with actual AWS management account ID
-
-  # Standard tags merged into every component's `tags` variable
   tags:
-    Tenant: "{{ .vars.tenant }}"
-    Account: "{{ .vars.account }}"
-    Environment: "{{ .vars.environment }}"
+    Tenant: "{{ .settings.context.tenant }}"
+    Account: "{{ .settings.environment.account }}"
+    Environment: "{{ .settings.context.environment }}"
     ManagedBy: "Terraform"
 
 terraform:
@@ -31,10 +26,16 @@ terraform:
   backend_type: s3
   backend:
     s3:
-      bucket: "{{ .vars.tenant }}-terraform-state"
+      bucket: "{{ .settings.context.tenant }}-terraform-state"
       key: "terraform.tfstate"
       region: "{{ .vars.region }}"
       encrypt: true
       use_lockfile: true
       assume_role:
-        role_arn: "arn:aws:iam::{{ .vars.management_account_id }}:role/{{ .vars.tenant }}-terraform-backend-role"
+        role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+settings:
+  environment:
+    namespace: fnx
+    management_account_id: "123456789012"
+  context:
+    tenant: fnx

@@ -11,9 +11,9 @@ components:
           category: "databases"
       vars:
         enabled: true
-        identifier: "{{ .vars.tenant }}-{{ .vars.account }}-{{ .vars.environment }}-db"
-        engine: "{{ .vars.rds_engine | default \"postgres\" }}"
-        engine_version: "{{ .vars.rds_engine_version | default \"14\" }}"
+        identifier: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-db"
+        engine: "{{ .settings.environment.rds_engine | default \"postgres\" }}"
+        engine_version: "{{ .settings.environment.rds_engine_version | default \"14\" }}"
         instance_class: "db.t3.micro"
         allocated_storage: 20
         max_allocated_storage: 100
@@ -28,8 +28,8 @@ components:
 
         # Security settings
         deletion_protection: false
-        skip_final_snapshot: "{{ not .vars.is_production }}"
-        final_snapshot_identifier: "{{ .vars.tenant }}-{{ .vars.account }}-{{ .vars.environment }}-db-final"
+        skip_final_snapshot: "{{ not .settings.environment.is_production }}"
+        final_snapshot_identifier: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-db-final"
         storage_encrypted: true
 
         # Network settings

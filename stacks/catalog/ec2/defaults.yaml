@@ -10,7 +10,7 @@ components:
           description: "Manages EC2 instances and SSH keys"
           category: "compute"
       vars:
-        enabled: true
+        environment: "{{ .settings.context.environment }}"
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
@@ -21,7 +21,7 @@ components:
         ssh_key_rsa_bits: 4096
 
         # Global SSH key for environment-wide use
-        global_key_name: "{{ .vars.tenant }}-{{ .vars.environment }}-ssh-key"
+        global_key_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-ssh-key"
 
         # Instances configuration
         instances: {}

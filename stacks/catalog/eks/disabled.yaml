@@ -4,5 +4,4 @@ components:
     eks:
       metadata:
         component: eks
-      vars:
         enabled: false

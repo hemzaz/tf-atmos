@@ -4,5 +4,4 @@ components:
     monitoring:
       metadata:
         component: monitoring
-      vars:
         enabled: false

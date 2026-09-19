@@ -24,30 +24,6 @@ import:
 
 vars:
   # Core environment identifiers
-  environment: testenv-01
-  tenant_name: testenv-01
-
-  # Domain configuration
-  domain_name: "example.com"
-  hosted_zone_id: "Z1234567890EXAMPLE"
-
-  # Environment-specific configuration
-  eks_kubernetes_version: "1.28"
-  eks_public_access: false
-  rds_engine: "postgres"
-  rds_engine_version: "14"
-  use_external_secrets: true
-  secrets_manager_path_prefix: "myapp/fnx/certificates"
-
-  # Feature flags
-  enable_container_insights: false
-  enable_vpc_flow_logs: false
-
-  # Override development mixin with specific values
-  security:
-    vpc_flow_logs: true  # Override development mixin default
-
-  # Environment tagging strategy
   tags:
     Team: "DevOps"
     CostCenter: "IT"
@@ -77,3 +53,19 @@ settings:
     monitoring:
       critical_alerts: ["ops@example.com"]
       warning_alerts: ["team@example.com"]
+    tenant_name: testenv-01
+    hosted_zone_id: "Z1234567890EXAMPLE"
+    eks_kubernetes_version: "1.28"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
+    use_external_secrets: true
+    secrets_manager_path_prefix: "myapp/fnx/certificates"
+    enable_container_insights: false
+    enable_vpc_flow_logs: false
+    security:
+      vpc_flow_logs: true # Override development mixin default
+
+  # Environment tagging strategy
+  context:
+    environment: testenv-01

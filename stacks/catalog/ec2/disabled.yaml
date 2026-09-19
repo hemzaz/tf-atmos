@@ -4,5 +4,4 @@ components:
     ec2:
       metadata:
         component: ec2
-      vars:
         enabled: false

@@ -4,5 +4,4 @@ components:
     secretsmanager:
       metadata:
         component: secretsmanager
-      vars:
         enabled: false

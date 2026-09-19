@@ -110,7 +110,7 @@ components:
         security_groups:
           # ALB Security Group - allows inbound HTTP/HTTPS from anywhere
           alb:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-alb-sg"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-alb-sg"
             description: "Security group for web application ALB"
             ingress_rules:
               - description: "HTTPS from CloudFront"
@@ -135,7 +135,7 @@ components:
 
           # Application Security Group - allows traffic from ALB only
           application:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-app-sg"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-app-sg"
             description: "Security group for web application containers"
             ingress_rules:
               - description: "HTTP from ALB"
@@ -163,7 +163,7 @@ components:
 
           # Database Security Group - allows traffic from application only
           database:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-db-sg"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db-sg"
             description: "Security group for RDS database"
             ingress_rules:
               - description: "PostgreSQL from application"
@@ -175,7 +175,7 @@ components:
 
           # Cache Security Group - allows traffic from application only
           cache:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-cache-sg"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cache-sg"
             description: "Security group for ElastiCache"
             ingress_rules:
               - description: "Redis from application"
@@ -223,7 +223,7 @@ components:
         component: alb
         type: real
       vars:
-        name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-alb"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-alb"
         internal: false
         load_balancer_type: "application"
 
@@ -234,7 +234,7 @@ components:
 
         # Access logging
         enable_access_logs: true
-        access_logs_bucket: "{{ .vars.tenant }}-{{ .vars.environment }}-alb-logs"
+        access_logs_bucket: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-alb-logs"
         access_logs_prefix: "webapp"
 
         # Idle timeout configuration
@@ -263,7 +263,7 @@ components:
         # Target groups
         target_groups:
           app:
-            name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-tg"
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-tg"
             port: 8080
             protocol: "HTTP"
             target_type: "ip"  # For Fargate
@@ -301,7 +301,7 @@ components:
         component: waf
         type: real
       vars:
-        name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-waf"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-waf"
         scope: "REGIONAL"
 
         # Associate with ALB
@@ -340,7 +340,7 @@ components:
 
         # CloudWatch metrics
         cloudwatch_metrics_enabled: true
-        metric_name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-waf"
+        metric_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-waf"
         sampled_requests_enabled: true
 
         tags:
@@ -359,7 +359,7 @@ components:
         component: ecs
         type: real
       vars:
-        cluster_name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp"
+        cluster_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp"
 
         # Fargate-only cluster (no EC2 instances to manage)
         fargate_only: true
@@ -386,12 +386,12 @@ components:
         component: ecs-service
         type: real
       vars:
-        name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-service"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-service"
         cluster_arn: !terraform.state web-application/ecs-cluster .cluster_arn
 
         # Task definition
         task_definition:
-          family: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp"
+          family: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp"
           cpu: 256
           memory: 512
           network_mode: "awsvpc"
@@ -409,7 +409,7 @@ components:
                   protocol: "tcp"
               environment:
                 - name: "ENVIRONMENT"
-                  value: "{{ .vars.environment }}"
+                  value: "{{ .settings.context.environment }}"
                 - name: "DATABASE_HOST"
                   value: !terraform.state web-application/rds .endpoint
                 - name: "REDIS_HOST"
@@ -420,7 +420,7 @@ components:
               logConfiguration:
                 logDriver: "awslogs"
                 options:
-                  awslogs-group: "/ecs/{{ .vars.tenant }}-{{ .vars.environment }}-webapp"
+                  awslogs-group: "/ecs/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp"
                   awslogs-region: "{{ .vars.region }}"
                   awslogs-stream-prefix: "webapp"
               healthCheck:
@@ -490,7 +490,7 @@ components:
         component: rds
         type: real
       vars:
-        identifier: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-db"
+        identifier: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db"
 
         # Engine configuration
         engine: "postgres"
@@ -511,7 +511,7 @@ components:
         port: 5432
 
         # Network configuration
-        db_subnet_group_name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-db-subnet"
+        db_subnet_group_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db-subnet"
         subnet_ids: !terraform.state web-application/vpc .database_subnet_ids
         vpc_security_group_ids:
           - !terraform.state web-application/securitygroups .security_group_ids.database
@@ -540,7 +540,7 @@ components:
         # Enable for production
         deletion_protection: false
         skip_final_snapshot: true
-        final_snapshot_identifier: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-db-final"
+        final_snapshot_identifier: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db-final"
 
         # Parameter group
         parameters:
@@ -568,7 +568,7 @@ components:
         component: elasticache
         type: real
       vars:
-        cluster_id: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-cache"
+        cluster_id: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cache"
 
         # Engine configuration
         engine: "redis"
@@ -580,7 +580,7 @@ components:
         num_cache_nodes: 1
 
         # Network configuration
-        subnet_group_name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-cache-subnet"
+        subnet_group_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cache-subnet"
         subnet_ids: !terraform.state web-application/vpc .private_subnet_ids
         security_group_ids:
           - !terraform.state web-application/securitygroups .security_group_ids.cache
@@ -627,7 +627,7 @@ components:
         component: cloudfront
         type: real
       vars:
-        distribution_name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-cdn"
+        distribution_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cdn"
 
         # Origin configuration
         origins:
@@ -716,7 +716,7 @@ components:
         # Logging
         logging:
           enabled: true
-          bucket: "{{ .vars.tenant }}-{{ .vars.environment }}-cloudfront-logs.s3.amazonaws.com"
+          bucket: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-cloudfront-logs.s3.amazonaws.com"
           prefix: "webapp/"
           include_cookies: false
 
@@ -788,7 +788,7 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        dashboard_name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-dashboard"
+        dashboard_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-dashboard"
 
         # Enable monitoring features
         enable_resource_monitoring: true
@@ -911,7 +911,7 @@ components:
         # SNS for notifications
         alarm_notifications_enabled: true
         alarm_email_addresses: []
-        sns_topic_name: "{{ .vars.tenant }}-{{ .vars.environment }}-webapp-alarms"
+        sns_topic_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-alarms"
 
         tags:
           Layer: "monitoring"

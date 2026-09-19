@@ -6,7 +6,6 @@ components:
         component: vpc
         type: abstract
       vars:
-        enabled: true
         vpc_cidr: "10.0.0.0/16"
         azs:
           - '{{ .vars.region }}a'
@@ -35,21 +34,21 @@ components:
         type: abstract
       vars:
         enabled: true
-        root_domain: "{{ .vars.tenant }}.com"
+        root_domain: "{{ .settings.context.tenant }}.com"
         create_root_zone: false
         multi_account_dns_delegation: false
 
         # Configure zones
         zones:
           main:
-            name: '{{ .vars.environment }}.{{ .vars.tenant }}.com'
-            comment: Main zone for {{ .vars.environment }} environment
+            name: '{{ .settings.context.environment }}.{{ .settings.context.tenant }}.com'
+            comment: Main zone for {{ .settings.context.environment }} environment
             force_destroy: false
             enable_query_logging: true
             vpc_associations: []
           internal:
-            name: internal.{{ .vars.environment }}.{{ .vars.tenant }}.com
-            comment: Internal DNS for {{ .vars.environment }} environment
+            name: internal.{{ .settings.context.environment }}.{{ .settings.context.tenant }}.com
+            comment: Internal DNS for {{ .settings.context.environment }} environment
             vpc_associations:
               - !terraform.state vpc/main .vpc_id
             force_destroy: false
