@@ -26,7 +26,7 @@ variable "subnet_ids" {
 }
 
 variable "ami_id" {
-  description = "AMI ID for instances (leave empty for latest Amazon Linux 2)"
+  description = "AMI ID for instances (leave null for the latest Amazon Linux 2023 x86_64 AMI)"
   type        = string
   default     = null
 }
@@ -59,12 +59,22 @@ variable "on_demand_percentage_above_base" {
   description = "Percentage of on-demand instances above base"
   type        = number
   default     = 20
+
+  validation {
+    condition     = var.on_demand_percentage_above_base >= 0 && var.on_demand_percentage_above_base <= 100
+    error_message = "on_demand_percentage_above_base must be between 0 and 100."
+  }
 }
 
 variable "spot_allocation_strategy" {
   description = "How to allocate Spot capacity (lowest-price, capacity-optimized, capacity-optimized-prioritized)"
   type        = string
   default     = "capacity-optimized"
+
+  validation {
+    condition     = contains(["lowest-price", "capacity-optimized", "capacity-optimized-prioritized", "price-capacity-optimized"], var.spot_allocation_strategy)
+    error_message = "spot_allocation_strategy must be lowest-price, capacity-optimized, capacity-optimized-prioritized, or price-capacity-optimized."
+  }
 }
 
 variable "spot_max_price" {
@@ -142,11 +152,11 @@ variable "enable_scheduled_scaling" {
 variable "scheduled_actions" {
   description = "List of scheduled scaling actions"
   type = list(object({
-    name               = string
-    min_size           = number
-    max_size           = number
-    desired_capacity   = number
-    recurrence         = string
+    name             = string
+    min_size         = number
+    max_size         = number
+    desired_capacity = number
+    recurrence       = string
   }))
   default = []
 }
@@ -161,6 +171,11 @@ variable "instance_refresh_min_healthy_percentage" {
   description = "Minimum healthy percentage during instance refresh"
   type        = number
   default     = 90
+
+  validation {
+    condition     = var.instance_refresh_min_healthy_percentage >= 0 && var.instance_refresh_min_healthy_percentage <= 100
+    error_message = "instance_refresh_min_healthy_percentage must be between 0 and 100."
+  }
 }
 
 variable "enable_warm_pool" {
@@ -209,6 +224,11 @@ variable "health_check_type" {
   description = "Health check type (EC2 or ELB)"
   type        = string
   default     = "EC2"
+
+  validation {
+    condition     = contains(["EC2", "ELB"], var.health_check_type)
+    error_message = "health_check_type must be EC2 or ELB."
+  }
 }
 
 variable "health_check_grace_period" {

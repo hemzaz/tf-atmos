@@ -1,544 +1,240 @@
-name: Terraform Infrastructure CD Pipeline
+# Deploy with Atmos Native CI.
+#   push to the default branch: deploy, per stack, every component affected since
+#     that stack's last successful deploy, in dependency order.
+#   workflow_dispatch (default branch only): plan or deploy one known stack
+#     (optionally one component).
+# Approvals and credentials come from GitHub Environments named after the Atmos
+# stack (e.g. fnx-prod-production); give production environments required
+# reviewers. Each environment defines vars.AWS_ROLE_ARN (OIDC-trusted deploy role).
+# Destroy is intentionally not exposed here: use
+# `atmos workflow destroy -f destroy-environment` (typed confirmation).
+#
+# GitHub-side controls this file relies on (they cannot be expressed in YAML):
+#   - Every stack environment: deployment branches = the default branch only.
+#   - Deploy role trust (each environment's AWS_ROLE_ARN): aud = sts.amazonaws.com,
+#     sub = repo:<org>/<repo>:environment:<stack>. Never a wildcard.
+#   - Plan role trust (repo-level AWS_PLAN_ROLE_ARN, read-only): sub =
+#     repo:<org>/<repo>:pull_request, plus repo:<org>/<repo>:ref:refs/heads/<default
+#     branch> for drift detection and disaster-recovery checks.
+#   - A tag ruleset allowing only GitHub Actions to create/update/delete
+#     refs/tags/deployed/**, so only this workflow moves the deploy markers.
+#
+# Ordering: the workflow-level concurrency group serializes runs. GitHub keeps
+# only one pending run per group, so a burst of pushes can evict a queued run.
+# Nothing is lost when that happens: each stack deploys everything affected since
+# its `deployed/<stack>` tag, which moves only after that stack deployed
+# successfully, so the next run picks up the evicted run's commits.
+# Bootstrap once per stack (otherwise a run falls back to the push's `before` commit):
+#   git tag deployed/<stack> <last-deployed-sha> && git push origin deployed/<stack>
+name: Terraform CD
+# AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
+# there is no AWS account yet, and that variable marks AWS as configured.
 
 on:
   push:
-    branches:
-      - master
-      - main
-      - develop
+    branches: [main, master]
     paths:
-      - 'components/**'
-      - 'stacks/**'
-      - 'workflows/**'
-      - '.github/workflows/**'
-  pull_request:
-    branches:
-      - master
-      - main
-    paths:
-      - 'components/**'
-      - 'stacks/**'
-      - 'workflows/**'
+      - atmos.yaml
+      - components/**
+      - stacks/**
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Target environment'
+      stack:
+        description: Atmos stack
         required: true
         type: choice
-        options:
-          - dev
-          - staging
-          - prod
-        default: dev
-      tenant:
-        description: 'Tenant identifier'
-        required: true
-        default: 'fnx'
-      account:
-        description: 'AWS account identifier'
-        required: true
-        default: 'dev'
+        options: [fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production]
       component:
-        description: 'Specific component to deploy (empty for all)'
+        description: Component to target (empty = every component in the stack)
         required: false
+        type: string
       action:
-        description: 'Deployment action'
+        description: Terraform action
         required: true
         type: choice
-        options:
-          - plan
-          - apply
-          - destroy
+        options: [plan, deploy]
         default: plan
-      skip_tests:
-        description: 'Skip integration tests'
-        type: boolean
-        default: false
 
-env:
-  ATMOS_VERSION: "1.44.0"
-  TERRAFORM_VERSION: "1.5.7"
-  AWS_DEFAULT_REGION: us-east-1
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+permissions: {}
+
+concurrency:
+  group: terraform-cd-main
+  cancel-in-progress: false
 
 jobs:
-  # Security and compliance checks
-  security-scan:
-    name: Security & Compliance Scan
+  affected-stacks:
+    name: Affected stacks
+    if: >-
+      vars.AWS_PLAN_ROLE_ARN != '' &&
+      github.event_name == 'push' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    container:
+      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+    permissions:
+      contents: read
     outputs:
-      security-status: ${{ steps.security-check.outputs.status }}
+      matrix: ${{ steps.stacks.outputs.matrix }}
+      any: ${{ steps.stacks.outputs.any }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-      - name: Run Checkov static analysis
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: .
-          quiet: true
-          framework: terraform
-          output_format: sarif
-          output_file_path: checkov.sarif
-
-      - name: Security check status
-        id: security-check
+          fetch-tags: true
+          persist-credentials: false
+      - id: stacks
+        name: Describe affected since each stack's last deploy
+        shell: python3 {0}
+        env:
+          PUSH_BASE: ${{ github.event.before }}
         run: |
-          if [ -f "trivy-results.sarif" ] && [ -f "checkov.sarif" ]; then
-            echo "status=passed" >> $GITHUB_OUTPUT
-          else
-            echo "status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          import json, os, subprocess
 
-  # Code quality and linting
-  code-quality:
-    name: Code Quality & Linting
+          # Promotion order; stacks not listed here deploy last.
+          ORDER = ["fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-prod-production"]
+          head = os.environ["GITHUB_SHA"]
+          push_base = os.environ.get("PUSH_BASE", "")
+
+          def git(*args):
+              return subprocess.run(["git", *args], capture_output=True, text=True)
+
+          stacks = json.loads(subprocess.check_output(
+              ["atmos", "describe", "stacks", "--process-functions=false",
+               "--format", "json", "--query", "keys"]))
+          stacks.sort(key=lambda s: (ORDER.index(s) if s in ORDER else len(ORDER), s))
+
+          include = []
+          for stack in stacks:
+              tag = git("rev-parse", "-q", "--verify", f"refs/tags/deployed/{stack}^{{commit}}")
+              if tag.returncode == 0:
+                  base = tag.stdout.strip()
+              elif push_base.strip("0"):
+                  base = push_base
+                  print(f"::warning::No deployed/{stack} tag; comparing against the push base {base}")
+              else:
+                  raise SystemExit(f"::error::No deployed/{stack} tag and no push base; create the tag first")
+              if base == head:
+                  continue
+              if git("merge-base", "--is-ancestor", base, head).returncode != 0:
+                  print(f"::warning::{stack}: {base} is not an ancestor of {head} (newer deploy or rewritten history); skipping")
+                  continue
+              subprocess.run(
+                  ["atmos", "describe", "affected", "--base", base, "-s", stack,
+                   "--include-dependents", "--process-functions=false",
+                   "--format", "json", "--file", "affected.json"], check=True)
+              with open("affected.json") as f:
+                  if json.load(f):
+                      include.append({"stack": stack, "base": base})
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"matrix={json.dumps({'include': include})}\n")
+              out.write(f"any={'true' if include else 'false'}\n")
+
+  deploy-affected:
+    name: Deploy ${{ matrix.stack }}
+    needs: affected-stacks
+    if: needs.affected-stacks.outputs.any == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      lint-status: ${{ steps.lint-check.outputs.status }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Atmos
-        uses: cloudposse/github-action-setup-atmos@v1
-        with:
-          atmos-version: ${{ env.ATMOS_VERSION }}
-
-      - name: Cache Terraform modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.terraform.d/plugin-cache
-            .terraform/
-          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
-
-      - name: Run Atmos lint workflow
-        run: |
-          atmos workflow lint -f lint.yaml fix=false
-
-      - name: Validate Terraform formatting
-        run: |
-          terraform fmt -check -recursive ./components/terraform/
-
-      - name: Lint status check
-        id: lint-check
-        run: |
-          echo "status=passed" >> $GITHUB_OUTPUT
-
-  # Component validation and testing
-  component-validation:
-    name: Component Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [security-scan, code-quality]
-    if: needs.security-scan.outputs.security-status == 'passed' && needs.code-quality.outputs.lint-status == 'passed'
+    container:
+      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+    environment: ${{ matrix.stack }}
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
     strategy:
-      matrix:
-        environment: [dev, staging, prod]
       fail-fast: false
-    outputs:
-      validation-status: ${{ steps.validation-check.outputs.status }}
+      max-parallel: 1
+      matrix: ${{ fromJson(needs.affected-stacks.outputs.matrix) }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Atmos
-        uses: cloudposse/github-action-setup-atmos@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          atmos-version: ${{ env.ATMOS_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+      - name: Deploy affected components
+        env:
+          BASE_SHA: ${{ matrix.base }}
+          STACK: ${{ matrix.stack }}
+        run: atmos terraform deploy --affected --sha "$BASE_SHA" -s "$STACK"
+      - name: Record successful deploy
+        run: mkdir -p deployed && echo "$GITHUB_SHA" > deployed/sha
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployed-${{ matrix.stack }}
+          path: deployed/
+          retention-days: 1
 
-      - name: Validate components for ${{ matrix.environment }}
-        run: |
-          # Determine tenant and account based on environment
-          case "${{ matrix.environment }}" in
-            dev) TENANT=fnx; ACCOUNT=dev ;;
-            staging) TENANT=fnx; ACCOUNT=staging ;;
-            prod) TENANT=fnx; ACCOUNT=prod ;;
-          esac
-          
-          echo "Validating environment: ${{ matrix.environment }}, tenant: $TENANT, account: $ACCOUNT"
-          atmos workflow validate -f validate.yaml tenant=$TENANT account=$ACCOUNT environment=${{ matrix.environment }}
-
-      - name: Validation status check
-        id: validation-check
-        run: |
-          echo "status=passed" >> $GITHUB_OUTPUT
-
-  # Infrastructure planning
-  infrastructure-plan:
-    name: Infrastructure Plan
+  # The only job with contents: write. For each stack whose deploy succeeded (it
+  # uploaded a marker artifact), move deployed/<stack> forward to this commit.
+  mark-deployed:
+    name: Move deploy markers
+    needs: [affected-stacks, deploy-affected]
+    if: always() && needs.affected-stacks.outputs.any == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [component-validation]
-    if: needs.component-validation.outputs.validation-status == 'passed'
-    strategy:
-      matrix:
-        environment: [dev, staging, prod]
-      fail-fast: false
-    outputs:
-      plan-status: ${{ steps.plan-check.outputs.status }}
-      plan-changes: ${{ steps.plan-changes.outputs.changes }}
+    permissions:
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Atmos
-        uses: cloudposse/github-action-setup-atmos@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          atmos-version: ${{ env.ATMOS_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', upper(matrix.environment))] }}
-          role-session-name: GitHubActions-${{ matrix.environment }}
-
-      - name: Create plan directory
+          pattern: deployed-*
+          path: markers
+      - name: Move deployed/<stack> tags
         run: |
-          mkdir -p plans/${{ matrix.environment }}
+          shopt -s nullglob
+          for dir in markers/deployed-*; do
+            stack="${dir#markers/deployed-}"
+            sha="$(cat "$dir/sha")"
+            [[ "$stack" =~ ^[A-Za-z0-9._-]+$ && "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad marker $dir"; exit 1; }
+            ref="refs/tags/deployed/$stack"
+            if current="$(git rev-parse -q --verify "$ref^{commit}")" && ! git merge-base --is-ancestor "$current" "$sha"; then
+              echo "::warning::$ref ($current) is not an ancestor of $sha; leaving it"
+              continue
+            fi
+            git push --force origin "$sha:$ref"
+          done
 
-      - name: Generate infrastructure plan
-        run: |
-          # Determine tenant and account based on environment
-          case "${{ matrix.environment }}" in
-            dev) TENANT=fnx; ACCOUNT=dev ;;
-            staging) TENANT=fnx; ACCOUNT=staging ;;
-            prod) TENANT=fnx; ACCOUNT=prod ;;
-          esac
-          
-          echo "Planning environment: ${{ matrix.environment }}, tenant: $TENANT, account: $ACCOUNT"
-          atmos workflow plan-environment -f plan-environment.yaml \
-            tenant=$TENANT \
-            account=$ACCOUNT \
-            environment=${{ matrix.environment }} \
-            output_dir=./plans/${{ matrix.environment }}
-
-      - name: Detect plan changes
-        id: plan-changes
-        run: |
-          if find ./plans/${{ matrix.environment }} -name "*.tfplan" -exec terraform show {} \; | grep -q "Plan:"; then
-            echo "changes=true" >> $GITHUB_OUTPUT
-            echo "Infrastructure changes detected for ${{ matrix.environment }}"
-          else
-            echo "changes=false" >> $GITHUB_OUTPUT
-            echo "No infrastructure changes for ${{ matrix.environment }}"
-          fi
-
-      - name: Upload plan artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: terraform-plans-${{ matrix.environment }}
-          path: plans/${{ matrix.environment }}/
-          retention-days: 7
-
-      - name: Plan status check
-        id: plan-check
-        run: |
-          echo "status=passed" >> $GITHUB_OUTPUT
-
-      - name: Comment on PR with plan
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            
-            // Find plan files
-            const planDir = './plans/${{ matrix.environment }}';
-            if (fs.existsSync(planDir)) {
-              const files = fs.readdirSync(planDir);
-              const planFiles = files.filter(f => f.endsWith('.tfplan'));
-              
-              if (planFiles.length > 0) {
-                const comment = `## Terraform Plan Results for ${{ matrix.environment }}
-            
-            **Environment**: ${{ matrix.environment }}
-            **Plan files generated**: ${planFiles.length}
-            **Changes detected**: ${{ steps.plan-changes.outputs.changes }}
-            
-            <details>
-            <summary>Plan Summary</summary>
-            
-            \`\`\`
-            Plan files: ${planFiles.join(', ')}
-            \`\`\`
-            </details>
-            
-            Plans are available as artifacts for 7 days.`;
-                
-                github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: comment
-                });
-              }
-            }
-
-  # Development environment deployment
-  deploy-dev:
-    name: Deploy to Development
+  dispatch:
+    name: ${{ inputs.action }} ${{ inputs.stack }} ${{ inputs.component }}
+    # Re-check the stack against the known list: API callers are not bound to the
+    # choice options, and `environment:` would auto-create an unprotected environment.
+    if: >-
+      vars.AWS_PLAN_ROLE_ARN != '' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      contains(fromJson('["fnx-dev-testenv-01","fnx-staging-staging-01","fnx-prod-production"]'), inputs.stack)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    needs: [infrastructure-plan]
-    if: |
-      always() &&
-      needs.infrastructure-plan.result == 'success' &&
-      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-    environment: 
-      name: dev
-      url: https://dev.platform.company.com
+    container:
+      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+    environment: ${{ inputs.stack }}
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ACTION: ${{ inputs.action }}
+      COMPONENT: ${{ inputs.component }}
+      STACK: ${{ inputs.stack }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Atmos
-        uses: cloudposse/github-action-setup-atmos@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          atmos-version: ${{ env.ATMOS_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
-          role-session-name: GitHubActions-Deploy-Dev
-
-      - name: Deploy to development
-        run: |
-          echo "Deploying to development environment"
-          atmos workflow apply-environment -f apply-environment.yaml \
-            tenant=fnx \
-            account=dev \
-            environment=dev \
-            auto_approve=true
-
-      - name: Run integration tests
-        if: github.event.inputs.skip_tests != 'true'
-        run: |
-          echo "Running integration tests"
-          # Add integration test commands here
-          sleep 5  # Placeholder for actual tests
-
-      - name: Update deployment status
-        run: |
-          echo "Development deployment completed successfully"
-
-  # Staging environment deployment
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    needs: [deploy-dev]
-    if: |
-      always() &&
-      needs.deploy-dev.result == 'success' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-    environment:
-      name: staging
-      url: https://staging.platform.company.com
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Atmos
-        uses: cloudposse/github-action-setup-atmos@v1
-        with:
-          atmos-version: ${{ env.ATMOS_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_STAGING }}
-          role-session-name: GitHubActions-Deploy-Staging
-
-      - name: Deploy to staging
-        run: |
-          echo "Deploying to staging environment"
-          atmos workflow apply-environment -f apply-environment.yaml \
-            tenant=fnx \
-            account=staging \
-            environment=staging \
-            auto_approve=true
-
-      - name: Run staging tests
-        if: github.event.inputs.skip_tests != 'true'
-        run: |
-          echo "Running staging validation tests"
-          # Add staging-specific tests here
-          sleep 5  # Placeholder for actual tests
-
-  # Production environment deployment
-  deploy-prod:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: [deploy-staging]
-    if: |
-      always() &&
-      needs.deploy-staging.result == 'success' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-    environment:
-      name: production
-      url: https://platform.company.com
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Atmos
-        uses: cloudposse/github-action-setup-atmos@v1
-        with:
-          atmos-version: ${{ env.ATMOS_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
-          role-session-name: GitHubActions-Deploy-Prod
-
-      - name: Pre-deployment health check
-        run: |
-          echo "Running pre-deployment health checks"
-          # Add production health checks here
-          aws eks describe-cluster --name production-cluster --query 'cluster.status'
-
-      - name: Deploy to production
-        run: |
-          echo "Deploying to production environment"
-          atmos workflow apply-environment -f apply-environment.yaml \
-            tenant=fnx \
-            account=prod \
-            environment=production \
-            auto_approve=true
-
-      - name: Post-deployment verification
-        run: |
-          echo "Running post-deployment verification"
-          # Add production verification tests here
-          sleep 10  # Allow time for deployment to stabilize
-          
-          # Check application health
-          curl -f https://platform.company.com/health || exit 1
-
-      - name: Run production smoke tests
-        if: github.event.inputs.skip_tests != 'true'
-        run: |
-          echo "Running production smoke tests"
-          # Add production smoke tests here
-          sleep 5  # Placeholder for actual tests
-
-  # Drift detection job (runs after deployments)
-  drift-detection:
-    name: Infrastructure Drift Detection
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [deploy-dev, deploy-staging, deploy-prod]
-    if: always()
-    strategy:
-      matrix:
-        environment: [dev, staging, prod]
-      fail-fast: false
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Atmos
-        uses: cloudposse/github-action-setup-atmos@v1
-        with:
-          atmos-version: ${{ env.ATMOS_VERSION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', upper(matrix.environment))] }}
-          role-session-name: GitHubActions-Drift-${{ matrix.environment }}
-
-      - name: Run drift detection
-        run: |
-          case "${{ matrix.environment }}" in
-            dev) TENANT=fnx; ACCOUNT=dev ;;
-            staging) TENANT=fnx; ACCOUNT=staging ;;
-            prod) TENANT=fnx; ACCOUNT=prod ;;
-          esac
-          
-          echo "Running drift detection for ${{ matrix.environment }}"
-          atmos workflow drift-detection -f drift-detection.yaml \
-            tenant=$TENANT \
-            account=$ACCOUNT \
-            environment=${{ matrix.environment }} \
-            report_format=both || echo "Drift detected in ${{ matrix.environment }}"
-
-  # Notification job
-  notification:
-    name: Pipeline Notification
-    runs-on: ubuntu-latest
-    needs: [deploy-dev, deploy-staging, deploy-prod, drift-detection]
-    if: always()
-    steps:
-      - name: Determine pipeline status
-        id: status
-        run: |
-          if [[ "${{ needs.deploy-dev.result }}" == "success" && \
-                "${{ needs.deploy-staging.result }}" == "success" && \
-                "${{ needs.deploy-prod.result }}" == "success" ]]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "message=All deployments completed successfully" >> $GITHUB_OUTPUT
-          elif [[ "${{ needs.deploy-dev.result }}" == "failure" || \
-                  "${{ needs.deploy-staging.result }}" == "failure" || \
-                  "${{ needs.deploy-prod.result }}" == "failure" ]]; then
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "message=One or more deployments failed" >> $GITHUB_OUTPUT
-          else
-            echo "status=partial" >> $GITHUB_OUTPUT
-            echo "message=Pipeline completed with mixed results" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send notification
-        run: |
-          echo "Pipeline Status: ${{ steps.status.outputs.status }}"
-          echo "Message: ${{ steps.status.outputs.message }}"
-          # Add Slack/Teams/email notification logic here
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+      - name: Validate stacks
+        run: atmos validate stacks
+      - name: Run
+        # Inputs are passed via env (not interpolated into the script) to avoid injection.
+        run: atmos terraform "$ACTION" ${COMPONENT:+"$COMPONENT"} -s "$STACK"

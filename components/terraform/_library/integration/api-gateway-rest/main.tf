@@ -26,19 +26,13 @@ resource "aws_api_gateway_rest_api" "main" {
   description = var.api_description
 
   endpoint_configuration {
-    types = [var.endpoint_type]
+    types            = [var.endpoint_type]
     vpc_endpoint_ids = var.endpoint_type == "PRIVATE" ? var.vpc_endpoint_ids : null
   }
 
-  binary_media_types = var.binary_media_types
-  minimum_compression_size = var.enable_compression ? var.minimum_compression_size : null
-
-  dynamic "policy" {
-    for_each = var.api_policy != null ? [1] : []
-    content {
-      policy = var.api_policy
-    }
-  }
+  binary_media_types       = var.binary_media_types
+  minimum_compression_size = var.enable_compression ? tostring(var.minimum_compression_size) : null
+  policy                   = var.api_policy
 
   tags = local.tags
 }
@@ -120,9 +114,9 @@ resource "aws_api_gateway_stage" "main" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   stage_name    = var.stage_name
 
-  xray_tracing_enabled = var.enable_xray_tracing
+  xray_tracing_enabled  = var.enable_xray_tracing
   cache_cluster_enabled = var.enable_cache
-  cache_cluster_size = var.enable_cache ? var.cache_cluster_size : null
+  cache_cluster_size    = var.enable_cache ? var.cache_cluster_size : null
 
   dynamic "access_log_settings" {
     for_each = var.enable_access_logging ? [1] : []
@@ -155,8 +149,8 @@ resource "aws_api_gateway_method_settings" "main" {
     caching_enabled        = var.enable_cache
 
     # Cache settings
-    cache_ttl_in_seconds           = var.enable_cache ? var.cache_ttl_seconds : null
-    cache_data_encrypted           = var.enable_cache ? var.cache_data_encrypted : null
+    cache_ttl_in_seconds                    = var.enable_cache ? var.cache_ttl_seconds : null
+    cache_data_encrypted                    = var.enable_cache ? var.cache_data_encrypted : null
     require_authorization_for_cache_control = var.enable_cache ? var.require_authorization_for_cache_control : null
   }
 }
@@ -169,9 +163,9 @@ resource "aws_api_gateway_api_key" "main" {
   for_each = { for key in var.api_keys : key.name => key }
 
   name        = "${local.api_name}-${each.value.name}"
-  description = lookup(each.value, "description", null)
-  enabled     = lookup(each.value, "enabled", true)
-  value       = lookup(each.value, "value", null)
+  description = each.value.description
+  enabled     = each.value.enabled
+  value       = each.value.value
 
   tags = local.tags
 }
@@ -180,7 +174,7 @@ resource "aws_api_gateway_usage_plan" "main" {
   for_each = { for plan in var.usage_plans : plan.name => plan }
 
   name        = "${local.api_name}-${each.value.name}"
-  description = lookup(each.value, "description", null)
+  description = each.value.description
 
   api_stages {
     api_id = aws_api_gateway_rest_api.main.id
@@ -188,16 +182,16 @@ resource "aws_api_gateway_usage_plan" "main" {
   }
 
   dynamic "quota_settings" {
-    for_each = lookup(each.value, "quota_limit", null) != null ? [1] : []
+    for_each = each.value.quota_limit != null ? [1] : []
     content {
       limit  = each.value.quota_limit
-      offset = lookup(each.value, "quota_offset", 0)
-      period = lookup(each.value, "quota_period", "DAY")
+      offset = each.value.quota_offset
+      period = each.value.quota_period
     }
   }
 
   dynamic "throttle_settings" {
-    for_each = lookup(each.value, "throttle_burst_limit", null) != null ? [1] : []
+    for_each = each.value.throttle_burst_limit != null ? [1] : []
     content {
       burst_limit = each.value.throttle_burst_limit
       rate_limit  = each.value.throttle_rate_limit
@@ -218,7 +212,7 @@ resource "aws_api_gateway_usage_plan_key" "main" {
 locals {
   usage_plan_key_associations = flatten([
     for plan in var.usage_plans : [
-      for key_name in lookup(plan, "api_key_names", []) : {
+      for key_name in plan.api_key_names : {
         plan_name = plan.name
         key_name  = key_name
       }
@@ -275,8 +269,8 @@ resource "aws_api_gateway_request_validator" "main" {
 
   name                        = "${local.api_name}-${each.value.name}"
   rest_api_id                 = aws_api_gateway_rest_api.main.id
-  validate_request_body       = lookup(each.value, "validate_request_body", false)
-  validate_request_parameters = lookup(each.value, "validate_request_parameters", false)
+  validate_request_body       = each.value.validate_request_body
+  validate_request_parameters = each.value.validate_request_parameters
 }
 
 ##############################################

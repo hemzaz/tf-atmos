@@ -12,7 +12,7 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.name
+  region     = data.aws_region.current.region
   partition  = data.aws_partition.current.partition
 
   name_prefix = var.name
@@ -164,7 +164,7 @@ resource "aws_ecr_replication_configuration" "this" {
         for_each = var.replication_destinations
         content {
           region      = destination.value.region
-          registry_id = destination.value.registry_id != null ? destination.value.registry_id : local.account_id
+          registry_id = coalesce(destination.value.registry_id, local.account_id)
         }
       }
 

@@ -3,9 +3,10 @@ resource "aws_iam_policy" "resource_management" {
   path        = "/"
   description = "Policy for managing AWS resources within account with least privilege"
 
+  # Statements whose resource list is empty are dropped: IAM rejects empty Resource arrays.
   policy = jsonencode({
     Version = "2012-10-17",
-    Statement = [
+    Statement = [for statement in [
       {
         Sid    = "ReadOnlyAccess"
         Effect = "Allow",
@@ -95,7 +96,7 @@ resource "aws_iam_policy" "resource_management" {
         ],
         Resource = var.managed_sns_topic_arns != null ? var.managed_sns_topic_arns : []
       }
-    ]
+    ] : statement if length(flatten([statement.Resource])) > 0]
   })
 
   lifecycle {

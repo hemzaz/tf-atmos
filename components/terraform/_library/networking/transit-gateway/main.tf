@@ -45,18 +45,18 @@ resource "aws_ec2_transit_gateway_vpc_attachment" "this" {
   vpc_id             = each.value.vpc_id
   subnet_ids         = each.value.subnet_ids
 
-  dns_support                                     = lookup(each.value, "dns_support", true) ? "enable" : "disable"
-  ipv6_support                                    = lookup(each.value, "ipv6_support", false) ? "enable" : "disable"
-  appliance_mode_support                          = lookup(each.value, "appliance_mode_support", false) ? "enable" : "disable"
-  transit_gateway_default_route_table_association = lookup(each.value, "default_route_table_association", var.default_route_table_association)
-  transit_gateway_default_route_table_propagation = lookup(each.value, "default_route_table_propagation", var.default_route_table_propagation)
+  dns_support                                     = each.value.dns_support ? "enable" : "disable"
+  ipv6_support                                    = each.value.ipv6_support ? "enable" : "disable"
+  appliance_mode_support                          = each.value.appliance_mode_support ? "enable" : "disable"
+  transit_gateway_default_route_table_association = coalesce(each.value.default_route_table_association, var.default_route_table_association)
+  transit_gateway_default_route_table_propagation = coalesce(each.value.default_route_table_propagation, var.default_route_table_propagation)
 
   tags = merge(
     local.common_tags,
     {
       Name = "${local.name_prefix}-tgw-attachment-${each.key}"
     },
-    lookup(each.value, "tags", {})
+    each.value.tags
   )
 }
 
@@ -66,7 +66,7 @@ resource "aws_ec2_transit_gateway_vpc_attachment" "this" {
 resource "aws_customer_gateway" "this" {
   for_each = var.vpn_attachments
 
-  bgp_asn    = each.value.bgp_asn
+  bgp_asn    = tostring(each.value.bgp_asn)
   ip_address = each.value.ip_address
   type       = "ipsec.1"
 
@@ -85,7 +85,7 @@ resource "aws_vpn_connection" "this" {
   transit_gateway_id  = aws_ec2_transit_gateway.this.id
   type                = "ipsec.1"
 
-  static_routes_only = lookup(each.value, "static_routes_only", false)
+  static_routes_only = each.value.static_routes_only
 
   tags = merge(
     local.common_tags,
@@ -117,7 +117,7 @@ resource "aws_ec2_transit_gateway_route_table" "this" {
 resource "aws_ec2_transit_gateway_route_table_association" "vpc" {
   for_each = {
     for k, v in var.vpc_attachments : k => v
-    if lookup(v, "route_table_id", null) != null
+    if v.route_table_id != null
   }
 
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.this[each.key].id
@@ -127,7 +127,7 @@ resource "aws_ec2_transit_gateway_route_table_association" "vpc" {
 resource "aws_ec2_transit_gateway_route_table_association" "vpn" {
   for_each = {
     for k, v in var.vpn_attachments : k => v
-    if lookup(v, "route_table_id", null) != null
+    if v.route_table_id != null
   }
 
   transit_gateway_attachment_id  = aws_vpn_connection.this[each.key].transit_gateway_attachment_id
@@ -141,7 +141,7 @@ resource "aws_ec2_transit_gateway_route_table_propagation" "vpc" {
   for_each = {
     for item in flatten([
       for k, v in var.vpc_attachments : [
-        for rt_id in lookup(v, "propagate_to_route_tables", []) : {
+        for rt_id in v.propagate_to_route_tables : {
           attachment_key = k
           route_table_id = rt_id
           unique_key     = "${k}-${rt_id}"
@@ -158,7 +158,7 @@ resource "aws_ec2_transit_gateway_route_table_propagation" "vpn" {
   for_each = {
     for item in flatten([
       for k, v in var.vpn_attachments : [
-        for rt_id in lookup(v, "propagate_to_route_tables", []) : {
+        for rt_id in v.propagate_to_route_tables : {
           attachment_key = k
           route_table_id = rt_id
           unique_key     = "${k}-${rt_id}"
@@ -178,11 +178,11 @@ resource "aws_ec2_transit_gateway_route" "this" {
   for_each = {
     for item in flatten([
       for rt_key, rt_config in var.transit_gateway_route_tables : [
-        for route in lookup(rt_config, "routes", []) : {
+        for route in rt_config.routes : {
           route_table_key = rt_key
           cidr            = route.destination_cidr_block
-          attachment_key  = lookup(route, "attachment_key", null)
-          blackhole       = lookup(route, "blackhole", false)
+          attachment_key  = route.attachment_key
+          blackhole       = route.blackhole
           unique_key      = "${rt_key}-${replace(route.destination_cidr_block, "/", "-")}"
         }
       ]

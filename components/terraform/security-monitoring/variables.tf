@@ -1,11 +1,21 @@
 variable "region" {
   type        = string
   description = "AWS region"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
 }
 
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to all resources"
+
+  validation {
+    condition     = contains(keys(var.tags), "Environment")
+    error_message = "The tags map must contain an 'Environment' key."
+  }
 }
 
 # GuardDuty Variables
@@ -112,6 +122,8 @@ variable "enable_alert_enrichment" {
   default     = false
 }
 
+# Not ephemeral: the value is passed to a Lambda environment variable, which is not a
+# write-only argument and is stored in state.
 variable "slack_webhook_url" {
   type        = string
   description = "Slack webhook URL for security alerts"
@@ -119,6 +131,8 @@ variable "slack_webhook_url" {
   sensitive   = true
 }
 
+# Not ephemeral: the value is passed to a Lambda environment variable, which is not a
+# write-only argument and is stored in state.
 variable "pagerduty_integration_key" {
   type        = string
   description = "PagerDuty integration key for security alerts"

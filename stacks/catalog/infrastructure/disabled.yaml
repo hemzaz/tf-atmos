@@ -4,5 +4,4 @@ components:
     infrastructure:
       metadata:
         component: infrastructure
-      vars:
         enabled: false

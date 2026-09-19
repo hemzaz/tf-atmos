@@ -43,12 +43,6 @@ locals {
     var.default_key_name == null &&
     local.create_global_key
   }
-
-  # Instances using existing keys
-  instances_using_existing_keys = {
-    for k, v in local.instances_with_normalized_key_names : k => v
-    if v.normalized_key_name != null || var.default_key_name != null
-  }
 }
 
 # Generate individual keys for instances
@@ -61,8 +55,6 @@ resource "tls_private_key" "ssh_key" {
     # Prevent recreation of keys, which helps with idempotency
     # Terraform will error if this can't be achieved rather than replacing the key
     prevent_destroy = true
-    # Mark the key as sensitive
-    sensitive = true
 
     # Add preconditions to validate that key parameters haven't changed
     precondition {
@@ -88,8 +80,6 @@ resource "tls_private_key" "global_ssh_key" {
     # Prevent recreation of keys, which helps with idempotency
     # Terraform will error if this can't be achieved rather than replacing the key
     prevent_destroy = true
-    # Mark the key as sensitive
-    sensitive = true
 
     # Add preconditions to validate that key parameters haven't changed
     precondition {
@@ -171,7 +161,6 @@ resource "aws_secretsmanager_secret_version" "ssh_key" {
     subnet_id           = aws_instance.instances[each.key].subnet_id
     security_group_id   = aws_security_group.instances[each.key].id
     environment         = var.tags["Environment"]
-    created_at          = timestamp()
   })
 
   depends_on = [aws_instance.instances]
@@ -185,9 +174,9 @@ resource "aws_secretsmanager_secret_version" "ssh_key" {
   }
 }
 
-# The update secret functionality has been moved directly into the aws_secretsmanager_secret_version resource
-# We no longer need this null_resource since we include the instance_id directly in the secret
-# No need for local-exec provisioners or AWS CLI commands
+# SSH private keys stay regular (non-ephemeral) values: aws_key_pair.public_key is not a
+# write-only argument, so an ephemeral tls_private_key cannot feed it, and the key pair is
+# already in state through tls_private_key. secret_string_wo would therefore hide nothing.
 
 # Store global SSH key in Secrets Manager
 resource "aws_secretsmanager_secret" "global_ssh_key" {
@@ -214,70 +203,10 @@ resource "aws_secretsmanager_secret_version" "global_ssh_key" {
     key_name           = aws_key_pair.global[0].key_name
     environment        = var.tags["Environment"]
     used_by_instances  = keys(local.instances_using_global_key)
+    # Instance IDs are included directly, replacing the local-exec secret update that
+    # overwrote this version out of band
+    instance_details = { for k, v in local.instances_using_global_key : k => aws_instance.instances[k].id }
   })
-}
-
-# Update global key with instance details after instances are created
-resource "null_resource" "update_global_key_instance_info" {
-  count = var.store_ssh_keys_in_secrets_manager && local.create_global_key && length(local.instances_using_global_key) > 0 ? 1 : 0
-
-  triggers = {
-    # Use instance IDs as triggers so this runs when instances change
-    instance_ids = join(",", [for k, v in local.instances_using_global_key : aws_instance.instances[k].id])
-    # Use constant secret name to avoid circular dependencies
-    secret_name = local.create_global_key ? aws_secretsmanager_secret.global_ssh_key[0].name : ""
-  }
-
-  provisioner "local-exec" {
-    command = <<EOT
-      # Exit on errors and echo commands
-      set -e
-      
-      # Get current secret value
-      echo "Retrieving global secret value..."
-      if ! SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id ${aws_secretsmanager_secret.global_ssh_key[0].id} --query 'SecretString' --output text); then
-        echo "Failed to retrieve global secret value"
-        exit 1
-      fi
-      
-      # Check if jq is installed
-      if ! command -v jq &> /dev/null; then
-        echo "jq is required but not installed. Please install jq to continue."
-        exit 1
-      fi
-      
-      # Create instance details map
-      INSTANCE_DETAILS='{${join(",", [for k, v in local.instances_using_global_key :
-    format("\"%s\": \"%s\"", k, aws_instance.instances[k].id)
-])}}'
-      
-      # Add instance_details to the JSON
-      echo "Adding instance details to global secret..."
-      if ! UPDATED_VALUE=$(echo $SECRET_VALUE | jq ". + {\"instance_details\": $INSTANCE_DETAILS}"); then
-        echo "Failed to update JSON with instance details"
-        exit 1
-      fi
-      
-      # Update the secret
-      echo "Updating global secret with instance details..."
-      if ! aws secretsmanager update-secret --secret-id ${aws_secretsmanager_secret.global_ssh_key[0].id} --secret-string "$UPDATED_VALUE"; then
-        echo "Failed to update global secret"
-        exit 1
-      fi
-      
-      echo "Successfully updated global secret with instance details"
-    EOT
-}
-
-depends_on = [
-  aws_instance.instances,
-  aws_secretsmanager_secret_version.global_ssh_key
-]
-
-lifecycle {
-  # Ignore changes to secret_name to prevent recreation when secret metadata changes
-  ignore_changes = [triggers.secret_name]
-}
 }
 
 locals {
@@ -288,11 +217,11 @@ locals {
 resource "aws_instance" "instances" {
   for_each = local.instances
 
-  ami                    = lookup(each.value, "ami_id", local.default_ami)
+  ami                    = coalesce(each.value.ami_id, local.default_ami)
   instance_type          = each.value.instance_type
   key_name               = contains(keys(local.instances_requiring_keys), each.key) ? aws_key_pair.generated[each.key].key_name : (contains(keys(local.instances_using_global_key), each.key) ? aws_key_pair.global[0].key_name : lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", var.default_key_name))
   vpc_security_group_ids = concat([aws_security_group.instances[each.key].id], lookup(each.value, "additional_security_group_ids", []))
-  subnet_id              = lookup(each.value, "subnet_id", var.subnet_ids[0])
+  subnet_id              = coalesce(each.value.subnet_id, var.subnet_ids[0])
   user_data              = lookup(each.value, "user_data", null)
   iam_instance_profile   = aws_iam_instance_profile.instances[each.key].name
   monitoring             = lookup(each.value, "detailed_monitoring", false)
@@ -337,9 +266,8 @@ resource "aws_instance" "instances" {
   )
 
   lifecycle {
-    # Use more specific configuration for handling AMIs
-    # Only ignore AMI changes if explicitly configured
-    ignore_changes = lookup(each.value, "enable_ami_updates", false) ? [] : [ami]
+    # AMI updates never replace instances in place
+    ignore_changes = [ami]
 
     # Check that we have a valid key_name
     precondition {

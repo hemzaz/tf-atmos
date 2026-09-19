@@ -4,5 +4,4 @@ components:
     services:
       metadata:
         component: services
-      vars:
         enabled: false

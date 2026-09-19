@@ -84,7 +84,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "data_repository" 
 #------------------------------------------------------------------------------
 resource "aws_fsx_lustre_file_system" "this" {
   storage_capacity            = var.storage_capacity_gb
-  subnet_ids                  = var.deployment_type == "PERSISTENT_1" || var.deployment_type == "PERSISTENT_2" ? [var.subnet_id] : [var.subnet_id]
+  subnet_ids                  = [var.subnet_id]
   security_group_ids          = var.security_group_ids
   deployment_type             = var.deployment_type
   storage_type                = var.storage_type
@@ -92,15 +92,15 @@ resource "aws_fsx_lustre_file_system" "this" {
 
   kms_key_id = var.enable_encryption ? (var.kms_key_id != null ? var.kms_key_id : aws_kms_key.fsx[0].arn) : null
 
-  automatic_backup_retention_days = var.deployment_type != "SCRATCH_1" && var.deployment_type != "SCRATCH_2" ? var.automatic_backup_retention_days : null
+  automatic_backup_retention_days   = var.deployment_type != "SCRATCH_1" && var.deployment_type != "SCRATCH_2" ? var.automatic_backup_retention_days : null
   daily_automatic_backup_start_time = var.deployment_type != "SCRATCH_1" && var.deployment_type != "SCRATCH_2" ? var.daily_automatic_backup_start_time : null
-  copy_tags_to_backups            = var.deployment_type != "SCRATCH_1" && var.deployment_type != "SCRATCH_2" ? var.copy_tags_to_backups : null
+  copy_tags_to_backups              = var.deployment_type != "SCRATCH_1" && var.deployment_type != "SCRATCH_2" ? var.copy_tags_to_backups : null
 
   weekly_maintenance_start_time = var.weekly_maintenance_start_time
 
-  data_compression_type = var.data_compression_type
-  import_path           = var.s3_import_path != null ? var.s3_import_path : (var.create_s3_bucket ? "s3://${aws_s3_bucket.data_repository[0].id}" : null)
-  export_path           = var.s3_export_path != null ? var.s3_export_path : (var.create_s3_bucket ? "s3://${aws_s3_bucket.data_repository[0].id}" : null)
+  data_compression_type    = var.data_compression_type
+  import_path              = var.s3_import_path != null ? var.s3_import_path : (var.create_s3_bucket ? "s3://${aws_s3_bucket.data_repository[0].id}" : null)
+  export_path              = var.s3_export_path != null ? var.s3_export_path : (var.create_s3_bucket ? "s3://${aws_s3_bucket.data_repository[0].id}" : null)
   imported_file_chunk_size = var.imported_file_chunk_size
 
   dynamic "log_configuration" {
@@ -108,7 +108,7 @@ resource "aws_fsx_lustre_file_system" "this" {
 
     content {
       level       = var.log_level
-      destination = var.log_destination_arn
+      destination = var.log_destination_arn != null ? var.log_destination_arn : aws_cloudwatch_log_group.fsx[0].arn
     }
   }
 
@@ -125,19 +125,19 @@ resource "aws_fsx_data_repository_association" "this" {
   data_repository_path = each.value.data_repository_path
   file_system_path     = each.value.file_system_path
 
-  batch_import_meta_data_on_create = lookup(each.value, "batch_import_meta_data_on_create", false)
-  imported_file_chunk_size         = lookup(each.value, "imported_file_chunk_size", null)
+  batch_import_meta_data_on_create = each.value.batch_import_meta_data_on_create
+  imported_file_chunk_size         = each.value.imported_file_chunk_size
 
   dynamic "s3" {
-    for_each = lookup(each.value, "s3_auto_import_policy", null) != null || lookup(each.value, "s3_auto_export_policy", null) != null ? [1] : []
+    for_each = each.value.s3_auto_import_policy != null || each.value.s3_auto_export_policy != null ? [1] : []
 
     content {
       auto_import_policy {
-        events = lookup(each.value, "s3_auto_import_policy", ["NEW", "CHANGED", "DELETED"])
+        events = coalesce(each.value.s3_auto_import_policy, ["NEW", "CHANGED", "DELETED"])
       }
 
       auto_export_policy {
-        events = lookup(each.value, "s3_auto_export_policy", ["NEW", "CHANGED", "DELETED"])
+        events = coalesce(each.value.s3_auto_export_policy, ["NEW", "CHANGED", "DELETED"])
       }
     }
   }

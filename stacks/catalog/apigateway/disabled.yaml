@@ -4,5 +4,4 @@ components:
     apigateway:
       metadata:
         component: apigateway
-      vars:
         enabled: false

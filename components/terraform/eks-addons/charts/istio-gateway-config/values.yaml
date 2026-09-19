@@ -1,0 +1,2 @@
+# Domain served by the default gateway (set by Terraform)
+domainName: example.com

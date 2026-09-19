@@ -1,30 +1,30 @@
 output "zone_ids" {
   description = "Map of zone names to their IDs"
   value = merge(
-    var.create_root_zone ? { "${var.root_domain}" = aws_route53_zone.root_zone[0].zone_id } : {},
-    { for k, zone in aws_route53_zone.zones : k => zone.zone_id }
+    var.create_root_zone ? { (var.root_domain) = aws_route53_zone.root_zone[0].zone_id } : {},
+    { for k, zone in local.managed_zones : k => zone.zone_id }
   )
 }
 
 output "zone_name_servers" {
   description = "Map of zone names to their name servers"
   value = merge(
-    var.create_root_zone ? { "${var.root_domain}" = aws_route53_zone.root_zone[0].name_servers } : {},
-    { for k, zone in aws_route53_zone.zones : k => zone.name_servers }
+    var.create_root_zone ? { (var.root_domain) = aws_route53_zone.root_zone[0].name_servers } : {},
+    { for k, zone in local.managed_zones : k => zone.name_servers }
   )
 }
 
 output "delegation_set_name_servers" {
   description = "Map of delegation set IDs to their name servers"
   value = {
-    for k, ds in aws_route53_delegation_set.delegation_sets : k => ds.name_servers
+    for k, ds in merge(aws_route53_delegation_set.delegation_sets, aws_route53_delegation_set.dns_account_delegation_sets) : k => ds.name_servers
   }
 }
 
 output "records" {
   description = "Map of created record IDs to their attributes"
   value = {
-    for k, record in aws_route53_record.records : k => {
+    for k, record in merge(aws_route53_record.records, aws_route53_record.dns_account_records) : k => {
       name    = record.name
       type    = record.type
       zone_id = record.zone_id
@@ -55,7 +55,7 @@ output "root_domain" {
 output "domain_validation_options" {
   description = "Domain validation options for certificates if ACM is integrated"
   value = {
-    for k, zone in aws_route53_zone.zones : k => {
+    for k, zone in local.managed_zones : k => {
       zone_id = zone.zone_id
       name    = zone.name
     }

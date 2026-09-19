@@ -3,9 +3,9 @@
 ##############################################
 
 locals {
-  queue_name     = var.fifo_queue ? "${var.name_prefix}-${var.queue_name}.fifo" : "${var.name_prefix}-${var.queue_name}"
-  dlq_name       = var.enable_dead_letter_queue ? (var.fifo_queue ? "${var.name_prefix}-${var.queue_name}-dlq.fifo" : "${var.name_prefix}-${var.queue_name}-dlq") : null
-  kms_key_id     = var.enable_encryption ? (var.kms_key_id != null ? var.kms_key_id : aws_kms_key.queue[0].arn) : null
+  queue_name = var.fifo_queue ? "${var.name_prefix}-${var.queue_name}.fifo" : "${var.name_prefix}-${var.queue_name}"
+  dlq_name   = var.enable_dead_letter_queue ? (var.fifo_queue ? "${var.name_prefix}-${var.queue_name}-dlq.fifo" : "${var.name_prefix}-${var.queue_name}-dlq") : null
+  kms_key_id = var.enable_encryption ? (var.kms_key_id != null ? var.kms_key_id : aws_kms_key.queue[0].arn) : null
   redrive_policy = var.enable_dead_letter_queue ? jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq[0].arn
     maxReceiveCount     = var.max_receive_count
@@ -48,11 +48,11 @@ resource "aws_kms_alias" "queue" {
 resource "aws_sqs_queue" "dlq" {
   count = var.enable_dead_letter_queue ? 1 : 0
 
-  name                       = local.dlq_name
-  fifo_queue                 = var.fifo_queue
-  content_based_deduplication = var.fifo_queue ? var.content_based_deduplication : null
-  message_retention_seconds  = var.dlq_message_retention_seconds
-  kms_master_key_id          = local.kms_key_id
+  name                              = local.dlq_name
+  fifo_queue                        = var.fifo_queue
+  content_based_deduplication       = var.fifo_queue ? var.content_based_deduplication : null
+  message_retention_seconds         = var.dlq_message_retention_seconds
+  kms_master_key_id                 = local.kms_key_id
   kms_data_key_reuse_period_seconds = var.enable_encryption ? var.kms_data_key_reuse_seconds : null
 
   tags = merge(
@@ -69,8 +69,8 @@ resource "aws_sqs_queue" "dlq" {
 ##############################################
 
 resource "aws_sqs_queue" "main" {
-  name                       = local.queue_name
-  fifo_queue                 = var.fifo_queue
+  name                        = local.queue_name
+  fifo_queue                  = var.fifo_queue
   content_based_deduplication = var.fifo_queue ? var.content_based_deduplication : null
 
   # Message configuration
@@ -81,7 +81,7 @@ resource "aws_sqs_queue" "main" {
   max_message_size           = var.max_message_size
 
   # Encryption
-  kms_master_key_id                = local.kms_key_id
+  kms_master_key_id                 = local.kms_key_id
   kms_data_key_reuse_period_seconds = var.enable_encryption ? var.kms_data_key_reuse_seconds : null
   sqs_managed_sse_enabled           = !var.enable_encryption
 

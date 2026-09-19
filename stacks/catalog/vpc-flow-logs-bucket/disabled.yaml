@@ -5,5 +5,4 @@ components:
       metadata:
         # Point to the Terraform component
         component: vpc-flow-logs-bucket
-      vars:
         enabled: false

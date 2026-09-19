@@ -12,7 +12,7 @@ output "cluster_id" {
 
 output "cluster_arn" {
   description = "ARN of the ECS cluster"
-  value       = var.create_cluster ? aws_ecs_cluster.main[0].arn : null
+  value       = one(aws_ecs_cluster.main[*].arn)
 }
 
 output "cluster_name" {
@@ -26,17 +26,17 @@ output "cluster_name" {
 
 output "service_id" {
   description = "ID of the ECS service"
-  value       = aws_ecs_service.main.id
+  value       = local.service.id
 }
 
 output "service_arn" {
   description = "ARN of the ECS service"
-  value       = aws_ecs_service.main.id
+  value       = local.service.arn
 }
 
 output "service_name" {
   description = "Name of the ECS service"
-  value       = aws_ecs_service.main.name
+  value       = local.service.name
 }
 
 # ==============================================================================
@@ -102,12 +102,12 @@ output "security_group_ids" {
 
 output "log_group_name" {
   description = "Name of the CloudWatch Log Group"
-  value       = var.enable_cloudwatch_logs ? aws_cloudwatch_log_group.service[0].name : null
+  value       = one(aws_cloudwatch_log_group.service[*].name)
 }
 
 output "log_group_arn" {
   description = "ARN of the CloudWatch Log Group"
-  value       = var.enable_cloudwatch_logs ? aws_cloudwatch_log_group.service[0].arn : null
+  value       = one(aws_cloudwatch_log_group.service[*].arn)
 }
 
 # ==============================================================================
@@ -116,22 +116,22 @@ output "log_group_arn" {
 
 output "autoscaling_target_resource_id" {
   description = "Resource ID of the autoscaling target"
-  value       = var.enable_autoscaling ? aws_appautoscaling_target.service[0].resource_id : null
+  value       = one(aws_appautoscaling_target.service[*].resource_id)
 }
 
 output "autoscaling_cpu_policy_arn" {
   description = "ARN of the CPU-based autoscaling policy"
-  value       = var.enable_autoscaling ? aws_appautoscaling_policy.cpu[0].arn : null
+  value       = one(aws_appautoscaling_policy.cpu[*].arn)
 }
 
 output "autoscaling_memory_policy_arn" {
   description = "ARN of the memory-based autoscaling policy"
-  value       = var.enable_autoscaling ? aws_appautoscaling_policy.memory[0].arn : null
+  value       = one(aws_appautoscaling_policy.memory[*].arn)
 }
 
 output "autoscaling_alb_policy_arn" {
   description = "ARN of the ALB request count-based autoscaling policy"
-  value       = var.enable_autoscaling && var.enable_alb_target_tracking && var.target_group_arn != null ? aws_appautoscaling_policy.alb[0].arn : null
+  value       = one(aws_appautoscaling_policy.alb[*].arn)
 }
 
 # ==============================================================================
@@ -140,12 +140,12 @@ output "autoscaling_alb_policy_arn" {
 
 output "service_discovery_id" {
   description = "ID of the service discovery service"
-  value       = var.enable_service_discovery ? aws_service_discovery_service.main[0].id : null
+  value       = one(aws_service_discovery_service.main[*].id)
 }
 
 output "service_discovery_arn" {
   description = "ARN of the service discovery service"
-  value       = var.enable_service_discovery ? aws_service_discovery_service.main[0].arn : null
+  value       = one(aws_service_discovery_service.main[*].arn)
 }
 
 # ==============================================================================
@@ -154,27 +154,27 @@ output "service_discovery_arn" {
 
 output "codedeploy_app_name" {
   description = "Name of the CodeDeploy application"
-  value       = var.enable_blue_green_deployment ? aws_codedeploy_app.main[0].name : null
+  value       = one(aws_codedeploy_app.main[*].name)
 }
 
 output "codedeploy_app_id" {
   description = "ID of the CodeDeploy application"
-  value       = var.enable_blue_green_deployment ? aws_codedeploy_app.main[0].id : null
+  value       = one(aws_codedeploy_app.main[*].id)
 }
 
 output "codedeploy_deployment_group_name" {
   description = "Name of the CodeDeploy deployment group"
-  value       = var.enable_blue_green_deployment ? aws_codedeploy_deployment_group.main[0].deployment_group_name : null
+  value       = one(aws_codedeploy_deployment_group.main[*].deployment_group_name)
 }
 
 output "codedeploy_deployment_group_id" {
   description = "ID of the CodeDeploy deployment group"
-  value       = var.enable_blue_green_deployment ? aws_codedeploy_deployment_group.main[0].id : null
+  value       = one(aws_codedeploy_deployment_group.main[*].id)
 }
 
 output "codedeploy_role_arn" {
   description = "ARN of the CodeDeploy IAM role"
-  value       = var.enable_blue_green_deployment ? aws_iam_role.codedeploy[0].arn : null
+  value       = one(aws_iam_role.codedeploy[*].arn)
 }
 
 # ==============================================================================
@@ -184,8 +184,8 @@ output "codedeploy_role_arn" {
 output "capacity_provider_strategy" {
   description = "Capacity provider strategy configuration"
   value = {
-    fargate_weight      = var.fargate_base_weight
-    fargate_spot_weight = var.enable_fargate_spot ? var.fargate_spot_weight : 0
+    fargate_weight       = var.fargate_base_weight
+    fargate_spot_weight  = var.enable_fargate_spot ? var.fargate_spot_weight : 0
     fargate_spot_enabled = var.enable_fargate_spot
   }
 }
@@ -197,11 +197,11 @@ output "capacity_provider_strategy" {
 output "deployment_configuration" {
   description = "Deployment configuration summary"
   value = {
-    circuit_breaker_enabled      = var.enable_deployment_circuit_breaker
-    blue_green_enabled           = var.enable_blue_green_deployment
-    deployment_config_name       = var.enable_blue_green_deployment ? var.deployment_config_name : null
-    maximum_percent              = var.deployment_maximum_percent
-    minimum_healthy_percent      = var.deployment_minimum_healthy_percent
+    circuit_breaker_enabled = var.enable_deployment_circuit_breaker
+    blue_green_enabled      = var.enable_blue_green_deployment
+    deployment_config_name  = var.enable_blue_green_deployment ? var.deployment_config_name : null
+    maximum_percent         = var.deployment_maximum_percent
+    minimum_healthy_percent = var.deployment_minimum_healthy_percent
   }
 }
 
@@ -216,7 +216,7 @@ output "cost_optimization_summary" {
     fargate_spot_percentage = var.enable_fargate_spot ? var.fargate_spot_weight : 0
     estimated_monthly_cost_usd = {
       fargate_base_cost = var.cpu == 256 && var.memory == 512 ? 13.00 * var.desired_count : null
-      notes = "Actual costs depend on CPU, memory, and running time. Use AWS Cost Calculator for precise estimates."
+      notes             = "Actual costs depend on CPU, memory, and running time. Use AWS Cost Calculator for precise estimates."
     }
   }
 }
@@ -228,15 +228,15 @@ output "cost_optimization_summary" {
 output "module_metadata" {
   description = "Module version and configuration summary"
   value = {
-    module_version = "1.0.0"
-    service_name   = var.service_name
-    environment    = var.environment
-    cpu            = var.cpu
-    memory         = var.memory
-    desired_count  = var.desired_count
-    autoscaling_enabled = var.enable_autoscaling
-    load_balancer_enabled = var.enable_load_balancer
-    service_discovery_enabled = var.enable_service_discovery
+    module_version             = "1.0.0"
+    service_name               = var.service_name
+    environment                = var.environment
+    cpu                        = var.cpu
+    memory                     = var.memory
+    desired_count              = var.desired_count
+    autoscaling_enabled        = var.enable_autoscaling
+    load_balancer_enabled      = var.enable_load_balancer
+    service_discovery_enabled  = var.enable_service_discovery
     container_insights_enabled = var.enable_container_insights
   }
 }

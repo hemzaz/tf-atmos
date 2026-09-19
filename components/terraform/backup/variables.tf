@@ -1,11 +1,21 @@
 variable "region" {
   type        = string
   description = "AWS region"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
 }
 
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to all resources"
+
+  validation {
+    condition     = contains(keys(var.tags), "Environment")
+    error_message = "The tags map must contain an 'Environment' key."
+  }
 }
 
 # Backup Vault Variables
@@ -48,8 +58,13 @@ variable "enable_cross_region_backup" {
 
 variable "replica_region" {
   type        = string
-  description = "Replica region for cross-region backups"
+  description = "Replica region for cross-region backups (required when enable_cross_region_backup is true)"
   default     = null
+
+  validation {
+    condition     = !var.enable_cross_region_backup || (var.replica_region != null && var.replica_region != var.region)
+    error_message = "replica_region must be set, and differ from region, when enable_cross_region_backup is true."
+  }
 }
 
 variable "replica_kms_key_arn" {

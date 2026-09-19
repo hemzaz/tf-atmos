@@ -1,20 +1,49 @@
 # Secure S3 Bucket Resource Template
-# Production-ready S3 bucket with security best practices
+# Production-ready S3 bucket with security best practices: owner-enforced
+# object ownership, public access block, default encryption, versioning and a
+# bucket policy that denies non-TLS requests.
+#
+# Usage: copy this file into its own module directory (for example
+# components/terraform/<component>/modules/s3-bucket/main.tf) and call it with
+# a `module` block. It is self-contained: the module declares its own
+# provider requirements and takes no provider configuration.
+
+terraform {
+  required_version = ">= 1.16.0, < 2.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.0, < 7.0"
+    }
+  }
+}
 
 locals {
-  bucket_name = "${var.name_prefix}-${var.bucket_purpose}"
+  bucket_name   = "${var.name_prefix}-${var.bucket_purpose}"
+  kms_encrypted = var.kms_key_id != null
 }
 
 # S3 Bucket
 resource "aws_s3_bucket" "this" {
-  bucket = local.bucket_name
-  tags   = var.tags
+  bucket        = local.bucket_name
+  force_destroy = var.force_destroy
+  tags          = var.tags
+}
+
+# Disable ACLs: the bucket owner owns every object
+resource "aws_s3_bucket_ownership_controls" "this" {
+  bucket = aws_s3_bucket.this.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
 }
 
 # Bucket versioning
 resource "aws_s3_bucket_versioning" "this" {
   bucket = aws_s3_bucket.this.id
-  
+
   versioning_configuration {
     status = var.versioning_enabled ? "Enabled" : "Suspended"
   }
@@ -23,21 +52,21 @@ resource "aws_s3_bucket_versioning" "this" {
 # Server-side encryption
 resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   bucket = aws_s3_bucket.this.id
-  
+
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = var.kms_key_id != "" ? "aws:kms" : "AES256"
-      kms_master_key_id = var.kms_key_id != "" ? var.kms_key_id : null
+      sse_algorithm     = local.kms_encrypted ? "aws:kms" : "AES256"
+      kms_master_key_id = var.kms_key_id
     }
-    
-    bucket_key_enabled = var.kms_key_id != "" ? true : false
+
+    bucket_key_enabled = local.kms_encrypted
   }
 }
 
 # Public access block (security best practice)
 resource "aws_s3_bucket_public_access_block" "this" {
   bucket = aws_s3_bucket.this.id
-  
+
   block_public_acls       = var.block_public_access
   block_public_policy     = var.block_public_access
   ignore_public_acls      = var.block_public_access
@@ -47,29 +76,33 @@ resource "aws_s3_bucket_public_access_block" "this" {
 # Lifecycle configuration
 resource "aws_s3_bucket_lifecycle_configuration" "this" {
   count = length(var.lifecycle_rules) > 0 ? 1 : 0
-  
+
   bucket = aws_s3_bucket.this.id
-  
+
   dynamic "rule" {
     for_each = var.lifecycle_rules
     content {
       id     = rule.value.id
       status = rule.value.enabled ? "Enabled" : "Disabled"
-      
+
+      filter {
+        prefix = rule.value.prefix
+      }
+
       dynamic "expiration" {
-        for_each = rule.value.expiration_days != null ? [1] : []
+        for_each = rule.value.expiration_days != null ? [rule.value.expiration_days] : []
         content {
-          days = rule.value.expiration_days
+          days = expiration.value
         }
       }
-      
+
       dynamic "noncurrent_version_expiration" {
-        for_each = rule.value.noncurrent_version_expiration_days != null ? [1] : []
+        for_each = rule.value.noncurrent_version_expiration_days != null ? [rule.value.noncurrent_version_expiration_days] : []
         content {
-          noncurrent_days = rule.value.noncurrent_version_expiration_days
+          noncurrent_days = noncurrent_version_expiration.value
         }
       }
-      
+
       dynamic "transition" {
         for_each = rule.value.transitions
         content {
@@ -79,24 +112,26 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
       }
     }
   }
+
+  depends_on = [aws_s3_bucket_versioning.this]
 }
 
 # Logging
 resource "aws_s3_bucket_logging" "this" {
   count = var.logging_enabled ? 1 : 0
-  
+
   bucket = aws_s3_bucket.this.id
-  
+
   target_bucket = var.logging_target_bucket
-  target_prefix = var.logging_target_prefix != "" ? var.logging_target_prefix : "access-logs/${local.bucket_name}/"
+  target_prefix = coalesce(var.logging_target_prefix, "access-logs/${local.bucket_name}/")
 }
 
 # Notification configuration
 resource "aws_s3_bucket_notification" "this" {
   count = length(var.notification_configurations) > 0 ? 1 : 0
-  
+
   bucket = aws_s3_bucket.this.id
-  
+
   dynamic "lambda_function" {
     for_each = [for config in var.notification_configurations : config if config.type == "lambda"]
     content {
@@ -106,7 +141,7 @@ resource "aws_s3_bucket_notification" "this" {
       filter_suffix       = lambda_function.value.filter_suffix
     }
   }
-  
+
   dynamic "topic" {
     for_each = [for config in var.notification_configurations : config if config.type == "sns"]
     content {
@@ -116,7 +151,7 @@ resource "aws_s3_bucket_notification" "this" {
       filter_suffix = topic.value.filter_suffix
     }
   }
-  
+
   dynamic "queue" {
     for_each = [for config in var.notification_configurations : config if config.type == "sqs"]
     content {
@@ -131,9 +166,9 @@ resource "aws_s3_bucket_notification" "this" {
 # CORS configuration
 resource "aws_s3_bucket_cors_configuration" "this" {
   count = length(var.cors_rules) > 0 ? 1 : 0
-  
+
   bucket = aws_s3_bucket.this.id
-  
+
   dynamic "cors_rule" {
     for_each = var.cors_rules
     content {
@@ -149,52 +184,93 @@ resource "aws_s3_bucket_cors_configuration" "this" {
 # Website configuration
 resource "aws_s3_bucket_website_configuration" "this" {
   count = var.website_enabled ? 1 : 0
-  
+
   bucket = aws_s3_bucket.this.id
-  
+
   index_document {
     suffix = var.website_index_document
   }
-  
+
   error_document {
     key = var.website_error_document
   }
-  
+
   dynamic "routing_rule" {
     for_each = var.website_routing_rules
     content {
       condition {
-        key_prefix_equals = routing_rule.value.condition_key_prefix_equals
+        key_prefix_equals               = routing_rule.value.condition_key_prefix_equals
         http_error_code_returned_equals = routing_rule.value.condition_http_error_code
       }
-      
+
       redirect {
-        host_name     = routing_rule.value.redirect_host_name
-        http_redirect_code = routing_rule.value.redirect_http_code
-        protocol      = routing_rule.value.redirect_protocol
+        host_name               = routing_rule.value.redirect_host_name
+        http_redirect_code      = routing_rule.value.redirect_http_code
+        protocol                = routing_rule.value.redirect_protocol
         replace_key_prefix_with = routing_rule.value.redirect_replace_key_prefix
       }
     }
   }
 }
 
-# Bucket policy
+# Bucket policy: always deny non-TLS access, merged with any caller policy
+data "aws_iam_policy_document" "bucket" {
+  source_policy_documents = var.bucket_policy != null ? [var.bucket_policy] : []
+
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.this.arn,
+      "${aws_s3_bucket.this.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
 resource "aws_s3_bucket_policy" "this" {
-  count = var.bucket_policy != "" ? 1 : 0
-  
   bucket = aws_s3_bucket.this.id
-  policy = var.bucket_policy
+  policy = data.aws_iam_policy_document.bucket.json
+
+  depends_on = [aws_s3_bucket_public_access_block.this]
 }
 
 # Variables
 variable "name_prefix" {
   type        = string
-  description = "Name prefix for the bucket"
+  description = "Name prefix for the bucket (e.g. <tenant>-<account>-<environment>)"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]*$", var.name_prefix))
+    error_message = "The name_prefix must contain only lowercase letters, numbers, dots and hyphens."
+  }
 }
 
 variable "bucket_purpose" {
   type        = string
   description = "Purpose of the bucket (e.g., logs, data, assets)"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*[a-z0-9]$", var.bucket_purpose))
+    error_message = "The bucket_purpose must contain only lowercase letters, numbers and hyphens."
+  }
+}
+
+variable "force_destroy" {
+  type        = bool
+  description = "Delete all objects when the bucket is destroyed (never enable for production data)"
+  default     = false
 }
 
 variable "versioning_enabled" {
@@ -205,8 +281,8 @@ variable "versioning_enabled" {
 
 variable "kms_key_id" {
   type        = string
-  description = "KMS key ID for encryption (empty for AES256)"
-  default     = ""
+  description = "KMS key ARN or ID for SSE-KMS encryption (null for SSE-S3/AES256)"
+  default     = null
 }
 
 variable "block_public_access" {
@@ -217,17 +293,27 @@ variable "block_public_access" {
 
 variable "lifecycle_rules" {
   type = list(object({
-    id                                   = string
-    enabled                             = bool
-    expiration_days                     = optional(number)
-    noncurrent_version_expiration_days  = optional(number)
-    transitions = list(object({
+    id                                 = string
+    enabled                            = bool
+    prefix                             = optional(string, "")
+    expiration_days                    = optional(number)
+    noncurrent_version_expiration_days = optional(number)
+    transitions = optional(list(object({
       days          = number
       storage_class = string
-    }))
+    })), [])
   }))
   description = "Lifecycle rules for the bucket"
   default     = []
+
+  validation {
+    condition = alltrue(flatten([
+      for rule in var.lifecycle_rules : [
+        for t in rule.transitions : contains(["STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER", "GLACIER_IR", "DEEP_ARCHIVE"], t.storage_class)
+      ]
+    ]))
+    error_message = "Transition storage_class must be one of STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER, GLACIER_IR or DEEP_ARCHIVE."
+  }
 }
 
 variable "logging_enabled" {
@@ -238,26 +324,31 @@ variable "logging_enabled" {
 
 variable "logging_target_bucket" {
   type        = string
-  description = "Target bucket for access logs"
-  default     = ""
+  description = "Target bucket for access logs (required when logging_enabled is true)"
+  default     = null
 }
 
 variable "logging_target_prefix" {
   type        = string
-  description = "Prefix for access logs"
-  default     = ""
+  description = "Prefix for access logs (defaults to access-logs/<bucket>/)"
+  default     = null
 }
 
 variable "notification_configurations" {
   type = list(object({
-    type            = string # lambda, sns, or sqs
+    type            = string
     destination_arn = string
     events          = list(string)
     filter_prefix   = optional(string)
     filter_suffix   = optional(string)
   }))
-  description = "S3 event notification configurations"
+  description = "S3 event notification configurations (type is lambda, sns or sqs)"
   default     = []
+
+  validation {
+    condition     = alltrue([for config in var.notification_configurations : contains(["lambda", "sns", "sqs"], config.type)])
+    error_message = "Notification type must be one of lambda, sns or sqs."
+  }
 }
 
 variable "cors_rules" {
@@ -292,12 +383,12 @@ variable "website_error_document" {
 
 variable "website_routing_rules" {
   type = list(object({
-    condition_key_prefix_equals    = optional(string)
-    condition_http_error_code      = optional(string)
-    redirect_host_name            = optional(string)
-    redirect_http_code            = optional(string)
-    redirect_protocol             = optional(string)
-    redirect_replace_key_prefix   = optional(string)
+    condition_key_prefix_equals = optional(string)
+    condition_http_error_code   = optional(string)
+    redirect_host_name          = optional(string)
+    redirect_http_code          = optional(string)
+    redirect_protocol           = optional(string)
+    redirect_replace_key_prefix = optional(string)
   }))
   description = "Website routing rules"
   default     = []
@@ -305,8 +396,8 @@ variable "website_routing_rules" {
 
 variable "bucket_policy" {
   type        = string
-  description = "Bucket policy JSON"
-  default     = ""
+  description = "Additional bucket policy JSON, merged with the TLS-only statement (use an aws_iam_policy_document)"
+  default     = null
 }
 
 variable "tags" {
@@ -343,10 +434,10 @@ output "bucket_hosted_zone_id" {
 
 output "bucket_website_endpoint" {
   description = "Website endpoint of the S3 bucket"
-  value       = var.website_enabled ? aws_s3_bucket_website_configuration.this[0].website_endpoint : null
+  value       = one(aws_s3_bucket_website_configuration.this[*].website_endpoint)
 }
 
 output "bucket_website_domain" {
   description = "Domain name of the website endpoint"
-  value       = var.website_enabled ? aws_s3_bucket_website_configuration.this[0].website_domain : null
+  value       = one(aws_s3_bucket_website_configuration.this[*].website_domain)
 }

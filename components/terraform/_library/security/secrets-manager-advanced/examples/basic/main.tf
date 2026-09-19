@@ -1,9 +1,9 @@
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.16.0, < 2.0.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 5.0.0, < 6.0.0"
+      version = ">= 6.0, < 7.0"
     }
   }
 }
@@ -18,6 +18,7 @@ module "secret_basic" {
   name_prefix = "example-basic"
   description = "Basic secret example"
 
+  create_secret_version = true
   secret_string = jsonencode({
     api_key = "example-key"
   })

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: istio-gateway-config
+description: Default Istio Gateway and VirtualService for the eks-addons component
+type: application
+version: 1.0.0

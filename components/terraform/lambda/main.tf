@@ -13,12 +13,7 @@ resource "aws_iam_role" "lambda" {
     }]
   })
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.function_name}-role"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.function_name}-role" }
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
@@ -45,12 +40,7 @@ resource "aws_cloudwatch_log_group" "lambda" {
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_id
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "/aws/lambda/${var.tags["Environment"]}-${var.function_name}"
-    }
-  )
+  tags = { Name = "/aws/lambda/${var.tags["Environment"]}-${var.function_name}" }
 }
 
 resource "aws_security_group" "lambda" {
@@ -106,12 +96,7 @@ resource "aws_security_group" "lambda" {
     }
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.function_name}-sg"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.function_name}-sg" }
 
   lifecycle {
     create_before_destroy = true
@@ -200,15 +185,10 @@ resource "aws_lambda_function" "main" {
     }
   }
 
-  package_type = var.package_type
+  package_type  = var.package_type
   architectures = var.architectures
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.function_name}"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.function_name}" }
 
   # Add reliability preconditions
   lifecycle {
@@ -339,8 +319,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
   dimensions = {
     FunctionName = aws_lambda_function.main.function_name
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "lambda_error_rate" {
@@ -360,8 +338,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_error_rate" {
   dimensions = {
     FunctionName = aws_lambda_function.main.function_name
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
@@ -381,8 +357,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   dimensions = {
     FunctionName = aws_lambda_function.main.function_name
   }
-
-  tags = var.tags
 }
 
 # Cost optimization: Schedule for predictable workloads
@@ -393,8 +367,6 @@ resource "aws_cloudwatch_event_rule" "lambda_schedule" {
   description         = "Schedule for Lambda function ${var.function_name}"
   schedule_expression = var.schedule_expression
   state               = var.schedule_enabled ? "ENABLED" : "DISABLED"
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "lambda_schedule_target" {

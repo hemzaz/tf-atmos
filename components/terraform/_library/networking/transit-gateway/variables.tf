@@ -73,16 +73,16 @@ variable "transit_gateway_cidr_blocks" {
 variable "vpc_attachments" {
   description = "Map of VPC attachments to create"
   type = map(object({
-    vpc_id                           = string
-    subnet_ids                       = list(string)
-    dns_support                      = optional(bool, true)
-    ipv6_support                     = optional(bool, false)
-    appliance_mode_support           = optional(bool, false)
-    default_route_table_association  = optional(bool, true)
-    default_route_table_propagation  = optional(bool, true)
-    route_table_id                   = optional(string)
-    propagate_to_route_tables        = optional(list(string), [])
-    tags                             = optional(map(string), {})
+    vpc_id                          = string
+    subnet_ids                      = list(string)
+    dns_support                     = optional(bool, true)
+    ipv6_support                    = optional(bool, false)
+    appliance_mode_support          = optional(bool, false)
+    default_route_table_association = optional(bool) # null = inherit var.default_route_table_association
+    default_route_table_propagation = optional(bool) # null = inherit var.default_route_table_propagation
+    route_table_id                  = optional(string)
+    propagate_to_route_tables       = optional(list(string), [])
+    tags                            = optional(map(string), {})
   }))
   default = {}
 }
@@ -90,13 +90,18 @@ variable "vpc_attachments" {
 variable "vpn_attachments" {
   description = "Map of VPN attachments to create"
   type = map(object({
-    bgp_asn                    = number
-    ip_address                 = string
-    static_routes_only         = optional(bool, false)
-    route_table_id             = optional(string)
-    propagate_to_route_tables  = optional(list(string), [])
+    bgp_asn                   = number
+    ip_address                = string
+    static_routes_only        = optional(bool, false)
+    route_table_id            = optional(string)
+    propagate_to_route_tables = optional(list(string), [])
   }))
   default = {}
+
+  validation {
+    condition     = alltrue([for v in values(var.vpn_attachments) : v.bgp_asn >= 1 && v.bgp_asn <= 2147483647])
+    error_message = "VPN attachment bgp_asn must be between 1 and 2147483647."
+  }
 }
 
 variable "transit_gateway_route_tables" {

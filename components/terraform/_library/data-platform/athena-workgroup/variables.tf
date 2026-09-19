@@ -37,7 +37,7 @@ variable "output_location" {
 
 variable "output_bucket_arn" {
   type        = string
-  description = "S3 output bucket ARN (for IAM policy)"
+  description = "S3 output bucket ARN (for IAM policy). Defaults to the bucket in output_location."
   default     = ""
 }
 

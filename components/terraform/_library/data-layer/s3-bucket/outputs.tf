@@ -25,7 +25,7 @@ output "bucket_hosted_zone_id" {
 
 output "bucket_region" {
   description = "AWS region of the bucket"
-  value       = aws_s3_bucket.this.region
+  value       = aws_s3_bucket.this.bucket_region
 }
 
 output "website_endpoint" {

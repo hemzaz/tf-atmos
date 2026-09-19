@@ -7,10 +7,13 @@ import:
 
 vars:
   region: eu-west-2
-  environment: eu-west-2
-  availability_zones:
-    - eu-west-2a
-    - eu-west-2b
-    - eu-west-2c
+settings:
+  environment:
+    availability_zones:
+      - eu-west-2a
+      - eu-west-2b
+      - eu-west-2c
 
 # Other defaults for the eu-west-2 region
+  context:
+    environment: eu-west-2

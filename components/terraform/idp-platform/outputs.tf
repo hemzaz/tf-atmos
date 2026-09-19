@@ -3,29 +3,29 @@
 # EKS Cluster Outputs
 output "eks_cluster_id" {
   description = "EKS cluster ID"
-  value       = module.eks_cluster.cluster_id
+  value       = module.eks_cluster.cluster_ids["idp"]
 }
 
 output "eks_cluster_arn" {
   description = "EKS cluster ARN"
-  value       = module.eks_cluster.cluster_arn
+  value       = module.eks_cluster.cluster_arns["idp"]
 }
 
 output "eks_cluster_endpoint" {
   description = "EKS cluster endpoint URL"
-  value       = module.eks_cluster.cluster_endpoint
+  value       = module.eks_cluster.cluster_endpoints["idp"]
   sensitive   = true
 }
 
 output "eks_cluster_certificate_authority_data" {
   description = "EKS cluster certificate authority data"
-  value       = module.eks_cluster.cluster_certificate_authority_data
+  value       = module.eks_cluster.cluster_ca_data["idp"]
   sensitive   = true
 }
 
 output "eks_cluster_security_group_id" {
   description = "EKS cluster security group ID"
-  value       = module.eks_cluster.cluster_security_group_id
+  value       = module.eks_cluster.cluster_security_group_ids["idp"]
 }
 
 output "eks_node_group_arns" {
@@ -35,7 +35,7 @@ output "eks_node_group_arns" {
 
 output "eks_oidc_provider_arn" {
   description = "EKS OIDC provider ARN for service account roles"
-  value       = module.eks_cluster.oidc_provider_arn
+  value       = module.eks_cluster.oidc_provider_arns["idp"]
 }
 
 # Database Outputs
@@ -44,42 +44,36 @@ output "database_instance_id" {
   value       = module.idp_database.instance_id
 }
 
-output "database_instance_arn" {
-  description = "RDS instance ARN"
-  value       = module.idp_database.instance_arn
-}
-
 output "database_endpoint" {
   description = "RDS instance endpoint"
-  value       = module.idp_database.endpoint
+  value       = module.idp_database.instance_address
   sensitive   = true
 }
 
 output "database_port" {
   description = "RDS instance port"
-  value       = module.idp_database.port
+  value       = 5432
 }
 
 output "database_name" {
   description = "Database name"
-  value       = module.idp_database.db_name
+  value       = module.idp_database.instance_name
 }
 
 output "database_username" {
   description = "Database master username"
-  value       = module.idp_database.username
+  value       = "idp_admin"
   sensitive   = true
 }
 
-output "database_password" {
-  description = "Database master password"
-  value       = module.idp_database.password
-  sensitive   = true
+output "database_password_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the database master credentials"
+  value       = module.idp_database.password_secret_arn
 }
 
 output "database_connection_string" {
   description = "Database connection string (without credentials)"
-  value       = "postgresql://${module.idp_database.endpoint}:${module.idp_database.port}/${module.idp_database.db_name}"
+  value       = "postgresql://${module.idp_database.instance_address}:5432/${module.idp_database.instance_name}"
   sensitive   = true
 }
 
@@ -112,10 +106,9 @@ output "redis_port" {
   value       = aws_elasticache_replication_group.redis.port
 }
 
-output "redis_auth_token" {
-  description = "ElastiCache Redis auth token"
-  value       = random_password.redis_auth_token.result
-  sensitive   = true
+output "redis_auth_token_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the Redis AUTH token"
+  value       = aws_secretsmanager_secret.redis_auth.arn
 }
 
 # Storage Outputs
@@ -123,7 +116,7 @@ output "s3_bucket_names" {
   description = "S3 bucket names by purpose"
   value = {
     for purpose in ["artifacts", "backups", "logs", "techdocs", "uploads"] :
-    purpose => module.idp_storage[purpose].bucket_name
+    purpose => aws_s3_bucket.idp_storage[purpose].id
   }
 }
 
@@ -131,7 +124,7 @@ output "s3_bucket_arns" {
   description = "S3 bucket ARNs by purpose"
   value = {
     for purpose in ["artifacts", "backups", "logs", "techdocs", "uploads"] :
-    purpose => module.idp_storage[purpose].bucket_arn
+    purpose => aws_s3_bucket.idp_storage[purpose].arn
   }
 }
 
@@ -139,7 +132,7 @@ output "s3_bucket_domains" {
   description = "S3 bucket domain names"
   value = {
     for purpose in ["artifacts", "backups", "logs", "techdocs", "uploads"] :
-    purpose => module.idp_storage[purpose].bucket_domain_name
+    purpose => aws_s3_bucket.idp_storage[purpose].bucket_regional_domain_name
   }
 }
 
@@ -183,17 +176,12 @@ output "hosted_zone_name_servers" {
 # Certificate Outputs
 output "certificate_arn" {
   description = "ACM certificate ARN"
-  value       = module.acm_certificate.certificate_arn
+  value       = module.acm_certificate.certificate_arns["idp"]
 }
 
 output "certificate_domain_name" {
   description = "ACM certificate domain name"
-  value       = module.acm_certificate.domain_name
-}
-
-output "certificate_subject_alternative_names" {
-  description = "ACM certificate subject alternative names"
-  value       = module.acm_certificate.subject_alternative_names
+  value       = module.acm_certificate.certificate_domains["idp"]
 }
 
 # Secrets Outputs
@@ -212,8 +200,7 @@ output "security_groups" {
   description = "Security group IDs and names"
   value = {
     database = {
-      id   = aws_security_group.database.id
-      name = aws_security_group.database.name
+      id = module.idp_database.security_group_id
     }
     redis = {
       id   = aws_security_group.redis.id
@@ -260,33 +247,25 @@ output "public_subnet_ids" {
   value       = data.aws_subnets.public.ids
 }
 
-# IAM Outputs
-output "iam_roles" {
-  description = "IAM role ARNs"
-  value = {
-    rds_enhanced_monitoring = aws_iam_role.rds_enhanced_monitoring.arn
-  }
-}
-
 # Platform Configuration Output
 output "platform_configuration" {
   description = "Complete platform configuration for Kubernetes deployment"
   value = {
     # Cluster configuration
     cluster = {
-      name                  = module.eks_cluster.cluster_id
-      endpoint              = module.eks_cluster.cluster_endpoint
-      certificate_authority = module.eks_cluster.cluster_certificate_authority_data
-      oidc_provider_arn     = module.eks_cluster.oidc_provider_arn
-      security_group_id     = module.eks_cluster.cluster_security_group_id
+      name                  = module.eks_cluster.cluster_ids["idp"]
+      endpoint              = module.eks_cluster.cluster_endpoints["idp"]
+      certificate_authority = module.eks_cluster.cluster_ca_data["idp"]
+      oidc_provider_arn     = module.eks_cluster.oidc_provider_arns["idp"]
+      security_group_id     = module.eks_cluster.cluster_security_group_ids["idp"]
     }
 
     # Database configuration
     database = {
-      host     = module.idp_database.endpoint
-      port     = module.idp_database.port
-      name     = module.idp_database.db_name
-      username = module.idp_database.username
+      host     = module.idp_database.instance_address
+      port     = 5432
+      name     = module.idp_database.instance_name
+      username = "idp_admin"
     }
 
     # Redis configuration
@@ -299,8 +278,8 @@ output "platform_configuration" {
     storage = {
       for purpose in ["artifacts", "backups", "logs", "techdocs", "uploads"] :
       purpose => {
-        bucket_name = module.idp_storage[purpose].bucket_name
-        bucket_arn  = module.idp_storage[purpose].bucket_arn
+        bucket_name = aws_s3_bucket.idp_storage[purpose].id
+        bucket_arn  = aws_s3_bucket.idp_storage[purpose].arn
       }
     }
 
@@ -313,8 +292,8 @@ output "platform_configuration" {
 
     # Certificate configuration
     certificate = {
-      arn         = module.acm_certificate.certificate_arn
-      domain_name = module.acm_certificate.domain_name
+      arn         = module.acm_certificate.certificate_arns["idp"]
+      domain_name = module.acm_certificate.certificate_domains["idp"]
     }
 
     # Load balancer configuration

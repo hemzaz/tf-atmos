@@ -3,22 +3,22 @@
 # Load Balancer outputs
 output "load_balancer_arn" {
   description = "ARN of the load balancer"
-  value       = var.load_balancer_enabled ? aws_lb.this[0].arn : null
+  value       = one(aws_lb.this[*].arn)
 }
 
 output "load_balancer_dns_name" {
   description = "DNS name of the load balancer"
-  value       = var.load_balancer_enabled ? aws_lb.this[0].dns_name : null
+  value       = one(aws_lb.this[*].dns_name)
 }
 
 output "load_balancer_zone_id" {
   description = "Canonical hosted zone ID of the load balancer"
-  value       = var.load_balancer_enabled ? aws_lb.this[0].zone_id : null
+  value       = one(aws_lb.this[*].zone_id)
 }
 
 output "target_group_arn" {
   description = "ARN of the target group"
-  value       = var.load_balancer_enabled ? aws_lb_target_group.this[0].arn : null
+  value       = one(aws_lb_target_group.this[*].arn)
 }
 
 # ECS outputs
@@ -70,7 +70,7 @@ output "task_definition_revision" {
 # Security Group outputs
 output "alb_security_group_id" {
   description = "ID of the ALB security group"
-  value       = var.load_balancer_enabled ? aws_security_group.alb[0].id : null
+  value       = one(aws_security_group.alb[*].id)
 }
 
 output "service_security_group_id" {
@@ -103,63 +103,49 @@ output "log_group_arn" {
 # Auto Scaling outputs
 output "auto_scaling_target_resource_id" {
   description = "Resource ID of the auto scaling target"
-  value       = var.auto_scaling_enabled ? aws_appautoscaling_target.this[0].resource_id : null
+  value       = one(aws_appautoscaling_target.this[*].resource_id)
 }
 
 output "auto_scaling_cpu_policy_arn" {
   description = "ARN of the CPU auto scaling policy"
-  value       = var.auto_scaling_enabled ? aws_appautoscaling_policy.cpu[0].arn : null
+  value       = one(aws_appautoscaling_policy.cpu[*].arn)
 }
 
 output "auto_scaling_memory_policy_arn" {
   description = "ARN of the memory auto scaling policy"
-  value       = var.auto_scaling_enabled && var.auto_scaling_memory_enabled ? aws_appautoscaling_policy.memory[0].arn : null
-}
-
-# Service discovery outputs (for future use)
-output "service_discovery_service_id" {
-  description = "ID of the service discovery service"
-  value       = null # TODO: Implement service discovery
+  value       = one(aws_appautoscaling_policy.memory[*].arn)
 }
 
 # Computed values
 output "service_url" {
   description = "URL to access the service"
-  value       = var.load_balancer_enabled ? "http${var.certificate_arn != "" ? "s" : ""}://${aws_lb.this[0].dns_name}" : null
+  value       = var.load_balancer_enabled ? "${local.https_enabled ? "https" : "http"}://${aws_lb.this[0].dns_name}" : null
 }
 
 output "service_endpoint" {
   description = "Service endpoint information"
   value = var.load_balancer_enabled ? {
-    dns_name     = aws_lb.this[0].dns_name
-    zone_id      = aws_lb.this[0].zone_id
-    scheme       = aws_lb.this[0].scheme
+    dns_name           = aws_lb.this[0].dns_name
+    zone_id            = aws_lb.this[0].zone_id
+    scheme             = aws_lb.this[0].internal ? "internal" : "internet-facing"
     load_balancer_type = aws_lb.this[0].load_balancer_type
-    protocol     = var.certificate_arn != "" ? "HTTPS" : "HTTP"
-    port         = var.certificate_arn != "" ? 443 : 80
+    protocol           = local.https_enabled ? "HTTPS" : "HTTP"
+    port               = local.https_enabled ? 443 : 80
   } : null
 }
 
-# Summary information
 output "service_info" {
   description = "Summary information about the service"
   value = {
-    name                = var.service_name
-    cluster_name        = aws_ecs_cluster.this.name
-    desired_count       = var.desired_count
-    task_cpu           = var.task_cpu
-    task_memory        = var.task_memory
-    container_port     = var.container_port
+    name                  = var.service_name
+    cluster_name          = aws_ecs_cluster.this.name
+    desired_count         = var.desired_count
+    task_cpu              = var.task_cpu
+    task_memory           = var.task_memory
+    container_port        = var.container_port
     load_balancer_enabled = var.load_balancer_enabled
     auto_scaling_enabled  = var.auto_scaling_enabled
     container_insights    = var.container_insights_enabled
     platform_version      = var.platform_version
   }
-}
-
-# Resource tags
-output "common_tags" {
-  description = "Common tags applied to resources"
-  value       = local.common_tags
-  sensitive   = false
 }

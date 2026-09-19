@@ -1,3 +1,11 @@
+locals {
+  # Record format conversion writes compressed Parquet itself; Firehose requires
+  # the S3 compression_format to be UNCOMPRESSED when conversion is enabled.
+  s3_compression_format = var.enable_parquet_conversion ? "UNCOMPRESSED" : var.s3_compression_format
+
+  s3_bucket_arns = compact(distinct([var.s3_bucket_arn, var.backup_s3_bucket_arn]))
+}
+
 ##############################################
 # Kinesis Firehose Delivery Stream
 ##############################################
@@ -30,11 +38,14 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
       bucket_arn          = var.s3_bucket_arn
       prefix              = var.s3_prefix
       error_output_prefix = var.s3_error_prefix
-      compression_format  = var.s3_compression_format
+      compression_format  = local.s3_compression_format
       kms_key_arn         = var.kms_key_arn
 
-      buffer_size     = var.buffer_size_mb
-      buffer_interval = var.buffer_interval_seconds
+      # Record format conversion requires a buffer of at least 64 MiB.
+      buffering_size     = var.enable_parquet_conversion ? max(64, var.buffer_size_mb) : var.buffer_size_mb
+      buffering_interval = var.buffer_interval_seconds
+
+      s3_backup_mode = var.enable_s3_backup ? "Enabled" : "Disabled"
 
       dynamic "processing_configuration" {
         for_each = var.enable_transformation ? [1] : []
@@ -87,7 +98,7 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
           schema_configuration {
             database_name = var.glue_database_name
             table_name    = var.glue_table_name
-            region        = data.aws_region.current.name
+            region        = data.aws_region.current.region
             role_arn      = aws_iam_role.firehose.arn
           }
         }
@@ -96,13 +107,13 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
       dynamic "s3_backup_configuration" {
         for_each = var.enable_s3_backup ? [1] : []
         content {
-          role_arn            = aws_iam_role.firehose.arn
-          bucket_arn          = var.backup_s3_bucket_arn
-          prefix              = var.backup_s3_prefix
-          compression_format  = var.s3_compression_format
-          buffer_size         = var.buffer_size_mb
-          buffer_interval     = var.buffer_interval_seconds
-          kms_key_arn         = var.kms_key_arn
+          role_arn           = aws_iam_role.firehose.arn
+          bucket_arn         = var.backup_s3_bucket_arn
+          prefix             = var.backup_s3_prefix
+          compression_format = var.s3_compression_format
+          buffering_size     = var.buffer_size_mb
+          buffering_interval = var.buffer_interval_seconds
+          kms_key_arn        = var.kms_key_arn
         }
       }
     }
@@ -111,11 +122,11 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
   dynamic "opensearch_configuration" {
     for_each = var.destination == "opensearch" ? [1] : []
     content {
-      role_arn           = aws_iam_role.firehose.arn
-      domain_arn         = var.opensearch_domain_arn
-      index_name         = var.opensearch_index_name
+      role_arn              = aws_iam_role.firehose.arn
+      domain_arn            = var.opensearch_domain_arn
+      index_name            = var.opensearch_index_name
       index_rotation_period = var.opensearch_index_rotation
-      type_name          = var.opensearch_type_name
+      type_name             = var.opensearch_type_name
 
       buffering_interval = var.buffer_interval_seconds
       buffering_size     = var.buffer_size_mb
@@ -148,13 +159,13 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
       s3_backup_mode = var.enable_s3_backup ? "AllDocuments" : "FailedDocumentsOnly"
 
       s3_configuration {
-        role_arn            = aws_iam_role.firehose.arn
-        bucket_arn          = var.backup_s3_bucket_arn
-        prefix              = var.backup_s3_prefix
-        compression_format  = var.s3_compression_format
-        buffer_size         = var.buffer_size_mb
-        buffer_interval     = var.buffer_interval_seconds
-        kms_key_arn         = var.kms_key_arn
+        role_arn           = aws_iam_role.firehose.arn
+        bucket_arn         = var.backup_s3_bucket_arn
+        prefix             = var.backup_s3_prefix
+        compression_format = var.s3_compression_format
+        buffering_size     = var.buffer_size_mb
+        buffering_interval = var.buffer_interval_seconds
+        kms_key_arn        = var.kms_key_arn
       }
     }
   }
@@ -171,13 +182,13 @@ resource "aws_kinesis_firehose_delivery_stream" "main" {
       data_table_columns = var.redshift_table_columns
 
       s3_configuration {
-        role_arn            = aws_iam_role.firehose.arn
-        bucket_arn          = var.s3_bucket_arn
-        prefix              = var.s3_prefix
-        compression_format  = var.s3_compression_format
-        buffer_size         = var.buffer_size_mb
-        buffer_interval     = var.buffer_interval_seconds
-        kms_key_arn         = var.kms_key_arn
+        role_arn           = aws_iam_role.firehose.arn
+        bucket_arn         = var.s3_bucket_arn
+        prefix             = var.s3_prefix
+        compression_format = var.s3_compression_format
+        buffering_size     = var.buffer_size_mb
+        buffering_interval = var.buffer_interval_seconds
+        kms_key_arn        = var.kms_key_arn
       }
 
       dynamic "processing_configuration" {
@@ -247,12 +258,26 @@ resource "aws_iam_role_policy" "firehose" {
             "s3:ListBucketMultipartUploads",
             "s3:PutObject"
           ]
-          Resource = [
-            var.s3_bucket_arn,
-            "${var.s3_bucket_arn}/*"
-          ]
+          Resource = flatten([for arn in local.s3_bucket_arns : [arn, "${arn}/*"]])
         }
       ],
+      var.destination == "opensearch" ? [
+        {
+          Effect = "Allow"
+          Action = [
+            "es:DescribeDomain",
+            "es:DescribeDomains",
+            "es:DescribeDomainConfig",
+            "es:ESHttpGet",
+            "es:ESHttpPost",
+            "es:ESHttpPut"
+          ]
+          Resource = [
+            var.opensearch_domain_arn,
+            "${var.opensearch_domain_arn}/*"
+          ]
+        }
+      ] : [],
       var.kinesis_source_stream_arn != null ? [
         {
           Effect = "Allow"
@@ -303,9 +328,9 @@ resource "aws_iam_role_policy" "firehose" {
             "glue:GetTableVersions"
           ]
           Resource = [
-            "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:catalog",
-            "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:database/${var.glue_database_name}",
-            "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/${var.glue_database_name}/${var.glue_table_name}"
+            "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:catalog",
+            "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:database/${var.glue_database_name}",
+            "arn:aws:glue:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:table/${var.glue_database_name}/${var.glue_table_name}"
           ]
         }
       ] : []

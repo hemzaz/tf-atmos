@@ -61,13 +61,6 @@ locals {
   # 1. Loaded directly (legacy mode using acm_certificate_key/acm_certificate_crt)
   # 2. Managed by External Secrets (recommended approach using Secrets Manager)
 
-  # Template for Istio gateway configurations
-  istio_gateway_template = templatefile(
-    "${path.module}/kubernetes_manifests/istio-gateway.yaml",
-    {
-      domain_name = var.domain_name
-    }
-  )
 }
 
 # Get cluster info to validate it's accessible before proceeding
@@ -177,10 +170,14 @@ resource "aws_iam_role_policy_attachment" "service_account" {
 resource "aws_eks_addon" "addons" {
   for_each = local.addons
 
-  cluster_name      = each.value.cluster_name
-  addon_name        = each.value.name
-  addon_version     = lookup(each.value, "version", null)
-  resolve_conflicts = lookup(each.value, "resolve_conflicts", "OVERWRITE")
+  cluster_name  = each.value.cluster_name
+  addon_name    = each.value.name
+  addon_version = lookup(each.value, "version", null)
+
+  # AWS provider v6 removed resolve_conflicts; a legacy per-addon value still seeds both settings
+  # resolve_conflicts_on_create only accepts NONE or OVERWRITE, so a legacy PRESERVE maps to NONE
+  resolve_conflicts_on_create = lookup(each.value, "resolve_conflicts_on_create", replace(lookup(each.value, "resolve_conflicts", "OVERWRITE"), "PRESERVE", "NONE"))
+  resolve_conflicts_on_update = lookup(each.value, "resolve_conflicts_on_update", lookup(each.value, "resolve_conflicts", "OVERWRITE"))
 
   # Fix circular dependency by directly using service_account_role_arn if provided,
   # otherwise set to null and establish depends_on relationship
@@ -196,13 +193,11 @@ resource "aws_eks_addon" "addons" {
     }
   )
 
-  # Add dependency on wait_for_cluster and conditionally on service account role
-  depends_on = concat(
-    [time_sleep.wait_for_cluster],
-    lookup(each.value, "create_service_account_role", false) &&
-    contains(keys(aws_iam_role_policy_attachment.service_account), "${each.value.cluster_name}.${each.value.name}") ?
-    [aws_iam_role_policy_attachment.service_account["${each.value.cluster_name}.${each.value.name}"]] : []
-  )
+  # depends_on must be static; depend on the whole set of service account attachments
+  depends_on = [
+    time_sleep.wait_for_cluster,
+    aws_iam_role_policy_attachment.service_account
+  ]
 }
 
 # Wait for addons to be ready before proceeding with helm releases
@@ -238,19 +233,6 @@ resource "time_sleep" "wait_for_addons" {
   }
 }
 
-# Helm Provider Configuration
-provider "helm" {
-  kubernetes {
-    host                   = var.host
-    cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
-      command     = "aws"
-    }
-  }
-}
-
 # Helm Releases
 resource "helm_release" "releases" {
   for_each = local.helm_releases
@@ -264,30 +246,20 @@ resource "helm_release" "releases" {
 
   values = lookup(each.value, "values", [])
 
-  # Only set clusterName if not provided by user
-  dynamic "set" {
-    for_each = contains(keys(lookup(each.value, "set_values", {})), "clusterName") ? [] : [1]
-    content {
-      name  = "clusterName"
-      value = each.value.cluster_name
+  # clusterName defaults to the cluster key unless provided in set_values
+  set = [
+    for name, value in merge({ clusterName = each.value.cluster_name }, lookup(each.value, "set_values", {})) : {
+      name  = name
+      value = tostring(value)
     }
-  }
+  ]
 
-  dynamic "set" {
-    for_each = lookup(each.value, "set_values", {})
-    content {
-      name  = set.key
-      value = set.value
+  set_sensitive = [
+    for name, value in lookup(each.value, "set_sensitive_values", {}) : {
+      name  = name
+      value = tostring(value)
     }
-  }
-
-  dynamic "set_sensitive" {
-    for_each = lookup(each.value, "set_sensitive_values", {})
-    content {
-      name  = set_sensitive.key
-      value = set_sensitive.value
-    }
-  }
+  ]
 
   timeout = lookup(each.value, "timeout", 300)
   atomic  = lookup(each.value, "atomic", true)
@@ -319,7 +291,7 @@ resource "time_sleep" "wait_for_helm_releases" {
         name        = v.name
         version     = v.version
         namespace   = v.namespace
-        values_hash = v.metadata[0].values_hash
+        values_hash = v.metadata.values_hash
         status      = v.status
       }
     ]))
@@ -336,17 +308,6 @@ resource "time_sleep" "wait_for_helm_releases" {
       condition     = length(helm_release.releases) > 0
       error_message = "No Helm releases were created. Check the helm_releases configuration."
     }
-  }
-}
-
-# Kubernetes Provider Configuration
-provider "kubernetes" {
-  host                   = var.host
-  cluster_ca_certificate = base64decode(var.cluster_ca_certificate)
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    args        = ["eks", "get-token", "--cluster-name", var.cluster_name]
-    command     = "aws"
   }
 }
 
@@ -367,26 +328,29 @@ resource "kubernetes_manifest" "manifests" {
   ]
 }
 
-# Apply Istio gateway configuration
-resource "kubectl_manifest" "istio_gateway" {
-  count             = var.domain_name != "" && var.istio_enabled ? 1 : 0
-  yaml_body         = local.istio_gateway_template
-  wait              = true
-  server_side_apply = true
-  force_conflicts   = true
-  wait_for_rollout  = true
+# Apply Istio gateway configuration through a local Helm chart: unlike kubernetes_manifest,
+# Helm does not need the Istio CRDs at plan time, so the first apply can install Istio
+# (helm_release.releases) and the gateway resources together.
+resource "helm_release" "istio_gateway" {
+  count = var.domain_name != "" && var.istio_enabled ? 1 : 0
+
+  name      = "istio-gateway-config"
+  chart     = "${path.module}/charts/istio-gateway-config"
+  namespace = "istio-ingress"
+  timeout   = 300
+  wait      = true
+
+  set = [
+    {
+      name  = "domainName"
+      value = var.domain_name
+    },
+  ]
 
   depends_on = [
     helm_release.releases,
     time_sleep.wait_for_helm_releases
   ]
-
-  # Add timeout to ensure adequate time for manifest creation
-  timeouts {
-    create = "5m"
-    update = "5m"
-    delete = "3m"
-  }
 }
 
 # Wait for istio-ingress namespace to be ready before proceeding with certificate-related resources
@@ -395,7 +359,7 @@ resource "time_sleep" "wait_for_istio_namespace" {
 
   depends_on = [
     time_sleep.wait_for_helm_releases,
-    kubectl_manifest.istio_gateway
+    helm_release.istio_gateway
   ]
 
   # Increase wait time to ensure namespace is fully ready with all resources
@@ -403,18 +367,21 @@ resource "time_sleep" "wait_for_istio_namespace" {
 }
 
 # Create a Kubernetes secret from ACM certificate content
-resource "kubernetes_secret" "istio_certs" {
-  count = var.istio_enabled && !var.use_external_secrets && var.acm_certificate_crt != "" && var.acm_certificate_key != "" ? 1 : 0
+resource "kubernetes_secret_v1" "istio_certs" {
+  # acm_certificate_key is ephemeral and cannot drive count; the certificate decides
+  count = var.istio_enabled && !var.use_external_secrets && var.acm_certificate_crt != "" ? 1 : 0
 
   metadata {
     name      = "istio-gateway-cert"
     namespace = "istio-ingress"
   }
 
-  data = {
+  # Write-only: the private key is sent to the cluster but never stored in Terraform state
+  data_wo = {
     "tls.crt" = var.acm_certificate_crt
     "tls.key" = var.acm_certificate_key
   }
+  data_wo_revision = var.acm_certificate_revision
 
   type = "kubernetes.io/tls"
 

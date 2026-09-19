@@ -1,93 +1,39 @@
-# Security Monitoring Component
+# security-monitoring
 
-This Terraform component implements comprehensive security monitoring for AWS environments using GuardDuty, Security Hub, and Inspector V2.
+Creates a GuardDuty detector (+ S3/EKS/malware protection features and a
+high-severity finding filter), enables Security Hub with CIS/FSBP/PCI-DSS
+standards subscriptions, enables Inspector V2, an SNS topic for security
+alerts (with optional Slack/PagerDuty via a Lambda alert-enrichment
+function), EventBridge rules routing GuardDuty/Security Hub/Inspector
+findings to SNS, and CloudWatch alarms on finding thresholds.
 
-## Features
+## Deployed instances
 
-- **AWS GuardDuty**: Intelligent threat detection for AWS accounts and workloads
-  - S3 protection
-  - EKS audit log analysis
-  - EC2 malware protection
+Not referenced by any of the 3 real stacks — zero instances. Separately, the
+prod stack's `security.yaml` has `guardduty/main` and `securityhub/main`
+entries, both `enabled: false` placeholders for a future, not-yet-written
+dedicated component — not this component, does not exercise this code.
 
-- **AWS Security Hub**: Centralized security findings aggregation
-  - CIS AWS Foundations Benchmark
-  - AWS Foundational Security Best Practices
-  - PCI-DSS compliance (optional)
+## Inputs / outputs
 
-- **AWS Inspector V2**: Automated vulnerability management
-  - EC2 instance scanning
-  - ECR container image scanning
-  - Lambda function scanning
+| Key | Notes |
+|---|---|
+| `tags` (required) | must contain `Environment` key (validated) |
+| `guardduty_finding_frequency` | one of FIFTEEN_MINUTES/ONE_HOUR/SIX_HOURS (validated) |
+| `enable_guardduty`, `enable_security_hub`, `enable_inspector` | each independently toggleable |
+| `security_email_subscriptions`, `slack_webhook_url`, `pagerduty_integration_key` | alert routing |
+| out: `guardduty_detector_id`, `security_hub_account_arn`, `security_alerts_topic_arn` | — |
 
-- **Alert Management**:
-  - SNS topic for security alerts
-  - EventBridge rules for HIGH/CRITICAL findings
-  - Optional Lambda enrichment for Slack/PagerDuty integration
-  - Email notifications
+## Dependencies / gotchas
 
-- **CloudWatch Alarms**:
-  - Root account usage detection
-  - Unauthorized API calls
-  - IAM policy changes
-  - Security group modifications
+- No `dependencies.components` entries exist anywhere (component is unused).
+- Do not confuse with the disabled `guardduty/main`/`securityhub/main` stack stubs in prod — those belong to a different, not-yet-built component.
+- `tags` validation fails the plan if `Environment` key is missing.
+- Security Hub standards (`enable_cis_standard` etc.) are separate subscriptions — `enable_security_hub` alone enables no standard.
 
 ## Usage
 
-```hcl
-module "security_monitoring" {
-  source = "../../components/terraform/security-monitoring"
-
-  region = "us-east-1"
-
-  enable_guardduty    = true
-  enable_security_hub = true
-  enable_inspector    = true
-
-  security_email_subscriptions = [
-    "security-team@example.com"
-  ]
-
-  enable_alert_enrichment     = true
-  slack_webhook_url           = var.slack_webhook_url
-  pagerduty_integration_key   = var.pagerduty_key
-
-  tags = {
-    Environment = "production"
-    ManagedBy   = "terraform"
-  }
-}
 ```
-
-## Requirements
-
-- AWS account with appropriate permissions
-- CloudTrail enabled for metric filters
-- KMS key for encryption (optional)
-
-## Alert Enrichment Lambda
-
-The optional alert enrichment Lambda function:
-- Enhances security findings with additional context
-- Routes alerts to Slack and PagerDuty
-- Provides formatted notifications with severity indicators
-- Includes remediation guidance
-
-## Best Practices
-
-1. Enable all protection features in production
-2. Configure email notifications for security team
-3. Integrate with incident response tools (PagerDuty, Slack)
-4. Review findings regularly
-5. Set up automated remediation for common issues
-6. Enable encryption for SNS topics and logs
-7. Retain logs for compliance requirements (90+ days)
-
-## Compliance
-
-This component helps meet compliance requirements for:
-- CIS AWS Foundations Benchmark
-- AWS Foundational Security Best Practices
-- PCI-DSS (when enabled)
-- SOC 2
-- ISO 27001
-- HIPAA (with additional controls)
+atmos terraform plan security-monitoring -s fnx-dev-testenv-01
+```
+(after adding a `security-monitoring` component entry to that stack).

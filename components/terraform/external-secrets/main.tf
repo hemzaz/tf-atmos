@@ -27,12 +27,7 @@ resource "aws_iam_role" "external_secrets" {
     ]
   })
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${local.name_prefix}-external-secrets-role"
-    }
-  )
+  tags = { Name = "${local.name_prefix}-external-secrets-role" }
 }
 
 # Create IAM policy for external-secrets to access AWS Secrets Manager
@@ -43,12 +38,7 @@ resource "aws_iam_policy" "external_secrets" {
   description = "Policy for external-secrets to access AWS Secrets Manager"
   policy      = file("${path.module}/policies/external-secrets-policy.json")
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${local.name_prefix}-external-secrets-policy"
-    }
-  )
+  tags = { Name = "${local.name_prefix}-external-secrets-policy" }
 }
 
 # Attach the policy to the role
@@ -70,20 +60,20 @@ resource "helm_release" "external_secrets" {
   namespace        = var.namespace
   create_namespace = var.create_namespace
 
-  set {
-    name  = "serviceAccount.create"
-    value = "true"
-  }
-
-  set {
-    name  = "serviceAccount.name"
-    value = var.service_account_name
-  }
-
-  set {
-    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = aws_iam_role.external_secrets[0].arn
-  }
+  set = [
+    {
+      name  = "serviceAccount.create"
+      value = "true"
+    },
+    {
+      name  = "serviceAccount.name"
+      value = var.service_account_name
+    },
+    {
+      name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+      value = aws_iam_role.external_secrets[0].arn
+    },
+  ]
 
   # Additional customizations can be added here
 
@@ -95,14 +85,14 @@ resource "helm_release" "external_secrets" {
 }
 
 # Wait for external-secrets CRDs to be registered with dynamic health check
-resource "null_resource" "wait_for_crds" {
+resource "terraform_data" "wait_for_crds" {
   count = local.enabled && (var.create_default_cluster_secret_store || var.create_certificate_secret_store) ? 1 : 0
 
   depends_on = [helm_release.external_secrets]
 
   # Use triggers to run on each apply
-  triggers = {
-    helm_release_id = local.enabled ? helm_release.external_secrets[0].id : null
+  triggers_replace = {
+    helm_release_id = helm_release.external_secrets[0].id
   }
 
   # Use local-exec to wait for CRDs to be ready with proper health check

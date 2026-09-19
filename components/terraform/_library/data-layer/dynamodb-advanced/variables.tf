@@ -46,6 +46,10 @@ variable "hash_key_type" {
   type        = string
   description = "Hash key attribute type: S (string), N (number), or B (binary)"
   default     = "S"
+  validation {
+    condition     = contains(["S", "N", "B"], var.hash_key_type)
+    error_message = "hash_key_type must be S, N, or B."
+  }
 }
 
 variable "range_key" {
@@ -58,6 +62,10 @@ variable "range_key_type" {
   type        = string
   description = "Range key attribute type: S, N, or B"
   default     = "S"
+  validation {
+    condition     = contains(["S", "N", "B"], var.range_key_type)
+    error_message = "range_key_type must be S, N, or B."
+  }
 }
 
 variable "attributes" {
@@ -67,6 +75,10 @@ variable "attributes" {
   }))
   description = "Additional attributes for GSI/LSI"
   default     = []
+  validation {
+    condition     = alltrue([for a in var.attributes : contains(["S", "N", "B"], a.type)])
+    error_message = "Each attribute type must be S, N, or B."
+  }
 }
 
 variable "global_secondary_indexes" {
@@ -80,6 +92,10 @@ variable "global_secondary_indexes" {
   }))
   description = "Global secondary indexes"
   default     = []
+  validation {
+    condition     = alltrue([for g in var.global_secondary_indexes : contains(["ALL", "KEYS_ONLY", "INCLUDE"], g.projection_type)])
+    error_message = "GSI projection_type must be ALL, KEYS_ONLY, or INCLUDE."
+  }
 }
 
 variable "local_secondary_indexes" {
@@ -90,6 +106,10 @@ variable "local_secondary_indexes" {
   }))
   description = "Local secondary indexes"
   default     = []
+  validation {
+    condition     = alltrue([for l in var.local_secondary_indexes : contains(["ALL", "KEYS_ONLY", "INCLUDE"], l.projection_type)])
+    error_message = "LSI projection_type must be ALL, KEYS_ONLY, or INCLUDE."
+  }
 }
 
 variable "enable_autoscaling" {
@@ -114,6 +134,10 @@ variable "autoscaling_read_target" {
   type        = number
   description = "Target utilization % for read auto-scaling"
   default     = 70
+  validation {
+    condition     = var.autoscaling_read_target > 0 && var.autoscaling_read_target <= 100
+    error_message = "autoscaling_read_target must be between 1 and 100."
+  }
 }
 
 variable "autoscaling_write_min" {
@@ -132,6 +156,10 @@ variable "autoscaling_write_target" {
   type        = number
   description = "Target utilization % for write auto-scaling"
   default     = 70
+  validation {
+    condition     = var.autoscaling_write_target > 0 && var.autoscaling_write_target <= 100
+    error_message = "autoscaling_write_target must be between 1 and 100."
+  }
 }
 
 variable "enable_streams" {
@@ -144,6 +172,10 @@ variable "stream_view_type" {
   type        = string
   description = "Stream view type: KEYS_ONLY, NEW_IMAGE, OLD_IMAGE, NEW_AND_OLD_IMAGES"
   default     = "NEW_AND_OLD_IMAGES"
+  validation {
+    condition     = contains(["KEYS_ONLY", "NEW_IMAGE", "OLD_IMAGE", "NEW_AND_OLD_IMAGES"], var.stream_view_type)
+    error_message = "stream_view_type must be KEYS_ONLY, NEW_IMAGE, OLD_IMAGE, or NEW_AND_OLD_IMAGES."
+  }
 }
 
 variable "enable_point_in_time_recovery" {
@@ -198,6 +230,10 @@ variable "table_class" {
   type        = string
   description = "Table class: STANDARD or STANDARD_INFREQUENT_ACCESS"
   default     = "STANDARD"
+  validation {
+    condition     = contains(["STANDARD", "STANDARD_INFREQUENT_ACCESS"], var.table_class)
+    error_message = "table_class must be STANDARD or STANDARD_INFREQUENT_ACCESS."
+  }
 }
 
 variable "tags" {

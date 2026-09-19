@@ -1,5 +1,5 @@
 resource "aws_ram_resource_association" "vpc_subnets" {
-  count              = var.ram_resource_share_arn != "" ? length(aws_subnet.private) : 0
-  resource_arn       = aws_subnet.private[count.index].arn
+  for_each           = var.ram_resource_share_arn != "" ? aws_subnet.private : {}
+  resource_arn       = each.value.arn
   resource_share_arn = var.ram_resource_share_arn
 }

@@ -63,6 +63,12 @@ variable "clusters" {
     istio_config                   = optional(map(any), {})
     additional_namespaces          = optional(list(string), [])
 
+    # Resources consumed by main.tf (flattened per cluster); previously undeclared,
+    # so the object type silently dropped them
+    addons               = optional(any, {})
+    helm_releases        = optional(any, {})
+    kubernetes_manifests = optional(any, {})
+
     # Tags
     tags = optional(map(string), {})
   }))
@@ -263,6 +269,18 @@ variable "acm_certificate_key" {
   description = "Private key content from ACM"
   default     = ""
   sensitive   = true
+  ephemeral   = true
+}
+
+variable "acm_certificate_revision" {
+  type        = number
+  description = "Increment to push new acm_certificate_crt/acm_certificate_key content to the write-only Istio TLS secret"
+  default     = 1
+
+  validation {
+    condition     = var.acm_certificate_revision >= 1 && floor(var.acm_certificate_revision) == var.acm_certificate_revision
+    error_message = "acm_certificate_revision must be a positive integer."
+  }
 }
 
 # Secrets Manager Integration

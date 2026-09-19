@@ -1,5 +1,5 @@
 locals {
-  name_prefix = "${var.tags["Environment"]}-${var.tags["Name"] != null ? var.tags["Name"] : "backup"}"
+  name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "backup")}"
 }
 
 # AWS Backup Vault
@@ -7,12 +7,7 @@ resource "aws_backup_vault" "main" {
   name        = local.name_prefix
   kms_key_arn = var.kms_key_arn
 
-  tags = merge(
-    var.tags,
-    {
-      Name = local.name_prefix
-    }
-  )
+  tags = { Name = local.name_prefix }
 }
 
 # Cross-Region Backup Vault (if enabled)
@@ -23,12 +18,7 @@ resource "aws_backup_vault" "cross_region" {
   name        = "${local.name_prefix}-replica"
   kms_key_arn = var.replica_kms_key_arn
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${local.name_prefix}-replica"
-    }
-  )
+  tags = { Name = "${local.name_prefix}-replica" }
 }
 
 # Backup Vault Lock (compliance mode)
@@ -57,8 +47,6 @@ resource "aws_iam_role" "backup" {
       }
     ]
   })
-
-  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "backup" {
@@ -83,17 +71,20 @@ resource "aws_backup_plan" "daily" {
     completion_window = var.backup_completion_window
 
     lifecycle {
-      delete_after                = var.daily_retention_days
-      cold_storage_after          = var.daily_cold_storage_days
+      delete_after                              = var.daily_retention_days
+      cold_storage_after                        = var.daily_cold_storage_days
       opt_in_to_archive_for_supported_resources = var.enable_archive_tier
     }
 
-    copy_action {
-      destination_vault_arn = var.enable_cross_region_backup ? aws_backup_vault.cross_region[0].arn : null
+    dynamic "copy_action" {
+      for_each = var.enable_cross_region_backup ? [aws_backup_vault.cross_region[0].arn] : []
+      content {
+        destination_vault_arn = copy_action.value
 
-      lifecycle {
-        delete_after       = var.daily_retention_days
-        cold_storage_after = var.daily_cold_storage_days
+        lifecycle {
+          delete_after       = var.daily_retention_days
+          cold_storage_after = var.daily_cold_storage_days
+        }
       }
     }
 
@@ -111,8 +102,6 @@ resource "aws_backup_plan" "daily" {
     }
     resource_type = "EC2"
   }
-
-  tags = var.tags
 }
 
 # Weekly Backup Plan
@@ -127,17 +116,20 @@ resource "aws_backup_plan" "weekly" {
     completion_window = var.backup_completion_window
 
     lifecycle {
-      delete_after                = var.weekly_retention_days
-      cold_storage_after          = var.weekly_cold_storage_days
+      delete_after                              = var.weekly_retention_days
+      cold_storage_after                        = var.weekly_cold_storage_days
       opt_in_to_archive_for_supported_resources = var.enable_archive_tier
     }
 
-    copy_action {
-      destination_vault_arn = var.enable_cross_region_backup ? aws_backup_vault.cross_region[0].arn : null
+    dynamic "copy_action" {
+      for_each = var.enable_cross_region_backup ? [aws_backup_vault.cross_region[0].arn] : []
+      content {
+        destination_vault_arn = copy_action.value
 
-      lifecycle {
-        delete_after       = var.weekly_retention_days
-        cold_storage_after = var.weekly_cold_storage_days
+        lifecycle {
+          delete_after       = var.weekly_retention_days
+          cold_storage_after = var.weekly_cold_storage_days
+        }
       }
     }
 
@@ -148,8 +140,6 @@ resource "aws_backup_plan" "weekly" {
       }
     )
   }
-
-  tags = var.tags
 }
 
 # Monthly Backup Plan
@@ -164,17 +154,20 @@ resource "aws_backup_plan" "monthly" {
     completion_window = var.backup_completion_window
 
     lifecycle {
-      delete_after                = var.monthly_retention_days
-      cold_storage_after          = var.monthly_cold_storage_days
+      delete_after                              = var.monthly_retention_days
+      cold_storage_after                        = var.monthly_cold_storage_days
       opt_in_to_archive_for_supported_resources = var.enable_archive_tier
     }
 
-    copy_action {
-      destination_vault_arn = var.enable_cross_region_backup ? aws_backup_vault.cross_region[0].arn : null
+    dynamic "copy_action" {
+      for_each = var.enable_cross_region_backup ? [aws_backup_vault.cross_region[0].arn] : []
+      content {
+        destination_vault_arn = copy_action.value
 
-      lifecycle {
-        delete_after       = var.monthly_retention_days
-        cold_storage_after = var.monthly_cold_storage_days
+        lifecycle {
+          delete_after       = var.monthly_retention_days
+          cold_storage_after = var.monthly_cold_storage_days
+        }
       }
     }
 
@@ -185,8 +178,6 @@ resource "aws_backup_plan" "monthly" {
       }
     )
   }
-
-  tags = var.tags
 }
 
 # Backup Selection for RDS
@@ -266,8 +257,6 @@ resource "aws_sns_topic" "backup_notifications" {
 
   name              = "${local.name_prefix}-notifications"
   kms_master_key_id = var.kms_key_arn
-
-  tags = var.tags
 }
 
 resource "aws_sns_topic_subscription" "backup_email" {
@@ -302,8 +291,6 @@ resource "aws_cloudwatch_metric_alarm" "backup_failures" {
   alarm_description   = "Backup jobs have failed"
   alarm_actions       = [aws_sns_topic.backup_notifications[0].arn]
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "restore_failures" {
@@ -320,8 +307,6 @@ resource "aws_cloudwatch_metric_alarm" "restore_failures" {
   alarm_description   = "Restore jobs have failed"
   alarm_actions       = [aws_sns_topic.backup_notifications[0].arn]
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 # Backup Report Plan
@@ -332,30 +317,30 @@ resource "aws_backup_report_plan" "main" {
   description = "Daily backup compliance report"
 
   report_delivery_channel {
-    formats = ["CSV", "JSON"]
+    formats        = ["CSV", "JSON"]
     s3_bucket_name = var.backup_reports_bucket
     s3_key_prefix  = "backup-reports/"
   }
 
   report_setting {
-    report_template = "BACKUP_JOB_REPORT"
-    accounts        = [data.aws_caller_identity.current.account_id]
+    report_template    = "BACKUP_JOB_REPORT"
+    accounts           = [data.aws_caller_identity.current.account_id]
     organization_units = var.organization_units
-    regions         = [var.region]
+    regions            = [var.region]
   }
-
-  tags = var.tags
 }
 
 # Lambda function for automated backup testing (optional)
 resource "aws_lambda_function" "backup_testing" {
   count = var.enable_backup_testing ? 1 : 0
 
-  filename         = "${path.module}/lambda/backup-testing.zip"
-  function_name    = "${local.name_prefix}-testing"
-  role             = aws_iam_role.backup_testing[0].arn
-  handler          = "index.handler"
-  source_code_hash = filebase64sha256("${path.module}/lambda/backup-testing.zip")
+  filename      = "${path.module}/lambda/backup-testing.zip"
+  function_name = "${local.name_prefix}-testing"
+  role          = aws_iam_role.backup_testing[0].arn
+  handler       = "index.handler"
+  # The package is not committed; try() keeps the disabled path valid and the precondition
+  # below reports a missing package when the function is enabled.
+  source_code_hash = try(filebase64sha256("${path.module}/lambda/backup-testing.zip"), null)
   runtime          = "python3.11"
   timeout          = 900
   memory_size      = 512
@@ -368,7 +353,12 @@ resource "aws_lambda_function" "backup_testing" {
     }
   }
 
-  tags = var.tags
+  lifecycle {
+    precondition {
+      condition     = fileexists("${path.module}/lambda/backup-testing.zip")
+      error_message = "Lambda package ${path.module}/lambda/backup-testing.zip is missing; build it before enabling this function."
+    }
+  }
 }
 
 # IAM role for backup testing Lambda
@@ -389,8 +379,6 @@ resource "aws_iam_role" "backup_testing" {
       }
     ]
   })
-
-  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "backup_testing_basic" {
@@ -435,8 +423,6 @@ resource "aws_cloudwatch_event_rule" "backup_testing" {
   name                = "${local.name_prefix}-testing-schedule"
   description         = "Trigger backup testing Lambda on schedule"
   schedule_expression = var.backup_testing_schedule
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "backup_testing" {

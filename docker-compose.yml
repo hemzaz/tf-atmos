@@ -201,7 +201,7 @@ services:
 
   # Security Scanning
   trivy:
-    image: aquasec/trivy:latest
+    image: aquasec/trivy:0.74.0
     container_name: idp-trivy
     volumes:
       - trivy_cache:/root/.cache

@@ -33,8 +33,8 @@ variable "availability_zones" {
   type        = list(string)
 
   validation {
-    condition     = length(var.availability_zones) >= 2
-    error_message = "At least 2 availability zones are required for high availability."
+    condition     = length(var.availability_zones) >= 2 && length(distinct(var.availability_zones)) == length(var.availability_zones)
+    error_message = "At least 2 distinct availability zones are required for high availability."
   }
 }
 
@@ -50,6 +50,11 @@ variable "public_subnets" {
     ])
     error_message = "All public subnet CIDRs must be valid IPv4 CIDR blocks."
   }
+
+  validation {
+    condition     = length(var.public_subnets) <= length(var.availability_zones)
+    error_message = "public_subnets must not have more entries than availability_zones (one subnet per AZ)."
+  }
 }
 
 variable "private_subnets" {
@@ -64,6 +69,11 @@ variable "private_subnets" {
     ])
     error_message = "All private subnet CIDRs must be valid IPv4 CIDR blocks."
   }
+
+  validation {
+    condition     = length(var.private_subnets) <= length(var.availability_zones)
+    error_message = "private_subnets must not have more entries than availability_zones (one subnet per AZ)."
+  }
 }
 
 variable "database_subnets" {
@@ -77,6 +87,11 @@ variable "database_subnets" {
       can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$", cidr))
     ])
     error_message = "All database subnet CIDRs must be valid IPv4 CIDR blocks."
+  }
+
+  validation {
+    condition     = length(var.database_subnets) <= length(var.availability_zones)
+    error_message = "database_subnets must not have more entries than availability_zones (one subnet per AZ)."
   }
 }
 
@@ -142,6 +157,11 @@ variable "flow_logs_s3_bucket_arn" {
   description = "ARN of S3 bucket for flow logs (required if flow_logs_destination_type is s3)"
   type        = string
   default     = null
+
+  validation {
+    condition     = !(var.enable_flow_logs && var.flow_logs_destination_type == "s3") || var.flow_logs_s3_bucket_arn != null
+    error_message = "flow_logs_s3_bucket_arn is required when flow logs are sent to s3."
+  }
 }
 
 variable "enable_vpn_gateway" {
@@ -154,6 +174,14 @@ variable "vpn_gateway_amazon_side_asn" {
   description = "ASN for the Amazon side of the VPN Gateway"
   type        = number
   default     = 64512
+
+  validation {
+    condition = (
+      (var.vpn_gateway_amazon_side_asn >= 64512 && var.vpn_gateway_amazon_side_asn <= 65534) ||
+      (var.vpn_gateway_amazon_side_asn >= 4200000000 && var.vpn_gateway_amazon_side_asn <= 4294967294)
+    )
+    error_message = "VPN gateway Amazon side ASN must be in range 64512-65534 or 4200000000-4294967294."
+  }
 }
 
 variable "enable_transit_gateway" {
@@ -166,6 +194,11 @@ variable "transit_gateway_id" {
   description = "ID of the Transit Gateway to attach to"
   type        = string
   default     = null
+
+  validation {
+    condition     = !var.enable_transit_gateway || var.transit_gateway_id != null
+    error_message = "transit_gateway_id is required when enable_transit_gateway is true."
+  }
 }
 
 variable "transit_gateway_routes" {
@@ -190,8 +223,29 @@ variable "vpc_endpoints" {
     - security_group_ids: (Interface only) List of security group IDs
     - policy: (Optional) IAM policy for the endpoint
   EOT
-  type        = map(any)
-  default     = {}
+  type = map(object({
+    service_type        = string
+    route_table_ids     = optional(list(string), [])
+    subnet_ids          = optional(list(string), [])
+    private_dns_enabled = optional(bool, true)
+    security_group_ids  = optional(list(string))
+    policy              = optional(string)
+  }))
+  default = {}
+
+  validation {
+    condition     = alltrue([for e in values(var.vpc_endpoints) : contains(["Gateway", "Interface"], e.service_type)])
+    error_message = "vpc_endpoints service_type must be Gateway or Interface."
+  }
+
+  validation {
+    condition = alltrue([for k in keys(var.vpc_endpoints) : contains([
+      "s3", "dynamodb", "ec2", "ec2messages", "ssm", "ssmmessages", "ecr_api", "ecr_dkr", "logs", "kms",
+      "secretsmanager", "rds", "sns", "sqs", "lambda", "ecs", "ecs_agent", "ecs_telemetry",
+      "elasticloadbalancing", "autoscaling"
+    ], k)])
+    error_message = "vpc_endpoints keys must be one of the services supported by this module (see local.vpc_endpoint_services)."
+  }
 }
 
 variable "default_network_acl_ingress" {

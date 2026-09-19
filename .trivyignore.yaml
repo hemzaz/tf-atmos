@@ -1,0 +1,95 @@
+# Trivy baseline 2026-09-19 - burn down, don't add.
+# HIGH/CRITICAL misconfigurations present when the baseline was taken; the PR
+# gate ignores exactly these (rule, file) pairs. Regenerate with
+# `atmos workflow security-baseline -f lint`.
+misconfigurations:
+  - id: AWS-0006
+    paths:
+      - "_library/data-platform/athena-workgroup/main.tf"
+  - id: AWS-0031
+    paths:
+      - "_library/cicd/ecr-repository/v1.0.0/main.tf"
+  - id: AWS-0040
+    paths:
+      - "eks/main.tf"
+  - id: AWS-0041
+    paths:
+      - "eks/main.tf"
+  - id: AWS-0052
+    paths:
+      - "idp-platform/main.tf"
+  - id: AWS-0053
+    paths:
+      - "idp-platform/main.tf"
+  - id: AWS-0064
+    paths:
+      - "_library/data-platform/kinesis-stream/main.tf"
+  - id: AWS-0086
+    paths:
+      - "backend/s3-backend.tf"
+  - id: AWS-0086
+    paths:
+      - "idp-platform/main.tf"
+  - id: AWS-0087
+    paths:
+      - "backend/s3-backend.tf"
+  - id: AWS-0087
+    paths:
+      - "idp-platform/main.tf"
+  - id: AWS-0091
+    paths:
+      - "backend/s3-backend.tf"
+  - id: AWS-0091
+    paths:
+      - "idp-platform/main.tf"
+  - id: AWS-0093
+    paths:
+      - "backend/s3-backend.tf"
+  - id: AWS-0093
+    paths:
+      - "idp-platform/main.tf"
+  - id: AWS-0095
+    paths:
+      - "cost-optimization/main.tf"
+  - id: AWS-0095
+    paths:
+      - "idp-platform/main.tf"
+  - id: AWS-0095
+    paths:
+      - "monitoring/main.tf"
+  - id: AWS-0096
+    paths:
+      - "_library/compute/lambda-pattern-library/main.tf"
+  - id: AWS-0104
+    paths:
+      - "_library/compute/asg-launch-template/main.tf"
+  - id: AWS-0104
+    paths:
+      - "_library/compute/ecs-fargate-service/main.tf"
+  - id: AWS-0104
+    paths:
+      - "_library/data-layer/elasticache-redis/main.tf"
+  - id: AWS-0104
+    paths:
+      - "_library/data-layer/rds-aurora-advanced/main.tf"
+  - id: AWS-0104
+    paths:
+      - "_library/networking/vpc-advanced/examples/complete/main.tf"
+  - id: AWS-0104
+    paths:
+      - "_library/networking/vpc-endpoints/main.tf"
+  - id: AWS-0104
+    paths:
+      - "rds/main.tf"
+  - id: AWS-0132
+    paths:
+      - "_library/networking/network-firewall/main.tf"
+  - id: AWS-0132
+    paths:
+      - "_library/security/waf-advanced/main.tf"
+  - id: AWS-0132
+    paths:
+      - "backend/s3-backend.tf"
+  - id: AWS-0164
+    paths:
+      - "_library/networking/vpc-advanced/main.tf"

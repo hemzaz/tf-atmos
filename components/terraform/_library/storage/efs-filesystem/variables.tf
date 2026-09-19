@@ -114,7 +114,7 @@ variable "transition_to_archive" {
   default     = null
 
   validation {
-    condition = var.transition_to_archive == null || can(regex("^AFTER_([1-9]|[1-9][0-9])_DAYS?$", var.transition_to_archive))
+    condition     = var.transition_to_archive == null || can(regex("^AFTER_([1-9]|[1-9][0-9])_DAYS?$", var.transition_to_archive))
     error_message = "Transition to archive must be a valid lifecycle policy value."
   }
 }
@@ -146,7 +146,7 @@ variable "access_points" {
         permissions = string
       })
     })
-    tags = optional(map(string))
+    tags = optional(map(string), {})
   }))
   default = {}
 }
@@ -161,6 +161,11 @@ variable "file_system_policy" {
   description = "EFS file system policy (JSON string)"
   type        = string
   default     = null
+
+  validation {
+    condition     = var.file_system_policy == null || can(jsondecode(var.file_system_policy))
+    error_message = "File system policy must be a valid JSON document."
+  }
 }
 
 variable "enable_cloudwatch_alarms" {

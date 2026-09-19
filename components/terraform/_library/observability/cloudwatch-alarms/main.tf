@@ -19,11 +19,11 @@ resource "aws_sns_topic" "alarms" {
 }
 
 resource "aws_sns_topic_subscription" "email" {
-  count = var.create_sns_topic && length(var.alarm_email_endpoints) > 0 ? length(var.alarm_email_endpoints) : 0
+  for_each = var.create_sns_topic ? toset(var.alarm_email_endpoints) : toset([])
 
   topic_arn = aws_sns_topic.alarms[0].arn
   protocol  = "email"
-  endpoint  = var.alarm_email_endpoints[count.index]
+  endpoint  = each.value
 }
 
 ##############################################
@@ -149,18 +149,18 @@ resource "aws_cloudwatch_metric_alarm" "anomaly_cpu" {
 resource "aws_cloudwatch_composite_alarm" "system_critical" {
   count = var.create_composite_alarms ? 1 : 0
 
-  alarm_name          = "${var.name_prefix}-system-critical"
-  alarm_description   = "Multiple system metrics in alarm state"
-  actions_enabled     = true
-  alarm_actions       = var.alarm_actions
-  ok_actions          = var.ok_actions
+  alarm_name                = "${var.name_prefix}-system-critical"
+  alarm_description         = "Multiple system metrics in alarm state"
+  actions_enabled           = true
+  alarm_actions             = var.alarm_actions
+  ok_actions                = var.ok_actions
   insufficient_data_actions = []
 
-  alarm_rule = join(" OR ", [
+  alarm_rule = join(" OR ", compact([
     var.create_cpu_alarms ? "ALARM(${aws_cloudwatch_metric_alarm.cpu_high[0].alarm_name})" : "",
     var.create_memory_alarms ? "ALARM(${aws_cloudwatch_metric_alarm.memory_high[0].alarm_name})" : "",
     var.create_disk_alarms ? "ALARM(${aws_cloudwatch_metric_alarm.disk_high[0].alarm_name})" : ""
-  ])
+  ]))
 
   tags = merge(
     var.tags,
@@ -190,15 +190,9 @@ resource "aws_cloudwatch_metric_alarm" "custom" {
   alarm_description   = each.value.description
   alarm_actions       = var.alarm_actions
   ok_actions          = var.ok_actions
-  treat_missing_data  = lookup(each.value, "treat_missing_data", "notBreaching")
+  treat_missing_data  = each.value.treat_missing_data
 
-  dynamic "dimensions" {
-    for_each = lookup(each.value, "dimensions", {})
-    content {
-      name  = dimensions.key
-      value = dimensions.value
-    }
-  }
+  dimensions = each.value.dimensions
 
   tags = merge(
     var.tags,
@@ -212,15 +206,24 @@ resource "aws_cloudwatch_metric_alarm" "custom" {
 # Auto-Remediation Lambda
 ##############################################
 
+data "archive_file" "auto_remediation" {
+  count = var.enable_auto_remediation ? 1 : 0
+
+  type        = "zip"
+  source_file = "${path.module}/templates/auto_remediation.py"
+  output_path = "${path.root}/.terraform/archive/${var.name_prefix}-auto_remediation.zip"
+}
+
 resource "aws_lambda_function" "auto_remediation" {
   count = var.enable_auto_remediation ? 1 : 0
 
-  filename      = "${path.module}/templates/auto_remediation.zip"
-  function_name = "${var.name_prefix}-auto-remediation"
-  role          = aws_iam_role.auto_remediation[0].arn
-  handler       = "index.handler"
-  runtime       = "python3.11"
-  timeout       = 60
+  filename         = data.archive_file.auto_remediation[0].output_path
+  source_code_hash = data.archive_file.auto_remediation[0].output_base64sha256
+  function_name    = "${var.name_prefix}-auto-remediation"
+  role             = aws_iam_role.auto_remediation[0].arn
+  handler          = "auto_remediation.handler"
+  runtime          = "python3.13"
+  timeout          = 60
 
   environment {
     variables = {
@@ -240,10 +243,11 @@ resource "aws_lambda_function" "auto_remediation" {
 resource "aws_lambda_permission" "cloudwatch" {
   count = var.enable_auto_remediation ? 1 : 0
 
-  statement_id  = "AllowExecutionFromCloudWatch"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.auto_remediation[0].function_name
-  principal     = "cloudwatch.amazonaws.com"
+  statement_id   = "AllowExecutionFromCloudWatch"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.auto_remediation[0].function_name
+  principal      = "lambda.alarms.cloudwatch.amazonaws.com"
+  source_account = data.aws_caller_identity.current.account_id
 }
 
 resource "aws_iam_role" "auto_remediation" {
@@ -288,7 +292,8 @@ resource "aws_iam_role_policy" "auto_remediation" {
         Action = [
           "ec2:StopInstances",
           "ec2:RebootInstances",
-          "autoscaling:SetDesiredCapacity"
+          "autoscaling:SetDesiredCapacity",
+          "autoscaling:DescribeAutoScalingGroups"
         ]
         Resource = "*"
       }

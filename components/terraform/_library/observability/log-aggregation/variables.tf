@@ -21,14 +21,14 @@ variable "log_retention_days" {
 
 variable "kms_key_id" {
   type        = string
-  description = "KMS key ID for encryption"
+  description = "KMS key ARN for encryption (null uses AWS managed keys; the key policy must allow the CloudWatch Logs service when set)"
   default     = null
 }
 
 variable "service_log_groups" {
   type = map(object({
     retention_days = optional(number)
-    filter_pattern = optional(string)
+    filter_pattern = optional(string, "")
   }))
   description = "Map of service names to log group configurations"
   default     = {}
@@ -123,8 +123,13 @@ variable "export_schedule" {
 # Athena Queries
 variable "enable_athena_queries" {
   type        = bool
-  description = "Enable Athena query setup"
+  description = "Enable Athena query setup (requires enable_s3_export)"
   default     = true
+
+  validation {
+    condition     = !var.enable_athena_queries || var.enable_s3_export
+    error_message = "enable_athena_queries requires enable_s3_export = true (Athena uses the export bucket)."
+  }
 }
 
 # Metric Filters
@@ -156,7 +161,7 @@ variable "custom_metric_filters" {
     pattern     = string
     metric_name = string
     value       = string
-    unit        = optional(string)
+    unit        = optional(string, "None")
   }))
   description = "Custom metric filter configurations"
   default     = {}

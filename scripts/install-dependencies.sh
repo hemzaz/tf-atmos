@@ -13,12 +13,13 @@ YELLOW="\033[33m"
 BLUE="\033[34m"
 RESET="\033[0m"
 
-# Load environment variables from .env file if it exists
-if [[ -f "$(dirname "$0")/../.env" ]]; then
-  echo -e "${BLUE}Loading tool versions from .env file...${RESET}"
-  source "$(dirname "$0")/../.env"
+# Load tool versions from .atmos.env (the repository's version pins)
+if [[ -f "$(dirname "$0")/../.atmos.env" ]]; then
+  echo -e "${BLUE}Loading tool versions from .atmos.env...${RESET}"
+  # shellcheck source=../.atmos.env
+  source "$(dirname "$0")/../.atmos.env"
 else
-  echo -e "${YELLOW}No .env file found. Using default versions.${RESET}"
+  echo -e "${YELLOW}No .atmos.env file found. Using default versions.${RESET}"
 fi
 
 # Default configuration
@@ -39,14 +40,14 @@ INSTALL_CHECKOV=false
 INSTALL_REDIS=true
 # Cookiecutter was removed in favor of Copier
 INSTALL_COPIER=true
-TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.5.7}"
-ATMOS_VERSION="${ATMOS_VERSION:-1.38.0}"
-KUBECTL_VERSION="${KUBECTL_VERSION:-1.28.3}"
-HELM_VERSION="${HELM_VERSION:-3.13.1}"
-TFSEC_VERSION="${TFSEC_VERSION:-1.28.13}"
-TFLINT_VERSION="${TFLINT_VERSION:-0.55.1}"
-CHECKOV_VERSION="${CHECKOV_VERSION:-3.2.382}"
-COPIER_VERSION="${COPIER_VERSION:-9.5.0}"
+TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.16.3}"
+ATMOS_VERSION="${ATMOS_VERSION:-1.229.0}"
+KUBECTL_VERSION="${KUBECTL_VERSION:-1.37.0}"
+HELM_VERSION="${HELM_VERSION:-4.3.0}"
+TFSEC_VERSION="${TFSEC_VERSION:-1.28.14}"
+TFLINT_VERSION="${TFLINT_VERSION:-0.64.0}"
+CHECKOV_VERSION="${CHECKOV_VERSION:-3.3.19}"
+COPIER_VERSION="${COPIER_VERSION:-9.18.2}"
 INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="$HOME/.local/bin"
 SYSTEM_INSTALL=false
@@ -62,7 +63,7 @@ show_help() {
   echo "  $0 [options]"
   echo
   echo -e "${BOLD}Version Management:${RESET}"
-  echo "  Tool versions are managed in the .env file at the root of the repository."
+  echo "  Tool versions are managed in the .atmos.env file at the root of the repository."
   echo "  You can override versions using the command line options below."
   echo
   echo -e "${BOLD}Options:${RESET}"

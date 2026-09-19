@@ -38,22 +38,22 @@ output "vpc_default_security_group_id" {
 #------------------------------------------------------------------------------
 output "public_subnet_ids" {
   description = "List of IDs of public subnets"
-  value       = aws_subnet.public[*].id
+  value       = [for az in local.public_azs : aws_subnet.public[az].id]
 }
 
 output "public_subnet_arns" {
   description = "List of ARNs of public subnets"
-  value       = aws_subnet.public[*].arn
+  value       = [for az in local.public_azs : aws_subnet.public[az].arn]
 }
 
 output "public_subnet_cidrs" {
   description = "List of CIDR blocks of public subnets"
-  value       = aws_subnet.public[*].cidr_block
+  value       = [for az in local.public_azs : aws_subnet.public[az].cidr_block]
 }
 
 output "public_subnet_azs" {
   description = "List of availability zones of public subnets"
-  value       = aws_subnet.public[*].availability_zone
+  value       = [for az in local.public_azs : aws_subnet.public[az].availability_zone]
 }
 
 output "public_route_table_ids" {
@@ -66,27 +66,27 @@ output "public_route_table_ids" {
 #------------------------------------------------------------------------------
 output "private_subnet_ids" {
   description = "List of IDs of private subnets"
-  value       = aws_subnet.private[*].id
+  value       = [for az in local.private_azs : aws_subnet.private[az].id]
 }
 
 output "private_subnet_arns" {
   description = "List of ARNs of private subnets"
-  value       = aws_subnet.private[*].arn
+  value       = [for az in local.private_azs : aws_subnet.private[az].arn]
 }
 
 output "private_subnet_cidrs" {
   description = "List of CIDR blocks of private subnets"
-  value       = aws_subnet.private[*].cidr_block
+  value       = [for az in local.private_azs : aws_subnet.private[az].cidr_block]
 }
 
 output "private_subnet_azs" {
   description = "List of availability zones of private subnets"
-  value       = aws_subnet.private[*].availability_zone
+  value       = [for az in local.private_azs : aws_subnet.private[az].availability_zone]
 }
 
 output "private_route_table_ids" {
   description = "List of IDs of private route tables"
-  value       = aws_route_table.private[*].id
+  value       = [for az in local.private_azs : aws_route_table.private[az].id]
 }
 
 #------------------------------------------------------------------------------
@@ -94,22 +94,22 @@ output "private_route_table_ids" {
 #------------------------------------------------------------------------------
 output "database_subnet_ids" {
   description = "List of IDs of database subnets"
-  value       = aws_subnet.database[*].id
+  value       = [for az in local.database_azs : aws_subnet.database[az].id]
 }
 
 output "database_subnet_arns" {
   description = "List of ARNs of database subnets"
-  value       = aws_subnet.database[*].arn
+  value       = [for az in local.database_azs : aws_subnet.database[az].arn]
 }
 
 output "database_subnet_cidrs" {
   description = "List of CIDR blocks of database subnets"
-  value       = aws_subnet.database[*].cidr_block
+  value       = [for az in local.database_azs : aws_subnet.database[az].cidr_block]
 }
 
 output "database_subnet_azs" {
   description = "List of availability zones of database subnets"
-  value       = aws_subnet.database[*].availability_zone
+  value       = [for az in local.database_azs : aws_subnet.database[az].availability_zone]
 }
 
 output "database_subnet_group_id" {
@@ -124,7 +124,7 @@ output "database_subnet_group_name" {
 
 output "database_route_table_ids" {
   description = "List of IDs of database route tables"
-  value       = aws_route_table.database[*].id
+  value       = [for az in local.database_azs : aws_route_table.database[az].id]
 }
 
 #------------------------------------------------------------------------------
@@ -145,22 +145,22 @@ output "internet_gateway_arn" {
 #------------------------------------------------------------------------------
 output "nat_gateway_ids" {
   description = "List of NAT Gateway IDs"
-  value       = aws_nat_gateway.this[*].id
+  value       = [for az in local.nat_gateway_azs : aws_nat_gateway.this[az].id]
 }
 
 output "nat_gateway_public_ips" {
   description = "List of public Elastic IPs associated with NAT Gateways"
-  value       = aws_eip.nat[*].public_ip
+  value       = [for az in local.nat_gateway_azs : aws_eip.nat[az].public_ip]
 }
 
 output "nat_gateway_private_ips" {
   description = "List of private IPs associated with NAT Gateways"
-  value       = aws_nat_gateway.this[*].private_ip
+  value       = [for az in local.nat_gateway_azs : aws_nat_gateway.this[az].private_ip]
 }
 
 output "nat_gateway_network_interface_ids" {
   description = "List of network interface IDs assigned to NAT Gateways"
-  value       = aws_nat_gateway.this[*].network_interface_id
+  value       = [for az in local.nat_gateway_azs : aws_nat_gateway.this[az].network_interface_id]
 }
 
 #------------------------------------------------------------------------------

@@ -16,7 +16,7 @@ locals {
 # Customer Gateway
 #------------------------------------------------------------------------------
 resource "aws_customer_gateway" "this" {
-  bgp_asn    = var.customer_gateway_bgp_asn
+  bgp_asn    = tostring(var.customer_gateway_bgp_asn)
   ip_address = var.customer_gateway_ip_address
   type       = "ipsec.1"
 
@@ -34,8 +34,9 @@ resource "aws_customer_gateway" "this" {
 resource "aws_vpn_gateway" "this" {
   count = var.use_transit_gateway ? 0 : 1
 
-  vpc_id          = var.vpc_id
-  amazon_side_asn = var.vpn_gateway_amazon_side_asn
+  # Attached to the VPC via aws_vpn_gateway_attachment below (setting vpc_id
+  # here as well would attach it twice)
+  amazon_side_asn = tostring(var.vpn_gateway_amazon_side_asn)
 
   tags = merge(
     local.common_tags,
@@ -60,47 +61,61 @@ resource "aws_vpn_connection" "this" {
   type                = "ipsec.1"
 
   # Use either Transit Gateway or Virtual Private Gateway
-  transit_gateway_id  = var.use_transit_gateway ? var.transit_gateway_id : null
-  vpn_gateway_id      = var.use_transit_gateway ? null : aws_vpn_gateway.this[0].id
+  transit_gateway_id = var.use_transit_gateway ? var.transit_gateway_id : null
+  vpn_gateway_id     = var.use_transit_gateway ? null : aws_vpn_gateway.this[0].id
 
   static_routes_only = var.static_routes_only
 
   # Tunnel configuration
-  tunnel1_inside_cidr   = var.tunnel1_inside_cidr
-  tunnel1_preshared_key = var.tunnel1_preshared_key
-  tunnel1_dpd_timeout_action = var.tunnel1_dpd_timeout_action
-  tunnel1_ike_versions  = var.tunnel1_ike_versions
-  tunnel1_phase1_dh_group_numbers = var.tunnel1_phase1_dh_group_numbers
+  tunnel1_inside_cidr                  = var.tunnel1_inside_cidr
+  tunnel1_preshared_key                = var.tunnel1_preshared_key
+  tunnel1_dpd_timeout_action           = var.tunnel1_dpd_timeout_action
+  tunnel1_ike_versions                 = var.tunnel1_ike_versions
+  tunnel1_phase1_dh_group_numbers      = var.tunnel1_phase1_dh_group_numbers
   tunnel1_phase1_encryption_algorithms = var.tunnel1_phase1_encryption_algorithms
-  tunnel1_phase1_integrity_algorithms = var.tunnel1_phase1_integrity_algorithms
-  tunnel1_phase1_lifetime_seconds = var.tunnel1_phase1_lifetime_seconds
-  tunnel1_phase2_dh_group_numbers = var.tunnel1_phase2_dh_group_numbers
+  tunnel1_phase1_integrity_algorithms  = var.tunnel1_phase1_integrity_algorithms
+  tunnel1_phase1_lifetime_seconds      = var.tunnel1_phase1_lifetime_seconds
+  tunnel1_phase2_dh_group_numbers      = var.tunnel1_phase2_dh_group_numbers
   tunnel1_phase2_encryption_algorithms = var.tunnel1_phase2_encryption_algorithms
-  tunnel1_phase2_integrity_algorithms = var.tunnel1_phase2_integrity_algorithms
-  tunnel1_phase2_lifetime_seconds = var.tunnel1_phase2_lifetime_seconds
-  tunnel1_startup_action = var.tunnel1_startup_action
+  tunnel1_phase2_integrity_algorithms  = var.tunnel1_phase2_integrity_algorithms
+  tunnel1_phase2_lifetime_seconds      = var.tunnel1_phase2_lifetime_seconds
+  tunnel1_startup_action               = var.tunnel1_startup_action
 
-  tunnel2_inside_cidr   = var.tunnel2_inside_cidr
-  tunnel2_preshared_key = var.tunnel2_preshared_key
-  tunnel2_dpd_timeout_action = var.tunnel2_dpd_timeout_action
-  tunnel2_ike_versions  = var.tunnel2_ike_versions
-  tunnel2_phase1_dh_group_numbers = var.tunnel2_phase1_dh_group_numbers
+  tunnel2_inside_cidr                  = var.tunnel2_inside_cidr
+  tunnel2_preshared_key                = var.tunnel2_preshared_key
+  tunnel2_dpd_timeout_action           = var.tunnel2_dpd_timeout_action
+  tunnel2_ike_versions                 = var.tunnel2_ike_versions
+  tunnel2_phase1_dh_group_numbers      = var.tunnel2_phase1_dh_group_numbers
   tunnel2_phase1_encryption_algorithms = var.tunnel2_phase1_encryption_algorithms
-  tunnel2_phase1_integrity_algorithms = var.tunnel2_phase1_integrity_algorithms
-  tunnel2_phase1_lifetime_seconds = var.tunnel2_phase1_lifetime_seconds
-  tunnel2_phase2_dh_group_numbers = var.tunnel2_phase2_dh_group_numbers
+  tunnel2_phase1_integrity_algorithms  = var.tunnel2_phase1_integrity_algorithms
+  tunnel2_phase1_lifetime_seconds      = var.tunnel2_phase1_lifetime_seconds
+  tunnel2_phase2_dh_group_numbers      = var.tunnel2_phase2_dh_group_numbers
   tunnel2_phase2_encryption_algorithms = var.tunnel2_phase2_encryption_algorithms
-  tunnel2_phase2_integrity_algorithms = var.tunnel2_phase2_integrity_algorithms
-  tunnel2_phase2_lifetime_seconds = var.tunnel2_phase2_lifetime_seconds
-  tunnel2_startup_action = var.tunnel2_startup_action
+  tunnel2_phase2_integrity_algorithms  = var.tunnel2_phase2_integrity_algorithms
+  tunnel2_phase2_lifetime_seconds      = var.tunnel2_phase2_lifetime_seconds
+  tunnel2_startup_action               = var.tunnel2_startup_action
 
   # Logging
-  tunnel1_log_options {
-    cloudwatch_log_group_arn = var.enable_cloudwatch_logs ? aws_cloudwatch_log_group.tunnel1[0].arn : null
+  dynamic "tunnel1_log_options" {
+    for_each = var.enable_cloudwatch_logs ? [aws_cloudwatch_log_group.tunnel1[0].arn] : []
+    content {
+      cloudwatch_log_options {
+        log_enabled       = true
+        log_group_arn     = tunnel1_log_options.value
+        log_output_format = "json"
+      }
+    }
   }
 
-  tunnel2_log_options {
-    cloudwatch_log_group_arn = var.enable_cloudwatch_logs ? aws_cloudwatch_log_group.tunnel2[0].arn : null
+  dynamic "tunnel2_log_options" {
+    for_each = var.enable_cloudwatch_logs ? [aws_cloudwatch_log_group.tunnel2[0].arn] : []
+    content {
+      cloudwatch_log_options {
+        log_enabled       = true
+        log_group_arn     = tunnel2_log_options.value
+        log_output_format = "json"
+      }
+    }
   }
 
   tags = merge(

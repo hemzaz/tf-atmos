@@ -1,3 +1,7 @@
+locals {
+  rotation_lambda_package = "${path.module}/templates/rotation_lambda.zip"
+}
+
 ##############################################
 # Secrets Manager Secret
 ##############################################
@@ -19,9 +23,9 @@ resource "aws_secretsmanager_secret" "main" {
   tags = merge(
     var.tags,
     {
-      Name       = "${var.name_prefix}-secret"
-      Module     = "secrets-manager-advanced"
-      ManagedBy  = "terraform"
+      Name      = "${var.name_prefix}-secret"
+      Module    = "secrets-manager-advanced"
+      ManagedBy = "terraform"
     }
   )
 }
@@ -31,11 +35,15 @@ resource "aws_secretsmanager_secret" "main" {
 ##############################################
 
 resource "aws_secretsmanager_secret_version" "main" {
-  count = var.secret_string != null || var.secret_binary != null ? 1 : 0
+  count = var.create_secret_version ? 1 : 0
 
-  secret_id     = aws_secretsmanager_secret.main.id
-  secret_string = var.secret_string
-  secret_binary = var.secret_binary != null ? base64decode(var.secret_binary) : null
+  secret_id = aws_secretsmanager_secret.main.id
+
+  # Ephemeral + write-only: the string value never reaches state or plan files.
+  # secret_binary has no write-only form in AWS provider v6 and is stored in state.
+  secret_string_wo         = var.secret_string
+  secret_string_wo_version = var.secret_binary == null ? var.secret_string_version : null
+  secret_binary            = var.secret_binary
 }
 
 ##############################################
@@ -64,16 +72,16 @@ resource "aws_secretsmanager_secret_rotation" "main" {
 resource "aws_lambda_function" "rotation" {
   count = var.create_rotation_lambda ? 1 : 0
 
-  filename      = "${path.module}/templates/rotation_lambda.zip"
+  filename      = local.rotation_lambda_package
   function_name = "${var.name_prefix}-rotation"
   role          = aws_iam_role.rotation[0].arn
   handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.11"
+  runtime       = "python3.13"
   timeout       = 30
 
   environment {
     variables = {
-      SECRETS_MANAGER_ENDPOINT = "https://secretsmanager.${data.aws_region.current.name}.amazonaws.com"
+      SECRETS_MANAGER_ENDPOINT = "https://secretsmanager.${data.aws_region.current.region}.amazonaws.com"
     }
   }
 
@@ -84,6 +92,13 @@ resource "aws_lambda_function" "rotation" {
       ManagedBy = "terraform"
     }
   )
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.rotation_lambda_package)
+      error_message = "create_rotation_lambda requires a rotation Lambda package at ${local.rotation_lambda_package}; the module does not ship one."
+    }
+  }
 }
 
 resource "aws_lambda_permission" "rotation" {
@@ -93,6 +108,7 @@ resource "aws_lambda_permission" "rotation" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.rotation[0].function_name
   principal     = "secretsmanager.amazonaws.com"
+  source_arn    = aws_secretsmanager_secret.main.arn
 }
 
 ##############################################
@@ -151,7 +167,7 @@ resource "aws_iam_role_policy" "rotation" {
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "arn:aws:logs:*:*:*"
+        Resource = "arn:${data.aws_partition.current.partition}:logs:*:*:*"
       }
     ]
   })
@@ -159,3 +175,4 @@ resource "aws_iam_role_policy" "rotation" {
 
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}

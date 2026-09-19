@@ -53,6 +53,17 @@ variable "endpoints" {
     ])
     error_message = "Interface endpoints require subnet_ids."
   }
+
+  validation {
+    condition = alltrue([for k in keys(var.endpoints) : contains([
+      "s3", "dynamodb", "ec2", "ec2messages", "ssm", "ssmmessages", "ecr_api", "ecr_dkr", "logs", "kms",
+      "secretsmanager", "rds", "sns", "sqs", "lambda", "ecs", "ecs_agent", "ecs_telemetry",
+      "elasticloadbalancing", "autoscaling", "athena", "cloudformation", "cloudtrail", "cloudwatch",
+      "events", "execute_api", "kinesis_streams", "kinesis_firehose", "sagemaker_api", "sagemaker_runtime",
+      "servicecatalog", "sts", "transfer", "glue", "sagemaker_notebook", "elasticache"
+    ], k)])
+    error_message = "Endpoint keys must be one of the services supported by this module (see local.service_names)."
+  }
 }
 
 variable "subnet_ids_for_estimation" {

@@ -1,127 +1,91 @@
-# Full Stack Template  
-# Complete production-ready infrastructure
+---
+# Full Stack Template
+# Production-ready infrastructure: VPC, tiered security groups, EKS with
+# add-ons, PostgreSQL on RDS, application secrets and monitoring.
 #
-# Includes: VPC, EKS, RDS, monitoring, security, secrets management
-# Usage: Copy and customize for production environments
+# Usage: copy into an account/region directory as a top-level stack and set
+# settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
+#   cp templates/stacks/full-stack.yaml stacks/orgs/fnx/prod/eu-west-2/platform-01.yaml
+#   atmos validate stacks
+#   atmos workflow plan -f plan-environment -s fnx-prod-platform-01
+# To target another account or region, change the `orgs/fnx/<stage>/_defaults`
+# (org and account defaults) and `mixins/region/<region>` imports.
+# Environment-wide knobs live in settings.environment; components read them
+# as {{ .settings.environment.<key> }}. Cross-component values use
+# !terraform.state and deployment order comes from dependencies.components.
 
-terraform:
-  vars:
-    # Stack configuration
-    stack_purpose: "full-production-infrastructure"
-    cost_center: "production"
-    
-    # Networking
-    vpc_cidr: "10.0.0.0/16"
-    availability_zones: ["a", "b", "c"]
-    
-    # EKS Configuration
-    kubernetes_version: "1.28"
-    node_groups:
-      general:
-        instance_types: ["m5.large", "m5.xlarge"]
-        min_size: 2
-        max_size: 10
-        desired_size: 3
-        
-    # Database configuration
-    db_engine: "mysql"
-    db_engine_version: "8.0"
-    db_instance_class: "db.r5.large"
-    db_multi_az: true
-    
-    # Monitoring and observability
-    monitoring_enabled: true
-    logging_retention_days: 30
-    
-    # Security
-    secrets_manager_enabled: true
-    certificate_arn: "" # Set via environment variable or SSM
-    
 import:
+  - orgs/fnx/prod/_defaults
+  - mixins/region/eu-west-2
+  - mixins/production
+  - catalog/_base/defaults
   - catalog/vpc/defaults
+  - catalog/securitygroup/defaults
   - catalog/eks/defaults
-  - catalog/rds/defaults
+  - catalog/eks-addons/defaults
+  - catalog/secretsmanager/defaults
   - catalog/monitoring/defaults
-  - mixins/tenant/${tenant}
-  - mixins/stage/${account}
-  - mixins/region/${region}
+  # Optional environment profile from templates/configs (import it last):
+  # - mixins/profiles/production
+
+vars:
+  tags:
+    Template: "full-stack"
+
+settings:
+  context:
+    environment: platform-01
+  environment:
+    description: "Full production platform (EKS, RDS, monitoring)"
+    vpc_cidr: "10.30.0.0/16"
+    eks_kubernetes_version: "1.33"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "16"
+    rds_family: "postgres16"
+    rds_instance_class: "db.r6g.large"
+    log_retention_days: 30
+    ops_email: "ops@example.com"
 
 components:
   terraform:
-    # Core networking
-    vpc:
+    # Core networking: one NAT gateway per AZ for high availability
+    vpc/main:
       metadata:
         component: vpc
-        inherits: [vpc/defaults]
+        inherits:
+          - vpc/defaults
       vars:
-        name: "${var.tenant}-${var.environment}-vpc"
-        cidr_block: "${var.vpc_cidr}"
-        availability_zones: "${var.availability_zones}"
-        
-        # Multi-tier subnets
-        public_subnets_enabled: true
-        public_subnet_cidrs: ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
-        
-        private_subnets_enabled: true  
-        private_subnet_cidrs: ["10.0.10.0/24", "10.0.20.0/24", "10.0.30.0/24"]
-        
-        database_subnets_enabled: true
-        database_subnet_cidrs: ["10.0.100.0/24", "10.0.200.0/24", "10.0.300.0/24"]
-        
-        # High availability NAT
-        nat_gateway_enabled: true
-        single_nat_gateway: false
-        
-        # VPC endpoints for security
-        vpc_endpoints:
-          s3: true
-          dynamodb: true
-          ec2: true
-          ssm: true
-          
-    # Security groups
-    security-groups:
+        vpc_cidr: "{{ .settings.environment.vpc_cidr }}"
+        public_subnets:
+          - "10.30.1.0/24"
+          - "10.30.2.0/24"
+          - "10.30.3.0/24"
+        private_subnets:
+          - "10.30.10.0/24"
+          - "10.30.20.0/24"
+          - "10.30.30.0/24"
+        database_subnets:
+          - "10.30.100.0/24"
+          - "10.30.101.0/24"
+          - "10.30.102.0/24"
+        enable_nat_gateway: true
+        nat_gateway_strategy: "one_per_az"
+        enable_flow_logs: true
+        flow_logs_retention_days: 90
+
+    # Application Load Balancer tier
+    securitygroup/alb:
       metadata:
         component: securitygroup
+        inherits:
+          - securitygroup
       vars:
-        name: "${var.tenant}-${var.environment}-sg"
         security_groups:
-          eks-cluster:
-            description: "EKS cluster security group"
-            ingress_rules:
-              - description: "HTTPS API"
-                from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks: ["${var.vpc_cidr}"]
-                
-          eks-nodes:
-            description: "EKS node group security group"
-            ingress_rules:
-              - description: "Node to node communication"
-                from_port: 0
-                to_port: 65535
-                protocol: "tcp"
-                self: true
-              - description: "Cluster to nodes"
-                from_port: 1025
-                to_port: 65535
-                protocol: "tcp"
-                source_security_group_id: "eks-cluster"
-                
-          rds:
-            description: "RDS security group"
-            ingress_rules:
-              - description: "MySQL from EKS nodes"
-                from_port: 3306
-                to_port: 3306
-                protocol: "tcp"
-                source_security_group_id: "eks-nodes"
-                
           alb:
             description: "Application Load Balancer"
             ingress_rules:
-              - description: "HTTP from internet"
+              - description: "HTTP from internet (redirected to HTTPS)"
                 from_port: 80
                 to_port: 80
                 protocol: "tcp"
@@ -131,123 +95,167 @@ components:
                 to_port: 443
                 protocol: "tcp"
                 cidr_blocks: ["0.0.0.0/0"]
-                
-    # EKS Cluster
-    eks:
+
+    # Additional security group for EKS worker nodes (the cluster security
+    # group itself is created by EKS)
+    securitygroup/eks-nodes:
+      metadata:
+        component: securitygroup
+        inherits:
+          - securitygroup
+      vars:
+        security_groups:
+          eks-nodes:
+            description: "EKS node group security group"
+            ingress_rules:
+              - description: "Node to node communication"
+                from_port: 0
+                to_port: 65535
+                protocol: "tcp"
+                self: true
+              - description: "Traffic from the load balancers"
+                from_port: 1025
+                to_port: 65535
+                protocol: "tcp"
+                security_groups:
+                  - !terraform.state securitygroup/alb .security_group_ids.alb
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: securitygroup/alb
+
+    # Database tier: PostgreSQL only from the EKS nodes
+    securitygroup/rds:
+      metadata:
+        component: securitygroup
+        inherits:
+          - securitygroup
+      vars:
+        security_groups:
+          rds:
+            description: "RDS security group"
+            ingress_rules:
+              - description: "PostgreSQL from EKS nodes"
+                from_port: 5432
+                to_port: 5432
+                protocol: "tcp"
+                security_groups:
+                  - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: securitygroup/eks-nodes
+
+    # EKS cluster (private endpoint; subnet_ids come from eks/defaults)
+    eks/main:
       metadata:
         component: eks
-        inherits: [eks/defaults]
+        inherits:
+          - eks/defaults
       vars:
-        name: "${var.tenant}-${var.environment}-eks"
-        kubernetes_version: "${var.kubernetes_version}"
-        
-        # Cluster configuration
-        endpoint_private_access: true
-        endpoint_public_access: true
-        public_access_cidrs: ["0.0.0.0/0"] # Restrict in production
-        
-        # Node groups
-        node_groups: "${var.node_groups}"
-        
-        # Add-ons
-        cluster_addons:
-          vpc-cni:
-            version: "latest"
-          kube-proxy:
-            version: "latest"  
-          coredns:
-            version: "latest"
-            
-    # EKS Add-ons
-    eks-addons:
+        clusters:
+          main:
+            kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+            endpoint_private_access: true
+            endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
+            security_group_ids:
+              - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+            node_groups:
+              general:
+                enabled: true
+                instance_types: ["m6i.large", "m6i.xlarge"]
+                capacity_type: "ON_DEMAND"
+                min_size: 2
+                max_size: 10
+                desired_size: 3
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: securitygroup/eks-nodes
+
+    # EKS add-ons, wired to the cluster outputs
+    eks-addons/main:
       metadata:
         component: eks-addons
-        inherits: [eks-addons/defaults]
+        inherits:
+          - eks-addons
       vars:
-        cluster_name: "${atmos.component.eks.outputs.cluster_name}"
-        cluster_endpoint: "${atmos.component.eks.outputs.cluster_endpoint}"
-        oidc_provider_arn: "${atmos.component.eks.outputs.oidc_provider_arn}"
-        
-        # Essential add-ons
-        aws_load_balancer_controller_enabled: true
-        cluster_autoscaler_enabled: true
-        external_dns_enabled: true
-        cert_manager_enabled: true
-        
-        # Monitoring
-        cloudwatch_metrics_enabled: "${var.monitoring_enabled}"
-        container_insights_enabled: "${var.monitoring_enabled}"
-        
-        # Security
-        external_secrets_enabled: "${var.secrets_manager_enabled}"
-        
-    # RDS Database
-    rds:
+        clusters:
+          main:
+            cluster_name: !terraform.state eks/main .cluster_ids.main
+            kubernetes_host: !terraform.state eks/main .cluster_endpoints.main
+            cluster_ca_certificate: !terraform.state eks/main .cluster_ca_data.main
+            oidc_provider_arn: !terraform.state eks/main .oidc_provider_arns.main
+            oidc_provider_url: !terraform.state eks/main .oidc_provider_arns.main | split("oidc-provider/") | .[1]
+            enable_aws_load_balancer_controller: true
+            enable_cluster_autoscaler: true
+            enable_external_dns: true
+            enable_cert_manager: true
+            cert_manager_letsencrypt_email: "{{ .settings.environment.ops_email }}"
+            enable_metrics_server: true
+            enable_aws_cloudwatch_metrics: true
+            enable_external_secrets: true
+      dependencies:
+        components:
+          - component: eks/main
+
+    # PostgreSQL on RDS. The master password is managed by RDS in Secrets
+    # Manager (output: password_secret_arn); no password lives in config.
+    rds/main:
       metadata:
         component: rds
-        inherits: [rds/defaults]
       vars:
-        name: "${var.tenant}-${var.environment}-db"
-        engine: "${var.db_engine}"
-        engine_version: "${var.db_engine_version}"
-        instance_class: "${var.db_instance_class}"
-        
-        # High availability
-        multi_az: "${var.db_multi_az}"
-        
-        # Security
+        identifier: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-db"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        family: "{{ .settings.environment.rds_family }}"
+        instance_class: "{{ .settings.environment.rds_instance_class }}"
+        username: "app_admin"
+        port: 5432
+        db_name: "app"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        vpc_cidr: !terraform.state vpc/main .vpc_cidr
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_groups:
+          - !terraform.state securitygroup/rds .security_group_ids.rds
+        allocated_storage: 100
+        max_allocated_storage: 1000
+        storage_encrypted: true
+        multi_az: true
         deletion_protection: true
         skip_final_snapshot: false
-        final_snapshot_identifier: "${var.tenant}-${var.environment}-final-snapshot"
-        
-        # Networking
-        subnet_group_name: "database"
-        
-        # Backup and maintenance
         backup_retention_period: 7
         backup_window: "03:00-04:00"
         maintenance_window: "sun:04:00-sun:05:00"
-        
-    # Secrets Manager
-    secrets:
+        performance_insights_enabled: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: securitygroup/rds
+
+    # Application secrets (random values generated by Terraform)
+    secretsmanager/app:
       metadata:
         component: secretsmanager
-      vars:
-        name: "${var.tenant}-${var.environment}-secrets"
-        secrets:
-          database:
-            description: "Database credentials"
-            secret_string: |
-              {
-                "username": "admin",
-                "password": "CHANGE_ME_IN_CONSOLE",
-                "host": "${atmos.component.rds.outputs.endpoint}",
-                "port": 3306,
-                "database": "${var.tenant}_${var.environment}"
-              }
-              
-    # Monitoring
-    monitoring:
+        inherits:
+          - secretsmanager/api
+
+    # Dashboards and alarms for the platform
+    monitoring/main:
       metadata:
         component: monitoring
-        inherits: [monitoring/defaults]  
+        inherits:
+          - monitoring/defaults
       vars:
-        name: "${var.tenant}-${var.environment}-monitoring"
-        
-        # CloudWatch dashboards
-        dashboards_enabled: true
-        
-        # Alarms
-        alarms:
-          high_cpu:
-            metric_name: "CPUUtilization"
-            threshold: 80
-            comparison_operator: "GreaterThanThreshold"
-            
-          database_connections:
-            metric_name: "DatabaseConnections"  
-            threshold: 50
-            comparison_operator: "GreaterThanThreshold"
-            
-        # Log groups
-        log_retention_days: "${var.logging_retention_days}"
+        create_dashboard: true
+        eks_cluster_name: !terraform.state eks/main .cluster_ids.main
+        enable_rds_monitoring: true
+        rds_instances:
+          - !terraform.state rds/main .instance_id
+        alarm_email_subscriptions:
+          - "{{ .settings.environment.ops_email }}"
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: eks/main
+          - component: rds/main

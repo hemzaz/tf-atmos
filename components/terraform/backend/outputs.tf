@@ -8,14 +8,9 @@ output "backend_bucket_arn" {
   value       = aws_s3_bucket.terraform_state.arn
 }
 
-output "dynamodb_table" {
-  description = "The DynamoDB table used for Terraform state locking"
-  value       = aws_dynamodb_table.terraform_locks.id
-}
-
-output "dynamodb_table_arn" {
-  description = "The ARN of the DynamoDB table used for Terraform state locking"
-  value       = aws_dynamodb_table.terraform_locks.arn
+output "backend_kms_key_arn" {
+  description = "The ARN of the KMS key encrypting Terraform state"
+  value       = aws_kms_key.terraform_state_key.arn
 }
 
 output "backend_role_arn" {

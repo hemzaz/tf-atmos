@@ -1,100 +1,62 @@
 # CLAUDE.md - Terraform/Atmos Infrastructure Project
 
-This file provides guidance to Claude Code when working with this Terraform/Atmos infrastructure codebase.
-
-## Project Overview
-
 This is a **Terraform/Atmos infrastructure-as-code project** with:
-- **17 Terraform components** (VPC, EKS, RDS, Lambda, etc.)
-- **Python CLI tool "Gaia"** for workflow automation
-- **Multi-tenant/multi-environment** architecture
-- **16 Atmos workflows** for deployment automation
+- **22 Terraform root modules** in `components/terraform/` (plus `_library/` and `_catalog/`)
+- **3 stacks**: `fnx-dev-testenv-01`, `fnx-staging-staging-01`, `fnx-prod-production` (eu-west-2)
+- **Atmos workflows** in `workflows/` (`atmos list workflows`) and **Atmos Native CI** in `.github/workflows/`
+- Atmos >= 1.229.0 (enforced in `atmos.yaml`); Terraform 1.16.3 is installed by the Atmos toolchain
+- S3 state backend `fnx-terraform-state` with native lockfiles (`use_lockfile`), no DynamoDB
 
-## Essential Commands
+There is no Python CLI; use `atmos` commands and workflows.
 
-### Validation & Linting
+## Essential commands
+
 ```bash
-atmos workflow lint                    # Lint all configurations  
-atmos workflow validate               # Validate all components
-atmos terraform validate <component> -s <stack>  # Validate specific component
+atmos list stacks / components / workflows
+atmos describe component <component> -s <stack>       # resolved config for one instance
+
+atmos validate stacks                                  # offline, no AWS credentials
+atmos workflow validate-all -f validate-enhanced        # schema, stacks, yamllint, fmt, terraform validate
+atmos workflow lint -f lint                             # fmt, yamllint, tflint, trivy — run before committing
+
+atmos terraform plan <component> -s <stack>
+atmos terraform deploy <component> -s <stack>           # plan + apply one instance
+atmos workflow deploy -f deploy-full-stack -s <stack>    # layered, confirmed per layer
 ```
 
-### Planning & Deployment
-```bash
-atmos workflow plan-environment tenant=<tenant> account=<account> environment=<environment>
-atmos workflow apply-environment tenant=<tenant> account=<account> environment=<environment>
-```
+## Gotchas
 
-### Stack Management
-```bash
-atmos describe stacks                 # List all stacks
-./scripts/list_stacks.sh             # User-friendly stack listing
-```
+- `atmos describe stacks`/`describe component` calls must pass `--process-functions=false`
+  (`--format json`) — without it Atmos evaluates `!terraform.state` etc. and needs live AWS state.
+- The `validate-all` workflow (`validate-root-modules` step) runs `terraform init`/`validate`
+  **serially** across every root module in a `for` loop. Set `TF_PLUGIN_CACHE_DIR` first or each
+  module redownloads providers.
+- Tags must include `Tenant`, `Account`, `Environment`, `ManagedBy = "Terraform"` (set once via
+  `default_tags` in each `provider.tf`, sourced from `stacks/orgs/fnx/_defaults.yaml`) — don't
+  repeat them per resource.
+- Cross-component values use YAML functions (`!terraform.state <component> .<output>`), never
+  `${...}` interpolation.
+- Component naming is singular, no hyphens (`securitygroup`, not `security-groups`). Boolean
+  variables prefix with `is_`, `has_`, or `enable_`.
+- Disable an instance with `metadata.enabled: false`, not by deleting it.
+- `var.tags` must contain a non-empty `Environment` (validated) in vpc, monitoring, external-secrets,
+  rds, lambda and securitygroup: it is used in resource names. `atmos terraform lint` runs tflint
+  without stack vars, so these variables stay required (no `{}` default) to keep tflint from crashing.
+- `idp-platform` calls `../eks`, `../rds` and `../acm` as modules. Before changing their variables,
+  grep for `source = "../<component>"`; `validate-all` catches the breakage, per-component checks don't.
 
-## Development Guidelines
+## Conventions
 
-### Terraform/HCL Standards
-- Follow naming: `${local.name_prefix}-<resource-type>`
-- Use snake_case for resources, variables, outputs
-- Include detailed variable descriptions with validation
-- Mark sensitive outputs with `sensitive = true`
-- Apply consistent tags to all resources
+- Per-component files: `main.tf` (or split into `iam.tf`, `locals.tf`, ...), `variables.tf`,
+  `outputs.tf`, `versions.tf` (`>= 1.16.0, < 2.0.0` + `required_providers`), `provider.tf`,
+  `README.md` — every component needs one.
+- snake_case for resources/variables/outputs; `sensitive = true` on sensitive outputs; validation
+  blocks on variable definitions.
+- Encrypt at rest and in transit; least-privilege IAM; secrets in Secrets Manager, never committed;
+  specific CIDRs, never `0.0.0.0/0`.
 
-### File Structure (per component)
-- `main.tf` - Primary resource definitions
-- `variables.tf` - Input variables with validation
-- `outputs.tf` - Output values with descriptions  
-- `provider.tf` - Provider configuration
-- `README.md` - Component documentation
+## Before marking work complete
 
-### Security Requirements
-- Encrypt sensitive data at rest and in transit
-- Use least privilege IAM policies
-- Store secrets in SSM/Secrets Manager (`${ssm:/path}`)
-- Never commit sensitive information
-- Use specific CIDR blocks, avoid 0.0.0.0/0
-
-### Multi-Environment Patterns
-- Use Atmos stack hierarchies for configuration inheritance
-- Component naming: singular form without hyphens (`securitygroup` not `security-groups`)
-- Boolean variables: prefix with `is_`, `has_`, or `enable_`
-
-## Testing & Validation
-
-### Before Committing
-```bash
-atmos workflow lint                   # Fix formatting issues
-atmos workflow validate              # Validate all components
-```
-
-### Component Testing
-```bash
-atmos terraform validate <component> -s <tenant>-<account>-<environment>
-atmos terraform plan <component> -s <stack> --out=plan.out
-```
-
-## Python Tooling (Gaia CLI)
-
-### Installation
-```bash
-pip install -e .                     # Install in development mode
-```
-
-### Usage
-```bash
-gaia workflow lint --fix false       # Lint with optional auto-fix
-gaia workflow validate --tenant <tenant> --account <account> --environment <environment>
-```
-
-## Common Stacks
-- `fnx-dev-testenv-01` - Main development environment
-
-## Review Checklist
-
-Before marking tasks complete:
-- [ ] Terraform code follows naming conventions
-- [ ] Variables include descriptions and validation
-- [ ] Sensitive outputs marked appropriately  
-- [ ] Security best practices followed
-- [ ] Components validated with `atmos workflow validate`
-- [ ] Documentation updated (README.md)
+- [ ] `atmos workflow lint -f lint` and `atmos workflow validate-all -f validate-enhanced` pass
+- [ ] Tags, naming and validation conventions above followed
+- [ ] Component `README.md` updated if its interface changed

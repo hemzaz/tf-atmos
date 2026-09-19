@@ -4,5 +4,4 @@ components:
     network:
       metadata:
         component: network
-      vars:
         enabled: false

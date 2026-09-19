@@ -3,7 +3,7 @@
 # =============================================================================
 
 config {
-  module = true
+  call_module_type = "local"
   force = false
 }
 
@@ -14,7 +14,7 @@ plugin "terraform" {
 
 plugin "aws" {
   enabled = true
-  version = "0.29.0"
+  version = "0.48.0"
   source  = "github.com/terraform-linters/tflint-ruleset-aws"
 }
 
@@ -52,7 +52,9 @@ rule "aws_instance_invalid_type" {
   enabled = true
 }
 
+# Off: components tag resources through provider default_tags built from
+# var.tags, and `atmos terraform lint` runs tflint without stack vars, so
+# var.tags is empty there and every resource looks untagged.
 rule "aws_resource_missing_tags" {
-  enabled = true
-  tags = ["Name", "Environment", "Tenant", "ManagedBy"]
+  enabled = false
 }

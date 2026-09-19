@@ -16,16 +16,6 @@ variable "vpc_id" {
   }
 }
 
-variable "vpc_cidr" {
-  type        = string
-  description = "VPC CIDR block for security group egress rules"
-
-  validation {
-    condition     = can(cidrhost(var.vpc_cidr, 0))
-    error_message = "Must be a valid IPv4 CIDR block address."
-  }
-}
-
 variable "additional_egress_rules" {
   type = list(object({
     from_port       = number
@@ -276,14 +266,18 @@ variable "deletion_protection" {
 
 variable "prevent_destroy" {
   type        = bool
-  description = "Prevent destroy of the RDS instance through the lifecycle"
+  description = "Protect the RDS instance from deletion (enforced via deletion_protection, since lifecycle.prevent_destroy cannot use variables)"
   default     = true
 }
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
 }
 
 # Performance Optimization Variables
@@ -457,6 +451,12 @@ variable "sns_topic_arn" {
 }
 
 # Secrets Rotation Variables
+variable "master_user_secret_kms_key_id" {
+  type        = string
+  description = "KMS key for the RDS-managed master user secret (defaults to aws/secretsmanager)"
+  default     = null
+}
+
 variable "enable_secrets_rotation" {
   type        = bool
   description = "Enable automatic rotation of RDS database credentials"
@@ -472,35 +472,6 @@ variable "rotation_days" {
     condition     = var.rotation_days >= 1 && var.rotation_days <= 365
     error_message = "Rotation days must be between 1 and 365."
   }
-}
-
-variable "rotation_logs_retention_days" {
-  type        = number
-  description = "Retention period in days for rotation Lambda logs"
-  default     = 7
-
-  validation {
-    condition     = contains([0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653], var.rotation_logs_retention_days)
-    error_message = "Rotation logs retention days must be a valid CloudWatch Logs retention period."
-  }
-}
-
-variable "enable_rotation_alarms" {
-  type        = bool
-  description = "Enable CloudWatch alarms for rotation failures"
-  default     = true
-}
-
-variable "rotation_alarm_actions" {
-  type        = list(string)
-  description = "List of SNS topic ARNs to notify when rotation alarms trigger"
-  default     = []
-}
-
-variable "rotation_duration_alarm_threshold" {
-  type        = number
-  description = "Maximum duration in milliseconds for rotation before alarming"
-  default     = 60000 # 60 seconds
 }
 
 variable "create_rotation_sns_topic" {

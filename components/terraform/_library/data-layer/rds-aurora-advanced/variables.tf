@@ -286,20 +286,42 @@ variable "master_username" {
 variable "master_password_secret_arn" {
   type        = string
   description = <<-EOT
-    ARN of AWS Secrets Manager secret containing the master password.
+    ARN of an existing AWS Secrets Manager secret containing the master password.
     Secret must contain a JSON with 'password' key or be a plain string.
+    The value is read ephemerally and passed as a write-only argument (never stored in state).
     Example: "arn:aws:secretsmanager:us-east-1:123456789012:secret:db-password-abc123"
-    If not provided, a random password will be generated and stored in Secrets Manager.
+    If not provided, see manage_master_user_password.
   EOT
   default     = null
+}
+
+variable "manage_master_user_password" {
+  type        = bool
+  description = <<-EOT
+    Let RDS generate and manage the master password in Secrets Manager (recommended).
+    Ignored when master_password_secret_arn is set. When false (and no secret ARN is
+    given) the module generates an ephemeral password, writes it to the cluster via a
+    write-only argument and stores it in a module-owned Secrets Manager secret.
+    Default: true
+  EOT
+  default     = true
+}
+
+variable "master_password_version" {
+  type        = number
+  description = <<-EOT
+    Version of the write-only master password (used when master_password_secret_arn is
+    set or manage_master_user_password is false). Increment to push a new password.
+    Default: 1
+  EOT
+  default     = 1
 }
 
 variable "enable_secrets_rotation" {
   type        = bool
   description = <<-EOT
-    Enable automatic rotation of database master password using Lambda.
-    Requires master_password_secret_arn or will use the generated secret.
-    Rotation occurs every 30 days by default.
+    Configure the rotation schedule (secrets_rotation_days) of the RDS-managed master
+    secret. Only applies when the password is managed by RDS (manage_master_user_password).
     Default: true
   EOT
   default     = true

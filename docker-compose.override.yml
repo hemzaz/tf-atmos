@@ -39,7 +39,6 @@ services:
       target: development
     volumes:
       - ./platform/api:/app/api:cached
-      - ./gaia:/app/gaia:cached
       - ./:/app/infrastructure:cached
       - api_cache:/app/.cache
     environment:
@@ -54,9 +53,6 @@ services:
         - action: sync+restart
           path: ./platform/api
           target: /app/api
-        - action: sync+restart
-          path: ./gaia
-          target: /app/gaia
 
   # Development-specific services
   docs:

@@ -10,13 +10,18 @@ variable "region" {
 variable "cross_account_role_name" {
   type        = string
   description = "Name of the cross-account IAM role"
+
+  validation {
+    condition     = can(regex("^[\\w+=,.@-]{1,64}$", var.cross_account_role_name))
+    error_message = "cross_account_role_name must be 1-64 characters of alphanumerics or +=,.@_-."
+  }
 }
 
 variable "trusted_account_ids" {
   type        = list(string)
   description = "List of AWS account IDs that are allowed to assume the cross-account role"
   validation {
-    condition     = alltrue([for id in var.trusted_account_ids : can(regex("^\\d{12}$", id))])
+    condition     = length(var.trusted_account_ids) > 0 && alltrue([for id in var.trusted_account_ids : can(regex("^\\d{12}$", id))])
     error_message = "Each AWS account ID must be a 12-digit number."
   }
 }
@@ -24,6 +29,12 @@ variable "trusted_account_ids" {
 variable "policy_name" {
   type        = string
   description = "Name of the IAM policy to be attached to the cross-account role"
+
+  validation {
+    # 128 minus the "-resource-management" suffix appended in resource-management-policy.tf
+    condition     = can(regex("^[\\w+=,.@-]{1,108}$", var.policy_name))
+    error_message = "policy_name must be 1-108 characters of alphanumerics or +=,.@_-."
+  }
 }
 
 variable "tags" {
@@ -114,4 +125,44 @@ variable "environment" {
     condition     = contains(["dev", "development", "staging", "stage", "prod", "production"], lower(var.environment))
     error_message = "Environment must be one of: dev, development, staging, stage, prod, production."
   }
+}
+# Trust policy conditions (at least one is required when trusting another account)
+variable "trusted_principal_org_id" {
+  type        = string
+  description = "Require assuming principals to belong to this AWS Organization (aws:PrincipalOrgID)"
+  default     = null
+
+  validation {
+    condition     = var.trusted_principal_org_id == null || can(regex("^o-[a-z0-9]{10,32}$", var.trusted_principal_org_id))
+    error_message = "trusted_principal_org_id must be an AWS Organization ID (o-xxxxxxxxxx)."
+  }
+}
+
+variable "external_id" {
+  type        = string
+  description = "Require this sts:ExternalId when assuming the role"
+  default     = null
+
+  validation {
+    condition     = var.external_id == null || can(regex("^[\\w+=,.@:/-]{2,1224}$", var.external_id))
+    error_message = "external_id must be 2-1224 characters of alphanumerics or +=,.@:/-."
+  }
+}
+
+variable "require_mfa" {
+  type        = bool
+  description = "Require MFA (aws:MultiFactorAuthPresent) when assuming the role"
+  default     = false
+}
+
+variable "resource_name_prefix" {
+  type        = string
+  description = "Name prefix of the S3 buckets the role may manage (defaults to environment)"
+  default     = null
+}
+
+variable "state_bucket_names" {
+  type        = list(string)
+  description = "Terraform state bucket names whose bucket policy the role must never change (buckets matching *terraform-state* are always protected)"
+  default     = []
 }

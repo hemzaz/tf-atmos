@@ -1,6 +1,12 @@
 locals {
   name_prefix = "${var.name_prefix}-${var.environment}"
 
+  sse_algorithm = {
+    "sse-s3"   = "AES256"
+    "sse-kms"  = "aws:kms"
+    "dsse-kms" = "aws:kms:dsse"
+  }[var.encryption_type]
+
   common_tags = merge(
     {
       Name        = var.bucket_name
@@ -51,7 +57,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = var.encryption_type == "sse-s3" ? "AES256" : "aws:kms"
+      sse_algorithm     = local.sse_algorithm
       kms_master_key_id = var.encryption_type != "sse-s3" ? var.kms_key_id : null
     }
     bucket_key_enabled = var.encryption_type != "sse-s3" ? true : false
@@ -119,19 +125,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
       id     = rule.value.id
       status = rule.value.enabled ? "Enabled" : "Disabled"
 
-      dynamic "filter" {
-        for_each = rule.value.prefix != null || rule.value.tags != null ? [1] : []
+      # Always emit a filter (an empty filter applies to all objects). Prefix and
+      # tags combined, or several tags, must be wrapped in an "and" block.
+      filter {
+        prefix = length(coalesce(rule.value.tags, {})) == 0 ? rule.value.prefix : null
 
-        content {
-          prefix = rule.value.prefix
+        dynamic "and" {
+          for_each = length(coalesce(rule.value.tags, {})) > 0 ? [1] : []
 
-          dynamic "tag" {
-            for_each = rule.value.tags != null ? rule.value.tags : {}
-
-            content {
-              key   = tag.key
-              value = tag.value
-            }
+          content {
+            prefix = rule.value.prefix
+            tags   = rule.value.tags
           }
         }
       }
@@ -249,19 +253,31 @@ resource "aws_s3_bucket_replication_configuration" "this" {
       priority = rule.value.priority
       status   = "Enabled"
 
-      dynamic "filter" {
-        for_each = rule.value.prefix != null || rule.value.filter_tags != null ? [1] : []
+      # V2 replication schema: always emit a filter and delete_marker_replication.
+      filter {
+        prefix = length(coalesce(rule.value.filter_tags, {})) == 0 ? rule.value.prefix : null
+
+        dynamic "and" {
+          for_each = length(coalesce(rule.value.filter_tags, {})) > 0 ? [1] : []
+
+          content {
+            prefix = rule.value.prefix
+            tags   = rule.value.filter_tags
+          }
+        }
+      }
+
+      delete_marker_replication {
+        status = "Disabled"
+      }
+
+      # Replicating SSE-KMS objects requires opting in to encrypted-object selection.
+      dynamic "source_selection_criteria" {
+        for_each = rule.value.replica_kms_key_id != null ? [1] : []
 
         content {
-          prefix = rule.value.prefix
-
-          dynamic "tag" {
-            for_each = rule.value.filter_tags != null ? rule.value.filter_tags : {}
-
-            content {
-              key   = tag.key
-              value = tag.value
-            }
+          sse_kms_encrypted_objects {
+            status = "Enabled"
           }
         }
       }

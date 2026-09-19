@@ -67,11 +67,11 @@ variable "deployment_pattern" {
 # ==============================================================================
 
 variable "runtime" {
-  description = "Lambda runtime (e.g., python3.11, nodejs20.x, java17, go1.x)"
+  description = "Lambda runtime (e.g., python3.13, nodejs22.x, java21, provided.al2023)"
   type        = string
 
   validation {
-    condition = can(regex("^(python3\\.(8|9|10|11|12)|nodejs(18|20)\\.x|java(11|17|21)|go1\\.x|dotnet(6|7|8)|ruby3\\.2|provided\\.al2|provided\\.al2023)$", var.runtime))
+    condition     = can(regex("^(python3\\.(9|1[0-4])|nodejs(18|20|22|24)\\.x|java(11|17|21|25)|dotnet(8|10)|ruby3\\.[2-4]|provided\\.al2|provided\\.al2023)$", var.runtime))
     error_message = "Runtime must be a valid AWS Lambda runtime identifier."
   }
 }
@@ -316,9 +316,9 @@ variable "enable_api_gateway_access_logs" {
 }
 
 variable "api_gateway_authorization" {
-  description = "Authorization type for API Gateway (NONE, AWS_IAM, COGNITO_USER_POOLS, CUSTOM)"
+  description = "Authorization type for API Gateway (NONE, AWS_IAM, COGNITO_USER_POOLS, CUSTOM). Defaults to AWS_IAM so the API is not public unless NONE is chosen explicitly."
   type        = string
-  default     = "NONE"
+  default     = "AWS_IAM"
 
   validation {
     condition     = contains(["NONE", "AWS_IAM", "COGNITO_USER_POOLS", "CUSTOM"], var.api_gateway_authorization)
@@ -327,9 +327,14 @@ variable "api_gateway_authorization" {
 }
 
 variable "api_gateway_authorizer_id" {
-  description = "ID of the API Gateway authorizer (required if authorization is not NONE)"
+  description = "ID of the API Gateway authorizer (required when authorization is COGNITO_USER_POOLS or CUSTOM)"
   type        = string
   default     = null
+
+  validation {
+    condition     = !contains(["COGNITO_USER_POOLS", "CUSTOM"], var.api_gateway_authorization) || var.api_gateway_authorizer_id != null
+    error_message = "api_gateway_authorizer_id is required when api_gateway_authorization is COGNITO_USER_POOLS or CUSTOM."
+  }
 }
 
 variable "api_gateway_cors_enabled" {
@@ -339,9 +344,26 @@ variable "api_gateway_cors_enabled" {
 }
 
 variable "api_gateway_cors_allow_origins" {
-  description = "Allowed origins for CORS"
+  description = "Allowed origins for CORS. Empty by default (no cross-origin access); list explicit origins such as https://app.example.com."
   type        = list(string)
-  default     = ["*"]
+  default     = []
+}
+
+variable "api_gateway_cors_allow_methods" {
+  description = "Allowed HTTP methods for CORS"
+  type        = list(string)
+  default     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+  validation {
+    condition     = alltrue([for m in var.api_gateway_cors_allow_methods : contains(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "*"], m)])
+    error_message = "CORS methods must be GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS or *."
+  }
+}
+
+variable "api_gateway_cors_allow_headers" {
+  description = "Allowed request headers for CORS"
+  type        = list(string)
+  default     = ["Content-Type", "Authorization", "X-Amz-Date", "X-Amz-Security-Token", "X-Api-Key"]
 }
 
 # ==============================================================================
@@ -364,6 +386,11 @@ variable "eventbridge_rules" {
     enabled             = optional(bool, true)
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for rule in var.eventbridge_rules : rule.schedule_expression != null || rule.event_pattern != null])
+    error_message = "Each EventBridge rule needs a schedule_expression or an event_pattern."
+  }
 }
 
 variable "eventbridge_bus_name" {

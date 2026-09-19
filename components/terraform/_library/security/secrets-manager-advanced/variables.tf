@@ -1,6 +1,11 @@
 variable "name_prefix" {
   type        = string
   description = "Prefix for resource names"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9/_+=.@-]{1,500}$", var.name_prefix))
+    error_message = "name_prefix may only contain alphanumerics and /_+=.@- characters."
+  }
 }
 
 variable "description" {
@@ -11,16 +16,54 @@ variable "description" {
 
 variable "secret_string" {
   type        = string
-  description = "Secret value (JSON string)"
+  description = "Secret value (JSON string). Ephemeral and sent through the write-only secret_string_wo, so it is never stored in state or saved plan files. Requires create_secret_version = true."
   default     = null
   sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = var.secret_string == null || var.create_secret_version
+    error_message = "secret_string requires create_secret_version = true."
+  }
+
+  validation {
+    condition     = var.secret_string == null || var.secret_binary == null
+    error_message = "secret_string and secret_binary are mutually exclusive."
+  }
+
+  validation {
+    condition     = !var.create_secret_version || var.secret_string != null || var.secret_binary != null
+    error_message = "create_secret_version = true requires secret_string or secret_binary."
+  }
+}
+
+variable "create_secret_version" {
+  type        = bool
+  description = "Create a secret version from secret_string or secret_binary. A non-secret switch because resource counts cannot depend on the ephemeral secret_string."
+  default     = false
+}
+
+variable "secret_string_version" {
+  type        = number
+  description = "Version of secret_string; increment it to push a changed secret_string (write-only values are not diffed)"
+  default     = 1
+
+  validation {
+    condition     = var.secret_string_version >= 1
+    error_message = "secret_string_version must be >= 1."
+  }
 }
 
 variable "secret_binary" {
   type        = string
-  description = "Binary secret value (base64)"
+  description = "Binary secret value (base64-encoded). AWS provider v6 has no write-only form of secret_binary, so this value IS stored in Terraform state; prefer secret_string for sensitive data."
   default     = null
   sensitive   = true
+
+  validation {
+    condition     = var.secret_binary == null || can(base64decode(var.secret_binary))
+    error_message = "secret_binary must be base64-encoded."
+  }
 }
 
 variable "kms_key_id" {
@@ -33,6 +76,11 @@ variable "enable_rotation" {
   type        = bool
   description = "Enable automatic rotation"
   default     = false
+
+  validation {
+    condition     = !var.enable_rotation || var.create_rotation_lambda || var.rotation_lambda_arn != ""
+    error_message = "enable_rotation requires create_rotation_lambda = true or a rotation_lambda_arn."
+  }
 }
 
 variable "rotation_days" {

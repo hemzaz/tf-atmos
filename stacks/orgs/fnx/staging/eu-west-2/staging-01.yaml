@@ -26,18 +26,19 @@ import:
 
 vars:
   # Core variables for stack naming
-  tenant: fnx
-  environment: staging-01
-  stage: staging
-  account: staging
   region: eu-west-2
 
   # AWS Account ID
-  aws_account_id: "${env:AWS_STAGING_ACCOUNT_ID, 123456789012}"
-
-  # VPC configuration - staging mirrors production structure
-  vpc_cidr: "10.10.0.0/16"
-
-  # Description
-  description: "Staging-01 Environment - Production Validation"
-  namespace: staging-01
+  # Plain value: Go templates (e.g. IAM ARNs) are rendered before YAML functions,
+  # so an !env value could not be interpolated into them.
+settings:
+  environment:
+    account: staging
+    aws_account_id: "123456789012"
+    vpc_cidr: "10.10.0.0/16"
+    description: "Staging-01 Environment - Production Validation"
+    namespace: staging-01
+  context:
+    tenant: fnx
+    environment: staging-01
+    stage: staging

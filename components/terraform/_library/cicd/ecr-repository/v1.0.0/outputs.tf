@@ -33,7 +33,7 @@ output "registry_id" {
 
 output "repository_console_url" {
   description = "URL to the ECR repository console"
-  value       = "https://${data.aws_region.current.name}.console.aws.amazon.com/ecr/repositories/private/${local.account_id}/${var.name}"
+  value       = "https://${local.region}.console.aws.amazon.com/ecr/repositories/private/${local.account_id}/${var.name}"
 }
 
 ################################################################################
@@ -56,12 +56,12 @@ output "scan_type" {
 
 output "high_severity_alarm_arn" {
   description = "ARN of the high severity findings alarm"
-  value       = var.enable_cloudwatch_metrics && var.enable_scan_on_push ? aws_cloudwatch_metric_alarm.image_scan_findings_high[0].arn : null
+  value       = one(aws_cloudwatch_metric_alarm.image_scan_findings_high[*].arn)
 }
 
 output "low_pull_count_alarm_arn" {
   description = "ARN of the low pull count alarm"
-  value       = var.enable_cloudwatch_metrics ? aws_cloudwatch_metric_alarm.repository_pull_count[0].arn : null
+  value       = one(aws_cloudwatch_metric_alarm.repository_pull_count[*].arn)
 }
 
 ################################################################################
@@ -84,7 +84,7 @@ output "replication_destinations" {
 
 output "docker_login_command" {
   description = "Docker login command for this repository"
-  value       = "aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com"
+  value       = "aws ecr get-login-password --region ${local.region} | docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${local.region}.amazonaws.com"
 }
 
 output "docker_pull_command" {

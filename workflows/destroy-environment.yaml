@@ -1,28 +1,27 @@
----
-name: destroy-environment
-description: "Destroy all components in an environment"
-
+# Destroys every component of one stack in reverse dependency order.
+# The stack is typed interactively and doubles as the confirmation, so a
+# mistyped or missing stack can never widen the blast radius.
+#
+# Usage: atmos workflow destroy -f destroy-environment   (do not pass --stack)
 workflows:
   destroy:
+    description: Destroy all components in one stack (typed stack name required)
     steps:
-    - run:
-        command: |
-          # Use Python-based CLI for safer and more reliable destroy operations
-          gaia workflow destroy-environment \
-            --tenant ${tenant} \
-            --account ${account} \
-            --environment ${environment} \
-            --auto-approve ${auto_approve:-false} \
-            --safe-destroy ${safe_destroy:-true}
-
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "Environment destruction completed successfully."
-          else
-            echo "Environment destruction failed or was partially completed."
-            echo "Review logs for details on any remaining resources."
-            exit $EXIT_CODE
-          fi
-        env:
-          AWS_SDK_LOAD_CONFIG: 1
+      - name: stack
+        type: input
+        prompt: Stack to destroy (e.g. fnx-dev-testenv-01)
+      - name: preview
+        type: atmos
+        command: terraform destroy -s {{ .steps.stack.value }} --dry-run
+      - name: confirmation
+        type: input
+        prompt: "Type the stack name again to destroy it"
+      - name: guard
+        type: shell
+        command: test -n "{{ .steps.stack.value }}" && test "{{ .steps.confirmation.value }}" = "{{ .steps.stack.value }}" || { echo "Destruction cancelled."; exit 1; }
+      - name: destroy
+        type: atmos
+        command: terraform destroy -s {{ .steps.stack.value }} -auto-approve
+      - type: toast
+        level: success
+        content: Stack {{ .steps.stack.value }} destroyed

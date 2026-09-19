@@ -1,14 +1,14 @@
 provider "aws" {
   region = var.region
-}
 
-terraform {
-  required_version = ">= 1.9.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.74.0"
+  dynamic "assume_role" {
+    for_each = var.assume_role_arn != null ? [var.assume_role_arn] : []
+    content {
+      role_arn = assume_role.value
     }
+  }
+
+  default_tags {
+    tags = var.tags
   }
 }

@@ -145,6 +145,10 @@ variable "additional_policy_statements" {
     })), [])
   }))
   default = []
+  validation {
+    condition     = alltrue([for st in var.additional_policy_statements : contains(["Allow", "Deny"], st.effect)])
+    error_message = "Policy statement effect must be Allow or Deny."
+  }
 }
 
 ##############################################

@@ -9,6 +9,11 @@ variable "tags" {
 variable "environment" {
   type        = string
   description = "Environment name (dev, staging, prod)"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*$", var.environment))
+    error_message = "environment must contain only lowercase letters, numbers, and hyphens."
+  }
 }
 
 # Service Images
@@ -41,10 +46,10 @@ variable "service_versions" {
   type        = map(string)
   description = "Version labels for each service"
   default = {
-    api_gateway    = "v1.0.0"
-    platform_api   = "v1.0.0"
-    auth_service   = "v1.0.0"
-    job_processor  = "v1.0.0"
+    api_gateway   = "v1.0.0"
+    platform_api  = "v1.0.0"
+    auth_service  = "v1.0.0"
+    job_processor = "v1.0.0"
   }
 }
 
@@ -53,6 +58,7 @@ variable "database_url" {
   type        = string
   description = "Database connection URL"
   sensitive   = true
+  ephemeral   = true
 }
 
 variable "database_username" {
@@ -65,6 +71,7 @@ variable "database_password" {
   type        = string
   description = "Database password"
   sensitive   = true
+  ephemeral   = true
 }
 
 # Redis Configuration
@@ -72,12 +79,25 @@ variable "redis_url" {
   type        = string
   description = "Redis connection URL"
   sensitive   = true
+  ephemeral   = true
 }
 
 variable "redis_password" {
   type        = string
   description = "Redis password"
   sensitive   = true
+  ephemeral   = true
+}
+
+variable "credentials_revision" {
+  type        = number
+  description = "Increment to push changed database/redis credentials to the write-only Kubernetes secrets"
+  default     = 1
+
+  validation {
+    condition     = var.credentials_revision >= 1 && floor(var.credentials_revision) == var.credentials_revision
+    error_message = "credentials_revision must be a positive integer."
+  }
 }
 
 # Service Configuration
@@ -86,23 +106,23 @@ variable "service_configs" {
   description = "Configuration maps for each service"
   default = {
     api_gateway = {
-      "worker_processes" = "auto"
+      "worker_processes"   = "auto"
       "worker_connections" = "1024"
-      "keepalive_timeout" = "65"
+      "keepalive_timeout"  = "65"
     }
     platform_api = {
-      "max_connections" = "100"
+      "max_connections"    = "100"
       "connection_timeout" = "30"
-      "read_timeout" = "30"
+      "read_timeout"       = "30"
     }
     auth_service = {
-      "jwt_expiry" = "3600"
+      "jwt_expiry"           = "3600"
       "refresh_token_expiry" = "604800"
-      "bcrypt_rounds" = "12"
+      "bcrypt_rounds"        = "12"
     }
     job_processor = {
       "max_workers" = "4"
-      "queue_size" = "1000"
+      "queue_size"  = "1000"
       "job_timeout" = "300"
     }
   }

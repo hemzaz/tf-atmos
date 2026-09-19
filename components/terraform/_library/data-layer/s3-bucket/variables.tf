@@ -202,6 +202,11 @@ variable "object_lock_days" {
   description = "Number of days for object lock retention"
   type        = number
   default     = 1
+
+  validation {
+    condition     = var.object_lock_days >= 1
+    error_message = "object_lock_days must be at least 1."
+  }
 }
 
 variable "enable_intelligent_tiering" {
@@ -214,25 +219,40 @@ variable "intelligent_tiering_archive_days" {
   description = "Days before archiving to Archive Access tier"
   type        = number
   default     = 90
+
+  validation {
+    condition     = var.intelligent_tiering_archive_days >= 90 && var.intelligent_tiering_archive_days <= 730
+    error_message = "intelligent_tiering_archive_days must be between 90 and 730."
+  }
 }
 
 variable "intelligent_tiering_deep_archive_days" {
   description = "Days before archiving to Deep Archive Access tier"
   type        = number
   default     = 180
+
+  validation {
+    condition     = var.intelligent_tiering_deep_archive_days >= 180 && var.intelligent_tiering_deep_archive_days <= 730
+    error_message = "intelligent_tiering_deep_archive_days must be between 180 and 730."
+  }
 }
 
 variable "event_notifications" {
   description = "List of event notifications"
   type = list(object({
-    id          = string
-    events      = list(string)
-    destination_type = string  # sns, sqs, or lambda
+    id               = string
+    events           = list(string)
+    destination_type = string # sns, sqs, or lambda
     destination_arn  = string
     filter_prefix    = optional(string)
     filter_suffix    = optional(string)
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for n in var.event_notifications : contains(["sns", "sqs", "lambda"], n.destination_type)])
+    error_message = "event_notifications destination_type must be sns, sqs, or lambda."
+  }
 }
 
 variable "bucket_policy" {

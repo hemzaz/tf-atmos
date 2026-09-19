@@ -47,7 +47,7 @@ output "deployment_group_name" {
 
 output "deployment_config_id" {
   description = "ID of the custom deployment configuration"
-  value       = var.create_deployment_config ? aws_codedeploy_deployment_config.this[0].id : null
+  value       = one(aws_codedeploy_deployment_config.this[*].id)
 }
 
 output "deployment_config_name" {
@@ -80,7 +80,7 @@ output "service_role_name" {
 
 output "deployment_group_console_url" {
   description = "URL to the CodeDeploy deployment group console"
-  value       = "https://${data.aws_region.current.name}.console.aws.amazon.com/codesuite/codedeploy/applications/${aws_codedeploy_app.this.name}/deployment-groups/${aws_codedeploy_deployment_group.this.deployment_group_name}"
+  value       = "https://${data.aws_region.current.region}.console.aws.amazon.com/codesuite/codedeploy/applications/${aws_codedeploy_app.this.name}/deployment-groups/${aws_codedeploy_deployment_group.this.deployment_group_name}"
 }
 
 output "deployment_type" {

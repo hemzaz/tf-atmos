@@ -34,6 +34,6 @@ output "parameter_group_id" {
 }
 
 output "password_secret_arn" {
-  value       = aws_secretsmanager_secret.db_password.arn
-  description = "ARN of the Secrets Manager secret for the RDS password"
+  value       = aws_db_instance.main.master_user_secret[0].secret_arn
+  description = "ARN of the RDS-managed Secrets Manager secret holding the master credentials"
 }

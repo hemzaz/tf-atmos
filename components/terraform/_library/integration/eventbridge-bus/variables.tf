@@ -45,6 +45,10 @@ variable "archive_config" {
     retention_days = optional(number, 0)
     event_pattern  = optional(string, null)
   })
+  validation {
+    condition     = var.archive_config.retention_days >= 0
+    error_message = "Archive retention_days must be >= 0 (0 = indefinite)."
+  }
   default = {
     description    = null
     retention_days = 0
@@ -73,8 +77,8 @@ variable "event_rules" {
       target_id    = optional(string, null)
       dlq_arn      = optional(string, null)
       input_transformer = optional(object({
-        input_paths   = optional(map(string), null)
-        input_template = optional(string, null)
+        input_paths    = optional(map(string), null)
+        input_template = string
       }), null)
       retry_policy = optional(object({
         maximum_event_age      = optional(number, 86400)
@@ -121,6 +125,22 @@ variable "event_rules" {
     })), [])
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for r in var.event_rules : r.event_pattern != null || r.schedule_expression != null])
+    error_message = "Each event rule requires event_pattern or schedule_expression."
+  }
+
+  validation {
+    condition = alltrue(flatten([for r in var.event_rules : [
+      for t in r.lambda_targets : try(
+        t.retry_policy.maximum_event_age >= 60 && t.retry_policy.maximum_event_age <= 86400 &&
+        t.retry_policy.maximum_retry_attempts >= 0 && t.retry_policy.maximum_retry_attempts <= 185,
+        true
+      )
+    ]]))
+    error_message = "retry_policy.maximum_event_age must be 60-86400 and maximum_retry_attempts 0-185."
+  }
 }
 
 ##############################################

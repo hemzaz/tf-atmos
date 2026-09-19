@@ -2,6 +2,11 @@ variable "region" {
   type        = string
   description = "AWS region"
   default     = "eu-west-2"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
 }
 
 variable "vpc_cidr" {
@@ -130,12 +135,6 @@ variable "create_vpc_iam_role" {
   default     = true
 }
 
-variable "vpc_iam_role_name" {
-  type        = string
-  description = "Name of the IAM role for VPC management"
-  default     = ""
-}
-
 variable "default_sg_ingress_self_only" {
   type        = bool
   description = "Whether to allow only self ingress in the default security group"
@@ -184,8 +183,12 @@ variable "default_security_group_egress_rules" {
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
 }
 
 # VPC Flow Logs Variables

@@ -1,54 +1,35 @@
-# atmos.yaml
-# Configuration file for Atmos - Infrastructure as Code framework
-# https://atmos.tools/
+# yaml-language-server: $schema=https://atmos.tools/schemas/atmos/atmos-config/1.0/atmos-config.json
+# Atmos CLI configuration - https://atmos.tools/cli/configuration
+#
+# Backend, provider and toolchain defaults live in the stack hierarchy
+# (stacks/orgs/fnx/_defaults.yaml), not here.
 
 base_path: "."
+
+version:
+  constraint:
+    require: ">=1.229.0"
+    enforcement: fatal
+    message: "This repository requires Atmos >= 1.229.0 (see .atmos.env)."
 
 components:
   terraform:
     base_path: components/terraform
     apply_auto_approve: false
     deploy_run_init: true
-    init_run_reconfigure: true
     auto_generate_backend_file: true
-    backend_type: "s3"
-    terraform_version: "1.11.0"
-    terragrunt_version: "0.45.0"
-    hooks:
-      pre_plan:
-        - run:
-            command: terraform fmt -check -recursive
-      pre_apply:
-        - run:
-            command: terraform validate
-      post_apply:
-        - run:
-            command: terraform output -json > "${TF_DATA_DIR}/outputs.json"
-    backend:
-      s3:
-        encrypt: true
-        bucket: "atmos-terraform-state-${tenant}-${account}-${environment}"
-        key: "terraform/${tenant}/${environment}/${component}.tfstate"
-        dynamodb_table: "atmos-terraform-state-lock"
-        region: "${region}"
-        role_arn: ""
+    init:
+      reconfigure: auto
 
 stacks:
   base_path: stacks
   included_paths:
-    - "orgs/**/**/**/*.yaml"
+    - "orgs/**/*.yaml"
   excluded_paths:
     - "**/_defaults.yaml"
-    - "**/defaults.yaml"
-    - "**/disabled.yaml"
-    - "**/components/**/*.yaml"
-    - "**/main.yaml"
-
-  # Enable schema validation
-  validate_schemas: true
-
-  # Simple path-based pattern
-  name_pattern: "{dir}"
+    - "**/components/**"
+  # e.g. fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production
+  name_template: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-{{ .settings.context.environment }}"
 
 workflows:
   base_path: workflows
@@ -56,55 +37,33 @@ workflows:
 logs:
   file: "/dev/stderr"
   level: Info
-  color: true
 
 settings:
   list_merge_strategy: replace
-  atmos_cli_version: "1.163.0"
-  component:
-    deps:
-      enabled: true
-    version:
-      enabled: true
-  affected:
+
+# Native CI (GitHub Actions): job summaries, $GITHUB_OUTPUT variables,
+# commit statuses and upserted PR plan comments. Inactive outside CI.
+ci:
+  enabled: true
+  output:
     enabled: true
-    command: terraform
+  summary:
+    enabled: true
+  checks:
+    enabled: true
+    context_prefix: atmos
+  comments:
+    enabled: true
+    behavior: upsert
 
 schemas:
   atmos:
-    manifest: "stacks/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"
+    manifest: "https://atmos.tools/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"
 
 templates:
   settings:
     enabled: true
-  sprig:
-    enabled: true
-  gomplate:
-    enabled: true
-  terragrunt:
-    enabled: true
-
-vars:
-  # Global variables
-  region: "eu-west-2"
-  workspace: "default"
-  terraform_version: "1.11.0"
-
-  # AWS Provider configuration
-  aws_provider_version: "~> 5.0"
-  aws_region: "${region}"
-
-  # Backend configuration
-  backend_type: "s3"
-  backend_region: "${region}"
-
-  # Standard tags for all resources
-  tags:
-    ManagedBy: "atmos"
-    Environment: "${environment}"
-    Tenant: "${tenant}"
-    Project: "tf-atmos"
-
-  # Account configurations
-  account_id: "${env:AWS_ACCOUNT_ID, REQUIRED_ACCOUNT_ID}"
-  management_account_id: "${env:AWS_MANAGEMENT_ACCOUNT_ID, REQUIRED_MANAGEMENT_ACCOUNT_ID}"
+    sprig:
+      enabled: true
+    gomplate:
+      enabled: true

@@ -1,6 +1,11 @@
 variable "region" {
   type        = string
   description = "AWS region"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
 }
 
 variable "assume_role_arn" {
@@ -64,12 +69,6 @@ variable "chart_version" {
   default     = "0.9.9"
 }
 
-variable "certificate_secret_path_template" {
-  type        = string
-  description = "Template for certificate secrets path in Secrets Manager"
-  default     = "certificates/{name}"
-}
-
 variable "create_default_cluster_secret_store" {
   type        = bool
   description = "Whether to create the default cluster secret store"
@@ -84,6 +83,10 @@ variable "create_certificate_secret_store" {
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
 }

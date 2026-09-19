@@ -1,8 +1,4 @@
 ---
-name: iam
-description: "Reusable IAM configuration for cross-account access"
-
-# Import base configuration
 import:
   - catalog/_base/defaults
 
@@ -12,43 +8,31 @@ components:
       metadata:
         component: iam
         type: abstract
-        version: "1.0.0"
-        description: "Manages IAM roles for cross-account access and CI/CD"
-        category: "security"
-      depends_on:
-        - backend
+        custom:
+          version: "1.0.0"
+          description: "Manages IAM roles for cross-account access and CI/CD"
+          category: "security"
       vars:
-        # Component-specific variables only
-        # Base variables (tenant, account, environment, region) inherited from _base
-        enabled: true
-        management_account_id: "${management_account_id}"
-        target_account_id: "${target_account_id}"
-        cross_account_role_name: "${tenant}-${account}-${environment}-CrossAccountRole"
-        policy_name: "${tenant}-${account}-${environment}-CrossAccountPolicy"
+        environment: "{{ .settings.context.environment }}"
+        account_id: "{{ .settings.environment.account_id }}"
+        # Principals allowed to assume the cross-account role
+        trusted_account_ids:
+          - "{{ .settings.environment.management_account_id }}"
+        # Trust condition: the module requires require_mfa, external_id or
+        # trusted_principal_org_id when trusting another account.
+        # TODO(placeholder): replace with the real AWS Organizations ID.
+        trusted_principal_org_id: "o-xxxxxxxxxx"
+        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-CrossAccountRole"
+        policy_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-CrossAccountPolicy"
 
-      # Component-specific tags (merged with base tags)
-      tags:
-        Component: "IAM"
+        tags:
+          Component: "IAM"
 
-      # Provider configuration - inherits region from base
       providers:
         aws:
-          profile: "${aws_profile}"
-          region: "${region}"
           assume_role:
-            role_arn: "arn:aws:iam::${target_account_id}:role/${tenant}-${account}-${environment}-TerraformExecutionRole"
+            role_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-TerraformExecutionRole"
 
-      # Define component outputs with correct spelling
-      outputs:
-        cross_account_role_arn:
-          description: "ARN of the created cross-account IAM role"
-          value: "${output.cross_account_role_arn}"
-        cross_account_role_name:
-          description: "Name of the created cross-account IAM role"
-          value: "${output.cross_account_role_name}"
-        policy_arn:
-          description: "ARN of the IAM policy attached to the role"
-          value: "${output.policy_arn}"
-
-# Note: Removed redundant vars block that was self-referential
-# Variables like tenant, account, environment are inherited from parent stacks
+      dependencies:
+        components:
+          - component: backend/main

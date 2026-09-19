@@ -1,7 +1,4 @@
 ---
-name: services
-description: "Reusable services configuration"
-
 components:
   terraform:
     api_gateway:
@@ -9,85 +6,33 @@ components:
         component: api_gateway
         type: abstract
       vars:
-        tenant: "${tenant}"
         enabled: true
-        region: ${region}
-        name: "${tenant}-${environment}-api"
-        description: "API Gateway for ${environment} environment"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api"
+        description: "API Gateway for {{ .settings.context.environment }} environment"
         endpoint_type: "REGIONAL"
 
-      # Define common tags
-      tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
-        Component: "API Gateway"
-        ManagedBy: "Terraform"
-
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/api_gateway/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
-      providers:
-        aws:
-          profile: ${aws_profile}
-          region: ${region}
-
+        tags:
+          Component: "API Gateway"
     load_balancer:
       metadata:
         component: load_balancer
         type: abstract
       vars:
-        tenant: "${tenant}"
         enabled: true
-        region: ${region}
-        vpc_id: ${output.vpc.vpc_id}
-        subnet_ids: ${output.vpc.public_subnet_ids}
-        name: "${tenant}-${environment}-alb"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .public_subnet_ids
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-alb"
         internal: false
 
-      # Define common tags
-      tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
-        Component: "Load Balancer"
-        ManagedBy: "Terraform"
-
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/load_balancer/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
-      providers:
-        aws:
-          profile: ${aws_profile}
-          region: ${region}
-
+        tags:
+          Component: "Load Balancer"
     cloudfront:
       metadata:
         component: cloudfront
         type: abstract
       vars:
-        tenant: "${tenant}"
         enabled: true
-        region: ${region}
-        comment: "${tenant}-${environment} CloudFront distribution"
+        comment: "{{ .settings.context.tenant }}-{{ .settings.context.environment }} CloudFront distribution"
         default_cache_behavior:
           allowed_methods:
             - "GET"
@@ -101,41 +46,15 @@ components:
           default_ttl: 3600
           max_ttl: 86400
 
-      # Define common tags
-      tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
-        Component: "CloudFront"
-        ManagedBy: "Terraform"
-
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/cloudfront/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
-      providers:
-        aws:
-          profile: ${aws_profile}
-          region: ${region}
-
+        tags:
+          Component: "CloudFront"
     ec2:
       metadata:
         component: ec2
         type: abstract
       vars:
-        tenant: "${tenant}"
-        enabled: true
-        region: ${region}
-        vpc_id: ${output.vpc.vpc_id}
-        subnet_ids: ${output.vpc.private_subnet_ids}
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
         # SSH Key Management Configuration
         create_ssh_keys: true
@@ -144,7 +63,7 @@ components:
         ssh_key_rsa_bits: 4096
 
         # Optional: Define a global key for the environment
-        # global_key_name: "${environment}-shared-key" # Uncomment to use a global key
+        # global_key_name: "{{ .settings.context.environment }}-shared-key" # Uncomment to use a global key
 
         # Optional: Use an existing key as default
         # default_key_name: "existing-key-name" # Uncomment to use an existing key
@@ -153,32 +72,5 @@ components:
         default_ami_id: ""  # Will be selected based on data source if not specified
         instances: {}  # Will be defined in environment-specific configuration
 
-      # Define common tags
-      tags:
-        Tenant: ${tenant}
-        Account: ${account}
-        Environment: ${environment}
-        Component: "EC2"
-        ManagedBy: "Terraform"
-
-      # Terraform backend configuration
-      settings:
-        terraform:
-          backend:
-            s3:
-              bucket: ${tenant}-terraform-state
-              key: ${account}/${environment}/services/ec2/terraform.tfstate
-              region: ${region}
-              role_arn: arn:aws:iam::${management_account_id}:role/${tenant}-terraform-backend-role
-              dynamodb_table: ${tenant}-terraform-locks
-
-      # Provider configuration
-      providers:
-        aws:
-          profile: ${aws_profile}
-          region: ${region}
-
-vars:
-  tenant: "${tenant}"
-  account: "${account}"
-  environment: "${environment}"
+        tags:
+          Component: "EC2"

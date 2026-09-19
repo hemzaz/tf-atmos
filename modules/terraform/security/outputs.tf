@@ -117,14 +117,14 @@ output "common_tags" {
 output "security_baseline" {
   description = "Security baseline configuration"
   value = {
-    kms_key_arn              = var.create_kms_key ? aws_kms_key.main[0].arn : var.existing_kms_key_arn
-    encryption_at_rest       = var.create_kms_key || var.existing_kms_key_arn != ""
-    key_rotation_enabled     = var.enable_key_rotation
-    multi_region_key         = var.enable_multi_region_key
-    security_group_id        = var.create_security_group ? aws_security_group.main[0].id : ""
-    service_role_arn         = var.create_service_role ? aws_iam_role.service_role[0].arn : ""
-    log_group_name           = var.create_log_group ? aws_cloudwatch_log_group.security_logs[0].name : ""
-    waf_web_acl_arn         = var.create_waf_web_acl ? aws_wafv2_web_acl.main[0].arn : ""
+    kms_key_arn          = var.create_kms_key ? aws_kms_key.main[0].arn : var.existing_kms_key_arn
+    encryption_at_rest   = var.create_kms_key || var.existing_kms_key_arn != ""
+    key_rotation_enabled = var.enable_key_rotation
+    multi_region_key     = var.enable_multi_region_key
+    security_group_id    = var.create_security_group ? aws_security_group.main[0].id : ""
+    service_role_arn     = var.create_service_role ? aws_iam_role.service_role[0].arn : ""
+    log_group_name       = var.create_log_group ? aws_cloudwatch_log_group.security_logs[0].name : ""
+    waf_web_acl_arn      = var.create_waf_web_acl ? aws_wafv2_web_acl.main[0].arn : ""
   }
 }
 
@@ -134,14 +134,14 @@ output "compliance_status" {
   value = {
     data_classification      = var.data_classification
     compliance_frameworks    = var.compliance_frameworks
-    encryption_at_rest      = var.create_kms_key || var.existing_kms_key_arn != ""
-    key_rotation_enabled    = var.enable_key_rotation
-    secure_transport_only   = var.create_s3_bucket_policy
-    access_logging_enabled  = var.create_log_group
+    encryption_at_rest       = var.create_kms_key || var.existing_kms_key_arn != ""
+    key_rotation_enabled     = var.enable_key_rotation
+    secure_transport_only    = var.create_s3_bucket_policy
+    access_logging_enabled   = var.create_log_group
     web_application_firewall = var.create_waf_web_acl
-    rate_limiting_enabled   = var.enable_rate_limiting
-    geo_blocking_enabled    = length(var.blocked_countries) > 0
-    cross_account_denial    = var.deny_cross_account_access
+    rate_limiting_enabled    = var.enable_rate_limiting
+    geo_blocking_enabled     = length(var.blocked_countries) > 0
+    cross_account_denial     = var.deny_cross_account_access
   }
 }
 
@@ -162,10 +162,10 @@ output "resource_arns" {
 output "security_recommendations" {
   description = "Security recommendations based on current configuration"
   value = {
-    enable_key_rotation = !var.enable_key_rotation && var.create_kms_key ? "Consider enabling KMS key rotation for enhanced security" : null
+    enable_key_rotation  = !var.enable_key_rotation && var.create_kms_key ? "Consider enabling KMS key rotation for enhanced security" : null
     use_multi_region_key = !var.enable_multi_region_key && var.environment == "prod" ? "Consider using multi-region KMS key for disaster recovery" : null
-    enable_waf = !var.create_waf_web_acl ? "Consider enabling WAF for web application protection" : null
+    enable_waf           = !var.create_waf_web_acl ? "Consider enabling WAF for web application protection" : null
     restrict_cidr_blocks = var.create_security_group && length(flatten([for rule in var.ingress_rules : rule.cidr_blocks if contains(rule.cidr_blocks, "0.0.0.0/0")])) > 0 ? "Avoid using 0.0.0.0/0 in security group rules" : null
-    enable_logging = !var.create_log_group ? "Consider enabling CloudWatch logging for security monitoring" : null
+    enable_logging       = !var.create_log_group ? "Consider enabling CloudWatch logging for security monitoring" : null
   }
 }

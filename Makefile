@@ -11,15 +11,17 @@
 # Configuration
 # =============================================================================
 
-# Default values - can be overridden via environment or command line
+# Default values - can be overridden via environment or command line.
+# Stack names follow atmos.yaml name_template: <tenant>-<stage>-<environment>
+# (fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production).
+# ACCOUNT is accepted as an alias for STAGE.
 TENANT ?= fnx
-ACCOUNT ?= dev
+STAGE ?= $(or $(ACCOUNT),dev)
 ENVIRONMENT ?= testenv-01
 REGION ?= eu-west-2
 
-# Derived values
-STACK := orgs/$(TENANT)/$(ACCOUNT)/$(REGION)/$(ENVIRONMENT)
-FRIENDLY_STACK := $(TENANT)-$(ENVIRONMENT)-$(ACCOUNT)
+# Derived values (STACK can also be passed directly: make plan STACK=fnx-prod-production)
+STACK ?= $(TENANT)-$(STAGE)-$(ENVIRONMENT)
 
 # Colors for pretty output
 RED := \033[0;31m
@@ -41,91 +43,46 @@ help: ## Show this help message
 	@echo
 	@echo "$(WHITE)Current Configuration:$(NC)"
 	@echo "  TENANT:      $(GREEN)$(TENANT)$(NC)"
-	@echo "  ACCOUNT:     $(GREEN)$(ACCOUNT)$(NC)"
+	@echo "  STAGE:       $(GREEN)$(STAGE)$(NC)"
 	@echo "  ENVIRONMENT: $(GREEN)$(ENVIRONMENT)$(NC)"
 	@echo "  REGION:      $(GREEN)$(REGION)$(NC)"
-	@echo "  STACK:       $(GREEN)$(FRIENDLY_STACK)$(NC)"
+	@echo "  STACK:       $(GREEN)$(STACK)$(NC)"
 	@echo
 	@echo "$(WHITE)Available Commands:$(NC)"
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(CYAN)%-15s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST) | sort
 	@echo
 	@echo "$(WHITE)Power User Features:$(NC)"
-	@echo "  $(YELLOW)API Mode:$(NC)       make api-serve     $(GREEN)# Start REST API server$(NC)"
+	@echo "  $(YELLOW)Workflows:$(NC)      atmos list workflows $(GREEN)# All Atmos workflows$(NC)"
 	@echo "  $(YELLOW)Watch Mode:$(NC)     make watch-validate $(GREEN)# Continuous validation$(NC)"
 	@echo "  $(YELLOW)Batch Ops:$(NC)      make validate-all  $(GREEN)# Validate all stacks$(NC)"
 	@echo
 	@echo "$(WHITE)Quick Examples:$(NC)"
-	@echo "  $(GREEN)make validate TENANT=fnx ENVIRONMENT=prod$(NC)"
-	@echo "  $(GREEN)make plan COMPONENT=vpc$(NC)"
+	@echo "  $(GREEN)make validate STAGE=prod ENVIRONMENT=production$(NC)"
+	@echo "  $(GREEN)make plan-component COMPONENT=vpc/main$(NC)"
 	@echo "  $(GREEN)make api-validate-stack STACK=fnx-dev-testenv-01$(NC)"
 
 # =============================================================================
-# Unified Gaia Interface - Single Entry Point  
+# API-Style Shortcuts (atmos wrappers)
 # =============================================================================
 
-gaia-smart: ## 🧠 Intelligent command interface (usage: make gaia-smart QUERY="validate my infrastructure")
-	@if [ -z "$(QUERY)" ]; then \
-		echo "$(RED)Error: QUERY variable is required$(NC)"; \
-		echo "Usage: make gaia-smart QUERY=\"your natural language request\""; \
-		echo "Examples:"; \
-		echo "  make gaia-smart QUERY=\"validate my infrastructure\""; \
-		echo "  make gaia-smart QUERY=\"deploy to staging environment\""; \
-		echo "  make gaia-smart QUERY=\"check security issues\""; \
-		exit 1; \
-	fi
-	@echo "$(CYAN)🧠 Processing: $(QUERY)$(NC)"
-	@gaia smart "$(QUERY)" $(if $(EXECUTE),--execute,)
+api-docs: ## List Atmos workflows and their descriptions
+	@atmos list workflows
 
-gaia-orchestrate: ## 🎼 Orchestrate tasks with dependency resolution
-	@echo "$(CYAN)🎼 Task Orchestration$(NC)"
-	@gaia orchestrate $(if $(ENVIRONMENT),--environment $(ENVIRONMENT),) $(if $(TASKS),$(foreach task,$(TASKS),--task $(task)),) $(if $(PLAN_ONLY),--plan-only,)
+api-health: ## Check that Atmos and its configuration load
+	@atmos version && atmos validate config
 
-gaia-hygiene: ## 🧹 Comprehensive system hygiene and maintenance
-	@echo "$(CYAN)🧹 System Hygiene$(NC)"
-	@gaia hygiene $(if $(SCOPE),--scope $(SCOPE),) $(if $(FIX),--fix,) $(if $(REPORT),--report,)
+api-status: ## Show components of the current stack
+	@atmos list components -s "$(STACK)"
 
-gaia-context: ## 🎯 Manage development context (usage: make gaia-context TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01)
-	@gaia context $(if $(TENANT),--tenant $(TENANT),) $(if $(ACCOUNT),--account $(ACCOUNT),) $(if $(ENVIRONMENT),--environment $(ENVIRONMENT),) $(if $(SHOW),--show,)
+api-list-stacks: ## List all stacks
+	@atmos list stacks
 
-gaia-dashboard: ## 📊 Unified system dashboard
-	@gaia dashboard
-
-# Quick shortcuts for power users
-gaia: gaia-dashboard ## Quick alias for unified dashboard
-smart: gaia-smart ## Quick alias for smart interface  
-orchestrate: gaia-orchestrate ## Quick alias for orchestration
-hygiene: gaia-hygiene ## Quick alias for system hygiene
-
-# =============================================================================
-# Power User & API Features
-# =============================================================================
-
-api-serve: ## Start Gaia API server for terminal-first workflows
-	@echo "$(CYAN)🚀 Starting Gaia API server...$(NC)"
-	@gaia serve --port 8080
-
-api-docs: ## Show API documentation and examples
-	@./scripts/curl-examples.sh
-
-api-health: ## Check API server health
-	@echo "$(CYAN)🩺 Checking API health...$(NC)"
-	@curl -s http://localhost:8080/health | jq '.' || echo "$(RED)❌ API server not running. Start with: make api-serve$(NC)"
-
-api-status: ## Get infrastructure status via API
-	@echo "$(CYAN)📊 Infrastructure Status:$(NC)"
-	@curl -s http://localhost:8080/status | jq '.summary' || echo "$(RED)❌ API server not running$(NC)"
-
-api-list-stacks: ## List all stacks via API
-	@echo "$(CYAN)📋 Available Stacks:$(NC)"
-	@curl -s http://localhost:8080/stacks | jq -r '.stacks[]' || echo "$(RED)❌ API server not running$(NC)"
-
-api-validate-stack: ## Validate specific stack via API (usage: make api-validate-stack STACK=fnx-dev-testenv-01)
+api-validate-stack: ## Validate a specific stack (usage: make api-validate-stack STACK=fnx-dev-testenv-01)
 	@echo "$(CYAN)✅ Validating stack: $(STACK)$(NC)"
-	@curl -X POST http://localhost:8080/stacks/$(STACK)/validate | jq '.summary' || echo "$(RED)❌ API server not running$(NC)"
+	@atmos workflow validate-stack -f validate-enhanced -s "$(STACK)"
 
-api-lint: ## Run linting via API
-	@echo "$(CYAN)🧹 Linting configurations...$(NC)"
-	@curl -X POST http://localhost:8080/lint | jq -r '.stdout' || echo "$(RED)❌ API server not running$(NC)"
+api-lint: ## Run linting (lint workflow)
+	@atmos workflow lint -f lint
 
 # =============================================================================
 # Terminal Ergonomics & Power Features  
@@ -135,16 +92,13 @@ watch-validate: ## Continuously watch validation status
 	@echo "$(CYAN)👀 Watching validation status (Ctrl+C to stop)...$(NC)"
 	@watch -n 10 'make validate 2>/dev/null || echo "❌ Validation failed"'
 
-watch-api-status: ## Watch infrastructure status via API
-	@echo "$(CYAN)👀 Watching API status (Ctrl+C to stop)...$(NC)"
-	@watch -n 10 'curl -s http://localhost:8080/status | jq ".summary" 2>/dev/null || echo "❌ API unavailable"'
+watch-api-status: ## Watch the component list of the current stack
+	@echo "$(CYAN)👀 Watching $(STACK) (Ctrl+C to stop)...$(NC)"
+	@watch -n 10 'atmos list components -s "$(STACK)"'
 
 validate-all: ## Validate all available stacks
 	@echo "$(CYAN)🔍 Validating all stacks...$(NC)"
-	@for stack in $$(./scripts/list_stacks.sh | tail -n +2); do \
-		echo "$(YELLOW)Validating: $$stack$(NC)"; \
-		atmos workflow validate --file validate.yaml tenant=$$(echo $$stack | cut -d- -f1) account=$$(echo $$stack | cut -d- -f3) environment=$$(echo $$stack | cut -d- -f2) || true; \
-	done
+	@atmos workflow validate-all -f validate-enhanced
 
 quick-health: ## Quick health check of infrastructure
 	@echo "$(CYAN)🩺 Quick Health Check$(NC)"
@@ -152,7 +106,7 @@ quick-health: ## Quick health check of infrastructure
 	@echo "$(WHITE)Atmos Status:$(NC)"
 	@atmos version 2>/dev/null && echo "$(GREEN)✅ Atmos OK$(NC)" || echo "$(RED)❌ Atmos issue$(NC)"
 	@echo "$(WHITE)Terraform Status:$(NC)"
-	@terraform version 2>/dev/null | head -1 && echo "$(GREEN)✅ Terraform OK$(NC)" || echo "$(RED)❌ Terraform issue$(NC)"
+	@terraform version 2>/dev/null | head -1 && echo "$(GREEN)✅ Terraform OK$(NC)" || echo "$(YELLOW)ℹ️  Terraform not on PATH (Atmos installs the pinned version from dependencies.tools)$(NC)"
 	@echo "$(WHITE)AWS Credentials:$(NC)"
 	@aws sts get-caller-identity 2>/dev/null | jq -r '.Account' | xargs -I {} echo "$(GREEN)✅ AWS Account: {}$(NC)" || echo "$(RED)❌ AWS credentials issue$(NC)"
 	@echo "$(WHITE)Project Structure:$(NC)"
@@ -165,12 +119,11 @@ show-config: ## Show current configuration and derived values
 	@echo "$(YELLOW)──────────────────────────────────────$(NC)"
 	@echo "$(WHITE)Environment Variables:$(NC)"
 	@echo "  TENANT:      $(GREEN)$(TENANT)$(NC)"
-	@echo "  ACCOUNT:     $(GREEN)$(ACCOUNT)$(NC)"  
+	@echo "  STAGE:       $(GREEN)$(STAGE)$(NC)"
 	@echo "  ENVIRONMENT: $(GREEN)$(ENVIRONMENT)$(NC)"
 	@echo "  REGION:      $(GREEN)$(REGION)$(NC)"
 	@echo "$(WHITE)Derived Values:$(NC)"
 	@echo "  STACK:           $(GREEN)$(STACK)$(NC)"
-	@echo "  FRIENDLY_STACK:  $(GREEN)$(FRIENDLY_STACK)$(NC)"
 	@echo "$(WHITE)AWS Configuration:$(NC)"
 	@aws configure list 2>/dev/null || echo "$(YELLOW)⚠️  AWS CLI not configured$(NC)"
 	@echo "$(WHITE)Current Directory:$(NC)"
@@ -181,7 +134,7 @@ list-stacks-friendly: ## List stacks with friendly names
 	@echo "$(YELLOW)──────────────────────────────────────────────────────$(NC)"
 	@./scripts/list_stacks.sh
 
-component-info: ## Show information about a component (usage: make component-info COMPONENT=vpc)
+component-info: ## Show information about a Terraform root module (usage: make component-info COMPONENT=vpc)
 ifndef COMPONENT
 	@echo "$(RED)❌ COMPONENT required. Usage: make component-info COMPONENT=vpc$(NC)"
 else
@@ -207,13 +160,13 @@ dev-cycle: ## Full development cycle: lint -> validate -> plan
 	@make plan
 	@echo "$(GREEN)✅ Development cycle complete$(NC)"
 
-dev-cycle-component: ## Component development cycle (usage: make dev-cycle-component COMPONENT=vpc)
+dev-cycle-component: ## Component development cycle (usage: make dev-cycle-component COMPONENT=vpc/main)
 ifndef COMPONENT
-	@echo "$(RED)❌ COMPONENT required. Usage: make dev-cycle-component COMPONENT=vpc$(NC)"
+	@echo "$(RED)❌ COMPONENT required. Usage: make dev-cycle-component COMPONENT=vpc/main$(NC)"
 else
 	@echo "$(CYAN)🔄 Component development cycle: $(COMPONENT)$(NC)"
 	@echo "$(YELLOW)Step 1/4: Component info$(NC)"
-	@make component-info COMPONENT=$(COMPONENT)
+	@atmos describe component $(COMPONENT) -s $(STACK) --process-functions=false --query .component
 	@echo "$(YELLOW)Step 2/4: Linting$(NC)"
 	@make lint
 	@echo "$(YELLOW)Step 3/4: Validation$(NC)"
@@ -230,57 +183,41 @@ safety-check: ## Comprehensive safety checks before any apply operation
 	@make validate
 	@echo "$(WHITE)2. AWS credentials check$(NC)"
 	@aws sts get-caller-identity >/dev/null && echo "$(GREEN)✅ AWS credentials valid$(NC)" || (echo "$(RED)❌ AWS credentials invalid$(NC)" && exit 1)
-	@echo "$(WHITE)3. Terraform version check$(NC)"
-	@terraform version | head -1
-	@echo "$(WHITE)4. Atmos version check$(NC)"
+	@echo "$(WHITE)3. Atmos version check$(NC)"
 	@atmos version
-	@echo "$(WHITE)5. State backend check$(NC)"
+	@echo "$(WHITE)4. State backend check$(NC)"
+	@atmos workflow verify -f bootstrap -s "$(STACK)"
 	@echo "$(GREEN)✅ All safety checks passed$(NC)"
 
 # =============================================================================
 # Terminal Integration Helpers
 # =============================================================================
 
-shell-functions: ## Generate shell functions for .bashrc/.zshrc  
-	@echo "$(CYAN)🐚 Shell Functions for .bashrc or .zshrc$(NC)"
-	@echo "$(YELLOW)────────────────────────────────────────────────────$(NC)"
-	@cat << 'EOF'
-# Gaia Infrastructure Management Functions
-gaia-status() { 
-  curl -s http://localhost:8080/status | jq '.summary' 2>/dev/null || echo "❌ Gaia API not running"
+# Printed by `make shell-functions`; kept in a variable because a recipe cannot hold a heredoc
+define SHELL_FUNCTIONS
+# Atmos Infrastructure Functions (stacks: <tenant>-<stage>-<environment>)
+infra-stacks() {
+  atmos list stacks
 }
 
-gaia-validate() {
+infra-validate-stack() {
   local stack=$${1:-fnx-dev-testenv-01}
-  curl -X POST http://localhost:8080/stacks/$$stack/validate | jq '.summary' 2>/dev/null
+  atmos workflow validate-stack -f validate-enhanced -s $$stack
 }
 
-gaia-quick() {
-  echo "🚀 Quick Gaia Commands:"
-  echo "  gaia-status          # Infrastructure status"
-  echo "  gaia-validate [stack]  # Validate stack"
-  echo "  gaia-lint            # Lint all configs"
-  echo "  gaia-serve           # Start API server"
-}
-
-gaia-lint() {
-  curl -X POST http://localhost:8080/lint | jq -r '.stdout' 2>/dev/null
-}
-
-gaia-serve() {
-  echo "🚀 Starting Gaia API server..."
-  gaia serve --port 8080
+infra-lint() {
+  atmos workflow lint -f lint
 }
 
 # Terraform shortcuts
 tf-plan() {
-  local component=$${1:?Component required}
+  local component=$${1:?Component required, e.g. vpc/main}
   local stack=$${2:-fnx-dev-testenv-01}
   atmos terraform plan $$component -s $$stack
 }
 
 tf-validate() {
-  local component=$${1:?Component required}
+  local component=$${1:?Component required, e.g. vpc/main}
   local stack=$${2:-fnx-dev-testenv-01}
   atmos terraform validate $$component -s $$stack
 }
@@ -289,15 +226,21 @@ tf-validate() {
 alias infra-status='make quick-health'
 alias infra-validate='make validate'
 alias infra-plan='make plan'
-alias infra-api='gaia serve'
-EOF
+alias infra-workflows='atmos list workflows'
+endef
+export SHELL_FUNCTIONS
+
+shell-functions: ## Generate shell functions for .bashrc/.zshrc  
+	@echo "$(CYAN)🐚 Shell Functions for .bashrc or .zshrc$(NC)"
+	@echo "$(YELLOW)────────────────────────────────────────────────────$(NC)"
+	@printf '%s\n' "$$SHELL_FUNCTIONS"
 	@echo "$(GREEN)💡 Copy the above functions to your shell profile!$(NC)"
 	@echo
 	@echo "$(WHITE)Examples:$(NC)"
 	@echo "  make status                           # Show current stack status"
 	@echo "  make validate                        # Validate all configurations"
-	@echo "  make plan TENANT=prod ACCOUNT=main   # Plan with different params"
-	@echo "  make apply ENVIRONMENT=staging       # Apply to staging environment"
+	@echo "  make plan STAGE=prod ENVIRONMENT=production  # Plan another stack"
+	@echo "  make apply STACK=fnx-staging-staging-01      # Apply to staging"
 	@echo
 	@echo "$(WHITE)Development:$(NC)"
 	@echo "  make dev-start                       # Start development environment"
@@ -310,62 +253,48 @@ info: ## Show detailed system and stack information
 	@command -v atmos >/dev/null 2>&1 && echo "✅ Atmos: $$(atmos version)" || echo "❌ Atmos: Not installed"
 	@command -v terraform >/dev/null 2>&1 && echo "✅ Terraform: $$(terraform version | head -1)" || echo "❌ Terraform: Not installed"
 	@command -v docker >/dev/null 2>&1 && echo "✅ Docker: $$(docker version --format '{{.Client.Version}}')" || echo "❌ Docker: Not installed"
-	@command -v gaia >/dev/null 2>&1 && echo "✅ Gaia CLI: $$(gaia version | grep 'Gaia CLI' | head -1)" || echo "⚠️  Gaia CLI: Not installed (optional)"
 	@echo
 	@echo "$(WHITE)Available Stacks:$(NC)"
 	@echo "===================="
-	@./scripts/list_stacks.sh || atmos list stacks
+	@atmos list stacks
 	@echo
 	@echo "$(WHITE)Current Stack Components:$(NC)"
 	@echo "=========================="
-	@atmos list components -s "$(STACK)" 2>/dev/null || echo "No components found for $(FRIENDLY_STACK)"
+	@atmos list components -s "$(STACK)" 2>/dev/null || echo "No components found for $(STACK)"
 
 # =============================================================================
 # Core Infrastructure Commands
 # =============================================================================
 
 validate: ## Validate all Terraform configurations
-	@echo "$(BLUE)Validating configurations for $(FRIENDLY_STACK)...$(NC)"
-	@atmos workflow validate tenant=$(TENANT) account=$(ACCOUNT) environment=$(ENVIRONMENT)
+	@echo "$(BLUE)Validating configurations for $(STACK)...$(NC)"
+	@atmos workflow validate -f validate -s "$(STACK)"
 
 lint: ## Lint and format all code
 	@echo "$(BLUE)Linting and formatting code...$(NC)"
-	@atmos workflow lint
+	@atmos workflow lint -f lint
 
 plan: ## Plan infrastructure changes
-	@echo "$(BLUE)Planning infrastructure changes for $(FRIENDLY_STACK)...$(NC)"
-	@atmos workflow plan-environment tenant=$(TENANT) account=$(ACCOUNT) environment=$(ENVIRONMENT)
+	@echo "$(BLUE)Planning infrastructure changes for $(STACK)...$(NC)"
+	@atmos workflow plan -f plan-environment -s "$(STACK)"
 
 apply: ## Apply infrastructure changes (with confirmation)
-	@echo "$(YELLOW)⚠️  This will apply changes to $(FRIENDLY_STACK)!$(NC)"
+	@echo "$(YELLOW)⚠️  This will apply changes to $(STACK)!$(NC)"
 	@read -p "Are you sure? (y/N) " -n 1 -r; \
 	echo; \
 	if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
 		echo "$(BLUE)Applying infrastructure changes...$(NC)"; \
-		atmos workflow apply-environment tenant=$(TENANT) account=$(ACCOUNT) environment=$(ENVIRONMENT); \
+		atmos workflow apply -f apply-environment -s "$(STACK)"; \
 	else \
 		echo "$(YELLOW)Apply cancelled.$(NC)"; \
 	fi
 
-destroy: ## Destroy infrastructure (with double confirmation)
-	@echo "$(RED)⚠️  DANGER: This will DESTROY all infrastructure in $(FRIENDLY_STACK)!$(NC)"
-	@read -p "Type '$(FRIENDLY_STACK)' to confirm: " confirm; \
-	if [ "$$confirm" = "$(FRIENDLY_STACK)" ]; then \
-		echo "$(RED)Final confirmation - are you absolutely sure? (y/N)$(NC)"; \
-		read -p "" -n 1 -r; \
-		echo; \
-		if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-			echo "$(RED)Destroying infrastructure...$(NC)"; \
-			atmos workflow destroy-environment tenant=$(TENANT) account=$(ACCOUNT) environment=$(ENVIRONMENT); \
-		else \
-			echo "$(GREEN)Destroy cancelled.$(NC)"; \
-		fi; \
-	else \
-		echo "$(GREEN)Destroy cancelled - confirmation didn't match.$(NC)"; \
-	fi
+destroy: ## Destroy infrastructure (the workflow asks for the stack name twice)
+	@echo "$(RED)⚠️  DANGER: This destroys every component of the stack you type (e.g. $(STACK))!$(NC)"
+	@atmos workflow destroy -f destroy-environment
 
 status: ## Show current infrastructure status
-	@echo "$(WHITE)Infrastructure Status for $(FRIENDLY_STACK)$(NC)"
+	@echo "$(WHITE)Infrastructure Status for $(STACK)$(NC)"
 	@echo "================================================"
 	@echo "$(WHITE)Stack:$(NC) $(STACK)"
 	@echo "$(WHITE)Components:$(NC)"
@@ -377,7 +306,7 @@ status: ## Show current infrastructure status
 
 drift: ## Check for configuration drift
 	@echo "$(BLUE)Checking for configuration drift...$(NC)"
-	@atmos workflow drift-detection
+	@atmos workflow drift-detection -f drift-detection -s "$(STACK)"
 
 # =============================================================================
 # Component-Specific Commands
@@ -385,33 +314,33 @@ drift: ## Check for configuration drift
 
 plan-vpc: ## Plan VPC changes
 	@echo "$(BLUE)Planning VPC changes...$(NC)"
-	@atmos terraform plan vpc -s "$(STACK)"
+	@atmos terraform plan vpc/main -s "$(STACK)"
 
 apply-vpc: ## Apply VPC changes
 	@echo "$(BLUE)Applying VPC changes...$(NC)"
-	@atmos terraform apply vpc -s "$(STACK)"
+	@atmos terraform apply vpc/main -s "$(STACK)"
 
 plan-eks: ## Plan EKS changes
 	@echo "$(BLUE)Planning EKS changes...$(NC)"
-	@atmos terraform plan eks -s "$(STACK)"
+	@atmos terraform plan eks/main -s "$(STACK)"
 
 apply-eks: ## Apply EKS changes
 	@echo "$(BLUE)Applying EKS changes...$(NC)"
-	@atmos terraform apply eks -s "$(STACK)"
+	@atmos terraform apply eks/main -s "$(STACK)"
 
-plan-component: ## Plan specific component (usage: make plan-component COMPONENT=vpc)
+plan-component: ## Plan specific component (usage: make plan-component COMPONENT=vpc/main)
 	@if [ -z "$(COMPONENT)" ]; then \
 		echo "$(RED)Error: COMPONENT variable is required$(NC)"; \
-		echo "Usage: make plan-component COMPONENT=vpc"; \
+		echo "Usage: make plan-component COMPONENT=vpc/main"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Planning $(COMPONENT) changes...$(NC)"
 	@atmos terraform plan $(COMPONENT) -s "$(STACK)"
 
-apply-component: ## Apply specific component (usage: make apply-component COMPONENT=vpc)
+apply-component: ## Apply specific component (usage: make apply-component COMPONENT=vpc/main)
 	@if [ -z "$(COMPONENT)" ]; then \
 		echo "$(RED)Error: COMPONENT variable is required$(NC)"; \
-		echo "Usage: make apply-component COMPONENT=vpc"; \
+		echo "Usage: make apply-component COMPONENT=vpc/main"; \
 		exit 1; \
 	fi
 	@echo "$(BLUE)Applying $(COMPONENT) changes...$(NC)"
@@ -424,37 +353,36 @@ apply-component: ## Apply specific component (usage: make apply-component COMPON
 setup: ## Setup development environment
 	@echo "$(BLUE)Setting up development environment...$(NC)"
 	@./scripts/dev-setup.sh
-	@$(MAKE) install-gaia
+	@$(MAKE) install-toolchain
 
-install-gaia: ## Install/upgrade Gaia CLI tool
-	@echo "$(BLUE)Installing Gaia CLI...$(NC)"
-	@cd gaia && pip install -e .
-	@echo "$(GREEN)✅ Gaia CLI installed. Run 'gaia --help' to get started.$(NC)"
+install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned in .atmos.env)
+	@echo "$(BLUE)Installing Terraform $$(sed -n 's/^TERRAFORM_VERSION=//p' .atmos.env) via the Atmos toolchain.$(NC)"
+	@atmos toolchain install hashicorp/terraform@$$(sed -n 's/^TERRAFORM_VERSION=//p' .atmos.env)
 
 dev-start: ## Start development environment with Docker Compose
 	@echo "$(BLUE)Starting development environment...$(NC)"
-	@./scripts/start-dev.sh
+	@docker compose up -d
 
 dev-stop: ## Stop development environment
 	@echo "$(BLUE)Stopping development environment...$(NC)"
-	@./scripts/stop-dev.sh
+	@docker compose down
 
 dev-logs: ## View development environment logs
 	@echo "$(BLUE)Following development logs...$(NC)"
-	@./scripts/logs-dev.sh
+	@docker compose logs -f
 
 dev-reset: ## Reset development environment (removes all data)
 	@echo "$(RED)⚠️  This will remove all development data!$(NC)"
-	@./scripts/reset-dev.sh
+	@docker compose down -v
 
 # =============================================================================
 # Environment Management
 # =============================================================================
 
-onboard: ## Quick environment onboarding with defaults
-	@echo "$(BLUE)Onboarding environment $(FRIENDLY_STACK)...$(NC)"
+onboard: ## Quick environment onboarding with defaults (scaffold stack + bootstrap backend)
+	@echo "$(BLUE)Onboarding environment $(STACK)...$(NC)"
 	@echo "Using default VPC CIDR: 10.0.0.0/16"
-	@atmos workflow onboard-environment tenant=$(TENANT) account=$(ACCOUNT) environment=$(ENVIRONMENT) vpc_cidr=10.0.0.0/16
+	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) --environment $(ENVIRONMENT) --region $(REGION) --vpc-cidr 10.0.0.0/16 --no-workspace
 
 onboard-custom: ## Custom environment onboarding (usage: make onboard-custom VPC_CIDR=10.1.0.0/16)
 	@if [ -z "$(VPC_CIDR)" ]; then \
@@ -462,8 +390,8 @@ onboard-custom: ## Custom environment onboarding (usage: make onboard-custom VPC
 		echo "Usage: make onboard-custom VPC_CIDR=10.1.0.0/16"; \
 		exit 1; \
 	fi
-	@echo "$(BLUE)Onboarding environment $(FRIENDLY_STACK) with VPC CIDR $(VPC_CIDR)...$(NC)"
-	@atmos workflow onboard-environment tenant=$(TENANT) account=$(ACCOUNT) environment=$(ENVIRONMENT) vpc_cidr=$(VPC_CIDR)
+	@echo "$(BLUE)Onboarding environment $(STACK) with VPC CIDR $(VPC_CIDR)...$(NC)"
+	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) --environment $(ENVIRONMENT) --region $(REGION) --vpc-cidr $(VPC_CIDR) --no-workspace
 
 list-stacks: ## List all available stacks
 	@echo "$(WHITE)Available Stacks:$(NC)"
@@ -480,20 +408,9 @@ test: ## Run all tests and validations
 	@$(MAKE) validate
 	@echo "$(GREEN)✅ All tests passed!$(NC)"
 
-check-security: ## Run security checks
+check-security: ## Run security checks (Trivy + Checkov via the security-scan workflow)
 	@echo "$(BLUE)Running security checks...$(NC)"
-	@if command -v tfsec >/dev/null 2>&1; then \
-		echo "🔍 Running tfsec security scan..."; \
-		tfsec ./components/terraform/ --format compact || echo "$(YELLOW)⚠️  Security issues found - review above$(NC)"; \
-	elif command -v checkov >/dev/null 2>&1; then \
-		echo "🔍 Running checkov security scan..."; \
-		checkov -d ./components/terraform/ --compact || echo "$(YELLOW)⚠️  Security issues found - review above$(NC)"; \
-	else \
-		echo "$(YELLOW)⚠️  No security scanner found. Install tfsec or checkov:$(NC)"; \
-		echo "  brew install tfsec"; \
-		echo "  pip install checkov"; \
-		exit 1; \
-	fi
+	@atmos workflow security-scan -f lint
 	@echo "$(GREEN)✅ Security check complete$(NC)"
 
 check-costs: ## Estimate infrastructure costs
@@ -531,29 +448,23 @@ clean: ## Clean temporary files and caches
 	@find . -name "*.pyc" -delete 2>/dev/null || true
 	@echo "$(GREEN)✅ Cleanup complete$(NC)"
 
-update-docs: ## Update and migrate documentation
+update-docs: ## Regenerate component README docs (terraform-docs pre-commit hook)
 	@echo "$(BLUE)Updating documentation...$(NC)"
-	@./scripts/migrate_docs.sh
+	@pre-commit run terraform_docs --all-files
 
-backup-state: ## Backup Terraform state (for disaster recovery)
+backup-state: ## Backup Terraform outputs and state listings (STACK=<stack>, or ALL_STACKS=1)
 	@echo "$(BLUE)Creating state backup...$(NC)"
 	@BACKUP_DIR="./backups/state/$$(date +%Y%m%d_%H%M%S)"; \
 	mkdir -p $$BACKUP_DIR; \
 	echo "📦 Backing up state files to $$BACKUP_DIR..."; \
-	if [ -n "$(TENANT)" ] && [ -n "$(ACCOUNT)" ] && [ -n "$(ENVIRONMENT)" ]; then \
-		echo "Backing up specific stack: $(TENANT)-$(ACCOUNT)-$(ENVIRONMENT)"; \
-		atmos terraform output -s $(TENANT)-$(ACCOUNT)-$(ENVIRONMENT) > $$BACKUP_DIR/outputs_$(TENANT)-$(ACCOUNT)-$(ENVIRONMENT).json 2>/dev/null || echo "No outputs found"; \
-		atmos terraform state list -s $(TENANT)-$(ACCOUNT)-$(ENVIRONMENT) > $$BACKUP_DIR/state_list_$(TENANT)-$(ACCOUNT)-$(ENVIRONMENT).txt 2>/dev/null || echo "No state found"; \
-	else \
-		echo "Backing up all available stacks..."; \
-		for stack in $$(./scripts/list_stacks.sh | grep -v "Available stacks:" | sed 's/^[[:space:]]*//'); do \
-			if [ -n "$$stack" ]; then \
-				echo "  Backing up stack: $$stack"; \
-				atmos terraform output -s $$stack > $$BACKUP_DIR/outputs_$$stack.json 2>/dev/null || echo "    No outputs for $$stack"; \
-				atmos terraform state list -s $$stack > $$BACKUP_DIR/state_list_$$stack.txt 2>/dev/null || echo "    No state for $$stack"; \
-			fi; \
+	for stack in $(if $(ALL_STACKS),$$(atmos list stacks),$(STACK)); do \
+		echo "  Backing up stack: $$stack"; \
+		for component in $$(atmos list components -s $$stack | cut -f1); do \
+			name=$$stack-$$(echo $$component | tr / -); \
+			atmos terraform output $$component -s $$stack -json > $$BACKUP_DIR/outputs_$$name.json 2>/dev/null || echo "    No outputs for $$component"; \
+			atmos terraform state list $$component -s $$stack > $$BACKUP_DIR/state_list_$$name.txt 2>/dev/null || echo "    No state for $$component"; \
 		done; \
-	fi; \
+	done; \
 	echo "$(GREEN)✅ State backup created in $$BACKUP_DIR$(NC)"
 
 doctor: ## Run system diagnostics
@@ -570,7 +481,7 @@ doctor: ## Run system diagnostics
 	@echo
 	@echo "$(WHITE)Stack Validation:$(NC)"
 	@echo "=================="
-	@atmos describe stacks -s "$(STACK)" >/dev/null 2>&1 && echo "✅ Current stack configuration is valid" || echo "❌ Current stack configuration has issues"
+	@atmos describe stacks -s "$(STACK)" --process-functions=false >/dev/null 2>&1 && echo "✅ Current stack configuration is valid" || echo "❌ Current stack configuration has issues"
 
 # =============================================================================
 # Quick Aliases for Frequent Tasks
@@ -589,109 +500,61 @@ h: help ## Alias for help
 # =============================================================================
 
 dev: ## Switch to development environment
-	@$(MAKE) TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01 status
+	@$(MAKE) STACK=fnx-dev-testenv-01 status
 
 staging: ## Switch to staging environment  
-	@$(MAKE) TENANT=fnx ACCOUNT=staging ENVIRONMENT=staging-01 status
+	@$(MAKE) STACK=fnx-staging-staging-01 status
 
 prod: ## Switch to production environment
-	@$(MAKE) TENANT=fnx ACCOUNT=prod ENVIRONMENT=production status
+	@$(MAKE) STACK=fnx-prod-production status
 
 # =============================================================================
 # AWS Backend Setup and Management
 # =============================================================================
+# State lives in the S3 bucket <tenant>-terraform-state (native lockfile
+# locking, no DynamoDB), created and managed by the backend/main component.
 
-setup-aws-backend: ## Setup AWS backend infrastructure (usage: make setup-aws-backend TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01)
-	@if [ -z "$(TENANT)" ] || [ -z "$(ACCOUNT)" ] || [ -z "$(ENVIRONMENT)" ]; then \
-		echo "$(RED)Error: TENANT, ACCOUNT, and ENVIRONMENT variables are required$(NC)"; \
-		echo "Usage: make setup-aws-backend TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01"; \
-		echo "Optional: REGION=us-west-2 ASSUME_ROLE=arn:aws:iam::123456789:role/Role"; \
-		exit 1; \
-	fi
-	@echo "$(BLUE)Setting up AWS backend infrastructure...$(NC)"
-	@./scripts/aws-setup.sh \
-		--tenant $(TENANT) \
-		--account $(ACCOUNT) \
-		--environment $(ENVIRONMENT) \
-		$(if $(REGION),--region $(REGION),) \
-		$(if $(ASSUME_ROLE),--assume-role $(ASSUME_ROLE),) \
-		$(if $(KMS_KEY),--kms-key-id $(KMS_KEY),) \
-		$(if $(DRY_RUN),--dry-run,) \
-		$(if $(FORCE),--force,)
+setup-aws-backend: ## Create the state bucket and apply backend/main (usage: make setup-aws-backend STACK=fnx-dev-testenv-01)
+	@echo "$(BLUE)Setting up AWS backend infrastructure for $(STACK)...$(NC)"
+	@atmos workflow backend-only -f bootstrap -s "$(STACK)"
 
-setup-aws-backend-dry-run: ## Dry run AWS backend setup (shows what would be created)
-	@$(MAKE) setup-aws-backend DRY_RUN=true TENANT=$(TENANT) ACCOUNT=$(ACCOUNT) ENVIRONMENT=$(ENVIRONMENT)
+setup-aws-backend-dry-run: ## Show the backend configuration and plan without applying
+	@atmos terraform backend describe backend/main -s "$(STACK)"
+	@atmos terraform plan backend/main -s "$(STACK)"
 
 validate-aws-setup: ## Validate existing AWS backend setup
-	@if [ -z "$(TENANT)" ] || [ -z "$(ACCOUNT)" ] || [ -z "$(ENVIRONMENT)" ]; then \
-		echo "$(RED)Error: TENANT, ACCOUNT, and ENVIRONMENT variables are required$(NC)"; \
-		echo "Usage: make validate-aws-setup TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01"; \
-		exit 1; \
-	fi
-	@echo "$(BLUE)Validating AWS backend setup...$(NC)"
-	@atmos workflow bootstrap-backend verify \
-		tenant=$(TENANT) \
-		account=$(ACCOUNT) \
-		environment=$(ENVIRONMENT) \
-		$(if $(REGION),region=$(REGION),)
+	@echo "$(BLUE)Validating AWS backend setup for $(STACK)...$(NC)"
+	@atmos workflow verify -f bootstrap -s "$(STACK)"
 
 bootstrap-environment: ## Complete environment bootstrap (backend + validation)
-	@if [ -z "$(TENANT)" ] || [ -z "$(ACCOUNT)" ] || [ -z "$(ENVIRONMENT)" ]; then \
-		echo "$(RED)Error: TENANT, ACCOUNT, and ENVIRONMENT variables are required$(NC)"; \
-		echo "Usage: make bootstrap-environment TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01"; \
-		exit 1; \
-	fi
-	@echo "$(BLUE)Bootstrapping complete environment: $(TENANT)-$(ACCOUNT)-$(ENVIRONMENT)$(NC)"
+	@echo "$(BLUE)Bootstrapping complete environment: $(STACK)$(NC)"
 	@echo "Step 1/3: Setting up AWS backend infrastructure..."
-	@$(MAKE) setup-aws-backend TENANT=$(TENANT) ACCOUNT=$(ACCOUNT) ENVIRONMENT=$(ENVIRONMENT) $(if $(REGION),REGION=$(REGION),)
+	@$(MAKE) --no-print-directory setup-aws-backend STACK=$(STACK)
 	@echo
 	@echo "Step 2/3: Validating backend setup..."
-	@$(MAKE) validate-aws-setup TENANT=$(TENANT) ACCOUNT=$(ACCOUNT) ENVIRONMENT=$(ENVIRONMENT) $(if $(REGION),REGION=$(REGION),)
+	@$(MAKE) --no-print-directory validate-aws-setup STACK=$(STACK)
 	@echo
 	@echo "Step 3/3: Running configuration validation..."
-	@$(MAKE) validate TENANT=$(TENANT) ACCOUNT=$(ACCOUNT) ENVIRONMENT=$(ENVIRONMENT)
+	@$(MAKE) --no-print-directory validate STACK=$(STACK)
 	@echo
 	@echo "$(GREEN)✅ Environment bootstrap completed successfully!$(NC)"
 	@echo "Next steps:"
-	@echo "  1. Apply backend component: make apply-component COMPONENT=backend"
-	@echo "  2. Initialize other components: make validate"
-	@echo "  3. Plan infrastructure: make plan"
+	@echo "  1. Plan infrastructure: make plan STACK=$(STACK)"
+	@echo "  2. Deploy layer by layer: atmos workflow deploy -f deploy-full-stack -s $(STACK)"
 
-cleanup-aws-backend: ## Clean up AWS backend infrastructure (DANGEROUS!)
-	@if [ -z "$(TENANT)" ] || [ -z "$(ACCOUNT)" ] || [ -z "$(ENVIRONMENT)" ]; then \
-		echo "$(RED)Error: TENANT, ACCOUNT, and ENVIRONMENT variables are required$(NC)"; \
-		echo "Usage: make cleanup-aws-backend TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01"; \
-		exit 1; \
-	fi
-	@echo "$(RED)⚠️  WARNING: This will DELETE your AWS backend infrastructure!$(NC)"
-	@echo "Resources to be deleted:"
-	@echo "  S3 Bucket: $(TENANT)-$(ACCOUNT)-$(ENVIRONMENT)-terraform-state"
-	@echo "  DynamoDB Table: $(TENANT)-$(ACCOUNT)-$(ENVIRONMENT)-terraform-locks"
-	@echo "  Region: $(or $(REGION),us-east-1)"
-	@echo
-	@echo "$(WHITE)Type '$(TENANT)-$(ACCOUNT)-$(ENVIRONMENT)' to confirm deletion:$(NC)"
-	@read -r confirmation && \
-	if [ "$$confirmation" = "$(TENANT)-$(ACCOUNT)-$(ENVIRONMENT)" ]; then \
-		echo "$(YELLOW)Proceeding with backend cleanup...$(NC)"; \
-		atmos workflow bootstrap-backend cleanup \
-			tenant=$(TENANT) \
-			account=$(ACCOUNT) \
-			environment=$(ENVIRONMENT) \
-			$(if $(REGION),region=$(REGION),) \
-			$(if $(FORCE),force=true,); \
-	else \
-		echo "$(GREEN)Cleanup cancelled - confirmation didn't match$(NC)"; \
-	fi
+cleanup-aws-backend: ## Destroy the backend/main component (DANGEROUS; the workflow asks for confirmation)
+	@echo "$(RED)⚠️  WARNING: This destroys the Terraform state backend component!$(NC)"
+	@atmos workflow destroy -f destroy-backend
 
 # AWS Backend Quick Commands for Common Environments
 setup-aws-dev: ## Quick setup for development backend
-	@$(MAKE) setup-aws-backend TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01
+	@$(MAKE) setup-aws-backend STACK=fnx-dev-testenv-01
 
 setup-aws-staging: ## Quick setup for staging backend  
-	@$(MAKE) setup-aws-backend TENANT=fnx ACCOUNT=staging ENVIRONMENT=staging-01
+	@$(MAKE) setup-aws-backend STACK=fnx-staging-staging-01
 
 setup-aws-prod: ## Quick setup for production backend
-	@$(MAKE) setup-aws-backend TENANT=fnx ACCOUNT=prod ENVIRONMENT=production REGION=us-west-2
+	@$(MAKE) setup-aws-backend STACK=fnx-prod-production
 
 # =============================================================================
 # Advanced Operations
@@ -699,15 +562,15 @@ setup-aws-prod: ## Quick setup for production backend
 
 import-resource: ## Import existing resource into Terraform state
 	@echo "$(BLUE)Starting resource import workflow...$(NC)"
-	@atmos workflow import
+	@atmos workflow import -f import -s "$(STACK)"
 
 rotate-certs: ## Rotate SSL certificates
 	@echo "$(BLUE)Rotating SSL certificates...$(NC)"
-	@atmos workflow rotate-certificate
+	@atmos workflow rotate -f rotate-certificate
 
 state-ops: ## Perform state operations
 	@echo "$(BLUE)Starting state operations workflow...$(NC)"
-	@atmos workflow state-operations
+	@STACK="$(STACK)" atmos workflow list-locks -f state-operations
 
 # =============================================================================
 # Debugging and Troubleshooting
@@ -717,10 +580,9 @@ debug-stack: ## Debug current stack configuration
 	@echo "$(WHITE)Stack Debug Information$(NC)"
 	@echo "========================"
 	@echo "Stack Name: $(STACK)"
-	@echo "Friendly Name: $(FRIENDLY_STACK)"
 	@echo
 	@echo "$(WHITE)Stack Description:$(NC)"
-	@atmos describe stacks -s "$(STACK)" || echo "Failed to describe stack"
+	@atmos describe stacks -s "$(STACK)" --process-functions=false || echo "Failed to describe stack"
 	@echo
 	@echo "$(WHITE)Stack Components:$(NC)"
 	@atmos list components -s "$(STACK)" || echo "Failed to list components"
@@ -729,11 +591,10 @@ debug-env: ## Debug environment variables and configuration
 	@echo "$(WHITE)Environment Debug Information$(NC)"
 	@echo "============================="
 	@echo "TENANT: $(TENANT)"
-	@echo "ACCOUNT: $(ACCOUNT)" 
+	@echo "STAGE: $(STAGE)"
 	@echo "ENVIRONMENT: $(ENVIRONMENT)"
 	@echo "REGION: $(REGION)"
 	@echo "STACK: $(STACK)"
-	@echo "FRIENDLY_STACK: $(FRIENDLY_STACK)"
 	@echo
 	@echo "$(WHITE)Working Directory:$(NC)"
 	@pwd
@@ -752,19 +613,17 @@ benchmark: ## Run performance benchmarks
 	echo "🚀 Benchmarking Terraform operations..."; \
 	echo "Results will be saved to $$RESULTS_DIR"; \
 	echo "Component,Operation,Duration,Status" > $$RESULTS_DIR/benchmark_results.csv; \
-	for component in $$(find ./components/terraform -mindepth 1 -maxdepth 1 -type d -exec basename {} \;); do \
-		if [ -f "./components/terraform/$$component/main.tf" ]; then \
-			echo "  📊 Benchmarking $$component..."; \
-			START_TIME=$$(date +%s); \
-			if timeout 300 atmos terraform validate $$component -s fnx-dev-testenv-01 > /dev/null 2>&1; then \
-				END_TIME=$$(date +%s); \
-				DURATION=$$((END_TIME - START_TIME)); \
-				echo "$$component,validate,$$DURATION,success" >> $$RESULTS_DIR/benchmark_results.csv; \
-				echo "    ✅ Validation: $${DURATION}s"; \
-			else \
-				echo "$$component,validate,-1,failed" >> $$RESULTS_DIR/benchmark_results.csv; \
-				echo "    ❌ Validation failed"; \
-			fi; \
+	for component in $$(atmos list components -s "$(STACK)" | cut -f1); do \
+		echo "  📊 Benchmarking $$component..."; \
+		START_TIME=$$(date +%s); \
+		if timeout 300 atmos terraform validate $$component -s "$(STACK)" > /dev/null 2>&1; then \
+			END_TIME=$$(date +%s); \
+			DURATION=$$((END_TIME - START_TIME)); \
+			echo "$$component,validate,$$DURATION,success" >> $$RESULTS_DIR/benchmark_results.csv; \
+			echo "    ✅ Validation: $${DURATION}s"; \
+		else \
+			echo "$$component,validate,-1,failed" >> $$RESULTS_DIR/benchmark_results.csv; \
+			echo "    ❌ Validation failed"; \
 		fi; \
 	done; \
 	echo "$(GREEN)✅ Benchmarks complete - results in $$RESULTS_DIR$(NC)"

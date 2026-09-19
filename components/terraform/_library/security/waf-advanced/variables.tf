@@ -278,6 +278,11 @@ variable "geo_allow_countries" {
     condition     = alltrue([for code in var.geo_allow_countries : length(code) == 2])
     error_message = "All country codes must be 2-character ISO 3166-1 alpha-2 codes."
   }
+
+  validation {
+    condition     = length(var.geo_allow_countries) == 0 || length(var.geo_block_countries) == 0
+    error_message = "geo_allow_countries and geo_block_countries are mutually exclusive."
+  }
 }
 
 ##############################################
@@ -334,6 +339,16 @@ variable "custom_rules" {
     Default: []
   EOT
   default     = []
+
+  validation {
+    condition     = alltrue([for r in var.custom_rules : contains(["ALLOW", "BLOCK", "COUNT"], r.action)])
+    error_message = "Custom rule action must be ALLOW, BLOCK or COUNT."
+  }
+
+  validation {
+    condition     = length(distinct([for r in var.custom_rules : r.priority])) == length(var.custom_rules)
+    error_message = "Custom rule priorities must be unique."
+  }
 }
 
 ##############################################
@@ -365,6 +380,11 @@ variable "log_destination_type" {
   validation {
     condition     = contains(["s3", "cloudwatch", "kinesis"], var.log_destination_type)
     error_message = "The log_destination_type must be 's3', 'cloudwatch', or 'kinesis'."
+  }
+
+  validation {
+    condition     = var.log_destination_type != "kinesis" || var.log_destination_arn != ""
+    error_message = "log_destination_type = \"kinesis\" requires log_destination_arn (a Firehose stream named aws-waf-logs-*)."
   }
 }
 
@@ -430,7 +450,7 @@ variable "resource_arns" {
   default     = []
 
   validation {
-    condition     = alltrue([for arn in var.resource_arns : can(regex("^arn:aws:", arn))])
+    condition     = alltrue([for arn in var.resource_arns : can(regex("^arn:aws[a-z-]*:", arn))])
     error_message = "All resource ARNs must be valid AWS ARNs starting with 'arn:aws:'."
   }
 }

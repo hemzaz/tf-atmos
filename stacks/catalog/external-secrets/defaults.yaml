@@ -2,6 +2,8 @@
 ##################################################
 # Catalog Configuration for External Secrets
 ##################################################
+# Instances set cluster_name/host/cluster_ca_certificate/oidc_provider_* from
+# the matching EKS instance via !terraform.state.
 
 components:
   terraform:
@@ -10,38 +12,15 @@ components:
         component: external-secrets
         type: abstract
       vars:
-        tenant: "${tenant}"
-        region: ${region}
-        enabled: ${vars.enabled | true}
-        cluster_name: ${eks.outputs.cluster_names.main}
-        host: ${eks.outputs.cluster_endpoints.main}
-        cluster_ca_certificate: ${eks.outputs.cluster_ca_data.main}
-        oidc_provider_arn: ${eks.outputs.oidc_provider_arns.main}
-        oidc_provider_url: ${eks.outputs.oidc_provider_urls.main}
+        enabled: true
 
-    # Optional settings with defaults
-    namespace:
-      name: "external-secrets"
-      create: true
-    serviceaccount:
-      name: "external-secrets"
-    helm:
-      chart_version: "0.9.9"
-    certificate_store:
-      path_template: "certificates/{name}"
-    secret_stores:
-      default_cluster:
-        create: true
-      certificate:
-        create: true
+        namespace: "external-secrets"
+        create_namespace: true
+        service_account_name: "external-secrets"
+        chart_version: "0.9.9"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
 
-    # Tags for resources
-    tags:
-      Environment: ${environment}
-      Component: "external-secrets"
-      Terraform: "true"
-      Team: "platform"
-vars:
-  tenant: "${tenant}"
-  account: "${account}"
-  environment: "${environment}"
+        tags:
+          Component: "external-secrets"
+          Team: "platform"

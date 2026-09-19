@@ -51,6 +51,11 @@ variable "customer_master_key_spec" {
   type        = string
   description = "Deprecated. Use key_spec instead"
   default     = null
+
+  validation {
+    condition     = var.customer_master_key_spec == null || contains(["SYMMETRIC_DEFAULT", "RSA_2048", "RSA_3072", "RSA_4096", "ECC_NIST_P256", "ECC_NIST_P384", "ECC_NIST_P521", "ECC_SECG_P256K1", "HMAC_224", "HMAC_256", "HMAC_384", "HMAC_512"], var.customer_master_key_spec)
+    error_message = "Invalid customer_master_key_spec."
+  }
 }
 
 variable "is_multi_region" {
@@ -103,6 +108,11 @@ variable "key_policy" {
   type        = string
   description = "Custom key policy JSON. If not provided, default policy will be created"
   default     = ""
+
+  validation {
+    condition     = var.key_policy == "" || can(jsondecode(var.key_policy))
+    error_message = "key_policy must be empty or a valid JSON document."
+  }
 }
 
 variable "enable_default_policy" {
@@ -153,6 +163,11 @@ variable "replica_regions" {
   type        = list(string)
   description = "List of AWS regions for key replicas (requires is_multi_region=true)"
   default     = []
+
+  validation {
+    condition     = length(var.replica_regions) == 0 || var.is_multi_region
+    error_message = "replica_regions requires is_multi_region = true."
+  }
 }
 
 variable "replica_deletion_window_in_days" {

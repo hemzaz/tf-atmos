@@ -42,12 +42,12 @@ output "pipeline_role_name" {
 
 output "artifact_bucket_id" {
   description = "ID of the S3 artifact bucket"
-  value       = length(aws_s3_bucket.artifact) > 0 ? aws_s3_bucket.artifact[0].id : var.artifact_bucket_name
+  value       = var.create_artifact_bucket ? aws_s3_bucket.artifact[0].id : data.aws_s3_bucket.artifact[0].id
 }
 
 output "artifact_bucket_arn" {
   description = "ARN of the S3 artifact bucket"
-  value       = length(aws_s3_bucket.artifact) > 0 ? aws_s3_bucket.artifact[0].arn : "arn:${data.aws_partition.current.partition}:s3:::${var.artifact_bucket_name}"
+  value       = var.create_artifact_bucket ? aws_s3_bucket.artifact[0].arn : data.aws_s3_bucket.artifact[0].arn
 }
 
 ################################################################################
@@ -56,12 +56,12 @@ output "artifact_bucket_arn" {
 
 output "notification_event_rule_arn" {
   description = "ARN of the CloudWatch Event Rule for pipeline notifications"
-  value       = var.enable_notifications && var.notification_target_arn != null ? aws_cloudwatch_event_rule.pipeline[0].arn : null
+  value       = one(aws_cloudwatch_event_rule.pipeline[*].arn)
 }
 
 output "source_event_rule_arn" {
   description = "ARN of the CloudWatch Event Rule for source changes"
-  value       = var.source_provider == "CodeCommit" && local.source_config.detect_changes ? aws_cloudwatch_event_rule.source[0].arn : null
+  value       = one(aws_cloudwatch_event_rule.source[*].arn)
 }
 
 ################################################################################
@@ -70,7 +70,7 @@ output "source_event_rule_arn" {
 
 output "pipeline_url" {
   description = "URL to the CodePipeline console"
-  value       = "https://${data.aws_region.current.name}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${aws_codepipeline.this.name}/view"
+  value       = "https://${data.aws_region.current.region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${aws_codepipeline.this.name}/view"
 }
 
 output "source_provider" {

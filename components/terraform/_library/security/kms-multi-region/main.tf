@@ -8,7 +8,8 @@ resource "aws_kms_key" "main" {
   customer_master_key_spec = var.customer_master_key_spec != null ? var.customer_master_key_spec : var.key_spec
   deletion_window_in_days  = var.deletion_window_in_days
   is_enabled               = true
-  enable_key_rotation      = var.enable_key_rotation && var.key_spec == "SYMMETRIC_DEFAULT"
+  enable_key_rotation      = local.rotation_enabled
+  rotation_period_in_days  = local.rotation_enabled ? var.rotation_period_in_days : null
   multi_region             = var.is_multi_region
 
   # Use custom policy if provided, otherwise use default
@@ -38,7 +39,10 @@ resource "aws_kms_alias" "main" {
 ##############################################
 
 resource "aws_kms_replica_key" "replicas" {
-  for_each = var.is_multi_region ? toset(var.replica_regions) : []
+  for_each = var.is_multi_region ? toset(var.replica_regions) : toset([])
+
+  # Enhanced region support (AWS provider v6) replaces a per-region provider alias
+  region = each.value
 
   description             = "${var.description} (Replica in ${each.value})"
   primary_key_arn         = aws_kms_key.main.arn
@@ -57,8 +61,12 @@ resource "aws_kms_replica_key" "replicas" {
     }
   )
 
-  # Use alternate provider for each region
-  provider = aws
+  lifecycle {
+    precondition {
+      condition     = each.value != data.aws_region.current.region
+      error_message = "replica_regions must not include the primary key's region."
+    }
+  }
 }
 
 ##############################################

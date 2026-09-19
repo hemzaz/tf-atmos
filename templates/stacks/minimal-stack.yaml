@@ -1,65 +1,65 @@
+---
 # Minimal Stack Template
-# Basic infrastructure with VPC, security groups, and essential components
+# Basic infrastructure: one VPC and tiered security groups.
 #
-# Usage: Copy to your stack directory and customize
-# Example: cp templates/stacks/minimal-stack.yaml stacks/orgs/myorg/dev/us-east-1/minimal/main.yaml
-
-terraform:
-  vars:
-    # Global stack variables
-    stack_purpose: "minimal-infrastructure"
-    cost_center: "development"
-    
-    # Networking
-    vpc_cidr: "10.0.0.0/16"
-    availability_zones: ["a", "b"]
-    
-    # Tagging strategy
-    additional_tags:
-      Purpose: "minimal-stack"
-      Template: "minimal-stack.yaml"
-      ManagedBy: "atmos"
+# Usage: copy into an account/region directory as a top-level stack and set
+# settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
+#   cp templates/stacks/minimal-stack.yaml stacks/orgs/fnx/dev/eu-west-2/minimal-01.yaml
+#   atmos validate stacks
+#   atmos terraform plan vpc/main -s fnx-dev-minimal-01
+# To target another account or region, change the `orgs/fnx/<stage>/_defaults`
+# (org and account defaults) and `mixins/region/<region>` imports.
 
 import:
-  # Base configurations
+  - orgs/fnx/dev/_defaults
+  - mixins/region/eu-west-2
+  - catalog/_base/defaults
   - catalog/vpc/defaults
-  - mixins/tenant/${tenant}
-  - mixins/stage/${account}
-  - mixins/region/${region}
+  - catalog/securitygroup/defaults
+  # Optional environment profile from templates/configs (import it last):
+  # - mixins/profiles/development
+
+vars:
+  tags:
+    Template: "minimal-stack"
+
+settings:
+  context:
+    environment: minimal-01
+  environment:
+    description: "Minimal environment (VPC and security groups)"
+    vpc_cidr: "10.10.0.0/16"
 
 components:
   terraform:
-    # Core networking
-    vpc:
+    # Core networking. Other components read its outputs through
+    # `!terraform.state vpc/main .<output>`; AZs come from vpc/defaults.
+    vpc/main:
       metadata:
         component: vpc
         inherits:
           - vpc/defaults
       vars:
-        name: "${var.tenant}-${var.environment}-vpc"
-        cidr_block: "${var.vpc_cidr}"
-        availability_zones: "${var.availability_zones}"
-        
-        # Public subnets for load balancers
-        public_subnets_enabled: true
-        public_subnet_cidrs: ["10.0.1.0/24", "10.0.2.0/24"]
-        
-        # Private subnets for applications  
-        private_subnets_enabled: true
-        private_subnet_cidrs: ["10.0.10.0/24", "10.0.20.0/24"]
-        
-        # NAT Gateway for private subnet internet access
-        nat_gateway_enabled: true
-        nat_instance_enabled: false
-        
-    # Basic security groups
-    security-groups:
+        vpc_cidr: "{{ .settings.environment.vpc_cidr }}"
+        public_subnets:
+          - "10.10.1.0/24"
+          - "10.10.2.0/24"
+          - "10.10.3.0/24"
+        private_subnets:
+          - "10.10.10.0/24"
+          - "10.10.20.0/24"
+          - "10.10.30.0/24"
+        # A single NAT gateway keeps a minimal environment cheap
+        enable_nat_gateway: true
+        nat_gateway_strategy: "single"
+
+    # Web tier: public HTTP(S) into the load balancers
+    securitygroup/web:
       metadata:
         component: securitygroup
+        inherits:
+          - securitygroup
       vars:
-        name: "${var.tenant}-${var.environment}-sg"
-        
-        # Web tier security group
         security_groups:
           web:
             description: "Web tier security group"
@@ -69,13 +69,20 @@ components:
                 to_port: 80
                 protocol: "tcp"
                 cidr_blocks: ["0.0.0.0/0"]
-              - description: "HTTPS from anywhere"  
+              - description: "HTTPS from anywhere"
                 from_port: 443
                 to_port: 443
                 protocol: "tcp"
                 cidr_blocks: ["0.0.0.0/0"]
-                
-          # Application tier security group
+
+    # Application tier: only reachable from the web tier
+    securitygroup/app:
+      metadata:
+        component: securitygroup
+        inherits:
+          - securitygroup
+      vars:
+        security_groups:
           app:
             description: "Application tier security group"
             ingress_rules:
@@ -83,14 +90,31 @@ components:
                 from_port: 8080
                 to_port: 8080
                 protocol: "tcp"
-                source_security_group_id: "web"
-                
-          # Database tier security group  
+                security_groups:
+                  - !terraform.state securitygroup/web .security_group_ids.web
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: securitygroup/web
+
+    # Database tier: only reachable from the application tier
+    securitygroup/db:
+      metadata:
+        component: securitygroup
+        inherits:
+          - securitygroup
+      vars:
+        security_groups:
           db:
             description: "Database tier security group"
             ingress_rules:
-              - description: "MySQL from app tier"
-                from_port: 3306
-                to_port: 3306
+              - description: "PostgreSQL from app tier"
+                from_port: 5432
+                to_port: 5432
                 protocol: "tcp"
-                source_security_group_id: "app"
+                security_groups:
+                  - !terraform.state securitygroup/app .security_group_ids.app
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: securitygroup/app
