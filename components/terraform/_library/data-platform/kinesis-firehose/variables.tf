@@ -43,7 +43,7 @@ variable "s3_error_prefix" {
 
 variable "s3_compression_format" {
   type        = string
-  description = "Compression format (UNCOMPRESSED, GZIP, ZIP, Snappy, HADOOP_SNAPPY)"
+  description = "Compression format (UNCOMPRESSED, GZIP, ZIP, Snappy, HADOOP_SNAPPY). Forced to UNCOMPRESSED when enable_parquet_conversion is true."
   default     = "GZIP"
 
   validation {
@@ -84,6 +84,11 @@ variable "transformation_lambda_arn" {
   type        = string
   description = "Lambda function ARN for transformation"
   default     = ""
+
+  validation {
+    condition     = !var.enable_transformation || var.transformation_lambda_arn != ""
+    error_message = "transformation_lambda_arn is required when enable_transformation is true."
+  }
 }
 
 variable "kms_key_arn" {
@@ -102,6 +107,11 @@ variable "backup_s3_bucket_arn" {
   type        = string
   description = "Backup S3 bucket ARN"
   default     = ""
+
+  validation {
+    condition     = (!var.enable_s3_backup && var.destination != "opensearch") || var.backup_s3_bucket_arn != ""
+    error_message = "backup_s3_bucket_arn is required when enable_s3_backup is true or destination is opensearch."
+  }
 }
 
 variable "backup_s3_prefix" {
@@ -126,12 +136,22 @@ variable "glue_table_name" {
   type        = string
   description = "Glue table name for schema"
   default     = ""
+
+  validation {
+    condition     = !var.enable_parquet_conversion || (var.glue_database_name != "" && var.glue_table_name != "")
+    error_message = "glue_database_name and glue_table_name are required when enable_parquet_conversion is true."
+  }
 }
 
 variable "opensearch_domain_arn" {
   type        = string
   description = "OpenSearch domain ARN"
   default     = ""
+
+  validation {
+    condition     = var.destination != "opensearch" || var.opensearch_domain_arn != ""
+    error_message = "opensearch_domain_arn is required when destination is opensearch."
+  }
 }
 
 variable "opensearch_index_name" {
@@ -182,6 +202,11 @@ variable "redshift_table_name" {
   type        = string
   description = "Redshift table name"
   default     = ""
+
+  validation {
+    condition     = var.destination != "redshift" || var.redshift_table_name != ""
+    error_message = "redshift_table_name is required when destination is redshift."
+  }
 }
 
 variable "redshift_copy_options" {

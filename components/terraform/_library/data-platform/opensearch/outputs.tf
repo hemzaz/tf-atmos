@@ -18,8 +18,8 @@ output "endpoint" {
   value       = aws_opensearch_domain.main.endpoint
 }
 
-output "kibana_endpoint" {
-  description = "OpenSearch Dashboards endpoint"
+output "dashboard_endpoint" {
+  description = "OpenSearch Dashboards endpoint (replaces kibana_endpoint, removed in AWS provider v6)"
   value       = aws_opensearch_domain.main.dashboard_endpoint
 }
 
@@ -51,11 +51,11 @@ output "cloudwatch_log_group_arns" {
 output "alarm_arns" {
   description = "Map of CloudWatch alarm ARNs"
   value = var.enable_monitoring ? {
-    cluster_red          = aws_cloudwatch_metric_alarm.cluster_red[0].arn
-    cluster_yellow       = aws_cloudwatch_metric_alarm.cluster_yellow[0].arn
-    free_storage_space   = aws_cloudwatch_metric_alarm.free_storage_space[0].arn
-    cpu_utilization      = aws_cloudwatch_metric_alarm.cpu_utilization[0].arn
-    jvm_memory_pressure  = aws_cloudwatch_metric_alarm.jvm_memory_pressure[0].arn
+    cluster_red         = aws_cloudwatch_metric_alarm.cluster_red[0].arn
+    cluster_yellow      = aws_cloudwatch_metric_alarm.cluster_yellow[0].arn
+    free_storage_space  = aws_cloudwatch_metric_alarm.free_storage_space[0].arn
+    cpu_utilization     = aws_cloudwatch_metric_alarm.cpu_utilization[0].arn
+    jvm_memory_pressure = aws_cloudwatch_metric_alarm.jvm_memory_pressure[0].arn
   } : {}
 }
 

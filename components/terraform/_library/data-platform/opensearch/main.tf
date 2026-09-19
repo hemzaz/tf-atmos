@@ -119,13 +119,20 @@ resource "aws_opensearch_domain" "main" {
       desired_state       = "ENABLED"
       rollback_on_disable = var.auto_tune_rollback_on_disable
 
-      maintenance_schedule {
-        start_at = var.auto_tune_start_at
-        duration {
-          value = var.auto_tune_duration_value
-          unit  = var.auto_tune_duration_unit
+      # start_at is required by maintenance_schedule; without it (default) Auto-Tune
+      # uses the domain's off-peak window instead of a dedicated schedule.
+      use_off_peak_window = var.auto_tune_start_at == null
+
+      dynamic "maintenance_schedule" {
+        for_each = var.auto_tune_start_at != null ? [1] : []
+        content {
+          start_at = var.auto_tune_start_at
+          duration {
+            value = var.auto_tune_duration_value
+            unit  = var.auto_tune_duration_unit
+          }
+          cron_expression_for_recurrence = var.auto_tune_cron_expression
         }
-        cron_expression_for_recurrence = var.auto_tune_cron_expression
       }
     }
   }

@@ -6,29 +6,22 @@ resource "aws_kinesis_stream" "main" {
   name             = "${var.name_prefix}-stream"
   retention_period = var.retention_hours
 
-  dynamic "stream_mode_details" {
-    for_each = var.stream_mode == "ON_DEMAND" ? [1] : []
-    content {
-      stream_mode = "ON_DEMAND"
-    }
+  stream_mode_details {
+    stream_mode = var.stream_mode
   }
 
   shard_count = var.stream_mode == "PROVISIONED" ? var.shard_count : null
 
-  dynamic "shard_level_metrics" {
-    for_each = var.enable_enhanced_monitoring ? [1] : []
-    content {
-      shard_level_metrics = [
-        "IncomingBytes",
-        "IncomingRecords",
-        "OutgoingBytes",
-        "OutgoingRecords",
-        "WriteProvisionedThroughputExceeded",
-        "ReadProvisionedThroughputExceeded",
-        "IteratorAgeMilliseconds"
-      ]
-    }
-  }
+  # shard_level_metrics is a plain set argument, not a block.
+  shard_level_metrics = var.enable_enhanced_monitoring ? [
+    "IncomingBytes",
+    "IncomingRecords",
+    "OutgoingBytes",
+    "OutgoingRecords",
+    "WriteProvisionedThroughputExceeded",
+    "ReadProvisionedThroughputExceeded",
+    "IteratorAgeMilliseconds"
+  ] : []
 
   encryption_type = var.kms_key_id != null ? "KMS" : "NONE"
   kms_key_id      = var.kms_key_id
@@ -83,14 +76,14 @@ resource "aws_lambda_event_source_mapping" "consumer" {
 
   event_source_arn                   = aws_kinesis_stream.main.arn
   function_name                      = each.value.function_name
-  starting_position                  = lookup(each.value, "starting_position", "LATEST")
-  batch_size                         = lookup(each.value, "batch_size", 100)
-  maximum_batching_window_in_seconds = lookup(each.value, "batching_window", 0)
-  parallelization_factor             = lookup(each.value, "parallelization_factor", 1)
-  enabled                            = lookup(each.value, "enabled", true)
+  starting_position                  = each.value.starting_position
+  batch_size                         = each.value.batch_size
+  maximum_batching_window_in_seconds = each.value.batching_window
+  parallelization_factor             = each.value.parallelization_factor
+  enabled                            = each.value.enabled
 
   dynamic "destination_config" {
-    for_each = lookup(each.value, "on_failure_destination", null) != null ? [1] : []
+    for_each = each.value.on_failure_destination != null ? [1] : []
     content {
       on_failure {
         destination_arn = each.value.on_failure_destination
@@ -99,7 +92,7 @@ resource "aws_lambda_event_source_mapping" "consumer" {
   }
 
   dynamic "filter_criteria" {
-    for_each = lookup(each.value, "filter_pattern", null) != null ? [1] : []
+    for_each = each.value.filter_pattern != null ? [1] : []
     content {
       filter {
         pattern = each.value.filter_pattern

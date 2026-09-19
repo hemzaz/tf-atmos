@@ -72,6 +72,17 @@ variable "lambda_consumers" {
   }))
   description = "Map of Lambda consumer configurations"
   default     = {}
+
+  validation {
+    condition = alltrue([
+      for k, v in var.lambda_consumers :
+      contains(["LATEST", "TRIM_HORIZON"], v.starting_position) &&
+      v.batch_size >= 1 && v.batch_size <= 10000 &&
+      v.batching_window >= 0 && v.batching_window <= 300 &&
+      v.parallelization_factor >= 1 && v.parallelization_factor <= 10
+    ])
+    error_message = "lambda_consumers: starting_position must be LATEST|TRIM_HORIZON, batch_size 1-10000, batching_window 0-300, parallelization_factor 1-10."
+  }
 }
 
 variable "enable_cloudwatch_logs" {
