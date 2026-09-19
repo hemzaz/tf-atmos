@@ -36,6 +36,8 @@ on:
       - components/**
       - stacks/**
       - workflows/**
+      - .trivyignore.yaml
+      - .checkov.baseline
       - .github/workflows/terraform-ci.yml
   merge_group:
 
