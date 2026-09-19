@@ -157,7 +157,7 @@ resource "aws_cloudwatch_metric_alarm" "log_errors" {
 
 # Certificate Monitoring Resources
 locals {
-  name_prefix = "${var.tags["Environment"]}-${var.tags["Name"] != null ? var.tags["Name"] : "monitoring"}"
+  name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "monitoring")}"
 
   # Process certificate ARNs for dashboard
   certificate_arns         = var.certificate_arns
