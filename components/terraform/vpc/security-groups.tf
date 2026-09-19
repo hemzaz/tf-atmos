@@ -67,10 +67,5 @@ resource "aws_security_group" "default" {
     }
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-default-sg"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-default-sg" }
 }

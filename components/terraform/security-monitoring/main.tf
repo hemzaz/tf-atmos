@@ -1,37 +1,29 @@
 locals {
-  name_prefix = "${var.tags["Environment"]}-${var.tags["Name"] != null ? var.tags["Name"] : "security"}"
+  name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "security")}"
+
+  # GuardDuty protection plans (AWS provider v6 deprecates detector datasources)
+  guardduty_features = {
+    S3_DATA_EVENTS         = var.enable_s3_protection
+    EKS_AUDIT_LOGS         = var.enable_eks_protection
+    EBS_MALWARE_PROTECTION = var.enable_malware_protection
+  }
 }
 
 # GuardDuty Detector
 resource "aws_guardduty_detector" "main" {
   enable = var.enable_guardduty
 
-  datasources {
-    s3_logs {
-      enable = var.enable_s3_protection
-    }
-    kubernetes {
-      audit_logs {
-        enable = var.enable_eks_protection
-      }
-    }
-    malware_protection {
-      scan_ec2_instance_with_findings {
-        ebs_volumes {
-          enable = var.enable_malware_protection
-        }
-      }
-    }
-  }
-
   finding_publishing_frequency = var.guardduty_finding_frequency
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${local.name_prefix}-detector"
-    }
-  )
+  tags = { Name = "${local.name_prefix}-detector" }
+}
+
+resource "aws_guardduty_detector_feature" "main" {
+  for_each = var.enable_guardduty ? local.guardduty_features : {}
+
+  detector_id = aws_guardduty_detector.main.id
+  name        = each.key
+  status      = each.value ? "ENABLED" : "DISABLED"
 }
 
 # GuardDuty Filter for high/critical findings
@@ -55,7 +47,7 @@ resource "aws_guardduty_filter" "high_severity" {
 resource "aws_securityhub_account" "main" {
   count = var.enable_security_hub ? 1 : 0
 
-  enable_default_standards = var.enable_default_standards
+  enable_default_standards  = var.enable_default_standards
   control_finding_generator = "SECURITY_CONTROL"
   auto_enable_controls      = var.auto_enable_controls
 }
@@ -98,12 +90,7 @@ resource "aws_sns_topic" "security_alerts" {
   display_name      = "Security Alerts for ${var.tags["Environment"]}"
   kms_master_key_id = var.kms_key_id
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${local.name_prefix}-alerts"
-    }
-  )
+  tags = { Name = "${local.name_prefix}-alerts" }
 }
 
 resource "aws_sns_topic_policy" "security_alerts" {
@@ -157,8 +144,6 @@ resource "aws_cloudwatch_event_rule" "guardduty_findings" {
       severity = [4, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5, 5.0, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6, 6.0, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 7, 7.0, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 8, 8.0, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9]
     }
   })
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "guardduty_sns" {
@@ -190,8 +175,6 @@ resource "aws_cloudwatch_event_rule" "securityhub_findings" {
       }
     }
   })
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "securityhub_sns" {
@@ -216,8 +199,6 @@ resource "aws_cloudwatch_event_rule" "inspector_findings" {
       severity = ["HIGH", "CRITICAL"]
     }
   })
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "inspector_sns" {
@@ -232,24 +213,32 @@ resource "aws_cloudwatch_event_target" "inspector_sns" {
 resource "aws_lambda_function" "alert_enrichment" {
   count = var.enable_alert_enrichment ? 1 : 0
 
-  filename         = "${path.module}/lambda/alert-enrichment.zip"
-  function_name    = "${local.name_prefix}-alert-enrichment"
-  role             = aws_iam_role.alert_enrichment[0].arn
-  handler          = "index.handler"
-  source_code_hash = filebase64sha256("${path.module}/lambda/alert-enrichment.zip")
+  filename      = "${path.module}/lambda/alert-enrichment.zip"
+  function_name = "${local.name_prefix}-alert-enrichment"
+  role          = aws_iam_role.alert_enrichment[0].arn
+  handler       = "index.handler"
+  # The package is not committed; try() keeps the disabled path valid and the precondition
+  # below reports a missing package when the function is enabled.
+  source_code_hash = try(filebase64sha256("${path.module}/lambda/alert-enrichment.zip"), null)
   runtime          = "python3.11"
   timeout          = 60
   memory_size      = 256
 
   environment {
     variables = {
-      SLACK_WEBHOOK_URL  = var.slack_webhook_url != null ? var.slack_webhook_url : ""
-      PAGERDUTY_API_KEY  = var.pagerduty_integration_key != null ? var.pagerduty_integration_key : ""
-      ENVIRONMENT        = var.tags["Environment"]
+      SLACK_WEBHOOK_URL = var.slack_webhook_url != null ? var.slack_webhook_url : ""
+      PAGERDUTY_API_KEY = var.pagerduty_integration_key != null ? var.pagerduty_integration_key : ""
+      ENVIRONMENT       = var.tags["Environment"]
     }
   }
 
-  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = fileexists("${path.module}/lambda/alert-enrichment.zip")
+      error_message = "Lambda package ${path.module}/lambda/alert-enrichment.zip is missing; build it before enabling this function."
+    }
+  }
 }
 
 # IAM role for alert enrichment Lambda
@@ -270,8 +259,6 @@ resource "aws_iam_role" "alert_enrichment" {
       }
     ]
   })
-
-  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "alert_enrichment_basic" {
@@ -332,8 +319,6 @@ resource "aws_cloudwatch_log_group" "alert_enrichment" {
   name              = "/aws/lambda/${local.name_prefix}-alert-enrichment"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_id
-
-  tags = var.tags
 }
 
 # CloudWatch alarms for security events
@@ -351,8 +336,6 @@ resource "aws_cloudwatch_metric_alarm" "guardduty_high_findings" {
   alarm_description   = "GuardDuty high severity findings detected"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 # Root account usage alarm
@@ -368,8 +351,6 @@ resource "aws_cloudwatch_metric_alarm" "root_account_usage" {
   alarm_description   = "Root account has been used"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 # Unauthorized API calls alarm
@@ -385,8 +366,6 @@ resource "aws_cloudwatch_metric_alarm" "unauthorized_api_calls" {
   alarm_description   = "Unauthorized API calls detected"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 # IAM policy changes alarm
@@ -402,8 +381,6 @@ resource "aws_cloudwatch_metric_alarm" "iam_policy_changes" {
   alarm_description   = "IAM policy changes detected"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 # Security group changes alarm
@@ -419,8 +396,6 @@ resource "aws_cloudwatch_metric_alarm" "security_group_changes" {
   alarm_description   = "Security group changes detected"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 # Data source for current AWS account

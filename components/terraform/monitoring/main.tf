@@ -5,12 +5,7 @@ resource "aws_cloudwatch_log_group" "main" {
   retention_in_days = each.value.retention_days
   kms_key_id        = var.kms_key_id
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}/${each.key}"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}/${each.key}" }
 }
 
 resource "aws_cloudwatch_dashboard" "main" {
@@ -37,12 +32,7 @@ resource "aws_sns_topic" "alarms" {
 
   name = "${var.tags["Environment"]}-alarms"
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-alarms"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-alarms" }
 }
 
 resource "aws_sns_topic_subscription" "alarms_email" {
@@ -69,12 +59,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
 
   dimensions = each.value.dimensions
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-high-cpu"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${each.key}-high-cpu" }
 }
 
 resource "aws_cloudwatch_metric_alarm" "memory_high" {
@@ -93,12 +78,7 @@ resource "aws_cloudwatch_metric_alarm" "memory_high" {
 
   dimensions = each.value.dimensions
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-high-memory"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${each.key}-high-memory" }
 }
 
 resource "aws_cloudwatch_metric_alarm" "db_connections_high" {
@@ -119,12 +99,7 @@ resource "aws_cloudwatch_metric_alarm" "db_connections_high" {
     DBInstanceIdentifier = each.key
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-high-connections"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${each.key}-high-connections" }
 }
 
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
@@ -145,12 +120,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
     FunctionName = each.key
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-errors"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${each.key}-errors" }
 }
 
 # Create a CloudWatch Logs Metric Filter and Alarm for specific log patterns
@@ -182,12 +152,7 @@ resource "aws_cloudwatch_metric_alarm" "log_errors" {
   alarm_description   = "Error logs detected for ${each.key}"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-log-errors"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${each.key}-log-errors" }
 }
 
 # Certificate Monitoring Resources
@@ -209,8 +174,8 @@ locals {
   default_cert_expiry_dates = length(local.certificate_expiry_dates) > 0 ? local.certificate_expiry_dates : ["Not available"]
 }
 
-# Certificate monitoring dashboard
-resource "aws_cloudwatch_dashboard" "certificates" {
+# Certificate monitoring dashboard (renamed from "certificates", which collided with dashboards.tf)
+resource "aws_cloudwatch_dashboard" "certificate_monitoring" {
   count = var.enable_certificate_monitoring ? 1 : 0
 
   dashboard_name = "${local.name_prefix}-certificates"
@@ -255,12 +220,7 @@ resource "aws_cloudwatch_metric_alarm" "certificate_expiry" {
     CertificateArn = each.value.arn
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${local.name_prefix}-cert-expiry-${each.key}"
-    }
-  )
+  tags = { Name = "${local.name_prefix}-cert-expiry-${each.key}" }
 }
 
 # Backend Services Monitoring Dashboard
@@ -271,14 +231,14 @@ resource "aws_cloudwatch_dashboard" "backend_services" {
   dashboard_body = templatefile(
     "${path.module}/templates/backend-dashboard.json.tpl",
     {
-      region            = var.region
-      environment       = var.tags["Environment"]
-      cluster_name      = var.eks_cluster_name
-      api_gateway_name  = var.api_gateway_name
-      lambda_functions  = var.lambda_functions
-      rds_instances     = var.rds_instances
+      region               = var.region
+      environment          = var.tags["Environment"]
+      cluster_name         = var.eks_cluster_name
+      api_gateway_name     = var.api_gateway_name
+      lambda_functions     = var.lambda_functions
+      rds_instances        = var.rds_instances
       elasticache_clusters = var.elasticache_clusters
-      load_balancers    = var.load_balancers
+      load_balancers       = var.load_balancers
     }
   )
 }
@@ -299,11 +259,9 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_latency" {
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
 
   dimensions = {
-    ApiName   = var.api_gateway_name
-    Stage     = each.value
+    ApiName = var.api_gateway_name
+    Stage   = each.value
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
@@ -321,11 +279,9 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
 
   dimensions = {
-    ApiName   = var.api_gateway_name
-    Stage     = each.value
+    ApiName = var.api_gateway_name
+    Stage   = each.value
   }
-
-  tags = var.tags
 }
 
 # EKS Cluster Monitoring
@@ -346,8 +302,6 @@ resource "aws_cloudwatch_metric_alarm" "eks_cluster_failed_requests" {
   dimensions = {
     ClusterName = var.eks_cluster_name
   }
-
-  tags = var.tags
 }
 
 # Container Insights for EKS
@@ -369,8 +323,6 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_cpu_utilization" {
     ClusterName = var.eks_cluster_name
     Namespace   = var.backend_services_namespace
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "eks_pod_memory_utilization" {
@@ -391,8 +343,6 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_memory_utilization" {
     ClusterName = var.eks_cluster_name
     Namespace   = var.backend_services_namespace
   }
-
-  tags = var.tags
 }
 
 # Application Load Balancer Monitoring
@@ -413,8 +363,6 @@ resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
   dimensions = {
     LoadBalancer = each.value
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
@@ -434,8 +382,6 @@ resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
   dimensions = {
     LoadBalancer = each.value
   }
-
-  tags = var.tags
 }
 
 # ElastiCache Monitoring
@@ -456,8 +402,6 @@ resource "aws_cloudwatch_metric_alarm" "elasticache_cpu" {
   dimensions = {
     CacheClusterId = each.value
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "elasticache_memory" {
@@ -477,8 +421,6 @@ resource "aws_cloudwatch_metric_alarm" "elasticache_memory" {
   dimensions = {
     CacheClusterId = each.value
   }
-
-  tags = var.tags
 }
 
 # Synthetic Monitoring
@@ -493,14 +435,14 @@ resource "aws_synthetics_canary" "api_health_check" {
   runtime_version      = "syn-nodejs-puppeteer-6.2"
 
   schedule {
-    expression                = var.synthetics_schedule
-    duration_in_seconds       = 0
+    expression          = var.synthetics_schedule
+    duration_in_seconds = 0
   }
 
   run_config {
-    timeout_in_seconds    = 60
-    memory_in_mb         = 960
-    active_tracing       = var.enable_tracing
+    timeout_in_seconds = 60
+    memory_in_mb       = 960
+    active_tracing     = var.enable_tracing
     environment_variables = {
       API_ENDPOINT = var.api_endpoint
     }
@@ -508,8 +450,6 @@ resource "aws_synthetics_canary" "api_health_check" {
 
   success_retention_period = 31
   failure_retention_period = 31
-
-  tags = var.tags
 }
 
 # IAM role for Synthetics canary
@@ -530,8 +470,6 @@ resource "aws_iam_role" "synthetics_execution" {
       }
     ]
   })
-
-  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "synthetics_execution" {
@@ -556,8 +494,6 @@ resource "aws_xray_sampling_rule" "backend_services" {
   service_type   = "*"
   service_name   = "*"
   resource_arn   = "*"
-
-  tags = var.tags
 }
 
 # Custom metrics for business KPIs
@@ -588,7 +524,5 @@ resource "aws_cloudwatch_metric_alarm" "business_metrics" {
   threshold           = each.value.threshold
   alarm_description   = "Business metric ${each.key}: ${each.value.description}"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
-
-  tags = var.tags
 }
 

@@ -1,6 +1,11 @@
 variable "region" {
   type        = string
   description = "AWS region"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
 }
 
 variable "assume_role_arn" {
@@ -41,7 +46,7 @@ variable "endpoint_type" {
   description = "List of endpoint types for the REST API Gateway, for HTTP API Gateway this is always REGIONAL"
   default     = ["REGIONAL"]
   validation {
-    condition     = can([for type in var.endpoint_type : contains(["REGIONAL", "EDGE", "PRIVATE"], type)])
+    condition     = alltrue([for type in var.endpoint_type : contains(["REGIONAL", "EDGE", "PRIVATE"], type)])
     error_message = "Endpoint type must be one of 'REGIONAL', 'EDGE', or 'PRIVATE'."
   }
 }
@@ -342,7 +347,7 @@ variable "cache_ttl_seconds" {
 
 variable "cache_key_parameters" {
   type        = list(string)
-  description = "List of parameters to include in the cache key"
+  description = "DEPRECATED: ignored. Cache keys are set per integration; aws_api_gateway_method_settings never supported this argument"
   default     = []
 }
 

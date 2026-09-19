@@ -4,7 +4,7 @@
 # Public subnet NACL - More restrictive for internet-facing resources
 resource "aws_network_acl" "public" {
   vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.public[*].id
+  subnet_ids = [for subnet in aws_subnet.public : subnet.id]
 
   # Allow inbound HTTP from internet
   ingress {
@@ -81,7 +81,7 @@ resource "aws_network_acl" "public" {
 # Private subnet NACL - Only allow traffic from within VPC and specific outbound
 resource "aws_network_acl" "private" {
   vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.private[*].id
+  subnet_ids = [for subnet in aws_subnet.private : subnet.id]
 
   # Allow all inbound traffic from VPC CIDR
   ingress {
@@ -166,7 +166,7 @@ resource "aws_network_acl" "private" {
 resource "aws_network_acl" "database" {
   count      = length(var.database_subnets) > 0 ? 1 : 0
   vpc_id     = aws_vpc.main.id
-  subnet_ids = aws_subnet.database[*].id
+  subnet_ids = [for subnet in aws_subnet.database : subnet.id]
 
   # Allow inbound database traffic from private subnets only
   ingress {

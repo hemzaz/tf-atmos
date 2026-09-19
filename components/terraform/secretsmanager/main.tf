@@ -3,8 +3,6 @@
 ##################################################
 
 locals {
-  enabled             = module.this.enabled
-  name_prefix         = "${module.this.environment}-${module.this.name}"
   default_description = "Managed by Terraform"
 
   # Create a map of secrets from the input variables
@@ -20,11 +18,11 @@ locals {
     rotation_automatically   = lookup(v, "rotation_automatically", var.default_rotation_automatically)
     recovery_window_in_days  = lookup(v, "recovery_window_in_days", var.default_recovery_window_in_days)
     generate_random_password = lookup(v, "generate_random_password", false)
-  } if var.secrets_enabled }
+  } if var.enabled && var.secrets_enabled }
 
   # Process secret paths with proper structure
   secrets_with_path = { for k, v in local.defined_secrets : k => merge(v, {
-    full_path = join("/", compact([var.context_name, module.this.environment, trimprefix(trimsuffix(v.path, "/"), "/"), v.name]))
+    full_path = join("/", compact([var.context_name, var.environment, trimprefix(trimsuffix(v.path, "/"), "/"), v.name]))
   }) }
 }
 
@@ -57,7 +55,6 @@ resource "aws_secretsmanager_secret" "this" {
   description             = each.value.description
   kms_key_id              = each.value.kms_key_id
   recovery_window_in_days = each.value.recovery_window_in_days
-  tags                    = module.this.tags
 
   lifecycle {
     # Validate encryption key is specified
@@ -74,7 +71,7 @@ resource "aws_secretsmanager_secret" "this" {
 
     # Add explicit protection for production secrets
     precondition {
-      condition     = !contains(["prod", "production"], lower(module.this.environment)) || each.value.recovery_window_in_days >= 7
+      condition     = !contains(["prod", "production"], lower(var.environment)) || each.value.recovery_window_in_days >= 7
       error_message = "Production secrets must have a recovery window of at least 7 days for protection against accidental deletion."
     }
   }

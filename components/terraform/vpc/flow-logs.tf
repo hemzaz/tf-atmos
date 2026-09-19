@@ -102,9 +102,9 @@ resource "aws_flow_log" "main" {
 
   vpc_id                   = aws_vpc.main.id
   traffic_type             = "ALL"
-  iam_role_arn            = aws_iam_role.flow_logs[0].arn
-  log_destination_type    = "cloud-watch-logs"
-  log_destination         = aws_cloudwatch_log_group.flow_logs[0].arn
+  iam_role_arn             = aws_iam_role.flow_logs[0].arn
+  log_destination_type     = "cloud-watch-logs"
+  log_destination          = aws_cloudwatch_log_group.flow_logs[0].arn
   max_aggregation_interval = var.flow_logs_aggregation_interval
 
   # Custom log format for detailed analysis
@@ -131,11 +131,11 @@ resource "aws_cloudwatch_log_metric_filter" "ssh_access" {
   pattern        = "[version, account, eni, source, destination, srcport, dstport=\"22\", protocol=\"6\", packets, bytes, windowstart, windowend, action, flowlogstatus]"
 
   metric_transformation {
-    name      = "SSHAccessAttempts"
-    namespace = "VPC/FlowLogs"
-    value     = "1"
+    name          = "SSHAccessAttempts"
+    namespace     = "VPC/FlowLogs"
+    value         = "1"
     default_value = "0"
-    unit      = "Count"
+    unit          = "Count"
   }
 }
 
@@ -153,8 +153,6 @@ resource "aws_cloudwatch_metric_alarm" "ssh_access" {
   alarm_description   = "Alert on high SSH access attempts"
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.flow_logs_alarm_actions
-
-  tags = var.tags
 }
 
 # 2. RDP access attempts
@@ -166,11 +164,11 @@ resource "aws_cloudwatch_log_metric_filter" "rdp_access" {
   pattern        = "[version, account, eni, source, destination, srcport, dstport=\"3389\", protocol=\"6\", packets, bytes, windowstart, windowend, action, flowlogstatus]"
 
   metric_transformation {
-    name      = "RDPAccessAttempts"
-    namespace = "VPC/FlowLogs"
-    value     = "1"
+    name          = "RDPAccessAttempts"
+    namespace     = "VPC/FlowLogs"
+    value         = "1"
     default_value = "0"
-    unit      = "Count"
+    unit          = "Count"
   }
 }
 
@@ -188,8 +186,6 @@ resource "aws_cloudwatch_metric_alarm" "rdp_access" {
   alarm_description   = "Alert on high RDP access attempts"
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.flow_logs_alarm_actions
-
-  tags = var.tags
 }
 
 # 3. Rejected connection attempts
@@ -201,11 +197,11 @@ resource "aws_cloudwatch_log_metric_filter" "rejected_connections" {
   pattern        = "[version, account, eni, source, destination, srcport, dstport, protocol, packets, bytes, windowstart, windowend, action=\"REJECT\", flowlogstatus]"
 
   metric_transformation {
-    name      = "RejectedConnections"
-    namespace = "VPC/FlowLogs"
-    value     = "1"
+    name          = "RejectedConnections"
+    namespace     = "VPC/FlowLogs"
+    value         = "1"
     default_value = "0"
-    unit      = "Count"
+    unit          = "Count"
   }
 }
 
@@ -223,8 +219,6 @@ resource "aws_cloudwatch_metric_alarm" "rejected_connections" {
   alarm_description   = "Alert on high number of rejected connections (potential attack)"
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.flow_logs_alarm_actions
-
-  tags = var.tags
 }
 
 # 4. Large data transfers (potential data exfiltration)
@@ -236,11 +230,11 @@ resource "aws_cloudwatch_log_metric_filter" "large_data_transfer" {
   pattern        = "[version, account, eni, source, destination, srcport, dstport, protocol, packets, bytes > 10000000, windowstart, windowend, action, flowlogstatus]"
 
   metric_transformation {
-    name      = "LargeDataTransfers"
-    namespace = "VPC/FlowLogs"
-    value     = "$bytes"
+    name          = "LargeDataTransfers"
+    namespace     = "VPC/FlowLogs"
+    value         = "$bytes"
     default_value = "0"
-    unit      = "Bytes"
+    unit          = "Bytes"
   }
 }
 
@@ -258,8 +252,6 @@ resource "aws_cloudwatch_metric_alarm" "large_data_transfer" {
   alarm_description   = "Alert on large data transfers (potential data exfiltration)"
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.flow_logs_alarm_actions
-
-  tags = var.tags
 }
 
 # 5. Port scanning detection (many different ports from same source)
@@ -269,14 +261,14 @@ resource "aws_cloudwatch_log_metric_filter" "port_scan" {
   name           = "${var.tags["Environment"]}-port-scan-activity"
   log_group_name = aws_cloudwatch_log_group.flow_logs[0].name
   # This pattern detects multiple rejected connection attempts
-  pattern        = "[version, account, eni, source, destination, srcport, dstport, protocol, packets=\"1\", bytes, windowstart, windowend, action=\"REJECT\", flowlogstatus]"
+  pattern = "[version, account, eni, source, destination, srcport, dstport, protocol, packets=\"1\", bytes, windowstart, windowend, action=\"REJECT\", flowlogstatus]"
 
   metric_transformation {
-    name      = "PortScanActivity"
-    namespace = "VPC/FlowLogs"
-    value     = "1"
+    name          = "PortScanActivity"
+    namespace     = "VPC/FlowLogs"
+    value         = "1"
     default_value = "0"
-    unit      = "Count"
+    unit          = "Count"
   }
 }
 
@@ -294,8 +286,6 @@ resource "aws_cloudwatch_metric_alarm" "port_scan" {
   alarm_description   = "Alert on potential port scanning activity"
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.flow_logs_alarm_actions
-
-  tags = var.tags
 }
 
 # Optional: S3 bucket for long-term Flow Logs storage

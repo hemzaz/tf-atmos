@@ -19,8 +19,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
   dimensions = {
     DBInstanceIdentifier = each.value
   }
-
-  tags = var.tags
 }
 
 # RDS CPU Utilization Alarms
@@ -41,8 +39,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
   dimensions = {
     DBInstanceIdentifier = each.value
   }
-
-  tags = var.tags
 }
 
 # Lambda Throttles Alarm
@@ -63,8 +59,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   dimensions = {
     FunctionName = each.value
   }
-
-  tags = var.tags
 }
 
 # Lambda Duration Alarm (timeout warning)
@@ -85,8 +79,6 @@ resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
   dimensions = {
     FunctionName = each.value
   }
-
-  tags = var.tags
 }
 
 # EC2 Instance Status Check Failed
@@ -107,8 +99,6 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
   dimensions = {
     InstanceId = each.value
   }
-
-  tags = var.tags
 }
 
 # EKS Node Not Ready
@@ -129,8 +119,6 @@ resource "aws_cloudwatch_metric_alarm" "eks_node_not_ready" {
   dimensions = {
     ClusterName = var.eks_cluster_name
   }
-
-  tags = var.tags
 }
 
 # API Gateway 4XX Errors
@@ -152,8 +140,6 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_4xx_errors" {
     ApiName = var.api_gateway_name
     Stage   = each.value
   }
-
-  tags = var.tags
 }
 
 # NAT Gateway Packets Drop Count
@@ -174,8 +160,6 @@ resource "aws_cloudwatch_metric_alarm" "nat_gateway_packets_drop" {
   dimensions = {
     NatGatewayId = each.value
   }
-
-  tags = var.tags
 }
 
 # VPC Flow Logs Delivery Failures
@@ -193,8 +177,6 @@ resource "aws_cloudwatch_metric_alarm" "flow_logs_delivery_failure" {
   alarm_description   = "VPC Flow Logs delivery failures detected"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
   treat_missing_data  = "notBreaching"
-
-  tags = var.tags
 }
 
 # Application ELB Target Response Time
@@ -222,8 +204,6 @@ resource "aws_cloudwatch_metric_alarm" "alb_target_response_time_p99" {
       }
     }
   }
-
-  tags = var.tags
 }
 
 # ECS Service CPU Utilization
@@ -245,8 +225,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_cpu" {
     ClusterName = each.value.cluster_name
     ServiceName = each.value.service_name
   }
-
-  tags = var.tags
 }
 
 # ECS Service Memory Utilization
@@ -268,8 +246,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_memory" {
     ClusterName = each.value.cluster_name
     ServiceName = each.value.service_name
   }
-
-  tags = var.tags
 }
 
 # DynamoDB Throttled Requests
@@ -290,8 +266,6 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttled_requests" {
   dimensions = {
     TableName = each.value
   }
-
-  tags = var.tags
 }
 
 # SQS Queue Message Age
@@ -312,8 +286,6 @@ resource "aws_cloudwatch_metric_alarm" "sqs_message_age" {
   dimensions = {
     QueueName = each.value
   }
-
-  tags = var.tags
 }
 
 # Anomaly Detection Based Alarms
@@ -344,6 +316,4 @@ resource "aws_cloudwatch_metric_alarm" "anomaly_detection" {
       stat        = "Average"
     }
   }
-
-  tags = var.tags
 }

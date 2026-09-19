@@ -120,7 +120,7 @@ resource "aws_iam_role_policy" "secrets_rotation" {
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.tags["Environment"]}-${var.identifier}-rotation:*"
+        Resource = "arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.tags["Environment"]}-${var.identifier}-rotation:*"
       },
       {
         Effect = "Allow"
@@ -143,10 +143,10 @@ resource "aws_lambda_function" "secrets_rotation" {
 
   filename         = data.archive_file.rotation_lambda[0].output_path
   function_name    = "${var.tags["Environment"]}-${var.identifier}-rotation"
-  role            = aws_iam_role.secrets_rotation[0].arn
-  handler         = "index.handler"
-  runtime         = "python3.11"
-  timeout         = 300
+  role             = aws_iam_role.secrets_rotation[0].arn
+  handler          = "index.handler"
+  runtime          = "python3.11"
+  timeout          = 300
   source_code_hash = data.archive_file.rotation_lambda[0].output_base64sha256
 
   vpc_config {
@@ -156,7 +156,7 @@ resource "aws_lambda_function" "secrets_rotation" {
 
   environment {
     variables = {
-      SECRETS_MANAGER_ENDPOINT = "https://secretsmanager.${data.aws_region.current.name}.amazonaws.com"
+      SECRETS_MANAGER_ENDPOINT = "https://secretsmanager.${data.aws_region.current.region}.amazonaws.com"
     }
   }
 
@@ -247,8 +247,6 @@ resource "aws_cloudwatch_metric_alarm" "rotation_failed" {
   dimensions = {
     FunctionName = aws_lambda_function.secrets_rotation[0].function_name
   }
-
-  tags = var.tags
 }
 
 # CloudWatch Alarm for rotation duration
@@ -270,8 +268,6 @@ resource "aws_cloudwatch_metric_alarm" "rotation_duration" {
   dimensions = {
     FunctionName = aws_lambda_function.secrets_rotation[0].function_name
   }
-
-  tags = var.tags
 }
 
 # SNS topic for rotation notifications (optional)
@@ -320,8 +316,6 @@ resource "aws_cloudwatch_event_rule" "rotation_success" {
       }
     }
   })
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "rotation_success" {

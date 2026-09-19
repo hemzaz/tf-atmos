@@ -6,12 +6,7 @@ resource "aws_ecs_cluster" "main" {
     value = var.enable_container_insights ? "enabled" : "disabled"
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-ecs-cluster"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-ecs-cluster" }
 }
 
 resource "aws_ecs_capacity_provider" "main" {

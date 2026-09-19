@@ -1,14 +1,18 @@
 provider "aws" {
   region = var.region
+
+  default_tags {
+    tags = var.tags
+  }
 }
 
-terraform {
-  required_version = ">= 1.9.0"
+# Destination region for cross-region backup copies; falls back to the primary
+# region when replication is disabled so the provider can always be configured
+provider "aws" {
+  alias  = "replica"
+  region = coalesce(var.replica_region, var.region)
 
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.74.0"
-    }
+  default_tags {
+    tags = var.tags
   }
 }

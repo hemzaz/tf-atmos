@@ -40,7 +40,7 @@ locals {
       name  = "checkpoint_completion_target"
       value = tostring(var.checkpoint_completion_target)
     }
-  } : {
+    } : {
     # MySQL performance parameters
     innodb_buffer_pool_size = {
       name  = "innodb_buffer_pool_size"
@@ -78,12 +78,7 @@ resource "aws_db_subnet_group" "main" {
   description = "Subnet group for ${var.identifier} RDS instance"
   subnet_ids  = var.subnet_ids
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-subnet-group"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-subnet-group" }
 }
 
 # Enhanced security group with detailed rules
@@ -149,12 +144,7 @@ resource "aws_security_group" "rds" {
     }
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-sg"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-sg" }
 
   lifecycle {
     create_before_destroy = true
@@ -193,12 +183,7 @@ resource "aws_security_group" "rds_proxy" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-proxy-sg"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-proxy-sg" }
 
   lifecycle {
     create_before_destroy = true
@@ -212,52 +197,57 @@ resource "aws_db_parameter_group" "main" {
 
   # Performance optimization parameters
   dynamic "parameter" {
-    for_each = merge(var.parameters, local.performance_parameters)
+    for_each = merge({ for p in var.parameters : p.name => p }, local.performance_parameters)
     content {
       name  = parameter.value.name
       value = parameter.value.value
     }
   }
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-pg"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-pg" }
 }
 
 # Connection pooling with RDS Proxy
 resource "aws_db_proxy" "main" {
   count = var.enable_rds_proxy ? 1 : 0
 
-  name                   = "${var.tags["Environment"]}-${var.identifier}-proxy"
-  engine_family         = var.engine == "postgres" ? "POSTGRESQL" : "MYSQL"
+  name          = "${var.tags["Environment"]}-${var.identifier}-proxy"
+  engine_family = var.engine == "postgres" ? "POSTGRESQL" : "MYSQL"
   auth {
     auth_scheme = "SECRETS"
     secret_arn  = aws_secretsmanager_secret.db_password.arn
   }
   role_arn               = aws_iam_role.rds_proxy[0].arn
   vpc_subnet_ids         = var.subnet_ids
+  vpc_security_group_ids = [aws_security_group.rds_proxy[0].id]
   require_tls            = var.proxy_require_tls
   idle_client_timeout    = var.proxy_idle_client_timeout
-  max_connections_percent = var.proxy_max_connections_percent
-  max_idle_connections_percent = var.proxy_max_idle_connections_percent
 
-  target {
-    db_instance_identifier = aws_db_instance.main.id
-  }
-
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-proxy"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-proxy" }
 
   depends_on = [
     aws_iam_role_policy_attachment.rds_proxy
   ]
+}
+
+# Connection pool settings live on the proxy's default target group
+resource "aws_db_proxy_default_target_group" "main" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  db_proxy_name = aws_db_proxy.main[0].name
+
+  connection_pool_config {
+    max_connections_percent      = var.proxy_max_connections_percent
+    max_idle_connections_percent = var.proxy_max_idle_connections_percent
+  }
+}
+
+resource "aws_db_proxy_target" "main" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  db_proxy_name          = aws_db_proxy.main[0].name
+  target_group_name      = aws_db_proxy_default_target_group.main[0].name
+  db_instance_identifier = aws_db_instance.main.identifier
 }
 
 # IAM role for RDS Proxy
@@ -279,12 +269,7 @@ resource "aws_iam_role" "rds_proxy" {
     ]
   })
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-rds-proxy-role"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-rds-proxy-role" }
 }
 
 resource "aws_iam_policy" "rds_proxy" {
@@ -306,8 +291,6 @@ resource "aws_iam_policy" "rds_proxy" {
       }
     ]
   })
-
-  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "rds_proxy" {
@@ -317,8 +300,10 @@ resource "aws_iam_role_policy_attachment" "rds_proxy" {
   policy_arn = aws_iam_policy.rds_proxy[0].arn
 }
 
-resource "random_password" "password" {
-  length  = 16
+# Ephemeral: the password is generated per run and only sent to AWS through write-only
+# arguments, so it never lands in plan or state. Bump password_version to rotate it.
+ephemeral "random_password" "password" {
+  length  = 32
   special = false
 }
 
@@ -326,24 +311,20 @@ resource "aws_secretsmanager_secret" "db_password" {
   name        = "${var.tags["Environment"]}/${var.identifier}/password"
   description = "Password for ${var.identifier} RDS instance"
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-secret"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-secret" }
 }
 
 resource "aws_secretsmanager_secret_version" "db_password" {
   secret_id = aws_secretsmanager_secret.db_password.id
-  secret_string = jsonencode({
+  secret_string_wo = jsonencode({
     username = var.username
-    password = random_password.password.result
+    password = ephemeral.random_password.password.result
     engine   = var.engine
     host     = aws_db_instance.main.address
     port     = var.port
     dbname   = var.db_name
   })
+  secret_string_wo_version = var.password_version
 }
 
 resource "aws_iam_role" "monitoring" {
@@ -364,12 +345,7 @@ resource "aws_iam_role" "monitoring" {
     ]
   })
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-${var.identifier}-monitoring-role"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-${var.identifier}-monitoring-role" }
 }
 
 resource "aws_iam_role_policy_attachment" "monitoring" {
@@ -383,13 +359,13 @@ resource "aws_iam_role_policy_attachment" "monitoring" {
 resource "aws_db_instance" "read_replica" {
   count = var.create_read_replica ? 1 : 0
 
-  identifier                  = "${var.tags["Environment"]}-${var.identifier}-read-replica"
-  replicate_source_db         = aws_db_instance.main.id
-  instance_class              = var.read_replica_instance_class != null ? var.read_replica_instance_class : var.instance_class
-  monitoring_interval         = var.monitoring_interval
-  monitoring_role_arn         = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
+  identifier                   = "${var.tags["Environment"]}-${var.identifier}-read-replica"
+  replicate_source_db          = aws_db_instance.main.id
+  instance_class               = var.read_replica_instance_class != null ? var.read_replica_instance_class : var.instance_class
+  monitoring_interval          = var.monitoring_interval
+  monitoring_role_arn          = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
   performance_insights_enabled = var.performance_insights_enabled
-  skip_final_snapshot         = true
+  skip_final_snapshot          = true
 
   tags = merge(
     var.tags,
@@ -401,50 +377,48 @@ resource "aws_db_instance" "read_replica" {
 }
 
 resource "aws_db_instance" "main" {
-  identifier                   = "${var.tags["Environment"]}-${var.identifier}"
-  engine                       = var.engine
-  engine_version               = var.engine_version
-  instance_class               = var.instance_class
-  allocated_storage            = var.allocated_storage
-  max_allocated_storage        = var.max_allocated_storage
-  storage_type                 = var.storage_type
-  storage_encrypted            = var.storage_encrypted
-  kms_key_id                   = var.kms_key_id
-  username                     = var.username
-  password                     = random_password.password.result
-  port                         = var.port
-  db_name                      = var.db_name
-  parameter_group_name         = aws_db_parameter_group.main.name
-  db_subnet_group_name         = aws_db_subnet_group.main.name
-  vpc_security_group_ids       = [aws_security_group.rds.id]
-  availability_zone            = var.availability_zone
-  multi_az                     = var.multi_az
-  publicly_accessible          = var.publicly_accessible
-  allow_major_version_upgrade  = var.allow_major_version_upgrade
-  auto_minor_version_upgrade   = var.auto_minor_version_upgrade
-  backup_retention_period      = var.backup_retention_period
-  backup_window                = var.backup_window
-  maintenance_window           = var.maintenance_window
-  skip_final_snapshot          = var.skip_final_snapshot
-  final_snapshot_identifier    = var.skip_final_snapshot ? null : "${var.tags["Environment"]}-${var.identifier}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
-  copy_tags_to_snapshot        = var.copy_tags_to_snapshot
-  monitoring_interval          = var.monitoring_interval
-  monitoring_role_arn          = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
-  performance_insights_enabled = var.performance_insights_enabled
+  identifier                            = "${var.tags["Environment"]}-${var.identifier}"
+  engine                                = var.engine
+  engine_version                        = var.engine_version
+  instance_class                        = var.instance_class
+  allocated_storage                     = var.allocated_storage
+  max_allocated_storage                 = var.max_allocated_storage
+  storage_type                          = var.storage_type
+  storage_encrypted                     = var.storage_encrypted
+  kms_key_id                            = var.kms_key_id
+  username                              = var.username
+  password_wo                           = ephemeral.random_password.password.result
+  password_wo_version                   = var.password_version
+  port                                  = var.port
+  db_name                               = var.db_name
+  parameter_group_name                  = aws_db_parameter_group.main.name
+  db_subnet_group_name                  = aws_db_subnet_group.main.name
+  vpc_security_group_ids                = [aws_security_group.rds.id]
+  availability_zone                     = var.availability_zone
+  multi_az                              = var.multi_az
+  publicly_accessible                   = var.publicly_accessible
+  allow_major_version_upgrade           = var.allow_major_version_upgrade
+  auto_minor_version_upgrade            = var.auto_minor_version_upgrade
+  backup_retention_period               = var.backup_retention_period
+  backup_window                         = var.backup_window
+  maintenance_window                    = var.maintenance_window
+  skip_final_snapshot                   = var.skip_final_snapshot
+  final_snapshot_identifier             = var.skip_final_snapshot ? null : "${var.tags["Environment"]}-${var.identifier}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+  copy_tags_to_snapshot                 = var.copy_tags_to_snapshot
+  monitoring_interval                   = var.monitoring_interval
+  monitoring_role_arn                   = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
+  performance_insights_enabled          = var.performance_insights_enabled
   performance_insights_retention_period = var.performance_insights_retention_period
-  deletion_protection          = var.deletion_protection
+  # prevent_destroy only accepts literals, so var.prevent_destroy maps to deletion protection
+  deletion_protection = var.deletion_protection || var.prevent_destroy
 
   # Storage performance optimizations
-  iops                         = var.storage_type == "io1" || var.storage_type == "gp3" ? var.iops : null
-  storage_throughput           = var.storage_type == "gp3" ? var.storage_throughput : null
+  iops               = var.storage_type == "io1" || var.storage_type == "gp3" ? var.iops : null
+  storage_throughput = var.storage_type == "gp3" ? var.storage_throughput : null
 
   # Enhanced monitoring and logging
   enabled_cloudwatch_logs_exports = var.enabled_cloudwatch_logs_exports
 
-  lifecycle {
-    prevent_destroy = var.prevent_destroy
-    ignore_changes  = [password] # Ignore password changes to prevent unnecessary updates
-  }
 
   depends_on = [
     aws_iam_role_policy_attachment.monitoring
@@ -477,8 +451,6 @@ resource "aws_cloudwatch_metric_alarm" "database_cpu" {
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.main.id
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "database_connections" {
@@ -498,8 +470,6 @@ resource "aws_cloudwatch_metric_alarm" "database_connections" {
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.main.id
   }
-
-  tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "database_free_storage" {
@@ -519,8 +489,6 @@ resource "aws_cloudwatch_metric_alarm" "database_free_storage" {
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.main.id
   }
-
-  tags = var.tags
 }
 
 # Automated backup verification
@@ -541,8 +509,6 @@ resource "aws_cloudwatch_metric_alarm" "backup_retention" {
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.main.id
   }
-
-  tags = var.tags
 }
 
 

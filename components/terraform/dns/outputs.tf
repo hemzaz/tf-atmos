@@ -2,7 +2,7 @@ output "zone_ids" {
   description = "Map of zone names to their IDs"
   value = merge(
     var.create_root_zone ? { "${var.root_domain}" = aws_route53_zone.root_zone[0].zone_id } : {},
-    { for k, zone in aws_route53_zone.zones : k => zone.zone_id }
+    { for k, zone in local.managed_zones : k => zone.zone_id }
   )
 }
 
@@ -10,7 +10,7 @@ output "zone_name_servers" {
   description = "Map of zone names to their name servers"
   value = merge(
     var.create_root_zone ? { "${var.root_domain}" = aws_route53_zone.root_zone[0].name_servers } : {},
-    { for k, zone in aws_route53_zone.zones : k => zone.name_servers }
+    { for k, zone in local.managed_zones : k => zone.name_servers }
   )
 }
 
@@ -55,7 +55,7 @@ output "root_domain" {
 output "domain_validation_options" {
   description = "Domain validation options for certificates if ACM is integrated"
   value = {
-    for k, zone in aws_route53_zone.zones : k => {
+    for k, zone in local.managed_zones : k => {
       zone_id = zone.zone_id
       name    = zone.name
     }

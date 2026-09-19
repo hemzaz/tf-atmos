@@ -2,18 +2,13 @@ resource "aws_vpn_gateway" "main" {
   count  = var.enable_vpn_gateway ? 1 : 0
   vpc_id = aws_vpc.main.id
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-vpn-gateway"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-vpn-gateway" }
 }
 
 resource "aws_vpn_gateway_route_propagation" "private" {
-  count          = var.enable_vpn_gateway ? length(var.private_subnets) : 0
+  for_each       = var.enable_vpn_gateway ? aws_route_table.private : {}
   vpn_gateway_id = aws_vpn_gateway.main[0].id
-  route_table_id = aws_route_table.private[count.index].id
+  route_table_id = each.value.id
 }
 
 resource "aws_vpn_gateway_route_propagation" "public" {

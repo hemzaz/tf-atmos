@@ -1,17 +1,6 @@
 # Cost Optimization Module - Automated Infrastructure Cost Management
 # This module implements automated cost optimization strategies across all environments
 
-terraform {
-  required_version = ">= 1.3.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 5.0"
-    }
-  }
-}
-
 locals {
   name_prefix = "${var.namespace}-${var.environment}-${var.stage}"
 
@@ -326,6 +315,13 @@ resource "aws_lambda_function" "savings_analyzer" {
   source_code_hash = data.archive_file.savings_analyzer_lambda.output_base64sha256
 
   tags = local.common_tags
+
+  lifecycle {
+    precondition {
+      condition     = fileexists("${path.module}/lambda/savings_analyzer.py")
+      error_message = "Lambda source ${path.module}/lambda/savings_analyzer.py is missing."
+    }
+  }
 }
 
 data "archive_file" "savings_analyzer_lambda" {
@@ -333,7 +329,8 @@ data "archive_file" "savings_analyzer_lambda" {
   output_path = "${path.module}/savings_analyzer_lambda.zip"
 
   source {
-    content  = file("${path.module}/lambda/savings_analyzer.py")
+    # Source is not committed; the function precondition reports it instead of failing validation
+    content  = try(file("${path.module}/lambda/savings_analyzer.py"), "")
     filename = "index.py"
   }
 }
@@ -463,6 +460,13 @@ resource "aws_lambda_function" "resource_cleanup" {
   source_code_hash = data.archive_file.cleanup_lambda.output_base64sha256
 
   tags = local.common_tags
+
+  lifecycle {
+    precondition {
+      condition     = fileexists("${path.module}/lambda/cleanup.py")
+      error_message = "Lambda source ${path.module}/lambda/cleanup.py is missing."
+    }
+  }
 }
 
 data "archive_file" "cleanup_lambda" {
@@ -470,7 +474,8 @@ data "archive_file" "cleanup_lambda" {
   output_path = "${path.module}/cleanup_lambda.zip"
 
   source {
-    content  = file("${path.module}/lambda/cleanup.py")
+    # Source is not committed; the function precondition reports it instead of failing validation
+    content  = try(file("${path.module}/lambda/cleanup.py"), "")
     filename = "index.py"
   }
 }

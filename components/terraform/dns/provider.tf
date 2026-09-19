@@ -1,14 +1,32 @@
 provider "aws" {
   region = var.region
+
+  dynamic "assume_role" {
+    for_each = var.assume_role_arn != null ? [var.assume_role_arn] : []
+    content {
+      role_arn = assume_role.value
+    }
+  }
+
+  default_tags {
+    tags = var.tags
+  }
 }
 
-terraform {
-  required_version = ">= 1.9.0"
+# Account hosting public zones when multi_account_dns_delegation is enabled;
+# falls back to the default credentials when no role is given
+provider "aws" {
+  alias  = "dns_account"
+  region = var.region
 
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.74.0"
+  dynamic "assume_role" {
+    for_each = var.dns_account_assume_role_arn != null ? [var.dns_account_assume_role_arn] : []
+    content {
+      role_arn = assume_role.value
     }
+  }
+
+  default_tags {
+    tags = var.tags
   }
 }

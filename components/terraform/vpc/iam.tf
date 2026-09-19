@@ -1,6 +1,8 @@
 # vpc/iam.tf
 
 resource "aws_iam_role" "vpc_management_role" {
+  count = var.create_vpc_iam_role ? 1 : 0
+
   name = "${var.tags["Environment"]}-vpc-management-role"
 
   assume_role_policy = jsonencode({
@@ -16,29 +18,23 @@ resource "aws_iam_role" "vpc_management_role" {
     ]
   })
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-vpc-management-role"
-    }
-  )
+  tags = { Name = "${var.tags["Environment"]}-vpc-management-role" }
 }
 
 resource "aws_iam_role_policy" "vpc_management_policy" {
+  count = var.create_vpc_iam_role ? 1 : 0
+
   name = "${var.tags["Environment"]}-vpc-management-policy"
-  role = aws_iam_role.vpc_management_role.id
+  role = aws_iam_role.vpc_management_role[0].id
 
   policy = file("${path.module}/policies/vpc-policies.json")
 }
 
 resource "aws_iam_instance_profile" "vpc_management_profile" {
-  name = "${var.tags["Environment"]}-vpc-management-profile"
-  role = aws_iam_role.vpc_management_role.name
+  count = var.create_vpc_iam_role ? 1 : 0
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.tags["Environment"]}-vpc-management-profile"
-    }
-  )
+  name = "${var.tags["Environment"]}-vpc-management-profile"
+  role = aws_iam_role.vpc_management_role[0].name
+
+  tags = { Name = "${var.tags["Environment"]}-vpc-management-profile" }
 }

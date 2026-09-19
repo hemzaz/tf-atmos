@@ -1,6 +1,11 @@
 variable "region" {
   type        = string
   description = "AWS region"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
+    error_message = "The region must be a valid AWS region name (e.g., us-east-1, eu-west-1)."
+  }
 }
 
 variable "assume_role_arn" {
@@ -18,6 +23,11 @@ variable "dns_account_assume_role_arn" {
 variable "root_domain" {
   type        = string
   description = "The root domain name (e.g., example.com)"
+
+  validation {
+    condition     = can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}\\.?$", var.root_domain))
+    error_message = "root_domain must be a valid lowercase DNS domain name (e.g., example.com)."
+  }
 }
 
 variable "create_root_zone" {
@@ -67,6 +77,13 @@ variable "records" {
   }))
   description = "Map of Route53 records to create"
   default     = {}
+
+  validation {
+    condition = alltrue([
+      for r in var.records : contains(["A", "AAAA", "CAA", "CNAME", "DS", "HTTPS", "MX", "NAPTR", "NS", "PTR", "SOA", "SPF", "SRV", "SSHFP", "SVCB", "TLSA", "TXT"], r.type)
+    ])
+    error_message = "Each record type must be a valid Route53 record type (A, AAAA, CNAME, MX, TXT, ...)."
+  }
 }
 
 variable "health_checks" {
@@ -89,6 +106,13 @@ variable "health_checks" {
   }))
   description = "Map of Route53 health checks to create"
   default     = {}
+
+  validation {
+    condition = alltrue([
+      for hc in var.health_checks : contains(["HTTP", "HTTPS", "HTTP_STR_MATCH", "HTTPS_STR_MATCH", "TCP", "CALCULATED", "CLOUDWATCH_METRIC", "RECOVERY_CONTROL"], hc.type)
+    ])
+    error_message = "Each health check type must be one of HTTP, HTTPS, HTTP_STR_MATCH, HTTPS_STR_MATCH, TCP, CALCULATED, CLOUDWATCH_METRIC, RECOVERY_CONTROL."
+  }
 }
 
 variable "delegation_sets" {
@@ -105,7 +129,7 @@ variable "traffic_policies" {
     name            = string
     comment         = optional(string)
     document        = string
-    version_comment = optional(string)
+    version_comment = optional(string) # DEPRECATED: unused, the provider has no traffic policy version resource
   }))
   description = "Map of Route53 traffic policies"
   default     = {}
