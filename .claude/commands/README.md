@@ -52,13 +52,13 @@ make status          # Infrastructure status
 make validate        # Validate configurations
 make plan           # Preview changes (safe)
 make apply          # Apply changes (with confirmation)
-gaia quick-start    # Interactive getting started guide
+./scripts/quickstart.sh # Interactive getting started guide
 ```
 
 ### Emergency Commands
 ```bash
 make doctor                    # Diagnose issues
-gaia troubleshoot             # Get help with problems
+make api-health                # Check Atmos and its configuration load
 make dev-reset               # Reset development environment
 aws sts get-caller-identity  # Check AWS credentials
 ```
@@ -75,7 +75,6 @@ aws sts get-caller-identity  # Check AWS credentials
 
 These commands integrate with:
 - **Makefile** - Main task runner with shortcuts
-- **Gaia CLI** - Enhanced Python wrapper for Atmos
 - **Atmos** - Core infrastructure orchestration tool
 - **Terraform** - Infrastructure as code engine
 
@@ -85,7 +84,7 @@ You can customize these commands by:
 1. Editing the markdown files directly
 2. Adding new command files following the same structure
 3. Updating the main Makefile to include new shortcuts
-4. Extending the Gaia CLI with new functions
+4. Adding new Atmos workflows in `workflows/*.yaml`
 
 ## Support
 

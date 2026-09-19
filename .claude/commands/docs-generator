@@ -18,7 +18,6 @@ generate_docs() {
             generate_component_docs
             generate_workflow_docs
             generate_runbooks
-            generate_api_docs
             generate_cost_docs
             generate_troubleshooting_guides
             ;;
@@ -30,9 +29,6 @@ generate_docs() {
             ;;
         "runbooks")
             generate_runbooks
-            ;;
-        "api")
-            generate_api_docs
             ;;
         "costs")
             generate_cost_docs
@@ -55,7 +51,7 @@ generate_component_docs() {
         local description=$(grep -r "description.*=" "$component/variables.tf" | head -1 | sed 's/.*description.*=.*"\(.*\)".*/\1/')
         local version=$(git log --oneline -1 --pretty=format:"%h" -- "$component")
         local last_updated=$(git log -1 --pretty=format:"%ci" -- "$component")
-        local cost_estimate=$(gaia cost estimate --component "$component_name" --format json 2>/dev/null | jq -r '.monthly_estimate // "Not available"')
+        local cost_estimate="Not available"
         
         # Get real usage data
         local usage_count=$(atmos describe affected --ref HEAD~10 2>/dev/null | grep -c "$component_name" || echo "0")
@@ -199,9 +195,6 @@ $description
 \`\`\`bash
 # Execute workflow
 atmos workflow $workflow_name $(get_workflow_params "$workflow")
-
-# Execute with Gaia
-gaia workflow $workflow_name $(get_workflow_params "$workflow")
 \`\`\`
 
 ## Parameters
@@ -216,7 +209,7 @@ $(parse_workflow_steps "$workflow")
 
 - **Execution History**: https://platform.company.com/workflows/$workflow_name
 - **Success Rate**: https://grafana.platform.company.com/d/workflows
-- **Logs**: \`gaia task list --workflow $workflow_name\`
+- **Logs**: \`ls -la logs/\`
 
 ## Examples
 
@@ -271,23 +264,6 @@ $(get_runbook_prevention "$runbook")
 *This runbook is interactive and tested weekly*
 EOF
     done
-}
-
-# Generate API documentation
-generate_api_docs() {
-    echo "🔌 Generating API documentation..."
-    
-    # Extract OpenAPI specs from Gaia
-    gaia api spec --format openapi > docs/api/platform-api.yaml
-    
-    # Generate interactive docs
-    swagger-codegen generate \
-        -i docs/api/platform-api.yaml \
-        -l html2 \
-        -o docs/api/
-    
-    # Create SDK examples
-    create_sdk_examples
 }
 
 # Helper functions

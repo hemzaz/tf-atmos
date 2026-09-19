@@ -20,8 +20,8 @@ make plan
 # Using make
 make plan TENANT=fnx ACCOUNT=dev ENVIRONMENT=testenv-01
 
-# Using Gaia CLI
-gaia workflow plan-environment --tenant fnx --account dev --environment testenv-01
+# Using Atmos directly
+atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 ```
 
 ### Plan specific component

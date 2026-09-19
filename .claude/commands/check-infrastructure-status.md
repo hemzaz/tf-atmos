@@ -16,22 +16,19 @@ Get a comprehensive overview of your current infrastructure state and recent act
 make status
 ```
 
-### Enhanced status with Gaia
+### Detailed stack status with Atmos
 ```bash
 # General status
-gaia status
+atmos list components -s fnx-dev-testenv-01
 
-# Status for specific environment
-gaia status --tenant fnx --account dev --environment testenv-01
+# Full stack description for a specific environment
+atmos describe stacks -s fnx-dev-testenv-01
 ```
 
 ### System diagnostics
 ```bash
 # Full system health check
 make doctor
-
-# Or with Gaia CLI
-gaia doctor
 ```
 
 ### List available environments
@@ -39,7 +36,7 @@ gaia doctor
 make list-stacks
 
 # Or with friendly names
-gaia list stacks
+./scripts/list_stacks.sh
 ```
 
 ### View recent activity
@@ -94,6 +91,6 @@ Components you might see:
 
 ### Getting help
 - `make help` - Show all available commands
-- `gaia --help` - Show Gaia CLI options
+- `atmos --help` - Show Atmos CLI options
 - `make doctor` - Run comprehensive diagnostics
 - Check `QUICK_START.md` for common tasks

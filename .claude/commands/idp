@@ -101,7 +101,6 @@ show_platform_status() {
     # Core services status
     echo "🏥 Core Services Health:"
     check_service_health "Atmos CLI" "atmos --version"
-    check_service_health "Gaia CLI" "gaia --version"  
     check_service_health "Terraform" "terraform version"
     check_service_health "Kubectl" "kubectl version --client"
     check_service_health "AWS CLI" "aws --version"

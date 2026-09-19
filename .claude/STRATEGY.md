@@ -62,19 +62,11 @@ Phase 1: Fix → Phase 2: Simplify → Phase 3: Transform → Phase 4: Optimize
 - Functional Python CLI with core operations
 - Infrastructure capable of handling production workloads
 
-### Goal 2: Clean Gaia CLI (Months 2-3)
-**Eliminate 70% complexity while preserving 100% unique value**
+### Goal 2: Clean Gaia CLI (Months 2-3) — Complete
 
-**Simplification Strategy:**
-- **Keep (500 lines)**: Certificate management, environment templating, dependency resolution, UX utilities
-- **Eliminate (3,000+ lines)**: Terraform operation wrappers, async processing, custom state management
-- **Migrate**: Basic operations to native Atmos workflows
-
-**Success Criteria:**
-- 75% code reduction
-- Maintained certificate automation capabilities
-- Native Atmos workflows for basic operations
-- Simplified architecture with clear value proposition
+The Gaia CLI wrapper was a one-time exploration and has since been removed
+entirely rather than simplified. Its operations now go through native Atmos
+workflows and the `Makefile` targets in this repository.
 
 ### Goal 3: Evolve to Full IDP (Months 4-12)
 **Transform from infrastructure tool to developer productivity platform**
@@ -173,7 +165,7 @@ CLI → Atmos Workflows → Terraform Components → AWS Resources
 │ Developer Experience Layer                   │
 │ • Backstage Portal                          │
 │ • Platform APIs (FastAPI/GraphQL)          │
-│ • Simplified Gaia CLI                      │
+│ • Atmos CLI                                │
 └─────────────────────────────────────────────┘
                        │
 ┌─────────────────────────────────────────────┐
