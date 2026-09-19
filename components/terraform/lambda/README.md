@@ -22,7 +22,7 @@ fnx-staging-staging-01, fnx-prod-production) — zero instances. Add a
 | `subnet_ids` set → requires `vpc_endpoint_prefix_list_ids` | validated |
 | `package_type` | `Zip` or `Image` only (validated) |
 | `architectures` | `x86_64`/`arm64` only (validated) |
-| `tags` | plain `map(string)`, default `{}` — no required-key validation (unlike other components here) |
+| `tags` | required; must include a non-empty `Environment` (validated), used in every resource name |
 | out: `function_arn`, `function_invoke_arn`, `role_arn`, `alias_arn` | — |
 
 ## Dependencies / gotchas

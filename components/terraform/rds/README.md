@@ -23,6 +23,7 @@ working usage pattern (`web-application/rds`) exists only in
 | `vpc_id`, `subnet_ids`, `identifier`, `engine`, `instance_class` (required) | `vpc_id` must match `^vpc-[a-f0-9]+$` |
 | `storage_encrypted` | validation forces `true` always |
 | `multi_az`, `deletion_protection`, `publicly_accessible=false`, `backup_retention_period>=7` | forced when `environment = "prod"` |
+| `tags` | required; must include a non-empty `Environment` (validated) |
 | `monitoring_interval` | one of 0/1/5/10/15/30/60 (validated) |
 | out: `instance_endpoint`, `password_secret_arn`, `security_group_id` | — |
 
@@ -31,10 +32,11 @@ working usage pattern (`web-application/rds`) exists only in
 - `dependencies.components`: depends on `vpc/main` (from the abstract stanza — never exercised by a real deploy).
 - Prod-only hard gates: `multi_az`, `deletion_protection`, `publicly_accessible`, `backup_retention_period` all fail plan/apply if misconfigured when `environment = "prod"`.
 - `storage_encrypted` is validated to always be `true` — cannot be disabled.
+- `idp-platform` calls this component as a module (`source = "../rds"`), so variable changes here must be mirrored there.
 
 ## Usage
 
 No real instance to plan today. If instantiated (e.g. copying `web-application/rds`):
 ```
-atmos terraform plan rds -s fnx-dev-testenv-01
+atmos terraform plan rds/main -s fnx-dev-testenv-01   # after adding an rds/main instance
 ```

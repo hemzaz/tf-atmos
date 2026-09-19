@@ -19,7 +19,7 @@ this applies.
 |---|---|
 | `vpc_id` (required) | — |
 | `security_groups` (map, default `{}`) | keys become SG names; each value can set `ingress_rules`/`egress_rules`/`description`/`tags` |
-| `tags["Environment"]` | used to build SG name `${Environment}-${key}-sg`; missing key errors at apply, not validated |
+| `tags` | required; must include a non-empty `Environment` (validated), used in SG names `${Environment}-${key}-sg` |
 | `enforce_no_public_ingress` | when `true`, apply fails if any rule allows `0.0.0.0/0` ingress |
 | `log_retention_days` | must be a valid CloudWatch retention value (validated) |
 | out: `security_group_ids`, `security_group_arns` (both maps keyed by SG name) | — |
@@ -27,7 +27,7 @@ this applies.
 ## Dependencies / gotchas
 
 - No `dependencies.components` entries exist anywhere (component is unused).
-- `tags` has no required-key validation, but the SG name/`Name` tag interpolate `var.tags["Environment"]` directly — omitting it fails at plan/apply, not with a clean validation error.
+- `tags` without a non-empty `Environment` fails validation before any plan.
 - `enforce_no_public_ingress = true` is a hard gate via `terraform_data` precondition, not just a warning.
 
 ## Usage
