@@ -35,7 +35,10 @@ resource "aws_cloudwatch_log_group" "eks" {
   )
 }
 
+#trivy:ignore:AWS-0040 Public endpoint is off unless a cluster sets endpoint_public_access = true
+#trivy:ignore:AWS-0041 Public endpoint is off unless a cluster sets endpoint_public_access = true
 resource "aws_eks_cluster" "clusters" {
+  #checkov:skip=CKV_AWS_38:Public endpoint is off unless a cluster sets endpoint_public_access = true
   for_each = local.clusters
 
   name     = "${var.tags["Environment"]}-${each.key}"

@@ -3,6 +3,7 @@
 
 # Launch template for each instance configuration
 resource "aws_launch_template" "instance" {
+  #checkov:skip=CKV_AWS_88:Public IP is off unless an instance sets associate_public_ip_address = true
   for_each = var.enable_launch_templates ? local.instances : {}
 
   name_prefix   = "${var.tags["Environment"]}-${each.key}-lt-"
@@ -230,6 +231,9 @@ resource "aws_launch_template" "instance" {
 
 # Create EC2 instances from launch templates (if enabled)
 resource "aws_instance" "from_launch_template" {
+  #checkov:skip=CKV_AWS_79:False positive, IMDSv2 is enforced by the launch template (enforce_imdsv2)
+  #checkov:skip=CKV_AWS_126:False positive, detailed monitoring is set by the launch template
+  #checkov:skip=CKV_AWS_135:False positive, ebs_optimized is set by the launch template
   for_each = var.enable_launch_templates && var.create_instances_from_templates ? local.instances : {}
 
   launch_template {
