@@ -132,7 +132,6 @@ atmos.lock
 
 # Container and Docker
 .docker/
-docker-compose.override.yml
 
 # Certificate files (security)
 *.pem

@@ -4,7 +4,7 @@
 # This Makefile provides shortcuts for common development tasks
 # Run 'make help' to see all available commands
 
-.PHONY: help setup clean validate lint plan apply destroy status dev-start dev-stop dev-logs
+.PHONY: help setup clean validate lint plan apply destroy status
 .DEFAULT_GOAL := help
 
 # =============================================================================
@@ -243,8 +243,6 @@ shell-functions: ## Generate shell functions for .bashrc/.zshrc
 	@echo "  make apply STACK=fnx-staging-staging-01      # Apply to staging"
 	@echo
 	@echo "$(WHITE)Development:$(NC)"
-	@echo "  make dev-start                       # Start development environment"
-	@echo "  make dev-logs                        # View development logs"
 	@echo "  make onboard                         # Quick environment onboarding"
 
 info: ## Show detailed system and stack information
@@ -350,30 +348,13 @@ apply-component: ## Apply specific component (usage: make apply-component COMPON
 # Development Environment Commands
 # =============================================================================
 
-setup: ## Setup development environment
+setup: ## Setup development environment (installs the Atmos toolchain)
 	@echo "$(BLUE)Setting up development environment...$(NC)"
-	@./scripts/dev-setup.sh
 	@$(MAKE) install-toolchain
 
 install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned in .atmos.env)
 	@echo "$(BLUE)Installing Terraform $$(sed -n 's/^TERRAFORM_VERSION=//p' .atmos.env) via the Atmos toolchain.$(NC)"
 	@atmos toolchain install hashicorp/terraform@$$(sed -n 's/^TERRAFORM_VERSION=//p' .atmos.env)
-
-dev-start: ## Start development environment with Docker Compose
-	@echo "$(BLUE)Starting development environment...$(NC)"
-	@docker compose up -d
-
-dev-stop: ## Stop development environment
-	@echo "$(BLUE)Stopping development environment...$(NC)"
-	@docker compose down
-
-dev-logs: ## View development environment logs
-	@echo "$(BLUE)Following development logs...$(NC)"
-	@docker compose logs -f
-
-dev-reset: ## Reset development environment (removes all data)
-	@echo "$(RED)⚠️  This will remove all development data!$(NC)"
-	@docker compose down -v
 
 # =============================================================================
 # Environment Management

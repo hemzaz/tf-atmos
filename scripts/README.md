@@ -17,7 +17,6 @@ Stacks are named by `name_template` as `<tenant>-<stage>-<environment>`
 | `quickstart.sh` | Check prerequisites, create a stack, bootstrap the backend, deploy |
 | `install-dependencies.sh` | Install CLI tools at the versions pinned in `.atmos.env` |
 | `update-versions.sh` | Check or bump the versions in `.atmos.env` |
-| `dev-setup.sh` | Local dev environment setup |
 | `onboard-developer.sh` | Onboarding checklist for a new developer |
 | `validate-terraform.sh` | Ad hoc Terraform validation helper |
 | `check-shell-compat.sh` | Check scripts for bash/POSIX portability issues |

@@ -87,23 +87,6 @@ check_command() {
     fi
 }
 
-wait_with_spinner() {
-    local pid=$1
-    local message="${2:-Working...}"
-    local delay=0.1
-    local spinstr='|/-\'
-    
-    echo -n "$message "
-    while kill -0 $pid 2>/dev/null; do
-        local temp=${spinstr#?}
-        printf "[%c]" "$spinstr"
-        spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b"
-    done
-    echo "done"
-}
-
 # =============================================================================
 # Main Onboarding Functions
 # =============================================================================
@@ -119,7 +102,6 @@ show_welcome() {
     echo -e "${WHITE}What we'll do:${NC}"
     echo -e "  🔧 Install and configure required tools"
     echo -e "  📦 Set up Python virtual environment"
-    echo -e "  🐳 Configure Docker development environment"
     echo -e "  ⚙️  Create development configuration files"
     echo -e "  🔍 Validate infrastructure access and permissions"
     echo -e "  📚 Set up IDE and development shortcuts"
@@ -315,23 +297,9 @@ setup_python_environment() {
 
 setup_development_environment() {
     log STEP "Setting up development environment"
-    
+
     cd "$PROJECT_ROOT"
-    
-    # Run existing dev-setup script if it exists
-    if [ -f "scripts/dev-setup.sh" ]; then
-        log INFO "Running development environment setup..."
-        bash scripts/dev-setup.sh > "$ONBOARD_LOG.dev-setup" 2>&1 &
-        local setup_pid=$!
-        wait_with_spinner $setup_pid "Setting up development environment"
-        
-        if wait $setup_pid; then
-            log SUCCESS "Development environment setup completed"
-        else
-            log WARNING "Development environment setup had some issues (check logs)"
-        fi
-    fi
-    
+
     # Create developer-specific configuration
     log INFO "Creating developer configuration..."
     
@@ -439,17 +407,10 @@ EOF
       "group": "build"
     },
     {
-      "label": "Plan Infrastructure", 
+      "label": "Plan Infrastructure",
       "type": "shell",
       "command": "make plan",
       "group": "build"
-    },
-    {
-      "label": "Start Dev Environment",
-      "type": "shell",
-      "command": "make dev-start",
-      "group": "build",
-      "isBackground": true
     }
   ]
 }
@@ -475,12 +436,6 @@ alias plan='make plan'
 alias apply='make apply'
 alias status='make status'
 alias doctor='make doctor'
-
-# Development environment
-alias dev-start='make dev-start'
-alias dev-stop='make dev-stop'
-alias dev-logs='make dev-logs'
-alias dev-reset='make dev-reset'
 
 # Atmos shortcuts (stacks are <tenant>-<stage>-<environment>)
 alias a-stacks='atmos list stacks'
@@ -629,13 +584,6 @@ make list-stacks             # List available environments
 make onboard                 # Quick environment onboarding
 \`\`\`
 
-### 🐳 Development Environment
-\`\`\`bash
-make dev-start               # Start local development environment
-make dev-logs                # View development logs
-make dev-stop                # Stop development environment
-\`\`\`
-
 ## 🛠️ Atmos CLI
 
 \`\`\`bash
@@ -652,7 +600,6 @@ atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 3. **Validate**: \`make validate\` 
 4. **Plan**: \`make plan\` (always safe)
 5. **Apply**: \`make apply\` (with confirmation)
-6. **Monitor**: \`make dev-logs\` or monitoring dashboard
 
 ## 🎯 Your Environment
 
@@ -752,7 +699,6 @@ generate_completion_report() {
 2. Source aliases: \`source .dev_aliases\`
 3. Try: \`make status\` or \`make doctor\`
 4. Explore: \`make help\` and \`atmos list workflows\`
-5. Start development: \`make dev-start\`
 
 ## 📋 Verification Commands
 
@@ -787,7 +733,6 @@ show_completion() {
     echo -e "${CYAN}🎯 What's Ready:${NC}"
     echo -e "   🛠️  All infrastructure tools (Terraform, Atmos, AWS CLI)"
     echo -e "   🐍 Python virtual environment"
-    echo -e "   🐳 Docker development environment"
     echo -e "   💻 VS Code configuration and extensions"
     echo -e "   🚀 Development shortcuts and aliases"
     echo
