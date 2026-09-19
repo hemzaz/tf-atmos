@@ -1,58 +1,35 @@
-# KMS Component
+# kms
 
-_Last Updated: September 19, 2026_
+Thin wrapper around `../_library/security/kms-multi-region`: creates a
+single customer-managed KMS key (or a multi-region key with replicas when
+`is_multi_region`/`replica_regions` are set) with configurable rotation,
+deletion window, key policy/administrators/users/service-users, alias, and
+grants.
 
-## Overview
+## Deployed
 
-Thin root component that creates a customer managed KMS key (single-region by default)
-by wrapping the library module [`_library/security/kms-multi-region`](../_library/security/kms-multi-region/README.md).
-Every module input is exposed with the same name, type and default and passed straight
-through; the component only adds `region` and applies `tags` as provider `default_tags`.
+`kms/main` only, in fnx-prod-production
+(`stacks/orgs/fnx/prod/eu-west-2/production/components/security.yaml`).
+Grepping dev and staging stacks for `kms` finds no reference at all — those
+environments simply don't deploy a KMS component today.
 
-## Requirements
+| Inputs (required) | Inputs (behavior) | Outputs consumed |
+|---|---|---|
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by prod's services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
-| Name | Version |
-|------|---------|
-| terraform | >= 1.16.0, < 2.0.0 |
-| aws | ~> 6.65 |
+## Dependencies & gotchas
+
+- No `dependencies.components` entries in the map.
+- Prod's `key_administrators`/`key_users` are hardcoded ARNs
+  (`.../role/Admin`, `.../role/production-eks-node-role`) that must already
+  exist before apply — the stack comment notes the iam ci/eks-node instances
+  are disabled, so this repo's `iam` component does not create those roles.
+- `replica_regions` requires `is_multi_region = true` (validation).
+- `rotation_period_in_days` validated 90-2560; `deletion_window_in_days`
+  validated 7-30.
 
 ## Usage
 
-```yaml
-components:
-  terraform:
-    kms:
-      vars:
-        region: "eu-west-2"
-        name_prefix: "fnx-prod-production"
-        description: "Platform encryption key"
-        tags:
-          Environment: "production"
 ```
-
-Multi-region replicas: set `is_multi_region: true` and `replica_regions`. Replicas use the
-AWS provider v6 per-resource `region` argument, so no provider alias is needed.
-
-## Inputs
-
-| Name | Description | Default |
-|------|-------------|---------|
-| `region` | AWS region | n/a (required) |
-| `tags` | Tags for all resources (provider `default_tags` and the module) | `{}` |
-
-All other inputs (`name_prefix` (required), `description`, `key_spec`, `key_usage`,
-`customer_master_key_spec`, `is_multi_region`, `enable_key_rotation`,
-`rotation_period_in_days`, `deletion_window_in_days`, `key_policy`,
-`enable_default_policy`, `key_administrators`, `key_users`, `key_service_users`,
-`alias_name`, `create_alias`, `replica_regions`, `replica_deletion_window_in_days`,
-`grants`) are documented in the [library module README](../_library/security/kms-multi-region/README.md).
-
-## Outputs
-
-| Name | Description |
-|------|-------------|
-| `key_arn` | ARN of the primary KMS key |
-| `key_id` | ID of the primary KMS key |
-| `alias_name` | Name of the key alias (empty when `create_alias = false`) |
-| `alias_arn` | ARN of the key alias (empty when `create_alias = false`) |
-| `replica_keys` | Replica keys by region (empty for a single-region key) |
+atmos terraform plan kms/main -s fnx-prod-production
+```
