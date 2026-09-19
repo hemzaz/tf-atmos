@@ -89,7 +89,7 @@ docker run -p 4141:4141 \
   -e GITHUB_TOKEN=<your-github-token> \
   -e GITHUB_WEBHOOK_SECRET=<your-webhook-secret> \
   -e REPO_ALLOWLIST=github.com/your-org/* \
-  -e AWS_REGION=us-west-2 \
+  -e AWS_REGION=eu-west-2 \
   -v ~/.aws:/root/.aws \
   -v $(pwd)/accounts.json:/atlantis/accounts.json \
   atlantis-atmos:latest
@@ -104,7 +104,7 @@ docker run -p 4141:4141 \
 #### Manual Installation
 
 1. Install Atlantis according to the [official documentation](https://www.runatlantis.io/docs/installation-guide.html)
-2. Install Atmos v1.44.0 or later
+2. Install Atmos v1.229.0 or later
 3. Install required tools: jq, yq, aws-cli, and bash
 4. Copy all files from this directory to your Atlantis server
 5. Configure Atlantis to use the provided repo config
@@ -118,8 +118,8 @@ docker run -p 4141:4141 \
 | `GITHUB_TOKEN` | GitHub personal access token | Yes | - |
 | `GITHUB_WEBHOOK_SECRET` | Secret for verifying GitHub webhooks | Yes | - |
 | `REPO_ALLOWLIST` | List of repositories Atlantis will respond to | Yes | - |
-| `AWS_REGION` | Default AWS region | No | us-west-2 |
-| `ATMOS_VERSION` | Atmos version to use | No | 1.44.0 |
+| `AWS_REGION` | Default AWS region | No | eu-west-2 |
+| `ATMOS_VERSION` | Atmos version to use | No | 1.229.0 |
 | `MAX_RETRIES` | Maximum retry attempts for commands | No | 3 |
 
 ### AWS Authentication
@@ -161,7 +161,7 @@ Comment on the pull request with:
 | `atlantis apply` | Apply all planned changes | `atlantis apply` |
 | `atlantis plan -d [component]` | Plan specific component | `atlantis plan -d vpc` |
 | `atlantis apply -d [component]` | Apply specific component | `atlantis apply -d vpc` |
-| `atlantis plan -- component=[name] stack=[stack]` | Explicitly specify component/stack | `atlantis plan -- component=vpc stack=acme-dev-us-east-1` |
+| `atlantis plan -- component=[name] stack=[stack]` | Explicitly specify component/stack | `atlantis plan -- component=vpc/main stack=fnx-dev-testenv-01` |
 
 ## Security Considerations
 
@@ -193,8 +193,8 @@ The integration implements several security best practices:
 The integration supports Atmos's multi-account architecture through:
 
 1. **Account Detection**
-   - Intelligent parsing of stack names to determine account context
-   - Properly formatted stack names (`tenant-account-environment`)
+   - Account resolved from the stack configuration (`settings.environment.account`)
+   - Stack names follow `name_template`: `<tenant>-<stage>-<environment>`
 
 2. **Cross-Account Authentication**
    - Dynamic role assumption for each detected account
@@ -281,10 +281,10 @@ repos:
 
 This integration has been tested with:
 
-- Atmos v1.44.0 or later
-- Terraform v1.5.0 or later
-- AWS Provider v4.9.0 or later
-- Atlantis v0.24.1 or later
+- Atmos v1.229.0 or later
+- Terraform 1.16.3 (installed by the Atmos toolchain)
+- AWS Provider ~> 6.65
+- Atlantis v0.47.1
 - Docker 20.10.x or later
 
 ## Additional Resources
