@@ -9,6 +9,8 @@
 # Required configuration: vars.AWS_PLAN_ROLE_ARN (read-only OIDC role),
 # optional vars.ATMOS_VERSION / vars.AWS_REGION.
 name: Drift detection
+# AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
+# there is no AWS account yet, and that variable marks AWS as configured.
 
 on:
   schedule:
@@ -25,6 +27,7 @@ permissions: {}
 jobs:
   stacks:
     name: Stacks
+    if: vars.AWS_PLAN_ROLE_ARN != ''
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}

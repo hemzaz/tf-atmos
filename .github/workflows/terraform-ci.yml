@@ -3,6 +3,7 @@
 #   vars.ATMOS_VERSION       Atmos container tag (defaults to 1.229.0)
 #   vars.AWS_REGION          region for OIDC credentials (defaults to eu-west-2)
 #   vars.AWS_PLAN_ROLE_ARN   read-only IAM role trusted for this repo's GitHub OIDC tokens
+#   (plan jobs are skipped while it is unset)
 # Terraform and scanners are installed by the Atmos toolchain (dependencies.tools).
 #
 # GitHub-side controls this file relies on (they cannot be expressed in YAML):
@@ -140,7 +141,7 @@ jobs:
   plan:
     name: Plan ${{ matrix.component }} (${{ matrix.stack }})
     needs: affected
-    if: ${{ needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
+    if: ${{ vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}

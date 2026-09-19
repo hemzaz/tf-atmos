@@ -8,6 +8,8 @@
 # role's trust policy must allow that sub (see .github/workflows/terraform-cd.yml).
 # Optional: vars.ATMOS_VERSION / vars.AWS_REGION.
 name: Disaster recovery
+# AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
+# there is no AWS account yet, and that variable marks AWS as configured.
 
 on:
   workflow_dispatch:
@@ -34,6 +36,7 @@ jobs:
     name: ${{ inputs.action }} ${{ inputs.stack }}
     # API callers are not bound to the choice options, so re-check the stack.
     if: >-
+      vars.AWS_PLAN_ROLE_ARN != '' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
       contains(fromJson('["fnx-dev-testenv-01","fnx-staging-staging-01","fnx-prod-production"]'), inputs.stack)
     runs-on: ubuntu-latest
