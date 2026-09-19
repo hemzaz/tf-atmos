@@ -11,7 +11,14 @@ Production-ready AWS CodePipeline with multiple source/deploy providers, cross-a
 - Cross-account deployment support
 - Artifact encryption with KMS
 - CloudWatch Events for pipeline notifications
-- Pipeline V2 with advanced execution modes
+- Pipeline V2 with advanced execution modes (`execution_mode`)
+- Artifact bucket: an existing bucket is used by default; set `create_artifact_bucket = true` to have the module create it (versioned, encrypted, public access blocked)
+- GitHub sources use a CodeConnections/CodeStar connection (`CodeStarSourceConnection` action)
+
+## Requirements
+
+- Terraform >= 1.16.0, < 2.0.0
+- AWS provider >= 6.0, < 7.0
 
 ## Example
 
@@ -20,7 +27,8 @@ module "pipeline" {
   source = "../../_library/cicd/codepipeline/v1.0.0"
 
   name                 = "my-app-pipeline"
-  artifact_bucket_name = "my-pipeline-artifacts"
+  artifact_bucket_name   = "my-pipeline-artifacts"
+  create_artifact_bucket = true
 
   # Source from GitHub
   source_provider = "GitHub"

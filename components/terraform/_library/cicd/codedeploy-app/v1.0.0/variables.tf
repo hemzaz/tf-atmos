@@ -62,7 +62,7 @@ variable "ec2_tag_filters" {
   description = "EC2 tag filters for identifying instances to deploy to"
   type = list(object({
     key   = optional(string)
-    type  = optional(string) # KEY_ONLY, VALUE_ONLY, KEY_AND_VALUE
+    type  = optional(string, "KEY_AND_VALUE") # KEY_ONLY, VALUE_ONLY, KEY_AND_VALUE
     value = optional(string)
   }))
   default = []
@@ -73,7 +73,7 @@ variable "ec2_tag_set" {
   type = list(object({
     ec2_tag_filter = list(object({
       key   = optional(string)
-      type  = optional(string)
+      type  = optional(string, "KEY_AND_VALUE")
       value = optional(string)
     }))
   }))
@@ -84,7 +84,7 @@ variable "on_premises_tag_filters" {
   description = "On-premises instance tag filters"
   type = list(object({
     key   = optional(string)
-    type  = optional(string)
+    type  = optional(string, "KEY_AND_VALUE")
     value = optional(string)
   }))
   default = []
@@ -254,7 +254,7 @@ variable "blue_green_deployment_config" {
 variable "load_balancer_info" {
   description = "Load balancer configuration for blue/green deployments"
   type = object({
-    target_group_arns        = optional(list(string))
+    target_group_arns = optional(list(string), [])
     target_group_pair = optional(object({
       prod_traffic_route_listener_arns = list(string)
       test_traffic_route_listener_arns = optional(list(string))
@@ -263,7 +263,7 @@ variable "load_balancer_info" {
     }))
     elb_info = optional(list(object({
       name = string
-    })))
+    })), [])
   })
   default = null
 }
@@ -300,7 +300,7 @@ variable "alarm_configuration" {
   type = object({
     enabled                   = bool
     alarm_names               = optional(list(string))
-    ignore_poll_alarm_failure = optional(bool)
+    ignore_poll_alarm_failure = optional(bool, false)
   })
   default = null
 }

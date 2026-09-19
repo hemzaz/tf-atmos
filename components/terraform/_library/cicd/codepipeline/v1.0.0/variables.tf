@@ -45,8 +45,14 @@ variable "role_permissions_boundary" {
 ################################################################################
 
 variable "artifact_bucket_name" {
-  description = "Name of S3 bucket for pipeline artifacts (will be created if not exists)"
+  description = "Name of S3 bucket for pipeline artifacts. Must already exist unless create_artifact_bucket is true."
   type        = string
+}
+
+variable "create_artifact_bucket" {
+  description = "Whether to create the artifact bucket (versioned, encrypted, public access blocked). When false, an existing bucket named artifact_bucket_name is used."
+  type        = bool
+  default     = false
 }
 
 variable "artifact_encryption_key_id" {
@@ -78,15 +84,15 @@ variable "source_provider" {
 variable "source_configuration" {
   description = "Source stage configuration (provider-specific)"
   type = object({
-    repository_name      = optional(string) # CodeCommit/GitHub repo name
-    branch_name          = optional(string) # Branch to track (default: main)
-    connection_arn       = optional(string) # GitHub connection ARN
-    bucket_name          = optional(string) # S3 bucket name
-    object_key           = optional(string) # S3 object key
-    repository_name_ecr  = optional(string) # ECR repository name
-    image_tag            = optional(string) # ECR image tag (default: latest)
-    poll_for_changes     = optional(bool)   # Enable polling (default: false)
-    detect_changes       = optional(bool)   # Use CloudWatch Events (default: true)
+    repository_name     = optional(string)           # CodeCommit/GitHub repo name
+    branch_name         = optional(string, "main")   # Branch to track
+    connection_arn      = optional(string)           # GitHub connection ARN
+    bucket_name         = optional(string)           # S3 bucket name
+    object_key          = optional(string)           # S3 object key
+    repository_name_ecr = optional(string)           # ECR repository name
+    image_tag           = optional(string, "latest") # ECR image tag
+    poll_for_changes    = optional(bool, false)      # Enable polling
+    detect_changes      = optional(bool, true)       # Use CloudWatch Events
   })
 }
 
@@ -126,12 +132,17 @@ variable "build_output_artifact" {
 
 variable "build_environment_variables" {
   description = "Environment variables to pass to build stage"
-  type        = list(object({
+  type = list(object({
     name  = string
     value = string
-    type  = optional(string) # PLAINTEXT, PARAMETER_STORE, SECRETS_MANAGER
+    type  = optional(string, "PLAINTEXT") # PLAINTEXT, PARAMETER_STORE, SECRETS_MANAGER
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for env in var.build_environment_variables : contains(["PLAINTEXT", "PARAMETER_STORE", "SECRETS_MANAGER"], env.type)])
+    error_message = "Environment variable type must be PLAINTEXT, PARAMETER_STORE, or SECRETS_MANAGER."
+  }
 }
 
 ################################################################################
@@ -196,28 +207,28 @@ variable "deploy_configuration" {
   description = "Deploy stage configuration (provider-specific)"
   type = object({
     # CodeDeploy
-    application_name     = optional(string)
-    deployment_group     = optional(string)
+    application_name = optional(string)
+    deployment_group = optional(string)
 
     # ECS
-    cluster_name         = optional(string)
-    service_name         = optional(string)
-    file_name            = optional(string) # imagedefinitions.json
+    cluster_name = optional(string)
+    service_name = optional(string)
+    file_name    = optional(string, "imagedefinitions.json")
 
     # Lambda
-    function_name        = optional(string)
+    function_name = optional(string)
 
     # CloudFormation
-    stack_name           = optional(string)
-    template_path        = optional(string)
-    capabilities         = optional(list(string))
-    role_arn             = optional(string)
-    parameter_overrides  = optional(map(string))
+    stack_name          = optional(string)
+    template_path       = optional(string)
+    capabilities        = optional(list(string), ["CAPABILITY_IAM"])
+    role_arn            = optional(string)
+    parameter_overrides = optional(map(string))
 
     # S3
-    bucket_name          = optional(string)
-    extract              = optional(bool)
-    object_key           = optional(string)
+    bucket_name = optional(string)
+    extract     = optional(bool, false)
+    object_key  = optional(string)
   })
 }
 

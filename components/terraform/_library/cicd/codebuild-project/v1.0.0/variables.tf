@@ -92,9 +92,14 @@ variable "source_git_submodules_config" {
 }
 
 variable "source_auth_type" {
-  description = "Authentication type for private repositories (OAUTH, BASIC_AUTH, PERSONAL_ACCESS_TOKEN, CODECONNECTIONS)"
+  description = "Authentication type for private repositories (OAUTH, SECRETS_MANAGER, CODECONNECTIONS)"
   type        = string
   default     = null
+
+  validation {
+    condition     = var.source_auth_type == null || contains(["OAUTH", "SECRETS_MANAGER", "CODECONNECTIONS"], coalesce(var.source_auth_type, "OAUTH"))
+    error_message = "source_auth_type must be one of OAUTH, SECRETS_MANAGER, CODECONNECTIONS."
+  }
 }
 
 variable "source_auth_resource" {
@@ -167,9 +172,14 @@ variable "environment_variables" {
   type = list(object({
     name  = string
     value = string
-    type  = optional(string) # PLAINTEXT, PARAMETER_STORE, SECRETS_MANAGER
+    type  = optional(string, "PLAINTEXT") # PLAINTEXT, PARAMETER_STORE, SECRETS_MANAGER
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for env in var.environment_variables : contains(["PLAINTEXT", "PARAMETER_STORE", "SECRETS_MANAGER"], env.type)])
+    error_message = "Environment variable type must be PLAINTEXT, PARAMETER_STORE, or SECRETS_MANAGER."
+  }
 }
 
 ################################################################################
@@ -364,11 +374,11 @@ variable "queued_timeout" {
 variable "build_batch_config" {
   description = "Build batch configuration for parallel builds"
   type = object({
-    service_role                  = string
-    combine_artifacts             = optional(bool)
-    timeout_in_mins               = optional(number)
-    restrictions_max_builds       = optional(number)
-    restrictions_compute_types    = optional(list(string))
+    service_role               = string
+    combine_artifacts          = optional(bool, false)
+    timeout_in_mins            = optional(number)
+    restrictions_max_builds    = optional(number)
+    restrictions_compute_types = optional(list(string))
   })
   default = null
 }
@@ -388,7 +398,7 @@ variable "webhook_filter_groups" {
   type = list(list(object({
     type                    = string # EVENT, BASE_REF, HEAD_REF, ACTOR_ACCOUNT_ID, FILE_PATH, COMMIT_MESSAGE
     pattern                 = string
-    exclude_matched_pattern = optional(bool)
+    exclude_matched_pattern = optional(bool, false)
   })))
   default = []
 }
@@ -438,9 +448,9 @@ variable "secondary_sources" {
     location            = string
     source_identifier   = string
     git_clone_depth     = optional(number)
-    git_submodules      = optional(bool)
+    git_submodules      = optional(bool, false)
     buildspec           = optional(string)
-    insecure_ssl        = optional(bool)
+    insecure_ssl        = optional(bool, false)
     report_build_status = optional(bool)
   }))
   default = []
@@ -455,7 +465,7 @@ variable "secondary_artifacts" {
     path                = optional(string)
     namespace_type      = optional(string)
     packaging           = optional(string)
-    encryption_disabled = optional(bool)
+    encryption_disabled = optional(bool, false)
   }))
   default = []
 }

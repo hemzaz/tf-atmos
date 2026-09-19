@@ -12,7 +12,7 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.name
+  region     = data.aws_region.current.region
   partition  = data.aws_partition.current.partition
 
   name_prefix = var.name
@@ -185,9 +185,9 @@ resource "aws_codedeploy_deployment_group" "this" {
   service_role_arn       = var.create_service_role ? aws_iam_role.this[0].arn : var.service_role_arn
   deployment_config_name = local.deployment_config_name
 
-  autoscaling_groups           = var.autoscaling_groups
-  outdated_instances_strategy  = var.outdated_instances_strategy
-  termination_hook_enabled     = var.termination_hook_enabled
+  autoscaling_groups          = var.autoscaling_groups
+  outdated_instances_strategy = var.outdated_instances_strategy
+  termination_hook_enabled    = var.termination_hook_enabled
 
   tags = local.default_tags
 
@@ -196,7 +196,7 @@ resource "aws_codedeploy_deployment_group" "this" {
     for_each = var.ec2_tag_filters
     content {
       key   = ec2_tag_filter.value.key
-      type  = coalesce(ec2_tag_filter.value.type, "KEY_AND_VALUE")
+      type  = ec2_tag_filter.value.type
       value = ec2_tag_filter.value.value
     }
   }
@@ -209,7 +209,7 @@ resource "aws_codedeploy_deployment_group" "this" {
         for_each = ec2_tag_set.value.ec2_tag_filter
         content {
           key   = ec2_tag_filter.value.key
-          type  = coalesce(ec2_tag_filter.value.type, "KEY_AND_VALUE")
+          type  = ec2_tag_filter.value.type
           value = ec2_tag_filter.value.value
         }
       }
@@ -221,7 +221,7 @@ resource "aws_codedeploy_deployment_group" "this" {
     for_each = var.on_premises_tag_filters
     content {
       key   = on_premises_instance_tag_filter.value.key
-      type  = coalesce(on_premises_instance_tag_filter.value.type, "KEY_AND_VALUE")
+      type  = on_premises_instance_tag_filter.value.type
       value = on_premises_instance_tag_filter.value.value
     }
   }
@@ -274,10 +274,12 @@ resource "aws_codedeploy_deployment_group" "this" {
   dynamic "load_balancer_info" {
     for_each = var.load_balancer_info != null ? [1] : []
     content {
+      # target_group_info takes target group *names*; derive them from the ARNs
+      # (arn:...:targetgroup/<name>/<id>).
       dynamic "target_group_info" {
-        for_each = var.load_balancer_info.target_group_arns != null ? [1] : []
+        for_each = var.load_balancer_info.target_group_arns
         content {
-          name = null # Must be null when using target_group_arns
+          name = split("/", target_group_info.value)[1]
         }
       }
 
@@ -306,7 +308,7 @@ resource "aws_codedeploy_deployment_group" "this" {
       }
 
       dynamic "elb_info" {
-        for_each = var.load_balancer_info.elb_info != null ? var.load_balancer_info.elb_info : []
+        for_each = var.load_balancer_info.elb_info
         content {
           name = elb_info.value.name
         }
@@ -326,7 +328,7 @@ resource "aws_codedeploy_deployment_group" "this" {
     content {
       enabled                   = var.alarm_configuration.enabled
       alarms                    = var.alarm_configuration.alarm_names
-      ignore_poll_alarm_failure = coalesce(var.alarm_configuration.ignore_poll_alarm_failure, false)
+      ignore_poll_alarm_failure = var.alarm_configuration.ignore_poll_alarm_failure
     }
   }
 

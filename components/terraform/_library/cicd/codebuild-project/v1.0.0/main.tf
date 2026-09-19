@@ -12,7 +12,7 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.name
+  region     = data.aws_region.current.region
   partition  = data.aws_partition.current.partition
 
   name_prefix = var.name
@@ -27,15 +27,6 @@ locals {
 
   # CloudWatch Logs configuration
   cloudwatch_logs_group_name = var.cloudwatch_logs_group_name != null ? var.cloudwatch_logs_group_name : "/aws/codebuild/${var.name}"
-
-  # Environment variables with defaults
-  environment_variables = [
-    for env in var.environment_variables : {
-      name  = env.name
-      value = env.value
-      type  = coalesce(env.type, "PLAINTEXT")
-    }
-  ]
 }
 
 ################################################################################
@@ -261,10 +252,10 @@ resource "aws_iam_role_policy" "this" {
 }
 
 resource "aws_iam_role_policy_attachment" "additional" {
-  count = var.create_role ? length(var.additional_policy_arns) : 0
+  for_each = var.create_role ? toset(var.additional_policy_arns) : toset([])
 
   role       = aws_iam_role.this[0].name
-  policy_arn = var.additional_policy_arns[count.index]
+  policy_arn = each.value
 }
 
 ################################################################################
@@ -311,15 +302,16 @@ resource "aws_codebuild_project" "this" {
   dynamic "secondary_sources" {
     for_each = var.secondary_sources
     content {
-      type              = secondary_sources.value.type
-      location          = secondary_sources.value.location
-      source_identifier = secondary_sources.value.source_identifier
-      git_clone_depth   = secondary_sources.value.git_clone_depth
-      buildspec         = secondary_sources.value.buildspec
-      insecure_ssl      = coalesce(secondary_sources.value.insecure_ssl, false)
+      type                = secondary_sources.value.type
+      location            = secondary_sources.value.location
+      source_identifier   = secondary_sources.value.source_identifier
+      git_clone_depth     = secondary_sources.value.git_clone_depth
+      buildspec           = secondary_sources.value.buildspec
+      insecure_ssl        = secondary_sources.value.insecure_ssl
+      report_build_status = secondary_sources.value.report_build_status
 
       dynamic "git_submodules_config" {
-        for_each = coalesce(secondary_sources.value.git_submodules, false) ? [1] : []
+        for_each = secondary_sources.value.git_submodules ? [1] : []
         content {
           fetch_submodules = true
         }
@@ -337,7 +329,7 @@ resource "aws_codebuild_project" "this" {
     certificate                 = var.environment_certificate
 
     dynamic "environment_variable" {
-      for_each = local.environment_variables
+      for_each = var.environment_variables
       content {
         name  = environment_variable.value.name
         value = environment_variable.value.value
@@ -377,7 +369,7 @@ resource "aws_codebuild_project" "this" {
       path                = secondary_artifacts.value.path
       namespace_type      = secondary_artifacts.value.namespace_type
       packaging           = secondary_artifacts.value.packaging
-      encryption_disabled = coalesce(secondary_artifacts.value.encryption_disabled, false)
+      encryption_disabled = secondary_artifacts.value.encryption_disabled
     }
   }
 
@@ -413,9 +405,9 @@ resource "aws_codebuild_project" "this" {
   dynamic "build_batch_config" {
     for_each = var.build_batch_config != null ? [1] : []
     content {
-      service_role    = var.build_batch_config.service_role
-      combine_artifacts = coalesce(var.build_batch_config.combine_artifacts, false)
-      timeout_in_mins = var.build_batch_config.timeout_in_mins
+      service_role      = var.build_batch_config.service_role
+      combine_artifacts = var.build_batch_config.combine_artifacts
+      timeout_in_mins   = var.build_batch_config.timeout_in_mins
 
       dynamic "restrictions" {
         for_each = var.build_batch_config.restrictions_max_builds != null || var.build_batch_config.restrictions_compute_types != null ? [1] : []
@@ -463,7 +455,7 @@ resource "aws_codebuild_webhook" "this" {
         content {
           type                    = filter.value.type
           pattern                 = filter.value.pattern
-          exclude_matched_pattern = coalesce(filter.value.exclude_matched_pattern, false)
+          exclude_matched_pattern = filter.value.exclude_matched_pattern
         }
       }
     }

@@ -190,6 +190,11 @@ variable "replication_filters" {
     filter_type = string # PREFIX_MATCH
   }))
   default = []
+
+  validation {
+    condition     = alltrue([for f in var.replication_filters : f.filter_type == "PREFIX_MATCH"])
+    error_message = "Replication filter_type must be PREFIX_MATCH."
+  }
 }
 
 ################################################################################
