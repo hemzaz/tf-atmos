@@ -1,4 +1,5 @@
 resource "aws_security_group" "default" {
+  #checkov:skip=CKV2_AWS_5:Shared group exported as default_security_group_id for other components to attach
   name        = "${var.tags["Environment"]}-default-sg"
   description = "Default security group to allow inbound/outbound from the VPC"
   vpc_id      = aws_vpc.main.id
@@ -68,4 +69,14 @@ resource "aws_security_group" "default" {
   }
 
   tags = { Name = "${var.tags["Environment"]}-default-sg" }
+}
+
+# Take over the VPC's AWS-created default security group and remove all its rules, so
+# resources launched without an explicit security group get no network access
+resource "aws_default_security_group" "this" {
+  count = var.manage_default_security_group ? 1 : 0
+
+  vpc_id = aws_vpc.main.id
+
+  tags = { Name = "${var.tags["Environment"]}-aws-default-sg-restricted" }
 }

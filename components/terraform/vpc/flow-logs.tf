@@ -9,6 +9,39 @@ resource "aws_kms_key" "flow_logs" {
   deletion_window_in_days = 30
   enable_key_rotation     = true
 
+  # Account administration plus CloudWatch Logs, which cannot use the key without a grant
+  # here. A key policy cannot reference its own ARN; "*" means "this key".
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableAccountAdministration"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogsFlowLogGroups"
+        Effect    = "Allow"
+        Principal = { Service = "logs.${var.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt*",
+          "kms:Decrypt*",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*",
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/vpc/flowlogs/*"
+          }
+        }
+      },
+    ]
+  })
+
   tags = merge(
     var.tags,
     {
@@ -290,6 +323,10 @@ resource "aws_cloudwatch_metric_alarm" "port_scan" {
 
 # Optional: S3 bucket for long-term Flow Logs storage
 resource "aws_s3_bucket" "flow_logs" {
+  #checkov:skip=CKV2_AWS_6:False positive, aws_s3_bucket_public_access_block.flow_logs covers this bucket
+  #checkov:skip=CKV2_AWS_61:False positive, aws_s3_bucket_lifecycle_configuration.flow_logs covers this bucket
+  #checkov:skip=CKV_AWS_21:False positive, aws_s3_bucket_versioning.flow_logs covers this bucket
+  #checkov:skip=CKV_AWS_145:False positive, aws_s3_bucket_server_side_encryption_configuration.flow_logs uses the flow logs CMK
   count = var.enable_flow_logs && var.flow_logs_s3_backup ? 1 : 0
 
   bucket = "${var.tags["Environment"]}-vpc-flow-logs-${data.aws_caller_identity.current.account_id}"
@@ -358,6 +395,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "flow_logs" {
 
     expiration {
       days = 365
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }

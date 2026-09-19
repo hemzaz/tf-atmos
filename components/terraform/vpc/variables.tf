@@ -153,6 +153,12 @@ variable "default_sg_allow_all_outbound" {
   default     = false
 }
 
+variable "manage_default_security_group" {
+  type        = bool
+  description = "Manage the VPC's AWS-created default security group and strip all of its rules"
+  default     = true
+}
+
 variable "default_security_group_ingress_rules" {
   type = list(object({
     from_port       = number
