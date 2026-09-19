@@ -43,7 +43,7 @@ output "role_arn" {
 
 output "role_name" {
   description = "Name of the Lambda execution role"
-  value       = var.create_role ? aws_iam_role.lambda[0].name : null
+  value       = one(aws_iam_role.lambda[*].name)
 }
 
 output "log_group_name" {
@@ -58,32 +58,32 @@ output "log_group_arn" {
 
 output "function_url" {
   description = "URL of the Lambda function (if function URL is enabled)"
-  value       = var.enable_function_url ? aws_lambda_function_url.main[0].function_url : null
+  value       = one(aws_lambda_function_url.main[*].function_url)
 }
 
 output "api_gateway_url" {
   description = "URL of the API Gateway (if API Gateway is enabled)"
-  value       = var.enable_api_gateway ? module.api_gateway[0].api_url : null
+  value       = local.create_rest_api ? aws_api_gateway_stage.main[0].invoke_url : one(aws_apigatewayv2_stage.main[*].invoke_url)
 }
 
 output "api_gateway_id" {
   description = "ID of the API Gateway (if enabled)"
-  value       = var.enable_api_gateway ? module.api_gateway[0].api_id : null
+  value       = local.create_rest_api ? aws_api_gateway_rest_api.main[0].id : one(aws_apigatewayv2_api.main[*].id)
 }
 
 output "dlq_arn" {
   description = "ARN of the Dead Letter Queue"
-  value       = var.enable_dlq ? (var.dlq_target_arn != null ? var.dlq_target_arn : aws_sqs_queue.dlq[0].arn) : null
+  value       = local.dlq_arn
 }
 
 output "sqs_queue_arn" {
   description = "ARN of the SQS queue (if created)"
-  value       = var.create_sqs_queue ? aws_sqs_queue.trigger[0].arn : null
+  value       = one(aws_sqs_queue.trigger[*].arn)
 }
 
 output "sqs_queue_url" {
   description = "URL of the SQS queue (if created)"
-  value       = var.create_sqs_queue ? aws_sqs_queue.trigger[0].url : null
+  value       = one(aws_sqs_queue.trigger[*].url)
 }
 
 output "deployment_pattern" {

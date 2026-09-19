@@ -33,7 +33,7 @@ output "autoscaling_group_arn" {
 
 output "iam_role_arn" {
   description = "ARN of the IAM role"
-  value       = var.iam_instance_profile == null ? aws_iam_role.instance[0].arn : null
+  value       = one(aws_iam_role.instance[*].arn)
 }
 
 output "iam_instance_profile_name" {

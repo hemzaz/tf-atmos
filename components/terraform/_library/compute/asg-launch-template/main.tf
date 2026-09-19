@@ -14,32 +14,54 @@ locals {
     }
   )
 
-  # User data with CloudWatch agent installation
-  user_data_base64 = var.user_data != "" ? var.user_data : (var.enable_cloudwatch_agent ? base64encode(templatefile("${path.module}/templates/user-data.sh", {
-    cloudwatch_config = jsonencode({
-      metrics = {
-        namespace = "CustomMetrics/${local.name}"
-        metrics_collected = {
-          mem = {
-            measurement = [{ name = "mem_used_percent" }]
-            metrics_collection_interval = 60
-          }
-          disk = {
-            measurement = [{ name = "used_percent" }]
-            metrics_collection_interval = 60
-            resources = ["*"]
-          }
+  cloudwatch_agent_config = jsonencode({
+    metrics = {
+      namespace = "CustomMetrics/${local.name}"
+      append_dimensions = {
+        AutoScalingGroupName = "$${aws:AutoScalingGroupName}"
+      }
+      aggregation_dimensions = [["AutoScalingGroupName"]]
+      metrics_collected = {
+        mem = {
+          measurement                 = [{ name = "mem_used_percent" }]
+          metrics_collection_interval = 60
+        }
+        disk = {
+          measurement                 = [{ name = "used_percent" }]
+          metrics_collection_interval = 60
+          resources                   = ["*"]
         }
       }
-    })
-  })) : "")
+    }
+  })
+
+  # Default user data: install and start the CloudWatch agent (Amazon Linux 2023).
+  cloudwatch_agent_user_data = <<-EOT
+    #!/bin/bash
+    set -euo pipefail
+    dnf install -y amazon-cloudwatch-agent
+    mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
+    cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWCONFIG'
+    ${local.cloudwatch_agent_config}
+    CWCONFIG
+    /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s \
+      -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+  EOT
+
+  # var.user_data is already base64 encoded.
+  user_data_base64 = var.user_data != "" ? var.user_data : (var.enable_cloudwatch_agent ? base64encode(local.cloudwatch_agent_user_data) : null)
+
+  alb_target_tracking_enabled = var.enable_alb_target_tracking && var.alb_target_group_arn != null
 }
 
 # ==============================================================================
 # DATA SOURCES
 # ==============================================================================
 
-data "aws_ami" "amazon_linux_2" {
+data "aws_partition" "current" {}
+
+# Amazon Linux 2 reached end of support on 2026-06-30; default to Amazon Linux 2023.
+data "aws_ami" "amazon_linux" {
   count = var.ami_id == null ? 1 : 0
 
   most_recent = true
@@ -47,7 +69,7 @@ data "aws_ami" "amazon_linux_2" {
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    values = ["al2023-ami-2023.*-x86_64"]
   }
 
   filter {
@@ -65,21 +87,24 @@ data "aws_ami" "amazon_linux_2" {
 # IAM ROLE FOR INSTANCES
 # ==============================================================================
 
+data "aws_iam_policy_document" "instance_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_iam_role" "instance" {
   count = var.iam_instance_profile == null ? 1 : 0
 
   name = "${local.name}-instance-role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
+  assume_role_policy = data.aws_iam_policy_document.instance_assume_role.json
 
   tags = local.common_tags
 }
@@ -88,14 +113,14 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   count = var.iam_instance_profile == null ? 1 : 0
 
   role       = aws_iam_role.instance[0].name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 resource "aws_iam_role_policy_attachment" "cloudwatch" {
   count = var.iam_instance_profile == null && var.enable_cloudwatch_agent ? 1 : 0
 
   role       = aws_iam_role.instance[0].name
-  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
 resource "aws_iam_instance_profile" "instance" {
@@ -142,7 +167,7 @@ resource "aws_launch_template" "main" {
   name        = "${local.name}-lt"
   description = "Launch template for ${local.name}"
 
-  image_id      = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux_2[0].id
+  image_id      = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux[0].id
   instance_type = var.instance_type
   key_name      = var.key_name
 
@@ -255,12 +280,7 @@ resource "aws_autoscaling_group" "main" {
     }
   }
 
-  dynamic "target_group_arns" {
-    for_each = var.alb_target_group_arn != null ? [var.alb_target_group_arn] : []
-    content {
-      arn = target_group_arns.value
-    }
-  }
+  target_group_arns = var.alb_target_group_arn != null ? [var.alb_target_group_arn] : []
 
   dynamic "instance_refresh" {
     for_each = var.enable_instance_refresh ? [1] : []
@@ -337,8 +357,22 @@ resource "aws_autoscaling_policy" "memory" {
   }
 }
 
+# ALBRequestCountPerTarget needs "<lb arn suffix>/<target group arn suffix>";
+# the load balancer part cannot be derived from the target group ARN alone.
+data "aws_lb_target_group" "alb" {
+  count = local.alb_target_tracking_enabled ? 1 : 0
+
+  arn = var.alb_target_group_arn
+}
+
+data "aws_lb" "alb" {
+  count = local.alb_target_tracking_enabled ? 1 : 0
+
+  arn = one(data.aws_lb_target_group.alb[0].load_balancer_arns)
+}
+
 resource "aws_autoscaling_policy" "alb" {
-  count = var.enable_alb_target_tracking && var.alb_target_group_arn != null ? 1 : 0
+  count = local.alb_target_tracking_enabled ? 1 : 0
 
   name                   = "${local.name}-alb-tracking"
   autoscaling_group_name = aws_autoscaling_group.main.name
@@ -347,7 +381,7 @@ resource "aws_autoscaling_policy" "alb" {
   target_tracking_configuration {
     predefined_metric_specification {
       predefined_metric_type = "ALBRequestCountPerTarget"
-      resource_label         = "${split("/", var.alb_target_group_arn)[1]}/${split("/", var.alb_target_group_arn)[2]}/${split("/", var.alb_target_group_arn)[3]}"
+      resource_label         = "${data.aws_lb.alb[0].arn_suffix}/${data.aws_lb_target_group.alb[0].arn_suffix}"
     }
     target_value = var.alb_target_value
   }
