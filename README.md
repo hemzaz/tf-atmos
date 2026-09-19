@@ -48,7 +48,7 @@ The full procedure is in the [Deployment Guide](./docs/DEPLOYMENT.md).
 
 ```
 atmos.yaml                  Atmos CLI config (version constraint, paths, name_template, Native CI)
-components/terraform/       Terraform root modules (+ _library/ shared modules, _catalog/ registry metadata)
+components/terraform/       Terraform root modules (+ _library/ shared modules)
 modules/terraform/          Provider-less shared modules
 stacks/
   orgs/fnx/                 Org, account and region defaults, and the three stacks
@@ -75,8 +75,7 @@ Each stack imports five domain files from its `components/` directory (`globals`
 
 ## Components
 
-`components/terraform/` holds 22 root modules, plus `_library/` (reusable modules) and `_catalog/`
-(module registry metadata): `acm`, `apigateway`, `backend`, `backup`, `cost-optimization`, `dns`,
+`components/terraform/` holds 22 root modules, plus `_library/` (shared modules): `acm`, `apigateway`, `backend`, `backup`, `cost-optimization`, `dns`,
 `ec2`, `ecs`, `eks`, `eks-addons`, `eks-backend-services`, `external-secrets`, `iam`,
 `idp-platform`, `kms`, `lambda`, `monitoring`, `rds`, `secretsmanager`, `security-monitoring`,
 `securitygroup`, `vpc`.
