@@ -8,10 +8,13 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: foundation, networking, security, compute, platform, data, services, monitoring
+#   layers: foundation, kms, networking, security, compute, platform, data, services, monitoring
+#   The kms layer only has work in stacks with an enabled kms component (today
+#   fnx-prod-production, whose eks/ec2 consumers read its key via !terraform.state);
+#   elsewhere its plan and deploy match nothing and the prompt just asks to continue.
 workflows:
   deploy:
-    description: Deploy the complete stack layer by layer (foundation -> monitoring), each layer planned, confirmed, then applied from its saved plan
+    description: Deploy the complete stack layer by layer (foundation -> kms -> monitoring), each layer planned, confirmed, then applied from its saved plan
     steps:
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
@@ -31,6 +34,25 @@ workflows:
       - name: deploy-foundation
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "backend" or .metadata.component == "iam"'
+      - name: kms_instances
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[] | select(.metadata.component == "kms" and .metadata.enabled != false and .metadata.type != "abstract")] | length'
+        output: none
+      - name: plan-kms
+        type: atmos
+        command: terraform plan --query '.metadata.component == "kms"'
+      - name: confirm_kms
+        type: confirm
+        prompt: '{{ if eq (trim .steps.kms_instances.value) "0" }}No kms component in this stack; continue?{{ else }}Apply the kms layer plan above?{{ end }}'
+        default: false
+      - name: guard-kms
+        type: shell
+        command: test "{{ .steps.confirm_kms.value }}" = "true" || { echo "Deployment cancelled before the kms layer."; exit 1; }
+      - name: deploy-kms
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "kms"'
       - name: plan-networking
         type: atmos
         command: terraform plan --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
@@ -142,6 +164,29 @@ workflows:
       - name: deploy
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "backend" or .metadata.component == "iam"'
+
+  deploy-kms:
+    description: "Deploy the kms layer: customer-managed KMS keys (only stacks that define kms)"
+    steps:
+      - name: kms_instances
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[] | select(.metadata.component == "kms" and .metadata.enabled != false and .metadata.type != "abstract")] | length'
+        output: none
+      - name: plan-kms
+        type: atmos
+        command: terraform plan --query '.metadata.component == "kms"'
+      - name: confirm_kms
+        type: confirm
+        prompt: '{{ if eq (trim .steps.kms_instances.value) "0" }}No kms component in this stack; continue?{{ else }}Apply the kms layer plan above?{{ end }}'
+        default: false
+      - name: guard-kms
+        type: shell
+        command: test "{{ .steps.confirm_kms.value }}" = "true" || { echo "Deployment cancelled of the kms layer."; exit 1; }
+      - name: deploy-kms
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "kms"'
 
   deploy-networking:
     description: "Deploy the networking layer: VPCs, DNS and security groups"
