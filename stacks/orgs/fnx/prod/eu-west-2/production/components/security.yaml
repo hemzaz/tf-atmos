@@ -68,23 +68,22 @@ components:
     kms/main:
       metadata:
         component: kms
-        enabled: false  # no components/terraform/kms root module yet (see PR notes)
       vars:
-        description: "Production main encryption key"
-        key_usage: "ENCRYPT_DECRYPT"
-        customer_master_key_spec: "SYMMETRIC_DEFAULT"
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
+        key_spec: SYMMETRIC_DEFAULT
+        key_usage: ENCRYPT_DECRYPT
         enable_key_rotation: true
+        rotation_period_in_days: 365
         deletion_window_in_days: 30
-
-        # Key policy
+        alias_name: production-main  # without the alias/ prefix
         key_administrators:
-          - "arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/Admin"
+          - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/Admin
+        # IAM roles referenced here must exist before apply (the iam ci/eks-node
+        # instances are disabled; EKS-managed node roles need their ARNs here)
         key_users:
-          - "arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-eks-node-role"
-          - "arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-ci-role"
-
-        aliases:
-          - "alias/production-main"
+          - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-eks-node-role
+          - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-ci-role
 
     # ==========================================================================
     # ACM Certificates - Production
@@ -130,6 +129,8 @@ components:
         inherits:
           - secretsmanager/defaults
       vars:
+        # No rotation Lambdas are deployed: rotation settings were removed.
+        # The RDS master password is rotated by RDS itself.
         secrets:
           app_credentials:
             name: "credentials"
@@ -137,28 +138,18 @@ components:
             path: "production/app"
             generate_random_password: true
             password_length: 48
-            # Enable rotation
-            enable_rotation: true
-            rotation_lambda_arn: !terraform.state lambda/secret-rotation .function_arn
-            rotation_days: 30
           api_keys:
             name: "api-keys"
             description: "Production API integration keys"
             path: "production/app/api"
             generate_random_password: true
             password_length: 64
-            enable_rotation: true
-            rotation_days: 90
           database_credentials:
             name: "db-credentials"
             description: "Production database credentials"
             path: "production/app/database"
             generate_random_password: true
             password_length: 32
-            enable_rotation: true
-            rotation_lambda_arn: !terraform.state lambda/rds-secret-rotation .function_arn
-            rotation_days: 14
-
         context_name: "production/app"
         default_recovery_window_in_days: 30
     secretsmanager/infra:

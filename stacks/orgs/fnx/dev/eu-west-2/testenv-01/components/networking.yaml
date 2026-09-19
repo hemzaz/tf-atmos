@@ -48,29 +48,28 @@ components:
         enable_flow_logs: "{{ .settings.environment.enable_vpc_flow_logs }}"
     network/main:
       metadata:
-        component: network
-        enabled: false  # no components/terraform/network root module yet (see PR notes)
+        component: dns
+        inherits:
+          - dns
       vars:
-        vpc_id: !terraform.state vpc/main .vpc_id
-        # DNS settings
-        dns_create_root_zone: false
-        dns_multi_account: false
-
-        # Define zones
-        dns_zones:
+        root_domain: fnx.example.com
+        create_root_zone: false
+        multi_account_dns_delegation: false
+        zones:
           main:
             name: "fnx.example.com"
             comment: "Main zone for fnx environment"
             force_destroy: true
             enable_query_logging: true
-            vpc_associations: []
           internal:
             name: "internal.fnx.example.com"
             comment: "Internal DNS for fnx environment"
             force_destroy: true
+            vpc_associations:
+              - !terraform.state vpc/main .vpc_id
 
         # Define essential DNS records
-        dns_records:
+        records:
           www_main:
             zone_name: "main"
             name: "www.fnx.example.com"
@@ -87,16 +86,14 @@ components:
     # Network resources for services VPC
     network/services:
       metadata:
-        component: network
-        enabled: false  # no components/terraform/network root module yet (see PR notes)
+        component: dns
+        inherits:
+          - dns
       vars:
-        vpc_id: !terraform.state vpc/services .vpc_id
-        # DNS settings
-        dns_create_root_zone: false
-        dns_multi_account: false
-
-        # Define zones
-        dns_zones:
+        root_domain: fnx.example.com
+        create_root_zone: false
+        multi_account_dns_delegation: false
+        zones:
           services:
             name: "services.fnx.example.com"
             comment: "Services zone for fnx environment"
@@ -107,7 +104,7 @@ components:
             force_destroy: true
 
         # Define essential DNS records
-        dns_records:
+        records:
           api_services:
             zone_name: "services"
             name: "api.services.fnx.example.com"

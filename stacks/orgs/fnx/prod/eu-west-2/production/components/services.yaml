@@ -71,6 +71,10 @@ components:
           max_age: 300
           allow_credentials: false
         enable_waf: true
+      dependencies:
+        components:
+          - component: network/main
+          - component: acm/main
     apigateway/data:
       metadata:
         component: apigateway
@@ -102,6 +106,10 @@ components:
         api_name: "production-data-api"
         zone_id: !terraform.state network/services .zone_ids.data
         tracing_enabled: true
+      dependencies:
+        components:
+          - component: network/services
+          - component: acm/services
     infrastructure/main:
       metadata:
         component: infrastructure
@@ -195,6 +203,9 @@ components:
     # ==========================================================================
     # Infrastructure - Data Processing Stack (Production HA)
     # ==========================================================================
+      dependencies:
+        components:
+          - component: kms/main
     infrastructure/data:
       metadata:
         component: infrastructure
@@ -271,6 +282,9 @@ components:
     # ==========================================================================
     # Monitoring - Main Dashboard (Production)
     # ==========================================================================
+      dependencies:
+        components:
+          - component: kms/main
     monitoring/main:
       metadata:
         component: monitoring

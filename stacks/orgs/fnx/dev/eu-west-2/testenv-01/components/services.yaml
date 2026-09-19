@@ -36,6 +36,10 @@ components:
 
         api_name: "main-api"
         zone_id: !terraform.state network/main .zone_ids.main
+      dependencies:
+        components:
+          - component: network/main
+          - component: acm/main
     apigateway/data:
       metadata:
         component: apigateway
@@ -58,6 +62,10 @@ components:
     # Infrastructure instances
         api_name: "data-api"
         zone_id: !terraform.state network/services .zone_ids.data
+      dependencies:
+        components:
+          - component: network/services
+          - component: acm/services
     infrastructure/main:
       metadata:
         component: infrastructure

@@ -57,6 +57,13 @@ variable "zones" {
   }))
   description = "Map of Route53 zones to create"
   default     = {}
+
+  validation {
+    condition = alltrue([
+      for z in values(var.zones) : !(z.enable_query_logging && length(z.vpc_associations) > 0)
+    ])
+    error_message = "enable_query_logging is only supported for public zones; private zones (with vpc_associations) need Route53 Resolver query logging instead."
+  }
 }
 
 variable "records" {
