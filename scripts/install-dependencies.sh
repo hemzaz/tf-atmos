@@ -927,9 +927,7 @@ install_redis() {
       brew install redis
       
       echo -e "${GREEN}Redis installed: $(redis-server --version)${RESET}"
-      echo -e "${YELLOW}To start Redis server:${RESET}"
-      echo -e "${YELLOW}  - Use our helper script: scripts/start_redis.sh${RESET}"
-      echo -e "${YELLOW}  - Or manually: brew services start redis${RESET}"
+      echo -e "${YELLOW}To start Redis server: brew services start redis${RESET}"
     else
       echo -e "${RED}Homebrew not found. Unable to install Redis.${RESET}"
     fi
@@ -956,9 +954,7 @@ install_redis() {
     
     if command -v redis-server &>/dev/null; then
       echo -e "${GREEN}Redis installed: $(redis-server --version)${RESET}"
-      echo -e "${YELLOW}To start Redis server:${RESET}"
-      echo -e "${YELLOW}  - Use our helper script: scripts/start_redis.sh${RESET}"
-      echo -e "${YELLOW}  - Or manually: sudo systemctl start redis${RESET}"
+      echo -e "${YELLOW}To start Redis server: sudo systemctl start redis${RESET}"
     else
       echo -e "${RED}Failed to install Redis${RESET}"
     fi
@@ -1188,7 +1184,7 @@ if [[ "$INSTALL_REDIS" == "true" ]]; then
   if redis-cli ping &>/dev/null; then
     echo -e "    ${GREEN}Redis server is running${RESET}"
   else
-    echo -e "    ${YELLOW}Redis server is not running. Use scripts/start_redis.sh to start it.${RESET}"
+    echo -e "    ${YELLOW}Redis server is not running. Start it with 'brew services start redis' (macOS) or 'sudo systemctl start redis' (Linux).${RESET}"
   fi
 fi
 

@@ -681,7 +681,7 @@ print_summary() {
     echo -e "${WHITE}Documentation:${NC}"
     echo "  - Deployment Guide:  docs/DEPLOYMENT.md"
     echo "  - Operations Guide:  docs/OPERATIONS.md"
-    echo "  - Runbooks:          docs/runbooks/"
+    echo "  - Runbooks:          workflows/disaster-recovery.yaml (see docs/OPERATIONS.md)"
     echo
 
     echo -e "${GREEN}${BOLD}Quickstart completed successfully!${NC}"
