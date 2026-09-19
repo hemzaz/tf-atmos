@@ -1,195 +1,197 @@
 # Lambda Function Resource Template
-# Production-ready Lambda function with monitoring and security
+# Production-ready Lambda function with a least-privilege execution role,
+# log group, optional VPC access, event source permissions and alarms.
+#
+# Usage: copy this file into its own module directory (for example
+# components/terraform/<component>/modules/lambda-function/main.tf) and call it
+# with a `module` block. It is self-contained: the module declares its own
+# provider requirements and takes no provider configuration.
+
+terraform {
+  required_version = ">= 1.16.0, < 2.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.0, < 7.0"
+    }
+  }
+}
 
 locals {
   function_name = "${var.name_prefix}-${var.function_name}"
+  vpc_enabled   = length(var.vpc_subnet_ids) > 0
 }
+
+data "aws_partition" "current" {}
 
 # Lambda function
 resource "aws_lambda_function" "this" {
   function_name = local.function_name
-  role         = aws_iam_role.lambda_execution.arn
-  
-  # Code configuration
+  role          = aws_iam_role.lambda_execution.arn
+
+  # Code configuration (exactly one of filename, s3_bucket/s3_key or image_uri)
   filename         = var.filename
   source_code_hash = var.filename != null ? filebase64sha256(var.filename) : null
-  
+
   s3_bucket         = var.s3_bucket
-  s3_key           = var.s3_key
+  s3_key            = var.s3_key
   s3_object_version = var.s3_object_version
-  
+
   image_uri    = var.image_uri
   package_type = var.package_type
-  
+
   # Runtime configuration
   runtime     = var.package_type == "Zip" ? var.runtime : null
   handler     = var.package_type == "Zip" ? var.handler : null
   timeout     = var.timeout
   memory_size = var.memory_size
-  
-  # Architecture
+
   architectures = var.architectures
-  
-  # Environment variables
+  layers        = var.layers
+  publish       = var.provisioned_concurrent_executions != null
+
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
   dynamic "environment" {
-    for_each = length(var.environment_variables) > 0 ? [1] : []
+    for_each = length(var.environment_variables) > 0 ? [var.environment_variables] : []
     content {
-      variables = var.environment_variables
+      variables = environment.value
     }
   }
-  
-  # VPC configuration
+
   dynamic "vpc_config" {
-    for_each = var.vpc_subnet_ids != null ? [1] : []
+    for_each = local.vpc_enabled ? [1] : []
     content {
       subnet_ids         = var.vpc_subnet_ids
       security_group_ids = var.vpc_security_group_ids
     }
   }
-  
-  # Dead letter queue
+
   dynamic "dead_letter_config" {
-    for_each = var.dead_letter_target_arn != null ? [1] : []
+    for_each = var.dead_letter_target_arn != null ? [var.dead_letter_target_arn] : []
     content {
-      target_arn = var.dead_letter_target_arn
+      target_arn = dead_letter_config.value
     }
   }
-  
-  # Tracing
+
   tracing_config {
     mode = var.tracing_mode
   }
-  
-  # Image configuration for container images
+
   dynamic "image_config" {
     for_each = var.package_type == "Image" ? [1] : []
     content {
       command           = var.image_command
-      entry_point      = var.image_entry_point
+      entry_point       = var.image_entry_point
       working_directory = var.image_working_directory
     }
   }
-  
-  # Layers
-  layers = var.layers
-  
-  # Reserved concurrency
-  reserved_concurrent_executions = var.reserved_concurrent_executions
-  
-  # Provisioned concurrency
-  dynamic "provisioned_concurrency_config" {
-    for_each = var.provisioned_concurrent_executions != null ? [1] : []
-    content {
-      provisioned_concurrent_executions = var.provisioned_concurrent_executions
-    }
+
+  logging_config {
+    log_format = "JSON"
+    log_group  = aws_cloudwatch_log_group.lambda_logs.name
   }
-  
+
   tags = var.tags
-  
+
   depends_on = [
-    aws_iam_role_policy_attachment.lambda_logs,
+    aws_iam_role_policy.lambda_logging,
     aws_cloudwatch_log_group.lambda_logs,
   ]
 }
 
+# Provisioned concurrency targets the published version
+resource "aws_lambda_provisioned_concurrency_config" "this" {
+  count = var.provisioned_concurrent_executions != null ? 1 : 0
+
+  function_name                     = aws_lambda_function.this.function_name
+  qualifier                         = aws_lambda_function.this.version
+  provisioned_concurrent_executions = var.provisioned_concurrent_executions
+}
+
 # Lambda execution role
+data "aws_iam_policy_document" "assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_iam_role" "lambda_execution" {
-  name = "${local.function_name}-execution-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
+  name               = "${local.function_name}-execution-role"
+  assume_role_policy = data.aws_iam_policy_document.assume_role.json
+
   tags = var.tags
 }
 
-# Basic execution policy
-resource "aws_iam_role_policy_attachment" "lambda_basic" {
-  role       = aws_iam_role.lambda_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+# CloudWatch Logs permissions, scoped to this function's log group
+data "aws_iam_policy_document" "lambda_logging" {
+  statement {
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = ["${aws_cloudwatch_log_group.lambda_logs.arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_logging" {
+  name   = "${local.function_name}-logging"
+  role   = aws_iam_role.lambda_execution.id
+  policy = data.aws_iam_policy_document.lambda_logging.json
 }
 
 # VPC execution policy (if VPC is configured)
 resource "aws_iam_role_policy_attachment" "lambda_vpc" {
-  count = var.vpc_subnet_ids != null ? 1 : 0
-  
+  count = local.vpc_enabled ? 1 : 0
+
   role       = aws_iam_role.lambda_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
 # X-Ray tracing policy
 resource "aws_iam_role_policy_attachment" "lambda_xray" {
   count = var.tracing_mode == "Active" ? 1 : 0
-  
+
   role       = aws_iam_role.lambda_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
-# CloudWatch Logs permissions
-resource "aws_iam_role_policy_attachment" "lambda_logs" {
-  role       = aws_iam_role.lambda_execution.name
-  policy_arn = aws_iam_policy.lambda_logging.arn
-}
-
-resource "aws_iam_policy" "lambda_logging" {
-  name = "${local.function_name}-logging"
-  path = "/"
-  description = "IAM policy for logging from Lambda"
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      }
-    ]
-  })
-}
-
-# Custom IAM policies
+# Custom inline policy (pass an aws_iam_policy_document JSON)
 resource "aws_iam_role_policy" "lambda_custom" {
-  count = var.custom_policy_json != "" ? 1 : 0
-  
-  name = "${local.function_name}-custom-policy"
-  role = aws_iam_role.lambda_execution.id
+  count = var.custom_policy_json != null ? 1 : 0
+
+  name   = "${local.function_name}-custom-policy"
+  role   = aws_iam_role.lambda_execution.id
   policy = var.custom_policy_json
 }
 
-# Attach additional managed policies
+# Additional managed policies
 resource "aws_iam_role_policy_attachment" "lambda_managed_policies" {
-  count = length(var.managed_policy_arns)
-  
+  for_each = toset(var.managed_policy_arns)
+
   role       = aws_iam_role.lambda_execution.name
-  policy_arn = var.managed_policy_arns[count.index]
+  policy_arn = each.value
 }
 
 # CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   name              = "/aws/lambda/${local.function_name}"
   retention_in_days = var.log_retention_days
-  
+  kms_key_id        = var.log_kms_key_arn
+
   tags = var.tags
 }
 
 # Lambda permissions for API Gateway
 resource "aws_lambda_permission" "api_gateway" {
   count = var.api_gateway_source_arn != null ? 1 : 0
-  
+
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.this.function_name
@@ -197,78 +199,92 @@ resource "aws_lambda_permission" "api_gateway" {
   source_arn    = var.api_gateway_source_arn
 }
 
-# Lambda permissions for S3
+# Lambda permissions for S3 (key = logical name of the bucket)
 resource "aws_lambda_permission" "s3" {
-  count = length(var.s3_bucket_notifications)
-  
-  statement_id  = "AllowExecutionFromS3-${count.index}"
+  for_each = var.s3_bucket_notifications
+
+  statement_id  = "AllowExecutionFromS3-${each.key}"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.this.function_name
   principal     = "s3.amazonaws.com"
-  source_arn    = var.s3_bucket_notifications[count.index].bucket_arn
+  source_arn    = each.value.bucket_arn
 }
 
-# Lambda permissions for EventBridge
+# Lambda permissions for EventBridge (key = logical name of the rule)
 resource "aws_lambda_permission" "eventbridge" {
-  count = length(var.eventbridge_rules)
-  
-  statement_id  = "AllowExecutionFromEventBridge-${count.index}"
+  for_each = var.eventbridge_rules
+
+  statement_id  = "AllowExecutionFromEventBridge-${each.key}"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.this.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = var.eventbridge_rules[count.index].rule_arn
+  source_arn    = each.value.rule_arn
 }
 
 # CloudWatch Alarms
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   count = var.enable_error_alarm ? 1 : 0
-  
+
   alarm_name          = "${local.function_name}-errors"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
+  evaluation_periods  = 2
   metric_name         = "Errors"
   namespace           = "AWS/Lambda"
-  period              = "300"
+  period              = 300
   statistic           = "Sum"
   threshold           = var.error_alarm_threshold
-  alarm_description   = "This metric monitors Lambda function errors"
-  
+  alarm_description   = "Lambda function errors for ${local.function_name}"
+  alarm_actions       = var.alarm_actions
+  treat_missing_data  = "notBreaching"
+
   dimensions = {
     FunctionName = aws_lambda_function.this.function_name
   }
-  
+
   tags = var.tags
 }
 
 resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
   count = var.enable_duration_alarm ? 1 : 0
-  
+
   alarm_name          = "${local.function_name}-duration"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
+  evaluation_periods  = 2
   metric_name         = "Duration"
   namespace           = "AWS/Lambda"
-  period              = "300"
+  period              = 300
   statistic           = "Average"
   threshold           = var.duration_alarm_threshold
-  alarm_description   = "This metric monitors Lambda function duration"
-  
+  alarm_description   = "Lambda function duration for ${local.function_name}"
+  alarm_actions       = var.alarm_actions
+  treat_missing_data  = "notBreaching"
+
   dimensions = {
     FunctionName = aws_lambda_function.this.function_name
   }
-  
+
   tags = var.tags
 }
 
-# Variables (essential ones, add more as needed)
+# Variables
 variable "name_prefix" {
   type        = string
-  description = "Name prefix for resources"
+  description = "Name prefix for resources (e.g. <tenant>-<account>-<environment>)"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_-]+$", var.name_prefix))
+    error_message = "The name_prefix must contain only letters, numbers, hyphens and underscores."
+  }
 }
 
 variable "function_name" {
   type        = string
-  description = "Name of the Lambda function"
+  description = "Name of the Lambda function (appended to name_prefix)"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_-]+$", var.function_name))
+    error_message = "The function_name must contain only letters, numbers, hyphens and underscores."
+  }
 }
 
 # Code source variables
@@ -306,7 +322,7 @@ variable "package_type" {
   type        = string
   description = "Lambda deployment package type"
   default     = "Zip"
-  
+
   validation {
     condition     = contains(["Zip", "Image"], var.package_type)
     error_message = "Package type must be either 'Zip' or 'Image'."
@@ -316,13 +332,13 @@ variable "package_type" {
 # Runtime configuration
 variable "runtime" {
   type        = string
-  description = "Runtime environment for the Lambda function"
-  default     = "python3.9"
+  description = "Runtime environment for the Lambda function (Zip packages only)"
+  default     = "python3.13"
 }
 
 variable "handler" {
   type        = string
-  description = "Function entrypoint"
+  description = "Function entrypoint (Zip packages only)"
   default     = "lambda_function.lambda_handler"
 }
 
@@ -330,7 +346,7 @@ variable "timeout" {
   type        = number
   description = "Function timeout in seconds"
   default     = 30
-  
+
   validation {
     condition     = var.timeout >= 1 && var.timeout <= 900
     error_message = "Timeout must be between 1 and 900 seconds."
@@ -339,9 +355,9 @@ variable "timeout" {
 
 variable "memory_size" {
   type        = number
-  description = "Amount of memory available to the function"
+  description = "Amount of memory available to the function in MB"
   default     = 128
-  
+
   validation {
     condition     = var.memory_size >= 128 && var.memory_size <= 10240
     error_message = "Memory size must be between 128 MB and 10,240 MB."
@@ -351,38 +367,35 @@ variable "memory_size" {
 variable "architectures" {
   type        = list(string)
   description = "Instruction set architecture for the function"
-  default     = ["x86_64"]
-  
+  default     = ["arm64"]
+
   validation {
-    condition = alltrue([
-      for arch in var.architectures : contains(["x86_64", "arm64"], arch)
-    ])
+    condition     = alltrue([for arch in var.architectures : contains(["x86_64", "arm64"], arch)])
     error_message = "Architectures must be 'x86_64' or 'arm64'."
   }
 }
 
-# Additional variables for environment, VPC, etc.
 variable "environment_variables" {
   type        = map(string)
-  description = "Environment variables for the function"
+  description = "Environment variables for the function (never put secrets here; read them from Secrets Manager at runtime)"
   default     = {}
 }
 
 variable "vpc_subnet_ids" {
   type        = list(string)
-  description = "VPC subnet IDs"
-  default     = null
+  description = "VPC subnet IDs (empty to run outside a VPC)"
+  default     = []
 }
 
 variable "vpc_security_group_ids" {
   type        = list(string)
-  description = "VPC security group IDs"
+  description = "VPC security group IDs (required when vpc_subnet_ids is set)"
   default     = []
 }
 
 variable "dead_letter_target_arn" {
   type        = string
-  description = "ARN of the dead letter queue"
+  description = "ARN of the SQS queue or SNS topic used as dead letter target"
   default     = null
 }
 
@@ -390,7 +403,7 @@ variable "tracing_mode" {
   type        = string
   description = "X-Ray tracing mode"
   default     = "PassThrough"
-  
+
   validation {
     condition     = contains(["Active", "PassThrough"], var.tracing_mode)
     error_message = "Tracing mode must be either 'Active' or 'PassThrough'."
@@ -405,14 +418,19 @@ variable "layers" {
 
 variable "reserved_concurrent_executions" {
   type        = number
-  description = "Reserved concurrent executions"
-  default     = null
+  description = "Reserved concurrent executions (-1 for unreserved)"
+  default     = -1
 }
 
 variable "provisioned_concurrent_executions" {
   type        = number
-  description = "Provisioned concurrent executions"
+  description = "Provisioned concurrent executions on the published version (null to disable)"
   default     = null
+
+  validation {
+    condition     = var.provisioned_concurrent_executions == null || try(var.provisioned_concurrent_executions >= 1, false)
+    error_message = "Provisioned concurrent executions must be at least 1 when set."
+  }
 }
 
 # Image configuration (for container images)
@@ -437,13 +455,13 @@ variable "image_working_directory" {
 # IAM configuration
 variable "custom_policy_json" {
   type        = string
-  description = "Custom IAM policy JSON"
-  default     = ""
+  description = "Custom inline IAM policy JSON for the execution role (null for none)"
+  default     = null
 }
 
 variable "managed_policy_arns" {
   type        = list(string)
-  description = "List of managed policy ARNs to attach"
+  description = "List of managed policy ARNs to attach to the execution role"
   default     = []
 }
 
@@ -452,6 +470,17 @@ variable "log_retention_days" {
   type        = number
   description = "CloudWatch log retention in days"
   default     = 14
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "Log retention must be a valid CloudWatch retention period."
+  }
+}
+
+variable "log_kms_key_arn" {
+  type        = string
+  description = "KMS key ARN used to encrypt the log group (null for AWS-managed encryption)"
+  default     = null
 }
 
 variable "enable_error_alarm" {
@@ -478,27 +507,33 @@ variable "duration_alarm_threshold" {
   default     = 10000
 }
 
+variable "alarm_actions" {
+  type        = list(string)
+  description = "ARNs (e.g. SNS topics) notified when an alarm fires"
+  default     = []
+}
+
 # Event sources
 variable "api_gateway_source_arn" {
   type        = string
-  description = "API Gateway source ARN"
+  description = "API Gateway execution ARN allowed to invoke the function"
   default     = null
 }
 
 variable "s3_bucket_notifications" {
-  type = list(object({
+  type = map(object({
     bucket_arn = string
   }))
-  description = "S3 bucket notification configurations"
-  default     = []
+  description = "S3 buckets allowed to invoke the function, keyed by a logical name"
+  default     = {}
 }
 
 variable "eventbridge_rules" {
-  type = list(object({
+  type = map(object({
     rule_arn = string
   }))
-  description = "EventBridge rule configurations"
-  default     = []
+  description = "EventBridge rules allowed to invoke the function, keyed by a logical name"
+  default     = {}
 }
 
 variable "tags" {
