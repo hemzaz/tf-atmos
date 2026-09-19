@@ -140,40 +140,40 @@ resource "aws_backup_plan" "this" {
     for_each = each.value.rules
 
     content {
-      rule_name         = rule.value.name
-      target_vault_name = aws_backup_vault.this.name
-      schedule          = rule.value.schedule
-      start_window      = lookup(rule.value, "start_window", 60)
-      completion_window = lookup(rule.value, "completion_window", 120)
-      enable_continuous_backup = lookup(rule.value, "enable_continuous_backup", false)
+      rule_name                = rule.value.name
+      target_vault_name        = aws_backup_vault.this.name
+      schedule                 = rule.value.schedule
+      start_window             = rule.value.start_window
+      completion_window        = rule.value.completion_window
+      enable_continuous_backup = rule.value.enable_continuous_backup
 
       lifecycle {
-        delete_after       = lookup(rule.value.lifecycle, "delete_after", null)
-        cold_storage_after = lookup(rule.value.lifecycle, "cold_storage_after", null)
+        delete_after       = rule.value.lifecycle.delete_after
+        cold_storage_after = rule.value.lifecycle.cold_storage_after
       }
 
       dynamic "copy_action" {
-        for_each = lookup(rule.value, "copy_actions", [])
+        for_each = rule.value.copy_actions
 
         content {
           destination_vault_arn = copy_action.value.destination_vault_arn
 
           lifecycle {
-            delete_after       = lookup(copy_action.value.lifecycle, "delete_after", null)
-            cold_storage_after = lookup(copy_action.value.lifecycle, "cold_storage_after", null)
+            delete_after       = copy_action.value.lifecycle.delete_after
+            cold_storage_after = copy_action.value.lifecycle.cold_storage_after
           }
         }
       }
 
       recovery_point_tags = merge(
         local.common_tags,
-        lookup(rule.value, "recovery_point_tags", {})
+        rule.value.recovery_point_tags
       )
     }
   }
 
   dynamic "advanced_backup_setting" {
-    for_each = lookup(each.value, "advanced_backup_settings", [])
+    for_each = each.value.advanced_backup_settings
 
     content {
       backup_options = advanced_backup_setting.value.backup_options
@@ -200,7 +200,7 @@ resource "aws_backup_selection" "this" {
   iam_role_arn = aws_iam_role.backup.arn
 
   dynamic "selection_tag" {
-    for_each = lookup(each.value, "selection_tags", [])
+    for_each = each.value.selection_tags
 
     content {
       type  = "STRINGEQUALS"
@@ -209,14 +209,14 @@ resource "aws_backup_selection" "this" {
     }
   }
 
-  resources = lookup(each.value, "resource_arns", [])
+  resources = each.value.resource_arns
 
   dynamic "condition" {
-    for_each = lookup(each.value, "conditions", [])
+    for_each = each.value.conditions
 
     content {
       dynamic "string_equals" {
-        for_each = lookup(condition.value, "string_equals", [])
+        for_each = condition.value.string_equals
 
         content {
           key   = string_equals.value.key
@@ -225,7 +225,7 @@ resource "aws_backup_selection" "this" {
       }
 
       dynamic "string_like" {
-        for_each = lookup(condition.value, "string_like", [])
+        for_each = condition.value.string_like
 
         content {
           key   = string_like.value.key
@@ -234,7 +234,7 @@ resource "aws_backup_selection" "this" {
       }
 
       dynamic "string_not_equals" {
-        for_each = lookup(condition.value, "string_not_equals", [])
+        for_each = condition.value.string_not_equals
 
         content {
           key   = string_not_equals.value.key
@@ -243,7 +243,7 @@ resource "aws_backup_selection" "this" {
       }
 
       dynamic "string_not_like" {
-        for_each = lookup(condition.value, "string_not_like", [])
+        for_each = condition.value.string_not_like
 
         content {
           key   = string_not_like.value.key

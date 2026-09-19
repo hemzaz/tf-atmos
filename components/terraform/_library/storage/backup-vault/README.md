@@ -70,8 +70,8 @@ module "backup_vault" {
 
 | Name | Version |
 |------|---------|
-| terraform | >= 1.5.0 |
-| aws | >= 5.0.0 |
+| terraform | >= 1.16.0, < 2.0.0 |
+| aws | >= 6.0, < 7.0 |
 
 ## Inputs
 

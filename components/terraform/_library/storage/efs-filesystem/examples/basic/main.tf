@@ -14,7 +14,7 @@ module "efs" {
   performance_mode = "generalPurpose"
   throughput_mode  = "elastic"
 
-  transition_to_ia = "AFTER_30_DAYS"
+  transition_to_ia     = "AFTER_30_DAYS"
   enable_backup_policy = true
 
   access_points = {

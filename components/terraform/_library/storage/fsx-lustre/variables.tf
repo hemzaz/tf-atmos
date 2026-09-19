@@ -189,7 +189,7 @@ variable "data_repository_associations" {
   type = map(object({
     data_repository_path             = string
     file_system_path                 = string
-    batch_import_meta_data_on_create = optional(bool)
+    batch_import_meta_data_on_create = optional(bool, false)
     imported_file_chunk_size         = optional(number)
     s3_auto_import_policy            = optional(list(string))
     s3_auto_export_policy            = optional(list(string))

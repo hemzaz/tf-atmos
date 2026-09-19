@@ -31,6 +31,11 @@ variable "destination_bucket_id" {
 variable "destination_region" {
   description = "AWS region of the destination bucket"
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]$", var.destination_region))
+    error_message = "Destination region must be a valid AWS region name (e.g. us-west-2)."
+  }
 }
 
 variable "destination_account_id" {
@@ -60,17 +65,17 @@ variable "destination_kms_key_arn" {
 variable "replication_rules" {
   description = "List of replication rules"
   type = list(object({
-    id                                  = string
-    priority                            = number
-    filter_prefix                       = optional(string)
-    filter_tags                         = optional(map(string))
-    destination_storage_class           = optional(string)
-    delete_marker_replication_status    = optional(string)
-    enable_replication_time_control     = optional(bool)
-    replication_time_minutes            = optional(number)
-    enable_metrics                      = optional(bool)
-    metrics_event_threshold_minutes     = optional(number)
-    enable_replica_modifications        = optional(bool)
+    id                               = string
+    priority                         = number
+    filter_prefix                    = optional(string)
+    filter_tags                      = optional(map(string), {})
+    destination_storage_class        = optional(string, "STANDARD")
+    delete_marker_replication_status = optional(string, "Disabled")
+    enable_replication_time_control  = optional(bool, false)
+    replication_time_minutes         = optional(number, 15)
+    enable_metrics                   = optional(bool, false)
+    metrics_event_threshold_minutes  = optional(number, 15)
+    enable_replica_modifications     = optional(bool, false)
   }))
 
   validation {
@@ -81,7 +86,7 @@ variable "replication_rules" {
   validation {
     condition = alltrue([
       for rule in var.replication_rules :
-      rule.destination_storage_class == null || contains([
+      contains([
         "STANDARD", "REDUCED_REDUNDANCY", "STANDARD_IA",
         "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER",
         "DEEP_ARCHIVE", "GLACIER_IR"
@@ -93,7 +98,7 @@ variable "replication_rules" {
   validation {
     condition = alltrue([
       for rule in var.replication_rules :
-      rule.delete_marker_replication_status == null || contains(["Enabled", "Disabled"], rule.delete_marker_replication_status)
+      contains(["Enabled", "Disabled"], rule.delete_marker_replication_status)
     ])
     error_message = "Delete marker replication status must be Enabled or Disabled."
   }
@@ -130,6 +135,11 @@ variable "object_lock_days" {
   description = "Number of days for object lock retention"
   type        = number
   default     = 1
+
+  validation {
+    condition     = var.object_lock_days >= 1
+    error_message = "Object lock retention must be at least 1 day."
+  }
 }
 
 variable "enable_cloudwatch_alarms" {
