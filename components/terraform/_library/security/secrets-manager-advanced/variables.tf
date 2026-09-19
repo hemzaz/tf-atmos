@@ -16,9 +16,31 @@ variable "description" {
 
 variable "secret_string" {
   type        = string
-  description = "Secret value (JSON string). Sent via the write-only secret_string_wo argument, so it is never stored in state"
+  description = "Secret value (JSON string). Ephemeral and sent through the write-only secret_string_wo, so it is never stored in state or saved plan files. Requires create_secret_version = true."
   default     = null
   sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = var.secret_string == null || var.create_secret_version
+    error_message = "secret_string requires create_secret_version = true."
+  }
+
+  validation {
+    condition     = var.secret_string == null || var.secret_binary == null
+    error_message = "secret_string and secret_binary are mutually exclusive."
+  }
+
+  validation {
+    condition     = !var.create_secret_version || var.secret_string != null || var.secret_binary != null
+    error_message = "create_secret_version = true requires secret_string or secret_binary."
+  }
+}
+
+variable "create_secret_version" {
+  type        = bool
+  description = "Create a secret version from secret_string or secret_binary. A non-secret switch because resource counts cannot depend on the ephemeral secret_string."
+  default     = false
 }
 
 variable "secret_string_version" {
@@ -34,7 +56,7 @@ variable "secret_string_version" {
 
 variable "secret_binary" {
   type        = string
-  description = "Binary secret value (base64-encoded)"
+  description = "Binary secret value (base64-encoded). AWS provider v6 has no write-only form of secret_binary, so this value IS stored in Terraform state; prefer secret_string for sensitive data."
   default     = null
   sensitive   = true
 

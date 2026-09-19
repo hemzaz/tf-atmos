@@ -1609,6 +1609,7 @@ modules:
       - "Lambda rotation functions (included)"
       - "Cross-account access policies"
       - "KMS encryption integration"
+      - "Ephemeral secret_string sent write-only (never in state or plan files); enable with create_secret_version"
       - "CloudWatch monitoring and alarms"
       - "Rotation failure alerting"
       - "Version management"
@@ -2362,6 +2363,7 @@ modules:
     features:
       - "5 deployment patterns supported"
       - "API Gateway integration (REST and HTTP APIs)"
+      - "Secure API defaults: AWS_IAM authorization and no CORS origins unless configured (authorizer_id required for COGNITO_USER_POOLS/CUSTOM)"
       - "EventBridge scheduled and event-driven triggers"
       - "SQS queue processing with batch configuration"
       - "SNS topic subscription"

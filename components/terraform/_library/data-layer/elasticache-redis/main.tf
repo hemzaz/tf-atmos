@@ -118,11 +118,11 @@ resource "aws_elasticache_replication_group" "this" {
   kms_key_id                 = var.kms_key_id
   transit_encryption_enabled = var.enable_encryption_in_transit
 
-  # Write-only: the token is sent to AWS but never stored in state/plan.
+  # Write-only + ephemeral: the token is sent to AWS but never stored in state or plan files.
   # AWS provider v6 requires auth_token_update_strategy whenever a token is set.
   auth_token_wo              = var.auth_token
-  auth_token_wo_version      = var.auth_token != null ? var.auth_token_version : null
-  auth_token_update_strategy = var.auth_token != null ? var.auth_token_update_strategy : null
+  auth_token_wo_version      = var.enable_auth_token ? var.auth_token_version : null
+  auth_token_update_strategy = var.enable_auth_token ? var.auth_token_update_strategy : null
 
   # Backups
   snapshot_retention_limit = var.snapshot_retention_limit
