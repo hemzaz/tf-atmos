@@ -65,15 +65,23 @@ variable "custom_sampling_rules" {
     priority       = number
     reservoir_size = number
     fixed_rate     = number
-    url_path       = optional(string)
-    host           = optional(string)
-    http_method    = optional(string)
-    service_type   = optional(string)
-    service_name   = optional(string)
-    resource_arn   = optional(string)
+    url_path       = optional(string, "*")
+    host           = optional(string, "*")
+    http_method    = optional(string, "*")
+    service_type   = optional(string, "*")
+    service_name   = optional(string, "*")
+    resource_arn   = optional(string, "*")
   }))
   description = "Custom sampling rules"
   default     = {}
+
+  validation {
+    condition = alltrue([
+      for r in values(var.custom_sampling_rules) :
+      r.fixed_rate >= 0 && r.fixed_rate <= 1 && r.reservoir_size >= 0 && r.priority >= 1 && r.priority <= 9999
+    ])
+    error_message = "Each sampling rule needs fixed_rate in [0,1], reservoir_size >= 0 and priority in [1,9999]."
+  }
 }
 
 # X-Ray Groups

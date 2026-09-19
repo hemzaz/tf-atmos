@@ -10,7 +10,7 @@ output "dashboard_name" {
 
 output "dashboard_url" {
   description = "Console URL for the CloudWatch dashboard"
-  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
+  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${local.region}#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
 }
 
 output "discovered_instance_count" {
@@ -20,7 +20,7 @@ output "discovered_instance_count" {
 
 output "discovered_alb_count" {
   description = "Number of ALBs discovered for monitoring"
-  value       = var.enable_auto_discovery ? length(var.discovery_alb_names) : 0
+  value       = length(data.aws_lb.discovered)
 }
 
 output "custom_namespace" {

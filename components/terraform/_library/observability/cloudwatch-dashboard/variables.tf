@@ -10,7 +10,7 @@ variable "name_prefix" {
 
 variable "region" {
   type        = string
-  description = "AWS region for dashboard metrics"
+  description = "AWS region for dashboard metrics (defaults to the provider region)"
   default     = null
 }
 
