@@ -134,6 +134,7 @@ instances by `dependencies.components`.
 | Layer | Workflow | Root modules |
 |-------|----------|--------------|
 | foundation | `deploy-foundation` | `backend`, `iam` |
+| kms | `deploy-kms` | `kms` |
 | networking | `deploy-networking` | `vpc`, `dns`, `securitygroup` |
 | security | `deploy-security` | `acm`, `secretsmanager`, `security-monitoring` |
 | compute | `deploy-compute` | `eks`, `ec2`, `ecs` |
@@ -147,12 +148,9 @@ atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01                
 atmos workflow deploy-networking -f deploy-full-stack -s fnx-dev-testenv-01      # one layer
 ```
 
-The layers do not include `kms`. In production, EKS, EC2 and RDS read the key ARN from
-`kms/main`, so deploy it before the compute layer:
-
-```bash
-atmos terraform deploy kms/main -s fnx-prod-production
-```
+The `kms` layer runs right after `foundation` because in production EKS, EC2 and RDS read
+the key ARN from `kms/main`. In stacks without an enabled `kms` component (today every stack
+except `fnx-prod-production`) the layer plans nothing and its prompt only asks to continue.
 
 Other ways to deploy:
 

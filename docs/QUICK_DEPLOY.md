@@ -29,8 +29,8 @@ atmos workflow full -f bootstrap -s $STACK           # state bucket, IAM, VPCs
 atmos workflow deploy -f deploy-full-stack -s $STACK # remaining layers, confirmed one by one
 ```
 
-For `fnx-prod-production`, deploy `kms/main` before the compute layer
-(`atmos terraform deploy kms/main -s fnx-prod-production`); the layered workflow does not include it.
+In `fnx-prod-production` the `kms` layer (right after `foundation`) deploys `kms/main`, whose key
+EKS, EC2 and RDS use; in other stacks it has nothing to do and just asks to continue.
 
 ## 4. Verify
 

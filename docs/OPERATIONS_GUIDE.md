@@ -27,7 +27,8 @@ read the stack from that environment variable (or prompt for it).
 |-------|-----|-----------|
 | Drift | `atmos workflow drift-detection -f drift-detection -s <stack>` | Hourly, `drift-detection.yml` (read-only plan role; drift fails the job and the changes appear in the job summary) |
 | Code security | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL) or `atmos workflow security-scan-report -f lint` (report only). SARIF lands in `reports/` | Nightly `security-scan.yml`; every PR in `terraform-ci.yml` |
-| Lint and validation | `atmos workflow lint -f lint`, `atmos workflow validate-all -f validate-enhanced` | Every PR |
+| Lint and validation | `atmos workflow lint -f lint` (terraform fmt, yamllint, Trivy, TFLint), `atmos workflow validate-all -f validate-enhanced`. Run `atmos workflow tflint-init -f lint` once first: it installs TFLint and the rulesets pinned in `.tflint.hcl` (needs network; the lint workflow itself does not) | Every PR |
+| Scan baselines | `atmos workflow security-baseline -f lint` rewrites `.trivyignore.yaml` and `.checkov.baseline` from the current code. The PR gate fails only on findings not in these files. Regenerate them after fixing findings (to burn the backlog down), never to make a failing PR pass; review the diff before committing | No |
 | DR readiness | `STACK=<stack> atmos workflow dr-status -f disaster-recovery` | Manual `disaster-recovery.yml` |
 | Security Hub findings | `atmos workflow security-audit -f security-hardening -s <stack>` | No |
 

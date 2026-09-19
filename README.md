@@ -106,6 +106,7 @@ atmos workflow apply -f apply-environment -s fnx-dev-testenv-01
 atmos workflow deploy-networking -f deploy-full-stack -s fnx-dev-testenv-01   # one layer
 
 # Checks
+atmos workflow tflint-init -f lint   # once: installs TFLint and the rulesets in .tflint.hcl
 atmos workflow lint -f lint
 atmos workflow validate -f validate -s fnx-dev-testenv-01
 atmos workflow drift-detection -f drift-detection -s fnx-dev-testenv-01
