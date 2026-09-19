@@ -16,8 +16,10 @@ workflows:
         prompt: Template to deploy
         options: [web-application, microservices, serverless-api, data-pipeline, batch-processing]
       - name: validate
-        type: atmos
-        command: validate stacks
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate`/`list stacks` reject that flag.
+        type: shell
+        command: atmos validate stacks
       - name: plan
         type: atmos
         command: terraform plan --log-order grouped --query '.atmos_component | test("^{{ .steps.template.value }}/")'
