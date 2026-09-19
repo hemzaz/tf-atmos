@@ -105,12 +105,9 @@ components:
 | `tenant` | Tenant name for resource naming | `string` | `""` | Yes |
 | `account_id` | AWS Account ID for resource policies | `string` | `""` | Yes |
 | `bucket_name` | Name of the S3 bucket for Terraform state (3-51 characters) | `string` | n/a | Yes |
-| `dynamodb_table_name` | Deprecated and ignored (S3-native locking) | `string` | `""` | No |
 | `enable_access_logging` | Create the access logs bucket and enable S3 server access logging | `bool` | `true` | No |
 | `region` | AWS region | `string` | `""` | Yes |
-| `state_file_key` | Key for the state file in S3 bucket | `string` | `"terraform.tfstate"` | No |
 | `iam_role_name` | Name of the IAM role to assume for Terraform execution | `string` | `""` | Yes |
-| `iam_role_arn` | ARN of the IAM role to assume for Terraform execution | `string` | `""` | No |
 | `tags` | Common tags to apply to all resources | `map(string)` | `{}` | No |
 
 ## Outputs

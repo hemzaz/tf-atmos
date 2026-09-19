@@ -345,12 +345,6 @@ variable "cache_ttl_seconds" {
   }
 }
 
-variable "cache_key_parameters" {
-  type        = list(string)
-  description = "DEPRECATED: ignored. Cache keys are set per integration; aws_api_gateway_method_settings never supported this argument"
-  default     = []
-}
-
 # Throttling Configuration Variables
 variable "throttling_rate_limit" {
   type        = number
