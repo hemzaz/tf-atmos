@@ -6,8 +6,10 @@ workflows:
     description: Generate Terraform execution plans for all components in a stack
     steps:
       - name: validate
-        type: atmos
-        command: validate stacks
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate`/`list stacks` reject that flag.
+        type: shell
+        command: atmos validate stacks
       - name: plan
         type: atmos
         command: terraform plan --failure-mode keep-going --log-order grouped --hide no-changes

@@ -12,14 +12,16 @@ workflows:
         wasilibs/go-yamllint: "1.38.0"
     steps:
       - name: validate-config
-        type: atmos
-        command: validate schema
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate`/`list stacks` reject that flag.
+        type: shell
+        command: atmos validate schema
       - name: validate-stacks
-        type: atmos
-        command: validate stacks
+        type: shell
+        command: atmos validate stacks
       - name: list-stacks
-        type: atmos
-        command: list stacks
+        type: shell
+        command: atmos list stacks
       - type: parallel
         fail:
           mode: wait_all
@@ -45,8 +47,8 @@ workflows:
     description: Validate stack manifests and resolve every component of one stack
     steps:
       - name: validate-stacks
-        type: atmos
-        command: validate stacks
+        type: shell
+        command: atmos validate stacks
       - name: describe-stack
         type: atmos
         command: describe stacks --process-functions=false --format json

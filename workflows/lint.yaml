@@ -21,8 +21,10 @@ workflows:
         trivy: "0.74.0"
     steps:
       - name: validate-config
-        type: atmos
-        command: validate config
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate`/`list stacks` reject that flag.
+        type: shell
+        command: atmos validate config
       - type: parallel
         fail:
           mode: wait_all

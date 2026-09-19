@@ -9,11 +9,13 @@ workflows:
         terraform: "1.16.3"
     steps:
       - name: validate-config
-        type: atmos
-        command: validate config
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate`/`list stacks` reject that flag.
+        type: shell
+        command: atmos validate config
       - name: validate-stacks
-        type: atmos
-        command: validate stacks
+        type: shell
+        command: atmos validate stacks
       - name: terraform-fmt
         type: shell
         command: terraform fmt -check -recursive components/terraform

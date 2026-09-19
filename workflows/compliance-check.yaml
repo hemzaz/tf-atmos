@@ -10,8 +10,10 @@ workflows:
     description: Run compliance checks (CIS, FSBP, PCI DSS, ...) for one stack
     steps:
       - name: validate
-        type: atmos
-        command: validate stacks
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate`/`list stacks` reject that flag.
+        type: shell
+        command: atmos validate stacks
       - name: report
         type: atmos
         command: aws compliance report

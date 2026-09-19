@@ -14,8 +14,10 @@ workflows:
     description: Deploy the complete stack layer by layer (foundation -> monitoring), each layer planned, confirmed, then applied from its saved plan
     steps:
       - name: validate
-        type: atmos
-        command: validate stacks
+        # shell, not type: atmos: a workflow run with -s appends -s to every atmos
+        # step, and `atmos validate`/`list stacks` reject that flag.
+        type: shell
+        command: atmos validate stacks
       - name: plan-foundation
         type: atmos
         command: terraform plan --query '.metadata.component == "backend" or .metadata.component == "iam"'
