@@ -77,7 +77,7 @@ variable "instances" {
     key_name                          = optional(string)
     subnet_id                         = optional(string)
     user_data                         = optional(string)
-    detailed_monitoring               = optional(bool, false)
+    detailed_monitoring               = optional(bool)
     ebs_optimized                     = optional(bool, true)
     enabled                           = optional(bool, true)
     root_volume_type                  = optional(string, "gp3")

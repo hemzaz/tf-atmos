@@ -26,7 +26,7 @@ resource "aws_launch_template" "instance" {
     content {
       associate_public_ip_address = try(each.value.associate_public_ip_address, false)
       delete_on_termination       = true
-      security_groups             = try(each.value.security_groups, [])
+      security_groups             = concat([aws_security_group.instances[each.key].id], each.value.additional_security_group_ids)
       subnet_id                   = try(each.value.subnet_id, null)
 
       # Enhanced networking
@@ -75,7 +75,7 @@ resource "aws_launch_template" "instance" {
 
   # Monitoring
   monitoring {
-    enabled = try(each.value.detailed_monitoring, var.enable_detailed_monitoring, true)
+    enabled = each.value.detailed_monitoring != null ? each.value.detailed_monitoring : var.enable_detailed_monitoring
   }
 
   # Placement
@@ -231,8 +231,8 @@ resource "aws_launch_template" "instance" {
 
 # Create EC2 instances from launch templates (if enabled)
 resource "aws_instance" "from_launch_template" {
-  #checkov:skip=CKV_AWS_79:False positive, IMDSv2 is enforced by the launch template (enforce_imdsv2)
-  #checkov:skip=CKV_AWS_126:False positive, detailed monitoring is set by the launch template
+  #checkov:skip=CKV_AWS_79:http_tokens comes from the launch template, which requires IMDSv2 unless a stack sets enforce_imdsv2 = false
+  #checkov:skip=CKV_AWS_126:False positive, detailed monitoring is set by the launch template (enable_detailed_monitoring, default true)
   #checkov:skip=CKV_AWS_135:False positive, ebs_optimized is set by the launch template
   for_each = var.enable_launch_templates && var.create_instances_from_templates ? local.instances : {}
 
@@ -245,7 +245,7 @@ resource "aws_instance" "from_launch_template" {
   subnet_id = !var.enable_network_interface_config ? try(each.value.subnet_id, null) : null
 
   # Override security groups if needed
-  vpc_security_group_ids = !var.enable_network_interface_config ? try(each.value.security_groups, []) : null
+  vpc_security_group_ids = !var.enable_network_interface_config ? concat([aws_security_group.instances[each.key].id], each.value.additional_security_group_ids) : null
 
   # Availability zone
   availability_zone = try(each.value.availability_zone, null)
