@@ -55,6 +55,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The aqua registry verifies tflint releases with GitHub artifact
+      # attestations (`gh attestation verify`), which needs a GitHub token. Install
+      # it in its own step so the read-only token never reaches the lint step,
+      # which runs PR code; the lint step then reuses this install. Keep the
+      # version in sync with workflows/lint.yaml (a mismatch fails loudly).
+      - name: Install tflint (attestation-verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: atmos toolchain install terraform-linters/tflint@0.64.0
       - name: Lint (fmt, yamllint, tflint, trivy)
         run: atmos workflow lint -f lint
       - name: Validate config, stacks and root modules
@@ -93,10 +102,39 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # describe affected also parses the base branch. When the base cannot be
+      # parsed (e.g. pre-migration stacks invalid for this Atmos version), plan
+      # every enabled, non-abstract instance instead of failing the PR.
       - id: affected
-        run: >-
-          atmos describe affected --format=matrix --include-dependents
-          --process-functions=false --output-file "$GITHUB_OUTPUT"
+        shell: python3 {0}
+        run: |
+          import json, os, subprocess
+
+          out_file = os.environ["GITHUB_OUTPUT"]
+          affected = subprocess.run(
+              ["atmos", "describe", "affected", "--format=matrix", "--include-dependents",
+               "--process-functions=false", "--output-file", "affected.out"])
+          if affected.returncode == 0:
+              with open("affected.out") as src, open(out_file, "a") as out:
+                  out.write(src.read())
+              raise SystemExit(0)
+
+          print("::warning title=describe affected failed::Falling back to planning every "
+                "enabled, non-abstract component instance (see the error above).")
+          stacks = json.loads(subprocess.check_output(
+              ["atmos", "describe", "stacks", "--process-functions=false",
+               "--format", "json", "--sections", "metadata"]))
+          include = []
+          for stack, config in sorted(stacks.items()):
+              components = (config.get("components") or {}).get("terraform") or {}
+              for component, spec in sorted(components.items()):
+                  metadata = (spec or {}).get("metadata") or {}
+                  if metadata.get("type") == "abstract" or metadata.get("enabled") is False:
+                      continue
+                  include.append({"stack": stack, "component": component})
+          with open(out_file, "a") as out:
+              out.write(f"matrix={json.dumps({'include': include})}\n")
+          print(f"{len(include)} instances")
 
   plan:
     name: Plan ${{ matrix.component }} (${{ matrix.stack }})
