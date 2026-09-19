@@ -18,6 +18,7 @@ module "secret_basic" {
   name_prefix = "example-basic"
   description = "Basic secret example"
 
+  create_secret_version = true
   secret_string = jsonencode({
     api_key = "example-key"
   })

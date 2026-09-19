@@ -101,15 +101,32 @@ variable "enable_encryption_in_transit" {
   default     = true
 }
 
-variable "auth_token" {
-  type        = string
-  description = "Auth token for Redis AUTH (16-128 chars, requires transit encryption). Passed as a write-only argument, never stored in state."
-  default     = null
-  sensitive   = true
+variable "enable_auth_token" {
+  type        = bool
+  description = "Enable Redis AUTH with auth_token. A non-secret switch because resource counts and non-write-only arguments cannot depend on the ephemeral auth_token."
+  default     = false
 
   validation {
-    condition     = var.auth_token == null || (length(coalesce(var.auth_token, "x")) >= 16 && length(coalesce(var.auth_token, "x")) <= 128 && var.enable_encryption_in_transit)
-    error_message = "auth_token must be 16-128 characters and requires enable_encryption_in_transit = true."
+    condition     = !var.enable_auth_token || var.enable_encryption_in_transit
+    error_message = "enable_auth_token requires enable_encryption_in_transit = true."
+  }
+}
+
+variable "auth_token" {
+  type        = string
+  description = "Auth token for Redis AUTH (16-128 chars). Ephemeral and passed through the write-only auth_token_wo, so it is never stored in state or saved plan files. Set enable_auth_token = true alongside it."
+  default     = null
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = var.auth_token == null || (length(coalesce(var.auth_token, "x")) >= 16 && length(coalesce(var.auth_token, "x")) <= 128)
+    error_message = "auth_token must be 16-128 characters."
+  }
+
+  validation {
+    condition     = var.enable_auth_token == (var.auth_token != null)
+    error_message = "Set auth_token if and only if enable_auth_token = true."
   }
 }
 
@@ -117,6 +134,11 @@ variable "auth_token_version" {
   type        = number
   description = "Version of the write-only auth_token. Increment to push a new token value to AWS."
   default     = 1
+
+  validation {
+    condition     = var.auth_token_version >= 1
+    error_message = "auth_token_version must be >= 1."
+  }
 }
 
 variable "auth_token_update_strategy" {

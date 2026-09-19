@@ -35,13 +35,14 @@ resource "aws_secretsmanager_secret" "main" {
 ##############################################
 
 resource "aws_secretsmanager_secret_version" "main" {
-  count = var.secret_string != null || var.secret_binary != null ? 1 : 0
+  count = var.create_secret_version ? 1 : 0
 
   secret_id = aws_secretsmanager_secret.main.id
 
-  # Write-only: the string value is sent to AWS but never persisted in state
+  # Ephemeral + write-only: the string value never reaches state or plan files.
+  # secret_binary has no write-only form in AWS provider v6 and is stored in state.
   secret_string_wo         = var.secret_string
-  secret_string_wo_version = var.secret_string != null ? var.secret_string_version : null
+  secret_string_wo_version = var.secret_binary == null ? var.secret_string_version : null
   secret_binary            = var.secret_binary
 }
 
