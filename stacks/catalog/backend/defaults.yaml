@@ -7,15 +7,6 @@ components:
         type: abstract
       vars:
         tenant: "{{ .settings.context.tenant }}"
-        environment: "{{ .settings.context.environment }}"
         account_id: "{{ .settings.environment.account_id }}"
         bucket_name: "{{ .settings.context.tenant }}-terraform-state"
-        state_file_key: "{{ .settings.context.environment }}/{{ .atmos_component }}/terraform.tfstate"
         iam_role_name: "{{ .settings.context.tenant }}-terraform-backend-role"
-        iam_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
-
-        # Environment-wide retention/protection policy (settings.environment);
-        # `dig` keeps explicit false/0 values, falling back to the module defaults
-        log_retention_days: '{{ dig "log_retention_days" 90 .settings.environment }}'
-        backup_retention_days: '{{ dig "backup_retention_days" 30 .settings.environment }}'
-        enable_deletion_protection: '{{ dig "enable_deletion_protection" true .settings.environment }}'

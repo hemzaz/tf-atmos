@@ -31,6 +31,9 @@ components:
         trusted_account_ids:
           - "{{ .settings.environment.management_account_id }}"
 
+        # MFA required for production access (trust condition)
+        require_mfa: true
+
         # MFA required for production access
     iam/ci:
       metadata:
@@ -61,13 +64,7 @@ components:
       vars:
         bucket_name: "fnx-production-terraform-state"
         iam_role_name: "fnx-production-terraform-backend-role"
-        iam_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/fnx-production-terraform-backend-role"
-        state_file_key: "{{ .settings.context.environment }}/{{ .atmos_component }}/terraform.tfstate"
         enable_access_logging: true
-
-        # Cross-region replication for DR
-        enable_cross_region_backup: true
-        backup_region: "us-east-1"
     kms/main:
       metadata:
         component: kms

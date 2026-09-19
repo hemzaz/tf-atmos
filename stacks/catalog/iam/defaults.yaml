@@ -18,6 +18,10 @@ components:
         # Principals allowed to assume the cross-account role
         trusted_account_ids:
           - "{{ .settings.environment.management_account_id }}"
+        # Trust condition: the module requires require_mfa, external_id or
+        # trusted_principal_org_id when trusting another account.
+        # TODO(placeholder): replace with the real AWS Organizations ID.
+        trusted_principal_org_id: "o-xxxxxxxxxx"
         cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-CrossAccountRole"
         policy_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-CrossAccountPolicy"
 
