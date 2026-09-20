@@ -1,0 +1,85 @@
+---
+# Local sandbox stack — fnx-local-sandbox
+#
+# Runs real terraform apply/destroy against the Floci AWS emulator, with no AWS
+# account and no credentials. This is how a component is proven to actually
+# provision, rather than merely validate.
+#
+#   atmos emulator up aws -s fnx-local-sandbox
+#   atmos terraform apply vpc/main -s fnx-local-sandbox
+#   atmos emulator down aws -s fnx-local-sandbox
+#
+# Deliberately standalone: it does not import the dev/staging/prod component
+# files, so nothing here can affect a real environment, and a change to a real
+# environment cannot silently change what the sandbox proves.
+#
+# Known Floci gaps, each verified against the running emulator rather than
+# assumed. They are limits of the emulator, not defects in the components:
+#   - CreateNetworkAcl is unimplemented          -> manage_network_acls: false
+#   - no VPC default SG to adopt                 -> manage_default_security_group: false
+#   - TagInstanceProfile is unimplemented        -> create_vpc_iam_role: false
+#   - DescribeSecurityGroups returns empty UserIdGroupPairs, dropping the
+#     self-reference on `self = true` rules, so a re-plan of vpc/main always
+#     shows aws_security_group.default as changed. apply and destroy both
+#     succeed; only idempotency is affected, and only here.
+import:
+  - catalog/_base/defaults
+  - mixins/tenant/fnx
+  - mixins/region/eu-west-2
+  - orgs/fnx/local/_defaults
+  - catalog/emulator/aws
+  - catalog/vpc/defaults
+
+vars:
+  region: eu-west-2
+
+# Sandbox state is local and disposable. The inherited S3 backend assumes a role
+# in the management account and writes to the shared state bucket — neither
+# exists here, and neither should: a throwaway emulator run must never touch
+# real state.
+terraform:
+  backend_type: local
+  backend:
+    local: {}
+
+settings:
+  environment:
+    description: "Local Floci sandbox"
+    namespace: sandbox
+    account: local
+    aws_account_id: "000000000000"
+    vpc_cidr: "10.90.0.0/16"
+    enable_vpc_flow_logs: false
+  context:
+    tenant: fnx
+    environment: sandbox
+    stage: local
+
+components:
+  terraform:
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        vpc_cidr: "10.90.0.0/16"
+        private_subnets:
+          - "10.90.1.0/24"
+          - "10.90.2.0/24"
+        public_subnets:
+          - "10.90.101.0/24"
+          - "10.90.102.0/24"
+        # NAT gateways and flow logs are off: they cost time to converge and add
+        # nothing to what the sandbox is proving.
+        enable_nat_gateway: false
+        enable_flow_logs: false
+        # Floci does not implement CreateNetworkAcl, and does not pre-create a
+        # VPC default security group for aws_default_security_group to adopt.
+        # These two are emulator gaps, not defects in the component - both stay
+        # true everywhere else.
+        manage_network_acls: false
+        manage_default_security_group: false
+        # Floci implements IAM roles and instance profiles but not
+        # TagInstanceProfile, so the profile is created and then fails on tagging.
+        create_vpc_iam_role: false

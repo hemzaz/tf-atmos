@@ -153,6 +153,12 @@ variable "default_sg_allow_all_outbound" {
   default     = false
 }
 
+variable "manage_network_acls" {
+  type        = bool
+  description = "Manage subnet network ACLs in this component. Set false where NACLs are managed centrally, or when running against an emulator that does not implement them"
+  default     = true
+}
+
 variable "manage_default_security_group" {
   type        = bool
   description = "Manage the VPC's AWS-created default security group and strip all of its rules. One way: setting this back to false, or destroying the resource, only drops the group from state - the removed rules are not restored"

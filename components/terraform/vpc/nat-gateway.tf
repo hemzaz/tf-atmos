@@ -6,8 +6,13 @@ locals {
     )
   ) : 0
 
-  # Determine the list of explicit subnet IDs to use for NAT gateways based on strategy
-  nat_gateway_subnet_indices = var.nat_gateway_strategy == "one_per_az" ? [for i in range(local.nat_gateway_count) : i] : (var.nat_gateway_strategy == "single" ? [0] : [])
+  # Determine the list of explicit subnet IDs to use for NAT gateways based on strategy.
+  # Derived from nat_gateway_count so enable_nat_gateway = false always wins: the
+  # "single" strategy is the default, and testing the strategy first meant a
+  # disabled NAT gateway was still created.
+  nat_gateway_subnet_indices = local.nat_gateway_count == 0 ? [] : (
+    var.nat_gateway_strategy == "one_per_az" ? [for i in range(local.nat_gateway_count) : i] : [0]
+  )
 
   # NAT gateways keyed by the CIDR of the public subnet hosting them
   nat_gateways = {
@@ -21,7 +26,10 @@ data "aws_availability_zones" "available" {
 }
 
 data "aws_availability_zone" "available" {
-  count = length(var.public_subnets)
+  # Only queried when NAT gateways are actually created; aws_eip.nat is the sole
+  # consumer. Without this gate the lookup ran on every plan, including in VPCs
+  # with no NAT gateway at all.
+  count = local.nat_gateway_count > 0 ? length(var.public_subnets) : 0
   name  = var.nat_gateway_azs != null && length(var.nat_gateway_azs) > count.index ? var.nat_gateway_azs[count.index] : data.aws_availability_zones.available.names[count.index % length(data.aws_availability_zones.available.names)]
 }
 

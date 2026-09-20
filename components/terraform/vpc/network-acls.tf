@@ -3,6 +3,7 @@
 
 # Public subnet NACL - More restrictive for internet-facing resources
 resource "aws_network_acl" "public" {
+  count      = var.manage_network_acls ? 1 : 0
   vpc_id     = aws_vpc.main.id
   subnet_ids = [for subnet in aws_subnet.public : subnet.id]
 
@@ -80,6 +81,7 @@ resource "aws_network_acl" "public" {
 
 # Private subnet NACL - Only allow traffic from within VPC and specific outbound
 resource "aws_network_acl" "private" {
+  count      = var.manage_network_acls ? 1 : 0
   vpc_id     = aws_vpc.main.id
   subnet_ids = [for subnet in aws_subnet.private : subnet.id]
 
@@ -164,7 +166,7 @@ resource "aws_network_acl" "private" {
 
 # Database subnet NACL - Most restrictive, only allow specific database traffic
 resource "aws_network_acl" "database" {
-  count      = length(var.database_subnets) > 0 ? 1 : 0
+  count      = var.manage_network_acls && length(var.database_subnets) > 0 ? 1 : 0
   vpc_id     = aws_vpc.main.id
   subnet_ids = [for subnet in aws_subnet.database : subnet.id]
 

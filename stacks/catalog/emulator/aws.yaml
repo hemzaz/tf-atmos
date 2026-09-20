@@ -1,0 +1,21 @@
+---
+# yaml-language-server: $schema=https://atmos.tools/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json
+#
+# Local AWS sandbox (Floci), used by the fnx-local-sandbox stack only.
+#
+# `atmos emulator up aws -s fnx-local-sandbox` starts or reuses the container;
+# the `local-aws` identity in atmos.yaml resolves this instance and the
+# provider-config contributor wires Terraform to it. There is no providers.tf
+# and no endpoint configuration to maintain.
+#
+# This exists so components can be applied and destroyed for real without an
+# AWS account. It is never imported by dev, staging or production.
+components:
+  emulator:
+    aws:
+      driver: floci/aws
+      region: "{{ .vars.region }}"
+      container:
+        # Pulled from Google's Docker Hub mirror to avoid Docker Hub rate limits,
+        # and pinned by digest so a local run matches what CI verified.
+        image: mirror.gcr.io/floci/floci@sha256:c88ec20bf221630dd195d38a14eeb0ac52ddfa72c37ebb3c8aa17f63ae27c5f2
