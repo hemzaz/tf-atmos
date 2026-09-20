@@ -233,6 +233,10 @@ components:
         function_name: "staging-data-processor"
         handler: "main.handler"
         runtime: "python3.13"
+        # Placeholder: CI builds the package and uploads it here. The bucket must
+        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        s3_bucket: "fnx-staging-lambda-artifacts"
+        s3_key: "staging-data-processor/latest.zip"
         memory_size: 512
         timeout: 300
         vpc_id: !terraform.state vpc/services .vpc_id
@@ -248,6 +252,10 @@ components:
         function_name: "staging-data-transformer"
         handler: "transform.handler"
         runtime: "python3.13"
+        # Placeholder: CI builds the package and uploads it here. The bucket must
+        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        s3_bucket: "fnx-staging-lambda-artifacts"
+        s3_key: "staging-data-transformer/latest.zip"
         memory_size: 1024
         timeout: 600
         vpc_id: !terraform.state vpc/services .vpc_id

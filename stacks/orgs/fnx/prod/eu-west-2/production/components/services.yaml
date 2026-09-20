@@ -308,6 +308,10 @@ components:
         function_name: "production-data-processor"
         handler: "main.handler"
         runtime: "python3.13"
+        # Placeholder: CI builds the package and uploads it here. The bucket must
+        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        s3_bucket: "fnx-production-lambda-artifacts"
+        s3_key: "production-data-processor/latest.zip"
         memory_size: 1024
         timeout: 600
         reserved_concurrent_executions: 100
@@ -327,6 +331,10 @@ components:
         function_name: "production-data-transformer"
         handler: "transform.handler"
         runtime: "python3.13"
+        # Placeholder: CI builds the package and uploads it here. The bucket must
+        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        s3_bucket: "fnx-production-lambda-artifacts"
+        s3_key: "production-data-transformer/latest.zip"
         memory_size: 2048
         timeout: 900
         reserved_concurrent_executions: 50
@@ -343,6 +351,10 @@ components:
         function_name: "production-report-generator"
         handler: "reports.handler"
         runtime: "python3.13"
+        # Placeholder: CI builds the package and uploads it here. The bucket must
+        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        s3_bucket: "fnx-production-lambda-artifacts"
+        s3_key: "production-report-generator/latest.zip"
         memory_size: 3008
         timeout: 900
         vpc_id: !terraform.state vpc/services .vpc_id

@@ -184,6 +184,10 @@ components:
         function_name: "data-processor"
         handler: "main.handler"
         runtime: "python3.13"
+        # Placeholder: CI builds the package and uploads it here. The bucket must
+        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        s3_bucket: "fnx-lambda-artifacts"
+        s3_key: "data-processor/latest.zip"
         memory_size: 512
         vpc_id: !terraform.state vpc/services .vpc_id
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
