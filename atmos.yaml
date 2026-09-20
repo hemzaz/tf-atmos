@@ -31,6 +31,16 @@ stacks:
   # e.g. fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production
   name_template: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-{{ .settings.context.environment }}"
 
+# Local AWS sandbox (Floci). Binds ONLY the fnx-local-sandbox stack, via that
+# stack's `aws` emulator component — deliberately not `default: true`, so no
+# real environment can ever be silently redirected at the emulator once real
+# credentials exist. See stacks/catalog/emulator/aws.yaml.
+auth:
+  identities:
+    local-aws:
+      kind: aws/emulator
+      emulator: fnx-local-sandbox/aws
+
 workflows:
   base_path: workflows
 

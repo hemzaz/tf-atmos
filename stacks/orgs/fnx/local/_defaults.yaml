@@ -1,0 +1,15 @@
+---
+# Local sandbox account defaults.
+#
+# Deliberately NOT a real AWS account. Everything under orgs/fnx/local targets
+# the Floci emulator via the `local-aws` identity, so the account id is the
+# emulator's own well-known id rather than a placeholder to be filled in.
+import:
+  - orgs/fnx/_defaults
+  - mixins/tenant/fnx
+
+settings:
+  environment:
+    account: local
+    account_id: "000000000000"
+    aws_profile: "local"
