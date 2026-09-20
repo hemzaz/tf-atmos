@@ -266,7 +266,18 @@ variable "enable_backend_monitoring" {
 variable "api_gateway_name" {
   type        = string
   description = "API Gateway name for monitoring"
-  default     = null
+
+  # Empty string, not null. enable_backend_monitoring defaults true, so
+  # aws_cloudwatch_dashboard.backend_services renders backend-dashboard.json.tpl
+  # on every instance, and that template interpolates this value directly:
+  #   templates/backend-dashboard.json.tpl:11
+  #     ["AWS/ApiGateway", "Count", "ApiName", "${api_gateway_name}"]
+  # Terraform refuses to interpolate null - "Invalid template interpolation
+  # value; The expression result is null" - so a null default made every
+  # instance fail at PLAN time, and dev, staging and prod all leave it unset.
+  # The sibling eks_cluster_name already defaults to "" and feeds the same
+  # template; this now matches it.
+  default = ""
 }
 
 variable "api_gateway_stages" {

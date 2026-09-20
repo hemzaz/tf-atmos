@@ -9,6 +9,22 @@
 #                the overlapping backup/maintenance windows that would have
 #                failed CreateDBInstance in staging AND prod.
 #
+# guardduty, securityhub and backup are NOT here, each tried and each blocked
+# by a LocalEmu gap rather than a component defect. Recorded so the next
+# attempt does not repeat them:
+#   - guardduty  CreateDetector succeeds, but reading any detector feature back
+#                returns "empty result". The features cannot be avoided either:
+#                aws_guardduty_detector_feature uses
+#                `for_each = var.enable ? local.features : {}`, so the
+#                enable_*_protection flags set each feature's STATUS, not
+#                whether the resource exists.
+#   - securityhub  UpdateSecurityHubConfiguration returns 501 "not
+#                implemented", and the provider calls it while creating
+#                aws_securityhub_account. Nothing is created at all.
+#   - backup     the IAM roles, SNS topic and both alarms create fine, then
+#                DescribeBackupVault returns 501 and the vault - the point of
+#                the component - cannot be read back.
+#
 # elasticache is NOT here either. Floci blocks it at CreateCacheSubnetGroup,
 # which LocalEmu does implement - but LocalEmu creates the replication group
 # without its member cache clusters, so the provider's read fails with
@@ -180,3 +196,22 @@ components:
       dependencies:
         components:
           - component: vpc/main
+
+    # Dashboards and the SNS topic are on by default, so the minimal instance
+    # still creates resources - 9 of them, applied and destroyed cleanly. The
+    # per-service alarm groups stay off: each wants real ARNs or instance ids
+    # that do not exist in this lane.
+    #
+    # This instance is what found that api_gateway_name defaulted to null while
+    # enable_backend_monitoring defaulted true, so every monitoring instance in
+    # dev, staging AND prod failed at PLAN time inside templatefile(). No stack
+    # sets either variable. See the comment on the variable in
+    # components/terraform/monitoring/variables.tf.
+    monitoring/main:
+      metadata:
+        component: monitoring
+      vars:
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
