@@ -95,6 +95,8 @@ components:
         enable_nat_gateway: true
         nat_gateway_strategy: "one_per_az"
 
+        enable_flow_logs: true
+
         tags:
           NetworkTier: "services"
           HighAvailability: "true"
@@ -102,22 +104,30 @@ components:
     # ==========================================================================
     # VPC Peering - Connect Main and Services VPCs
     # ==========================================================================
-        enable_flow_logs: true
     network/vpc-peering:
       metadata:
         component: network
-        enabled: false  # no components/terraform/network root module yet (see PR notes)
       vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
         create_vpc_peering: true
         requester_vpc_id: !terraform.state vpc/main .vpc_id
         accepter_vpc_id: !terraform.state vpc/services .vpc_id
 
         auto_accept: true
 
+        # Private route tables only: the peer CIDR needs to be reachable from
+        # the application tier, and adding it to the public tables would route
+        # peer traffic through internet-facing subnets for no gain.
         requester_routes:
           - destination_cidr_block: "10.21.0.0/16"
+            route_table_ids: !terraform.state vpc/main .private_route_table_ids
         accepter_routes:
           - destination_cidr_block: "10.20.0.0/16"
+            route_table_ids: !terraform.state vpc/services .private_route_table_ids
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: vpc/services
 
     # ==========================================================================
     # Network Resources - DNS for Main VPC
@@ -145,14 +155,24 @@ components:
             enable_query_logging: false
             vpc_associations:
               - !terraform.state vpc/main .vpc_id
-        # Records removed in the dns remap: www (alias to alb/main, which does
-        # not exist), api (apigateway manages its own custom-domain record and
-        # an alias here would be a dependency cycle) and db_internal (the
-        # disabled infrastructure/main). Re-add once those targets exist.
-        records: {}
+        # Still removed from the dns remap: www (alias to alb/main, which does
+        # not exist) and api (apigateway manages its own custom-domain record,
+        # so an alias here would be a dependency cycle). Re-add once those
+        # targets exist.
+        records:
+          db_internal:
+            zone_name: "internal"
+            name: "db.internal.fnx.example.com"
+            type: "CNAME"
+            ttl: 300
+            # instance_address, not instance_endpoint: the endpoint carries a
+            # :5432 suffix, which is not a legal CNAME target.
+            records:
+              - !terraform.state rds/main .instance_address
       dependencies:
         components:
           - component: vpc/main
+          - component: rds/main
 
     # ==========================================================================
     # Network Resources - DNS for Services VPC

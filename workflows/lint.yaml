@@ -51,9 +51,24 @@ workflows:
       # stack instance is never looked at. Ten of the twenty-three components were
       # in that state, and the gate reported "passed" while never opening them.
       # This step lints every component DIRECTORY, so an unwired component cannot
-      # go unlinted again. Both steps are needed: the instance pass resolves stack
-      # variables (catching what only shows up with real inputs), the directory
-      # pass guarantees coverage.
+      # go unlinted again.
+      #
+      # KEEP BOTH. They fail on disjoint classes, and each is blind to the other's:
+      #
+      #   - Directory-only catches: an unused declaration in a component no stack
+      #     instantiates. Reintroducing one in eks-addons had the instance pass
+      #     report "23 components linted, no findings" while this step caught it.
+      #
+      #   - Instance-only catches: a rule that aborts on an unresolved variable.
+      #     Replacing apigateway's `try(var.tags["Environment"], "default")` with a
+      #     bare index made tflint abort aws_cloudwatch_log_group_invalid_name with
+      #     "Failed to check ruleset" on both apigateway instances. This step never
+      #     saw it: without stack vars the directory pass does not reach that
+      #     evaluation at all. See the comment in apigateway/main.tf.
+      #
+      # So the instance pass resolves stack variables and catches what only shows
+      # up with real inputs; the directory pass guarantees coverage. Dropping
+      # either reopens a class of failure that has already happened once.
       - name: tflint-components
         type: script
         interpreter: bash

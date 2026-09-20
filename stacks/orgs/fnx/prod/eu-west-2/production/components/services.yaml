@@ -9,11 +9,31 @@
 import:
   - orgs/fnx/prod/eu-west-2/production/components/globals
   - catalog/apigateway/defaults
+  - catalog/cognito/defaults
   - catalog/monitoring/defaults
-  - catalog/infrastructure/defaults
 
 components:
   terraform:
+    # ==========================================================================
+    # Cognito - user pool backing the API Gateway authorizer
+    # ==========================================================================
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/defaults
+      vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        # Production tightens both knobs over the inherited defaults: MFA is
+        # mandatory rather than opt-in, and the pool cannot be deleted while it
+        # holds real users.
+        mfa_configuration: "ON"
+        deletion_protection: true
+        clients:
+          api:
+            generate_secret: true
+            access_token_validity_minutes: 30
+
     # ==========================================================================
     # API Gateway - Main API (Production)
     # ==========================================================================
@@ -32,29 +52,54 @@ components:
           - path_part: "users"
           - path_part: "products"
 
+        # Methods are addressed by resource_path ("/" is the API root), because
+        # a stack cannot know this API's resource IDs before apply.
+        api_methods:
+          - resource_path: "/"
+            http_method: "GET"
+            authorization: "NONE"
+          - resource_path: "/api"
+            http_method: "ANY"
+            authorization: "COGNITO_USER_POOLS"
+
+        # One integration per method. MOCK returns a canned response without a
+        # backend: these APIs have no Lambda or ALB behind them yet, and MOCK is
+        # the only type that may leave uri unset. Point them at a real backend
+        # by switching type to AWS_PROXY/HTTP_PROXY and setting uri.
+        api_integrations:
+          - resource_path: "/"
+            http_method: "GET"
+            integration_http_method: "GET"
+            type: "MOCK"
+          - resource_path: "/api"
+            http_method: "ANY"
+            integration_http_method: "POST"
+            type: "MOCK"
+
+        # Authorizer for the COGNITO_USER_POOLS method above. A method that asks
+        # for COGNITO_USER_POOLS without a pool here fails at apply.
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+
         # Domain Configuration
         domain_name: "api.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
+        api_name: "production-main-api"
+        zone_id: !terraform.state network/main .zone_ids.main
+
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000
 
-        # Method-level throttling for critical endpoints
         enable_logging: true
         log_retention_days: 90
         create_dashboard: true
-        enable_caching: true
-        tags:
-          Service: api-gateway
-          Tier: edge
-          CriticalityLevel: "high"
-
-    # ==========================================================================
-    # API Gateway - Data API (Production)
-    # ==========================================================================
-        api_name: "production-main-api"
-        zone_id: !terraform.state network/main .zone_ids.main
         tracing_enabled: true
+
+        # Cache settings
+        enable_caching: true
         cache_ttl_seconds: 300
+
         cors_configuration:
           allow_origins:
             - "https://{{ .settings.environment.domain_name }}"
@@ -65,16 +110,25 @@ components:
             - "Authorization"
             - "X-Api-Key"
             - "X-Request-Id"
-
-        # Cache settings
           expose_headers: []
           max_age: 300
           allow_credentials: false
+
         enable_waf: true
+
+        tags:
+          Service: api-gateway
+          Tier: edge
+          CriticalityLevel: "high"
       dependencies:
         components:
           - component: network/main
           - component: acm/main
+          - component: cognito/main
+
+    # ==========================================================================
+    # API Gateway - Data API (Production)
+    # ==========================================================================
     apigateway/data:
       metadata:
         component: apigateway
@@ -110,181 +164,174 @@ components:
         components:
           - component: network/services
           - component: acm/services
-    infrastructure/main:
+    # ECS Fargate cluster (was infrastructure/main.ecs). vpc_id/subnet_ids are
+    # not passed: an aws_ecs_cluster has neither - those belong to ECS services.
+    ecs/main:
       metadata:
-        component: infrastructure
-        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
+        component: ecs
       vars:
-        # ECS Fargate cluster
-        ecs:
-          enabled: true
-          fargate_only: true
-          cluster_name: "production-main-apps"
-          vpc_id: !terraform.state vpc/main .vpc_id
-          subnet_ids: !terraform.state vpc/main .private_subnet_ids
-          enable_container_insights: true
-          enable_execute_command: false  # Disabled in production
-
-        # RDS PostgreSQL - Multi-AZ Production
-        rds:
-          enabled: true
-          identifier: "production-main-db"
-          engine: "{{ .settings.environment.rds_engine }}"
-          engine_version: "{{ .settings.environment.rds_engine_version }}"
-          instance_class: "db.r5.xlarge"
-          allocated_storage: 100
-          max_allocated_storage: 500
-          db_name: "productionapp"
-
-          # High availability - CRITICAL
-          multi_az: true
-          availability_zone:       # Let AWS choose
-
-          # Security
-          storage_encrypted: true
-          kms_key_id: !terraform.state kms/main .key_arn
-          iam_database_authentication_enabled: true
-          deletion_protection: true
-
-          # Backup - extended retention
-          backup_retention_period: 30
-          backup_window: "03:00-04:00"
-          maintenance_window: "Sun:04:00-Sun:05:00"
-          copy_tags_to_snapshot: true
-
-          # Performance
-          performance_insights_enabled: true
-          performance_insights_retention_period: 7
-          performance_insights_kms_key_id: !terraform.state kms/main .key_arn
-
-          # Monitoring
-          monitoring_interval: 60
-          monitoring_role_arn: !terraform.state iam/rds-monitoring .role_arn
-          enabled_cloudwatch_logs_exports:
-            - "postgresql"
-            - "upgrade"
-
-          # Network
-          vpc_id: !terraform.state vpc/main .vpc_id
-          subnet_ids: !terraform.state vpc/main .database_subnet_ids
-
-          # Parameter group for production tuning
-          parameter_group_family: "postgres14"
-          parameters:
-            - name: "log_statement"
-              value: "all"
-            - name: "log_min_duration_statement"
-              value: "1000"  # Log queries > 1s
-            - name: "shared_preload_libraries"
-              value: "pg_stat_statements"
-
-        # ElastiCache Redis for caching
-        elasticache:
-          enabled: true
-          cluster_id: "production-cache"
-          engine: "redis"
-          engine_version: "7.0"
-          node_type: "cache.r5.large"
-          num_cache_nodes: 3
-          automatic_failover_enabled: true
-          multi_az_enabled: true
-          at_rest_encryption_enabled: true
-          transit_encryption_enabled: true
-          # Secret: export from SSM /production/elasticache/auth_token before plan/apply
-          auth_token: !env PROD_ELASTICACHE_AUTH_TOKEN
-          vpc_id: !terraform.state vpc/main .vpc_id
-          subnet_ids: !terraform.state vpc/main .elasticache_subnet_ids
-
-        tags:
-          Stack: main
-          Tier: application
-          CriticalityLevel: "high"
-
-    # ==========================================================================
-    # Infrastructure - Data Processing Stack (Production HA)
-    # ==========================================================================
+        cluster_name: "production-main-apps"
+        fargate_only: true
+        enable_container_insights: true
       dependencies:
         components:
-          - component: kms/main
-    infrastructure/data:
+          - component: vpc/main
+
+    # Application database - Multi-AZ (was infrastructure/main.rds).
+    # monitoring_role_arn pointed at an iam/rds-monitoring instance that has
+    # never existed; the component creates the role itself.
+    rds/main:
       metadata:
-        component: infrastructure
-        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
+        component: rds
       vars:
-        # ECS disabled for data stack
-        ecs:
-          enabled: false
-
-        # Data RDS - Large Instance for Analytics
-        rds:
-          enabled: true
-          identifier: "production-data-db"
-          engine: "{{ .settings.environment.rds_engine }}"
-          engine_version: "{{ .settings.environment.rds_engine_version }}"
-          instance_class: "db.r5.2xlarge"
-          allocated_storage: 200
-          max_allocated_storage: 1000
-          db_name: "productiondata"
-
-          multi_az: true
-          storage_encrypted: true
-          kms_key_id: !terraform.state kms/main .key_arn
-          deletion_protection: true
-
-          backup_retention_period: 30
-          performance_insights_enabled: true
-
-          vpc_id: !terraform.state vpc/services .vpc_id
-          subnet_ids: !terraform.state vpc/services .database_subnet_ids
-
-          # Read replica for analytics
-          create_read_replica: true
-          replica_instance_class: "db.r5.xlarge"
-
-        # Lambda for data processing
-        lambda:
-          enabled: true
-          functions:
-            data_processor:
-              function_name: "production-data-processor"
-              runtime: "python3.11"
-              handler: "main.handler"
-              memory_size: 1024
-              timeout: 600
-              reserved_concurrent_executions: 100
-              vpc_id: !terraform.state vpc/services .vpc_id
-              subnet_ids: !terraform.state vpc/services .private_subnet_ids
-              environment:
-                LOG_LEVEL: "INFO"
-                ENVIRONMENT: "production"
-            data_transformer:
-              function_name: "production-data-transformer"
-              runtime: "python3.11"
-              handler: "transform.handler"
-              memory_size: 2048
-              timeout: 900
-              reserved_concurrent_executions: 50
-              vpc_id: !terraform.state vpc/services .vpc_id
-              subnet_ids: !terraform.state vpc/services .private_subnet_ids
-            report_generator:
-              function_name: "production-report-generator"
-              runtime: "python3.11"
-              handler: "reports.handler"
-              memory_size: 3008
-              timeout: 900
-              vpc_id: !terraform.state vpc/services .vpc_id
-              subnet_ids: !terraform.state vpc/services .private_subnet_ids
-
-        tags:
-          Stack: data
-          Tier: data-processing
-
-    # ==========================================================================
-    # Monitoring - Main Dashboard (Production)
-    # ==========================================================================
+        identifier: "production-main-db"
+        db_name: "productionapp"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.xlarge"
+        allocated_storage: 100
+        max_allocated_storage: 500
+        multi_az: true
+        storage_encrypted: true
+        kms_key_id: !terraform.state kms/main .key_arn
+        iam_database_authentication_enabled: true
+        deletion_protection: true
+        backup_retention_period: 30
+        backup_window: "03:00-04:00"
+        maintenance_window: "Sun:04:00-Sun:05:00"
+        copy_tags_to_snapshot: true
+        performance_insights_enabled: true
+        performance_insights_retention_period: 7
+        performance_insights_kms_key_id: !terraform.state kms/main .key_arn
+        monitoring_interval: 60
+        create_monitoring_role: true
+        enabled_cloudwatch_logs_exports:
+          - "postgresql"
+          - "upgrade"
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        family: "postgres14"
+        parameters:
+          - name: "log_statement"
+            value: "all"
+          - name: "log_min_duration_statement"
+            value: "1000"
+          - name: "shared_preload_libraries"
+            value: "pg_stat_statements"
       dependencies:
         components:
+          - component: vpc/main
           - component: kms/main
+
+    # Redis cache (was infrastructure/main.elasticache)
+    elasticache/main:
+      metadata:
+        component: elasticache
+      vars:
+        cluster_id: "production-cache"
+        engine: "redis"
+        engine_version: "7.0"
+        node_type: "cache.r5.large"
+        num_cache_nodes: 3
+        automatic_failover_enabled: true
+        multi_az_enabled: true
+        at_rest_encryption_enabled: true
+        transit_encryption_enabled: true
+        # Secret: export PROD_ELASTICACHE_AUTH_TOKEN before plan/apply
+        auth_token: !env PROD_ELASTICACHE_AUTH_TOKEN
+        kms_key_id: !terraform.state kms/main .key_arn
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # Fail closed: nothing can reach the cache until a consumer's security
+        # group is listed here. ECS services are not managed by this repo, so
+        # there is no group to reference yet - add it when there is one.
+        allowed_security_group_ids: []
+        allowed_cidr_blocks: []
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+
+    # Analytics database with a read replica (was infrastructure/data.rds)
+    rds/data:
+      metadata:
+        component: rds
+      vars:
+        identifier: "production-data-db"
+        db_name: "productiondata"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.2xlarge"
+        allocated_storage: 200
+        max_allocated_storage: 1000
+        multi_az: true
+        storage_encrypted: true
+        kms_key_id: !terraform.state kms/main .key_arn
+        deletion_protection: true
+        backup_retention_period: 30
+        performance_insights_enabled: true
+        create_read_replica: true
+        read_replica_instance_class: "db.r5.xlarge"
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .database_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: kms/main
+
+    # Data processing (was infrastructure/data.lambda). The lambda component is
+    # single-function, so one instance per function.
+    lambda/data-processor:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "production-data-processor"
+        handler: "main.handler"
+        runtime: "python3.11"
+        memory_size: 1024
+        timeout: 600
+        reserved_concurrent_executions: 100
+        environment_variables:
+          LOG_LEVEL: "INFO"
+          ENVIRONMENT: "production"
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+
+    lambda/data-transformer:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "production-data-transformer"
+        handler: "transform.handler"
+        runtime: "python3.11"
+        memory_size: 2048
+        timeout: 900
+        reserved_concurrent_executions: 50
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+
+    lambda/report-generator:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "production-report-generator"
+        handler: "reports.handler"
+        runtime: "python3.11"
+        memory_size: 3008
+        timeout: 900
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+
+
     monitoring/main:
       metadata:
         component: monitoring

@@ -443,6 +443,40 @@ resource "aws_sns_topic" "alerts" {
   })
 }
 
+# Subscriptions for that topic. Without at least one, the health alarm above
+# publishes into a topic nobody receives - which is how this component sat
+# until now: the topic and the alarm existed, the delivery did not.
+resource "aws_sns_topic_subscription" "alerts_email" {
+  for_each = toset(var.notification_endpoints.email)
+
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+
+# Slack and Teams take an HTTPS subscription. SNS only starts delivering once
+# the endpoint answers a SubscriptionConfirmation POST by fetching the token
+# URL inside it. A raw Slack or Teams incoming webhook does NOT do that, so the
+# subscription would sit in PendingConfirmation forever. Point these at a
+# forwarder that confirms and reshapes the payload (a Lambda function URL or an
+# API Gateway), never at the webhook itself - see the README.
+resource "aws_sns_topic_subscription" "alerts_https" {
+  for_each = {
+    for k, v in {
+      slack = var.notification_endpoints.slack
+      teams = var.notification_endpoints.teams
+    } : k => v if v != ""
+  }
+
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "https"
+  endpoint  = each.value
+
+  # The forwarder gets the published message itself rather than an SNS envelope
+  # it would have to unwrap.
+  raw_message_delivery = true
+}
+
 # KMS key for encryption
 data "aws_kms_key" "s3" {
   key_id = "alias/aws/s3"

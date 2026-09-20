@@ -133,13 +133,8 @@ variable "tags" {
   default     = {}
 
   validation {
-    condition     = contains(keys(var.tags), "Environment")
-    error_message = "The tags map must contain an 'Environment' key for resource naming."
-  }
-
-  validation {
-    condition     = length(lookup(var.tags, "Environment", "")) > 0
-    error_message = "The Environment tag must not be an empty string."
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
   }
 }
 

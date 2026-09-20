@@ -145,8 +145,8 @@ variable "tags" {
   default     = {}
 
   validation {
-    condition     = length(var.tags) > 0 ? contains(keys(var.tags), "Environment") : true
-    error_message = "If tags is provided, it must contain an 'Environment' key."
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
   }
 }
 

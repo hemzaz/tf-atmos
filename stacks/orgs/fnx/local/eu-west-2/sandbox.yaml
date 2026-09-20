@@ -72,6 +72,11 @@ components:
         public_subnets:
           - "10.90.101.0/24"
           - "10.90.102.0/24"
+        # Exercises the database_subnet_ids output, which had no coverage at all
+        # until it was added - aws_subnet.database existed with no way to read it.
+        database_subnets:
+          - "10.90.201.0/24"
+          - "10.90.202.0/24"
         # NAT gateways and flow logs are off: they cost time to converge and add
         # nothing to what the sandbox is proving.
         enable_nat_gateway: false

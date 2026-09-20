@@ -247,3 +247,61 @@ variable "backup_window" {
     error_message = "Backup window must be in the format 'hh:mm-hh:mm'."
   }
 }
+
+variable "notification_endpoints" {
+  type = object({
+    email = optional(list(string), [])
+    slack = optional(string, "")
+    teams = optional(string, "")
+  })
+  description = "Where the platform health alarm sends notifications. `email` addresses subscribe natively (each one gets a confirmation mail). `slack` and `teams` must be HTTPS forwarder URLs that answer SNS's SubscriptionConfirmation, NOT raw incoming-webhook URLs, which never confirm"
+  default = {
+    email = []
+    slack = ""
+    teams = ""
+  }
+
+  validation {
+    condition     = alltrue([for e in var.notification_endpoints.email : can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", e))])
+    error_message = "notification_endpoints.email entries must be email addresses."
+  }
+
+  validation {
+    condition = alltrue([
+      for url in [var.notification_endpoints.slack, var.notification_endpoints.teams] :
+      url == "" || startswith(url, "https://")
+    ])
+    error_message = "notification_endpoints.slack and .teams must be https:// URLs, because SNS refuses plaintext HTTP subscriptions."
+  }
+
+  # Best-effort: names the raw-webhook hosts common enough to be worth a specific
+  # message. It cannot be the real guard - see acknowledge_https_forwarder. These
+  # hosts move (Office 365 connectors retired in May 2026, and the
+  # logic.azure.com URLs that replaced them are themselves being relocated), so
+  # any hostname list lags reality and fails OPEN on whatever is current. Extend
+  # it when a new one bites; do not rely on it.
+  validation {
+    condition = alltrue([
+      for url in [var.notification_endpoints.slack, var.notification_endpoints.teams] :
+      !can(regex("^https://hooks\\.slack\\.com/", url)) &&
+      !can(regex("\\.webhook\\.office\\.com/", url)) &&
+      !can(regex("\\.logic\\.azure\\.com[:/]", url)) &&
+      !can(regex("^https://(canary\\.)?discord(app)?\\.com/api/webhooks/", url))
+    ])
+    error_message = "That is a raw chat webhook URL, not a forwarder. A raw webhook never answers SNS's SubscriptionConfirmation POST, so the subscription would stay PendingConfirmation and deliver nothing, silently. Point slack/teams at something that confirms the subscription and reshapes the payload: a Lambda function URL, an API Gateway, or AWS Chatbot."
+  }
+
+  # The actual guard, and the reason the list above does not have to be complete.
+  validation {
+    condition = (
+      var.notification_endpoints.slack == "" && var.notification_endpoints.teams == ""
+    ) || var.acknowledge_https_forwarder
+    error_message = "Set acknowledge_https_forwarder = true to confirm that notification_endpoints.slack/.teams point at an endpoint which answers SNS's SubscriptionConfirmation POST. Pasting a chat webhook URL here produces a subscription stuck in PendingConfirmation: it delivers nothing and never errors, so the failure surfaces only when an alert does not arrive."
+  }
+}
+
+variable "acknowledge_https_forwarder" {
+  type        = bool
+  description = "Assert that notification_endpoints.slack/.teams are forwarders which confirm an SNS subscription, not raw chat webhooks. Required before either is accepted, because no hostname check can prove it"
+  default     = false
+}

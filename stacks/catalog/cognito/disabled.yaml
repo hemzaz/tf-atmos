@@ -1,7 +1,7 @@
 ---
 components:
   terraform:
-    infrastructure:
+    cognito:
       metadata:
-        component: infrastructure
+        component: cognito
         enabled: false

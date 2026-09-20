@@ -389,6 +389,8 @@ resource "aws_db_instance" "main" {
   monitoring_role_arn                   = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
   performance_insights_enabled          = var.performance_insights_enabled
   performance_insights_retention_period = var.performance_insights_retention_period
+  performance_insights_kms_key_id       = var.performance_insights_enabled ? var.performance_insights_kms_key_id : null
+  iam_database_authentication_enabled   = var.iam_database_authentication_enabled
   # prevent_destroy only accepts literals, so var.prevent_destroy maps to deletion protection
   deletion_protection = var.deletion_protection || var.prevent_destroy
 

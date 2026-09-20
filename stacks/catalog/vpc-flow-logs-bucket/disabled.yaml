@@ -1,8 +1,0 @@
----
-components:
-  terraform:
-    vpc-flow-logs-bucket:
-      metadata:
-        # Point to the Terraform component
-        component: vpc-flow-logs-bucket
-        enabled: false

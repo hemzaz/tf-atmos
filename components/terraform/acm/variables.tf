@@ -64,7 +64,7 @@ variable "tags" {
   default     = {}
 
   validation {
-    condition     = contains(keys(var.tags), "Environment")
-    error_message = "The tags map must contain an 'Environment' key."
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
   }
 }

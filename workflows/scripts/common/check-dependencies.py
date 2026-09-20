@@ -8,10 +8,12 @@ that is listed in the reader's `dependencies.components`; otherwise deploy order
 (and `atmos describe affected`) silently misses the edge. Exits 1 on any violation.
 """
 import json
+import os
 import sys
 from typing import Any, Iterator, Optional
 
 FUNCTIONS = ("!terraform.state", "!terraform.output")
+COMPONENTS_DIR = "components/terraform"
 
 
 def references(value: Any) -> Iterator[tuple[str, Optional[str]]]:
@@ -36,13 +38,29 @@ def is_deployable(instance: dict) -> bool:
     return metadata.get("type") != "abstract" and metadata.get("enabled", True) is not False
 
 
-def check(stacks: dict) -> list[str]:
+def module_name(name: str, instance: dict) -> str:
+    """The component directory this instance is built from."""
+    return instance.get("component") or instance.get("metadata", {}).get("component") or name
+
+
+def check(stacks: dict, components_dir: Optional[str] = None) -> list[str]:
+    """Check state references, and component directories too when components_dir is given."""
     errors = []
     for stack_name, stack in sorted(stacks.items()):
         instances = stack.get("components", {}).get("terraform", {})
         for name, instance in sorted(instances.items()):
             if not is_deployable(instance):
                 continue
+            # Nothing else catches this: `atmos validate stacks` and the
+            # validate-all workflow both pass when a deployable instance names a
+            # component that was never written, because neither maps instances
+            # back to directories.
+            if components_dir is not None:
+                module = module_name(name, instance)
+                if not os.path.isdir(os.path.join(components_dir, module)):
+                    errors.append(
+                        f"{stack_name}: {name} is deployable but {components_dir}/{module} does not exist"
+                    )
             declared = {
                 (dep.get("component"), dep.get("stack") or stack_name)
                 for dep in (instance.get("dependencies") or {}).get("components") or []
@@ -63,13 +81,17 @@ def check(stacks: dict) -> list[str]:
 
 
 def main() -> int:
-    errors = check(json.load(sys.stdin))
+    components_dir = sys.argv[1] if len(sys.argv) > 1 else COMPONENTS_DIR
+    errors = check(json.load(sys.stdin), components_dir)
     for error in errors:
         print(f"ERROR {error}")
     if errors:
         print(f"{len(errors)} dependency problem(s)")
         return 1
-    print("dependencies.components covers every !terraform.state/!terraform.output reference")
+    print(
+        "every deployable instance has a component directory, and "
+        "dependencies.components covers every !terraform.state/!terraform.output reference"
+    )
     return 0
 
 

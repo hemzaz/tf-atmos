@@ -38,27 +38,27 @@ components:
       dependencies:
         components:
           - component: backend/main
+    # GitHub Actions OIDC role. This is what repo variable AWS_PLAN_ROLE_ARN
+    # must point at before CI can run a real plan; every AWS job currently skips
+    # because it is unset. The trust policy is pinned to exact subject claims -
+    # never a wildcard - so no other repo can assume it.
     iam/ci:
       metadata:
         component: iam
         inherits:
           - iam
-        enabled: false  # iam module only manages a cross-account role; CI/EKS roles need their own module
-      vars: {}
-    iam/eks-node:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-        enabled: false  # iam module only manages a cross-account role; CI/EKS roles need their own module
-      vars: {}
-    iam/eks-cluster:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-        enabled: false  # iam module only manages a cross-account role; CI/EKS roles need their own module
-      vars: {}
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: true
+        ci_apply_role_enabled: true
+        ci_apply_role_environments:
+          - "fnx-prod-production"
+      dependencies:
+        components:
+          - component: backend/main
     backend/main:
       metadata:
         component: backend
@@ -175,15 +175,15 @@ components:
             description: "Production service account credentials"
             path: "production/service-accounts"
 
+        context_name: "production/infra"
+        default_recovery_window_in_days: 30
+
     # ==========================================================================
     # GuardDuty Configuration
     # ==========================================================================
-        context_name: "production/infra"
-        default_recovery_window_in_days: 30
     guardduty/main:
       metadata:
         component: guardduty
-        enabled: false  # no components/terraform/guardduty root module yet (see PR notes)
       vars:
         enable: true
         enable_s3_protection: true
@@ -204,11 +204,11 @@ components:
     securityhub/main:
       metadata:
         component: securityhub
-        enabled: false  # no components/terraform/securityhub root module yet (see PR notes)
       vars:
         enable: true
+        # AWS auto-subscribes AWS-FSBP and CIS under this flag. Listing them
+        # here as well collides at apply, so `standards` carries only what AWS
+        # does not enable for us.
         enable_default_standards: true
         standards:
-          - "aws-foundational-security-best-practices/v/1.0.0"
-          - "cis-aws-foundations-benchmark/v/1.2.0"
           - "pci-dss/v/3.2.1"
