@@ -1,4 +1,6 @@
 resource "aws_iam_policy" "resource_management" {
+  count = var.create_cross_account_role ? 1 : 0
+
   name        = "${var.policy_name}-resource-management"
   path        = "/"
   description = "Policy for managing AWS resources within account with least privilege"
@@ -112,6 +114,8 @@ resource "aws_iam_policy" "resource_management" {
 }
 
 resource "aws_iam_role_policy_attachment" "resource_management" {
-  role       = aws_iam_role.cross_account_role.name
-  policy_arn = aws_iam_policy.resource_management.arn
+  count = var.create_cross_account_role ? 1 : 0
+
+  role       = aws_iam_role.cross_account_role[0].name
+  policy_arn = aws_iam_policy.resource_management[0].arn
 }
