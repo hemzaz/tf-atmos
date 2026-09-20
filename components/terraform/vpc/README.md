@@ -27,9 +27,8 @@ Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 
 - No entries in `dependencies.components` point at `vpc` — downstream components read
   its state directly via `!terraform.state vpc/main|services ...` instead.
-- Stack configs reference `.database_subnet_ids`/`.elasticache_subnet_ids` on this
-  component's state (`services.yaml`), but `outputs.tf` exports only
-  `private_subnet_ids`/`public_subnet_ids` — neither exists (the latter isn't even a variable).
+- `database_subnet_ids` is exported; there is no elasticache subnet tier (no
+  variable, no resource), so cache components use `private_subnet_ids`.
 - `tags` without a non-empty `Environment` value fails validation before any plan.
 
 ## Usage

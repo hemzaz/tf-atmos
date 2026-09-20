@@ -186,7 +186,7 @@ components:
         auth_token: !env PROD_ELASTICACHE_AUTH_TOKEN
         kms_key_id: !terraform.state kms/main .key_arn
         vpc_id: !terraform.state vpc/main .vpc_id
-        subnet_ids: !terraform.state vpc/main .elasticache_subnet_ids
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
         # Fail closed: nothing can reach the cache until a consumer's security
         # group is listed here. ECS services are not managed by this repo, so
         # there is no group to reference yet - add it when there is one.

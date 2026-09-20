@@ -18,6 +18,14 @@ output "public_subnet_ids" {
   description = "List of IDs of public subnets"
 }
 
+# aws_subnet.database has existed all along with no way to read it, so every
+# stack referencing .database_subnet_ids would have failed at plan time. Keyed
+# off local.database_subnets because that is what the resource iterates.
+output "database_subnet_ids" {
+  value       = [for cidr in keys(local.database_subnets) : aws_subnet.database[cidr].id]
+  description = "List of IDs of database subnets; empty when database_subnets is not set"
+}
+
 output "private_route_table_ids" {
   value       = [for cidr in var.private_subnets : aws_route_table.private[cidr].id]
   description = "List of IDs of private route tables"
