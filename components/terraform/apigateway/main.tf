@@ -1,8 +1,10 @@
 locals {
   enabled = var.enabled
 
-  # Environment-based name prefix for consistent naming across all components
-  environment = try(var.tags["Environment"], "default")
+  # Environment-based name prefix for consistent naming across all components.
+  # No fallback: var.tags is validated to carry a non-empty Environment, so a
+  # try() here would be unreachable and would only hide a broken stack.
+  environment = var.tags["Environment"]
   name_prefix = "${local.environment}-${var.api_name}"
 
   # Determine which API type to create based on var.api_type
@@ -557,7 +559,7 @@ resource "aws_cloudwatch_dashboard" "api_dashboard" {
     {
       api_name    = local.name_prefix
       region      = var.region
-      environment = try(var.tags["Environment"], "default")
+      environment = local.environment
       stage_name  = var.stage_name
       api_type    = var.api_type
       api_stages  = [var.stage_name]
