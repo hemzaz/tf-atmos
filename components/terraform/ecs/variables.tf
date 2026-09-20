@@ -59,8 +59,18 @@ variable "enable_container_insights" {
   default     = true
 }
 
+variable "cluster_name" {
+  type        = string
+  description = "Name of the ECS cluster. Defaults to <Environment>-cluster; set it explicitly when an environment runs more than one cluster, otherwise they collide"
+  default     = null
+}
+
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
 }

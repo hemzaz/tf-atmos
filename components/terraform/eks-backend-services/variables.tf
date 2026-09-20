@@ -2,8 +2,13 @@
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources"
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
   default     = {}
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
 }
 
 variable "environment" {

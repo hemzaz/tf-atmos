@@ -1,17 +1,24 @@
+locals {
+  cluster_name = coalesce(var.cluster_name, "${var.tags["Environment"]}-cluster")
+}
+
 resource "aws_ecs_cluster" "main" {
-  name = "${var.tags["Environment"]}-cluster"
+  name = local.cluster_name
 
   setting {
     name  = "containerInsights"
     value = var.enable_container_insights ? "enabled" : "disabled"
   }
 
-  tags = { Name = "${var.tags["Environment"]}-ecs-cluster" }
+  # var.tags was previously dropped here entirely, so the cluster carried only a
+  # Name tag and none of the Tenant/Account/Environment/ManagedBy set that every
+  # other resource in this repo gets.
+  tags = merge(var.tags, { Name = local.cluster_name })
 }
 
 resource "aws_ecs_capacity_provider" "main" {
   count = var.fargate_only ? 0 : 1
-  name  = "${var.tags["Environment"]}-capacity-provider"
+  name  = "${local.cluster_name}-capacity-provider"
 
   auto_scaling_group_provider {
     auto_scaling_group_arn = var.autoscaling_group_arn
@@ -48,7 +55,3 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
     create_before_destroy = true
   }
 }
-
-
-
-
