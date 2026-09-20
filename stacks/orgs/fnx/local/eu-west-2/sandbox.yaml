@@ -20,6 +20,16 @@
 #   - TagInstanceProfile is unimplemented        -> create_vpc_iam_role: false
 #   - CreateDBSubnetGroup is unimplemented, so the rds component cannot be
 #     exercised here at all; it is covered by validate-all only.
+#   - CreateCacheSubnetGroup is unimplemented too, so elasticache is blocked
+#     the same way rds is, and for the same reason.
+#   - GetRestApi omits rootResourceId, so apigateway cannot be exercised here
+#     at all: the provider's create waiter reads that field to decide the API
+#     is AVAILABLE and fails with "unexpected state '', wanted target
+#     'AVAILABLE'", and the component needs the same id to attach the "/"
+#     method. The REST API itself is created correctly first - verified with
+#     get-rest-apis - so this is an emulator response gap, not a defect. It
+#     means the AWS_PROXY integration and the aws_lambda_permission added in
+#     #138 have still never executed anywhere.
 #   - DescribeManagedPrefixLists is unimplemented, so a VPC-attached lambda
 #     cannot be exercised here: the component resolves the region's S3 managed
 #     prefix list for egress. lambda/main therefore runs outside a VPC, and the
@@ -164,6 +174,65 @@ components:
           Environment: sandbox
           Tenant: fnx
           ManagedBy: Terraform
+
+    # The v1.0.0 notes recorded cognito as unimplemented by Floci. That is no
+    # longer true - CreateUserPool works - so the pool that every /api method
+    # authorizes against finally executes somewhere.
+    cognito/main:
+      metadata:
+        component: cognito
+      vars:
+        name_prefix: "fnx-sandbox-local"
+        deletion_protection: false
+        # Two Floci limits shape this instance, neither a component defect:
+        #   - SetUserPoolMfaConfig is unimplemented, and the provider calls it
+        #     whenever MFA is not OFF, so MFA is OFF here (prod uses ON).
+        #   - CreateUserPoolClient returns a response missing
+        #     prevent_user_existence_errors and explicit_auth_flows, so
+        #     Terraform aborts with "Provider produced inconsistent result
+        #     after apply". No client is declared here for that reason; the
+        #     user pool itself creates and destroys cleanly.
+        mfa_configuration: "OFF"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    securitygroup/app:
+      metadata:
+        component: securitygroup
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        # Floci does not implement PutMetricFilter, so the permissive-rule
+        # metric filter and its alarm cannot be created here. The security
+        # groups and their rules - the part worth proving - still are.
+        enable_security_group_logging: false
+        enable_security_group_alarms: false
+        # enforce_no_public_ingress is the guard worth proving: it blocks
+        # creation of any group allowing 0.0.0.0/0 ingress.
+        enforce_no_public_ingress: true
+        security_groups:
+          app:
+            description: "Sandbox application tier"
+            ingress_rules:
+              - from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["10.90.0.0/16"]
+                description: "HTTPS from inside the VPC"
+            egress_rules:
+              - from_port: 0
+                to_port: 0
+                protocol: "-1"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "All outbound"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+      dependencies:
+        components:
+          - component: vpc/main
 
     # ecs is exercised here before it is wired into any real environment by
     # the infrastructure/* remap. rds cannot be: see the Floci gaps above.
