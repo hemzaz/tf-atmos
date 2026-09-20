@@ -66,6 +66,22 @@ ci:
     enabled: true
     behavior: upsert
 
+# Scaffold templates (EXPERIMENTAL in Atmos). Both generate with the repository
+# root as the target, so a single run can place files under both
+# components/terraform/ and stacks/catalog/:
+#   atmos scaffold generate component . --force
+scaffold:
+  base_path: "./scaffolds"
+  templates:
+    component:
+      description: "Terraform root component following this repo's house rules"
+      source: "./scaffolds/component"
+      version: "1.0.0"
+    catalog-entry:
+      description: "Catalog defaults + disabled entry for an existing component"
+      source: "./scaffolds/catalog-entry"
+      version: "1.0.0"
+
 schemas:
   atmos:
     manifest: "https://atmos.tools/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"

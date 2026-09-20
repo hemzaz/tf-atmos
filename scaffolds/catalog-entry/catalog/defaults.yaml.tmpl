@@ -1,0 +1,30 @@
+---
+# Abstract defaults for {{ .Config.component_name }}. Real instances inherit this
+# and set the '' placeholders.
+#
+# Modelled on stacks/catalog/acm/defaults.yaml. Note that this file deliberately
+# carries no Atmos template strings: the scaffold engine rejects any output that
+# still contains Go-template delimiters, so a generated file cannot emit them.
+# Add them by hand afterwards if an instance needs one, e.g. name_prefix built
+# from .settings.context - see stacks/catalog/securitygroup/defaults.yaml.
+components:
+  terraform:
+    {{ .Config.component_name }}/defaults:
+      metadata:
+        component: {{ .Config.component_name }}
+        type: abstract
+        custom:
+          version: "1.0.0"
+          description: "{{ .Config.description }}"
+          category: "{{ .Config.category }}"
+      vars:
+        # Required: tenant-account-environment (set per instance)
+        name_prefix: ''
+{{- if .Config.use_enabled_gating }}
+
+        enabled: true
+{{- end }}
+
+        # Merged with the Environment tag the stack hierarchy already sets
+        tags:
+          Component: "{{ .Config.component_name }}"

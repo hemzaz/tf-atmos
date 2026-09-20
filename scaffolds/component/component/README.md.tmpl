@@ -1,0 +1,38 @@
+# {{ .Config.component_name }}
+
+{{ .Config.description }}
+
+Scaffolded from `scaffolds/component`. Replace this paragraph with what the
+component actually creates once it has resources.
+
+## Deployed as
+
+Not deployed yet. Add a real instance to a stack under
+`stacks/orgs/fnx/<account>/<region>/<environment>/components/`, inheriting
+`{{ .Config.component_name }}/defaults` from the catalog.
+
+| Input | Notes |
+|---|---|
+| `region` | AWS region; validated against the AWS region name format |
+| `name_prefix` | `tenant-account-environment`; every resource name starts with it |{{ if .Config.use_enabled_gating }}
+| `enabled` | Set `false` to make the component create nothing |{{ end }}
+| `tags` | **Required, no default.** Must contain a non-empty `Environment` |
+
+Outputs: `name_prefix`{{ if .Config.use_enabled_gating }}, `enabled`{{ end }} - placeholders that keep
+tflint's `terraform_unused_declarations` happy. Replace them with real outputs.
+
+## Dependencies / gotchas
+
+- `tags` is deliberately **required**. A `default = {}` makes every resource
+  look untagged to tflint and checkov, which run per-component without stack
+  vars - that is what broke the scanners repo-wide before.
+- Resources are tagged via the provider's `default_tags`, not per resource.
+- Suppress scanner findings inline (`#checkov:skip=<ID>:<reason>`,
+  `#trivy:ignore:<ID> <reason>`) with an honest reason. Never add entries to
+  `.checkov.baseline` or `.trivyignore.yaml` to make a scan pass.
+
+## Usage
+
+```
+atmos terraform plan {{ .Config.component_name }}/main -s fnx-dev-testenv-01
+```
