@@ -20,7 +20,7 @@ has abstract `apigateway_domain`/`apigateway_http`/`apigateway_rest` entries —
 | `api_type` | `REST` or `HTTP`, picks which resource set is created |
 | `domain_name`, `certificate_arn` | both required together for the custom domain |
 | `zone_id` | required for the Route53 alias record |
-| `enable_waf` / `tracing_enabled` | default false (prod `apigateway/main` sets true) / default true (X-Ray on the REST stage) |
+| `enable_waf` / `tracing_enabled` | both default false; prod opts in per instance. X-Ray bills per trace, so dev/staging stay off |
 
 No component reads these outputs via `!terraform.state apigateway...` — 0 matches in `stacks/`.
 

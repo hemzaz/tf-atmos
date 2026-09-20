@@ -50,6 +50,7 @@ resource "aws_api_gateway_rest_api" "rest_api" {
 
 # REST API Stage
 resource "aws_api_gateway_stage" "rest_stage" {
+  #checkov:skip=CKV_AWS_73:Deliberate, not a false positive. X-Ray bills per recorded trace, so tracing_enabled defaults to false and prod opts in (orgs/fnx/prod/.../services.yaml). Revisit if dev/staging ever need distributed tracing.
   count = local.create_rest_api ? 1 : 0
 
   deployment_id = aws_api_gateway_deployment.rest_deployment[0].id
