@@ -343,8 +343,9 @@ variable "api_integrations" {
     timeout_milliseconds    = optional(number, 29000)
     request_parameters      = optional(map(string), {})
     request_templates       = optional(map(string), {})
+    lambda_function_name    = optional(string)
   }))
-  description = "List of integrations for the REST API, one per api_methods entry, addressed by the same resource_path + http_method pair."
+  description = "List of integrations for the REST API, one per api_methods entry, addressed by the same resource_path + http_method pair. An AWS_PROXY entry must also set lambda_function_name so this component can grant API Gateway permission to invoke it."
   default     = []
 
   validation {
@@ -363,6 +364,28 @@ variable "api_integrations" {
       if contains(["AWS", "AWS_PROXY", "HTTP", "HTTP_PROXY"], i.type)
     ])
     error_message = "An api_integrations entry of type AWS, AWS_PROXY, HTTP or HTTP_PROXY must set uri to the backend it forwards to. Only MOCK integrations may leave uri unset."
+  }
+
+  # Without a matching aws_lambda_permission, an AWS_PROXY integration deploys
+  # clean and every call returns 500 with AccessDeniedException in the execution
+  # log. Requiring the function name here means this component can create that
+  # permission itself, so the failure cannot ship silently.
+  validation {
+    condition = alltrue([
+      for i in var.api_integrations :
+      i.lambda_function_name != null && i.lambda_function_name != ""
+      if i.type == "AWS_PROXY"
+    ])
+    error_message = "An AWS_PROXY integration must set lambda_function_name. API Gateway cannot invoke a Lambda without a resource policy granting it, and the resulting 500 appears only at request time, not at apply."
+  }
+
+  validation {
+    condition = alltrue([
+      for i in var.api_integrations :
+      i.lambda_function_name == null
+      if i.type != "AWS_PROXY"
+    ])
+    error_message = "lambda_function_name only applies to an AWS_PROXY integration; remove it from entries of any other type."
   }
 }
 
