@@ -16,8 +16,9 @@
 #
 # Components not listed here cannot be exercised against Floci; the gaps are
 # documented in stacks/orgs/fnx/local/eu-west-2/sandbox.yaml. rds is the notable
-# one - CreateDBSubnetGroup is unimplemented - so it is covered by validate-all
-# only.
+# one - CreateDBSubnetGroup is unimplemented - so it is exercised against
+# LocalEmu instead, in the fnx-local-localemu lane. That lane is started by hand
+# and has no workflow yet; localemu.yaml explains why.
 #
 # Worth the reminder: adding lambda here immediately found that every lambda
 # instance in dev, staging and prod was uncreatable, because none named a
