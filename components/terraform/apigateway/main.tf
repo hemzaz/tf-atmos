@@ -375,6 +375,33 @@ resource "aws_api_gateway_integration" "integration" {
   depends_on = [aws_api_gateway_method.method]
 }
 
+# Resource policy letting this API invoke the Lambda behind each AWS_PROXY
+# integration. Without it the integration applies cleanly and every request
+# returns 500 with AccessDeniedException, visible only in the execution log -
+# so it is created here rather than left to the caller to remember.
+#
+# It lives in this component, not in `lambda`, to keep the dependency one-way.
+# The lambda component can attach the same permission itself via
+# api_gateway_source_arn, but that needs this API's execution_arn while this
+# API needs the function's invoke_arn: a cycle. In this direction apigateway
+# depends on lambda and nothing depends back.
+resource "aws_lambda_permission" "api_gateway_invoke" {
+  for_each = local.create_rest_api ? {
+    for k, i in local.api_integrations : k => i
+    if i.type == "AWS_PROXY"
+  } : {}
+
+  statement_id  = "AllowInvokeFrom-${replace(replace(each.key, " ", "-"), "/", "_")}"
+  action        = "lambda:InvokeFunction"
+  function_name = each.value.lambda_function_name
+  principal     = "apigateway.amazonaws.com"
+
+  # Scoped to this API across its stages and methods. Pinning the method and
+  # path instead would break on ANY, whose wildcard is not a literal method in
+  # a source_arn.
+  source_arn = "${aws_api_gateway_rest_api.rest_api[0].execution_arn}/*/*"
+}
+
 # Route53 Record for custom domain
 resource "aws_route53_record" "api_domain" {
   #checkov:skip=CKV2_AWS_23:False positive, the alias targets this module's API Gateway custom domain

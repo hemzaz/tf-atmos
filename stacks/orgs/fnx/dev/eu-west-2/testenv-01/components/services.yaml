@@ -47,10 +47,9 @@ components:
             http_method: "ANY"
             authorization: "COGNITO_USER_POOLS"
 
-        # One integration per method. MOCK returns a canned response without a
-        # backend: these APIs have no Lambda or ALB behind them yet, and MOCK is
-        # the only type that may leave uri unset. Point them at a real backend
-        # by switching type to AWS_PROXY/HTTP_PROXY and setting uri.
+        # "/" stays MOCK on purpose: it is a liveness endpoint, and a canned 200
+        # is the correct answer for one. "/api" is the real entry point and is
+        # proxied to Lambda.
         api_integrations:
           - resource_path: "/"
             http_method: "GET"
@@ -58,8 +57,10 @@ components:
             type: "MOCK"
           - resource_path: "/api"
             http_method: "ANY"
-            integration_http_method: "POST"
-            type: "MOCK"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state lambda/data-processor .function_invoke_arn
+            lambda_function_name: !terraform.state lambda/data-processor .function_name
 
         # Authorizer for the COGNITO_USER_POOLS method above. A method that asks
         # for COGNITO_USER_POOLS without a pool here fails at apply.
@@ -81,6 +82,7 @@ components:
           - component: network/main
           - component: acm/main
           - component: cognito/main
+          - component: lambda/data-processor
     apigateway/data:
       metadata:
         component: apigateway
@@ -93,6 +95,23 @@ components:
           - path_part: "data"
           - path_part: "metrics"
 
+        api_methods:
+          - resource_path: "/data"
+            http_method: "ANY"
+            authorization: "NONE"
+
+        # Real backend: AWS_PROXY hands the whole request to the function and
+        # returns whatever it produces. lambda_function_name is required so this
+        # component can grant API Gateway permission to invoke it - without that
+        # policy the integration applies fine and every call returns 500.
+        api_integrations:
+          - resource_path: "/data"
+            http_method: "ANY"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state lambda/data-processor .function_invoke_arn
+            lambda_function_name: !terraform.state lambda/data-processor .function_name
+
         # Domain Configuration
         domain_name: "data.services.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
@@ -100,13 +119,15 @@ components:
         log_retention_days: 30
         create_dashboard: true
 
-    # Infrastructure instances
         api_name: "data-api"
         zone_id: !terraform.state network/services .zone_ids.data
       dependencies:
         components:
           - component: network/services
           - component: acm/services
+          - component: lambda/data-processor
+
+    # Infrastructure instances
     # ECS Fargate cluster for the main apps (was infrastructure/main.ecs).
     # vpc_id/subnet_ids are not passed: an aws_ecs_cluster has neither - those
     # belong to ECS services, which this component does not manage.
