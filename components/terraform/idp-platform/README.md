@@ -34,10 +34,23 @@ component today.
   inside it. A raw Slack or Teams incoming webhook never does, so the
   subscription would sit in `PendingConfirmation` and deliver nothing, silently.
   Point these at something that confirms and reshapes the payload — a Lambda
-  function URL, an API Gateway, or AWS Chatbot. A validation block rejects
-  `hooks.slack.com` and `*.webhook.office.com` URLs to stop that mistake at
-  plan time. `notification_endpoints.email` needs no forwarder: each address
-  gets a confirmation mail from AWS.
+  function URL, an API Gateway, or AWS Chatbot.
+
+  Setting either field therefore requires `acknowledge_https_forwarder = true`.
+  That flag, not the hostname check below, is the real guard: no URL inspection
+  can prove an endpoint confirms subscriptions, and the failure it prevents is
+  silent and permanent.
+
+  A second validation rejects the raw-webhook hosts worth naming —
+  `hooks.slack.com`, `*.webhook.office.com`, `*.logic.azure.com` (the Power
+  Automate URLs that replaced retired Office 365 connectors) and Discord — but
+  treat it as a better error message, not a guarantee. Those hosts move:
+  Office 365 connectors retired in May 2026 and the `logic.azure.com` URLs are
+  themselves being relocated, so the list lags and fails **open** on whatever
+  is current.
+
+  `notification_endpoints.email` needs neither flag nor forwarder — each
+  address gets a confirmation mail from AWS.
 - `environment` only accepts `dev`, `staging` or `prod`, and the `domain_name`
   regex allows exactly one dot — so `example.com` validates but the subdomain
   `idp.example.com` does not. Both are stricter than the rest of the repo and
