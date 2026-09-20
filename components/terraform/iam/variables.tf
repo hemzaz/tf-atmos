@@ -166,3 +166,191 @@ variable "state_bucket_names" {
   description = "Terraform state bucket names whose bucket policy the role must never change (buckets matching *terraform-state* are always protected)"
   default     = []
 }
+
+# ---------------------------------------------------------------------------
+# GitHub Actions OIDC CI roles (all optional; off unless github_oidc_enabled)
+# ---------------------------------------------------------------------------
+variable "create_cross_account_role" {
+  type        = bool
+  description = "Create the cross-account role and its two policies. Set false on an instance that only creates the GitHub Actions CI roles."
+  default     = true
+}
+
+variable "github_oidc_enabled" {
+  type        = bool
+  description = "Create the GitHub Actions OIDC CI roles"
+  default     = false
+}
+
+variable "github_oidc_repository" {
+  type        = string
+  description = "GitHub repository (\"<org>/<repo>\") whose OIDC tokens may assume the CI roles"
+  default     = null
+
+  validation {
+    condition     = var.github_oidc_repository == null || can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", var.github_oidc_repository))
+    error_message = "github_oidc_repository must be \"<org>/<repo>\"; a wildcard would let any repository assume the CI roles."
+  }
+
+  validation {
+    condition     = !var.github_oidc_enabled || var.github_oidc_repository != null
+    error_message = "github_oidc_repository is required when github_oidc_enabled is true."
+  }
+}
+
+variable "github_oidc_default_branch" {
+  type        = string
+  description = "Branch whose ref the plan role trusts (drift-detection and disaster-recovery run there)"
+  default     = "main"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9._/-]+$", var.github_oidc_default_branch))
+    error_message = "github_oidc_default_branch must be a branch name with no wildcard."
+  }
+}
+
+variable "github_oidc_create_provider" {
+  type        = bool
+  description = "Create the token.actions.githubusercontent.com OIDC provider. Leave false when the account already has one and set github_oidc_provider_arn instead."
+  default     = false
+}
+
+variable "github_oidc_provider_arn" {
+  type        = string
+  description = "ARN of an existing GitHub Actions OIDC provider to trust"
+  default     = null
+
+  validation {
+    condition     = var.github_oidc_provider_arn == null || can(regex("^arn:aws:iam::\\d{12}:oidc-provider/token\\.actions\\.githubusercontent\\.com$", var.github_oidc_provider_arn))
+    error_message = "github_oidc_provider_arn must be an arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com ARN."
+  }
+
+  validation {
+    condition = !var.github_oidc_enabled || (
+      var.github_oidc_create_provider && var.github_oidc_provider_arn == null
+      ) || (
+      !var.github_oidc_create_provider && var.github_oidc_provider_arn != null
+    )
+    error_message = "Set exactly one of github_oidc_create_provider = true or github_oidc_provider_arn when github_oidc_enabled is true."
+  }
+}
+
+variable "ci_role_name_prefix" {
+  type        = string
+  description = "Name prefix for the CI roles: the plan role is \"<prefix>-plan\" and the apply role \"<prefix>-apply\""
+  default     = null
+
+  validation {
+    # 64 minus the longest "-apply" suffix
+    condition     = var.ci_role_name_prefix == null || can(regex("^[\\w+=,.@-]{1,58}$", var.ci_role_name_prefix))
+    error_message = "ci_role_name_prefix must be 1-58 characters of alphanumerics or +=,.@_-."
+  }
+
+  validation {
+    condition     = !var.github_oidc_enabled || var.ci_role_name_prefix != null
+    error_message = "ci_role_name_prefix is required when github_oidc_enabled is true."
+  }
+}
+
+variable "ci_plan_role_subjects" {
+  type        = list(string)
+  description = "Exact GitHub OIDC `sub` claims the plan role trusts. Null derives repo:<repository>:pull_request and repo:<repository>:ref:refs/heads/<default branch>."
+  default     = null
+
+  validation {
+    condition = var.ci_plan_role_subjects == null || (
+      length(coalesce(var.ci_plan_role_subjects, [])) > 0 && alltrue([
+        for subject in coalesce(var.ci_plan_role_subjects, []) :
+        can(regex("^repo:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:[A-Za-z0-9._/:-]+$", subject))
+      ])
+    )
+    error_message = "Each ci_plan_role_subjects entry must be a fully qualified subject (repo:<org>/<repo>:<claim>), non-empty and free of wildcards; an unbounded sub lets any repository assume the role."
+  }
+}
+
+variable "ci_plan_policy_arns" {
+  type        = list(string)
+  description = "Managed policy ARNs attached to the plan role. Must stay read-only: plans run pull-request code."
+  default     = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+
+  validation {
+    condition     = alltrue([for arn in var.ci_plan_policy_arns : can(regex("^arn:aws:iam::(aws|\\d{12}):policy/", arn))])
+    error_message = "Each ci_plan_policy_arns entry must be an IAM policy ARN."
+  }
+
+  validation {
+    condition     = !anytrue([for arn in var.ci_plan_policy_arns : endswith(arn, "/AdministratorAccess") || endswith(arn, "/PowerUserAccess")])
+    error_message = "The plan role is assumed by pull-request workflows, so AdministratorAccess and PowerUserAccess must not be attached to it."
+  }
+}
+
+variable "ci_apply_role_enabled" {
+  type        = bool
+  description = "Also create the apply role, assumable only from the GitHub Environments in ci_apply_role_environments"
+  default     = false
+}
+
+variable "ci_apply_role_environments" {
+  type        = list(string)
+  description = "GitHub Environment names (the Atmos stack names used by terraform-cd.yml) whose OIDC tokens may assume the apply role"
+  default     = []
+
+  validation {
+    condition     = alltrue([for environment in var.ci_apply_role_environments : can(regex("^[A-Za-z0-9._-]+$", environment))])
+    error_message = "Each ci_apply_role_environments entry must be a GitHub Environment name with no wildcard."
+  }
+
+  validation {
+    condition     = !var.ci_apply_role_enabled || length(var.ci_apply_role_environments) > 0
+    error_message = "ci_apply_role_environments must name at least one GitHub Environment when ci_apply_role_enabled is true; an empty list would leave the apply role with no subject condition."
+  }
+}
+
+variable "ci_apply_policy_arns" {
+  type        = list(string)
+  description = "Managed policy ARNs attached to the apply role. No default: only the caller knows what its stacks deploy."
+  default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.ci_apply_policy_arns : can(regex("^arn:aws:iam::(aws|\\d{12}):policy/", arn))])
+    error_message = "Each ci_apply_policy_arns entry must be an IAM policy ARN."
+  }
+
+  validation {
+    condition     = !var.ci_apply_role_enabled || length(var.ci_apply_policy_arns) > 0
+    error_message = "ci_apply_policy_arns must be set when ci_apply_role_enabled is true."
+  }
+}
+
+variable "ci_state_bucket_name" {
+  type        = string
+  description = "Terraform state bucket the CI roles may read (the apply role may also write). Null skips the state policy."
+  default     = null
+
+  validation {
+    condition     = var.ci_state_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.ci_state_bucket_name))
+    error_message = "ci_state_bucket_name must be a valid S3 bucket name."
+  }
+}
+
+variable "ci_state_kms_key_arn" {
+  type        = string
+  description = "KMS key encrypting the state bucket; the CI roles get Decrypt and GenerateDataKey on it, the apply role also Encrypt"
+  default     = null
+
+  validation {
+    condition     = var.ci_state_kms_key_arn == null || can(regex("^arn:aws:kms:", var.ci_state_kms_key_arn))
+    error_message = "ci_state_kms_key_arn must be a KMS key ARN."
+  }
+}
+
+variable "ci_role_max_session_duration" {
+  type        = number
+  description = "Maximum session duration in seconds for the CI roles"
+  default     = 3600
+
+  validation {
+    condition     = var.ci_role_max_session_duration >= 3600 && var.ci_role_max_session_duration <= 43200
+    error_message = "ci_role_max_session_duration must be between 3600 and 43200 seconds."
+  }
+}
