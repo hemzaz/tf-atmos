@@ -20,6 +20,10 @@
 #   - TagInstanceProfile is unimplemented        -> create_vpc_iam_role: false
 #   - CreateDBSubnetGroup is unimplemented, so the rds component cannot be
 #     exercised here at all; it is covered by validate-all only.
+#   - DescribeManagedPrefixLists is unimplemented, so a VPC-attached lambda
+#     cannot be exercised here: the component resolves the region's S3 managed
+#     prefix list for egress. lambda/main therefore runs outside a VPC, and the
+#     prefix-list path has no executing coverage anywhere.
 #   - DescribeSecurityGroups returns empty UserIdGroupPairs, dropping the
 #     self-reference on `self = true` rules, so a re-plan of vpc/main always
 #     shows aws_security_group.default as changed. apply and destroy both
@@ -129,6 +133,33 @@ components:
       vars:
         environment: sandbox
         context_name: "sandbox/app"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # lambda executes here and nowhere else. This is the instance that proved
+    # the component could not be created at all without a deployment package:
+    # aws_lambda_function rejects "one of filename,image_uri,s3_bucket must be
+    # specified" at APPLY time, so validate, tflint, checkov and trivy all
+    # reported green while every real instance was uncreatable.
+    #
+    # filename points at a zip the sandbox workflow builds before apply - see
+    # the build-lambda-package step in workflows/sandbox.yaml. Nothing is
+    # committed, because a deployment package is application output and this is
+    # an infrastructure repo; the real stacks name an S3 object instead.
+    #
+    # Deliberately NOT in a VPC: Floci does not implement
+    # DescribeManagedPrefixLists, so the data source that resolves egress for a
+    # VPC-attached lambda cannot run here. That path stays unexercised.
+    lambda/main:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "probe"
+        handler: "main.handler"
+        runtime: "python3.13"
+        filename: "/tmp/tf-atmos-sandbox/lambda.zip"
         tags:
           Environment: sandbox
           Tenant: fnx

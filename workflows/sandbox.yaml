@@ -18,6 +18,11 @@
 # documented in stacks/orgs/fnx/local/eu-west-2/sandbox.yaml. rds is the notable
 # one - CreateDBSubnetGroup is unimplemented - so it is covered by validate-all
 # only.
+#
+# Worth the reminder: adding lambda here immediately found that every lambda
+# instance in dev, staging and prod was uncreatable, because none named a
+# deployment package and aws_lambda_function requires one at apply time. Six
+# green static gates had said otherwise. Coverage here is not a formality.
 workflows:
   sandbox-up:
     description: Start (or reuse) the local AWS emulator
@@ -64,8 +69,29 @@ workflows:
         name: apply-ecs
         command: atmos terraform apply ecs/main -s fnx-local-sandbox --identity local-aws -auto-approve
 
+      # lambda needs a deployment package to EXIST before apply: the provider
+      # rejects a function with none, which is how every real instance in this
+      # repo was found to be uncreatable. The package is built here rather than
+      # committed - it is application output, and this is an infrastructure
+      # repo. The path matches `filename` on lambda/main in the sandbox stack.
+      - type: shell
+        name: build-lambda-package
+        command: |
+          set -eu
+          dir=/tmp/tf-atmos-sandbox
+          rm -rf "$dir" && mkdir -p "$dir"
+          printf 'def handler(event, context):\n    return {"statusCode": 200, "body": "ok"}\n' > "$dir/main.py"
+          (cd "$dir" && zip -q lambda.zip main.py)
+          echo "built $dir/lambda.zip"
+      - type: shell
+        name: apply-lambda
+        command: atmos terraform apply lambda/main -s fnx-local-sandbox --identity local-aws -auto-approve
+
       # Destroy proves teardown works, and leaves the emulator clean for the
       # next run. Reverse order.
+      - type: shell
+        name: destroy-lambda
+        command: atmos terraform destroy lambda/main -s fnx-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-ecs
         command: atmos terraform destroy ecs/main -s fnx-local-sandbox --identity local-aws -auto-approve
