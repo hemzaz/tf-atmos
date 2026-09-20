@@ -71,15 +71,15 @@ workflows:
             if ! output=$(tflint --no-color --config "$config" --chdir "$dir" 2>&1); then
               failed="$failed $component"
               count=$(printf '%s\n' "$output" | grep -cE '^(Warning|Error):')
-              if [ "$count" -gt 0 ]; then
-                rules=$(printf '%s\n' "$output" | grep -oE '\([a-z0-9_]+\)$' \
-                  | tr -d '()' | sort -u | paste -sd, -)
+              rules=$(printf '%s\n' "$output" | grep -oE '\([a-z0-9_]+\)$' \
+                | tr -d '()' | sort -u | paste -sd, -)
+              if [ -n "$rules" ]; then
                 echo "  $component: $count finding(s) [$rules]"
               else
-                # tflint exited non-zero without emitting findings (parse error,
-                # bad config, missing plugin). A count summary would say nothing
-                # useful, so show what it actually reported.
-                echo "  $component: tflint failed without findings:"
+                # Non-zero exit with no rule name means tflint failed rather than
+                # found something (parse error, bad config, missing plugin). A
+                # rule summary would say nothing, so show what it reported.
+                echo "  $component: tflint failed to run:"
                 printf '%s\n' "$output" | sed 's/^/    /'
               fi
             fi
