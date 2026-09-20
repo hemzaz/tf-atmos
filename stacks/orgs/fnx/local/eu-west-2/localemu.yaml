@@ -1,0 +1,182 @@
+---
+# LocalEmu lane — fnx-local-localemu
+#
+# A second local lane, alongside the Floci sandbox (sandbox.yaml). It exists
+# for the components Floci cannot execute AT ALL, so that they are proven
+# somewhere rather than only validated:
+#
+#   rds          Floci has no CreateDBSubnetGroup. This lane is what caught
+#                the overlapping backup/maintenance windows that would have
+#                failed CreateDBInstance in staging AND prod.
+#
+# elasticache is NOT here either. Floci blocks it at CreateCacheSubnetGroup,
+# which LocalEmu does implement - but LocalEmu creates the replication group
+# without its member cache clusters, so the provider's read fails with
+# "CacheClusterNotFound: Cache cluster localemu-localemu-cache-001 not found".
+# Different wall, same outcome: elasticache still has no executing coverage.
+#
+# apigateway is NOT here, and cannot be run against either emulator. AWS
+# provider 6.65 waits for the RestApi's `apiStatus` field to reach AVAILABLE
+# (valid values UPDATING|AVAILABLE|PENDING|FAILED - a recent addition to the
+# API). Neither Floci nor LocalEmu returns apiStatus, so the SDK reads "" and
+# the create fails with:
+#     unexpected state '', wanted target 'AVAILABLE'
+# Confirmed from a TF_LOG=DEBUG trace: CreateRestApi returns 201 and the API is
+# fully formed - LocalEmu even returns rootResourceId, which Floci omits - the
+# failure is purely the missing status field. So the AWS_PROXY integration and
+# the aws_lambda_permission added in #138 still have no executing coverage.
+#
+# RUN IT AGAINST A FRESH EMULATOR. One apply/destroy cycle from a just-started
+# LocalEmu is clean (vpc 16 resources, lambda 4, rds 6). A SECOND cycle in the
+# same process is not: leftover objects make CreateDBParameterGroup and
+# CreateRole return AlreadyExists, and aws_db_subnet_group then fails with
+# "Provider produced inconsistent result after apply". Restart LocalEmu and
+# clear terraform.tfstate.d/fnx-local-localemu-* between runs. This is emulator
+# fidelity, not a component defect, but it is why the lane is not yet wired
+# into a repeatable workflow the way the Floci sandbox is.
+#
+# This is a SEPARATE STACK, not extra instances in sandbox.yaml, because
+# Terraform state is keyed by component+stack: applying one instance against
+# two different emulators would have them share a state file and believe
+# resources exist that do not.
+#
+# LocalEmu (localemu.cloud, Apache 2.0) is NOT an Atmos emulator component -
+# Atmos has no localemu driver. It is started by hand, outside Atmos, and is
+# reached through the `local-emu` identity in atmos.yaml, whose
+# spec.endpoint_url points at http://localhost:4566. There is no workflow step
+# for it yet, for the reason in the FRESH EMULATOR note above:
+#
+#   python3 -m venv <dir>/lemu-venv
+#   <dir>/lemu-venv/bin/pip install localemu==1.2.0
+#   nohup <dir>/lemu-venv/bin/localemu start &        # listens on :4566
+#
+# Both the dummy credentials and the endpoint must be exported, because
+# spec.endpoint_url only redirects Atmos's own AWS calls, not the Terraform
+# provider - without AWS_ENDPOINT_URL the apply goes to real AWS and gets an
+# STS 403:
+#
+#   export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test \
+#          AWS_ENDPOINT_URL=http://localhost:4566
+#   atmos terraform apply <c> -s fnx-local-localemu --identity local-emu
+#
+# Apply with `--identity local-emu`, never `local-aws`.
+#
+# Requires Python 3.13 exactly: 3.12 lacks warnings.deprecated (PEP 702) and
+# LocalEmu fails at runtime, while on 3.14 moto-ext caps aws-sam-translator at
+# <=1.103.0 and localemu 1.2.0 cannot be installed at all.
+import:
+  - catalog/_base/defaults
+  - mixins/tenant/fnx
+  - mixins/region/eu-west-2
+  - orgs/fnx/local/_defaults
+  - catalog/vpc/defaults
+
+vars:
+  region: eu-west-2
+
+# Local and disposable, exactly as in the Floci lane: a throwaway emulator run
+# must never touch real state.
+terraform:
+  backend_type: local
+  backend:
+    local: {}
+
+settings:
+  environment:
+    description: "Local LocalEmu lane"
+    namespace: localemu
+    account: local
+    aws_account_id: "000000000000"
+    vpc_cidr: "10.91.0.0/16"
+    enable_vpc_flow_logs: false
+  context:
+    tenant: fnx
+    environment: localemu
+    stage: local
+
+components:
+  terraform:
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        vpc_cidr: "10.91.0.0/16"
+        private_subnets:
+          - "10.91.1.0/24"
+          - "10.91.2.0/24"
+        public_subnets:
+          - "10.91.101.0/24"
+          - "10.91.102.0/24"
+        database_subnets:
+          - "10.91.201.0/24"
+          - "10.91.202.0/24"
+        enable_nat_gateway: false
+        enable_flow_logs: false
+        manage_network_acls: false
+        manage_default_security_group: false
+        create_vpc_iam_role: false
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # Re-run of the lambda component against a second emulator, not new
+    # coverage: apigateway cannot run in this lane (see the header), so nothing
+    # here proxies to it. Package is built by the build-lambda-package step in
+    # workflows/sandbox.yaml, which must be run before this applies.
+    lambda/api:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "api-backend"
+        handler: "main.handler"
+        runtime: "python3.13"
+        filename: "/tmp/tf-atmos-sandbox/lambda.zip"
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # Blocked by Floci (no CreateDBSubnetGroup). rds has never executed
+    # anywhere despite being declared in staging and prod.
+    rds/main:
+      metadata:
+        component: rds
+      vars:
+        identifier: "localemu-db"
+        db_name: "appdb"
+        # Windows must be separated by >= 30 minutes. Prod and staging both
+        # carried adjacent windows (backup 03:00-04:00, maintenance 04:00-...)
+        # and were rejected here with "The backup window and maintenance
+        # window must not overlap" - see the fix in their services.yaml.
+        backup_window: "03:00-04:00"
+        maintenance_window: "Sun:04:30-Sun:05:30"
+        # UNVERIFIED whether this is a component defect or a LocalEmu gap:
+        # with rotation enabled (the default), apply fails with "No Lambda
+        # rotation function ARN is associated with this secret". The component
+        # attaches aws_secretsmanager_secret_rotation to the RDS-MANAGED master
+        # user secret, which AWS rotates itself without a Lambda. LocalEmu may
+        # simply not implement managed rotation. Needs a real plan to settle;
+        # disabled here so the rest of the component is proven.
+        enable_secrets_rotation: false
+        # BOTH are needed. The component computes
+        #   deletion_protection = var.deletion_protection || var.prevent_destroy
+        # and prevent_destroy also defaults true, so setting deletion_protection
+        # alone is a no-op and destroy still fails with "Cannot delete a DB
+        # instance when DeletionProtection is enabled". Deliberate design -
+        # prevent_destroy stands in for lifecycle.prevent_destroy, which cannot
+        # take a variable - but an easy footgun, so it is spelled out here.
+        deletion_protection: false
+        prevent_destroy: false
+        skip_final_snapshot: true
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
+      dependencies:
+        components:
+          - component: vpc/main

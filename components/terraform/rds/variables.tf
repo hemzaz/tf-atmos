@@ -208,8 +208,17 @@ variable "backup_window" {
 
 variable "maintenance_window" {
   type        = string
-  description = "Weekly maintenance window time"
-  default     = "Sun:00:00-Sun:03:00"
+  description = "Weekly maintenance window time. Must be separated from backup_window by at least 30 minutes"
+  default     = "Sun:00:00-Sun:02:30"
+
+  # Keep this at least 30 minutes clear of backup_window. Until 2026-09 the
+  # default ended at 03:00, exactly when the backup window opens, and RDS
+  # rejects that with "The backup window and maintenance window must not
+  # overlap" - so every instance relying on the defaults failed at
+  # CreateDBInstance. staging and prod carried the same fault with their own
+  # adjacent values. Terraform cannot cross-validate two variables, so this is
+  # a comment rather than a validation block; the LocalEmu lane is what caught
+  # it and what will catch a regression.
 }
 
 variable "skip_final_snapshot" {
