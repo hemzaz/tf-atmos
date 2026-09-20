@@ -2,9 +2,16 @@ locals {
   enabled = var.enabled
 
   # Environment-based name prefix for consistent naming across all components.
-  # No fallback: var.tags is validated to carry a non-empty Environment, so a
-  # try() here would be unreachable and would only hide a broken stack.
-  environment = var.tags["Environment"]
+  #
+  # KEEP the try(). var.tags is validated to carry a non-empty Environment, so
+  # the fallback is unreachable at plan and apply time and reads like dead code
+  # - but tflint evaluates these locals statically, without resolving var.tags,
+  # and a bare var.tags["Environment"] makes it abort the
+  # aws_cloudwatch_log_group_invalid_name rule with "Failed to check ruleset",
+  # failing `atmos workflow lint` on both apigateway instances. Removing it was
+  # tried and reverted. The directory tflint pass does NOT catch this; only the
+  # per-instance pass does.
+  environment = try(var.tags["Environment"], "default")
   name_prefix = "${local.environment}-${var.api_name}"
 
   # Determine which API type to create based on var.api_type
