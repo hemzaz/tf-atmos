@@ -28,6 +28,20 @@ component today.
   may not wire to real resources — verify in main.tf before relying on them.
 - Nested provider blocks are fragile under `for_each`/`depends_on`; resolve
   the unsupported precondition before applying.
+- **`notification_endpoints.slack` / `.teams` must be a forwarder, not a
+  webhook.** SNS only begins delivering to an HTTPS subscription once the
+  endpoint answers a `SubscriptionConfirmation` POST by fetching the token URL
+  inside it. A raw Slack or Teams incoming webhook never does, so the
+  subscription would sit in `PendingConfirmation` and deliver nothing, silently.
+  Point these at something that confirms and reshapes the payload — a Lambda
+  function URL, an API Gateway, or AWS Chatbot. A validation block rejects
+  `hooks.slack.com` and `*.webhook.office.com` URLs to stop that mistake at
+  plan time. `notification_endpoints.email` needs no forwarder: each address
+  gets a confirmation mail from AWS.
+- `environment` only accepts `dev`, `staging` or `prod`, and the `domain_name`
+  regex allows exactly one dot — so `example.com` validates but the subdomain
+  `idp.example.com` does not. Both are stricter than the rest of the repo and
+  are worth loosening if this component is ever adopted.
 
 ## Usage
 

@@ -247,3 +247,38 @@ variable "backup_window" {
     error_message = "Backup window must be in the format 'hh:mm-hh:mm'."
   }
 }
+
+variable "notification_endpoints" {
+  type = object({
+    email = optional(list(string), [])
+    slack = optional(string, "")
+    teams = optional(string, "")
+  })
+  description = "Where the platform health alarm sends notifications. `email` addresses subscribe natively (each one gets a confirmation mail). `slack` and `teams` must be HTTPS forwarder URLs that answer SNS's SubscriptionConfirmation, NOT raw incoming-webhook URLs, which never confirm"
+  default = {
+    email = []
+    slack = ""
+    teams = ""
+  }
+
+  validation {
+    condition     = alltrue([for e in var.notification_endpoints.email : can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", e))])
+    error_message = "notification_endpoints.email entries must be email addresses."
+  }
+
+  validation {
+    condition = alltrue([
+      for url in [var.notification_endpoints.slack, var.notification_endpoints.teams] :
+      url == "" || startswith(url, "https://")
+    ])
+    error_message = "notification_endpoints.slack and .teams must be https:// URLs, because SNS refuses plaintext HTTP subscriptions."
+  }
+
+  validation {
+    condition = alltrue([
+      for url in [var.notification_endpoints.slack, var.notification_endpoints.teams] :
+      !can(regex("^https://hooks\\.slack\\.com/", url)) && !can(regex("\\.webhook\\.office\\.com/", url))
+    ])
+    error_message = "Point slack/teams at a forwarder that confirms the SNS subscription, not at the incoming-webhook URL itself: a raw webhook never answers SubscriptionConfirmation, so the subscription would stay PendingConfirmation and deliver nothing."
+  }
+}
