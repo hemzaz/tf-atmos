@@ -19,8 +19,12 @@ workflows:
       - name: validate-stacks
         type: shell
         command: atmos validate stacks
-      # Every !terraform.state/!terraform.output target must be an existing, enabled
-      # instance listed in the reader's dependencies.components (deploy ordering).
+      # Two things nothing else checks:
+      #  - every !terraform.state/!terraform.output target is an existing, enabled
+      #    instance listed in the reader's dependencies.components (deploy ordering);
+      #  - every deployable instance maps to a component directory that exists.
+      #    `atmos validate stacks` and validate-all both pass when it does not,
+      #    because neither maps instances back to directories.
       - name: check-dependencies
         type: shell
         command: |
@@ -28,7 +32,7 @@ workflows:
           python3 -m unittest discover -s workflows/scripts/common -p 'test_*.py'
           stacks_json="$(mktemp)"
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
-          python3 workflows/scripts/common/check-dependencies.py < "$stacks_json"
+          python3 workflows/scripts/common/check-dependencies.py components/terraform < "$stacks_json"
       - name: list-stacks
         type: shell
         command: atmos list stacks

@@ -34,20 +34,27 @@ components:
       dependencies:
         components:
           - component: backend/main
+    # GitHub Actions OIDC role. This is what repo variable AWS_PLAN_ROLE_ARN
+    # must point at before CI can run a real plan; every AWS job currently skips
+    # because it is unset. The trust policy is pinned to exact subject claims -
+    # never a wildcard - so no other repo can assume it.
     iam/ci:
       metadata:
         component: iam
         inherits:
           - iam
-        enabled: false  # iam module only manages a cross-account role; CI/EKS roles need their own module
-      vars: {}
-    iam/eks-node:
-      metadata:
-        component: iam
-        inherits:
-          - iam
-        enabled: false  # iam module only manages a cross-account role; CI/EKS roles need their own module
-      vars: {}
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: true
+        ci_apply_role_enabled: true
+        ci_apply_role_environments:
+          - "fnx-staging-staging-01"
+      dependencies:
+        components:
+          - component: backend/main
     backend/main:
       metadata:
         component: backend

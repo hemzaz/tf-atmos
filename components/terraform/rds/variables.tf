@@ -509,3 +509,15 @@ variable "environment" {
     error_message = "Environment must be one of: dev, staging, prod."
   }
 }
+
+variable "iam_database_authentication_enabled" {
+  type        = bool
+  description = "Use IAM database authentication instead of long-lived passwords. Supported by MySQL, MariaDB and PostgreSQL only"
+  default     = false
+}
+
+variable "performance_insights_kms_key_id" {
+  type        = string
+  description = "CMK encrypting Performance Insights data. Ignored unless performance_insights_enabled is true; AWS uses its own key when unset"
+  default     = null
+}

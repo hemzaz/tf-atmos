@@ -1,6 +1,7 @@
 """Tests for check-dependencies.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 
 _spec = importlib.util.spec_from_file_location(
@@ -75,6 +76,33 @@ class CheckDependenciesTest(unittest.TestCase):
     def test_cross_stack_reference_with_stack_passes(self):
         reader = instance({"x": "!terraform.state vpc/main s2 .id"}, [{"component": "vpc/main", "stack": "s2"}])
         self.assert_errors(stacks_with(reader, s2={"vpc/main": instance()}))
+
+    def test_missing_component_directory_fails(self):
+        # Nothing else catches this: atmos validate stacks and validate-all both
+        # pass when a deployable instance names a component that was never written.
+        with tempfile.TemporaryDirectory() as components:
+            pathlib.Path(components, "vpc").mkdir()
+            stacks = {"s1": {"components": {"terraform": {
+                "vpc/main": instance(component="vpc"),
+                "cache/main": instance(component="elasticache"),
+            }}}}
+            errors = check_dependencies.check(stacks, components)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("cache/main", errors[0])
+        self.assertIn("elasticache does not exist", errors[0])
+
+    def test_component_directory_check_skipped_when_dir_not_given(self):
+        stacks = {"s1": {"components": {"terraform": {"nope/main": instance(component="nope")}}}}
+        self.assertEqual(check_dependencies.check(stacks), [])
+
+    def test_abstract_and_disabled_instances_need_no_directory(self):
+        with tempfile.TemporaryDirectory() as components:
+            stacks = {"s1": {"components": {"terraform": {
+                "base": instance(component="ghost", type="abstract"),
+                "off": instance(component="ghost", enabled=False),
+            }}}}
+            self.assertEqual(check_dependencies.check(stacks, components), [])
+
 
 
 if __name__ == "__main__":

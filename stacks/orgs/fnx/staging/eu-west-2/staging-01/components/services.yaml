@@ -9,7 +9,6 @@ import:
   - orgs/fnx/staging/eu-west-2/staging-01/components/globals
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
-  - catalog/infrastructure/defaults
 
 components:
   terraform:
@@ -103,109 +102,100 @@ components:
         components:
           - component: network/services
           - component: acm/services
-    infrastructure/main:
+    # ECS Fargate cluster (was infrastructure/main.ecs). vpc_id/subnet_ids are
+    # not passed: an aws_ecs_cluster has neither - those belong to ECS services.
+    ecs/main:
       metadata:
-        component: infrastructure
-        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
+        component: ecs
       vars:
-        # ECS Fargate cluster
-        ecs:
-          enabled: true
-          fargate_only: true
-          cluster_name: "staging-main-apps"
-          vpc_id: !terraform.state vpc/main .vpc_id
-          subnet_ids: !terraform.state vpc/main .private_subnet_ids
-          enable_container_insights: true
+        cluster_name: "staging-main-apps"
+        fargate_only: true
+        enable_container_insights: true
+      dependencies:
+        components:
+          - component: vpc/main
 
-        # RDS PostgreSQL
-        rds:
-          enabled: true
-          identifier: "staging-main-db"
-          engine: "{{ .settings.environment.rds_engine }}"
-          engine_version: "{{ .settings.environment.rds_engine_version }}"
-          instance_class: "db.t3.medium"
-          allocated_storage: 20
-          max_allocated_storage: 100
-          db_name: "stagingapp"
-          multi_az: false  # Single AZ for staging
-          deletion_protection: false
-          skip_final_snapshot: true
-
-          # Security
-          storage_encrypted: true
-          iam_database_authentication_enabled: true
-
-          # Backup
-          backup_retention_period: 7
-          backup_window: "03:00-04:00"
-          maintenance_window: "Mon:04:00-Mon:05:00"
-
-          # Performance
-          performance_insights_enabled: true
-          performance_insights_retention_period: 7
-
-          # Network
-          vpc_id: !terraform.state vpc/main .vpc_id
-          subnet_ids: !terraform.state vpc/main .database_subnet_ids
-
-        tags:
-          Stack: main
-          Tier: application
-
-    # ==========================================================================
-    # Infrastructure - Data Processing Stack
-    # ==========================================================================
-    infrastructure/data:
+    # Application database (was infrastructure/main.rds)
+    rds/main:
       metadata:
-        component: infrastructure
-        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
+        component: rds
       vars:
-        # ECS disabled for data stack
-        ecs:
-          enabled: false
+        identifier: "staging-main-db"
+        db_name: "stagingapp"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.t3.medium"
+        allocated_storage: 20
+        max_allocated_storage: 100
+        multi_az: false
+        deletion_protection: false
+        skip_final_snapshot: true
+        storage_encrypted: true
+        iam_database_authentication_enabled: true
+        backup_retention_period: 7
+        backup_window: "03:00-04:00"
+        maintenance_window: "Mon:04:00-Mon:05:00"
+        performance_insights_enabled: true
+        performance_insights_retention_period: 7
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/main
 
-        # Data-specific RDS
-        rds:
-          enabled: true
-          identifier: "staging-data-db"
-          engine: "{{ .settings.environment.rds_engine }}"
-          engine_version: "{{ .settings.environment.rds_engine_version }}"
-          instance_class: "db.r5.large"
-          allocated_storage: 50
-          max_allocated_storage: 200
-          db_name: "stagingdata"
-          multi_az: false
+    # Analytics database (was infrastructure/data.rds)
+    rds/data:
+      metadata:
+        component: rds
+      vars:
+        identifier: "staging-data-db"
+        db_name: "stagingdata"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.large"
+        allocated_storage: 50
+        max_allocated_storage: 200
+        multi_az: false
+        storage_encrypted: true
+        backup_retention_period: 7
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
 
-          storage_encrypted: true
-          backup_retention_period: 7
+    # Data processing (was infrastructure/data.lambda). The lambda component is
+    # single-function, so one instance per function.
+    lambda/data-processor:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "staging-data-processor"
+        handler: "main.handler"
+        runtime: "python3.11"
+        memory_size: 512
+        timeout: 300
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
 
-          vpc_id: !terraform.state vpc/services .vpc_id
-          subnet_ids: !terraform.state vpc/services .private_subnet_ids
+    lambda/data-transformer:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "staging-data-transformer"
+        handler: "transform.handler"
+        runtime: "python3.11"
+        memory_size: 1024
+        timeout: 600
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
 
-        # Lambda for data processing
-        lambda:
-          enabled: true
-          functions:
-            data_processor:
-              function_name: "staging-data-processor"
-              runtime: "python3.11"
-              handler: "main.handler"
-              memory_size: 512
-              timeout: 300
-              vpc_id: !terraform.state vpc/services .vpc_id
-              subnet_ids: !terraform.state vpc/services .private_subnet_ids
-            data_transformer:
-              function_name: "staging-data-transformer"
-              runtime: "python3.11"
-              handler: "transform.handler"
-              memory_size: 1024
-              timeout: 600
-              vpc_id: !terraform.state vpc/services .vpc_id
-              subnet_ids: !terraform.state vpc/services .private_subnet_ids
-
-        tags:
-          Stack: data
-          Tier: data-processing
 
     # ==========================================================================
     # Monitoring - Main Dashboard and Alarms

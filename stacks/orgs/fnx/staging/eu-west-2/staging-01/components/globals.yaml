@@ -12,7 +12,6 @@ import:
   # Import catalog defaults for all components
   - catalog/vpc/defaults
   - catalog/network/defaults
-  - catalog/infrastructure/defaults
   - catalog/secretsmanager/defaults
   - catalog/external-secrets/defaults
   - catalog/ec2/defaults

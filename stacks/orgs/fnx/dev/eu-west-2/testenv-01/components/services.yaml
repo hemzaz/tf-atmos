@@ -3,7 +3,6 @@ import:
   - orgs/fnx/dev/eu-west-2/testenv-01/components/globals
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
-  - catalog/infrastructure/defaults
 
 components:
   terraform:
@@ -66,60 +65,69 @@ components:
         components:
           - component: network/services
           - component: acm/services
-    infrastructure/main:
+    # ECS Fargate cluster for the main apps (was infrastructure/main.ecs).
+    # vpc_id/subnet_ids are not passed: an aws_ecs_cluster has neither - those
+    # belong to ECS services, which this component does not manage.
+    ecs/main:
       metadata:
-        component: infrastructure
-        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
+        component: ecs
       vars:
-        # ECS configuration
-        ecs:
-          enabled: true
-          fargate_only: true
-          cluster_name: "main-apps"
-          vpc_id: !terraform.state vpc/main .vpc_id
-          subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        cluster_name: "main-apps"
+        fargate_only: true
+      dependencies:
+        components:
+          - component: vpc/main
 
-        # RDS configuration
-        rds:
-          enabled: true
-          identifier: "main-db"
-          instance_class: "db.t3.micro"
-          allocated_storage: 5
-          db_name: "mainapp"
-          engine: "{{ .settings.environment.rds_engine }}"
-          engine_version: "{{ .settings.environment.rds_engine_version }}"
-          vpc_id: !terraform.state vpc/main .vpc_id
-          subnet_ids: !terraform.state vpc/main .private_subnet_ids
-
-    infrastructure/data:
+    # Application database (was infrastructure/main.rds)
+    rds/main:
       metadata:
-        component: infrastructure
-        enabled: false  # no components/terraform/infrastructure root module yet (see PR notes)
+        component: rds
       vars:
-        # ECS configuration (disabled for data)
-        ecs:
-          enabled: false
+        identifier: "main-db"
+        db_name: "mainapp"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.t3.micro"
+        allocated_storage: 5
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/main
 
-        # Data-specific RDS
-        rds:
-          enabled: true
-          identifier: "data-db"
-          instance_class: "db.r5.large"
-          allocated_storage: 20
-          db_name: "datawarehouse"
-          engine: "{{ .settings.environment.rds_engine }}"
-          engine_version: "{{ .settings.environment.rds_engine_version }}"
-          vpc_id: !terraform.state vpc/services .vpc_id
-          subnet_ids: !terraform.state vpc/services .private_subnet_ids
+    # Analytics database (was infrastructure/data.rds)
+    rds/data:
+      metadata:
+        component: rds
+      vars:
+        identifier: "data-db"
+        db_name: "datawarehouse"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.large"
+        allocated_storage: 20
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
 
-        # Data-specific Lambda functions
-        lambda:
-          enabled: true
-          function_name: "data-processor"
-          memory_size: 512
-          runtime: "python3.9"
-          vpc_id: !terraform.state vpc/services .vpc_id
-          subnet_ids: !terraform.state vpc/services .private_subnet_ids
+    # Data processing (was infrastructure/data.lambda). The lambda component is
+    # single-function, so one instance per function.
+    lambda/data-processor:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "data-processor"
+        handler: "main.handler"
+        runtime: "python3.9"
+        memory_size: 512
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+
 
     # Monitoring instances
     monitoring/main:
