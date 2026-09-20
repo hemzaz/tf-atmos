@@ -47,6 +47,49 @@ workflows:
       - name: tflint
         type: atmos
         command: terraform lint
+      # `atmos terraform lint` above lints stack INSTANCES, so a component with no
+      # stack instance is never looked at. Ten of the twenty-three components were
+      # in that state, and the gate reported "passed" while never opening them.
+      # This step lints every component DIRECTORY, so an unwired component cannot
+      # go unlinted again. Both steps are needed: the instance pass resolves stack
+      # variables (catching what only shows up with real inputs), the directory
+      # pass guarantees coverage.
+      - name: tflint-components
+        type: script
+        interpreter: bash
+        script: |
+          set -uo pipefail
+          config="$PWD/.tflint.hcl"
+          failed=""
+          for dir in components/terraform/*/; do
+            component=$(basename "$dir")
+            # _library holds shared sub-modules, not root modules; skip it and any
+            # directory that has no Terraform files of its own.
+            [ "$component" = "_library" ] && continue
+            ls "$dir"*.tf >/dev/null 2>&1 || continue
+            # --no-color so the Warning:/Error: prefixes below match.
+            if ! output=$(tflint --no-color --config "$config" --chdir "$dir" 2>&1); then
+              failed="$failed $component"
+              count=$(printf '%s\n' "$output" | grep -cE '^(Warning|Error):')
+              if [ "$count" -gt 0 ]; then
+                rules=$(printf '%s\n' "$output" | grep -oE '\([a-z0-9_]+\)$' \
+                  | tr -d '()' | sort -u | paste -sd, -)
+                echo "  $component: $count finding(s) [$rules]"
+              else
+                # tflint exited non-zero without emitting findings (parse error,
+                # bad config, missing plugin). A count summary would say nothing
+                # useful, so show what it actually reported.
+                echo "  $component: tflint failed without findings:"
+                printf '%s\n' "$output" | sed 's/^/    /'
+              fi
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "tflint found issues in:$failed"
+            echo "Re-run one component with: tflint --config .tflint.hcl --chdir components/terraform/<component>/"
+            exit 1
+          fi
+          echo "tflint: all component directories clean"
       - type: toast
         level: success
         content: Lint checks passed

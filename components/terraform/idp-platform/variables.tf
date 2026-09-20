@@ -26,12 +26,6 @@ variable "tags" {
   default     = {}
 }
 
-variable "enable_github_integration" {
-  type        = bool
-  description = "Read the GitHub token SSM parameter for the Backstage GitHub integration"
-  default     = false
-}
-
 variable "acknowledge_unsupported" {
   type        = bool
   description = "Acknowledge that idp-platform is unsupported (nests root components with provider blocks); planning fails while false"
@@ -163,62 +157,6 @@ variable "redis_num_cache_clusters" {
   }
 }
 
-variable "enable_monitoring" {
-  type        = bool
-  description = "Enable comprehensive monitoring and logging"
-  default     = true
-}
-
-variable "enable_backup" {
-  type        = bool
-  description = "Enable automated backup solutions"
-  default     = true
-}
-
-variable "backup_retention_days" {
-  type        = number
-  description = "Number of days to retain backups"
-  default     = 30
-
-  validation {
-    condition     = var.backup_retention_days >= 1 && var.backup_retention_days <= 365
-    error_message = "Backup retention days must be between 1 and 365."
-  }
-}
-
-variable "enable_disaster_recovery" {
-  type        = bool
-  description = "Enable disaster recovery setup"
-  default     = false
-}
-
-variable "dr_region" {
-  type        = string
-  description = "Disaster recovery region"
-  default     = "us-west-2"
-
-  validation {
-    condition = contains([
-      "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-      "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1",
-      "ap-northeast-1", "ap-northeast-2", "ap-southeast-1", "ap-southeast-2"
-    ], var.dr_region)
-    error_message = "DR region must be a valid AWS region."
-  }
-}
-
-variable "enable_cost_optimization" {
-  type        = bool
-  description = "Enable cost optimization features like Spot instances"
-  default     = true
-}
-
-variable "enable_security_scanning" {
-  type        = bool
-  description = "Enable security scanning and compliance checks"
-  default     = true
-}
-
 variable "allowed_cidr_blocks" {
   type        = list(string)
   description = "CIDR blocks allowed to access the platform"
@@ -229,42 +167,6 @@ variable "allowed_cidr_blocks" {
       for cidr in var.allowed_cidr_blocks : can(cidrhost(cidr, 0))
     ])
     error_message = "All values must be valid CIDR blocks."
-  }
-}
-
-variable "notification_endpoints" {
-  type = object({
-    email = optional(list(string), [])
-    slack = optional(string, "")
-    teams = optional(string, "")
-  })
-  description = "Notification endpoints for alerts and events"
-  default = {
-    email = []
-    slack = ""
-    teams = ""
-  }
-}
-
-variable "feature_flags" {
-  type = object({
-    enable_argocd_integration    = optional(bool, true)
-    enable_cost_analysis         = optional(bool, true)
-    enable_compliance_checking   = optional(bool, true)
-    enable_drift_detection       = optional(bool, true)
-    enable_auto_scaling          = optional(bool, true)
-    enable_blue_green_deployment = optional(bool, false)
-    enable_canary_deployment     = optional(bool, false)
-  })
-  description = "Feature flags to enable/disable platform capabilities"
-  default = {
-    enable_argocd_integration    = true
-    enable_cost_analysis         = true
-    enable_compliance_checking   = true
-    enable_drift_detection       = true
-    enable_auto_scaling          = true
-    enable_blue_green_deployment = false
-    enable_canary_deployment     = false
   }
 }
 

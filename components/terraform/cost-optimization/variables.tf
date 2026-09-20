@@ -140,102 +140,6 @@ variable "snapshot_retention_days" {
   }
 }
 
-# Spot Instance Configuration
-variable "enable_spot_instances" {
-  type        = bool
-  description = "Enable spot instance usage for cost optimization"
-  default     = true
-}
-
-variable "spot_max_price_percentage" {
-  type        = number
-  description = "Maximum spot price as percentage of on-demand price"
-  default     = 80
-
-  validation {
-    condition     = var.spot_max_price_percentage > 0 && var.spot_max_price_percentage <= 100
-    error_message = "Spot max price percentage must be between 1 and 100."
-  }
-}
-
-variable "spot_instance_types" {
-  type        = list(string)
-  description = "List of instance types to use for spot instances"
-  default = [
-    "t3.micro",
-    "t3.small",
-    "t3.medium",
-    "t3a.micro",
-    "t3a.small",
-    "t3a.medium"
-  ]
-}
-
-# Reserved Instance Configuration
-variable "enable_reserved_instances" {
-  type        = bool
-  description = "Enable reserved instance recommendations"
-  default     = false
-}
-
-variable "ri_term_years" {
-  type        = number
-  description = "Reserved instance term in years (1 or 3)"
-  default     = 1
-
-  validation {
-    condition     = contains([1, 3], var.ri_term_years)
-    error_message = "RI term must be 1 or 3 years."
-  }
-}
-
-variable "ri_payment_option" {
-  type        = string
-  description = "Reserved instance payment option"
-  default     = "PARTIAL_UPFRONT"
-
-  validation {
-    condition     = contains(["ALL_UPFRONT", "PARTIAL_UPFRONT", "NO_UPFRONT"], var.ri_payment_option)
-    error_message = "Payment option must be ALL_UPFRONT, PARTIAL_UPFRONT, or NO_UPFRONT."
-  }
-}
-
-# Savings Plans Configuration
-variable "enable_savings_plans" {
-  type        = bool
-  description = "Enable savings plans recommendations"
-  default     = false
-}
-
-variable "sp_type" {
-  type        = string
-  description = "Savings plan type"
-  default     = "COMPUTE_SP"
-
-  validation {
-    condition     = contains(["COMPUTE_SP", "EC2_INSTANCE_SP", "SAGEMAKER_SP"], var.sp_type)
-    error_message = "Savings plan type must be COMPUTE_SP, EC2_INSTANCE_SP, or SAGEMAKER_SP."
-  }
-}
-
-variable "sp_term_years" {
-  type        = number
-  description = "Savings plan term in years (1 or 3)"
-  default     = 1
-
-  validation {
-    condition     = contains([1, 3], var.sp_term_years)
-    error_message = "SP term must be 1 or 3 years."
-  }
-}
-
-# Auto-scaling Configuration
-variable "enable_auto_scaling" {
-  type        = bool
-  description = "Enable auto-scaling for cost optimization"
-  default     = true
-}
-
 variable "scale_down_threshold" {
   type        = number
   description = "CPU utilization threshold for scaling down (%)"
@@ -256,72 +160,6 @@ variable "scale_up_threshold" {
     condition     = var.scale_up_threshold >= 50 && var.scale_up_threshold <= 95
     error_message = "Scale up threshold must be between 50 and 95."
   }
-}
-
-# Schedule Configuration
-variable "enable_scheduled_scaling" {
-  type        = bool
-  description = "Enable scheduled scaling for predictable workloads"
-  default     = true
-}
-
-variable "business_hours_start" {
-  type        = string
-  description = "Business hours start time (24-hour format)"
-  default     = "07:00"
-
-  validation {
-    condition     = can(regex("^([01]?[0-9]|2[0-3]):[0-5][0-9]$", var.business_hours_start))
-    error_message = "Start time must be in HH:MM format."
-  }
-}
-
-variable "business_hours_end" {
-  type        = string
-  description = "Business hours end time (24-hour format)"
-  default     = "19:00"
-
-  validation {
-    condition     = can(regex("^([01]?[0-9]|2[0-3]):[0-5][0-9]$", var.business_hours_end))
-    error_message = "End time must be in HH:MM format."
-  }
-}
-
-variable "weekend_shutdown" {
-  type        = bool
-  description = "Shutdown resources during weekends"
-  default     = true
-}
-
-# Monitoring Configuration
-variable "enable_cost_monitoring" {
-  type        = bool
-  description = "Enable detailed cost monitoring and reporting"
-  default     = true
-}
-
-variable "cost_report_frequency" {
-  type        = string
-  description = "Frequency of cost reports (DAILY, WEEKLY, MONTHLY)"
-  default     = "WEEKLY"
-
-  validation {
-    condition     = contains(["DAILY", "WEEKLY", "MONTHLY"], var.cost_report_frequency)
-    error_message = "Report frequency must be DAILY, WEEKLY, or MONTHLY."
-  }
-}
-
-variable "enable_recommendations" {
-  type        = bool
-  description = "Enable automated cost optimization recommendations"
-  default     = true
-}
-
-# S3 Lifecycle Configuration
-variable "enable_s3_lifecycle" {
-  type        = bool
-  description = "Enable S3 lifecycle policies for cost optimization"
-  default     = true
 }
 
 variable "s3_ia_transition_days" {
@@ -346,30 +184,6 @@ variable "s3_glacier_transition_days" {
   }
 }
 
-variable "s3_expiration_days" {
-  type        = number
-  description = "Days before object expiration (0 to disable)"
-  default     = 365
-
-  validation {
-    condition     = var.s3_expiration_days == 0 || (var.s3_expiration_days >= 180 && var.s3_expiration_days <= 3650)
-    error_message = "Expiration must be 0 (disabled) or between 180 and 3650 days."
-  }
-}
-
-# Database Optimization
-variable "enable_rds_optimization" {
-  type        = bool
-  description = "Enable RDS cost optimization features"
-  default     = true
-}
-
-variable "rds_auto_minor_version_upgrade" {
-  type        = bool
-  description = "Enable automatic minor version upgrades for RDS"
-  default     = true
-}
-
 variable "rds_backup_retention_period" {
   type        = number
   description = "RDS backup retention period in days"
@@ -378,33 +192,5 @@ variable "rds_backup_retention_period" {
   validation {
     condition     = var.rds_backup_retention_period >= 1 && var.rds_backup_retention_period <= 35
     error_message = "Backup retention must be between 1 and 35 days."
-  }
-}
-
-variable "enable_aurora_serverless" {
-  type        = bool
-  description = "Use Aurora Serverless for variable workloads"
-  default     = false
-}
-
-variable "aurora_min_capacity" {
-  type        = number
-  description = "Minimum Aurora Serverless v2 capacity units"
-  default     = 0.5
-
-  validation {
-    condition     = var.aurora_min_capacity >= 0.5 && var.aurora_min_capacity <= 16
-    error_message = "Aurora min capacity must be between 0.5 and 16."
-  }
-}
-
-variable "aurora_max_capacity" {
-  type        = number
-  description = "Maximum Aurora Serverless v2 capacity units"
-  default     = 4
-
-  validation {
-    condition     = var.aurora_max_capacity >= 1 && var.aurora_max_capacity <= 128
-    error_message = "Aurora max capacity must be between 1 and 128."
   }
 }
