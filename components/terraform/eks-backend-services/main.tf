@@ -2,8 +2,6 @@
 # This component manages backend services running on EKS for the IDP platform
 
 locals {
-  name_prefix = "${var.tags["Environment"]}-backend-services"
-
   # Service configurations with resource requirements and scaling policies
   backend_services = {
     # API Gateway microservice

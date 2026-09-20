@@ -177,56 +177,6 @@ variable "istio_enabled" {
   default     = false
 }
 
-variable "istio_enable_tracing" {
-  type        = bool
-  description = "Whether to enable distributed tracing in Istio - DEPRECATED, use clusters[*].enable_distributed_tracing instead"
-  default     = true
-}
-
-variable "istio_gateway_min_replicas" {
-  type        = number
-  description = "Minimum replicas for Istio gateway - DEPRECATED, use clusters[*].istio_config instead"
-  default     = 2
-
-  validation {
-    condition     = var.istio_gateway_min_replicas >= 2
-    error_message = "Istio gateway minimum replicas should be at least 2 for high availability."
-  }
-}
-
-variable "istio_gateway_max_replicas" {
-  type        = number
-  description = "Maximum replicas for Istio gateway - DEPRECATED, use clusters[*].istio_config instead"
-  default     = 5
-
-  validation {
-    condition     = var.istio_gateway_max_replicas >= var.istio_gateway_min_replicas
-    error_message = "Maximum replicas must be greater than or equal to minimum replicas."
-  }
-}
-
-variable "kiali_enabled" {
-  type        = bool
-  description = "Whether to enable Kiali visualization for Istio - DEPRECATED, use clusters[*].istio_config instead"
-  default     = false
-}
-
-variable "jaeger_enabled" {
-  type        = bool
-  description = "Whether to enable Jaeger tracing for Istio - DEPRECATED, use clusters[*].istio_config instead"
-  default     = false
-}
-
-variable "jaeger_storage_type" {
-  type        = string
-  description = "Storage type for Jaeger (memory, elasticsearch, cassandra) - DEPRECATED, use clusters[*].istio_config instead"
-  default     = "memory"
-  validation {
-    condition     = contains(["memory", "elasticsearch", "cassandra"], var.jaeger_storage_type)
-    error_message = "Allowed values for jaeger_storage_type are 'memory', 'elasticsearch', or 'cassandra'."
-  }
-}
-
 # Certificate management variables
 variable "domain_name" {
   type        = string
@@ -237,24 +187,6 @@ variable "domain_name" {
     condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}$", var.domain_name))
     error_message = "The domain_name must be a valid domain (e.g., example.com)."
   }
-}
-
-variable "hosted_zone_id" {
-  type        = string
-  description = "Route53 hosted zone ID for DNS validation - DEPRECATED, use clusters[*].cert_manager_config instead"
-  default     = ""
-
-  validation {
-    condition     = var.hosted_zone_id == "" || can(regex("^Z[A-Z0-9]{1,32}$", var.hosted_zone_id))
-    error_message = "The hosted_zone_id must be a valid Route53 Zone ID (e.g., Z00000000000000000000)."
-  }
-}
-
-# ACM Integration
-variable "acm_certificate_arn" {
-  type        = string
-  description = "ARN of the ACM certificate to use for Istio gateway"
-  default     = ""
 }
 
 variable "acm_certificate_crt" {

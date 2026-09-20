@@ -24,8 +24,8 @@ instances exist today. No stack imports it.
   reachable EKS cluster's kubeconfig, configured via Atmos `providers` or
   `KUBE_*` env vars — `provider.tf` wires no AWS/EKS component here.
 - `tags` has no validation requiring an `Environment` key (unlike `ec2`/`eks`), but
-  `local.name_prefix` reads `var.tags["Environment"]` directly — an omitted key
-  fails at plan/apply with a map-index error, not a validation message.
+  `main.tf` and `outputs.tf` read `var.tags["Environment"]` directly — an omitted
+  key fails at plan/apply with a map-index error, not a validation message.
 - Bump `credentials_revision` to push changed `database_url`/`redis_url`/password
   values — the `data_wo` write-only secrets don't update on their own.
 - `platform_api_image`, `auth_service_image`, `job_processor_image` default to
