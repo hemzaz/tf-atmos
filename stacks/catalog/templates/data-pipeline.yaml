@@ -280,7 +280,7 @@ components:
         description: "Transforms and enriches incoming data"
 
         # Runtime configuration
-        runtime: "python3.11"
+        runtime: "python3.13"
         handler: "handler.process_records"
         timeout: 300
         memory_size: 1024
@@ -344,7 +344,7 @@ components:
         description: "Validates data schema and quality"
 
         # Runtime configuration
-        runtime: "python3.11"
+        runtime: "python3.13"
         handler: "handler.validate_records"
         timeout: 60
         memory_size: 512
