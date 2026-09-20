@@ -155,14 +155,24 @@ components:
             enable_query_logging: false
             vpc_associations:
               - !terraform.state vpc/main .vpc_id
-        # Records removed in the dns remap: www (alias to alb/main, which does
-        # not exist), api (apigateway manages its own custom-domain record and
-        # an alias here would be a dependency cycle) and db_internal (the
-        # disabled infrastructure/main). Re-add once those targets exist.
-        records: {}
+        # Still removed from the dns remap: www (alias to alb/main, which does
+        # not exist) and api (apigateway manages its own custom-domain record,
+        # so an alias here would be a dependency cycle). Re-add once those
+        # targets exist.
+        records:
+          db_internal:
+            zone_name: "internal"
+            name: "db.internal.fnx.example.com"
+            type: "CNAME"
+            ttl: 300
+            # instance_address, not instance_endpoint: the endpoint carries a
+            # :5432 suffix, which is not a legal CNAME target.
+            records:
+              - !terraform.state rds/main .instance_address
       dependencies:
         components:
           - component: vpc/main
+          - component: rds/main
 
     # ==========================================================================
     # Network Resources - DNS for Services VPC
