@@ -8,10 +8,25 @@
 import:
   - orgs/fnx/staging/eu-west-2/staging-01/components/globals
   - catalog/apigateway/defaults
+  - catalog/cognito/defaults
   - catalog/monitoring/defaults
 
 components:
   terraform:
+    # ==========================================================================
+    # Cognito - user pool backing the API Gateway authorizer
+    # ==========================================================================
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/defaults
+      vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        clients:
+          api:
+            generate_secret: true
+
     # ==========================================================================
     # API Gateway - Main API
     # ==========================================================================
@@ -28,12 +43,35 @@ components:
           - path_part: "auth"
           - path_part: "health"
 
-        # API methods: the old config referenced this API's own resource IDs
-        # (apigateway_rest.rest_api_root_resource_id, resource_ids.api), which
-        # stack config cannot know before apply. Needs TF support for path-keyed methods.
-        # api_methods:
-        #   - resource_path: "/"      # GET, authorization NONE
-        #   - resource_path: "/api"   # ANY, authorization COGNITO_USER_POOLS
+        # Methods are addressed by resource_path ("/" is the API root), because
+        # a stack cannot know this API's resource IDs before apply.
+        api_methods:
+          - resource_path: "/"
+            http_method: "GET"
+            authorization: "NONE"
+          - resource_path: "/api"
+            http_method: "ANY"
+            authorization: "COGNITO_USER_POOLS"
+
+        # One integration per method. MOCK returns a canned response without a
+        # backend: these APIs have no Lambda or ALB behind them yet, and MOCK is
+        # the only type that may leave uri unset. Point them at a real backend
+        # by switching type to AWS_PROXY/HTTP_PROXY and setting uri.
+        api_integrations:
+          - resource_path: "/"
+            http_method: "GET"
+            integration_http_method: "GET"
+            type: "MOCK"
+          - resource_path: "/api"
+            http_method: "ANY"
+            integration_http_method: "POST"
+            type: "MOCK"
+
+        # Authorizer for the COGNITO_USER_POOLS method above. A method that asks
+        # for COGNITO_USER_POOLS without a pool here fails at apply.
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
 
         # Domain Configuration
         domain_name: "api.staging.{{ .settings.environment.domain_name }}"
@@ -68,6 +106,8 @@ components:
         components:
           - component: network/main
           - component: acm/main
+          - component: cognito/main
+
     apigateway/data:
       metadata:
         component: apigateway

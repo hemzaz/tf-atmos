@@ -9,10 +9,31 @@
 import:
   - orgs/fnx/prod/eu-west-2/production/components/globals
   - catalog/apigateway/defaults
+  - catalog/cognito/defaults
   - catalog/monitoring/defaults
 
 components:
   terraform:
+    # ==========================================================================
+    # Cognito - user pool backing the API Gateway authorizer
+    # ==========================================================================
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/defaults
+      vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        # Production tightens both knobs over the inherited defaults: MFA is
+        # mandatory rather than opt-in, and the pool cannot be deleted while it
+        # holds real users.
+        mfa_configuration: "ON"
+        deletion_protection: true
+        clients:
+          api:
+            generate_secret: true
+            access_token_validity_minutes: 30
+
     # ==========================================================================
     # API Gateway - Main API (Production)
     # ==========================================================================
@@ -31,29 +52,54 @@ components:
           - path_part: "users"
           - path_part: "products"
 
+        # Methods are addressed by resource_path ("/" is the API root), because
+        # a stack cannot know this API's resource IDs before apply.
+        api_methods:
+          - resource_path: "/"
+            http_method: "GET"
+            authorization: "NONE"
+          - resource_path: "/api"
+            http_method: "ANY"
+            authorization: "COGNITO_USER_POOLS"
+
+        # One integration per method. MOCK returns a canned response without a
+        # backend: these APIs have no Lambda or ALB behind them yet, and MOCK is
+        # the only type that may leave uri unset. Point them at a real backend
+        # by switching type to AWS_PROXY/HTTP_PROXY and setting uri.
+        api_integrations:
+          - resource_path: "/"
+            http_method: "GET"
+            integration_http_method: "GET"
+            type: "MOCK"
+          - resource_path: "/api"
+            http_method: "ANY"
+            integration_http_method: "POST"
+            type: "MOCK"
+
+        # Authorizer for the COGNITO_USER_POOLS method above. A method that asks
+        # for COGNITO_USER_POOLS without a pool here fails at apply.
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+
         # Domain Configuration
         domain_name: "api.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
+        api_name: "production-main-api"
+        zone_id: !terraform.state network/main .zone_ids.main
+
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000
 
-        # Method-level throttling for critical endpoints
         enable_logging: true
         log_retention_days: 90
         create_dashboard: true
-        enable_caching: true
-        tags:
-          Service: api-gateway
-          Tier: edge
-          CriticalityLevel: "high"
-
-    # ==========================================================================
-    # API Gateway - Data API (Production)
-    # ==========================================================================
-        api_name: "production-main-api"
-        zone_id: !terraform.state network/main .zone_ids.main
         tracing_enabled: true
+
+        # Cache settings
+        enable_caching: true
         cache_ttl_seconds: 300
+
         cors_configuration:
           allow_origins:
             - "https://{{ .settings.environment.domain_name }}"
@@ -64,16 +110,25 @@ components:
             - "Authorization"
             - "X-Api-Key"
             - "X-Request-Id"
-
-        # Cache settings
           expose_headers: []
           max_age: 300
           allow_credentials: false
+
         enable_waf: true
+
+        tags:
+          Service: api-gateway
+          Tier: edge
+          CriticalityLevel: "high"
       dependencies:
         components:
           - component: network/main
           - component: acm/main
+          - component: cognito/main
+
+    # ==========================================================================
+    # API Gateway - Data API (Production)
+    # ==========================================================================
     apigateway/data:
       metadata:
         component: apigateway

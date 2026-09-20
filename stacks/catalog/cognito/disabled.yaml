@@ -1,0 +1,7 @@
+---
+components:
+  terraform:
+    cognito:
+      metadata:
+        component: cognito
+        enabled: false

@@ -1,0 +1,28 @@
+---
+# Abstract defaults for cognito. Real instances inherit this
+# and set the '' placeholders.
+#
+# Modelled on stacks/catalog/acm/defaults.yaml. Note that this file deliberately
+# carries no Atmos template strings: the scaffold engine rejects any output that
+# still contains Go-template delimiters, so a generated file cannot emit them.
+# Add them by hand afterwards if an instance needs one, e.g. name_prefix built
+# from .settings.context - see stacks/catalog/securitygroup/defaults.yaml.
+components:
+  terraform:
+    cognito/defaults:
+      metadata:
+        component: cognito
+        type: abstract
+        custom:
+          version: "1.0.0"
+          description: "Cognito user pool and app clients for API authorization"
+          category: "security"
+      vars:
+        # Required: tenant-account-environment (set per instance)
+        name_prefix: ''
+
+        enabled: true
+
+        # Merged with the Environment tag the stack hierarchy already sets
+        tags:
+          Component: "cognito"
