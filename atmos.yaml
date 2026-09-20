@@ -45,12 +45,16 @@ auth:
     # Atmos has no localemu driver, so this is deliberately NOT an
     # `aws/emulator` identity: it is a static-credential identity whose
     # endpoint_url happens to be an AWS-compatible API on localhost. LocalEmu
-    # is started outside Atmos - see the localemu steps in workflows/sandbox.yaml.
+    # is started by hand, outside Atmos, and is deliberately not wired into a
+    # workflow yet - see the RUN IT AGAINST A FRESH EMULATOR note in
+    # stacks/orgs/fnx/local/eu-west-2/localemu.yaml for why.
     #
-    # It exists because Floci cannot exercise several components at all
-    # (apigateway, elasticache, rds) while LocalEmu implements them. The
-    # credentials are the conventional local-emulator dummies and authenticate
-    # nothing; they are read from the environment so no literal lands in git.
+    # It exists for rds, which Floci cannot exercise at all (no
+    # CreateDBSubnetGroup) and LocalEmu can. It does NOT rescue apigateway or
+    # elasticache: both fail on LocalEmu too, for their own reasons - see the
+    # header of stacks/orgs/fnx/local/eu-west-2/localemu.yaml. The credentials
+    # are the conventional local-emulator dummies and authenticate nothing;
+    # they are read from the environment so no literal lands in git.
     local-emu:
       kind: aws/user
       credentials:

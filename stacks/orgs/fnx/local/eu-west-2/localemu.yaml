@@ -41,10 +41,25 @@
 # resources exist that do not.
 #
 # LocalEmu (localemu.cloud, Apache 2.0) is NOT an Atmos emulator component -
-# Atmos has no localemu driver. It is started outside Atmos by the
-# localemu-up step in workflows/sandbox.yaml, and reached through the
-# `local-emu` identity in atmos.yaml, whose spec.endpoint_url points at
-# http://localhost:4566. Apply with `--identity local-emu`, never `local-aws`.
+# Atmos has no localemu driver. It is started by hand, outside Atmos, and is
+# reached through the `local-emu` identity in atmos.yaml, whose
+# spec.endpoint_url points at http://localhost:4566. There is no workflow step
+# for it yet, for the reason in the FRESH EMULATOR note above:
+#
+#   python3 -m venv <dir>/lemu-venv
+#   <dir>/lemu-venv/bin/pip install localemu==1.2.0
+#   nohup <dir>/lemu-venv/bin/localemu start &        # listens on :4566
+#
+# Both the dummy credentials and the endpoint must be exported, because
+# spec.endpoint_url only redirects Atmos's own AWS calls, not the Terraform
+# provider - without AWS_ENDPOINT_URL the apply goes to real AWS and gets an
+# STS 403:
+#
+#   export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test \
+#          AWS_ENDPOINT_URL=http://localhost:4566
+#   atmos terraform apply <c> -s fnx-local-localemu --identity local-emu
+#
+# Apply with `--identity local-emu`, never `local-aws`.
 #
 # Requires Python 3.13 exactly: 3.12 lacks warnings.deprecated (PEP 702) and
 # LocalEmu fails at runtime, while on 3.14 moto-ext caps aws-sam-translator at
@@ -107,8 +122,10 @@ components:
           Tenant: fnx
           ManagedBy: Terraform
 
-    # The function apigateway proxies to. Package is built by the
-    # build-lambda-package step in workflows/sandbox.yaml.
+    # Re-run of the lambda component against a second emulator, not new
+    # coverage: apigateway cannot run in this lane (see the header), so nothing
+    # here proxies to it. Package is built by the build-lambda-package step in
+    # workflows/sandbox.yaml, which must be run before this applies.
     lambda/api:
       metadata:
         component: lambda
