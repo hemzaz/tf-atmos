@@ -1,0 +1,48 @@
+{{- /* Keep this file valid HCL on its own: the repo gate runs terraform
+       validate against every directory under components/terraform. */ -}}
+# {{ .Config.component_name }} - {{ .Config.description }}
+#
+# Resource naming follows the repository convention:
+#
+#   "${var.name_prefix}-<resource>"   # name_prefix = tenant-account-environment
+#
+# Scanner suppressions are always inline and always carry an honest reason:
+#
+#   #checkov:skip=CKV_AWS_123:<honest reason>   # inside the resource block
+#   #trivy:ignore:AWS-0123 <honest reason>      # immediately above the block
+#
+# NEVER add an entry to .checkov.baseline or .trivyignore.yaml to make a scan
+# pass. Those baselines exist to burn findings down, and regenerating them to
+# turn a PR green hides the finding instead of fixing it. Only write
+# "False positive" when the rule genuinely does not apply to this resource -
+# if the risk is real but accepted, say so and say why.
+
+locals {
+{{- if .Config.use_enabled_gating }}
+  enabled     = var.enabled
+  name_prefix = var.name_prefix
+{{- else }}
+  name_prefix = var.name_prefix
+{{- end }}
+}
+
+# Add this component's resources below.
+#
+{{- if .Config.use_enabled_gating }}
+# Gate every resource on local.enabled so a stack can disable the component
+# without removing it from the catalog:
+#
+#   resource "aws_sns_topic" "this" {
+#     count = local.enabled ? 1 : 0
+#     name  = "${local.name_prefix}-{{ .Config.component_name }}"
+#   }
+{{- else }}
+# Name every resource from local.name_prefix:
+#
+#   resource "aws_sns_topic" "this" {
+#     name = "${local.name_prefix}-{{ .Config.component_name }}"
+#   }
+{{- end }}
+#
+# Resources are tagged through the provider's default_tags (see provider.tf) -
+# do not repeat var.tags on each resource.

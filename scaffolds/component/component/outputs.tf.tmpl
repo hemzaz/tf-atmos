@@ -1,0 +1,14 @@
+{{- /* tflint's terraform_unused_declarations is enabled repo-wide, so every
+       local declared in main.tf has to be read somewhere. These two outputs
+       keep a freshly scaffolded component lint-clean before it grows real
+       resources - replace them as soon as it has outputs worth exporting. */ -}}
+output "name_prefix" {
+  description = "Resource name prefix this component builds its resource names from"
+  value       = local.name_prefix
+}
+{{ if .Config.use_enabled_gating }}
+output "enabled" {
+  description = "Whether this component is creating resources"
+  value       = local.enabled
+}
+{{ end -}}

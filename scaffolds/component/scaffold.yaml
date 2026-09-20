@@ -1,0 +1,119 @@
+---
+# Generates a Terraform root component that already satisfies this repository's
+# house rules, so the scanners pass on the first run.
+#
+#   atmos scaffold generate component . --force
+#
+# The target is the REPOSITORY ROOT, not the component directory: `target:`
+# paths below place each file, and that is what lets one run emit both the
+# component and its catalog entry. `--force` is required only because the repo
+# root is non-empty; generation writes nothing but the files listed here.
+apiVersion: atmos/v1
+kind: AtmosScaffoldConfig
+metadata:
+  name: component
+  description: Terraform root component following this repo's house rules
+  version: 1.0.0
+spec:
+  fields:
+    - name: component_name
+      type: input
+      label: Component name
+      description: Directory name under components/terraform (lowercase, hyphens)
+      required: true
+      placeholder: my-component
+      validation:
+        pattern: "^[a-z][a-z0-9-]{1,30}$"
+        message: Must be 2-31 chars, lowercase letters/digits/hyphens, starting with a letter.
+
+    - name: description
+      type: input
+      label: One-line description
+      description: Used in the README heading and the catalog entry
+      required: true
+      placeholder: Manages X for the platform
+
+    - name: use_enabled_gating
+      type: confirm
+      label: Add an `enabled` variable and count-gate resources?
+      description: Lets a stack disable the component without removing it
+      default: true
+
+    - name: create_catalog_entry
+      type: confirm
+      label: Also generate stacks/catalog/<name>/{defaults,disabled}.yaml?
+      default: true
+
+    # Only reaches the catalog entry's metadata.custom.category, so it is worth
+    # asking about only when a catalog entry is actually being generated.
+    - name: category
+      type: select
+      label: Catalog category
+      when: "answers.create_catalog_entry == true"
+      default: networking
+      options:
+        - networking
+        - security
+        - compute
+        - storage
+        - data
+        - observability
+        - integration
+
+  files:
+    - path: component/main.tf.tmpl
+      target: "components/terraform/{{ .Config.component_name }}/main.tf"
+    - path: component/variables.tf.tmpl
+      target: "components/terraform/{{ .Config.component_name }}/variables.tf"
+    - path: component/outputs.tf.tmpl
+      target: "components/terraform/{{ .Config.component_name }}/outputs.tf"
+    - path: component/provider.tf.tmpl
+      target: "components/terraform/{{ .Config.component_name }}/provider.tf"
+    - path: component/versions.tf.tmpl
+      target: "components/terraform/{{ .Config.component_name }}/versions.tf"
+    - path: component/README.md.tmpl
+      target: "components/terraform/{{ .Config.component_name }}/README.md"
+
+    - path: catalog/defaults.yaml.tmpl
+      target: "stacks/catalog/{{ .Config.component_name }}/defaults.yaml"
+      when: "answers.create_catalog_entry == true"
+    - path: catalog/disabled.yaml.tmpl
+      target: "stacks/catalog/{{ .Config.component_name }}/disabled.yaml"
+      when: "answers.create_catalog_entry == true"
+
+  hooks:
+    # One `kind: steps` hook, not two `kind: step` hooks: hooks are a YAML map,
+    # so their relative order is not guaranteed, and fmt has to run before
+    # validation. Steps inside a single hook are ordered.
+    #
+    # Hook commands run in the INVOCATION directory, not the generated output
+    # directory, and no target-dir variable is exposed to them - so each step
+    # resolves the repo root itself instead of assuming the cwd.
+    verify:
+      events:
+        - after.scaffold.generate
+      kind: steps
+      with:
+        - name: terraform-fmt
+          type: shell
+          command: |
+            set -eu
+            root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+            dir="$root/components/terraform/{{ .Answers.component_name }}"
+            if [ ! -d "$dir" ]; then
+              echo "scaffold: $dir not found - generate with the repo root as the target; skipping fmt"
+              exit 0
+            fi
+            terraform fmt "$dir"
+
+        - name: validate-stacks
+          type: shell
+          command: |
+            set -eu
+            root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+            if [ ! -f "$root/atmos.yaml" ]; then
+              echo "scaffold: no atmos.yaml at $root; skipping stack validation"
+              exit 0
+            fi
+            cd "$root"
+            atmos validate stacks

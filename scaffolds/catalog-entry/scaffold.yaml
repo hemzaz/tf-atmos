@@ -1,0 +1,84 @@
+---
+# Generates just the catalog entry for a component that already exists under
+# components/terraform/.
+#
+#   atmos scaffold generate catalog-entry . --force
+#
+# The target is the REPOSITORY ROOT, not the catalog directory - `target:` paths
+# below place each file. `--force` is required only because the repo root is
+# non-empty; generation writes nothing but the two files listed here.
+#
+# The two catalog/*.tmpl files are kept byte-identical to the copies under
+# scaffolds/component/catalog/, which emit the same entry as part of a full
+# component run. Change both together.
+apiVersion: atmos/v1
+kind: AtmosScaffoldConfig
+metadata:
+  name: catalog-entry
+  description: Catalog defaults.yaml + disabled.yaml for an existing component
+  version: 1.0.0
+spec:
+  fields:
+    - name: component_name
+      type: input
+      label: Component name
+      description: Must match an existing directory under components/terraform
+      required: true
+      placeholder: my-component
+      validation:
+        pattern: "^[a-z][a-z0-9-]{1,30}$"
+        message: Must be 2-31 chars, lowercase letters/digits/hyphens, starting with a letter.
+
+    - name: description
+      type: input
+      label: One-line description
+      description: Used as the catalog entry's metadata.custom.description
+      required: true
+      placeholder: Manages X for the platform
+
+    - name: category
+      type: select
+      label: Catalog category
+      default: networking
+      options:
+        - networking
+        - security
+        - compute
+        - storage
+        - data
+        - observability
+        - integration
+
+    # The component's own variables.tf only declares `enabled` when it was
+    # scaffolded with gating, and setting a var the component does not declare
+    # fails at plan time - so only seed it when the component really has it.
+    - name: use_enabled_gating
+      type: confirm
+      label: Does the component declare an `enabled` variable?
+      default: true
+
+  files:
+    - path: catalog/defaults.yaml.tmpl
+      target: "stacks/catalog/{{ .Config.component_name }}/defaults.yaml"
+    - path: catalog/disabled.yaml.tmpl
+      target: "stacks/catalog/{{ .Config.component_name }}/disabled.yaml"
+
+  hooks:
+    # Hook commands run in the INVOCATION directory, not the generated output
+    # directory, and no target-dir variable is exposed to them - so the step
+    # resolves the repo root itself instead of assuming the cwd.
+    verify:
+      events:
+        - after.scaffold.generate
+      kind: step
+      type: shell
+      with:
+        command: |
+          set -eu
+          root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+          if [ ! -f "$root/atmos.yaml" ]; then
+            echo "scaffold: no atmos.yaml at $root; skipping stack validation"
+            exit 0
+          fi
+          cd "$root"
+          atmos validate stacks
