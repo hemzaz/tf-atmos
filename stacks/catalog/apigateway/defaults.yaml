@@ -44,7 +44,8 @@ components:
 
         # Monitoring
         create_dashboard: true
-        tracing_enabled: true
+        # X-Ray bills per recorded trace; prod opts in explicitly (orgs/fnx/prod/.../services.yaml)
+        tracing_enabled: false
 
         tags:
           Component: "ApiGateway"
@@ -91,7 +92,8 @@ components:
 
         # Monitoring
         create_dashboard: true
-        tracing_enabled: true
+        # X-Ray bills per recorded trace; prod opts in explicitly (orgs/fnx/prod/.../services.yaml)
+        tracing_enabled: false
 
         tags:
           Component: "ApiGateway"
