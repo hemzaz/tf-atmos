@@ -1,0 +1,34 @@
+output "replication_group_id" {
+  value       = local.enabled ? aws_elasticache_replication_group.main[0].id : null
+  description = "ID of the replication group"
+}
+
+output "replication_group_arn" {
+  value       = local.enabled ? aws_elasticache_replication_group.main[0].arn : null
+  description = "ARN of the replication group"
+}
+
+output "primary_endpoint_address" {
+  value       = local.enabled ? aws_elasticache_replication_group.main[0].primary_endpoint_address : null
+  description = "Endpoint clients write to"
+}
+
+output "reader_endpoint_address" {
+  value       = local.enabled ? aws_elasticache_replication_group.main[0].reader_endpoint_address : null
+  description = "Endpoint that load-balances reads across the replicas"
+}
+
+output "port" {
+  value       = local.enabled ? aws_elasticache_replication_group.main[0].port : null
+  description = "Port the cache listens on"
+}
+
+output "security_group_id" {
+  value       = local.enabled ? aws_security_group.main[0].id : null
+  description = "ID of the cache security group; grant application groups access by adding it to allowed_security_group_ids"
+}
+
+output "subnet_group_name" {
+  value       = local.enabled ? aws_elasticache_subnet_group.main[0].name : null
+  description = "Name of the cache subnet group"
+}
