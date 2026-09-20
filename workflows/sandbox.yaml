@@ -86,9 +86,21 @@ workflows:
       - type: shell
         name: apply-lambda
         command: atmos terraform apply lambda/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: apply-cognito
+        command: atmos terraform apply cognito/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: apply-securitygroup
+        command: atmos terraform apply securitygroup/app -s fnx-local-sandbox --identity local-aws -auto-approve
 
       # Destroy proves teardown works, and leaves the emulator clean for the
       # next run. Reverse order.
+      - type: shell
+        name: destroy-securitygroup
+        command: atmos terraform destroy securitygroup/app -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: destroy-cognito
+        command: atmos terraform destroy cognito/main -s fnx-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-lambda
         command: atmos terraform destroy lambda/main -s fnx-local-sandbox --identity local-aws -auto-approve
