@@ -985,7 +985,7 @@ components:
         description: "Submits batch jobs from SQS messages"
 
         # Runtime configuration
-        runtime: "python3.11"
+        runtime: "python3.13"
         handler: "handler.submit_job"
         timeout: 60
         memory_size: 256

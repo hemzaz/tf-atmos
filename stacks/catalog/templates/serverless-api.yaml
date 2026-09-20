@@ -401,7 +401,7 @@ components:
         description: "Main API handler function"
 
         # Runtime configuration
-        runtime: "python3.11"
+        runtime: "python3.13"
         handler: "app.handler"
         timeout: 30
         memory_size: 512
@@ -490,7 +490,7 @@ components:
         description: "Custom API authorizer (optional)"
 
         # Runtime configuration
-        runtime: "python3.11"
+        runtime: "python3.13"
         handler: "authorizer.handler"
         timeout: 10
         memory_size: 256
@@ -529,7 +529,7 @@ components:
         description: "Processes async tasks from SQS"
 
         # Runtime configuration
-        runtime: "python3.11"
+        runtime: "python3.13"
         handler: "processor.handler"
         timeout: 300
         memory_size: 1024
@@ -1202,7 +1202,7 @@ components:
 # Development:
 #   vars:
 #     api_type: "HTTP"  # Cheaper than REST
-#     lambda_runtime: "python3.11"
+#     lambda_runtime: "python3.13"
 #     lambda_architecture: "arm64"
 #     api_lambda_memory: 256
 #     api_lambda_concurrency: 10

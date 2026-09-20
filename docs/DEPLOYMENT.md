@@ -131,6 +131,20 @@ After the GitHub prerequisites above are in place:
 
 Destroy is not exposed in CI; use `atmos workflow destroy -f destroy-environment` locally.
 
+## Applies clean, does not serve traffic
+
+These are deliberate, not defects. Each one will `apply` green and then not do the thing its
+name suggests, because the missing piece is a real-world consumer this repo does not manage.
+Nothing here blocks a deploy; all of it blocks a working system.
+
+| What | Where | Why it is empty | To make it work |
+|------|-------|-----------------|-----------------|
+| Prod Redis reachable by nothing | `elasticache/main` in `stacks/orgs/fnx/prod/eu-west-2/production/components/services.yaml` — `allowed_security_group_ids: []`, `allowed_cidr_blocks: []` | Fail-closed on purpose. The `ecs` component is cluster-only (no service, no security group output) and `securitygroup` is instantiated nowhere, so there is no consumer group to name. | Add the consuming service's security group id once one exists. The component exports `security_group_id` for the reverse direction. `0.0.0.0/0` is rejected by validation. |
+| Cognito pool with no way in | `cognito/main` in every stack | The pool has clients but no users and no federated identity provider. `/api` sits behind `COGNITO_USER_POOLS`, so every request is rejected. | Create users, or configure a federated IdP — both need real credentials that do not belong in this repo. |
+| `/` returns a canned 200 | `apigateway/main`, `apigateway/data` — the `/` method stays `MOCK` | Intentional. `/` is a liveness endpoint and a canned 200 is the correct answer for one. | Nothing. `/api` and `/data` are the real Lambda-backed routes. |
+| Lambda has no deployment package | every `lambda/*` instance | No instance sets `filename`, `s3_bucket`+`s3_key`, or `image_uri`, and the component does not cross-validate that one is set. Whether this fails at apply is **unverified** — `terraform validate` and `plan` both pass. | Set a package source before the first real apply, and check the result. |
+| CI never plans anything | `.github/workflows/terraform-ci.yml` gates the plan job on `vars.AWS_PLAN_ROLE_ARN != ''` | The variable is unset, so every run reports Plan SKIPPED. | Set `AWS_PLAN_ROLE_ARN` to a read-only role (see the prerequisites table). Highest-value change here: it needs no apply, and it would have caught the Lambda VPC egress defect fixed in v1.1.0. |
+
 ## Verify and rollback
 
 ```bash

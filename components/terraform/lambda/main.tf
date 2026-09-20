@@ -43,6 +43,23 @@ resource "aws_cloudwatch_log_group" "lambda" {
   tags = { Name = "/aws/lambda/${var.tags["Environment"]}-${var.function_name}" }
 }
 
+# The S3 managed prefix list is AWS-managed and present in every region without
+# requiring a VPC endpoint to exist. Its entries are S3's public CIDRs, which is
+# exactly what a private-subnet Lambda reaches through the NAT gateway. Resolved
+# here so a stack does not have to hardcode a region-specific pl-* id in every
+# lambda instance; set vpc_endpoint_prefix_list_ids to override (for example
+# when real interface endpoints exist and egress should be confined to them).
+data "aws_ec2_managed_prefix_list" "s3" {
+  count = length(var.subnet_ids) > 0 && length(var.vpc_endpoint_prefix_list_ids) == 0 ? 1 : 0
+  name  = "com.amazonaws.${var.region}.s3"
+}
+
+locals {
+  # Empty means "resolve the region's S3 prefix list", never "allow nothing":
+  # an egress rule with an empty prefix_list_ids permits no traffic at all.
+  vpc_endpoint_prefix_list_ids = length(var.vpc_endpoint_prefix_list_ids) > 0 ? var.vpc_endpoint_prefix_list_ids : data.aws_ec2_managed_prefix_list.s3[*].id
+}
+
 resource "aws_security_group" "lambda" {
   count       = length(var.subnet_ids) > 0 ? 1 : 0
   name        = "${var.tags["Environment"]}-${var.function_name}-sg"
@@ -56,7 +73,7 @@ resource "aws_security_group" "lambda" {
     from_port       = 443
     to_port         = 443
     protocol        = "tcp"
-    prefix_list_ids = var.vpc_endpoint_prefix_list_ids
+    prefix_list_ids = local.vpc_endpoint_prefix_list_ids
   }
 
   # Only allow HTTP if explicitly enabled (not recommended for production)
@@ -67,7 +84,7 @@ resource "aws_security_group" "lambda" {
       from_port       = 80
       to_port         = 80
       protocol        = "tcp"
-      prefix_list_ids = var.vpc_endpoint_prefix_list_ids
+      prefix_list_ids = local.vpc_endpoint_prefix_list_ids
     }
   }
 

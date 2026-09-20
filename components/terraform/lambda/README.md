@@ -19,7 +19,7 @@ fnx-staging-staging-01, fnx-prod-production) — zero instances. Add a
 | `function_name`, `handler` (required, no default) | — |
 | `runtime` | default `nodejs22.x` |
 | `filename` / `s3_bucket`+`s3_key` | package source; no cross-validation that one is set |
-| `subnet_ids` set → requires `vpc_endpoint_prefix_list_ids` | validated |
+| `vpc_endpoint_prefix_list_ids` | optional override; empty resolves the region's AWS-managed S3 prefix list |
 | `package_type` | `Zip` or `Image` only (validated) |
 | `architectures` | `x86_64`/`arm64` only (validated) |
 | `tags` | required; must include a non-empty `Environment` (validated), used in every resource name |
@@ -28,7 +28,7 @@ fnx-staging-staging-01, fnx-prod-production) — zero instances. Add a
 ## Dependencies / gotchas
 
 - No `dependencies.components` entries exist anywhere (component is unused).
-- Deploying into a VPC (`subnet_ids` non-empty) fails validation unless `vpc_endpoint_prefix_list_ids` is also set — needed for S3 access from inside the VPC.
+- Deploying into a VPC (`subnet_ids` non-empty) resolves the region's AWS-managed S3 prefix list (`com.amazonaws.<region>.s3`) for egress, so no stack has to hardcode a region-specific `pl-*`. Until 2026-09 this was a hard validation instead, and it made every VPC lambda in every stack fail at plan. Set `vpc_endpoint_prefix_list_ids` explicitly to confine egress to real interface endpoints. Egress is never `0.0.0.0/0` either way.
 - `kms_key_arn` must match `^arn:aws:kms:` or be null (validated).
 - No required `Environment` tag check here, unlike `backup`/`cost-optimization`.
 

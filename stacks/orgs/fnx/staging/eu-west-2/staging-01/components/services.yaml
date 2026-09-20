@@ -232,7 +232,7 @@ components:
       vars:
         function_name: "staging-data-processor"
         handler: "main.handler"
-        runtime: "python3.11"
+        runtime: "python3.13"
         memory_size: 512
         timeout: 300
         vpc_id: !terraform.state vpc/services .vpc_id
@@ -247,7 +247,7 @@ components:
       vars:
         function_name: "staging-data-transformer"
         handler: "transform.handler"
-        runtime: "python3.11"
+        runtime: "python3.13"
         memory_size: 1024
         timeout: 600
         vpc_id: !terraform.state vpc/services .vpc_id

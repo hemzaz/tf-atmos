@@ -400,12 +400,19 @@ variable "schedule_input" {
 # Network Security Variables
 variable "vpc_endpoint_prefix_list_ids" {
   type        = list(string)
-  description = "List of VPC endpoint prefix list IDs for AWS services (replaces 0.0.0.0/0)"
+  description = "VPC endpoint prefix list IDs for egress from a VPC-attached Lambda (replaces 0.0.0.0/0). Empty resolves the region's AWS-managed S3 prefix list; see data.aws_ec2_managed_prefix_list.s3 in main.tf."
   default     = []
 
+  # This variable deliberately has NO validation requiring a non-empty value
+  # when subnet_ids is set. It used to, and the result was that every VPC
+  # lambda in every stack failed at plan with "Invalid value for variable",
+  # because a prefix list id is region-specific and no stack ever set one.
+  # Empty is now a resolved default, not a hole: egress is still never
+  # 0.0.0.0/0, it is confined to local.vpc_endpoint_prefix_list_ids.
+
   validation {
-    condition     = length(var.vpc_endpoint_prefix_list_ids) > 0 || length(var.subnet_ids) == 0
-    error_message = "VPC endpoint prefix list IDs are required when deploying Lambda in a VPC. Use data source: data.aws_prefix_list.s3 or create VPC endpoints."
+    condition     = alltrue([for pl in var.vpc_endpoint_prefix_list_ids : can(regex("^pl-[0-9a-f]+$", pl))])
+    error_message = "Each entry must be a prefix list id of the form pl-0123456789abcdef0."
   }
 }
 
