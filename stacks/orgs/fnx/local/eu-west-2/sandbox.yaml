@@ -18,6 +18,8 @@
 #   - CreateNetworkAcl is unimplemented          -> manage_network_acls: false
 #   - no VPC default SG to adopt                 -> manage_default_security_group: false
 #   - TagInstanceProfile is unimplemented        -> create_vpc_iam_role: false
+#   - CreateDBSubnetGroup is unimplemented, so the rds component cannot be
+#     exercised here at all; it is covered by validate-all only.
 #   - DescribeSecurityGroups returns empty UserIdGroupPairs, dropping the
 #     self-reference on `self = true` rules, so a re-plan of vpc/main always
 #     shows aws_security_group.default as changed. apply and destroy both
@@ -83,3 +85,60 @@ components:
         # Floci implements IAM roles and instance profiles but not
         # TagInstanceProfile, so the profile is created and then fails on tagging.
         create_vpc_iam_role: false
+
+    kms/main:
+      metadata:
+        component: kms
+      vars:
+        name_prefix: sandbox
+        description: "Sandbox CMK"
+        enable_key_rotation: true
+        deletion_window_in_days: 7
+        alias_name: "alias/sandbox"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    network/main:
+      metadata:
+        component: dns
+      vars:
+        root_domain: sandbox.internal
+        create_root_zone: false
+        zones:
+          main:
+            name: "sandbox.internal"
+            comment: "Sandbox zone"
+            force_destroy: true
+            enable_query_logging: false
+        records: {}
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    secretsmanager/app:
+      metadata:
+        component: secretsmanager
+      vars:
+        environment: sandbox
+        context_name: "sandbox/app"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # ecs is exercised here before it is wired into any real environment by
+    # the infrastructure/* remap. rds cannot be: see the Floci gaps above.
+    ecs/main:
+      metadata:
+        component: ecs
+      vars:
+        fargate_only: true
+        enable_container_insights: true
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+

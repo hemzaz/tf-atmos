@@ -1,0 +1,87 @@
+# Provision components for real against the local Floci AWS emulator.
+#
+# This is the only gate in the repo that actually executes Terraform. Everything
+# else - fmt, validate, tflint, checkov, trivy - is static analysis, and static
+# analysis has already been shown to miss real defects here (a NAT gateway that
+# was created despite enable_nat_gateway = false, and an IAM coalesce() that
+# would have failed every plan).
+#
+# Requires a container runtime (Docker or Podman). No AWS account, no
+# credentials, no cost.
+#
+# Usage:
+#   atmos workflow sandbox -f sandbox          # up, apply everything, destroy, down
+#   atmos workflow sandbox-up -f sandbox       # just start the emulator
+#   atmos workflow sandbox-down -f sandbox     # stop and remove it
+#
+# Components not listed here cannot be exercised against Floci; the gaps are
+# documented in stacks/orgs/fnx/local/eu-west-2/sandbox.yaml. rds is the notable
+# one - CreateDBSubnetGroup is unimplemented - so it is covered by validate-all
+# only.
+workflows:
+  sandbox-up:
+    description: Start (or reuse) the local AWS emulator
+    steps:
+      - type: shell
+        name: up
+        command: atmos emulator up aws -s fnx-local-sandbox
+
+  sandbox-down:
+    description: Stop and remove the local AWS emulator
+    steps:
+      - type: shell
+        name: down
+        command: atmos emulator down aws -s fnx-local-sandbox
+
+  sandbox:
+    description: Apply every sandbox component against the emulator, then destroy it
+    dependencies:
+      tools:
+        terraform: "1.16.3"
+    steps:
+      - type: shell
+        name: validate
+        command: atmos validate stacks
+
+      - type: shell
+        name: up
+        command: atmos emulator up aws -s fnx-local-sandbox
+
+      # Applied in dependency order: kms and vpc first, then what reads them.
+      - type: shell
+        name: apply-kms
+        command: atmos terraform apply kms/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: apply-vpc
+        command: atmos terraform apply vpc/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: apply-dns
+        command: atmos terraform apply network/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: apply-secretsmanager
+        command: atmos terraform apply secretsmanager/app -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: apply-ecs
+        command: atmos terraform apply ecs/main -s fnx-local-sandbox --identity local-aws -auto-approve
+
+      # Destroy proves teardown works, and leaves the emulator clean for the
+      # next run. Reverse order.
+      - type: shell
+        name: destroy-ecs
+        command: atmos terraform destroy ecs/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: destroy-secretsmanager
+        command: atmos terraform destroy secretsmanager/app -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: destroy-dns
+        command: atmos terraform destroy network/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: destroy-vpc
+        command: atmos terraform destroy vpc/main -s fnx-local-sandbox --identity local-aws -auto-approve
+      - type: shell
+        name: destroy-kms
+        command: atmos terraform destroy kms/main -s fnx-local-sandbox --identity local-aws -auto-approve
+
+      - type: shell
+        name: down
+        command: atmos emulator down aws -s fnx-local-sandbox
