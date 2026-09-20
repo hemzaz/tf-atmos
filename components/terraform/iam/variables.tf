@@ -143,8 +143,21 @@ variable "external_id" {
   description = "Require this sts:ExternalId when assuming the role"
   default     = null
 
+  # The length bounds are checked with length(), NOT inside the regex. Go's
+  # RE2 engine caps a repetition count at 1000, so "{2,1224}" made the whole
+  # pattern INVALID; regex() then errored, can() swallowed the error and
+  # returned false, and every non-null external_id was rejected - reporting
+  # "must be 2-1224 characters of alphanumerics or +=,.@:/-" about a value that
+  # was exactly that. catalog/iam/defaults.yaml offers this as one of the three
+  # ways to satisfy the cross-account trust precondition, so it was an escape
+  # hatch that could never be opened. Boundary confirmed against terraform:
+  # {2,1000} matches, {2,1001} does not.
   validation {
-    condition     = var.external_id == null || can(regex("^[\\w+=,.@:/-]{2,1224}$", var.external_id))
+    condition = var.external_id == null || (
+      length(var.external_id) >= 2 &&
+      length(var.external_id) <= 1224 &&
+      can(regex("^[\\w+=,.@:/-]+$", var.external_id))
+    )
     error_message = "external_id must be 2-1224 characters of alphanumerics or +=,.@:/-."
   }
 }
