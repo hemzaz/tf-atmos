@@ -73,11 +73,13 @@ Stack names come from `name_template` in `atmos.yaml`:
 | `fnx-staging-staging-01` | `stacks/orgs/fnx/staging/eu-west-2/staging-01.yaml` | eu-west-2 |
 | `fnx-prod-production` | `stacks/orgs/fnx/prod/eu-west-2/production.yaml` | eu-west-2 |
 | `fnx-local-sandbox` | `stacks/orgs/fnx/local/eu-west-2/sandbox.yaml` | eu-west-2 (emulated) |
+| `fnx-local-localemu` | `stacks/orgs/fnx/local/eu-west-2/localemu.yaml` | eu-west-2 (emulated) |
 
 The three real stacks each import five domain files from their `components/` directory
 (`globals`, `networking`, `security`, `compute`, `services`). See
-[stacks/README.md](./stacks/README.md). `fnx-local-sandbox` is the local emulator stack — see
-[Sandbox](#sandbox).
+[stacks/README.md](./stacks/README.md). The two `fnx-local-*` stacks are local emulator lanes —
+`fnx-local-sandbox` runs against Floci, `fnx-local-localemu` against LocalEmu for the components
+Floci cannot provision. See [Sandbox](#sandbox).
 
 ## Sandbox
 
@@ -107,10 +109,13 @@ Two things to know:
 
 - The `local-aws` identity is deliberately **not** `default: true`, so no real environment can be
   pointed at the emulator by accident. Pass `--identity local-aws` explicitly.
-- The emulator does not implement everything. `CreateDBSubnetGroup` is missing, so `rds` cannot be
-  sandbox-tested at all; `CreateNetworkAcl` and `TagInstanceProfile` are missing, which is why the
-  sandbox stack sets `manage_network_acls: false` and `create_vpc_iam_role: false`. Components
-  with no sandbox instance are covered by validation and scanners only — their READMEs say so.
+- The emulator does not implement everything. `CreateNetworkAcl` and `TagInstanceProfile` are
+  missing, which is why the sandbox stack sets `manage_network_acls: false` and
+  `create_vpc_iam_role: false`. `CreateDBSubnetGroup` is missing too, so `rds` cannot run against
+  Floci — it is exercised against LocalEmu instead, in the `fnx-local-localemu` lane, which is
+  what caught the overlapping backup and maintenance windows that would have failed
+  `CreateDBInstance` in staging and prod. Components with an instance in neither lane are covered
+  by validation and scanners only — their READMEs say so.
 
 ## Components
 
