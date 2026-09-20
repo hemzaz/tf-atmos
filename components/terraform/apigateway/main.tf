@@ -28,6 +28,17 @@ locals {
 
   # CORS configuration
   enable_cors = var.cors_configuration != null && lookup(var.cors_configuration, "enabled", false)
+
+  # Resource path -> API Gateway resource id. Stacks declare methods and integrations
+  # by path because they cannot know these ids before apply. "/" is the API root.
+  api_resource_ids_by_path = merge(
+    { for api in aws_api_gateway_rest_api.rest_api : "/" => api.root_resource_id },
+    { for idx, res in aws_api_gateway_resource.resource : "/${var.api_resources[idx].path_part}" => res.id }
+  )
+
+  # Methods and integrations share one key so each method is paired with its integration.
+  api_methods      = { for m in var.api_methods : "${m.http_method} ${m.resource_path}" => m }
+  api_integrations = { for i in var.api_integrations : "${i.http_method} ${i.resource_path}" => i }
 }
 
 # REST API
@@ -75,6 +86,12 @@ resource "aws_api_gateway_deployment" "rest_deployment" {
   count = local.create_rest_api ? 1 : 0
 
   rest_api_id = aws_api_gateway_rest_api.rest_api[0].id
+
+  # Without a trigger the deployment is created once and never refreshed, so methods
+  # added or changed later exist on the API but are never served on the stage.
+  triggers = {
+    redeployment = sha1(jsonencode([var.api_resources, var.api_methods, var.api_integrations]))
+  }
 
   lifecycle {
     create_before_destroy = true
@@ -298,41 +315,55 @@ resource "aws_api_gateway_resource" "resource" {
   path_part   = var.api_resources[count.index].path_part
 }
 
-# API Gateway methods
+# API Gateway methods, keyed by "<HTTP_METHOD> <resource_path>"
 resource "aws_api_gateway_method" "method" {
-  count = local.create_rest_api && length(var.api_methods) > 0 ? length(var.api_methods) : 0
+  for_each = local.create_rest_api ? local.api_methods : {}
 
   rest_api_id   = aws_api_gateway_rest_api.rest_api[0].id
-  resource_id   = var.api_methods[count.index].resource_id
-  http_method   = var.api_methods[count.index].http_method
-  authorization = var.api_methods[count.index].authorization
+  resource_id   = local.api_resource_ids_by_path[each.value.resource_path]
+  http_method   = each.value.http_method
+  authorization = each.value.authorization
 
-  authorizer_id = var.api_methods[count.index].authorization == "COGNITO_USER_POOLS" ? aws_api_gateway_authorizer.rest_cognito[0].id : (
-    var.api_methods[count.index].authorization == "CUSTOM" ? aws_api_gateway_authorizer.rest_lambda[0].id : null
+  # A method may name its own authorizer; otherwise it uses this component's authorizer.
+  authorizer_id = each.value.authorizer_id != null ? each.value.authorizer_id : (
+    each.value.authorization == "COGNITO_USER_POOLS" ? one(aws_api_gateway_authorizer.rest_cognito[*].id) : (
+      each.value.authorization == "CUSTOM" ? one(aws_api_gateway_authorizer.rest_lambda[*].id) : null
+    )
   )
 
-  api_key_required = var.api_methods[count.index].api_key_required
+  api_key_required = each.value.api_key_required
 
-  request_parameters = var.api_methods[count.index].request_parameters
+  request_parameters = each.value.request_parameters
 }
 
-# API Gateway integrations
+# API Gateway integrations, one per method, sharing the method's key
 resource "aws_api_gateway_integration" "integration" {
-  count = local.create_rest_api && length(var.api_integrations) > 0 ? length(var.api_integrations) : 0
+  for_each = local.create_rest_api ? local.api_integrations : {}
 
   rest_api_id             = aws_api_gateway_rest_api.rest_api[0].id
-  resource_id             = var.api_integrations[count.index].resource_id
-  http_method             = var.api_integrations[count.index].http_method
-  integration_http_method = var.api_integrations[count.index].integration_http_method
-  type                    = var.api_integrations[count.index].type
-  uri                     = var.api_integrations[count.index].uri
+  resource_id             = local.api_resource_ids_by_path[each.value.resource_path]
+  http_method             = each.value.http_method
+  integration_http_method = each.value.integration_http_method
+  type                    = each.value.type
+  uri                     = each.value.uri
 
-  connection_type      = var.api_integrations[count.index].connection_type
-  connection_id        = var.api_integrations[count.index].connection_id
-  timeout_milliseconds = var.api_integrations[count.index].timeout_milliseconds
+  connection_type      = each.value.connection_type
+  connection_id        = each.value.connection_id
+  timeout_milliseconds = each.value.timeout_milliseconds
 
-  request_parameters = var.api_integrations[count.index].request_parameters
-  request_templates  = var.api_integrations[count.index].request_templates
+  request_parameters = each.value.request_parameters
+  request_templates  = each.value.request_templates
+
+  # api_methods validates that every method has an integration; this catches the
+  # other direction, an integration naming a method that was never declared.
+  lifecycle {
+    precondition {
+      condition     = contains(keys(local.api_methods), each.key)
+      error_message = "api_integrations entry \"${each.key}\" has no matching api_methods entry with the same http_method and resource_path."
+    }
+  }
+
+  depends_on = [aws_api_gateway_method.method]
 }
 
 # Route53 Record for custom domain
@@ -426,7 +457,14 @@ resource "aws_wafv2_web_acl" "api_waf" {
     priority = 10
 
     override_action {
-      none {}
+      dynamic "none" {
+        for_each = var.waf_common_rule_set_action == "block" ? [1] : []
+        content {}
+      }
+      dynamic "count" {
+        for_each = var.waf_common_rule_set_action == "count" ? [1] : []
+        content {}
+      }
     }
 
     statement {
@@ -449,7 +487,14 @@ resource "aws_wafv2_web_acl" "api_waf" {
     priority = 20
 
     override_action {
-      none {}
+      dynamic "none" {
+        for_each = var.waf_known_bad_inputs_action == "block" ? [1] : []
+        content {}
+      }
+      dynamic "count" {
+        for_each = var.waf_known_bad_inputs_action == "count" ? [1] : []
+        content {}
+      }
     }
 
     statement {

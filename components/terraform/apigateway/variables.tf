@@ -256,37 +256,114 @@ variable "api_resources" {
     path_part = string
     parent_id = optional(string)
   }))
-  description = "List of resources for the REST API"
+  description = "List of resources for the REST API. Each entry becomes the path \"/<path_part>\" that api_methods and api_integrations address; pass parent_id only to hang a resource off an id owned by another component."
   default     = []
+
+  validation {
+    condition     = length(distinct([for r in var.api_resources : r.path_part])) == length(var.api_resources)
+    error_message = "Each api_resources entry must have a unique path_part, because path_part is what api_methods address."
+  }
 }
 
 variable "api_methods" {
   type = list(object({
-    resource_id        = string
+    resource_path      = string
     http_method        = string
-    authorization      = string
+    authorization      = optional(string, "NONE")
+    authorizer_id      = optional(string)
     api_key_required   = optional(bool, false)
     request_parameters = optional(map(bool), {})
   }))
-  description = "List of methods for the REST API"
+  description = "List of methods for the REST API. Addressed by resource_path (\"/\" for the API root, \"/<path_part>\" for an api_resources entry) because a stack cannot know this API's resource IDs before apply. Every method needs a matching api_integrations entry with the same resource_path and http_method."
   default     = []
+
+  validation {
+    condition     = length(distinct([for m in var.api_methods : "${m.http_method} ${m.resource_path}"])) == length(var.api_methods)
+    error_message = "Each api_methods entry must be a unique http_method + resource_path pair."
+  }
+
+  validation {
+    condition     = alltrue([for m in var.api_methods : contains(["ANY", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], m.http_method)])
+    error_message = "api_methods[*].http_method must be one of ANY, GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS."
+  }
+
+  validation {
+    condition     = alltrue([for m in var.api_methods : contains(["NONE", "AWS_IAM", "CUSTOM", "COGNITO_USER_POOLS"], m.authorization)])
+    error_message = "api_methods[*].authorization must be one of NONE, AWS_IAM, CUSTOM, COGNITO_USER_POOLS."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in var.api_methods : contains(
+        concat(["/"], [for r in var.api_resources : "/${r.path_part}"]),
+        m.resource_path
+      )
+    ])
+    error_message = "Every api_methods[*].resource_path must be \"/\" or \"/<path_part>\" of an api_resources entry. Known paths: ${join(", ", concat(["/"], [for r in var.api_resources : "/${r.path_part}"]))}."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in var.api_methods : contains(
+        [for i in var.api_integrations : "${i.http_method} ${i.resource_path}"],
+        "${m.http_method} ${m.resource_path}"
+      )
+    ])
+    error_message = "Every api_methods entry needs an api_integrations entry with the same http_method and resource_path, otherwise the method is deployed with nothing behind it."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in var.api_methods :
+      m.authorizer_id != null || var.authorizer_type == "COGNITO_USER_POOLS"
+      if m.authorization == "COGNITO_USER_POOLS"
+    ])
+    error_message = "A method with authorization COGNITO_USER_POOLS needs either its own authorizer_id or authorizer_type set to COGNITO_USER_POOLS on this component."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in var.api_methods :
+      m.authorizer_id != null || var.authorizer_type == "TOKEN"
+      if m.authorization == "CUSTOM"
+    ])
+    error_message = "A method with authorization CUSTOM needs either its own authorizer_id or authorizer_type set to TOKEN on this component."
+  }
 }
 
 variable "api_integrations" {
   type = list(object({
-    resource_id             = string
+    resource_path           = string
     http_method             = string
     integration_http_method = string
     type                    = string
-    uri                     = string
+    uri                     = optional(string)
     connection_type         = optional(string)
     connection_id           = optional(string)
     timeout_milliseconds    = optional(number, 29000)
     request_parameters      = optional(map(string), {})
     request_templates       = optional(map(string), {})
   }))
-  description = "List of integrations for the REST API"
+  description = "List of integrations for the REST API, one per api_methods entry, addressed by the same resource_path + http_method pair."
   default     = []
+
+  validation {
+    condition     = length(distinct([for i in var.api_integrations : "${i.http_method} ${i.resource_path}"])) == length(var.api_integrations)
+    error_message = "Each api_integrations entry must be a unique http_method + resource_path pair."
+  }
+
+  validation {
+    condition     = alltrue([for i in var.api_integrations : contains(["AWS", "AWS_PROXY", "HTTP", "HTTP_PROXY", "MOCK"], i.type)])
+    error_message = "api_integrations[*].type must be one of AWS, AWS_PROXY, HTTP, HTTP_PROXY, MOCK."
+  }
+
+  validation {
+    condition = alltrue([
+      for i in var.api_integrations : i.uri != null && i.uri != ""
+      if contains(["AWS", "AWS_PROXY", "HTTP", "HTTP_PROXY"], i.type)
+    ])
+    error_message = "An api_integrations entry of type AWS, AWS_PROXY, HTTP or HTTP_PROXY must set uri to the backend it forwards to. Only MOCK integrations may leave uri unset."
+  }
 }
 
 variable "create_dashboard" {
@@ -297,8 +374,13 @@ variable "create_dashboard" {
 
 variable "tags" {
   type        = map(string)
-  description = "A map of tags to add to all resources"
+  description = "A map of tags to add to all resources. Environment is required because it is the name prefix for every resource this component creates."
   default     = {}
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
 }
 
 # WAF Configuration Variables
@@ -315,6 +397,26 @@ variable "waf_rate_limit" {
   validation {
     condition     = var.waf_rate_limit >= 100 && var.waf_rate_limit <= 2000000000
     error_message = "WAF rate limit must be between 100 and 2,000,000,000."
+  }
+}
+
+variable "waf_common_rule_set_action" {
+  type        = string
+  description = "Action for the AWSManagedRulesCommonRuleSet group. 'block' lets the group apply its own rule actions; 'count' only records matches. Separate from waf_known_bad_inputs_action so soaking one group never silently relaxes the other."
+  default     = "block"
+  validation {
+    condition     = contains(["block", "count"], var.waf_common_rule_set_action)
+    error_message = "WAF common rule set action must be either 'block' or 'count'."
+  }
+}
+
+variable "waf_known_bad_inputs_action" {
+  type        = string
+  description = "Action for the AWSManagedRulesKnownBadInputsRuleSet group. 'block' lets the group apply its own rule actions; 'count' only records matches, so this group can be soaked against real traffic before it is allowed to reject requests."
+  default     = "block"
+  validation {
+    condition     = contains(["block", "count"], var.waf_known_bad_inputs_action)
+    error_message = "WAF known bad inputs action must be either 'block' or 'count'."
   }
 }
 
