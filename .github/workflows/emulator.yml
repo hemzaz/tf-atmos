@@ -56,12 +56,18 @@ jobs:
     name: Floci sandbox (8 components)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+    # Deliberately NOT run inside ghcr.io/cloudposse/atmos. `atmos emulator up
+    # aws` starts a Floci CONTAINER, and there is no docker-in-docker inside
+    # that image, so it fails with "container runtime not available: neither
+    # docker nor podman is available". The ubuntu runner has Docker; Atmos is
+    # installed onto it instead.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: cloudposse/github-action-setup-atmos@9e8d1e2db56fe851a85871d5993d63e182b66536 # v3.6.0
+        with:
+          atmos-version: ${{ vars.ATMOS_VERSION || '1.229.0' }}
       - name: Apply and destroy against Floci
         run: atmos workflow sandbox -f sandbox
 
@@ -80,16 +86,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install Atmos
-        env:
-          ATMOS_VERSION: ${{ vars.ATMOS_VERSION || '1.229.0' }}
-        run: |
-          set -euo pipefail
-          curl -fsSL -o /tmp/atmos.tar.gz \
-            "https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_${ATMOS_VERSION}_linux_amd64.tar.gz"
-          tar -xzf /tmp/atmos.tar.gz -C /tmp atmos
-          sudo install -m 0755 /tmp/atmos /usr/local/bin/atmos
-          atmos version
+      - uses: cloudposse/github-action-setup-atmos@9e8d1e2db56fe851a85871d5993d63e182b66536 # v3.6.0
+        with:
+          atmos-version: ${{ vars.ATMOS_VERSION || '1.229.0' }}
 
       - name: Apply and destroy against LocalEmu
         run: atmos workflow localemu -f localemu
