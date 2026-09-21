@@ -57,6 +57,7 @@ workflows:
             exit 0
           fi
           nohup "$venv/bin/localemu" start > /tmp/tf-atmos-localemu/localemu.log 2>&1 &
+          echo $! > /tmp/tf-atmos-localemu/localemu.pid
           for _ in $(seq 1 60); do
             if curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1; then
               echo "LocalEmu up on :4566"
@@ -71,26 +72,33 @@ workflows:
   localemu-down:
     description: Stop the LocalEmu emulator
     steps:
+      # Teardown of a disposable emulator must never fail a run whose applies
+      # and destroys all passed - that turned a fully green LocalEmu lane red
+      # in CI. It warns instead. Deliberately does NOT depend on lsof, which is
+      # not installed on a GitHub ubuntu runner.
       - type: shell
         name: down
         command: |
           set -u
-          pid="$(lsof -nP -iTCP:4566 -sTCP:LISTEN -t 2>/dev/null || true)"
-          if [ -z "$pid" ]; then
+          if ! curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1; then
             echo "LocalEmu not running"
             exit 0
           fi
-          kill "$pid" 2>/dev/null || true
-          sleep 3
-          if lsof -nP -iTCP:4566 -sTCP:LISTEN -t >/dev/null 2>&1; then
-            kill -9 "$pid" 2>/dev/null || true
+          pidfile=/tmp/tf-atmos-localemu/localemu.pid
+          if [ -f "$pidfile" ]; then
+            kill "$(cat "$pidfile")" 2>/dev/null || true
+          fi
+          pkill -f 'localemu start' 2>/dev/null || true
+          for _ in $(seq 1 5); do
+            curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1 || break
             sleep 2
+          done
+          if curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1; then
+            echo "WARNING: LocalEmu is still listening on :4566; stop it by hand" >&2
+          else
+            rm -f "$pidfile"
+            echo "LocalEmu stopped"
           fi
-          if lsof -nP -iTCP:4566 -sTCP:LISTEN -t >/dev/null 2>&1; then
-            echo "LocalEmu still listening on :4566" >&2
-            exit 1
-          fi
-          echo "LocalEmu stopped"
 
   localemu:
     description: Apply every LocalEmu component against the emulator, then destroy it

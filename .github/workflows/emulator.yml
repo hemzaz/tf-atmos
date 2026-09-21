@@ -52,25 +52,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  floci:
-    name: Floci sandbox (8 components)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Deliberately NOT run inside ghcr.io/cloudposse/atmos. `atmos emulator up
-    # aws` starts a Floci CONTAINER, and there is no docker-in-docker inside
-    # that image, so it fails with "container runtime not available: neither
-    # docker nor podman is available". The ubuntu runner has Docker; Atmos is
-    # installed onto it instead.
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: cloudposse/github-action-setup-atmos@9e8d1e2db56fe851a85871d5993d63e182b66536 # v3.6.0
-        with:
-          atmos-version: ${{ vars.ATMOS_VERSION || '1.229.0' }}
-      - name: Apply and destroy against Floci
-        run: atmos workflow sandbox -f sandbox
-
+  # The Floci sandbox is NOT wired in yet, on purpose. Two problems surfaced on
+  # the first CI runs, and only the first is solved:
+  #   1. It cannot run inside ghcr.io/cloudposse/atmos - `atmos emulator up aws`
+  #      starts a Floci CONTAINER and that image has no docker-in-docker
+  #      ("container runtime not available: neither docker nor podman is
+  #      available"). Solved by using the ubuntu runner, which has Docker.
+  #   2. Unsolved: on the runner, vpc/main then fails with
+  #      "waiting for Route Table Association (rtbassoc-...) create: timeout
+  #      while waiting for state to become 'associated' (timeout: 5m0s)" -
+  #      Floci's DescribeRouteTables never reports the association. That is an
+  #      emulator fidelity gap, not a component defect, and it burns five
+  #      minutes before failing.
+  # Adding the job before that is understood would mean a permanently red gate,
+  # and marking it continue-on-error would be a gate that cannot fail - worse
+  # than no gate. The Floci lane still runs locally: atmos workflow sandbox -f sandbox
   localemu:
     name: LocalEmu lane (rds, monitoring, iam)
     runs-on: ubuntu-latest
