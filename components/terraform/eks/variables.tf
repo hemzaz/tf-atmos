@@ -18,8 +18,79 @@ variable "clusters" {
     security_group_ids        = optional(list(string), [])
     kms_key_arn               = optional(string)
     enabled_cluster_log_types = optional(list(string), ["api", "audit", "authenticator", "controllerManager", "scheduler"])
-    node_groups               = optional(map(any), {})
     tags                      = optional(map(string), {})
+
+    # Typed, not `map(any)`. `map(any)` forces every node group to converge on
+    # one type, so a group with `taints` and a group without could not coexist:
+    # "all map elements must have the same type". It also silently discarded
+    # any key the component does not read.
+    node_groups = optional(map(object({
+      enabled        = optional(bool, true)
+      instance_types = optional(list(string), ["t3.medium"])
+      # instance_types and ami_type stay on the node group, never the launch
+      # template: a node group accepts up to 20 instance types and a launch
+      # template does not, and EKS uses ami_type to pick both the AMI and the
+      # bootstrap userdata. Matches cloudposse/terraform-aws-eks-node-group.
+      ami_type      = optional(string, "AL2_x86_64")
+      capacity_type = optional(string, "ON_DEMAND")
+      subnet_ids    = optional(list(string))
+      desired_size  = optional(number, 2)
+      min_size      = optional(number, 1)
+      max_size      = optional(number, 4)
+      labels        = optional(map(string), {})
+      tags          = optional(map(string), {})
+      taints = optional(list(object({
+        key    = string
+        value  = optional(string)
+        effect = string
+      })), [])
+      update_config = optional(object({
+        max_unavailable            = optional(number)
+        max_unavailable_percentage = optional(number)
+      }))
+
+      # Launch-template instance settings, names and defaults taken from
+      # cloudposse/terraform-aws-eks-node-group. IMDSv2 is required by default;
+      # the hop limit of 2 lets containerized workloads assume the instance
+      # profile, though IRSA service accounts are the better answer.
+      detailed_monitoring_enabled          = optional(bool, false)
+      metadata_http_endpoint_enabled       = optional(bool, true)
+      metadata_http_put_response_hop_limit = optional(number, 2)
+      metadata_http_tokens_required        = optional(bool, true)
+
+      # Copied from cloudposse-terraform-components/aws-eks-cluster; keep in
+      # sync by copy and paste. Root-volume encryption and volume type are
+      # launch-template-only settings -- `aws_eks_node_group` has no argument
+      # for either, and AWS rejects a node group that sets `disk_size` while a
+      # launch template is attached. That is why the old `disk_size`,
+      # `disk_type` and `disk_encrypted` keys are gone; upstream removed theirs
+      # for the same reason. The defaults give an encrypted gp3 root volume, so
+      # a stack wanting the secure baseline sets nothing.
+      block_device_map = optional(map(object({
+        no_device    = optional(bool, null)
+        virtual_name = optional(string, null)
+        ebs = optional(object({
+          delete_on_termination = optional(bool, true)
+          encrypted             = optional(bool, true)
+          iops                  = optional(number, null)
+          kms_key_id            = optional(string, null) # null => AWS-managed aws/ebs key
+          snapshot_id           = optional(string, null)
+          throughput            = optional(number, null) # for gp3, MiB/s, up to 1000
+          volume_size           = optional(number, 50)   # disk size in GB
+          volume_type           = optional(string, "gp3")
+
+          # Catch common camel case typos. These have no effect, they just
+          # generate better errors. Without these defined they would be
+          # silently ignored and the default values used instead, which is
+          # difficult to debug.
+          deleteOnTermination = optional(any, null)
+          kmsKeyId            = optional(any, null)
+          snapshotId          = optional(any, null)
+          volumeSize          = optional(any, null)
+          volumeType          = optional(any, null)
+        }))
+      })), { "/dev/xvda" = { ebs = {} } })
+    })), {})
   }))
   description = "Map of EKS cluster configurations with typed schema"
   default     = {}

@@ -59,9 +59,13 @@ components:
                   role: worker
                   environment: production
                 capacity_type: "ON_DEMAND" # Stable capacity for production
-                disk_size: 100
-                disk_type: "gp3"
-                disk_encrypted: true
+                # gp3 and encrypted are the component defaults, so only the
+                # size is stated. The old disk_size/disk_type/disk_encrypted
+                # keys were silently discarded and encrypted nothing.
+                block_device_map:
+                  "/dev/xvda":
+                    ebs:
+                      volume_size: 100
 
             # Spread across AZs
                 subnet_ids: !terraform.state vpc/main .private_subnet_ids
@@ -83,7 +87,10 @@ components:
                     value: monitoring
                     effect: "NO_SCHEDULE"
                 capacity_type: "ON_DEMAND"
-                disk_size: 200 # Extra space for metrics
+                block_device_map:
+                  "/dev/xvda":
+                    ebs:
+                      volume_size: 200 # Extra space for metrics
 
           # High-memory workloads
               memory-optimized:
@@ -95,7 +102,10 @@ components:
                 labels:
                   role: memory-optimized
                 capacity_type: "ON_DEMAND"
-                disk_size: 100
+                block_device_map:
+                  "/dev/xvda":
+                    ebs:
+                      volume_size: 100
 
         # Cluster addons
         default_cluster_log_retention_days: 90
@@ -138,9 +148,10 @@ components:
                 labels:
                   role: data-processing
                 capacity_type: "ON_DEMAND"
-                disk_size: 200
-                disk_type: "gp3"
-                disk_encrypted: true
+                block_device_map:
+                  "/dev/xvda":
+                    ebs:
+                      volume_size: 200
 
           # Batch processing (can use spot for cost savings)
               batch-workers:
@@ -156,7 +167,10 @@ components:
                     value: batch
                     effect: "NO_SCHEDULE"
                 capacity_type: "SPOT"
-                disk_size: 100
+                block_device_map:
+                  "/dev/xvda":
+                    ebs:
+                      volume_size: 100
 
         default_cluster_log_retention_days: 90
       dependencies:

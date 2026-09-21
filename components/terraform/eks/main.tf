@@ -225,52 +225,114 @@ resource "aws_iam_role_policy_attachment" "cluster_eks_vpc_resource_controller" 
 }
 
 # EKS Node Groups
+# A launch template is the only way to control root-volume encryption and
+# volume type on a managed node group; `aws_eks_node_group` exposes neither.
+# One template per node group, because block_device_map is per node group.
+# Deliberately no `image_id`/`user_data`: leaving them unset lets EKS supply the
+# AMI matching `ami_type` and inject its own bootstrap script.
+resource "aws_launch_template" "node_groups" {
+  for_each = local.node_groups
+
+  name_prefix = "${var.tags["Environment"]}-${each.key}-"
+  description = "Managed node group ${each.key} in cluster ${each.value.cluster_name}"
+
+  dynamic "block_device_mappings" {
+    for_each = each.value.block_device_map
+
+    content {
+      device_name  = block_device_mappings.key
+      no_device    = block_device_mappings.value.no_device
+      virtual_name = block_device_mappings.value.virtual_name
+
+      dynamic "ebs" {
+        for_each = block_device_mappings.value.ebs == null ? [] : [block_device_mappings.value.ebs]
+
+        content {
+          delete_on_termination = ebs.value.delete_on_termination
+          encrypted             = ebs.value.encrypted
+          iops                  = ebs.value.iops
+          kms_key_id            = ebs.value.kms_key_id
+          snapshot_id           = ebs.value.snapshot_id
+          throughput            = ebs.value.throughput
+          volume_size           = ebs.value.volume_size
+          volume_type           = ebs.value.volume_type
+        }
+      }
+    }
+  }
+
+  # http_endpoint is documented as optional but is required whenever
+  # http_put_response_hop_limit is set.
+  metadata_options {
+    http_endpoint               = each.value.metadata_http_endpoint_enabled ? "enabled" : "disabled"
+    http_put_response_hop_limit = each.value.metadata_http_put_response_hop_limit
+    http_tokens                 = each.value.metadata_http_tokens_required ? "required" : "optional"
+  }
+
+  monitoring {
+    enabled = each.value.detailed_monitoring_enabled
+  }
+
+  tags = merge(
+    var.tags,
+    each.value.tags,
+    { Name = "${var.tags["Environment"]}-${each.key}" }
+  )
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "aws_eks_node_group" "node_groups" {
   for_each = local.node_groups
 
-  cluster_name    = aws_eks_cluster.clusters[each.value.cluster_name].name
-  node_group_name = "${var.tags["Environment"]}-${each.key}"
-  node_role_arn   = aws_iam_role.node[each.value.cluster_name].arn
-  subnet_ids      = lookup(each.value, "subnet_ids", var.subnet_ids)
+  cluster_name = aws_eks_cluster.clusters[each.value.cluster_name].name
+  # name_prefix, not name: this node group is create_before_destroy, so any
+  # replacement would collide with the live one on a fixed name
+  # (ResourceInUseException). Attaching a launch template forces replacement,
+  # because launch_template.id is ForceNew.
+  node_group_name_prefix = "${var.tags["Environment"]}-${each.key}-"
+  node_role_arn          = aws_iam_role.node[each.value.cluster_name].arn
+  # A typed object always carries the attribute, so an unset value arrives as
+  # null rather than absent and `lookup` would no longer reach its default.
+  subnet_ids = coalesce(each.value.subnet_ids, var.subnet_ids)
 
-  instance_types = lookup(each.value, "instance_types", ["t3.medium"])
-  ami_type       = lookup(each.value, "ami_type", "AL2_x86_64")
-  capacity_type  = lookup(each.value, "capacity_type", "ON_DEMAND")
-  disk_size      = lookup(each.value, "disk_size", 50)
+  instance_types = each.value.instance_types
+  ami_type       = each.value.ami_type
+  capacity_type  = each.value.capacity_type
+  # No `disk_size`: AWS rejects a node group that sets it while a launch
+  # template is attached. Size lives in block_device_map instead.
+
+  launch_template {
+    id      = aws_launch_template.node_groups[each.key].id
+    version = aws_launch_template.node_groups[each.key].latest_version
+  }
 
   scaling_config {
-    desired_size = lookup(each.value, "desired_size", 2)
-    max_size     = lookup(each.value, "max_size", 4)
-    min_size     = lookup(each.value, "min_size", 1)
+    desired_size = each.value.desired_size
+    max_size     = each.value.max_size
+    min_size     = each.value.min_size
   }
 
   dynamic "taint" {
-    for_each = lookup(each.value, "taints", [])
+    for_each = each.value.taints
     content {
       key    = taint.value.key
-      value  = lookup(taint.value, "value", null)
+      value  = taint.value.value
       effect = taint.value.effect
     }
   }
 
   dynamic "update_config" {
-    for_each = lookup(each.value, "update_config", null) != null ? [1] : []
+    for_each = each.value.update_config == null ? [] : [each.value.update_config]
     content {
-      max_unavailable            = lookup(each.value.update_config, "max_unavailable", null)
-      max_unavailable_percentage = lookup(each.value.update_config, "max_unavailable_percentage", null)
+      max_unavailable            = update_config.value.max_unavailable
+      max_unavailable_percentage = update_config.value.max_unavailable_percentage
     }
   }
 
-  dynamic "launch_template" {
-    for_each = lookup(each.value, "launch_template", null) != null ? [1] : []
-    content {
-      id      = lookup(each.value.launch_template, "id", null)
-      name    = lookup(each.value.launch_template, "name", null)
-      version = lookup(each.value.launch_template, "version", null)
-    }
-  }
-
-  labels = lookup(each.value, "labels", {})
+  labels = each.value.labels
 
   tags = merge(
     var.tags,
@@ -304,22 +366,22 @@ resource "aws_eks_node_group" "node_groups" {
 
     # Validate taint effect values
     precondition {
-      condition = length(lookup(each.value, "taints", [])) == 0 || alltrue([
-        for taint in lookup(each.value, "taints", []) :
-        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], lookup(taint, "effect", "NO_SCHEDULE"))
+      condition = alltrue([
+        for taint in each.value.taints :
+        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], taint.effect)
       ])
       error_message = "Taint effect must be one of: NO_SCHEDULE, PREFER_NO_SCHEDULE, or NO_EXECUTE."
     }
 
     # Add precondition to check for required values
     precondition {
-      condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) > 0
+      condition     = length(coalesce(each.value.subnet_ids, var.subnet_ids)) > 0
       error_message = "At least one subnet must be provided for the node group."
     }
 
     # Add precondition to validate instance types are valid
     precondition {
-      condition     = length(lookup(each.value, "instance_types", ["t3.medium"])) > 0
+      condition     = length(each.value.instance_types) > 0
       error_message = "At least one instance type must be specified."
     }
   }

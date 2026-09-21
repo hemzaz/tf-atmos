@@ -171,14 +171,16 @@ components:
         node_groups:
           # System node group for cluster components
           system:
-            name: "system"
             instance_types:
               - "t3.medium"
             capacity_type: "ON_DEMAND"
             min_size: 2
             max_size: 4
             desired_size: 2
-            disk_size: 50
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 50
             labels:
               role: "system"
               node-type: "system"
@@ -189,29 +191,30 @@ components:
             update_config:
               max_unavailable_percentage: 33
             ami_type: "AL2_x86_64"
-            enable_monitoring: true
+            detailed_monitoring_enabled: true
 
           # Application node group for microservices
           application:
-            name: "application"
             instance_types:
               - "t3.large"
             capacity_type: "ON_DEMAND"
             min_size: 3
             max_size: 20
             desired_size: 3
-            disk_size: 100
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
             labels:
               role: "application"
               node-type: "application"
             update_config:
               max_unavailable_percentage: 25
             ami_type: "AL2_x86_64"
-            enable_monitoring: true
+            detailed_monitoring_enabled: true
 
           # Spot node group for cost optimization (non-critical workloads)
           spot:
-            name: "spot"
             instance_types:
               - "t3.large"
               - "t3.xlarge"
@@ -221,7 +224,10 @@ components:
             min_size: 0
             max_size: 10
             desired_size: 0
-            disk_size: 100
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
             labels:
               role: "spot"
               node-type: "spot"
@@ -232,7 +238,7 @@ components:
             update_config:
               max_unavailable_percentage: 50
             ami_type: "AL2_x86_64"
-            enable_monitoring: true
+            detailed_monitoring_enabled: true
 
         # OIDC provider for IRSA
         enable_irsa: true

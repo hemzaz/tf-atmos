@@ -8,6 +8,35 @@ Atmos Native CI in GitHub Actions.
 > alert recipients. The list is in
 > [Manual prerequisites before first apply](./docs/DEPLOYMENT.md#manual-prerequisites-before-first-apply).
 
+## This repository is opinionated: it follows Cloudposse
+
+Atmos is a Cloudposse utility, engineered around a particular way of working. Cloudposse know
+their product best, and they define how it should consume Terraform, Helm and other modules.
+So this repository follows Cloudposse all the way rather than inventing its own conventions.
+
+In practice that means:
+
+- **Component variables copy the upstream shape.** When a Cloudposse module or reference
+  component already models something, its variable names, types and defaults are copied
+  verbatim — defensive extras included. `clusters[*].node_groups.block_device_map` in
+  `components/terraform/eks` is copied from
+  [`cloudposse-terraform-components/aws-eks-cluster`](https://github.com/cloudposse-terraform-components/aws-eks-cluster),
+  down to the camel-case decoy attributes that turn a silently-dropped typo into a loud error.
+- **Typed objects, never `map(any)`.** `map(any)` forces every element to converge on one type,
+  so two entries differing by a single optional key cannot coexist, and any key the component
+  does not read is discarded without a warning.
+- **Upstream removals are respected.** Cloudposse deleted `disk_size`, `disk_type` and
+  `disk_encryption_enabled` from their node-group module because those are launch-template-only
+  settings that AWS rejects alongside a node group's own `disk_size`. This repository does not
+  reintroduce them.
+- **Deviations are documented.** Where this repository departs from upstream it says so in a
+  comment beside the code, with the reason.
+
+When a design question has no obvious answer, the tiebreaker is: do what Cloudposse does, and
+keep a comment naming the upstream source so the code can be re-synced later. Note that the old
+`cloudposse/terraform-aws-components` monorepo is archived — current reference components live
+under [`cloudposse-terraform-components`](https://github.com/cloudposse-terraform-components).
+
 ## Versions
 
 | Tool | Version | Where it's pinned |
