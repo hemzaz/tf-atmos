@@ -27,7 +27,12 @@ permissions: {}
 jobs:
   stacks:
     name: Stacks
-    if: vars.AWS_PLAN_ROLE_ARN != ''
+    # workflow_dispatch is not branch-restricted by GitHub, so without this a
+    # dispatch from any branch would run that branch's code with the plan role.
+    # disaster-recovery.yml and terraform-cd.yml already carry the same guard.
+    if: >-
+      vars.AWS_PLAN_ROLE_ARN != '' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
