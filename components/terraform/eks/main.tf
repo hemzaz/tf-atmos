@@ -23,6 +23,7 @@ locals {
 resource "aws_cloudwatch_log_group" "eks" {
   for_each = local.clusters
 
+  # checkov:skip=CKV_AWS_338:Retention is a per-stack cost decision, not a module one. Only prod pins default_cluster_log_retention_days (90); dev and staging inherit it, so raising the default to the year this check wants would quadruple their audit-log spend without anyone deciding to. The repo accepts the same finding on its five other log groups. Removing the dead lookup() below is what made this check resolvable at all -- it was never passing, only invisible.
   name = local.cluster_log_group_names[each.key]
   # No per-cluster override: `clusters` is a typed object and declares neither
   # `log_retention_days` nor `log_kms_key_id`, so a stack setting either would be
