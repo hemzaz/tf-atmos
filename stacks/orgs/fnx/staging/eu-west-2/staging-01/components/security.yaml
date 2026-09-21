@@ -9,6 +9,7 @@ import:
   - orgs/fnx/staging/eu-west-2/staging-01/components/globals
   - catalog/iam/defaults
   - catalog/backend/defaults
+  - catalog/kms/defaults
   - catalog/secretsmanager/defaults
   - catalog/acm/defaults
 
@@ -77,6 +78,20 @@ components:
       vars:
         bucket_name: "fnx-staging-terraform-state"
         iam_role_name: "fnx-staging-terraform-backend-role"
+
+    # ==========================================================================
+    # KMS - customer-managed key for Secrets Manager and other encrypted services
+    # ==========================================================================
+    kms/main:
+      metadata:
+        component: kms
+        inherits:
+          - kms/defaults
+      vars:
+        description: Staging main encryption key (Secrets Manager, EBS, RDS)
+        alias_name: staging-01-main  # without the alias/ prefix
+        deletion_window_in_days: 7   # non-prod: shorter window, faster teardown
+
     acm/main:
       metadata:
         component: acm
