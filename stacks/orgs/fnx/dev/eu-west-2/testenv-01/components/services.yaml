@@ -146,6 +146,10 @@ components:
       metadata:
         component: rds
       vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
         identifier: "main-db"
         db_name: "mainapp"
         engine: "{{ .settings.environment.rds_engine }}"
@@ -163,6 +167,10 @@ components:
       metadata:
         component: rds
       vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
         identifier: "data-db"
         db_name: "datawarehouse"
         engine: "{{ .settings.environment.rds_engine }}"
