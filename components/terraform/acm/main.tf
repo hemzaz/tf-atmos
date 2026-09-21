@@ -22,7 +22,7 @@ resource "aws_acm_certificate" "main" {
 
     # Add precondition checks to ensure domain and validation method are valid
     precondition {
-      condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}$", each.value.domain_name))
+      condition     = can(regex("^(\\*\\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$", each.value.domain_name))
       error_message = "Domain name ${each.value.domain_name} is not valid. It must be a valid DNS domain name."
     }
 
