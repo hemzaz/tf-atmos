@@ -1,0 +1,122 @@
+---
+# =============================================================================
+# GITHUB OIDC — HUB
+# =============================================================================
+# The ONE account that holds the GitHub Actions OIDC provider and the CI roles.
+# Pair with catalog/iam/oidc-spoke.yaml in every workload account.
+#
+#   GitHub Actions --(OIDC)--> hub CI role --(sts:AssumeRole)--> spoke role
+#
+# Why a hub at all: an AWS account can hold exactly one OIDC provider for
+# token.actions.githubusercontent.com. Three stacks each setting
+# github_oidc_create_provider: true collide with EntityAlreadyExists the moment
+# they share an account. Creating it once, here, removes the collision by
+# construction and pins the GitHub subject claims in a single auditable place.
+#
+# READ THIS BEFORE COPYING
+#   An OIDC provider is an ACCOUNT-LOCAL resource. A role in a spoke account
+#   CANNOT federate against a provider in the hub. Do not set
+#   github_oidc_provider_arn in a spoke to the hub's provider ARN: the
+#   component's regex accepts any 12-digit account, so nothing here rejects it,
+#   and it fails later at AWS. github_oidc_provider_arn exists only for "this
+#   SAME account already has a provider that something else created".
+#   Spokes therefore run with github_oidc_enabled: false and are reached by
+#   cross-account AssumeRole instead.
+#
+# The hub CI role holds NO service permissions of its own. Its power is the
+# list of roles it may assume, which is the point: the blast radius is one
+# policy document rather than a managed policy per account.
+#
+# Usage — in the hub stack (metadata.inherits is REQUIRED; importing this file
+# alone applies nothing):
+#
+#   import:
+#     - catalog/iam/oidc-hub
+#   components:
+#     terraform:
+#       iam/oidc-hub:
+#         metadata:
+#           inherits:
+#             - iam/oidc-hub
+#         vars:
+#           github_oidc_repository: "<org>/<repo>"
+#           ci_plan_policy_arns:
+#             - "arn:aws:iam::<HUB_ACCOUNT_ID>:policy/<prefix>-assume-spoke-plan"
+#
+# A full worked example, including the assume-spoke policy document and the
+# bootstrap order, is in examples/github-oidc-hub-spoke/README.md.
+# =============================================================================
+import:
+  - catalog/_base/defaults
+
+components:
+  terraform:
+    iam/oidc-hub:
+      metadata:
+        component: iam
+        type: abstract
+        custom:
+          version: "1.0.0"
+          description: "GitHub Actions OIDC provider and CI roles, hub account"
+          category: "security"
+      vars:
+        # The hub issues credentials; it does not manage workload resources.
+        # Leaving this false also avoids the two preconditions the spoke must
+        # satisfy (cross-account-roles.tf:59, resource-management-policy.tf:105).
+        create_cross_account_role: false
+        # Required by the component (no default). catalog/iam/defaults.yaml
+        # supplies this for ordinary iam instances; these bases do not import
+        # it, so they must set it themselves or plan aborts before any
+        # validation runs -- which reads as a pass if you only count
+        # "Invalid value for variable".
+        account_id: "{{ .settings.environment.account_id }}"
+
+        # Required by the component even though create_cross_account_role is
+        # false: these have no defaults, and Terraform demands a value before
+        # it evaluates anything. All four are UNUSED here -- the hub creates no
+        # cross-account role. trusted_account_ids cannot be [] (variables.tf
+        # requires length > 0), so it names this account, which grants nothing
+        # while create_cross_account_role stays false.
+        environment: "{{ .settings.context.stage }}"
+        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-unused"
+        policy_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-unused"
+        trusted_account_ids:
+          - "{{ .settings.environment.account_id }}"
+
+        github_oidc_enabled: true
+        # The one place in the whole repo this may be true.
+        github_oidc_create_provider: true
+        github_oidc_provider_arn: null
+
+        # Override in the stack. Left deliberately unset rather than guessed:
+        # the trust policy is pinned to exact subject claims, never a wildcard,
+        # so a wrong repository here silently trusts the wrong repo.
+        # github_oidc_repository: "<org>/<repo>"
+        github_oidc_default_branch: "master"
+
+        # Roles become <prefix>-plan and <prefix>-apply. Limit is 58 characters.
+        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci"
+
+        # MUST be overridden for hub-and-spoke. The component default is
+        # ReadOnlyAccess, which reads the HUB account -- useless for planning a
+        # spoke's resources. Point this at a customer-managed policy granting
+        # sts:AssumeRole on each spoke's plan role, e.g.
+        #   arn:aws:iam::<HUB_ACCOUNT_ID>:policy/<prefix>-assume-spoke-plan
+        # AdministratorAccess and PowerUserAccess are rejected here by
+        # variables.tf:295, because pull-request code assumes this role.
+        ci_plan_policy_arns:
+          - "arn:aws:iam::aws:policy/ReadOnlyAccess"
+
+        # Off by default, and turn it on deliberately. In hub-and-spoke the
+        # apply role should also hold only sts:AssumeRole into the spoke apply
+        # roles -- never a service policy. ci_apply_policy_arns has NO
+        # guardrail (the AdministratorAccess denylist covers the plan role
+        # only), so an unscoped value here is admin across every spoke.
+        ci_apply_role_enabled: false
+
+        # Lets the CI roles take the state lockfile rather than only read state.
+        ci_state_bucket_name: !terraform.state backend/main .backend_bucket
+        ci_state_kms_key_arn: !terraform.state backend/main .backend_kms_key_arn
+      dependencies:
+        components:
+          - component: backend/main

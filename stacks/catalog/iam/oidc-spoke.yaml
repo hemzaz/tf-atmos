@@ -1,0 +1,97 @@
+---
+# =============================================================================
+# GITHUB OIDC — SPOKE
+# =============================================================================
+# A workload account reached by the hub. Pair with catalog/iam/oidc-hub.yaml.
+#
+#   GitHub Actions --(OIDC)--> hub CI role --(sts:AssumeRole)--> THIS role
+#
+# The spoke has NO OIDC provider and NO OIDC roles. GitHub never talks to it
+# directly. An OIDC provider is account-local, so a role here cannot federate
+# against the hub's provider; pointing github_oidc_provider_arn at the hub
+# passes the component's regex and then fails at AWS. Hence
+# github_oidc_enabled: false, and a cross-account role instead.
+#
+# What this buys: the hub CI role holds no service permissions, so "what can
+# CI do in production" is answered by THIS file, per account, rather than by
+# one managed policy that necessarily spans every environment.
+#
+# TWO PRECONDITIONS this base satisfies, both of which fail at PLAN if you
+# strip them. They are lifecycle preconditions, so `terraform validate` cannot
+# see them:
+#
+#   cross-account-roles.tf:59          trusting an account other than the
+#       caller requires at least one of trusted_principal_org_id, external_id
+#       or require_mfa. Trusting your OWN account id short-circuits this and
+#       leaves the guard unexercised -- do not "simplify" it that way.
+#   resource-management-policy.tf:105  at least one of managed_s3_bucket_arns,
+#       managed_dynamodb_table_arns or managed_sns_topic_arns must be non-null.
+#       All three default null, so a bare instance cannot plan.
+#
+# Usage — in each workload stack (metadata.inherits is REQUIRED; importing this
+# file alone applies nothing):
+#
+#   import:
+#     - catalog/iam/oidc-spoke
+#   components:
+#     terraform:
+#       iam/oidc-spoke:
+#         metadata:
+#           inherits:
+#             - iam/oidc-spoke
+#         vars:
+#           trusted_account_ids:
+#             - "<HUB_ACCOUNT_ID>"
+#           external_id: "<a secret shared with the hub>"
+#           managed_s3_bucket_arns:
+#             - "arn:aws:s3:::<bucket this account manages>"
+#
+# A full worked example is in examples/github-oidc-hub-spoke/README.md.
+# =============================================================================
+import:
+  - catalog/_base/defaults
+
+components:
+  terraform:
+    iam/oidc-spoke:
+      metadata:
+        component: iam
+        type: abstract
+        custom:
+          version: "1.0.0"
+          description: "Cross-account role assumed by the OIDC hub, workload account"
+          category: "security"
+      vars:
+        # GitHub never reaches this account directly. See the header.
+        github_oidc_enabled: false
+
+        # Required by the component (no default). See the note in
+        # oidc-hub.yaml: without it, plan aborts BEFORE validations run.
+        account_id: "{{ .settings.environment.account_id }}"
+
+        create_cross_account_role: true
+        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci-exec"
+        policy_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci-exec"
+
+        # Lifecycle tier, not the environment instance name: the component
+        # validates dev/development/staging/stage/prod/production.
+        # context.stage carries the tier; context.environment is the instance
+        # ("testenv-01") and fails that validation.
+        environment: "{{ .settings.context.stage }}"
+
+        # The three below have NO safe default, so they are left unset here on
+        # purpose: a wrong value grants another account access to this one.
+        # Set each in the consuming stack.
+        #
+        # trusted_account_ids:          the hub, and only the hub
+        #   - "<HUB_ACCOUNT_ID>"
+        #
+        # external_id:                  satisfies cross-account-roles.tf:59.
+        #   Use trusted_principal_org_id instead for an org-wide condition.
+        #   require_mfa also satisfies it, but CI cannot present MFA.
+        #   "<shared secret>"
+        #
+        # managed_s3_bucket_arns:       satisfies
+        #   resource-management-policy.tf:105. Narrow to what this account
+        #   actually manages; this is the resource-specific half of the role.
+        #   - "arn:aws:s3:::<bucket>"

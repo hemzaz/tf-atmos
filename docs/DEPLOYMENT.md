@@ -117,6 +117,18 @@ atmos workflow deploy-serverless -f deploy-template -s <stack>   # quick deploy,
 atmos workflow deploy-parallel -f deploy-template -s <stack>     # independent components concurrently
 ```
 
+## CI across several AWS accounts
+
+The prerequisites above assume the CI roles live in the account being deployed. If you run more
+than one account, put the OIDC provider and the CI roles in a single hub account instead and reach
+the workload accounts by `sts:AssumeRole`. An account can hold only one OIDC provider for
+`token.actions.githubusercontent.com`, so a provider per stack collides the moment two stacks share
+an account; a provider is also account-local, so a spoke cannot federate against the hub's.
+
+Opt-in templates: `catalog/iam/oidc-hub` and `catalog/iam/oidc-spoke` (both abstract — a stack must
+`import` **and** `metadata.inherits` them). Worked example, including the assume-spoke policy and
+the bootstrap order: [examples/github-oidc-hub-spoke](../examples/github-oidc-hub-spoke/README.md).
+
 ## Deploy through CI/CD
 
 After the GitHub prerequisites above are in place:
