@@ -523,8 +523,13 @@ components:
 
         # Backup configuration
         backup_retention_period: 7
+        # RDS rejects a maintenance window that overlaps the backup window and
+        # wants >= 30 minutes of separation. These two were adjacent (backup
+        # closing at 04:00, maintenance opening at 04:00) - the same defect #142
+        # fixed in the component default and in staging and prod. Anyone copying
+        # this template would have hit it at CreateDBInstance.
         backup_window: "03:00-04:00"
-        maintenance_window: "sun:04:00-sun:05:00"
+        maintenance_window: "sun:04:30-sun:05:30"
         copy_tags_to_snapshot: true
         delete_automated_backups: false
 

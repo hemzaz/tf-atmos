@@ -7,14 +7,12 @@ storage, backup retention), and (in `secrets-rotation.tf`) Secrets Manager passw
 
 ## Deployed instances
 
-Not currently instantiated in any of the 3 real stacks. Every stack
-(fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production) only has an
-**abstract** catalog entry (`stacks/catalog/infrastructure/defaults.yaml`) —
-no real `rds`/`rds/main` instance is deployed today. The `rds:` vars under
-`infrastructure/main`/`infrastructure/data` in `services.yaml` are inputs to
-the (currently `enabled: false`) `infrastructure` component, not this one. A
-working usage pattern (`web-application/rds`) exists only in
-`stacks/catalog/templates/web-application.yaml`, which no real stack imports.
+Seven: `rds/main` in all three real stacks plus the `fnx-local-localemu`
+emulator lane, and `rds/data` in the three real stacks (the old
+`infrastructure/*.rds` inputs were remapped here). `rds/main` executes against
+LocalEmu on every CI run — the lane that caught the backup/maintenance window
+overlap which would have failed `CreateDBInstance` in staging and prod. Floci
+cannot run it: no `CreateDBSubnetGroup`.
 
 ## Inputs / outputs
 
@@ -29,14 +27,14 @@ working usage pattern (`web-application/rds`) exists only in
 
 ## Dependencies / gotchas
 
-- `dependencies.components`: depends on `vpc/main` (from the abstract stanza — never exercised by a real deploy).
+- `dependencies.components`: depends on `vpc/main`, which supplies `vpc_id` and the database subnet ids via `!terraform.state`.
 - Prod-only hard gates: `multi_az`, `deletion_protection`, `publicly_accessible`, `backup_retention_period` all fail plan/apply if misconfigured when `environment = "prod"`.
 - `storage_encrypted` is validated to always be `true` — cannot be disabled.
 - `idp-platform` calls this component as a module (`source = "../rds"`), so variable changes here must be mirrored there.
 
 ## Usage
 
-No real instance to plan today. If instantiated (e.g. copying `web-application/rds`):
 ```
-atmos terraform plan rds/main -s fnx-dev-testenv-01   # after adding an rds/main instance
+atmos terraform plan rds/main -s fnx-dev-testenv-01
+atmos workflow localemu -f localemu                   # applies + destroys it for real
 ```
