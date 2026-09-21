@@ -10,7 +10,9 @@ components:
           description: "Manages CloudWatch dashboards, alarms, and monitoring resources"
           category: "monitoring"
       vars:
-        environment: "{{ .settings.context.environment }}"
+        # The lifecycle tier the component validates (dev/staging/prod).
+        # context.environment is the instance name (`testenv-01`) and fails it.
+        environment: "{{ .settings.context.stage }}"
         enable_certificate_monitoring: true
 
         # Certificate monitoring configuration

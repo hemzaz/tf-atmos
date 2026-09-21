@@ -13,7 +13,9 @@ components:
         component: secretsmanager
         type: abstract
       vars:
-        environment: "{{ .settings.context.environment }}"
+        # The lifecycle tier the component validates (dev/staging/prod).
+        # context.environment is the instance name (`testenv-01`) and fails it.
+        environment: "{{ .settings.context.stage }}"
         enabled: true
         context_name: "common"
         secrets_enabled: true
