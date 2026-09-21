@@ -141,13 +141,14 @@ variable "tags" {
 # Network Security Variables
 variable "vpc_endpoint_prefix_list_ids" {
   type        = list(string)
-  description = "List of VPC endpoint prefix list IDs for AWS services (replaces 0.0.0.0/0 in default egress)"
+  description = "VPC endpoint prefix list IDs for the default egress rule (replaces 0.0.0.0/0). Empty resolves the region's S3 gateway prefix list automatically."
   default     = []
 
-  validation {
-    condition     = length(var.vpc_endpoint_prefix_list_ids) > 0
-    error_message = "VPC endpoint prefix list IDs are required for secure egress. Use data source: data.aws_prefix_list.s3 or create VPC endpoints."
-  }
+  # Deliberately no length validation. It used to require a non-empty list that
+  # no stack ever set, so `ec2` could not plan in ANY stack -- the component's
+  # own default was unusable. The egress rule still cannot be empty: an empty
+  # list now falls back to data.aws_prefix_list.s3 in main.tf, which is exactly
+  # what that validation's error message told callers to do by hand.
 }
 
 # Launch Template Variables

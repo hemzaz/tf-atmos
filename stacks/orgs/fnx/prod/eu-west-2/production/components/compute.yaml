@@ -173,6 +173,10 @@ components:
         create_ssh_keys: true
         store_ssh_keys_in_secrets_manager: true
         ssh_key_algorithm: "ED25519"  # Stronger algorithm
+        # Required in prod by ec2/variables.tf:241. The component defaults it
+        # false, which suits dev and staging where instances are torn down
+        # routinely; the validation exists to stop that default reaching prod.
+        default_disable_api_termination: true
         tags:
           Role: bastion
           Access: restricted

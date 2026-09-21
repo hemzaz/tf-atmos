@@ -212,6 +212,9 @@ resource "aws_secretsmanager_secret_version" "global_ssh_key" {
 locals {
   # Determine the AMI to use, with proper fallback to data source
   default_ami = var.default_ami_id != "" ? var.default_ami_id : data.aws_ami.default.id
+
+  # Same shape as default_ami: caller's value wins, otherwise resolve it.
+  default_egress_prefix_list_ids = length(var.vpc_endpoint_prefix_list_ids) > 0 ? var.vpc_endpoint_prefix_list_ids : [data.aws_prefix_list.s3[0].id]
 }
 
 resource "aws_instance" "instances" {
@@ -311,7 +314,7 @@ resource "aws_security_group" "instances" {
       from_port       = 443
       to_port         = 443
       protocol        = "tcp"
-      prefix_list_ids = var.vpc_endpoint_prefix_list_ids
+      prefix_list_ids = local.default_egress_prefix_list_ids
       description     = "Allow HTTPS outbound traffic to AWS services via VPC endpoints"
     }])
 
@@ -386,6 +389,16 @@ resource "aws_iam_role_policy" "custom" {
   name     = "${var.tags["Environment"]}-${each.key}-custom-policy"
   role     = aws_iam_role.instances[each.key].id
   policy   = each.value.custom_iam_policy
+}
+
+# The default egress rule restricts outbound HTTPS to AWS service prefix lists
+# instead of 0.0.0.0/0. Callers may pass their own ids; when they do not, the
+# region's S3 gateway prefix list is resolved here rather than demanded as an
+# input. Requiring that input is what made this component unplannable in every
+# stack, since no stack supplied it.
+data "aws_prefix_list" "s3" {
+  count = length(var.vpc_endpoint_prefix_list_ids) == 0 ? 1 : 0
+  name  = "com.amazonaws.${var.region}.s3"
 }
 
 # Verify existing key pairs exist
