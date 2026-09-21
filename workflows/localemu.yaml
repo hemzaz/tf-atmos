@@ -1,0 +1,197 @@
+# Provision components for real against LocalEmu, the second local emulator.
+#
+# Companion to sandbox.yaml, which drives the Floci lane. This one exists for
+# the components Floci cannot provision at all - rds above all, where it caught
+# backup and maintenance windows that overlapped in staging AND prod.
+#
+# Usage:
+#   atmos workflow localemu -f localemu          # up, apply everything, destroy, down
+#   atmos workflow localemu-up -f localemu       # just start the emulator
+#   atmos workflow localemu-down -f localemu     # stop it
+#
+# No AWS account, no credentials, no cost. Docker is NOT required either -
+# LocalEmu is a pip package, not a container, which is the one thing it has over
+# the Floci lane.
+#
+# Requires Python 3.13 EXACTLY. 3.12 lacks warnings.deprecated (PEP 702) and six
+# services die at runtime; on 3.14 moto-ext caps aws-sam-translator and
+# localemu 1.2.0 cannot be installed at all. The up step asserts this rather
+# than letting it fail later and confusingly.
+#
+# Every atmos command here needs BOTH the dummy credentials and
+# AWS_ENDPOINT_URL. The `local-emu` identity's spec.endpoint_url only redirects
+# Atmos's own AWS calls, not the Terraform provider, so without the env var the
+# apply reaches REAL AWS and fails on an STS 403. Atmos also refuses to run with
+# no identity at all, so bare env vars are not enough either.
+#
+# NOT idempotent across emulator restarts: a second cycle in the same LocalEmu
+# process hits AlreadyExists on CreateDBParameterGroup/CreateRole and then
+# "Provider produced inconsistent result after apply" on aws_db_subnet_group.
+# That is why this workflow clears the lane's workspace state before applying.
+# In CI it is a non-issue - every run is a fresh machine.
+workflows:
+  localemu-up:
+    description: Install (if needed) and start the LocalEmu emulator on :4566
+    steps:
+      - type: shell
+        name: up
+        command: |
+          set -eu
+          venv="${LOCALEMU_VENV:-/tmp/tf-atmos-localemu/venv}"
+          mkdir -p /tmp/tf-atmos-localemu
+          python3 - <<'PY'
+          import sys
+          if sys.version_info[:2] != (3, 13):
+              sys.exit(
+                  f"LocalEmu needs Python 3.13 exactly, found "
+                  f"{sys.version_info.major}.{sys.version_info.minor}. "
+                  "3.12 lacks warnings.deprecated; on 3.14 localemu 1.2.0 is uninstallable."
+              )
+          PY
+          if [ ! -x "$venv/bin/localemu" ]; then
+            python3 -m venv "$venv"
+            "$venv/bin/pip" install --quiet localemu==1.2.0
+          fi
+          if curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1; then
+            echo "LocalEmu already listening on :4566"
+            exit 0
+          fi
+          nohup "$venv/bin/localemu" start > /tmp/tf-atmos-localemu/localemu.log 2>&1 &
+          echo $! > /tmp/tf-atmos-localemu/localemu.pid
+          for _ in $(seq 1 60); do
+            if curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1; then
+              echo "LocalEmu up on :4566"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "LocalEmu did not come up within 120s; last log lines:" >&2
+          tail -20 /tmp/tf-atmos-localemu/localemu.log >&2 || true
+          exit 1
+
+  localemu-down:
+    description: Stop the LocalEmu emulator
+    steps:
+      # Teardown of a disposable emulator must never fail a run whose applies
+      # and destroys all passed - that turned a fully green LocalEmu lane red
+      # in CI. It warns instead. Deliberately does NOT depend on lsof, which is
+      # not installed on a GitHub ubuntu runner.
+      - type: shell
+        name: down
+        command: |
+          set -u
+          if ! curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1; then
+            echo "LocalEmu not running"
+            exit 0
+          fi
+          pidfile=/tmp/tf-atmos-localemu/localemu.pid
+          if [ -f "$pidfile" ]; then
+            kill "$(cat "$pidfile")" 2>/dev/null || true
+          fi
+          pkill -f 'localemu start' 2>/dev/null || true
+          for _ in $(seq 1 5); do
+            curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1 || break
+            sleep 2
+          done
+          if curl -fsS -m 2 http://localhost:4566/ >/dev/null 2>&1; then
+            echo "WARNING: LocalEmu is still listening on :4566; stop it by hand" >&2
+          else
+            rm -f "$pidfile"
+            echo "LocalEmu stopped"
+          fi
+
+  localemu:
+    description: Apply every LocalEmu component against the emulator, then destroy it
+    dependencies:
+      tools:
+        terraform: "1.16.3"
+    steps:
+      - type: shell
+        name: validate
+        command: atmos validate stacks
+
+      # A previous cycle's workspace state makes the next apply fail with
+      # AlreadyExists. These dirs are gitignored (.gitignore:158) and hold only
+      # this disposable lane's local state.
+      - type: shell
+        name: clear-lane-state
+        command: |
+          set -eu
+          find components/terraform -maxdepth 3 -type d \
+            -name 'fnx-local-localemu-*' -exec rm -rf {} + 2>/dev/null || true
+          echo "cleared LocalEmu workspace state"
+
+      - type: shell
+        name: up
+        command: atmos workflow localemu-up -f localemu
+
+      # lambda needs its deployment package to EXIST before apply - the provider
+      # rejects a function without one. Same path and payload as the Floci lane.
+      - type: shell
+        name: build-lambda-package
+        command: |
+          set -eu
+          dir=/tmp/tf-atmos-sandbox
+          rm -rf "$dir" && mkdir -p "$dir"
+          printf 'def handler(event, context):\n    return {"statusCode": 200, "body": "ok"}\n' > "$dir/main.py"
+          (cd "$dir" && zip -q lambda.zip main.py)
+          echo "built $dir/lambda.zip"
+
+      # Applied in dependency order: vpc first, then what reads its outputs.
+      - type: shell
+        name: apply-vpc
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform apply vpc/main -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: apply-lambda
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform apply lambda/api -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: apply-rds
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform apply rds/main -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: apply-monitoring
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform apply monitoring/main -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: apply-iam
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform apply iam/main -s fnx-local-localemu --identity local-emu -auto-approve
+
+      # Destroy proves teardown works and is where rds's deletion_protection
+      # footgun would surface. Reverse order.
+      - type: shell
+        name: destroy-iam
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform destroy iam/main -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: destroy-monitoring
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform destroy monitoring/main -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: destroy-rds
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform destroy rds/main -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: destroy-lambda
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform destroy lambda/api -s fnx-local-localemu --identity local-emu -auto-approve
+      - type: shell
+        name: destroy-vpc
+        command: |
+          export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
+          atmos terraform destroy vpc/main -s fnx-local-localemu --identity local-emu -auto-approve
+
+      - type: shell
+        name: down
+        command: atmos workflow localemu-down -f localemu
