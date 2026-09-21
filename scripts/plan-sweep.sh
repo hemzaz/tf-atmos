@@ -2,17 +2,34 @@
 #
 # plan-sweep.sh - bind each stack's RESOLVED variables to its component and plan.
 #
-# This is the missing rung between `terraform validate` and an emulator apply.
+# This is the middle rung between `terraform validate` and an emulator apply.
 # `terraform validate` exits 0 on a component whose variable validations all
 # fail, because it never binds values; tflint does not read them either. The
 # emulator lane does bind them, but covers 5 of 28 components and needs a
-# running emulator. Every defect found in between lived in that gap: the rds
-# window overlap, monitoring's null api_gateway_name, iam's over-long RE2
-# repetition, the environment/stage mix-up, ec2's impossible prefix-list
-# default and acm's wildcard-rejecting domain pattern.
+# running emulator.
 #
 # No AWS account is required. Terraform evaluates variable validations BEFORE
 # the provider authenticates, so `InvalidClientTokenId` is expected and ignored.
+#
+# WHAT THIS CAN AND CANNOT SEE -- the same fact cuts both ways.
+#
+# Because the provider never authenticates, execution stops there. Variable
+# validations run before that point and ARE checked. Resource-level
+# expressions, lifecycle preconditions and anything the AWS API decides run
+# after it and are NOT. So:
+#
+#   caught here   #145 iam RE2 repetition, #149 environment/stage mix-up,
+#                 #150 rds prod gates, #152 ec2 prefix-list default,
+#                 #153 iam/ci role prefix, #154 acm domain pattern
+#   NOT caught    #144 monitoring's null api_gateway_name -- a templatefile()
+#                 failure inside a resource, reached only after auth. Verified:
+#                 reintroducing that null still reports PASS here.
+#                 #142 rds overlapping backup/maintenance windows -- AWS
+#                 rejects those at apply; no local check can know.
+#
+# Both of those were caught by the emulator lane, which is why that lane is not
+# redundant with this one. A PASS here means "its variable validations accept
+# these values", never "this component works".
 #
 # Usage:
 #   bash scripts/plan-sweep.sh                       # the three real stacks
