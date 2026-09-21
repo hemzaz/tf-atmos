@@ -10,7 +10,9 @@ components:
           description: "Manages EC2 instances and SSH keys"
           category: "compute"
       vars:
-        environment: "{{ .settings.context.environment }}"
+        # The lifecycle tier the component validates (dev/staging/prod).
+        # context.environment is the instance name (`testenv-01`) and fails it.
+        environment: "{{ .settings.context.stage }}"
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
 

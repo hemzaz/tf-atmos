@@ -275,7 +275,9 @@ components:
 
         # Stage variables
         stage_variables:
-          environment: "{{ .settings.context.environment }}"
+          # The lifecycle tier the component validates (dev/staging/prod).
+          # context.environment is the instance name (`testenv-01`) and fails it.
+          environment: "{{ .settings.context.stage }}"
           log_level: "INFO"
 
         # Throttling (account-level defaults)

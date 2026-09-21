@@ -13,7 +13,9 @@ components:
           description: "Manages IAM roles for cross-account access and CI/CD"
           category: "security"
       vars:
-        environment: "{{ .settings.context.environment }}"
+        # The lifecycle tier the component validates (dev/staging/prod).
+        # context.environment is the instance name (`testenv-01`) and fails it.
+        environment: "{{ .settings.context.stage }}"
         account_id: "{{ .settings.environment.account_id }}"
         # Principals allowed to assume the cross-account role
         trusted_account_ids:
