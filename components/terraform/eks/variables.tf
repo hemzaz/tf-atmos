@@ -139,6 +139,58 @@ variable "clusters" {
     error_message = "At least one of endpoint_private_access or endpoint_public_access must be enabled for the cluster."
   }
 
+  # Node group validations. A nested object cannot carry its own validation
+  # block, so the checks that belong to a node group live on var.clusters.
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : ng.metadata_http_put_response_hop_limit >= 1
+      ])
+    ])
+    error_message = "metadata_http_put_response_hop_limit must be at least 1; IMDS is unreachable below that."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups :
+        ng.min_size <= ng.desired_size && ng.desired_size <= ng.max_size
+      ])
+    ])
+    error_message = "Each node group must satisfy min_size <= desired_size <= max_size."
+  }
+
+  # What makes the camel case decoys in block_device_map do anything. Declaring
+  # the misspellings is only half of it: it makes `volumeSize` arrive as a value
+  # instead of being dropped by the type constraint, and this is what turns that
+  # value into an error. Without it the decoys are dead weight and a typo still
+  # leaves the volume silently at its default size -- the very failure the typed
+  # schema exists to stop.
+  #
+  # cloudposse/terraform-aws-eks-node-group hangs this off a `random_pet`
+  # resource precondition. A precondition is the wrong host here: the eks
+  # component reads data sources, so `terraform plan` stops at
+  # InvalidClientTokenId before any resource is evaluated (verified against the
+  # plan-sweep logs), and the check would never run in a credential-less gate.
+  # Variable validations run before the provider authenticates, so this fires in
+  # CI, in the sweep, and in every apply.
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : length(compact(flatten([
+          for device_name, device in ng.block_device_map : [
+            device.ebs.deleteOnTermination,
+            device.ebs.kmsKeyId,
+            device.ebs.snapshotId,
+            device.ebs.volumeSize,
+            device.ebs.volumeType,
+          ] if device.ebs != null
+        ]))) == 0
+      ])
+    ])
+    error_message = "block_device_map does not support the camel case arguments deleteOnTermination, kmsKeyId, snapshotId, volumeSize or volumeType. Use delete_on_termination, kms_key_id, snapshot_id, volume_size and volume_type."
+  }
+
   validation {
     condition = alltrue([
       for k, v in var.clusters :

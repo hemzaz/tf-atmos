@@ -6,6 +6,10 @@ locals {
     for k, v in var.clusters : k => v if lookup(v, "enabled", true)
   }
 
+  cluster_log_group_names = {
+    for k, v in local.clusters : k => "/aws/eks/${var.tags["Environment"]}-${k}/cluster"
+  }
+
   # Merge node groups across all clusters
   node_groups = merge([
     for cluster_key, cluster in local.clusters : {
@@ -19,9 +23,18 @@ locals {
 resource "aws_cloudwatch_log_group" "eks" {
   for_each = local.clusters
 
-  name              = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
-  retention_in_days = lookup(each.value, "log_retention_days", var.default_cluster_log_retention_days)
-  kms_key_id        = lookup(each.value, "log_kms_key_id", null)
+  name = local.cluster_log_group_names[each.key]
+  # No per-cluster override: `clusters` is a typed object and declares neither
+  # `log_retention_days` nor `log_kms_key_id`, so a stack setting either would be
+  # dropped by the type constraint and silently ignored here.
+  retention_in_days = var.default_cluster_log_retention_days
+  # The cluster's own key, the one already encrypting its secrets. Until now
+  # this read a `log_kms_key_id` key that the typed schema does not declare, so
+  # it always resolved to null and the control-plane logs -- which carry the
+  # audit trail -- were written unencrypted. Checkov could not see that, because
+  # it cannot resolve a lookup(): removing the dead expression is what surfaced
+  # CKV_AWS_158.
+  kms_key_id = aws_kms_key.eks[each.key].arn
 
   tags = merge(
     var.tags,
@@ -112,7 +125,7 @@ resource "aws_eks_cluster" "clusters" {
 resource "aws_kms_key" "eks" {
   for_each = local.clusters
 
-  description             = "KMS key for EKS ${each.key} secrets encryption"
+  description             = "KMS key for EKS ${each.key} secrets and control-plane log encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
@@ -162,6 +175,32 @@ resource "aws_kms_key" "eks" {
           StringEquals = {
             "kms:CallerAccount" = data.aws_caller_identity.current.account_id,
             "kms:ViaService"    = "eks.${var.region}.amazonaws.com"
+          }
+        }
+      },
+      {
+        # Required for the log group below to use this key. Without it, CloudWatch
+        # Logs cannot write and AWS rejects the key association outright, so a
+        # missing statement fails the apply rather than silently dropping logs.
+        # Scoped by encryption context to this cluster's log group, which is why
+        # the name comes from local.cluster_log_group_names rather than being
+        # spelled out a second time.
+        Sid    = "Allow CloudWatch Logs to use the key for this cluster's log group",
+        Effect = "Allow",
+        Principal = {
+          Service = "logs.${var.region}.amazonaws.com"
+        },
+        Action = [
+          "kms:Encrypt*",
+          "kms:Decrypt*",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ],
+        Resource = "*",
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:${local.cluster_log_group_names[each.key]}"
           }
         }
       }
@@ -231,6 +270,14 @@ resource "aws_iam_role_policy_attachment" "cluster_eks_vpc_resource_controller" 
 # Deliberately no `image_id`/`user_data`: leaving them unset lets EKS supply the
 # AMI matching `ami_type` and inject its own bootstrap script.
 resource "aws_launch_template" "node_groups" {
+  # checkov:skip=CKV_AWS_79: http_tokens is "required" unless a stack sets
+  #   metadata_http_tokens_required = false. Checkov cannot evaluate the
+  #   conditional below and flags the resource whatever the value resolves to.
+  # checkov:skip=CKV_AWS_341: the hop limit defaults to 2 because AWS requires at
+  #   least 2 for a container off the host network to reach IMDSv2
+  #   (https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html),
+  #   which is also cloudposse/terraform-aws-eks-node-group's default. Prefer IRSA
+  #   over the instance profile and set the limit to 1 where no pod needs IMDS.
   for_each = local.node_groups
 
   name_prefix = "${var.tags["Environment"]}-${each.key}-"
