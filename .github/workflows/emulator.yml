@@ -1,0 +1,109 @@
+# Execute Terraform against local AWS emulators.
+#
+# This is the only CI gate that actually PROVISIONS. Everything else in
+# terraform-ci.yml is static analysis, and static analysis has repeatedly passed
+# on components that could not be created at all:
+#
+#   #140  every lambda instance was uncreatable - no deployment package, and
+#         aws_lambda_function requires one at APPLY time.
+#   #142  rds backup and maintenance windows overlapped in staging and prod;
+#         RDS rejects that at CreateDBInstance.
+#   #144  monitoring interpolated a null api_gateway_name, so every instance in
+#         dev, staging and prod failed at PLAN time.
+#   #145  iam's external_id regex exceeded Go RE2's 1000-repetition cap, so the
+#         variable could never be set.
+#
+# Six green static gates said otherwise every time.
+#
+# Deliberately NOT gated on vars.AWS_PLAN_ROLE_ARN. The plan job in
+# terraform-ci.yml is skipped until an AWS account exists; these lanes need no
+# account, no credentials and no cost, so they run on every PR regardless. That
+# is the whole point: executing coverage without waiting for an account.
+#
+# The LocalEmu lane is not idempotent across emulator restarts locally, which is
+# why it is run by hand there. In CI that does not apply - every run is a fresh
+# machine with a fresh emulator.
+name: Emulator
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "components/terraform/**"
+      - "stacks/**"
+      - "workflows/**"
+      - "atmos.yaml"
+      - ".github/workflows/emulator.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "components/terraform/**"
+      - "stacks/**"
+      - "workflows/**"
+      - "atmos.yaml"
+      - ".github/workflows/emulator.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  floci:
+    name: Floci sandbox (8 components)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Apply and destroy against Floci
+        run: atmos workflow sandbox -f sandbox
+
+  localemu:
+    name: LocalEmu lane (rds, monitoring, iam)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 3.13 exactly. 3.12 lacks warnings.deprecated (PEP 702) and six LocalEmu
+      # services die at runtime; on 3.14 localemu 1.2.0 cannot be installed.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+
+      - name: Install Atmos
+        env:
+          ATMOS_VERSION: ${{ vars.ATMOS_VERSION || '1.229.0' }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/atmos.tar.gz \
+            "https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_${ATMOS_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/atmos.tar.gz -C /tmp atmos
+          sudo install -m 0755 /tmp/atmos /usr/local/bin/atmos
+          atmos version
+
+      - name: Apply and destroy against LocalEmu
+        run: atmos workflow localemu -f localemu
+
+      # The lane's own teardown runs as the workflow's last step, but a failed
+      # apply skips it. Cheap, and it keeps the failure log honest.
+      - name: Stop LocalEmu
+        if: always()
+        run: atmos workflow localemu-down -f localemu || true
+
+      - name: Upload LocalEmu log on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: localemu-log
+          path: /tmp/tf-atmos-localemu/localemu.log
+          if-no-files-found: ignore

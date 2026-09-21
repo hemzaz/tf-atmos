@@ -164,13 +164,21 @@ components:
         # window must not overlap" - see the fix in their services.yaml.
         backup_window: "03:00-04:00"
         maintenance_window: "Sun:04:30-Sun:05:30"
-        # UNVERIFIED whether this is a component defect or a LocalEmu gap:
-        # with rotation enabled (the default), apply fails with "No Lambda
-        # rotation function ARN is associated with this secret". The component
-        # attaches aws_secretsmanager_secret_rotation to the RDS-MANAGED master
-        # user secret, which AWS rotates itself without a Lambda. LocalEmu may
-        # simply not implement managed rotation. Needs a real plan to settle;
-        # disabled here so the rest of the component is proven.
+        # SETTLED 2026-09-21: a LocalEmu gap, NOT a component defect. The
+        # default stays true everywhere else; it is off only here.
+        #
+        # With rotation on, LocalEmu fails the apply with "No Lambda rotation
+        # function ARN is associated with this secret" - it models the secret as
+        # an ordinary one. Against real AWS the component is correct:
+        #   - AWS RDS user guide, "Password management with Amazon RDS and AWS
+        #     Secrets Manager": "RDS manages the settings for the secret and
+        #     rotates the secret every seven days by default. You can modify
+        #     some of the settings, such as the rotation schedule."
+        #   - aws_secretsmanager_secret_rotation: rotation_lambda_arn "Must be
+        #     supplied if the secret is not managed by AWS."
+        # manage_master_user_password is hardcoded true in rds/main.tf, so the
+        # secret IS AWS-managed, the Lambda ARN is correctly omitted, and
+        # setting only the schedule is exactly the supported usage.
         enable_secrets_rotation: false
         # BOTH are needed. The component computes
         #   deletion_protection = var.deletion_protection || var.prevent_destroy
