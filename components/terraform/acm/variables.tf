@@ -18,9 +18,15 @@ variable "dns_domains" {
   description = "Map of domain configurations to create ACM certificates for"
   default     = {}
 
+  # The leading (\*\.)? admits wildcard certificates and the repeated label
+  # group admits subdomains. The previous pattern allowed neither -- it matched
+  # only "label.tld", so every stack's "*.example.com" was rejected and acm
+  # could not plan anywhere. Garbage is still refused: "-bad.com", "example"
+  # and "not_a_domain" all fail. A wildcard is only valid as the leftmost
+  # label, which the anchored prefix enforces.
   validation {
     condition = alltrue([
-      for k, v in var.dns_domains : can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}$", v.domain_name))
+      for k, v in var.dns_domains : can(regex("^(\\*\\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$", v.domain_name))
     ])
     error_message = "All domain names must be valid DNS domains (e.g., example.com)."
   }
@@ -35,7 +41,7 @@ variable "dns_domains" {
   validation {
     condition = alltrue([
       for k, v in var.dns_domains : alltrue([
-        for san in coalesce(v.subject_alternative_names, []) : can(regex("^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}$", san))
+        for san in coalesce(v.subject_alternative_names, []) : can(regex("^(\\*\\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}$", san))
       ])
     ])
     error_message = "All subject alternative names must be valid DNS domains."
