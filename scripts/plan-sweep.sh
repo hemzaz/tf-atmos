@@ -139,6 +139,12 @@ def synth(name):
             return val
     return None
 
+# Match an ACTUAL Atmos function, not merely a leading '!'. secretsmanager sets
+# random_password_override_special to the literal '!#\$%&*()-_=+[]{}<>:?', and
+# treating that as an unresolved function suppressed a REAL defect: the guard
+# below downgraded its genuine precondition failure to INCONCLUSIVE.
+ATMOS_FN = re.compile(r'^!(terraform\.state|terraform\.output|env|exec|include|template|store)\b')
+
 SENTINEL = object()
 dropped = []
 
@@ -147,7 +153,7 @@ def walk(key, node):
     # route_table_ids INSIDE a list of route objects. Missing those leaves the
     # literal '!terraform.state ...' string in a typed structure, which fails as
     # a type error and looks like a component defect. Recurse.
-    if isinstance(node, str) and node.startswith('!'):
+    if isinstance(node, str) and ATMOS_FN.match(node):
         got = synth(key)
         if got is None:
             dropped.append(key)
