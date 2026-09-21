@@ -53,9 +53,23 @@ components:
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
         github_oidc_create_provider: true
-        ci_apply_role_enabled: true
+        # Roles become <prefix>-plan and <prefix>-apply. Naming convention from
+        # catalog/iam/defaults.yaml, so context.environment (the instance name)
+        # is the right key here -- unlike the `environment` variable, a tier.
+        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci"
+        # Deliberately OFF. AWS_PLAN_ROLE_ARN needs only the PLAN role, which
+        # ships safe: ReadOnlyAccess by default, admin policies rejected at
+        # variables.tf:295. The APPLY role has no such guardrail and no
+        # defensible default -- it deploys the iam component itself, so
+        # PowerUserAccess+IAMFullAccess is admin with extra steps. Enable it
+        # only with a scoped customer-managed policy and a permissions boundary.
+        ci_apply_role_enabled: false
         ci_apply_role_environments:
           - "fnx-prod-production"
+        # Lets the plan role take the .tflock rather than only read state.
+        # backend/main is already a declared dependency below.
+        ci_state_bucket_name: !terraform.state backend/main .backend_bucket
+        ci_state_kms_key_arn: !terraform.state backend/main .backend_kms_key_arn
       dependencies:
         components:
           - component: backend/main
