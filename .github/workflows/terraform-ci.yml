@@ -99,10 +99,17 @@ jobs:
           persist-credentials: false
       # One shared provider cache across ~90 `terraform init`s. Without it each
       # pair redownloads the AWS provider and the job takes hours.
+      #
+      # The sweep builds its mirror with `git ls-files`. The workspace is
+      # created by the runner's user and the container runs as root, so git
+      # refuses the repository as "dubious ownership" -- checkout's own
+      # safe.directory entry goes into a temporary global config that later
+      # steps never see -- and the sweep stops before planning anything.
       - name: Plan every stack/component pair
         env:
           TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p "$TF_PLUGIN_CACHE_DIR"
           atmos workflow plan-sweep -f validate-enhanced
 

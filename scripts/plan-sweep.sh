@@ -45,7 +45,9 @@
 # planned at all; 2 if a required tool is missing or the diagnostic parser
 # fails its self-test; else 0. INCONCLUSIVE and UNATTRIBUTABLE do not fail the
 # run, but neither is ever reported as a pass. A PASS says how the plan ended:
-# "full plan", or "stopped at credentials" once everything before them held.
+# "full plan", or "stopped at an expected refusal" once everything before it
+# held -- the unissued key refused by AWS, or the synthetic EKS host that does
+# not resolve.
 set -u
 
 # Varfiles hold every resolved stack variable. Keep everything this run
@@ -199,15 +201,46 @@ gen_ca_cert() {
 # `git ls-files -co --exclude-standard` is the working tree minus what git
 # ignores: uncommitted edits are swept, generated files never are. Tracked
 # files deleted in the working tree are left out rather than failing the copy.
+#
+# The mirror is rebuilt from nothing on every run. A caller-supplied workdir
+# outlives the run, and tar only ever adds: a file deleted from the repository,
+# a .terraform/ directory and its lock file would all survive into the next
+# sweep and be planned as if they were still the working tree.
 # ---------------------------------------------------------------------------
 MIRROR="$WORK/mirror"
+rm -rf "$MIRROR" || exit 2
 mkdir -p "$MIRROR" || exit 2
 git ls-files -z -co --exclude-standard -- components/terraform |
   while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done |
   tar --null -T - -cf - | tar -xf - -C "$MIRROR"
+# Every stage but the filter has to succeed. The filter's status is that of its
+# last test, which is 1 whenever the last file listed was deleted in the
+# working tree, so it says nothing. A git or tar that failed half way leaves a
+# mirror with components missing, and the check below only notices one that is
+# missing all of them.
+mirror_rc=("${PIPESTATUS[@]}")
+if [ "${mirror_rc[0]}" -ne 0 ] || [ "${mirror_rc[2]}" -ne 0 ] || [ "${mirror_rc[3]}" -ne 0 ]; then
+  printf '%s\n' "error: copying components/terraform into $MIRROR failed" \
+    "       (git ls-files, tar create, tar extract exited ${mirror_rc[0]}, ${mirror_rc[2]}, ${mirror_rc[3]})." >&2
+  exit 2
+fi
 if ! ls -d "$MIRROR"/components/terraform/*/ >/dev/null 2>&1; then
   printf '%s\n' "error: could not copy components/terraform into $MIRROR" >&2
   exit 2
+fi
+
+# Untracked files are swept on purpose, so that uncommitted work is checked
+# before it is committed. An untracked override file, though, is exactly the
+# contamination the mirror exists to keep out: Terraform merges it into every
+# plan of that component, and it is usually a leftover rather than a change
+# anyone means to commit. It stays in -- it may be deliberate -- but it is
+# named, so that a verdict it changed is not mistaken for the committed code's.
+stray_overrides=$(git ls-files -o --exclude-standard -- components/terraform |
+  grep -E '(^|/)([^/]*_)?override\.tf(\.json)?$')
+if [ -n "$stray_overrides" ]; then
+  printf '%s\n' "warning: untracked override files are included in the sweep, and Terraform" \
+    "         merges each into every plan of its component:" >&2
+  printf '%s\n' "$stray_overrides" | sed 's/^/           /' >&2
 fi
 
 # In the mirror only, let each plan past the AWS provider's own credential
@@ -218,33 +251,80 @@ fi
 # set. Every API call still carries the unissued key and is refused, so a
 # component that reads a data source stops at its first one, as before.
 #
-# An override needs a base block to merge into, so it goes only where a
-# non-aliased provider "aws" is declared. awk gets the files as arguments, not
-# concatenated: several lack a final newline, and cat would glue one file's
-# closing brace onto the next file's provider line.
+# Which components get it is decided by what they use, not by parsing their
+# provider blocks: Terraform 1.16 accepts a default provider "aws" override
+# even where the configuration declares only an aliased block, or none at all.
+# It is still left out of a component that never touches AWS
+# (eks-backend-services): there it would not break init, but it would make
+# Terraform download the AWS provider for nothing.
+#
+# An override never reaches an ALIASED provider, so each alias gets its own
+# block; without one, backup's replica and dns's dns_account would still
+# validate the unissued key. Aliases are read one file at a time, from the
+# files as arguments rather than concatenated: several lack a final newline,
+# and cat would glue one file's closing brace onto the next file's provider line.
 for d in "$MIRROR"/components/terraform/*/; do
   ls "$d"*.tf >/dev/null 2>&1 || continue
-  has_default=$(awk '
-    FNR == 1                         { inb = 0 }
-    /^provider "aws" [{]/            { inb = 1; al = 0; next }
-    inb && /alias[[:space:]]*=/      { al = 1 }
-    inb && /^[}]/                    { if (!al) n++; inb = 0 }
-    END                              { print n + 0 }
+  grep -Eqs 'hashicorp/aws|^[[:space:]]*(resource|data)[[:space:]]+"aws_' "$d"*.tf || continue
+  aliases=$(awk '
+    FNR == 1                                  { inb = 0 }
+    /^provider[[:space:]]+"aws"[[:space:]]*[{]/ { inb = 1; next }
+    inb && /^[}]/                             { inb = 0; next }
+    inb && /^[[:space:]]*alias[[:space:]]*=/  {
+      a = $0
+      sub(/^[^"]*"/, "", a)
+      sub(/".*$/, "", a)
+      if (a != "" && !seen[a]++) print a
+    }
   ' "$d"*.tf)
-  [ "$has_default" -gt 0 ] || continue
-  cat >"${d}plan_sweep_override.tf" <<'EOF'
-provider "aws" {
-  skip_credentials_validation = true
-  skip_requesting_account_id  = true
-  skip_metadata_api_check     = true
-}
-EOF
+  {
+    for a in "" $aliases; do
+      printf '%s\n' 'provider "aws" {'
+      [ -n "$a" ] && printf '  alias                       = "%s"\n' "$a"
+      printf '%s\n' '  skip_credentials_validation = true' \
+        '  skip_requesting_account_id  = true' \
+        '  skip_metadata_api_check     = true' '}'
+    done
+  } >"${d}plan_sweep_override.tf"
 done
 
 # A fresh mirror means a fresh `terraform init` in every component on every
 # run; without a shared cache that is one AWS provider download apiece.
 export TF_PLUGIN_CACHE_DIR="${TF_PLUGIN_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/plan-sweep/terraform-plugins}"
 mkdir -p "$TF_PLUGIN_CACHE_DIR" || exit 2
+
+# ---------------------------------------------------------------------------
+# A stand-in for the aws CLI, on PATH for the plans only.
+#
+# external-secrets' kubernetes and helm providers authenticate with an exec
+# plugin that runs `aws eks get-token`. A developer's machine has the aws CLI
+# and CI's atmos image does not, so the same pair used to stop at "executable
+# aws not found" in CI and at the synthetic host's DNS failure on a laptop --
+# two different verdicts for one commit. With this first on PATH both get the
+# same static token and both stop at the DNS failure, which EXPECTED_RE knows.
+#
+# It answers `eks get-token` and nothing else. Anything more would mean some
+# plan wants the real CLI, and the real CLI must never run here: it would read
+# whatever credentials the machine has, which is what pinning them above exists
+# to prevent. The apiVersion is echoed from the request client-go sends in
+# KUBERNETES_EXEC_INFO, so it matches whichever version the exec block names;
+# v1beta1, external-secrets' version, is only the fallback.
+# ---------------------------------------------------------------------------
+AWS_SHIM_DIR="$WORK/aws-shim"
+mkdir -p "$AWS_SHIM_DIR" || exit 2
+cat >"$AWS_SHIM_DIR/aws" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = eks ] && [ "${2:-}" = get-token ]; then
+  api=$(printf '%s' "${KUBERNETES_EXEC_INFO:-}" |
+    sed -n 's/.*"apiVersion":"\(client\.authentication\.k8s\.io\/v[0-9a-z]*\)".*/\1/p')
+  printf '{"kind":"ExecCredential","apiVersion":"%s","spec":{},"status":{"expirationTimestamp":"2099-01-01T00:00:00Z","token":"k8s-aws-v1.plan-sweep-synthetic"}}\n' \
+    "${api:-client.authentication.k8s.io/v1beta1}"
+  exit 0
+fi
+echo "plan-sweep: the aws CLI stand-in only answers 'eks get-token'; refusing 'aws $*'." >&2
+exit 1
+EOF
+chmod 755 "$AWS_SHIM_DIR/aws" || exit 2
 
 SYNTH_CA_CERT="$(gen_ca_cert)" || SYNTH_CA_CERT=""
 if [ -z "$SYNTH_CA_CERT" ]; then
@@ -487,8 +567,12 @@ fold_diags() {
 # The last alternative is the synthetic EKS host failing to resolve -- and only
 # that host, so a kubernetes error against anything else is still an ERROR.
 # Its dots are bracketed rather than escaped: awk -v would eat the backslash.
+# Go words the failure per platform: macOS's resolver says "lookup HOST: no
+# such host", Linux's names the server it asked, "lookup HOST on
+# 192.168.65.7:53: no such host". Matching only the first had CI report ERROR
+# for the external-secrets pairs that PASSed on a laptop.
 EXPECTED_RE='InvalidClientTokenId|UnrecognizedClientException|InvalidAccessKeyId|no valid credential sources|AuthFailure|ExpiredToken'
-EXPECTED_RE="$EXPECTED_RE|lookup ${SYNTH_EKS_HOST//./[.]}: no such host"
+EXPECTED_RE="$EXPECTED_RE|lookup ${SYNTH_EKS_HOST//./[.]}( on [^ ]+)?: no such host"
 
 # "Invalid value for variable" is a failed validation block; "Invalid value for
 # INPUT variable" is a failed type constraint. Both are the component rejecting
@@ -531,8 +615,11 @@ PLAN_ARGS=(-input=false)
 # The parser IS the gate: every verdict is derived from what it extracts, so
 # when it silently extracts nothing, every pair reads as PASS. Before trusting
 # it with a real plan, feed it one validation failure -- inner value box
-# included -- and one credential stop, and refuse to run unless both come back
-# classified, with the detail intact.
+# included -- one credential stop, and the synthetic host's DNS failure in
+# Linux's wording, and refuse to run unless all three come back classified,
+# with the detail intact. The DNS case is here because macOS never produces
+# that wording: a regex that only matched the Mac's passed every local run
+# and failed only in CI.
 selftest="$WORK/parser-selftest.txt"
 cat >"$selftest" <<'EOF'
 ╷
@@ -551,8 +638,23 @@ cat >"$selftest" <<'EOF'
 │ api error InvalidClientTokenId: The security token included in the request is invalid.
 ╵
 EOF
+# Unquoted, unlike the one above, so that the host follows the constant. The
+# detail is wrapped mid-message, as Terraform wraps it.
+cat >>"$selftest" <<EOF
+╷
+│ Error: Invalid configuration for API client
+│
+│   with kubernetes_manifest.cluster_secret_store,
+│   on main.tf line 20, in resource "kubernetes_manifest" "cluster_secret_store":
+│   20: resource "kubernetes_manifest" "cluster_secret_store" {
+│
+│ Get "https://${SYNTH_EKS_HOST}/apis": dial tcp: lookup ${SYNTH_EKS_HOST} on
+│ 192.168.65.7:53: no such host
+╵
+EOF
 selftest_want='INVALID|var.x is "bad" x must be good.
-EXPECTED|api error InvalidClientTokenId: The security token included in the request is invalid.'
+EXPECTED|api error InvalidClientTokenId: The security token included in the request is invalid.
+EXPECTED|with kubernetes_manifest.cluster_secret_store, Get "https://'"$SYNTH_EKS_HOST"'/apis": dial tcp: lookup '"$SYNTH_EKS_HOST"' on 192.168.65.7:53: no such host'
 selftest_got=$(fold_diags "$selftest" | classify_diags | awk -F'\t' '{ print $1 "|" $4 }')
 if [ "$selftest_got" != "$selftest_want" ]; then
   KEEP_WORK=1
@@ -606,12 +708,20 @@ printf '%s\n' "-----------------------------------------------------------------
 # A failure is recorded rather than discarded for the same reason: a component
 # that cannot init cannot plan, and calling that ERROR blames the component for
 # this script's broken setup.
+#
+# No .terraform.lock.hcl is committed, and since Terraform 1.4 init will not
+# install a provider from TF_PLUGIN_CACHE_DIR without a lock entry to check it
+# against -- so every fresh mirror downloaded every provider again. Letting the
+# cache through is safe here and only here: the lock files these inits write
+# live in the mirror and are thrown away with it, never committed, so there is
+# no lock file for a cached provider to break.
 init_failed=""
 for d in "$MIRROR"/components/terraform/*/; do
   comp="$(basename "$d")"
   case "$comp" in _*) continue ;; esac
   ls "$d"*.tf >/dev/null 2>&1 || continue
-  if ! (cd "$d" && terraform init -backend=false -input=false) \
+  if ! (cd "$d" && TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=true \
+    terraform init -backend=false -input=false) \
     >"$WORK/init__$comp.log" 2>&1; then
     init_failed="$init_failed $comp"
   fi
@@ -685,7 +795,8 @@ for s in $STACKS; do
     out="$WORK/$tag.txt"
     cls="$WORK/$tag.diag"
     swept=$((swept + 1))
-    (cd "$dir" && terraform plan "${PLAN_ARGS[@]}" -var-file="$vf" >"$out" 2>&1)
+    (cd "$dir" && PATH="$AWS_SHIM_DIR:$PATH" \
+      terraform plan "${PLAN_ARGS[@]}" -var-file="$vf" >"$out" 2>&1)
     rc=$?
     fold_diags "$out" | classify_diags >"$cls"
 
@@ -694,7 +805,7 @@ for s in $STACKS; do
     other=$(grep -c '^OTHER' "$cls")
     expected=$(grep -c '^EXPECTED' "$cls")
 
-    how="stopped at credentials"
+    how="stopped at an expected refusal"
     [ "$rc" -eq 0 ] && how="full plan"
 
     # Every verdict below is derived from diagnostics, so a plan that failed
@@ -747,7 +858,7 @@ done
 printf '%s\n' "-------------------------------------------------------------------"
 printf 'PASS %s   FAIL %s   ERROR %s   UNATTRIBUTABLE %s   INCONCLUSIVE %s   SKIP %s\n' \
   "$pass" "$fail" "$errored" "$unattributable" "$inconclusive" "$skip"
-printf '  of the passes: %s planned in full, %s stopped at credentials\n' \
+printf '  of the passes: %s planned in full, %s stopped at an expected refusal\n' \
   "$pass_full" "$((pass - pass_full))"
 
 if [ "$KEEP_WORK" = 0 ] && [ "$fail" = 0 ] && [ "$errored" = 0 ] &&
