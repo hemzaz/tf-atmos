@@ -8,8 +8,10 @@
 # emulator lane does bind them, but covers 5 of 28 components and needs a
 # running emulator.
 #
-# No AWS account is required. Terraform evaluates variable validations BEFORE
-# the provider authenticates, so `InvalidClientTokenId` is expected and ignored.
+# No AWS account is required, and none is used: the script pins its own
+# unissued credentials (see below), so a plan that gets as far as the provider
+# stops at `InvalidClientTokenId`, which is expected and ignored. Terraform
+# evaluates variable validations BEFORE the provider authenticates.
 #
 # WHAT THIS CAN AND CANNOT SEE
 #
@@ -38,14 +40,54 @@
 #   bash scripts/plan-sweep.sh                       # the three real stacks
 #   bash scripts/plan-sweep.sh fnx-prod-production   # only these stacks
 #
-# Exit status: 1 if any pair FAILs or ERRORs, else 0. INCONCLUSIVE and
-# UNATTRIBUTABLE do not fail the run, but neither is ever reported as a pass.
+# Exit status: 1 if any pair FAILs, ERRORs or is SKIPped, or if nothing was
+# planned at all; 2 if a required tool is missing or the diagnostic parser
+# fails its self-test; else 0. INCONCLUSIVE and UNATTRIBUTABLE do not fail the
+# run, but neither is ever reported as a pass. A PASS says how the plan ended:
+# "full plan", or "stopped at credentials" once everything before them held.
 set -u
+
+# Varfiles hold every resolved stack variable. Keep everything this run
+# writes private to the user running it, a caller-supplied workdir included.
+umask 077
+
+# Pin the credentials instead of inheriting them. Through the default chain a
+# developer's live profile would have every plan read a real account, while CI
+# has none at all and ends somewhere else again -- and the same commit has to
+# reach the same verdicts everywhere. STS rejects an unissued key with
+# InvalidClientTokenId, the stop EXPECTED_RE recognises; the metadata endpoint
+# is disabled so the provider never waits on one that is not there. The key
+# deliberately does not look like a real one, so secret scanners stay quiet.
+unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SESSION_TOKEN AWS_SECURITY_TOKEN \
+  AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_CONTAINER_CREDENTIALS_FULL_URI \
+  AWS_CONTAINER_CREDENTIALS_RELATIVE_URI AWS_CONTAINER_AUTHORIZATION_TOKEN
+export AWS_ACCESS_KEY_ID=PLANSWEEPSYNTHETIC
+export AWS_SECRET_ACCESS_KEY=plan-sweep-synthetic-not-a-credential
+export AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null
+export AWS_EC2_METADATA_DISABLED=true
+
+# The rest of what a shell can hand a plan: an endpoint override sends it to an
+# emulator that accepts any key; TF_CLI_ARGS* add arguments to every command;
+# TF_VAR_* fills a variable the varfile lacks and hides a MISSING; a kubeconfig
+# hands an unconfigured kubernetes provider a real cluster.
+for v in $(compgen -e); do
+  case "$v" in
+    AWS_ENDPOINT_URL* | TF_CLI_ARGS* | TF_VAR_* | KUBECONFIG | KUBE_*) unset "$v" ;;
+  esac
+done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STACKS="${*:-fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production}"
 
 cd "$REPO" || exit 1
+
+# A missing tool is this script's failure, not ninety SKIPs to be read as one.
+for tool in atmos terraform python3; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    printf 'error: %s not found on PATH; nothing can be planned without it.\n' "$tool" >&2
+    exit 2
+  fi
+done
 
 fail=0
 pass=0
@@ -53,6 +95,9 @@ inconclusive=0
 unattributable=0
 errored=0
 skip=0
+swept=0
+pass_full=0
+interrupted=0
 
 # A caller-supplied workdir is the caller's to keep. One we made ourselves is
 # removed on exit ONLY if the run was completely clean -- if anything needs
@@ -72,11 +117,24 @@ fi
 
 cleanup() {
   [ "$KEEP_WORK" = 1 ] && return 0
-  [ "$fail" = 0 ] && [ "$errored" = 0 ] && [ "$unattributable" = 0 ] &&
-    [ "$inconclusive" = 0 ] && [ "$skip" = 0 ] && rm -rf "$WORK"
+  [ "$interrupted" = 0 ] && [ "$fail" = 0 ] && [ "$errored" = 0 ] &&
+    [ "$unattributable" = 0 ] && [ "$inconclusive" = 0 ] && [ "$skip" = 0 ] &&
+    rm -rf "$WORK"
   return 0
 }
-trap cleanup EXIT INT TERM
+
+# A signal handler that returns resumes the script: Ctrl-C used to stop only
+# the plan in flight, the loop moved on to the next pair, and the interrupted
+# pair -- which never printed a diagnostic -- read as a pass. Exit instead. The
+# EXIT trap still runs, and keeps the workdir because the run is incomplete.
+on_signal() {
+  interrupted=1
+  printf '\ninterrupted; varfiles and plan logs kept in %s\n' "$WORK" >&2
+  exit "$1"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # ---------------------------------------------------------------------------
 # Synthetic CA certificate, generated fresh per run.
@@ -299,6 +357,15 @@ PYEOF
 #
 # Fold each box back into a single "<summary>TAB<detail>" record instead, and
 # make every later decision per diagnostic.
+#
+# The box characters are multibyte, and CI's awk is mawk, which matches BYTES.
+# To it [│|] was a class of four bytes, so sub() removed the first byte of the
+# bar and left two behind; no summary then began with "Error: ", every
+# diagnostic was discarded, and every pair in CI reported PASS -- ten real
+# defects included, on a commit that reported them on macOS. ├─* likewise
+# repeated only the last byte of the dash. Keep multibyte characters out of
+# bracket expressions and group them before repeating; the self-test below
+# fails the run if a byte-wise and a character-wise awk ever disagree again.
 # ---------------------------------------------------------------------------
 fold_diags() {
   sed 's/\x1b\[[0-9;]*m//g' "$1" | awk '
@@ -306,7 +373,7 @@ fold_diags() {
     /^╵/ { if (inblk && s != "") print s "\t" ctx "\t" b; inblk=0; s=""; ctx=""; b=""; next }
     inblk {
       l = $0
-      sub(/^[│|]/, "", l)
+      sub(/^(│|[|])/, "", l)
       sub(/^[ \t]+/, "", l)
       sub(/[ \t]+$/, "", l)
       if (l == "") next
@@ -315,7 +382,7 @@ fold_diags() {
       # the inner bar prefixes the values, which do matter. Drop the first,
       # unwrap the second, or both end up in the one-line detail ahead of the
       # sentence that says what is wrong.
-      if (l ~ /^├─*$/) next
+      if (l ~ /^├(─)*$/) next
       sub(/^│[ ]?/, "", l)
       sub(/^[ \t]+/, "", l)
       if (l == "") next
@@ -376,6 +443,77 @@ show_diags() {
     cut -c1-160 | sed 's/^/        /' | head -"$3"
 }
 
+# Every plan this script runs -- the self-test's and the sweep's -- takes these
+# arguments and no others, so the self-test always reads the same format the
+# sweep does. -no-color, for one, drops the diagnostic box entirely.
+PLAN_ARGS=(-input=false)
+
+# The parser IS the gate: every verdict is derived from what it extracts, so
+# when it silently extracts nothing, every pair reads as PASS. Before trusting
+# it with a real plan, feed it one validation failure -- inner value box
+# included -- and one credential stop, and refuse to run unless both come back
+# classified, with the detail intact.
+selftest="$WORK/parser-selftest.txt"
+cat >"$selftest" <<'EOF'
+╷
+│ Error: Invalid value for variable
+│
+│   on variables.tf line 3, in variable "x":
+│    3:   validation {
+│     ├────────────────
+│     │ var.x is "bad"
+│
+│ x must be good.
+╵
+╷
+│ Error: Retrieving AWS account details
+│
+│ api error InvalidClientTokenId: The security token included in the request is invalid.
+╵
+EOF
+selftest_want='INVALID|var.x is "bad" x must be good.
+EXPECTED|api error InvalidClientTokenId: The security token included in the request is invalid.'
+selftest_got=$(fold_diags "$selftest" | classify_diags | awk -F'\t' '{ print $1 "|" $4 }')
+if [ "$selftest_got" != "$selftest_want" ]; then
+  KEEP_WORK=1
+  printf '%s\n' "error: the diagnostic parser failed its self-test, so every verdict would be" >&2
+  printf '%s\n' "       wrong. Expected:" "$selftest_want" "       Got:" "$selftest_got" >&2
+  exit 2
+fi
+
+# The canned sample proves the regexes, not the format: that belongs to
+# Terraform and to the flags this script passes, and a change to either once
+# turned every pair into an ERROR while the sample above still passed. So also
+# run a real plan, with the sweep's own PLAN_ARGS, on a module that breaks one
+# validation rule and one type constraint -- no providers, so no init -- and
+# require both to come back INVALID.
+st_mod="$WORK/parser-selftest-module"
+mkdir -p "$st_mod"
+cat >"$st_mod/main.tf" <<'EOF'
+variable "x" {
+  type = string
+  validation {
+    condition     = var.x == "good"
+    error_message = "x must be good."
+  }
+}
+
+variable "y" {
+  type = map(object({ p = number }))
+}
+EOF
+printf '%s\n' '{"x":"bad","y":{"a":{"p":1},"b":{"q":2}}}' >"$st_mod/vars.json"
+(cd "$st_mod" && terraform plan "${PLAN_ARGS[@]}" -var-file=vars.json >plan.txt 2>&1)
+st_rc=$?
+st_got=$(fold_diags "$st_mod/plan.txt" | classify_diags | cut -f1 | tr '\n' ' ')
+if [ "$st_rc" -eq 0 ] || [ "$st_got" != "INVALID INVALID " ]; then
+  KEEP_WORK=1
+  printf '%s\n' "error: the parser cannot read this terraform's own plan output (exit $st_rc," >&2
+  printf '%s\n' "       classified as '${st_got}', expected 'INVALID INVALID '), so every" >&2
+  printf '%s\n' "       verdict would be wrong. See $st_mod/plan.txt" >&2
+  exit 2
+fi
+
 printf '%-24s %-26s %s\n' STACK COMPONENT RESULT
 printf '%s\n' "-------------------------------------------------------------------"
 
@@ -402,15 +540,42 @@ done
 for s in $STACKS; do
   # `atmos list components` emits TAB-separated "<component>\t<type>\t<count>".
   # Splitting on whitespace yields three tokens per line and invents components.
-  for c in $(atmos list components -s "$s" 2>/dev/null | cut -f1); do
+  #
+  # Its failure used to be discarded along with its stderr: a mistyped stack
+  # listed nothing, the loop never ran, and the run exited 0 having planned
+  # nothing. A stack with no terraform components is an error -- and so is a
+  # column layout this script no longer recognises, which filters to the same
+  # empty list.
+  listed=$(atmos list components -s "$s" 2>"$WORK/list__$s.err")
+  comps=$(printf '%s\n' "$listed" | awk -F'\t' '$2 == "terraform" { print $1 }')
+  if [ -z "$comps" ]; then
+    printf '%-24s %-26s %s\n' "$s" "-" "ERROR no terraform components listed"
+    head -3 "$WORK/list__$s.err" | cut -c1-160 | sed 's/^/        /'
+    errored=$((errored + 1))
+    continue
+  fi
+
+  for c in $comps; do
     tag="${s}__$(printf '%s' "$c" | tr / _)"
     vf="$WORK/$tag.json"
+    desc="$WORK/$tag.describe.json"
 
     # The describe has to happen BEFORE the directory is resolved: it is the
     # only thing that knows which terraform component this instance maps to.
-    if ! meta=$(atmos describe component "$c" -s "$s" --process-functions=false --format json 2>/dev/null |
-      python3 "$SYNTH_PY" "$vf"); then
+    #
+    # Two steps, each keeping its own stderr. They used to share one pipe whose
+    # only message was "describe failed" -- even when it was the varfile
+    # builder that failed, printing its traceback into the middle of the table.
+    if ! atmos describe component "$c" -s "$s" --process-functions=false --format json \
+      >"$desc" 2>"$WORK/$tag.describe.err"; then
       printf '%-24s %-26s %s\n' "$s" "$c" "SKIP describe failed"
+      head -2 "$WORK/$tag.describe.err" | cut -c1-160 | sed 's/^/        /'
+      skip=$((skip + 1))
+      continue
+    fi
+    if ! meta=$(python3 "$SYNTH_PY" "$vf" <"$desc" 2>"$WORK/$tag.build.err"); then
+      printf '%-24s %-26s %s\n' "$s" "$c" "SKIP varfile build failed"
+      tail -2 "$WORK/$tag.build.err" | cut -c1-160 | sed 's/^/        /'
       skip=$((skip + 1))
       continue
     fi
@@ -439,12 +604,27 @@ for s in $STACKS; do
 
     out="$WORK/$tag.txt"
     cls="$WORK/$tag.diag"
-    (cd "$dir" && terraform plan -input=false -var-file="$vf" >"$out" 2>&1)
+    swept=$((swept + 1))
+    (cd "$dir" && terraform plan "${PLAN_ARGS[@]}" -var-file="$vf" >"$out" 2>&1)
+    rc=$?
     fold_diags "$out" | classify_diags >"$cls"
 
     invalid=$(grep -c '^INVALID' "$cls")
     missing=$(grep -c '^MISSING' "$cls")
     other=$(grep -c '^OTHER' "$cls")
+    expected=$(grep -c '^EXPECTED' "$cls")
+
+    how="stopped at credentials"
+    [ "$rc" -eq 0 ] && how="full plan"
+
+    # Every verdict below is derived from diagnostics, so a plan that failed
+    # without one this script could read -- a crash, a kill, a parser that no
+    # longer understands the output -- used to fall through all of them to
+    # PASS. An exit status that no diagnostic accounts for is an ERROR.
+    if [ "$rc" -ne 0 ] && [ $((invalid + missing + other + expected)) -eq 0 ]; then
+      printf '%-24s %-26s ERROR plan exited %s with no readable diagnostic\n' "$s" "$c" "$rc"
+      grep -v '^[[:space:]]*$' "$out" | tail -3 | cut -c1-160 | sed 's/^/        /'
+      errored=$((errored + 1))
 
     # An unsynthesizable Atmos function was dropped, so any failure here may be
     # ours rather than the component's -- this script cannot tell the two apart.
@@ -452,7 +632,7 @@ for s in $STACKS; do
     # dropped variables first: the drop is usually in a variable the error never
     # names, so a bare count left the reader unable to rule our own damage in or
     # out, and a real defect could hide behind it.
-    if [ "$ndropped" -gt 0 ] &&
+    elif [ "$ndropped" -gt 0 ] &&
       { [ "$invalid" -gt 0 ] || [ "$missing" -gt 0 ] || [ "$other" -gt 0 ]; }; then
       printf '%-24s %-26s UNATTRIBUTABLE dropped: %s\n' "$s" "$c" "$dropped"
       for b in INVALID MISSING OTHER; do show_diags "$cls" "$b" 4; done
@@ -473,11 +653,13 @@ for s in $STACKS; do
       # Nothing objected, but this script removed values the component may have
       # needed, so the plan it just proved clean is not quite the stack's plan.
       # An unqualified PASS here read as more coverage than there was.
-      printf '%-24s %-26s PASS (dropped: %s)\n' "$s" "$c" "$dropped"
+      printf '%-24s %-26s PASS (%s; dropped: %s)\n' "$s" "$c" "$how" "$dropped"
       pass=$((pass + 1))
+      [ "$rc" -eq 0 ] && pass_full=$((pass_full + 1))
     else
-      printf '%-24s %-26s PASS\n' "$s" "$c"
+      printf '%-24s %-26s PASS (%s)\n' "$s" "$c" "$how"
       pass=$((pass + 1))
+      [ "$rc" -eq 0 ] && pass_full=$((pass_full + 1))
     fi
   done
 done
@@ -485,6 +667,8 @@ done
 printf '%s\n' "-------------------------------------------------------------------"
 printf 'PASS %s   FAIL %s   ERROR %s   UNATTRIBUTABLE %s   INCONCLUSIVE %s   SKIP %s\n' \
   "$pass" "$fail" "$errored" "$unattributable" "$inconclusive" "$skip"
+printf '  of the passes: %s planned in full, %s stopped at credentials\n' \
+  "$pass_full" "$((pass - pass_full))"
 
 if [ "$KEEP_WORK" = 0 ] && [ "$fail" = 0 ] && [ "$errored" = 0 ] &&
   [ "$unattributable" = 0 ] && [ "$inconclusive" = 0 ] && [ "$skip" = 0 ]; then
@@ -493,8 +677,17 @@ else
   printf 'varfiles and plan logs: %s\n' "$WORK"
 fi
 
+status=0
+if [ "$swept" -eq 0 ]; then
+  printf '\n%s\n' "NOTHING WAS PLANNED: no stack/component pair reached terraform plan."
+  status=1
+fi
 if [ "$fail" -gt 0 ] || [ "$errored" -gt 0 ]; then
   printf '\n%s\n' "FAILING pairs cannot plan in their own stack."
-  exit 1
+  status=1
 fi
-exit 0
+if [ "$skip" -gt 0 ]; then
+  printf '\n%s\n' "SKIPPED pairs were never planned, so this run checked nothing about them."
+  status=1
+fi
+exit "$status"

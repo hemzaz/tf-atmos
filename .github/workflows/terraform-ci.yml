@@ -86,6 +86,9 @@ jobs:
     # the other way round.
     name: Plan sweep
     runs-on: ubuntu-latest
+    # ~9 minutes on a clean run. A hung plan otherwise holds a runner for the
+    # 6-hour default before anyone hears about it.
+    timeout-minutes: 30
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
     permissions:
