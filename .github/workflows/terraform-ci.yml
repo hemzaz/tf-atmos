@@ -37,6 +37,7 @@ on:
       - components/**
       - stacks/**
       - workflows/**
+      - scripts/**
       - .trivyignore.yaml
       - .checkov.baseline
       - .github/workflows/terraform-ci.yml
@@ -70,6 +71,37 @@ jobs:
         run: atmos workflow lint -f lint
       - name: Validate config, stacks and root modules
         run: atmos workflow validate-all -f validate-enhanced
+
+  plan-sweep:
+    # The rung between `terraform validate` and the emulator lanes: bind each
+    # stack's resolved variables to its component and plan. No AWS credentials
+    # and none wanted -- variable validations and (for components that need no
+    # provider data) lifecycle preconditions are evaluated before the provider
+    # authenticates, so every plan is expected to end at InvalidClientTokenId
+    # with nothing having objected on the way. A pair that objects earlier is
+    # a real finding; scripts/plan-sweep.sh exits 1 on it.
+    #
+    # Deliberately not in the lint job: this plans ~90 pairs and is the slowest
+    # gate in the file, and a lint failure should not hide a sweep failure or
+    # the other way round.
+    name: Plan sweep
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # One shared provider cache across ~90 `terraform init`s. Without it each
+      # pair redownloads the AWS provider and the job takes hours.
+      - name: Plan every stack/component pair
+        env:
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          atmos workflow plan-sweep -f validate-enhanced
 
   security-scan:
     name: Security scan
