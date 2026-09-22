@@ -219,21 +219,18 @@ components:
           Tenant: fnx
           ManagedBy: Terraform
 
-    # iam has two lifecycle.preconditions that a naive instance trips, both
-    # gated on create_cross_account_role (default true):
+    # iam has a lifecycle.precondition that a naive instance trips, gated on
+    # create_cross_account_role (default true):
     #
-    #   resource-management-policy.tf:105  at least one of
-    #     managed_s3_bucket_arns / managed_dynamodb_table_arns /
-    #     managed_sns_topic_arns must be non-null. All three default null, so
-    #     the default instance cannot plan.
     #   cross-account-roles.tf:59  trusting an account other than the caller
     #     requires one of trusted_principal_org_id, external_id or require_mfa.
     #
-    # Both are satisfied here deliberately rather than sidestepped. The trusted
+    # It is satisfied here deliberately rather than sidestepped. The trusted
     # account is NOT this lane's own 000000000000: trusting self would make
-    # local.trusts_other_accounts false and short-circuit the second
-    # precondition, leaving the guard unexercised. A foreign account plus an
-    # external_id is what actually proves it.
+    # local.trusts_other_accounts false and short-circuit the precondition,
+    # leaving the guard unexercised. A foreign account plus an external_id is
+    # what actually proves it. managed_s3_bucket_arns is optional; it is set so
+    # the S3 statements of the resource-management policy are exercised too.
     #
     # `environment` is validated against dev/development/staging/stage/prod/
     # production, so it cannot be "localemu" the way the tags are.

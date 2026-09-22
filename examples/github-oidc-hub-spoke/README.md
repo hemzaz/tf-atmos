@@ -116,10 +116,10 @@ components:
           - "arn:aws:s3:::fnx-prod-artifacts"
 ```
 
-`external_id` and `managed_s3_bucket_arns` are not optional decoration — they
-satisfy two `lifecycle` preconditions (`cross-account-roles.tf:59` and
-`resource-management-policy.tf:105`). Strip either and the component cannot
-plan. Use `trusted_principal_org_id` instead of `external_id` if you prefer an
+`external_id` is not optional decoration — it satisfies the `lifecycle`
+precondition at `cross-account-roles.tf:59`. Strip it and the component cannot
+plan. `managed_s3_bucket_arns` is optional: it adds write access to the listed
+buckets on top of the role's read-only, logs and metrics grants. Use `trusted_principal_org_id` instead of `external_id` if you prefer an
 org-wide condition; `require_mfa` also satisfies it, but CI cannot present MFA.
 
 Do **not** set `trusted_account_ids` to the spoke's own account id. That makes

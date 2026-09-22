@@ -101,16 +101,12 @@ resource "aws_iam_policy" "resource_management" {
     ] : statement if length(flatten([statement.Resource])) > 0]
   })
 
-  lifecycle {
-    precondition {
-      condition = (
-        var.managed_s3_bucket_arns != null ||
-        var.managed_dynamodb_table_arns != null ||
-        var.managed_sns_topic_arns != null
-      )
-      error_message = "At least one resource ARN list must be provided for resource-specific permissions."
-    }
-  }
+  # No precondition requiring a managed_* ARN list. The filter above already
+  # drops empty statements, and ReadOnlyAccess, CloudWatchLogsAccess and
+  # CloudWatchMetrics always remain, so the document is valid without them. A
+  # guard that forces extra write grants just to plan is the opposite of least
+  # privilege, and it made every catalog/iam/defaults instance unplannable.
+  # Cloud Posse's aws-iam-role likewise accepts an empty resource list.
 }
 
 resource "aws_iam_role_policy_attachment" "resource_management" {
