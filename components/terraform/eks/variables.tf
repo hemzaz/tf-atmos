@@ -60,7 +60,8 @@ variable "clusters" {
 
       # Per node group, as in cloudposse/terraform-aws-eks-node-group, where one
       # module instance is one node group; same names, semantics and defaults.
-      # random_pet_length: words in the name suffix. 452 names per word.
+      # random_pet_length: words in the name suffix (Name, Adjective-Name, then
+      # one Adverb per extra word); 452 names alone at the default of 1.
       # immediately_apply_lt_changes: null (default) follows
       # create_before_destroy, which is always true here, so any launch
       # template change replaces the node group blue/green. false: a content
@@ -230,9 +231,14 @@ variable "clusters" {
   # Environment when the cluster key already starts with it. A validation cannot
   # read locals, so name_base is written out again here. Keep the two in sync.
   # The check runs here, not in a precondition, so it works without AWS
-  # credentials (see the camel case validation above). The limit is EKS's 63
-  # characters minus 9 per random_pet word: a "-" and the longest word (8
-  # characters in the petname list the pinned random provider ships).
+  # credentials (see the camel case validation above). The pet is unknown
+  # until apply, so the limit is EKS's 63 characters minus the longest
+  # possible "-<pet>". golang-petname (as vendored by the pinned random
+  # provider) generates Name for 1 word, Adjective-Name for 2, and for 3 or
+  # more one Adverb per word beyond two followed by Adjective-Name. Names and
+  # adjectives are at most 8 characters, adverbs at most 10. Adding a "-"
+  # before each word, the budget is 9 * min(n, 2) + 11 * max(n - 2, 0):
+  # 9, 18, 29, 40 ... for n = 1, 2, 3, 4, so name_base may be 54, 45, 34, 23.
   validation {
     condition = alltrue([
       for k, v in var.clusters : alltrue([
@@ -246,11 +252,11 @@ variable "clusters" {
     condition = alltrue(flatten([
       for k, v in var.clusters : [
         for ng_k, ng in v.node_groups :
-        length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") <= 63 - 9 * ng.random_pet_length
+        length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") <= 63 - (9 * min(ng.random_pet_length, 2) + 11 * max(ng.random_pet_length - 2, 0))
         if v.enabled && ng.enabled
       ]
     ]))
-    error_message = "Node group names are limited to 63 characters by EKS. This component appends random_pet_length words of up to 8 characters, each after a '-', so \"<Environment>-<cluster key>-<node group key>\" (the Environment omitted when the cluster key already starts with it) must be at most 63 - 9 * random_pet_length characters (54 at the default length 1). Too long: ${join(", ", flatten([for k, v in var.clusters : [for ng_k, ng in v.node_groups : "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}" if v.enabled && ng.enabled && length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") > 63 - 9 * ng.random_pet_length]]))}."
+    error_message = "Node group names are limited to 63 characters by EKS, and this component appends a random_pet suffix of up to 9 * min(n, 2) + 11 * max(n - 2, 0) characters for random_pet_length n. So \"<Environment>-<cluster key>-<node group key>\" (the Environment omitted when the cluster key already starts with it) may be at most 54, 45, 34 or 23 characters for n = 1, 2, 3 or 4. Too long: ${join(", ", flatten([for k, v in var.clusters : [for ng_k, ng in v.node_groups : "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k} (random_pet_length ${ng.random_pet_length})" if v.enabled && ng.enabled && length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") > 63 - (9 * min(ng.random_pet_length, 2) + 11 * max(ng.random_pet_length - 2, 0))]]))}."
   }
 
   validation {

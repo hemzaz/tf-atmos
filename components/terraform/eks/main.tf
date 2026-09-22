@@ -38,6 +38,8 @@ locals {
   # The launch template's settings in one object, read both by the template
   # and by the random_pet keeper, as `launch_template_config` is in
   # cloudposse/terraform-aws-eks-node-group (launch-template.tf).
+  # Any new aws_launch_template argument must be added here and read from
+  # here; otherwise a change to it rolls in place instead of replacing the group.
   launch_template_configs = {
     for k, ng in local.node_groups : k => {
       block_device_mappings = ng.block_device_map
@@ -398,8 +400,10 @@ resource "aws_launch_template" "node_groups" {
 resource "random_pet" "node_groups" {
   for_each = local.node_groups
 
-  # Each word is at most 8 characters, from 452 names; the name_base length
-  # validation on var.clusters budgets 9 characters (word plus "-") per word.
+  # The pet is Name (length 1), Adjective-Name (2), or one Adverb per word
+  # beyond two, then Adjective-Name (3+). With the pinned random provider,
+  # names and adjectives are at most 8 characters and adverbs at most 10.
+  # The name_base validation on var.clusters budgets exactly that, "-" included.
   length    = each.value.random_pet_length
   separator = "-"
 
@@ -427,7 +431,8 @@ resource "aws_eks_node_group" "node_groups" {
 
   cluster_name = aws_eks_cluster.clusters[each.value.cluster_name].name
   # EKS allows 63 characters. The validation on var.clusters caps name_base
-  # at 63 - 9 * random_pet_length, which leaves room for the pet.
+  # at 63 minus the longest possible "-<pet>", so the name always fits. The
+  # pet is unknown until apply, so the cap is the only plan-time check.
   node_group_name = "${each.value.name_base}-${random_pet.node_groups[each.key].id}"
   node_role_arn   = aws_iam_role.node[each.value.cluster_name].arn
   # A typed object always carries the attribute, so an unset value arrives as
@@ -491,7 +496,10 @@ resource "aws_eks_node_group" "node_groups" {
       scaling_config[0].desired_size, # Allow autoscaling to manage desired size
 
       # Add other attributes that shouldn't trigger replacement if needed
-      # For example, labels and tags might be updated outside Terraform
+      # For example, labels and tags might be updated outside Terraform.
+      # Ignoring tags only matters with immediately_apply_lt_changes = false:
+      # under the default keeper, a tag change is also a launch template
+      # change, so it gives a new pet and replaces the group anyway.
       labels,
       tags
     ]

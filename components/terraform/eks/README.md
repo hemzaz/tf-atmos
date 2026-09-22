@@ -43,8 +43,11 @@ per-node-group instance settings follow `cloudposse/terraform-aws-eks-node-group
   instance types, AMI type, capacity type, launch template). That lets
   `create_before_destroy` start the replacement next to the live group under a
   new name, the way `cloudposse/terraform-aws-eks-node-group` does. The part
-  before the pet may be at most `63 - 9 * random_pet_length` characters (54 by
-  default): each pet word takes up to 8 characters plus a separator. This is
+  before the pet may be at most 54, 45, 34 or 23 characters for a
+  `random_pet_length` of 1, 2, 3 or 4 (54 by default). The pet is a name,
+  an adjective and a name, or adverbs followed by an adjective and a name.
+  Names and adjectives are at most 8 characters and adverbs at most 10, each
+  after a `-`. This is
   enforced by variable validation, so it fails without AWS credentials. The
   node group, its launch template and everything the template launches share
   one `Name` tag, the name without the pet.
