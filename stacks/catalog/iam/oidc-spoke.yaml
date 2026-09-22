@@ -16,17 +16,18 @@
 # CI do in production" is answered by THIS file, per account, rather than by
 # one managed policy that necessarily spans every environment.
 #
-# TWO PRECONDITIONS this base satisfies, both of which fail at PLAN if you
-# strip them. They are lifecycle preconditions, so `terraform validate` cannot
-# see them:
+# ONE PRECONDITION this base satisfies, which fails at PLAN if you strip it.
+# It is a lifecycle precondition, so `terraform validate` cannot see it:
 #
 #   cross-account-roles.tf:59          trusting an account other than the
 #       caller requires at least one of trusted_principal_org_id, external_id
 #       or require_mfa. Trusting your OWN account id short-circuits this and
 #       leaves the guard unexercised -- do not "simplify" it that way.
-#   resource-management-policy.tf:105  at least one of managed_s3_bucket_arns,
-#       managed_dynamodb_table_arns or managed_sns_topic_arns must be non-null.
-#       All three default null, so a bare instance cannot plan.
+#
+# managed_s3_bucket_arns / managed_dynamodb_table_arns / managed_sns_topic_arns
+# are optional. Without them the role gets read-only, CloudWatch Logs and
+# metrics access; list what this account manages to add object/table/topic
+# write access.
 #
 # Usage — in each workload stack (metadata.inherits is REQUIRED; importing this
 # file alone applies nothing):
@@ -91,7 +92,6 @@ components:
         #   require_mfa also satisfies it, but CI cannot present MFA.
         #   "<shared secret>"
         #
-        # managed_s3_bucket_arns:       satisfies
-        #   resource-management-policy.tf:105. Narrow to what this account
+        # managed_s3_bucket_arns:       optional. Narrow to what this account
         #   actually manages; this is the resource-specific half of the role.
         #   - "arn:aws:s3:::<bucket>"
