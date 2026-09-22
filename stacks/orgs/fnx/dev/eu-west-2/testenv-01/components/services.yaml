@@ -213,7 +213,7 @@ components:
       vars:
         create_dashboard: true
         enable_certificate_monitoring: true
-        certificate_arns: !terraform.state acm/main .certificate_arns // {}
+        certificate_arns: !terraform.state acm/main [.certificate_arns // {} | .[]]
         certificate_names: !terraform.state acm/main .certificate_domains // {} | keys
         certificate_domains: !terraform.state acm/main [.certificate_domains // {} | .[]]
         certificate_expiry_threshold: 30
@@ -238,7 +238,7 @@ components:
         enable_certificate_monitoring: true
 
         # Certificate monitoring configuration
-        certificate_arns: !terraform.state acm/services .certificate_arns // {}
+        certificate_arns: !terraform.state acm/services [.certificate_arns // {} | .[]]
         certificate_expiry_threshold: 30
 
         # Alert emails - only send critical alerts

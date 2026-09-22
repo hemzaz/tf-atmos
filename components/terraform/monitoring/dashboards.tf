@@ -15,12 +15,6 @@ locals {
     lambda_functions     = var.lambda_functions
     load_balancers       = var.load_balancers
     elasticache_clusters = var.elasticache_clusters
-    cert_arns            = local.default_cert_arns
-    cert_names           = local.default_cert_names
-    cert_domains         = local.default_cert_domains
-    cert_statuses        = local.default_cert_statuses
-    cert_expiry_dates    = local.default_cert_expiry_dates
-    cert_alarm_arns      = var.certificate_alarm_arns
   }
 }
 
@@ -104,10 +98,7 @@ resource "aws_cloudwatch_dashboard" "certificates" {
 
   dashboard_name = "${var.environment}-certificate-monitoring"
 
-  dashboard_body = templatefile(
-    "${path.module}/templates/certificate-dashboard.json.tpl",
-    local.dashboard_vars
-  )
+  dashboard_body = local.certificate_dashboard_body
 }
 
 # Custom Dashboard (user-provided JSON)

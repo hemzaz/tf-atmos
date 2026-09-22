@@ -166,12 +166,149 @@ locals {
   certificate_statuses     = var.certificate_statuses
   certificate_expiry_dates = var.certificate_expiry_dates
 
-  # Default values if not provided
-  default_cert_arns         = length(local.certificate_arns) > 0 ? local.certificate_arns : ["placeholder"]
-  default_cert_names        = length(local.certificate_names) > 0 ? local.certificate_names : ["No certificates found"]
-  default_cert_domains      = length(local.certificate_domains) > 0 ? local.certificate_domains : ["example.com"]
-  default_cert_statuses     = length(local.certificate_statuses) > 0 ? local.certificate_statuses : ["UNKNOWN"]
-  default_cert_expiry_dates = length(local.certificate_expiry_dates) > 0 ? local.certificate_expiry_dates : ["Not available"]
+  # One row per ARN, indexing the raw lists. try() keeps a shorter
+  # names/domains/... list from failing the plan (monitoring/data sets
+  # certificate_arns alone) without borrowing another row's placeholder. The
+  # placeholder row is used only when there are no ARNs at all.
+  certificate_dashboard_rows = length(local.certificate_arns) > 0 ? [
+    for i, arn in local.certificate_arns : {
+      arn    = arn
+      name   = try(local.certificate_names[i], arn)
+      domain = try(local.certificate_domains[i], "unknown")
+      status = try(local.certificate_statuses[i], "UNKNOWN")
+      expiry = try(local.certificate_expiry_dates[i], "Not available")
+    }
+    ] : [{
+      arn    = "placeholder"
+      name   = "No certificates found"
+      domain = "example.com"
+      status = "UNKNOWN"
+      expiry = "Not available"
+  }]
+
+  # The component's own expiry alarms plus any the stack passes in, merged the
+  # way Cloud Posse merges alarm endpoints (terraform-aws-cloudtrail-cloudwatch-
+  # alarms alarms.tf:7, distinct(compact(concat(...)))).
+  certificate_dashboard_alarm_arns = distinct(compact(concat(
+    var.certificate_alarm_arns,
+    [for a in aws_cloudwatch_metric_alarm.certificate_expiry : a.arn],
+  )))
+
+  # Built with jsonencode, not templatefile. The template interpolated
+  # join("\n\n", ...) inside a JSON string, and an HCL "\n" is a real newline,
+  # so every render was invalid JSON ("invalid character '\n' in string
+  # literal"). jsonencode escapes it. Shared by both certificate dashboards
+  # (certificate_monitoring below, certificates in dashboards.tf).
+  #
+  # widgets is a concat() of lists, and a list is empty when its widget has
+  # nothing valid to show. Cloud Posse likewise derives the widget list from
+  # the data instead of emitting fixed widgets (terraform-aws-cloudtrail-
+  # cloudwatch-alarms alarms.tf:81-101). An Alarm Status widget requires
+  # 1-100 ARNs, so it is omitted when there are none. The log widget is
+  # omitted without a cluster name, since it would query /aws/eks//...
+  certificate_dashboard_body = jsonencode({
+    widgets = concat([
+      {
+        type   = "text"
+        x      = 0
+        y      = 0
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "# Certificate Management Dashboard\nMonitoring TLS certificates across AWS ACM and Kubernetes clusters"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 1
+        width  = 12
+        height = 6
+        properties = {
+          metrics = [
+            for c in local.certificate_dashboard_rows :
+            ["AWS/CertificateManager", "DaysToExpiry", "CertificateArn", c.arn, { label = c.name }]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Certificate Days to Expiry"
+          period  = 300
+          stat    = "Average"
+          yAxis   = { left = { min = 0, max = 90 } }
+          annotations = {
+            horizontal = [
+              { label = "Critical", value = 14, color = "#d13212" },
+              { label = "Warning", value = 30, color = "#ff7f0e" },
+            ]
+          }
+        }
+      },
+      {
+        type   = "text"
+        x      = 12
+        y      = 1
+        width  = 12
+        height = 6
+        properties = {
+          markdown = join("\n\n", concat(
+            ["## Certificate Status"],
+            [
+              for c in local.certificate_dashboard_rows :
+              "- **${c.name}**\n  - ARN: `${c.arn}`\n  - Domain: ${c.domain}\n  - Status: ${c.status}\n  - Expiry: ${c.expiry}"
+            ],
+            ["**Note:** Certificates should be renewed at least 30 days before expiry to avoid service disruption."],
+          ))
+        }
+      },
+      ], length(local.certificate_dashboard_alarm_arns) > 0 ? [
+      {
+        type   = "alarm"
+        x      = 0
+        y      = 7
+        width  = 24
+        height = 6
+        properties = {
+          title  = "Certificate Expiry Alarms"
+          alarms = local.certificate_dashboard_alarm_arns
+        }
+      },
+      ] : [], [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 13
+        width  = 24
+        height = 6
+        properties = {
+          metrics = [
+            ["AWS/SecretsManager", "ResourceCount", "Service", "Secrets Manager", "Type", "Resource", { stat = "Sum" }],
+            ["AWS/SecretsManager", "SuccessfulRequestCount", "Service", "Secrets Manager", "Type", "API", { stat = "Sum" }],
+            ["AWS/SecretsManager", "ErrorCount", "Service", "Secrets Manager", "Type", "Error", { stat = "Sum" }],
+          ]
+          region  = var.region
+          title   = "Secrets Manager Activity (for Certificate Storage)"
+          view    = "timeSeries"
+          stacked = false
+          period  = 300
+        }
+      },
+      ], var.eks_cluster_name != "" ? [
+      {
+        type   = "log"
+        x      = 0
+        y      = 19
+        width  = 24
+        height = 6
+        properties = {
+          query  = "SOURCE '/aws/eks/${var.eks_cluster_name}/external-secrets' | fields @timestamp, @message\n| filter @message like /certificate/ or @message like /secret/\n| sort @timestamp desc\n| limit 100"
+          region = var.region
+          title  = "External Secrets Operator Logs (Certificate Related)"
+          view   = "table"
+        }
+      },
+    ] : [])
+  })
 }
 
 # Certificate monitoring dashboard (renamed from "certificates", which collided with dashboards.tf)
@@ -179,19 +316,7 @@ resource "aws_cloudwatch_dashboard" "certificate_monitoring" {
   count = var.enable_certificate_monitoring ? 1 : 0
 
   dashboard_name = "${local.name_prefix}-certificates"
-  dashboard_body = templatefile(
-    "${path.module}/templates/certificate-dashboard.json.tpl",
-    {
-      region            = var.region
-      cluster_name      = var.eks_cluster_name
-      cert_arns         = local.default_cert_arns
-      cert_names        = local.default_cert_names
-      cert_domains      = local.default_cert_domains
-      cert_statuses     = local.default_cert_statuses
-      cert_expiry_dates = local.default_cert_expiry_dates
-      cert_alarm_arns   = var.certificate_alarm_arns
-    }
-  )
+  dashboard_body = local.certificate_dashboard_body
 }
 
 # Certificate expiry alarms
