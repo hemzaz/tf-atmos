@@ -16,11 +16,12 @@
 # WHAT THIS CAN AND CANNOT SEE
 #
 # Variable validations are evaluated before the provider authenticates, so they
-# are ALWAYS checked. Past that point it depends on the component: one that
+# are ALWAYS checked. The provider's own credential check is switched off (see
+# the mirror, below), so past that point it depends on the component: one that
 # needs no provider data during plan (secretsmanager, for one) plans all the
 # way through, and its lifecycle preconditions are checked too. One that reads
-# a data source stops at InvalidClientTokenId, and anything after that point is
-# invisible.
+# a data source stops at its first one, refused for the unissued key, and
+# anything after that point is invisible.
 #
 #   caught          #145 iam RE2 repetition, #149 environment/stage mix-up,
 #                   #150 rds prod gates, #152 ec2 prefix-list default,
@@ -82,7 +83,7 @@ STACKS="${*:-fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production}"
 cd "$REPO" || exit 1
 
 # A missing tool is this script's failure, not ninety SKIPs to be read as one.
-for tool in atmos terraform python3; do
+for tool in atmos terraform python3 git tar; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     printf 'error: %s not found on PATH; nothing can be planned without it.\n' "$tool" >&2
     exit 2
@@ -183,6 +184,68 @@ gen_ca_cert() {
   return 1
 }
 
+# ---------------------------------------------------------------------------
+# A private copy of the components, planned instead of the working tree.
+#
+# The working tree carries files git ignores and Atmos generates --
+# backend.tf.json, *.tfvars.json and, from the emulator lanes,
+# providers_override.tf.json with test keys and skip_credentials_validation.
+# Terraform merges every *_override.tf.json it finds, so on a developer's
+# machine those leftovers quietly turned credential stops into full plans:
+# the same commit reached six more PASSes and six more ERRORs there than in
+# CI's fresh checkout. And a sweep has no business writing .terraform/ into
+# the repository.
+#
+# `git ls-files -co --exclude-standard` is the working tree minus what git
+# ignores: uncommitted edits are swept, generated files never are. Tracked
+# files deleted in the working tree are left out rather than failing the copy.
+# ---------------------------------------------------------------------------
+MIRROR="$WORK/mirror"
+mkdir -p "$MIRROR" || exit 2
+git ls-files -z -co --exclude-standard -- components/terraform |
+  while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done |
+  tar --null -T - -cf - | tar -xf - -C "$MIRROR"
+if ! ls -d "$MIRROR"/components/terraform/*/ >/dev/null 2>&1; then
+  printf '%s\n' "error: could not copy components/terraform into $MIRROR" >&2
+  exit 2
+fi
+
+# In the mirror only, let each plan past the AWS provider's own credential
+# check. Without this the provider validates the pinned key when it is
+# configured, STS refuses it, and Terraform stops before planning a single
+# resource -- so lifecycle preconditions (secretsmanager's KMS rule, for one)
+# were never evaluated in CI. These are the flags the emulator lanes already
+# set. Every API call still carries the unissued key and is refused, so a
+# component that reads a data source stops at its first one, as before.
+#
+# An override needs a base block to merge into, so it goes only where a
+# non-aliased provider "aws" is declared. awk gets the files as arguments, not
+# concatenated: several lack a final newline, and cat would glue one file's
+# closing brace onto the next file's provider line.
+for d in "$MIRROR"/components/terraform/*/; do
+  ls "$d"*.tf >/dev/null 2>&1 || continue
+  has_default=$(awk '
+    FNR == 1                         { inb = 0 }
+    /^provider "aws" [{]/            { inb = 1; al = 0; next }
+    inb && /alias[[:space:]]*=/      { al = 1 }
+    inb && /^[}]/                    { if (!al) n++; inb = 0 }
+    END                              { print n + 0 }
+  ' "$d"*.tf)
+  [ "$has_default" -gt 0 ] || continue
+  cat >"${d}plan_sweep_override.tf" <<'EOF'
+provider "aws" {
+  skip_credentials_validation = true
+  skip_requesting_account_id  = true
+  skip_metadata_api_check     = true
+}
+EOF
+done
+
+# A fresh mirror means a fresh `terraform init` in every component on every
+# run; without a shared cache that is one AWS provider download apiece.
+export TF_PLUGIN_CACHE_DIR="${TF_PLUGIN_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/plan-sweep/terraform-plugins}"
+mkdir -p "$TF_PLUGIN_CACHE_DIR" || exit 2
+
 SYNTH_CA_CERT="$(gen_ca_cert)" || SYNTH_CA_CERT=""
 if [ -z "$SYNTH_CA_CERT" ]; then
   # Better to drop the variable and report INCONCLUSIVE than to substitute
@@ -192,6 +255,13 @@ if [ -z "$SYNTH_CA_CERT" ]; then
   printf '%s\n' "         cluster_ca_certificate will be dropped rather than guessed." >&2
 fi
 export PLAN_SWEEP_CA_CERT="$SYNTH_CA_CERT"
+
+# The EKS endpoint the varfile builder hands out for `host`. Defined once,
+# because the classifier below has to recognise it: a kubernetes provider that
+# needs the API server at plan time (kubernetes_manifest does) can never reach
+# a host this script invented, and that failure is ours, not the component's.
+SYNTH_EKS_HOST=EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com
+export PLAN_SWEEP_EKS_HOST="$SYNTH_EKS_HOST"
 
 # ---------------------------------------------------------------------------
 # The varfile builder. Kept in its own file, and fed its inputs through the
@@ -232,7 +302,7 @@ SYNTH = [
     (r'^certificate_arns$',           ['arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
     (r'^certificate_names$',          ['main_wildcard']),
     (r'^certificate_domains$',        ['example.com']),
-    (r'^host$',                       'https://EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com'),
+    (r'^host$',                       'https://' + os.environ['PLAN_SWEEP_EKS_HOST']),
     (r'^cluster_name$',               'example-cluster'),
     (r'^oidc_provider_url$',          'oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
@@ -408,7 +478,17 @@ fold_diags() {
 # a varfile whose own values happen to mention one of these words can no longer
 # reach the detail and launder a genuine defect into expected noise. It is also
 # why the two real-defect rules below are decided first.
-EXPECTED_RE='InvalidClientTokenId|no valid credential sources|AuthFailure|ExpiredToken'
+#
+# With the credential check off, the refusal comes from whichever service the
+# first data source calls, and each words it its own way: STS and IAM say
+# InvalidClientTokenId, EC2 AuthFailure, S3 InvalidAccessKeyId, and the JSON
+# APIs (KMS, Secrets Manager, Lambda, ...) UnrecognizedClientException.
+#
+# The last alternative is the synthetic EKS host failing to resolve -- and only
+# that host, so a kubernetes error against anything else is still an ERROR.
+# Its dots are bracketed rather than escaped: awk -v would eat the backslash.
+EXPECTED_RE='InvalidClientTokenId|UnrecognizedClientException|InvalidAccessKeyId|no valid credential sources|AuthFailure|ExpiredToken'
+EXPECTED_RE="$EXPECTED_RE|lookup ${SYNTH_EKS_HOST//./[.]}: no such host"
 
 # "Invalid value for variable" is a failed validation block; "Invalid value for
 # INPUT variable" is a failed type constraint. Both are the component rejecting
@@ -527,7 +607,7 @@ printf '%s\n' "-----------------------------------------------------------------
 # that cannot init cannot plan, and calling that ERROR blames the component for
 # this script's broken setup.
 init_failed=""
-for d in components/terraform/*/; do
+for d in "$MIRROR"/components/terraform/*/; do
   comp="$(basename "$d")"
   case "$comp" in _*) continue ;; esac
   ls "$d"*.tf >/dev/null 2>&1 || continue
@@ -583,7 +663,7 @@ for s in $STACKS; do
     comp=$(printf '%s\n' "$meta" | sed -n 1p)
     dropped=$(printf '%s\n' "$meta" | sed -n 2p)
     [ -n "$comp" ] || comp="${c%%/*}"
-    dir="components/terraform/$comp"
+    dir="$MIRROR/components/terraform/$comp"
 
     if [ ! -d "$dir" ]; then
       printf '%-24s %-26s %s\n' "$s" "$c" "SKIP no component dir ($comp)"
