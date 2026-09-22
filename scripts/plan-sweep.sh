@@ -109,14 +109,29 @@ interrupted=0
 #
 # Absolute, because every plan runs from inside the component's directory and a
 # relative workdir would resolve against that instead.
+#
+# The sweep deletes and rebuilds its mirror inside the workdir, so it has to
+# know the workdir is its own: PLAN_SWEEP_WORKDIR=$HOME, or a project directory
+# that happens to have a mirror/ subdirectory, would otherwise lose it. A
+# workdir the sweep has used carries a marker file. An empty directory is
+# claimed and marked; a non-empty one without the marker is refused.
+WORK_MARKER=.plan-sweep-workdir
 if [ -n "${PLAN_SWEEP_WORKDIR:-}" ]; then
   mkdir -p "$PLAN_SWEEP_WORKDIR" || exit 1
   WORK="$(cd "$PLAN_SWEEP_WORKDIR" && pwd)" || exit 1
   KEEP_WORK=1
+  if [ ! -e "$WORK/$WORK_MARKER" ] && [ -n "$(ls -A "$WORK")" ]; then
+    printf '%s\n' "error: PLAN_SWEEP_WORKDIR=$WORK is not empty and was not created by" \
+      "       plan-sweep (no $WORK_MARKER in it). The sweep deletes and rebuilds" \
+      "       files there, so it will not use a directory it does not own. Point it" \
+      "       at an empty or new directory." >&2
+    exit 2
+  fi
 else
   WORK="$(mktemp -d)" || exit 1
   KEEP_WORK=0
 fi
+: >"$WORK/$WORK_MARKER" || exit 2
 
 cleanup() {
   [ "$KEEP_WORK" = 1 ] && return 0
@@ -205,9 +220,11 @@ gen_ca_cert() {
 # The mirror is rebuilt from nothing on every run. A caller-supplied workdir
 # outlives the run, and tar only ever adds: a file deleted from the repository,
 # a .terraform/ directory and its lock file would all survive into the next
-# sweep and be planned as if they were still the working tree.
+# sweep and be planned as if they were still the working tree. Deleting it is
+# safe because the workdir is marked as the sweep's own (see above).
 # ---------------------------------------------------------------------------
 MIRROR="$WORK/mirror"
+[ -e "$WORK/$WORK_MARKER" ] || exit 2
 rm -rf "$MIRROR" || exit 2
 mkdir -p "$MIRROR" || exit 2
 git ls-files -z -co --exclude-standard -- components/terraform |
@@ -265,7 +282,7 @@ fi
 # and cat would glue one file's closing brace onto the next file's provider line.
 for d in "$MIRROR"/components/terraform/*/; do
   ls "$d"*.tf >/dev/null 2>&1 || continue
-  grep -Eqs 'hashicorp/aws|^[[:space:]]*(resource|data)[[:space:]]+"aws_' "$d"*.tf || continue
+  grep -Eqs 'hashicorp/aws|^[[:space:]]*(resource|data|ephemeral)[[:space:]]+"aws_' "$d"*.tf || continue
   aliases=$(awk '
     FNR == 1                                  { inb = 0 }
     /^provider[[:space:]]+"aws"[[:space:]]*[{]/ { inb = 1; next }
@@ -297,7 +314,8 @@ mkdir -p "$TF_PLUGIN_CACHE_DIR" || exit 2
 # A stand-in for the aws CLI, on PATH for the plans only.
 #
 # external-secrets' kubernetes and helm providers authenticate with an exec
-# plugin that runs `aws eks get-token`. A developer's machine has the aws CLI
+# plugin that runs `aws eks get-token`, and so do eks-addons' (provider.tf), so
+# this covers both components. A developer's machine has the aws CLI
 # and CI's atmos image does not, so the same pair used to stop at "executable
 # aws not found" in CI and at the synthetic host's DNS failure on a laptop --
 # two different verdicts for one commit. With this first on PATH both get the
@@ -312,9 +330,26 @@ mkdir -p "$TF_PLUGIN_CACHE_DIR" || exit 2
 # ---------------------------------------------------------------------------
 AWS_SHIM_DIR="$WORK/aws-shim"
 mkdir -p "$AWS_SHIM_DIR" || exit 2
+#
+# The subcommand is looked for anywhere in the arguments, not at $1, because
+# global options may come first (Cloud Posse's provider-helm.tf passes
+# `--profile NAME eks get-token ...`). --cluster-name is required, as the real
+# CLI requires it, so that a malformed exec block still fails here instead of
+# being handed a token it would never get.
 cat >"$AWS_SHIM_DIR/aws" <<'EOF'
 #!/bin/sh
-if [ "${1:-}" = eks ] && [ "${2:-}" = get-token ]; then
+prev="" get_token=0 cluster=""
+for a in "$@"; do
+  [ "$prev" = eks ] && [ "$a" = get-token ] && get_token=1
+  [ "$prev" = --cluster-name ] && cluster=$a
+  case "$a" in --cluster-name=*) cluster=${a#--cluster-name=} ;; esac
+  prev=$a
+done
+if [ "$get_token" = 1 ]; then
+  if [ -z "$cluster" ]; then
+    echo "aws: error: the following arguments are required: --cluster-name" >&2
+    exit 252
+  fi
   api=$(printf '%s' "${KUBERNETES_EXEC_INFO:-}" |
     sed -n 's/.*"apiVersion":"\(client\.authentication\.k8s\.io\/v[0-9a-z]*\)".*/\1/p')
   printf '{"kind":"ExecCredential","apiVersion":"%s","spec":{},"status":{"expirationTimestamp":"2099-01-01T00:00:00Z","token":"k8s-aws-v1.plan-sweep-synthetic"}}\n' \
@@ -616,10 +651,10 @@ PLAN_ARGS=(-input=false)
 # when it silently extracts nothing, every pair reads as PASS. Before trusting
 # it with a real plan, feed it one validation failure -- inner value box
 # included -- one credential stop, and the synthetic host's DNS failure in
-# Linux's wording, and refuse to run unless all three come back classified,
-# with the detail intact. The DNS case is here because macOS never produces
-# that wording: a regex that only matched the Mac's passed every local run
-# and failed only in CI.
+# both Linux's and macOS's wording, and refuse to run unless all four come
+# back classified, with the detail intact. Both DNS forms are here because
+# each platform only ever produces its own: a regex that only matched the
+# Mac's passed every local run and failed only in CI.
 selftest="$WORK/parser-selftest.txt"
 cat >"$selftest" <<'EOF'
 ╷
@@ -638,8 +673,9 @@ cat >"$selftest" <<'EOF'
 │ api error InvalidClientTokenId: The security token included in the request is invalid.
 ╵
 EOF
-# Unquoted, unlike the one above, so that the host follows the constant. The
-# detail is wrapped mid-message, as Terraform wraps it.
+# Unquoted, unlike the one above, so that the host follows the constant. Linux
+# first, its detail wrapped mid-message as Terraform wraps it; then macOS's
+# shorter form, so that an edit to the regex cannot keep one and lose the other.
 cat >>"$selftest" <<EOF
 ╷
 │ Error: Invalid configuration for API client
@@ -651,10 +687,21 @@ cat >>"$selftest" <<EOF
 │ Get "https://${SYNTH_EKS_HOST}/apis": dial tcp: lookup ${SYNTH_EKS_HOST} on
 │ 192.168.65.7:53: no such host
 ╵
+╷
+│ Error: Invalid configuration for API client
+│
+│   with kubernetes_manifest.certificate_secret_store,
+│   on main.tf line 40, in resource "kubernetes_manifest" "certificate_secret_store":
+│   40: resource "kubernetes_manifest" "certificate_secret_store" {
+│
+│ Get "https://${SYNTH_EKS_HOST}/apis": dial tcp: lookup ${SYNTH_EKS_HOST}: no
+│ such host
+╵
 EOF
 selftest_want='INVALID|var.x is "bad" x must be good.
 EXPECTED|api error InvalidClientTokenId: The security token included in the request is invalid.
-EXPECTED|with kubernetes_manifest.cluster_secret_store, Get "https://'"$SYNTH_EKS_HOST"'/apis": dial tcp: lookup '"$SYNTH_EKS_HOST"' on 192.168.65.7:53: no such host'
+EXPECTED|with kubernetes_manifest.cluster_secret_store, Get "https://'"$SYNTH_EKS_HOST"'/apis": dial tcp: lookup '"$SYNTH_EKS_HOST"' on 192.168.65.7:53: no such host
+EXPECTED|with kubernetes_manifest.certificate_secret_store, Get "https://'"$SYNTH_EKS_HOST"'/apis": dial tcp: lookup '"$SYNTH_EKS_HOST"': no such host'
 selftest_got=$(fold_diags "$selftest" | classify_diags | awk -F'\t' '{ print $1 "|" $4 }')
 if [ "$selftest_got" != "$selftest_want" ]; then
   KEEP_WORK=1
