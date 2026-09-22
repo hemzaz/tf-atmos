@@ -114,6 +114,11 @@ components:
         security_groups:
           # ALB Security Group - allows inbound HTTP/HTTPS from anywhere
           alb:
+            # Every consumer of these groups is another component (it reads the id
+            # through !terraform.state), so a replaced group would leave them on an
+            # emptied old one until they are re-applied. Keep the id; only a changed
+            # rule is briefly absent while it is replaced. See the component README.
+            preserve_security_group_id: true
             description: "Security group for web application ALB"
             ingress_rules:
               - description: "HTTPS from CloudFront"
@@ -138,6 +143,7 @@ components:
 
           # Application Security Group - allows traffic from ALB only
           application:
+            preserve_security_group_id: true
             description: "Security group for web application containers"
             ingress_rules:
               - description: "HTTP from ALB"
@@ -165,6 +171,7 @@ components:
 
           # Database Security Group - allows traffic from application only
           database:
+            preserve_security_group_id: true
             description: "Security group for RDS database"
             ingress_rules:
               - description: "PostgreSQL from application"
@@ -176,6 +183,7 @@ components:
 
           # Cache Security Group - allows traffic from application only
           cache:
+            preserve_security_group_id: true
             description: "Security group for ElastiCache"
             ingress_rules:
               - description: "Redis from application"

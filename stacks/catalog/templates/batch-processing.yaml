@@ -116,6 +116,11 @@ components:
         security_groups:
           # Batch compute security group
           batch_compute:
+            # Every consumer of these groups is another component (it reads the id
+            # through !terraform.state), so a replaced group would leave them on an
+            # emptied old one until they are re-applied. Keep the id; only a changed
+            # rule is briefly absent while it is replaced. See the component README.
+            preserve_security_group_id: true
             description: "Security group for AWS Batch compute"
             ingress_rules: []  # No inbound needed
             egress_rules:
@@ -134,6 +139,7 @@ components:
 
           # EFS security group (if using shared storage)
           efs:
+            preserve_security_group_id: true
             description: "Security group for EFS mount targets"
             ingress_rules:
               - description: "NFS from batch compute"
