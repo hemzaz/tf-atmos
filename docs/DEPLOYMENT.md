@@ -52,6 +52,10 @@ atmos terraform plan vpc/main -s fnx-dev-testenv-01   # expect no resource repla
 The `network/*` instances use the `dns` root module; state from a different module won't match its
 addresses, so import the existing zones instead (`atmos workflow import -f import -s <stack>`).
 
+This section is about moving state to a different **bucket or key**. Moving a resource to a
+different **address** — a rename, a module move, a `count`-to-`for_each` change — is
+[Moving resources in state](./OPERATIONS.md#moving-resources-in-state).
+
 ## Bootstrap the state backend
 
 ```bash

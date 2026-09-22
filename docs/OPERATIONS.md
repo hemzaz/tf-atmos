@@ -39,6 +39,92 @@ atmos workflow deploy-app -f deploy-application -s <stack>   # application layer
 atmos workflow hot-deploy -f deploy-application -s <stack>   # Lambda and API Gateway only
 ```
 
+## Moving resources in state
+
+A change that renames a resource, moves it into or out of a module, or switches
+it between `count` and `for_each` does not change any infrastructure — but
+Terraform sees a new address and plans to destroy the old resource and create
+the new one. The plan is the only warning. Read every plan for `to destroy` and
+`must be replaced` before applying, especially on a refactor that was supposed
+to be cosmetic.
+
+### The default: `moved {}` in the component
+
+Put a `moved` block in the component, next to the resource, with a one-line
+reason. It is code: it is reviewed in the PR, it applies to every stack, and CI
+plans it like anything else. `components/terraform/eks/main.tf` is the
+precedent — five renames to snake_case for `terraform_naming_convention`:
+
+```hcl
+# Renamed to snake_case (tflint terraform_naming_convention); keeps existing state.
+moved {
+  from = aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy
+  to   = aws_iam_role_policy_attachment.cluster_eks_cluster_policy
+}
+```
+
+A `moved` block whose `from` address is absent from state is a no-op, so it is
+safe to keep after every stack has applied it, and safe to add for stacks that
+never had the old address. Leave them in for at least one full deploy cycle
+across dev, staging and prod; they can be deleted once `deployed/<stack>` has
+moved past the change in all three.
+
+`moved` covers: renaming a resource, moving one between modules, changing an
+index (`count` to `for_each`, or a `for_each` key), and renaming a module call.
+
+### `terraform state mv` is the fallback, not the tool
+
+```bash
+atmos terraform state mv <component> -s <stack> '<old address>' '<new address>'
+```
+
+Prefer `moved` wherever it applies. `state mv` is a manual act that has to be
+repeated for every stack, leaves no trace in the repository for the next
+reader, and cannot be reviewed. Use it only when the move cannot be expressed
+in configuration — for example when state has to be split across two components
+— and record what was run in the PR description.
+
+### What `moved` cannot express
+
+`moved` relabels one state object as another. It cannot help when there is no
+old object to relabel:
+
+- **An attribute becoming a resource.** Inline `ingress`/`egress` blocks are
+  attributes of `aws_security_group`, not separate state objects, so promoting
+  them to `aws_security_group_rule` resources has nothing to move from. The
+  `securitygroup` README documents the two-apply procedure this needs: revoke
+  the inline rules on the old version first, then upgrade and re-create them as
+  resources. The reverse has the same shape: the provider documents that a
+  group cannot carry inline rules and `aws_security_group_rule` resources at
+  once — the two overwrite each other — so the rules have to be removed before
+  the inline blocks are added. Any `dynamic` block promoted to a real resource
+  hits this.
+- **A replacement the provider forces.** Changing `name` to `name_prefix`, or
+  any other `ForceNew` attribute, replaces the resource whatever its address
+  is. That is not a state problem and no state operation avoids it; the
+  question to answer in the PR is what else depends on the identifier that is
+  about to change.
+- **A different root module.** `network/main` is a `dns` instance, not a
+  `network` one (`metadata.component` decides). State written by one module does
+  not match another module's addresses, so switching an instance's
+  `metadata.component` means importing, not moving — see
+  [Importing existing resources](#importing-existing-resources).
+
+### Verifying a move
+
+```bash
+atmos terraform plan <component> -s <stack>     # expect: 0 to add, 0 to change, 0 to destroy
+```
+
+A move that is complete plans as a no-op. If the plan still wants to destroy and
+re-create, an address is still unaccounted for. Check it in every stack that has
+state for the component, not just the first — `moved` applies everywhere, but a
+`for_each` key that differs per stack does not.
+
+Backend relocation (a different bucket or key, rather than a different address)
+is a separate procedure: see
+[Migrating existing state](./DEPLOYMENT.md#migrating-existing-state).
+
 ## State locks
 
 The S3 backend uses Terraform's native lockfiles (`use_lockfile: true`) — a lock is a
