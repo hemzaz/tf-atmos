@@ -42,10 +42,9 @@ variable "security_groups" {
       source_security_group_id = optional(string)
       self                     = optional(bool, false)
       description              = optional(string)
-      # An explicit identity for this rule. Without one, a rule is identified
-      # by direction, protocol and ports (see normalize.tf), so reordering or
-      # deleting other rules does not touch it. Needed only to keep two CIDR
-      # rules on the same protocol and ports apart.
+      # Cloudposse's optional rule key: unique within the group, known at
+      # plan. Without one the rule is keyed by its position in the list, so
+      # removing an earlier rule renumbers it (see normalize.tf and main.tf).
       key = optional(string)
     })), [])
     egress_rules = optional(list(object({

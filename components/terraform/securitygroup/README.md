@@ -18,7 +18,7 @@ the whole group, so changing one rule updates the group itself.
 `securitygroup/app` in `fnx-local-sandbox` only
 (`stacks/orgs/fnx/local/eu-west-2/sandbox.yaml`) — one group, one ingress rule,
 one egress rule, with `enforce_no_public_ingress: true` so the guard is
-exercised. Floci does not implement `PutMetricFilter`, so that instance sets
+exercised, and `preserve_security_group_id: true`. Floci does not implement `PutMetricFilter`, so that instance sets
 `enable_security_group_logging`/`enable_security_group_alarms` to `false`.
 
 None of the three real stacks (fnx-dev-testenv-01, fnx-staging-staging-01,
@@ -39,7 +39,7 @@ stack today.
 | `log_retention_days` | must be a valid CloudWatch retention value (validated) |
 | out: `security_group_ids`, `security_group_arns`, `security_group_vpc_id` | maps keyed by the `security_groups` key |
 | out: `security_group_names` | the generated group names; the group is created from a `name_prefix`, so the full name is only known after apply |
-| out: `security_group_rule_ids` | keyed by normalized rule key, e.g. `app/ingress/tcp:443-443#cidr` — read this when a rule is unexpectedly replaced |
+| out: `security_group_rule_ids` | keyed by normalized rule key, e.g. `app/ingress[0]#cidr` — read this when a rule is unexpectedly replaced |
 | out: `common_rule_templates`, `security_validation_warnings` | reference templates and the permissive-rule report |
 
 Each rule takes `from_port`, `to_port`, `protocol` and at least one source:
@@ -61,19 +61,32 @@ security_groups:
         source_security_group_id: "alb"     # sibling key, not an id
 ```
 
-Rules are keyed by what they authorize, not by their position in the list:
-`<group>/<direction>/<protocol>:<from>-<to>` plus `#cidr`, `#sg:<source>` or
-`#self` (`normalize.tf`). Deleting or reordering a rule touches only that rule.
-The CIDRs are deliberately not part of the key, so that a CIDR change replaces
-the same Terraform instance instead of creating a new one alongside the old,
-which would authorize the shared CIDRs twice (`InvalidPermission.Duplicate`).
-Two CIDR rules in one group and direction on the same protocol and ports would
-share a key; plan fails with a precondition naming the key. Merge their CIDR
-lists, or set a distinct `key` on each (the key then becomes
-`<group>/<direction>[<key>]`).
+Rules are keyed the way Cloudposse's `normalize.tf` keys them: the rule's `key`
+if it has one, otherwise its position in its list
+(`coalesce(rule.key, "${type}[${i}]")`), prefixed with the group's map key. Each
+rule is then split per source kind with Cloudposse's rule-matrix suffixes:
+`#cidr` (CIDRs and prefix lists), `#self`, and `#sg#<i>` per source group, with
+`source_security_group_id` appended to the `security_groups` list. So
+`app/ingress[0]#cidr`, `application/ingress[0]#sg#0`, or `app/https#cidr` for a
+rule with `key: https`. A `key` must be unique within its group; a repeat is
+Terraform's own "Duplicate object key" error, as in Cloudposse.
 
-This departs from Cloudposse, whose default key is the list position and whose
-README warns that removing a rule then recreates every rule after it.
+Removing a rule from the middle of a list renumbers every rule after it. How
+that plays out depends on the setting below:
+
+- `preserve_security_group_id = false`: the renumbered rules change the
+  `random_id` keepers, so the group is replaced and every rule is created on the
+  new, empty group. Nothing is authorized twice. Cloudposse: "If you are using
+  'create before destroy' behavior for the security group and security group
+  rules, then ... keys do not matter".
+- `preserve_security_group_id = true`: each later index is replaced, destroy
+  before create, with its successor's content, and the last index is destroyed.
+  Those rules are briefly absent. This is the "ripple effect" Cloudposse's README
+  describes; its remedy, and this component's, is an explicit `key` on each rule.
+  One risk is not verified against AWS: Terraform does not promise to destroy
+  one instance before creating another, so if the moved rule's new index is
+  created before its old index is destroyed, AWS returns
+  `InvalidPermission.Duplicate`. Explicit keys avoid that too.
 
 ### Rule changes: `preserve_security_group_id`
 
@@ -101,10 +114,14 @@ Use `true` for a group whose id is referenced where Terraform cannot move it: a
 rule in another component's group, a hard-coded id, a resource that cannot
 change its security groups in place.
 
-Cloudposse's `null_resource.sync_rules_and_sg_lifecycles` is not ported. It
-orders the rule swap against the group's consumers *in the same plan*; every
-consumer of this component is in another component, where no resource in this
-plan can order anything.
+Cloudposse's `null_resource.sync_rules_and_sg_lifecycles` is ported, one per
+`false` group: it is triggered by the group's id, depends on the
+`create_before_destroy` rules, and is itself `create_before_destroy`. When a
+group is replaced, the new group's rules therefore all exist before the deposed
+rules are destroyed. The other half of its purpose, holding the old rules until
+consumers have moved to the new group, needs the consumers in the same plan, and
+every consumer here is in another component. That is why the gap described
+under [Replacing a group](#replacing-a-group) remains.
 
 ## Dependencies & gotchas
 
@@ -115,8 +132,7 @@ plan can order anything.
 - Five `validation` blocks on `var.security_groups` reject, before any provider
   is configured: a `name` on a group; a map key shaped like `sg-...`; a rule
   source that is neither a sibling key nor an `sg-...` id; a rule with no source
-  at all; and an IPv4 prefix in `ipv6_cidr_blocks` (or the reverse). A
-  precondition on the group rejects two rules that resolve to one key.
+  at all; and an IPv4 prefix in `ipv6_cidr_blocks` (or the reverse).
 - The groups are created with `name_prefix`, not `name`:
   `<Environment>-<key>-sg-<random_id>-` (or `<Environment>-<key>-sg-` with
   `preserve_security_group_id`), and AWS appends a unique suffix. They are
@@ -171,7 +187,9 @@ rules are inline, so nothing revokes them), and `preserve_security_group_id =
 true`, where a rule change never replaces the group. For a group whose
 consumers are in other components, which is every group in the catalog
 templates, `preserve_security_group_id = true` keeps a rule change down to the
-changed rule being briefly absent.
+changed rule being briefly absent. Both catalog templates and the sandbox
+instance set it on every group; the component default stays `false`, which is
+Cloudposse's default.
 
 ## Migration from the inline-rule version
 

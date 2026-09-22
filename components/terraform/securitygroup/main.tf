@@ -84,13 +84,6 @@ resource "aws_security_group" "this" {
     # (DependencyViolation): see "Replacing a group" in the README for the
     # three-step rollout.
     create_before_destroy = true
-
-    # Checked here rather than in var.security_groups because the key is
-    # derived: see normalize.tf.
-    precondition {
-      condition     = length(local.duplicate_rule_keys) == 0
-      error_message = "Two rules resolve to the same key: ${join(", ", local.duplicate_rule_keys)}. Rules without a `key` are identified by group, direction, protocol and ports, so two CIDR rules sharing all four must be merged into one (list both CIDR sets) or each given a distinct `key`. Two rules naming the same source group or `self` on the same ports are the same AWS permission; drop one."
-    }
   }
 }
 
@@ -108,6 +101,9 @@ resource "aws_security_group" "this" {
 
 # Rules of groups with preserve_security_group_id = false. Their group is new
 # whenever they change, so creating first cannot collide with the old rules.
+# This is also why positional keys are safe here: removing a middle rule
+# renumbers the rest, which changes the keeper, so every rule is created afresh
+# on a new, empty group and the old rules go with the old group.
 resource "aws_security_group_rule" "keyed" {
   for_each = { for k, r in local.keyed_rules : k => r if local.rule_change_forces_new_group[r.sg_key] }
 
@@ -144,7 +140,10 @@ resource "aws_security_group_rule" "keyed" {
 
 # Rules of groups with preserve_security_group_id = true. The group stays, so a
 # changed rule must be revoked before it is re-authorized: a changed rule is
-# absent between the two calls.
+# absent between the two calls. Removing a middle rule replaces every rule
+# after it (each index now holds its successor's content) and destroys the
+# last index -- Cloudposse's "ripple effect", which an explicit `key` on each
+# rule avoids.
 resource "aws_security_group_rule" "dbc" {
   for_each = { for k, r in local.keyed_rules : k => r if !local.rule_change_forces_new_group[r.sg_key] }
 
@@ -171,4 +170,38 @@ resource "aws_security_group_rule" "dbc" {
   )
 
   self = each.value.self ? true : null
+}
+
+# Cloudposse's null_resource.sync_rules_and_sg_lifecycles, one per group whose
+# rules are create_before_destroy (their count condition: enabled &&
+# rule_create_before_destroy). Their comment, rewrapped:
+#
+#   This null resource prevents an outage when a new Security Group needs to be
+#   provisioned and `local.rule_create_before_destroy` is `true`:
+#   1. It prevents the deposed security group rules from being deleted until
+#      after all references to it have been changed to refer to the new
+#      security group.
+#   2. It ensures the new security group rules are created before the new
+#      security group is associated with existing resources
+#
+# Both effects are ordering within this plan. The associations in (1) and (2)
+# belong to consumers in other components, which this plan cannot order; what
+# remains is that a replaced group's id change replaces this resource, and the
+# deposed rules are destroyed only after it -- that is, after every new rule
+# exists. See "Replacing a group" in the README.
+resource "null_resource" "sync_rules_and_sg_lifecycles" {
+  # NOTE (Cloudposse): This resource affects the lifecycles even when count = 0,
+  # see https://github.com/hashicorp/terraform/issues/31316#issuecomment-1167450615
+  for_each = { for k, forced in local.rule_change_forces_new_group : k => k if forced }
+
+  # Replacement of the security group requires re-provisioning
+  triggers = {
+    sg_ids = aws_security_group.this[each.key].id
+  }
+
+  depends_on = [aws_security_group_rule.keyed]
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
