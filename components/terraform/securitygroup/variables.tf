@@ -142,6 +142,23 @@ variable "security_groups" {
     ]))
     error_message = "cidr_blocks takes IPv4 prefixes and ipv6_cidr_blocks takes IPv6 prefixes; neither accepts the other."
   }
+
+  # "6" and "tcp", or "all" and "-1", are one AWS permission under two
+  # spellings. Two rules differing only in the spelling pass plan and fail at
+  # apply with InvalidPermission.Duplicate, and changing the spelling alone
+  # replaces the rule. Cloudposse passes protocol through unnormalized
+  # (normalize.tf: `protocol = rule.protocol`), so accept one spelling rather
+  # than rewrite it: the canonical lower-case name where AWS has one, "-1" for
+  # all protocols, and the number for anything else.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.security_groups : [
+        for r in concat(v.ingress_rules, v.egress_rules) :
+        !contains(["6", "17", "1", "58", "all"], lower(r.protocol)) && r.protocol == lower(r.protocol)
+      ]
+    ]))
+    error_message = "protocol must be spelled \"tcp\", \"udp\", \"icmp\", \"icmpv6\", \"-1\" (all), or a number for any other protocol -- not \"6\", \"17\", \"1\", \"58\", \"all\", or upper case. Offending: ${join(", ", distinct(flatten([for k, v in var.security_groups : [for r in concat(v.ingress_rules, v.egress_rules) : "${k}: ${r.protocol}" if contains(["6", "17", "1", "58", "all"], lower(r.protocol)) || r.protocol != lower(r.protocol)]])))}."
+  }
 }
 
 variable "tags" {

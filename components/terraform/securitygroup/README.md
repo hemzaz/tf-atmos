@@ -68,8 +68,9 @@ rule is then split per source kind with Cloudposse's rule-matrix suffixes:
 `#cidr` (CIDRs and prefix lists), `#self`, and `#sg#<i>` per source group, with
 `source_security_group_id` appended to the `security_groups` list. So
 `app/ingress[0]#cidr`, `application/ingress[0]#sg#0`, or `app/https#cidr` for a
-rule with `key: https`. A `key` must be unique within its group; a repeat is
-Terraform's own "Duplicate object key" error, as in Cloudposse.
+rule with `key: https`. A `key` must be unique within its group, across ingress
+and egress. A repeat is Terraform's own "Duplicate object key" error, as in
+Cloudposse.
 
 Removing a rule from the middle of a list renumbers every rule after it. How
 that plays out depends on the setting below:
@@ -82,11 +83,34 @@ that plays out depends on the setting below:
 - `preserve_security_group_id = true`: each later index is replaced, destroy
   before create, with its successor's content, and the last index is destroyed.
   Those rules are briefly absent. This is the "ripple effect" Cloudposse's README
-  describes; its remedy, and this component's, is an explicit `key` on each rule.
-  One risk is not verified against AWS: Terraform does not promise to destroy
-  one instance before creating another, so if the moved rule's new index is
-  created before its old index is destroyed, AWS returns
-  `InvalidPermission.Duplicate`. Explicit keys avoid that too.
+  describes. It is worse than a gap: Terraform orders destroy-then-create
+  *within* one instance, not between two. A review of this component saw the
+  destroy of one instance and the create of another start 2 ms apart. A rule
+  that moves from `[1]` to `[0]` can be authorized at `[0]` while `[1]` still
+  holds it, and AWS rejects that with `InvalidPermission.Duplicate`.
+
+Cloudposse's guidance for when group ids must be preserved: "You can avoid this
+for the most part by providing the optional keys, and limiting each rule to a
+single source or destination." Every rule in both catalog templates and the
+sandbox stack has an explicit `key` and a single source, and every group there
+sets `preserve_security_group_id: true`. Do the same for any group that
+preserves its id.
+
+**Adding or renaming a `key` on an existing rule** under
+`preserve_security_group_id = true` moves the rule's permission to a new
+instance, which is exactly the race above. Use two applies:
+
+1. Remove the rule and apply. The old instance is revoked.
+2. Add it back with its new `key` and apply. The new instance is authorized.
+
+The rule is absent between the two applies. Under `false` a key change is just
+another rule change: a new group is created, and one apply is enough.
+
+**Known limit: overlapping CIDRs.** Two rules on the same group, direction,
+protocol and ports whose CIDR lists overlap (`[a, b]` and `[b, c]`) authorize
+`b` twice. Plan passes and apply fails with `InvalidPermission.Duplicate`.
+Cloudposse has no guard for this either. Keep each CIDR in exactly one rule per
+protocol and port range.
 
 ### Rule changes: `preserve_security_group_id`
 
@@ -129,10 +153,14 @@ under [Replacing a group](#replacing-a-group) remains.
 - `tags` without a non-empty `Environment` fails validation before any plan.
 - `enforce_no_public_ingress = true` is a hard gate via a `terraform_data`
   precondition, not a warning. It now covers `::/0` as well as `0.0.0.0/0`.
-- Five `validation` blocks on `var.security_groups` reject, before any provider
+- Six `validation` blocks on `var.security_groups` reject, before any provider
   is configured: a `name` on a group; a map key shaped like `sg-...`; a rule
   source that is neither a sibling key nor an `sg-...` id; a rule with no source
-  at all; and an IPv4 prefix in `ipv6_cidr_blocks` (or the reverse).
+  at all; an IPv4 prefix in `ipv6_cidr_blocks` (or the reverse); and a protocol
+  alias (`"6"`, `"17"`, `"1"`, `"58"`, `"all"`, upper case) in place of `tcp`,
+  `udp`, `icmp`, `icmpv6`, `-1`. The aliases name the same AWS permission, so a
+  mix fails at apply as a duplicate. Cloudposse passes `protocol` through
+  unnormalized, so this rejects the aliases rather than rewriting them.
 - The groups are created with `name_prefix`, not `name`:
   `<Environment>-<key>-sg-<random_id>-` (or `<Environment>-<key>-sg-` with
   `preserve_security_group_id`), and AWS appends a unique suffix. They are
