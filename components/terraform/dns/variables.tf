@@ -68,12 +68,18 @@ variable "zones" {
 
 variable "records" {
   type = map(object({
-    zone_name                        = string
-    name                             = string
-    type                             = string
-    ttl                              = optional(number)
-    records                          = optional(list(string), [])
-    alias                            = optional(map(any))
+    zone_name = string
+    name      = string
+    type      = string
+    ttl       = optional(number)
+    records   = optional(list(string), [])
+    # Typed so evaluate_target_health stays a bool and the alias shape is
+    # declared; map(any) coerced every value to a string.
+    alias = optional(object({
+      name                   = string
+      zone_id                = string
+      evaluate_target_health = optional(bool, true)
+    }))
     health_check_id                  = optional(string)
     set_identifier                   = optional(string)
     weighted_routing_policy          = optional(map(number))
