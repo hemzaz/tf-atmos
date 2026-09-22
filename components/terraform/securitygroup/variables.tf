@@ -72,6 +72,12 @@ variable "security_groups" {
     # the README.
     preserve_security_group_id = optional(bool, false)
 
+    # Cloudposse's allow_all_egress, per group: adds their "_allow_all_egress_"
+    # rule (egress, -1, 0.0.0.0/0 and ::/0). Their default is true; the repo
+    # owner set it false here because this repo forbids 0.0.0.0/0 and this
+    # component audits permissive rules. See the README.
+    allow_all_egress = optional(bool, false)
+
     # Not a setting: rejected by the validation below. It exists in the type
     # only so that a stack still setting it fails loudly -- an attribute
     # missing from an object type is silently dropped, not reported.
@@ -95,6 +101,40 @@ variable "security_groups" {
   validation {
     condition     = alltrue([for k, v in var.security_groups : !can(regex("^sg-", k))])
     error_message = "Security group keys must not start with \"sg-\": ${join(", ", [for k, v in var.security_groups : k if can(regex("^sg-", k))])}. The key is how other rules refer to the group, and a key shaped like an id cannot be told apart from one."
+  }
+
+  # Rule keys are "<group>/<key or type[i]>" plus "#cidr", "#self" or "#sg#<i>"
+  # (normalize.tf). "/" or "#" in a group key would let two different
+  # (group, rule) pairs spell the same resource key.
+  validation {
+    condition     = alltrue([for k, v in var.security_groups : !can(regex("[/#]", k))])
+    error_message = "Security group keys must not contain \"/\" or \"#\": ${join(", ", [for k, v in var.security_groups : k if can(regex("[/#]", k))])}. They are separators in the rule keys."
+  }
+
+  # An explicit rule key shares the namespace of the positional keys
+  # ("ingress[0]") and the reserved "_allow_all_egress_". The character set
+  # excludes brackets, so no explicit key can look positional.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.security_groups : [
+        for r in concat(v.ingress_rules, v.egress_rules) :
+        r.key == null ? true : (can(regex("^[A-Za-z0-9_.-]+$", r.key)) && r.key != "_allow_all_egress_")
+      ]
+    ]))
+    error_message = "Rule keys must match ^[A-Za-z0-9_.-]+$ and must not be \"_allow_all_egress_\" (reserved for allow_all_egress). A key like \"ingress[0]\" would collide with the positional key of an unkeyed rule. Offending: ${join(", ", distinct(flatten([for k, v in var.security_groups : [for r in concat(v.ingress_rules, v.egress_rules) : "${k}: ${r.key}" if r.key != null && (!can(regex("^[A-Za-z0-9_.-]+$", coalesce(r.key, "x"))) || r.key == "_allow_all_egress_")]])))}."
+  }
+
+  # A group naming itself as a source is `self: true` under another spelling:
+  # the same AWS permission, keyed differently, so setting both fails at apply
+  # as a duplicate, and switching between them races two instances.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.security_groups : [
+        for r in concat(v.ingress_rules, v.egress_rules) :
+        !contains(concat(r.security_groups, r.source_security_group_id == null ? [] : [r.source_security_group_id]), k)
+      ]
+    ]))
+    error_message = "A rule must not name its own group as a source; use `self: true`. Offending groups: ${join(", ", [for k, v in var.security_groups : k if anytrue([for r in concat(v.ingress_rules, v.egress_rules) : contains(concat(r.security_groups, r.source_security_group_id == null ? [] : [r.source_security_group_id]), k)])])}."
   }
 
   # source_security_group_id and security_groups both name a source. Either the

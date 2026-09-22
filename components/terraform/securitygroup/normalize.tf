@@ -37,6 +37,12 @@
 locals {
   security_groups = var.security_groups
 
+  # Cloudposse main.tf: default_rule_description = "Managed by Terraform",
+  # applied in normalize.tf as lookup(rule, "description", <default>). On a
+  # typed object the attribute is always present (null when unset), so lookup
+  # would return the null; coalesce is what gives their behavior here.
+  default_rule_description = "Managed by Terraform"
+
   norm_rules = flatten([
     for k, sg in var.security_groups : [
       for type, rules in { ingress = sg.ingress_rules, egress = sg.egress_rules } : [
@@ -45,6 +51,7 @@ locals {
           type            = type
           key             = "${k}/${coalesce(rule.key, "${type}[${i}]")}"
           rule            = rule
+          description     = coalesce(rule.description, local.default_rule_description)
           security_groups = concat(rule.security_groups, rule.source_security_group_id == null ? [] : [rule.source_security_group_id])
         }
       ]
@@ -58,7 +65,7 @@ locals {
     from_port                = r.rule.from_port
     to_port                  = r.rule.to_port
     protocol                 = r.rule.protocol
-    description              = r.rule.description
+    description              = r.description
     cidr_blocks              = []
     ipv6_cidr_blocks         = []
     prefix_list_ids          = []
@@ -73,7 +80,7 @@ locals {
     from_port                = r.rule.from_port
     to_port                  = r.rule.to_port
     protocol                 = r.rule.protocol
-    description              = r.rule.description
+    description              = r.description
     cidr_blocks              = r.rule.cidr_blocks
     ipv6_cidr_blocks         = r.rule.ipv6_cidr_blocks
     prefix_list_ids          = r.rule.prefix_list_ids
@@ -88,7 +95,7 @@ locals {
     from_port                = r.rule.from_port
     to_port                  = r.rule.to_port
     protocol                 = r.rule.protocol
-    description              = r.rule.description
+    description              = r.description
     cidr_blocks              = []
     ipv6_cidr_blocks         = []
     prefix_list_ids          = []
@@ -96,6 +103,25 @@ locals {
     self                     = false
   }]])
 
-  all_resource_rules = concat(local.self_rules, local.sg_exploded_rules, local.other_rules)
+  # Cloudposse normalize.tf allow_egress_rule / extra_rules, per group. Their
+  # allow_all_egress defaults to true; here it defaults to false (see
+  # variables.tf and the README). The rule joins all_resource_rules like any
+  # other, so it takes the keyed/dbc path and feeds the random_id keepers.
+  extra_rules = [for k, sg in var.security_groups : {
+    key                      = "${k}/_allow_all_egress_"
+    sg_key                   = k
+    type                     = "egress"
+    from_port                = 0
+    to_port                  = 0 # [sic] from and to port ignored when protocol is "-1", warning if not zero
+    protocol                 = "-1"
+    description              = "Allow all egress"
+    cidr_blocks              = ["0.0.0.0/0"]
+    ipv6_cidr_blocks         = ["::/0"]
+    prefix_list_ids          = []
+    source_security_group_id = null
+    self                     = false
+  } if sg.allow_all_egress]
+
+  all_resource_rules = concat(local.self_rules, local.sg_exploded_rules, local.other_rules, local.extra_rules)
   keyed_rules        = { for r in local.all_resource_rules : r.key => r }
 }

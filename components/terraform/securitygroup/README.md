@@ -16,9 +16,10 @@ the whole group, so changing one rule updates the group itself.
 ## Deployed
 
 `securitygroup/app` in `fnx-local-sandbox` only
-(`stacks/orgs/fnx/local/eu-west-2/sandbox.yaml`) — one group, one ingress rule,
-one egress rule, with `enforce_no_public_ingress: true` so the guard is
-exercised, and `preserve_security_group_id: true`. Floci does not implement `PutMetricFilter`, so that instance sets
+(`stacks/orgs/fnx/local/eu-west-2/sandbox.yaml`) — one group, one ingress
+rule, one egress rule, with `enforce_no_public_ingress: true` so the guard is
+exercised, and `preserve_security_group_id: true`. Floci does not implement
+`PutMetricFilter`, so that instance sets
 `enable_security_group_logging`/`enable_security_group_alarms` to `false`.
 
 None of the three real stacks (fnx-dev-testenv-01, fnx-staging-staging-01,
@@ -33,6 +34,7 @@ stack today.
 | `vpc_id` (required) | — |
 | `security_groups` (map, default `{}`) | typed `map(object(...))`; keys name the groups and are how rules refer to each other |
 | `security_groups.<key>.preserve_security_group_id` | default `false`; see [Rule changes](#rule-changes-preserve_security_group_id) |
+| `security_groups.<key>.allow_all_egress` | default `false` (Cloudposse: `true`); see [`allow_all_egress`](#allow_all_egress-default-false-unlike-cloudposse) |
 | `security_groups.<key>.name` | rejected by validation: names are generated, see below |
 | `tags` | required; must include a non-empty `Environment` (validated), used in the group names `${Environment}-${key}-sg` |
 | `enforce_no_public_ingress` | when `true`, apply fails if any rule allows ingress from `0.0.0.0/0` or `::/0` |
@@ -70,7 +72,14 @@ rule is then split per source kind with Cloudposse's rule-matrix suffixes:
 `app/ingress[0]#cidr`, `application/ingress[0]#sg#0`, or `app/https#cidr` for a
 rule with `key: https`. A `key` must be unique within its group, across ingress
 and egress. A repeat is Terraform's own "Duplicate object key" error, as in
-Cloudposse.
+Cloudposse. Validation keeps the namespace unambiguous:
+- a `key` must match `^[A-Za-z0-9_.-]+$`, which also rules out positional
+  shapes like `ingress[0]`;
+- `_allow_all_egress_` is reserved;
+- group keys may not contain `/` or `#`.
+
+A rule without a `description` gets Cloudposse's default, "Managed by
+Terraform".
 
 Removing a rule from the middle of a list renumbers every rule after it. How
 that plays out depends on the setting below:
@@ -96,15 +105,32 @@ sandbox stack has an explicit `key` and a single source, and every group there
 sets `preserve_security_group_id: true`. Do the same for any group that
 preserves its id.
 
-**Adding or renaming a `key` on an existing rule** under
-`preserve_security_group_id = true` moves the rule's permission to a new
-instance, which is exactly the race above. Use two applies:
+**Changes that move a permission between instances.** Under
+`preserve_security_group_id = true`, a permission must never leave one
+`for_each` instance and appear in another in the same apply. Terraform does not
+order the two instances, so the new one can be authorized while the old one
+still holds the permission. The ways to do that:
 
-1. Remove the rule and apply. The old instance is revoked.
-2. Add it back with its new `key` and apply. The new instance is authorized.
+- (a) adding, renaming or removing the `key` on an existing rule;
+- (b) moving a CIDR, prefix list or source group from one keyed rule to another
+  on the same protocol and ports, or swapping content between two keyed rules;
+- (c) reordering or removing entries in a rule's `security_groups` list with
+  more than one entry: `#sg#<i>` is positional even when the rule has a `key`,
+  so entry `i+1` moves to instance `i` (Cloudposse's README notes the same for
+  `rule_matrix`);
+- (d) switching between `self: true` and naming the group's own key as a
+  source. The validation below rejects the own-key form, so this only matters
+  if the group's own `sg-` id is written out literally.
 
-The rule is absent between the two applies. Under `false` a key change is just
-another rule change: a new group is created, and one apply is enough.
+Each of these takes two applies:
+
+1. Remove the permission from where it is (delete the rule, the CIDR, or the
+   list entry) and apply. The old instance is revoked.
+2. Add it where it should be (new key, other rule, new position) and apply. The
+   new instance is authorized.
+
+The permission is absent between the two applies. Under `false` any of these is
+just another rule change: a new group is created, and one apply is enough.
 
 **Known limit: overlapping CIDRs.** Two rules on the same group, direction,
 protocol and ports whose CIDR lists overlap (`[a, b]` and `[b, c]`) authorize
@@ -138,6 +164,32 @@ Use `true` for a group whose id is referenced where Terraform cannot move it: a
 rule in another component's group, a hard-coded id, a resource that cannot
 change its security groups in place.
 
+Mixed modes: if a `true` group has a rule sourcing a `false` sibling, then
+whenever the sibling is replaced that rule is replaced destroy-before-create to
+point at the new id. Its destroy does not wait for the sibling's new group, but
+its create does, so the rule is absent for the whole of the sibling's
+replacement, not just briefly.
+
+### `allow_all_egress` (default `false`, unlike Cloudposse)
+
+`security_groups.<key>.allow_all_egress` mirrors Cloudposse's input of the same
+name: when `true` it adds their rule verbatim, keyed `<group>/_allow_all_egress_`
+(`normalize.tf` `allow_egress_rule`): egress, protocol `-1`, ports `0`,
+`0.0.0.0/0` and `::/0`, description "Allow all egress". It goes through the
+same `keyed`/`dbc` resources and `random_id` keepers as every other rule.
+
+Cloudposse defaults it to `true`. It defaults to `false` here, a deliberate
+divergence decided by the repo owner: this repo's `CLAUDE.md` forbids
+`0.0.0.0/0`, and this component audits permissive rules. The permissive-rule
+audit in `audit.tf` does not flag the generated rule. It checks ingress only,
+because `enforce_no_public_ingress` is about ingress, so it treats this rule
+like any explicit egress rule to `0.0.0.0/0`. The rule is visible only because
+setting the flag is explicit. Setting it on a group that already has an
+explicit `-1`/`0.0.0.0/0` egress rule, as the sandbox's `app` has, authorizes
+that permission twice. That is the overlapping-CIDR limit above, and apply
+fails with `InvalidPermission.Duplicate`. Remove the explicit rule when you turn
+the flag on.
+
 Cloudposse's `null_resource.sync_rules_and_sg_lifecycles` is ported, one per
 `false` group: it is triggered by the group's id, depends on the
 `create_before_destroy` rules, and is itself `create_before_destroy`. When a
@@ -153,11 +205,13 @@ under [Replacing a group](#replacing-a-group) remains.
 - `tags` without a non-empty `Environment` fails validation before any plan.
 - `enforce_no_public_ingress = true` is a hard gate via a `terraform_data`
   precondition, not a warning. It now covers `::/0` as well as `0.0.0.0/0`.
-- Six `validation` blocks on `var.security_groups` reject, before any provider
-  is configured: a `name` on a group; a map key shaped like `sg-...`; a rule
-  source that is neither a sibling key nor an `sg-...` id; a rule with no source
-  at all; an IPv4 prefix in `ipv6_cidr_blocks` (or the reverse); and a protocol
-  alias (`"6"`, `"17"`, `"1"`, `"58"`, `"all"`, upper case) in place of `tcp`,
+- Nine `validation` blocks on `var.security_groups` reject, before any provider
+  is configured: a `name` on a group; a map key shaped like `sg-...` or
+  containing `/` or `#`; a rule `key` outside `^[A-Za-z0-9_.-]+$` or equal to
+  `_allow_all_egress_`; a rule source that is neither a sibling key nor an
+  `sg-...` id; a rule whose source is its own group's key (use `self: true`,
+  the same AWS permission); a rule with no source at all; an IPv4 prefix in
+  `ipv6_cidr_blocks` (or the reverse); and a protocol alias (`"6"`, `"17"`, `"1"`, `"58"`, `"all"`, upper case) in place of `tcp`,
   `udp`, `icmp`, `icmpv6`, `-1`. The aliases name the same AWS permission, so a
   mix fails at apply as a duplicate. Cloudposse passes `protocol` through
   unnormalized, so this rejects the aliases rather than rewriting them.
@@ -177,8 +231,9 @@ under [Replacing a group](#replacing-a-group) remains.
   forever. It is marked deprecated in the provider documentation, with no
   announced removal.
 - The group carries no inline egress, so the provider removes AWS's default
-  allow-all egress rule. `egress_rules` is therefore the whole of a group's
-  egress — a group with none can send nothing.
+  allow-all egress rule. `egress_rules` (plus the `allow_all_egress` rule, when
+  set) is therefore the whole of a group's egress — a group with none can send
+  nothing.
 
 ## Replacing a group
 
