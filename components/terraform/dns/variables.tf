@@ -73,9 +73,8 @@ variable "records" {
     type      = string
     ttl       = optional(number)
     records   = optional(list(string), [])
-    # Typed, not map(any): map(any) infers one element type for the whole map,
-    # so an alias with evaluate_target_health set and one without cannot coexist
-    # in the same records map ("all map elements must have the same type").
+    # Typed so evaluate_target_health stays a bool and the alias shape is
+    # declared; map(any) coerced every value to a string.
     alias = optional(object({
       name                   = string
       zone_id                = string
