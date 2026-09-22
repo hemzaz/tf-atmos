@@ -114,10 +114,11 @@ components:
         security_groups:
           # ALB Security Group - allows inbound HTTP/HTTPS from anywhere
           alb:
-            # Every consumer of these groups is another component (it reads the id
-            # through !terraform.state), so a replaced group would leave them on an
-            # emptied old one until they are re-applied. Keep the id; only a changed
-            # rule is briefly absent while it is replaced. See the component README.
+            # Every consumer of these groups is another component (it reads the
+            # id through !terraform.state), so a replaced group would leave them
+            # on an emptied old one until they are re-applied. Keep the id; only
+            # a changed rule is briefly absent while it is replaced. See the
+            # component README.
             preserve_security_group_id: true
             description: "Security group for web application ALB"
             ingress_rules:
