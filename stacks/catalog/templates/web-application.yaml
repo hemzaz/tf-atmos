@@ -107,10 +107,16 @@ components:
       vars:
         vpc_id: !terraform.state web-application/vpc .vpc_id
 
+        # NOTE: the rules below use source_security_group_id to name a
+        # sibling key in this map. The securitygroup component does not
+        # implement it -- the attribute was silently dropped, so the rule
+        # reached AWS with no source and was rejected at apply.
+        # var.security_groups now rejects it at plan instead, so importing
+        # this template as-is fails validation until the component grows
+        # separate aws_vpc_security_group_ingress_rule resources.
         security_groups:
           # ALB Security Group - allows inbound HTTP/HTTPS from anywhere
           alb:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-alb-sg"
             description: "Security group for web application ALB"
             ingress_rules:
               - description: "HTTPS from CloudFront"
@@ -135,7 +141,6 @@ components:
 
           # Application Security Group - allows traffic from ALB only
           application:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-app-sg"
             description: "Security group for web application containers"
             ingress_rules:
               - description: "HTTP from ALB"
@@ -163,7 +168,6 @@ components:
 
           # Database Security Group - allows traffic from application only
           database:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db-sg"
             description: "Security group for RDS database"
             ingress_rules:
               - description: "PostgreSQL from application"
@@ -175,7 +179,6 @@ components:
 
           # Cache Security Group - allows traffic from application only
           cache:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cache-sg"
             description: "Security group for ElastiCache"
             ingress_rules:
               - description: "Redis from application"

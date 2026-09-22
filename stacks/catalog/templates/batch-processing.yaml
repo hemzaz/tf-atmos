@@ -109,10 +109,16 @@ components:
       vars:
         vpc_id: !terraform.state batch-processing/vpc .vpc_id
 
+        # NOTE: the rules below use source_security_group_id to name a
+        # sibling key in this map. The securitygroup component does not
+        # implement it -- the attribute was silently dropped, so the rule
+        # reached AWS with no source and was rejected at apply.
+        # var.security_groups now rejects it at plan instead, so importing
+        # this template as-is fails validation until the component grows
+        # separate aws_vpc_security_group_ingress_rule resources.
         security_groups:
           # Batch compute security group
           batch_compute:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-compute-sg"
             description: "Security group for AWS Batch compute"
             ingress_rules: []  # No inbound needed
             egress_rules:
@@ -131,7 +137,6 @@ components:
 
           # EFS security group (if using shared storage)
           efs:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-efs-sg"
             description: "Security group for EFS mount targets"
             ingress_rules:
               - description: "NFS from batch compute"
