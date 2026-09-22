@@ -28,5 +28,10 @@ components:
         # exist, because KMS rejects a policy naming a principal it cannot
         # resolve.
         enable_default_policy: true
-        key_administrators:
-          - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/Admin
+        # No named `key_administrators` here. The root-account statement above
+        # already delegates key administration to IAM (the Cloud Posse aws-kms
+        # design), and a templated ARN is unsafe in a shared base: Go templates
+        # render before YAML functions, so in dev `aws_account_id` (an `!env`
+        # tag) lands in the ARN as raw text and CreateKey rejects the policy.
+        # Add named administrators per instance, with a literal account id and
+        # only for roles known to exist (prod does).

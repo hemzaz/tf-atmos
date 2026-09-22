@@ -9,9 +9,9 @@
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
 #   layers: foundation, kms, networking, security, compute, platform, data, services, monitoring
-#   The kms layer only has work in stacks with an enabled kms component (today
-#   fnx-prod-production, whose eks/ec2 consumers read its key via !terraform.state);
-#   elsewhere its plan and deploy match nothing and the prompt just asks to continue.
+#   The kms layer applies kms/main, which every stack defines. secretsmanager
+#   reads its key_arn via !terraform.state in every stack (and declares the
+#   dependency), and in prod rds/eks/ec2 read it too, so kms runs before them.
 workflows:
   deploy:
     description: Deploy the complete stack layer by layer (foundation -> kms -> monitoring), each layer planned, confirmed, then applied from its saved plan

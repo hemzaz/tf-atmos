@@ -92,6 +92,8 @@ components:
         description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
         alias_name: production-main  # without the alias/ prefix
         deletion_window_in_days: 30  # prod keeps the full window
+        key_administrators:
+          - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/Admin
         # IAM roles referenced here must exist before apply (the iam ci/eks-node
         # instances are disabled; EKS-managed node roles need their ARNs here)
         key_users:
