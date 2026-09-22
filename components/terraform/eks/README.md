@@ -40,12 +40,20 @@ per-node-group instance settings follow `cloudposse/terraform-aws-eks-node-group
   The Environment is omitted when the cluster key already starts with it, so
   prod's names look like `production-main-memory-optimized-<pet>`. The `random_pet` suffix
   changes whenever an input that forces replacement changes (node role, subnets,
-  instance types, AMI type, capacity type, launch template ID). That lets
+  instance types, AMI type, capacity type, launch template). That lets
   `create_before_destroy` start the replacement next to the live group under a
   new name, the way `cloudposse/terraform-aws-eks-node-group` does. The part
-  before the pet may be at most 54 characters: EKS allows 63 and the pet takes
-  up to 9 including the separator. This is enforced by variable validation, so
-  it fails without AWS credentials.
+  before the pet may be at most `63 - 9 * random_pet_length` characters (54 by
+  default): each pet word takes up to 8 characters plus a separator. This is
+  enforced by variable validation, so it fails without AWS credentials. The
+  node group, its launch template and everything the template launches share
+  one `Name` tag, the name without the pet.
+- **Cloud Posse's per-node-group knobs**, with their defaults:
+  `random_pet_length` (1) and `immediately_apply_lt_changes` (null, which
+  follows `create_before_destroy` and is therefore true here). With the
+  default, **any launch template change** (disk size, IMDS settings,
+  monitoring, tags) replaces the node group blue/green. Set it to `false` to
+  have such a change roll onto the existing group as a new template version.
 - **IMDSv2 is required by default** and the hop limit is 2, which is what AWS
   requires for a container off the host network to reach IMDS. Prefer IRSA and
   set `metadata_http_put_response_hop_limit = 1` where no pod needs IMDS.

@@ -28,6 +28,40 @@ locals {
       if lookup(ng, "enabled", true)
     }
   ]...)
+
+  # One label for everything a node group creates, as Cloud Posse does: the
+  # node group, its launch template, and what the template launches.
+  node_group_tags = {
+    for k, ng in local.node_groups : k => merge(var.tags, ng.tags, { Name = ng.name_base })
+  }
+
+  # The launch template's settings in one object, read both by the template
+  # and by the random_pet keeper, as `launch_template_config` is in
+  # cloudposse/terraform-aws-eks-node-group (launch-template.tf).
+  launch_template_configs = {
+    for k, ng in local.node_groups : k => {
+      block_device_mappings = ng.block_device_map
+      tag_specifications    = ["instance", "volume", "network-interface"]
+      # http_endpoint is documented as optional but is required whenever
+      # http_put_response_hop_limit is set.
+      metadata_options = {
+        http_endpoint               = ng.metadata_http_endpoint_enabled ? "enabled" : "disabled"
+        http_put_response_hop_limit = ng.metadata_http_put_response_hop_limit
+        http_tokens                 = ng.metadata_http_tokens_required ? "required" : "optional"
+      }
+      tags = local.node_group_tags[k]
+      monitoring = {
+        enabled = ng.detailed_monitoring_enabled
+      }
+    }
+  }
+
+  # Cloud Posse: "When `null` (default) this input takes the value of
+  # `create_before_destroy`". Node groups here are always
+  # create_before_destroy, so null means true.
+  immediately_apply_lt_changes = {
+    for k, ng in local.node_groups : k => coalesce(ng.immediately_apply_lt_changes, true)
+  }
 }
 
 resource "aws_cloudwatch_log_group" "eks" {
@@ -292,13 +326,13 @@ resource "aws_launch_template" "node_groups" {
   for_each = local.node_groups
 
   # A launch template name_prefix may be up to 102 characters (128 minus the
-  # 26-character unique suffix). The 54-character cap on name_base enforced
-  # on var.clusters keeps this well inside that limit.
+  # 26-character unique suffix). name_base is capped below 63 on var.clusters,
+  # well inside that limit.
   name_prefix = "${each.value.name_base}-"
   description = "Managed node group ${each.key} in cluster ${each.value.cluster_name}"
 
   dynamic "block_device_mappings" {
-    for_each = each.value.block_device_map
+    for_each = local.launch_template_configs[each.key].block_device_mappings
 
     content {
       device_name  = block_device_mappings.key
@@ -322,39 +356,29 @@ resource "aws_launch_template" "node_groups" {
     }
   }
 
-  # http_endpoint is documented as optional but is required whenever
-  # http_put_response_hop_limit is set.
   metadata_options {
-    http_endpoint               = each.value.metadata_http_endpoint_enabled ? "enabled" : "disabled"
-    http_put_response_hop_limit = each.value.metadata_http_put_response_hop_limit
-    http_tokens                 = each.value.metadata_http_tokens_required ? "required" : "optional"
+    http_endpoint               = local.launch_template_configs[each.key].metadata_options.http_endpoint
+    http_put_response_hop_limit = local.launch_template_configs[each.key].metadata_options.http_put_response_hop_limit
+    http_tokens                 = local.launch_template_configs[each.key].metadata_options.http_tokens
   }
 
   monitoring {
-    enabled = each.value.detailed_monitoring_enabled
+    enabled = local.launch_template_configs[each.key].monitoring.enabled
   }
 
   # Resource tags on the launch template tag only the template itself. These
   # propagate the tags to what EKS launches from it. The resource types match
   # the `resources_to_tag` default in cloudposse/terraform-aws-eks-node-group.
   dynamic "tag_specifications" {
-    for_each = toset(["instance", "volume", "network-interface"])
+    for_each = local.launch_template_configs[each.key].tag_specifications
 
     content {
       resource_type = tag_specifications.value
-      tags = merge(
-        var.tags,
-        each.value.tags,
-        { Name = each.value.name_base }
-      )
+      tags          = local.launch_template_configs[each.key].tags
     }
   }
 
-  tags = merge(
-    var.tags,
-    each.value.tags,
-    { Name = "${var.tags["Environment"]}-${each.key}" }
-  )
+  tags = local.launch_template_configs[each.key].tags
 
   lifecycle {
     create_before_destroy = true
@@ -366,18 +390,17 @@ resource "aws_launch_template" "node_groups" {
 # the live group under a different name, or EKS rejects it with
 # ResourceInUseException. The keepers are every node group input that the AWS
 # provider marks ForceNew: when one of them changes, a new pet is generated
-# and the replacement gets a fresh name. Anything else, including a change to
-# the launch template's contents (a new version, rolled out in place by EKS),
-# updates the group without renaming it.
+# and the replacement gets a fresh name. Keeper set and launch template
+# switch as in cloudposse/terraform-aws-eks-node-group main.tf.
 #
 # Not `node_group_name_prefix`: the provider caps that at 37 characters, and
 # the prod names run to 44.
 resource "random_pet" "node_groups" {
   for_each = local.node_groups
 
-  # One word of at most 8 characters, 452 to choose from. The 54-character
-  # cap on name_base assumes this length.
-  length    = 1
+  # Each word is at most 8 characters, from 452 names; the name_base length
+  # validation on var.clusters budgets 9 characters (word plus "-") per word.
+  length    = each.value.random_pet_length
   separator = "-"
 
   keepers = {
@@ -386,9 +409,16 @@ resource "random_pet" "node_groups" {
     instance_types = join(",", each.value.instance_types)
     ami_type       = each.value.ami_type
     capacity_type  = each.value.capacity_type
-    # The ID changes only when the template is replaced. launch_template.id is
-    # ForceNew on the node group; launch_template.version is not.
-    launch_template_id = aws_launch_template.node_groups[each.key].id
+    # immediately_apply_lt_changes (default: true, following
+    # create_before_destroy): any launch template change is a new pet, so the
+    # node group is replaced blue/green and every node gets the change at
+    # once. false: only a new template ID (launch_template.id is ForceNew)
+    # renames the group; a content change is a new template version that EKS
+    # rolls onto the existing group.
+    launch_template_id = (local.immediately_apply_lt_changes[each.key]
+      ? jsonencode(local.launch_template_configs[each.key])
+      : aws_launch_template.node_groups[each.key].id
+    )
   }
 }
 
@@ -396,8 +426,8 @@ resource "aws_eks_node_group" "node_groups" {
   for_each = local.node_groups
 
   cluster_name = aws_eks_cluster.clusters[each.value.cluster_name].name
-  # EKS allows 63 characters. name_base is capped at 54 on var.clusters, which
-  # leaves room for "-" and the pet.
+  # EKS allows 63 characters. The validation on var.clusters caps name_base
+  # at 63 - 9 * random_pet_length, which leaves room for the pet.
   node_group_name = "${each.value.name_base}-${random_pet.node_groups[each.key].id}"
   node_role_arn   = aws_iam_role.node[each.value.cluster_name].arn
   # A typed object always carries the attribute, so an unset value arrives as
@@ -441,12 +471,8 @@ resource "aws_eks_node_group" "node_groups" {
   labels = each.value.labels
 
   tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name        = "${var.tags["Environment"]}-${each.key}",
-      ClusterName = aws_eks_cluster.clusters[each.value.cluster_name].name
-    }
+    local.node_group_tags[each.key],
+    { ClusterName = aws_eks_cluster.clusters[each.value.cluster_name].name }
   )
 
   # Explicit dependencies to avoid race conditions during creation and destruction

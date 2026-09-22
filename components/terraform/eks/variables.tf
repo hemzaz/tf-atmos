@@ -58,6 +58,17 @@ variable "clusters" {
       metadata_http_put_response_hop_limit = optional(number, 2)
       metadata_http_tokens_required        = optional(bool, true)
 
+      # Per node group, as in cloudposse/terraform-aws-eks-node-group, where one
+      # module instance is one node group; same names, semantics and defaults.
+      # random_pet_length: words in the name suffix. 452 names per word.
+      # immediately_apply_lt_changes: null (default) follows
+      # create_before_destroy, which is always true here, so any launch
+      # template change replaces the node group blue/green. false: a content
+      # change becomes a new template version that EKS rolls onto the existing
+      # group in place; only a new template ID replaces the group.
+      random_pet_length            = optional(number, 1)
+      immediately_apply_lt_changes = optional(bool, null)
+
       # Copied from cloudposse-terraform-components/aws-eks-cluster; keep in
       # sync by copy and paste. Root-volume encryption and volume type are
       # launch-template-only settings -- `aws_eks_node_group` has no argument
@@ -219,17 +230,27 @@ variable "clusters" {
   # Environment when the cluster key already starts with it. A validation cannot
   # read locals, so name_base is written out again here. Keep the two in sync.
   # The check runs here, not in a precondition, so it works without AWS
-  # credentials (see the camel case validation above). 54 is EKS's
-  # 63-character limit minus the "-" and the longest random_pet word (8).
+  # credentials (see the camel case validation above). The limit is EKS's 63
+  # characters minus 9 per random_pet word: a "-" and the longest word (8
+  # characters in the petname list the pinned random provider ships).
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : ng.random_pet_length >= 1 && floor(ng.random_pet_length) == ng.random_pet_length
+      ])
+    ])
+    error_message = "random_pet_length must be a whole number of at least 1."
+  }
+
   validation {
     condition = alltrue(flatten([
       for k, v in var.clusters : [
         for ng_k, ng in v.node_groups :
-        length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") <= 54
+        length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") <= 63 - 9 * ng.random_pet_length
         if v.enabled && ng.enabled
       ]
     ]))
-    error_message = "Node group names are limited to 63 characters by EKS. This component appends '-' and a random_pet word of up to 8 characters, so \"<Environment>-<cluster key>-<node group key>\" (the Environment omitted when the cluster key already starts with it) must be at most 54 characters. Too long: ${join(", ", flatten([for k, v in var.clusters : [for ng_k, ng in v.node_groups : "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}" if v.enabled && ng.enabled && length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") > 54]]))}."
+    error_message = "Node group names are limited to 63 characters by EKS. This component appends random_pet_length words of up to 8 characters, each after a '-', so \"<Environment>-<cluster key>-<node group key>\" (the Environment omitted when the cluster key already starts with it) must be at most 63 - 9 * random_pet_length characters (54 at the default length 1). Too long: ${join(", ", flatten([for k, v in var.clusters : [for ng_k, ng in v.node_groups : "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}" if v.enabled && ng.enabled && length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") > 63 - 9 * ng.random_pet_length]]))}."
   }
 
   validation {
@@ -241,17 +262,6 @@ variable "clusters" {
       ]
     ]))
     error_message = "Cluster and node group keys may only contain letters, digits, '-' and '_', because they become part of the EKS node group name."
-  }
-
-  # Leaving out the Environment is safe only while no two clusters end up
-  # with the same prefix. With the keys "main" and "production-main" in the
-  # production environment, both would name their node groups
-  # "production-main-...".
-  validation {
-    condition = length(distinct([
-      for k, v in var.clusters : trimprefix(k, "${lookup(var.tags, "Environment", "")}-")
-    ])) == length(var.clusters)
-    error_message = "Two cluster keys give the same node group name prefix, e.g. \"main\" and \"<Environment>-main\". Rename one of them."
   }
 
   validation {
