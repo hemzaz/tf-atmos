@@ -16,7 +16,7 @@ for IRSA.
 
 | Required inputs | Behavior-changing | Outputs |
 |---|---|---|
-| `subnet_ids` (>= 2, `subnet-*` format), `clusters` map (each needs a valid `X.Y` `kubernetes_version`), `tags.Environment` | `default_kubernetes_version`, `enable_cluster_protection`, `default_cluster_log_retention_days`; a cluster with `endpoint_public_access` must set `public_access_cidrs` (non-empty, no `0.0.0.0/0`) | `cluster_ids`, `cluster_endpoints`, `cluster_ca_data`, `oidc_provider_arns`, `node_role_arns` (all maps keyed by cluster name) |
+| `subnet_ids` (>= 2, `subnet-*` format), `clusters` map (each needs a valid `X.Y` `kubernetes_version`), `tags.Environment` | `default_kubernetes_version`, `enable_cluster_protection`, `default_cluster_log_retention_days` (7 days; prod pins 90 in its own stack file); a cluster with `endpoint_public_access` must set `public_access_cidrs` (non-empty, no `0.0.0.0/0`) | `cluster_ids`, `cluster_endpoints`, `cluster_ca_data`, `oidc_provider_arns`, `node_role_arns` (all maps keyed by cluster name) |
 
 ## Node groups
 

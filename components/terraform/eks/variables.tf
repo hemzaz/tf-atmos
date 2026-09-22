@@ -318,7 +318,14 @@ variable "enable_cluster_protection" {
 variable "default_cluster_log_retention_days" {
   type        = number
   description = "Number of days to retain cluster logs"
-  default     = 90
+
+  # 7 days, not 90. This is the default every stack that does not say otherwise
+  # inherits, and the stacks that inherit it are dev and staging -- clusters
+  # that are rebuilt, not investigated months later. A default is the value
+  # nobody chose; it should be the cheap one, and a stack that needs a longer
+  # window says so in one line. prod does exactly that
+  # (stacks/orgs/fnx/prod/eu-west-2/production/components/compute.yaml: 90).
+  default = 7
 
   # Use more maintainable validation pattern based on CloudWatch allowed values
   validation {
