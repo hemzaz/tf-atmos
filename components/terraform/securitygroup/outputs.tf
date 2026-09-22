@@ -20,10 +20,11 @@ output "security_group_names" {
 }
 
 output "security_group_rule_ids" {
-  description = "Map of normalized rule key (e.g. \"app/ingress[0]#cidr\") to the created rule's ID. The keys are the identities for_each uses, so this is what to read when a rule is unexpectedly replaced."
-  value = {
-    for k, v in aws_security_group_rule.this : k => v.id
-  }
+  description = "Map of normalized rule key (e.g. \"app/ingress/tcp:443-443#cidr\") to the created rule's ID. The keys are the identities for_each uses, so this is what to read when a rule is unexpectedly replaced."
+  value = merge(
+    { for k, v in aws_security_group_rule.keyed : k => v.id },
+    { for k, v in aws_security_group_rule.dbc : k => v.id },
+  )
 }
 
 output "security_group_vpc_id" {

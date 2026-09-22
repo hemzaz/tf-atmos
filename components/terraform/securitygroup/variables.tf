@@ -42,10 +42,10 @@ variable "security_groups" {
       source_security_group_id = optional(string)
       self                     = optional(bool, false)
       description              = optional(string)
-      # An explicit, stable identity for this rule. Rules are keyed by their
-      # position in the list unless they carry one, so deleting the second of
-      # four rules renumbers the two after it and replaces them. Set `key` on
-      # any rule whose identity must survive the list being reordered.
+      # An explicit identity for this rule. Without one, a rule is identified
+      # by direction, protocol and ports (see normalize.tf), so reordering or
+      # deleting other rules does not touch it. Needed only to keep two CIDR
+      # rules on the same protocol and ports apart.
       key = optional(string)
     })), [])
     egress_rules = optional(list(object({
@@ -63,12 +63,32 @@ variable "security_groups" {
     })), [])
     tags = optional(map(string), {})
 
-    # Accepted and ignored: the group is named after its map key, so that two
-    # entries cannot claim the same name. See name_prefix in main.tf.
+    # Cloudposse's preserve_security_group_id, per group. false: any rule
+    # change creates a new group (new id) with the new rules; every consumer
+    # must follow the new id, and the old group's rules are revoked in the same
+    # apply, before the consumers (other components) have moved. true: the id
+    # survives rule changes, but a changed rule is revoked before it is
+    # re-authorized, so it is briefly absent. Either way a change to
+    # description or VPC still replaces the group. See "Replacing a group" in
+    # the README.
+    preserve_security_group_id = optional(bool, false)
+
+    # Not a setting: rejected by the validation below. It exists in the type
+    # only so that a stack still setting it fails loudly -- an attribute
+    # missing from an object type is silently dropped, not reported.
     name = optional(string)
   }))
   description = "Map of security groups to create"
   default     = {}
+
+  # Group names are generated -- "<Environment>-<key>-sg-<suffix>" via
+  # name_prefix -- so that a replacement group can exist next to the one it
+  # replaces. A per-group name would either be ignored or break replacement
+  # with InvalidGroup.Duplicate; say so instead of doing either.
+  validation {
+    condition     = alltrue([for k, v in var.security_groups : v.name == null])
+    error_message = "security_groups.<key>.name is not supported (set on: ${join(", ", [for k, v in var.security_groups : k if v.name != null])}). Groups are created with name_prefix \"<Environment>-<key>-sg-\" and AWS appends a unique suffix, so replacements can coexist with the group they replace. Rename the map key to change the name; the readable name is also the Name tag."
+  }
 
   # A map key is resolvable as a rule source, so it must not be mistakable for
   # an AWS security group id. This keeps the resolution in main.tf total: a
