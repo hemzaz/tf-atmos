@@ -11,7 +11,7 @@ locals {
   # -------------------------------------------------------------
   # Only process clusters where enabled=true (or not specified)
   clusters = {
-    for k, v in var.clusters : k => v if lookup(v, "enabled", true)
+    for k, v in var.clusters : k => v if v.enabled
   }
 
   # -------------------------------------------------------------
@@ -88,7 +88,7 @@ resource "time_sleep" "wait_for_cluster" {
   }
 
   # Set a base wait time that can be overridden per cluster
-  create_duration = lookup(each.value, "wait_for_cluster_duration", "45s")
+  create_duration = each.value.wait_for_cluster_duration
 
   # Add validation to ensure cluster is actually ACTIVE
   lifecycle {

@@ -40,6 +40,11 @@ variable "clusters" {
 
     # Optional fields
     service_account_token_path = optional(string)
+    # Read by main.tf; undeclared, the object type dropped them, so a stack's
+    # `enabled: false` still processed the cluster. Defaults live here because
+    # lookup() on a declared-but-null attribute returns null, not its default.
+    enabled                   = optional(bool, true)
+    wait_for_cluster_duration = optional(string, "45s")
 
     # Feature flags
     enable_aws_load_balancer_controller = optional(bool, true)
