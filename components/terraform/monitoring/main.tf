@@ -166,32 +166,48 @@ locals {
   certificate_statuses     = var.certificate_statuses
   certificate_expiry_dates = var.certificate_expiry_dates
 
-  # Default values if not provided
-  default_cert_arns         = length(local.certificate_arns) > 0 ? local.certificate_arns : ["placeholder"]
-  default_cert_names        = length(local.certificate_names) > 0 ? local.certificate_names : ["No certificates found"]
-  default_cert_domains      = length(local.certificate_domains) > 0 ? local.certificate_domains : ["example.com"]
-  default_cert_statuses     = length(local.certificate_statuses) > 0 ? local.certificate_statuses : ["UNKNOWN"]
-  default_cert_expiry_dates = length(local.certificate_expiry_dates) > 0 ? local.certificate_expiry_dates : ["Not available"]
-
-  # One row per ARN. try() keeps a shorter names/domains/... list from failing
-  # the plan: monitoring/data sets certificate_arns alone.
-  certificate_dashboard_rows = [
-    for i, arn in local.default_cert_arns : {
+  # One row per ARN, indexing the raw lists. try() keeps a shorter
+  # names/domains/... list from failing the plan (monitoring/data sets
+  # certificate_arns alone) without borrowing another row's placeholder. The
+  # placeholder row is used only when there are no ARNs at all.
+  certificate_dashboard_rows = length(local.certificate_arns) > 0 ? [
+    for i, arn in local.certificate_arns : {
       arn    = arn
-      name   = try(local.default_cert_names[i], arn)
-      domain = try(local.default_cert_domains[i], "unknown")
-      status = try(local.default_cert_statuses[i], "UNKNOWN")
-      expiry = try(local.default_cert_expiry_dates[i], "Not available")
+      name   = try(local.certificate_names[i], arn)
+      domain = try(local.certificate_domains[i], "unknown")
+      status = try(local.certificate_statuses[i], "UNKNOWN")
+      expiry = try(local.certificate_expiry_dates[i], "Not available")
     }
-  ]
+    ] : [{
+      arn    = "placeholder"
+      name   = "No certificates found"
+      domain = "example.com"
+      status = "UNKNOWN"
+      expiry = "Not available"
+  }]
+
+  # The component's own expiry alarms plus any the stack passes in, merged the
+  # way Cloud Posse merges alarm endpoints (terraform-aws-cloudtrail-cloudwatch-
+  # alarms alarms.tf:7, distinct(compact(concat(...)))).
+  certificate_dashboard_alarm_arns = distinct(compact(concat(
+    var.certificate_alarm_arns,
+    [for a in aws_cloudwatch_metric_alarm.certificate_expiry : a.arn],
+  )))
 
   # Built with jsonencode, not templatefile. The template interpolated
   # join("\n\n", ...) inside a JSON string, and an HCL "\n" is a real newline,
   # so every render was invalid JSON ("invalid character '\n' in string
   # literal"). jsonencode escapes it. Shared by both certificate dashboards
   # (certificate_monitoring below, certificates in dashboards.tf).
+  #
+  # widgets is a concat() of lists, and a list is empty when its widget has
+  # nothing valid to show. Cloud Posse likewise derives the widget list from
+  # the data instead of emitting fixed widgets (terraform-aws-cloudtrail-
+  # cloudwatch-alarms alarms.tf:81-101). An Alarm Status widget requires
+  # 1-100 ARNs, so it is omitted when there are none. The log widget is
+  # omitted without a cluster name, since it would query /aws/eks//...
   certificate_dashboard_body = jsonencode({
-    widgets = [
+    widgets = concat([
       {
         type   = "text"
         x      = 0
@@ -245,6 +261,7 @@ locals {
           ))
         }
       },
+      ], length(local.certificate_dashboard_alarm_arns) > 0 ? [
       {
         type   = "alarm"
         x      = 0
@@ -253,9 +270,10 @@ locals {
         height = 6
         properties = {
           title  = "Certificate Expiry Alarms"
-          alarms = var.certificate_alarm_arns
+          alarms = local.certificate_dashboard_alarm_arns
         }
       },
+      ] : [], [
       {
         type   = "metric"
         x      = 0
@@ -275,6 +293,7 @@ locals {
           period  = 300
         }
       },
+      ], var.eks_cluster_name != "" ? [
       {
         type   = "log"
         x      = 0
@@ -288,7 +307,7 @@ locals {
           view   = "table"
         }
       },
-    ]
+    ] : [])
   })
 }
 
