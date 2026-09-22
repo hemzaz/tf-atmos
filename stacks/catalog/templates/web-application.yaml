@@ -107,26 +107,42 @@ components:
       vars:
         vpc_id: !terraform.state web-application/vpc .vpc_id
 
+        # source_security_group_id below names a sibling key in this map,
+        # not an sg- id: the component resolves it to that group's id once
+        # the group exists. An unknown key fails var.security_groups
+        # validation at plan.
         security_groups:
           # ALB Security Group - allows inbound HTTP/HTTPS from anywhere
           alb:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-alb-sg"
+            # Every consumer of these groups is another component (it reads the
+            # id through !terraform.state), so a replaced group would leave them
+            # on an emptied old one until they are re-applied. Keep the id; only
+            # a changed rule is briefly absent while it is replaced. See the
+            # component README.
+            # Every rule carries an explicit `key`: without one a rule is keyed
+            # by its position, and removing an earlier rule would replace the
+            # ones after it. Adding or renaming a key on a live rule takes two
+            # applies (see the README).
+            preserve_security_group_id: true
             description: "Security group for web application ALB"
             ingress_rules:
-              - description: "HTTPS from CloudFront"
+              - key: "https"
+                description: "HTTPS from CloudFront"
                 from_port: 443
                 to_port: 443
                 protocol: "tcp"
                 cidr_blocks:
                   - "0.0.0.0/0"
-              - description: "HTTP redirect"
+              - key: "http"
+                description: "HTTP redirect"
                 from_port: 80
                 to_port: 80
                 protocol: "tcp"
                 cidr_blocks:
                   - "0.0.0.0/0"
             egress_rules:
-              - description: "Allow all outbound"
+              - key: "all-outbound"
+                description: "Allow all outbound"
                 from_port: 0
                 to_port: 0
                 protocol: "-1"
@@ -135,27 +151,31 @@ components:
 
           # Application Security Group - allows traffic from ALB only
           application:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-app-sg"
+            preserve_security_group_id: true
             description: "Security group for web application containers"
             ingress_rules:
-              - description: "HTTP from ALB"
+              - key: "http-from-alb"
+                description: "HTTP from ALB"
                 from_port: 8080
                 to_port: 8080
                 protocol: "tcp"
                 source_security_group_id: "alb"
             egress_rules:
-              - description: "HTTPS to AWS services"
+              - key: "https-aws"
+                description: "HTTPS to AWS services"
                 from_port: 443
                 to_port: 443
                 protocol: "tcp"
                 cidr_blocks:
                   - "0.0.0.0/0"
-              - description: "Database access"
+              - key: "postgres"
+                description: "Database access"
                 from_port: 5432
                 to_port: 5432
                 protocol: "tcp"
                 source_security_group_id: "database"
-              - description: "Redis cache access"
+              - key: "redis"
+                description: "Redis cache access"
                 from_port: 6379
                 to_port: 6379
                 protocol: "tcp"
@@ -163,10 +183,11 @@ components:
 
           # Database Security Group - allows traffic from application only
           database:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db-sg"
+            preserve_security_group_id: true
             description: "Security group for RDS database"
             ingress_rules:
-              - description: "PostgreSQL from application"
+              - key: "postgres-from-app"
+                description: "PostgreSQL from application"
                 from_port: 5432
                 to_port: 5432
                 protocol: "tcp"
@@ -175,10 +196,11 @@ components:
 
           # Cache Security Group - allows traffic from application only
           cache:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cache-sg"
+            preserve_security_group_id: true
             description: "Security group for ElastiCache"
             ingress_rules:
-              - description: "Redis from application"
+              - key: "redis-from-app"
+                description: "Redis from application"
                 from_port: 6379
                 to_port: 6379
                 protocol: "tcp"

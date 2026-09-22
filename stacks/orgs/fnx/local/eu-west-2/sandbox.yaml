@@ -222,15 +222,27 @@ components:
         enforce_no_public_ingress: true
         security_groups:
           app:
+            # Every consumer of these groups is another component (it reads the
+            # id through !terraform.state), so a replaced group would leave them
+            # on an emptied old one until they are re-applied. Keep the id; only
+            # a changed rule is briefly absent while it is replaced. See the
+            # component README.
+            # Every rule carries an explicit `key`: without one a rule is keyed
+            # by its position, and removing an earlier rule would replace the
+            # ones after it. Adding or renaming a key on a live rule takes two
+            # applies (see the README).
+            preserve_security_group_id: true
             description: "Sandbox application tier"
             ingress_rules:
-              - from_port: 443
+              - key: "https-vpc"
+                from_port: 443
                 to_port: 443
                 protocol: "tcp"
                 cidr_blocks: ["10.90.0.0/16"]
                 description: "HTTPS from inside the VPC"
             egress_rules:
-              - from_port: 0
+              - key: "all-outbound"
+                from_port: 0
                 to_port: 0
                 protocol: "-1"
                 cidr_blocks: ["0.0.0.0/0"]
