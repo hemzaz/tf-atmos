@@ -92,9 +92,14 @@ old object to relabel:
 - **An attribute becoming a resource.** Inline `ingress`/`egress` blocks are
   attributes of `aws_security_group`, not separate state objects, so promoting
   them to `aws_security_group_rule` resources has nothing to move from. The
-  `securitygroup` README documents the two-apply procedure this needs: revoke
-  the inline rules on the old version first, then upgrade and re-create them as
-  resources. The reverse has the same shape: the provider documents that a
+  `securitygroup` upgrade does not move them: it replaces every group
+  (`name` becomes `name_prefix`), so the new group is created with its rules
+  as resources while the old one keeps its inline rules until it is destroyed.
+  Its consumers live in other components, which makes that a three-apply
+  rollout -- this component, then its consumers, then this component again --
+  documented under "Replacing a group" in
+  [the component README](../components/terraform/securitygroup/README.md#replacing-a-group).
+  The reverse has the same shape: the provider documents that a
   group cannot carry inline rules and `aws_security_group_rule` resources at
   once — the two overwrite each other — so the rules have to be removed before
   the inline blocks are added. Any `dynamic` block promoted to a real resource
