@@ -6,22 +6,82 @@ locals {
     for k, v in var.clusters : k => v if lookup(v, "enabled", true)
   }
 
-  # Merge node groups across all clusters
+  cluster_log_group_names = {
+    for k, v in local.clusters : k => "/aws/eks/${var.tags["Environment"]}-${k}/cluster"
+  }
+
+  # Merge node groups across all clusters.
+  # `name_base` is the node group's name without its random_pet suffix:
+  # "<cluster>-<node group>", with the Environment prefixed only when the
+  # cluster key does not already start with it ("production-main", not
+  # "production-production-main"). It is a plain `-` join, never the `.` of the
+  # map key, which EKS does not document as valid in a node group name.
+  # Keep this expression in sync with the node group name validation on
+  # var.clusters, which has to repeat it because a validation cannot read locals.
   node_groups = merge([
     for cluster_key, cluster in local.clusters : {
       for ng_key, ng in lookup(cluster, "node_groups", {}) :
-      "${cluster_key}.${ng_key}" => merge(ng, { cluster_name = cluster_key })
+      "${cluster_key}.${ng_key}" => merge(ng, {
+        cluster_name = cluster_key
+        name_base    = "${var.tags["Environment"]}-${trimprefix(cluster_key, "${var.tags["Environment"]}-")}-${ng_key}"
+      })
       if lookup(ng, "enabled", true)
     }
   ]...)
+
+  # One label for everything a node group creates, as Cloud Posse does: the
+  # node group, its launch template, and what the template launches.
+  node_group_tags = {
+    for k, ng in local.node_groups : k => merge(var.tags, ng.tags, { Name = ng.name_base })
+  }
+
+  # The launch template's settings in one object, read both by the template
+  # and by the random_pet keeper, as `launch_template_config` is in
+  # cloudposse/terraform-aws-eks-node-group (launch-template.tf).
+  # Any new aws_launch_template argument must be added here and read from
+  # here; otherwise a change to it rolls in place instead of replacing the group.
+  launch_template_configs = {
+    for k, ng in local.node_groups : k => {
+      block_device_mappings = ng.block_device_map
+      tag_specifications    = ["instance", "volume", "network-interface"]
+      # http_endpoint is documented as optional but is required whenever
+      # http_put_response_hop_limit is set.
+      metadata_options = {
+        http_endpoint               = ng.metadata_http_endpoint_enabled ? "enabled" : "disabled"
+        http_put_response_hop_limit = ng.metadata_http_put_response_hop_limit
+        http_tokens                 = ng.metadata_http_tokens_required ? "required" : "optional"
+      }
+      tags = local.node_group_tags[k]
+      monitoring = {
+        enabled = ng.detailed_monitoring_enabled
+      }
+    }
+  }
+
+  # Cloud Posse: "When `null` (default) this input takes the value of
+  # `create_before_destroy`". Node groups here are always
+  # create_before_destroy, so null means true.
+  immediately_apply_lt_changes = {
+    for k, ng in local.node_groups : k => coalesce(ng.immediately_apply_lt_changes, true)
+  }
 }
 
 resource "aws_cloudwatch_log_group" "eks" {
   for_each = local.clusters
 
-  name              = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
-  retention_in_days = lookup(each.value, "log_retention_days", var.default_cluster_log_retention_days)
-  kms_key_id        = lookup(each.value, "log_kms_key_id", null)
+  # checkov:skip=CKV_AWS_338:Retention is a per-stack cost decision, not a module one. Only prod pins default_cluster_log_retention_days (90); dev and staging inherit it, so raising the default to the year this check wants would quadruple their audit-log spend without anyone deciding to. The repo accepts the same finding on its five other log groups. Removing the dead lookup() below is what made this check resolvable at all -- it was never passing, only invisible.
+  name = local.cluster_log_group_names[each.key]
+  # No per-cluster override: `clusters` is a typed object and declares neither
+  # `log_retention_days` nor `log_kms_key_id`, so a stack setting either would be
+  # dropped by the type constraint and silently ignored here.
+  retention_in_days = var.default_cluster_log_retention_days
+  # The cluster's own key, the one already encrypting its secrets. Until now
+  # this read a `log_kms_key_id` key that the typed schema does not declare, so
+  # it always resolved to null and the control-plane logs -- which carry the
+  # audit trail -- were written unencrypted. Checkov could not see that, because
+  # it cannot resolve a lookup(): removing the dead expression is what surfaced
+  # CKV_AWS_158.
+  kms_key_id = aws_kms_key.eks[each.key].arn
 
   tags = merge(
     var.tags,
@@ -112,7 +172,7 @@ resource "aws_eks_cluster" "clusters" {
 resource "aws_kms_key" "eks" {
   for_each = local.clusters
 
-  description             = "KMS key for EKS ${each.key} secrets encryption"
+  description             = "KMS key for EKS ${each.key} secrets and control-plane log encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
@@ -162,6 +222,32 @@ resource "aws_kms_key" "eks" {
           StringEquals = {
             "kms:CallerAccount" = data.aws_caller_identity.current.account_id,
             "kms:ViaService"    = "eks.${var.region}.amazonaws.com"
+          }
+        }
+      },
+      {
+        # Required for the log group below to use this key. Without it, CloudWatch
+        # Logs cannot write and AWS rejects the key association outright, so a
+        # missing statement fails the apply rather than silently dropping logs.
+        # Scoped by encryption context to this cluster's log group, which is why
+        # the name comes from local.cluster_log_group_names rather than being
+        # spelled out a second time.
+        Sid    = "Allow CloudWatch Logs to use the key for this cluster's log group",
+        Effect = "Allow",
+        Principal = {
+          Service = "logs.${var.region}.amazonaws.com"
+        },
+        Action = [
+          "kms:Encrypt*",
+          "kms:Decrypt*",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ],
+        Resource = "*",
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:${local.cluster_log_group_names[each.key]}"
           }
         }
       }
@@ -225,60 +311,173 @@ resource "aws_iam_role_policy_attachment" "cluster_eks_vpc_resource_controller" 
 }
 
 # EKS Node Groups
+# A launch template is the only way to control root-volume encryption and
+# volume type on a managed node group; `aws_eks_node_group` exposes neither.
+# One template per node group, because block_device_map is per node group.
+# Deliberately no `image_id`/`user_data`: leaving them unset lets EKS supply the
+# AMI matching `ami_type` and inject its own bootstrap script.
+resource "aws_launch_template" "node_groups" {
+  # checkov:skip=CKV_AWS_79: http_tokens is "required" unless a stack sets
+  #   metadata_http_tokens_required = false. Checkov cannot evaluate the
+  #   conditional below and flags the resource whatever the value resolves to.
+  # checkov:skip=CKV_AWS_341: the hop limit defaults to 2 because AWS requires at
+  #   least 2 for a container off the host network to reach IMDSv2
+  #   (https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html),
+  #   which is also cloudposse/terraform-aws-eks-node-group's default. Prefer IRSA
+  #   over the instance profile and set the limit to 1 where no pod needs IMDS.
+  for_each = local.node_groups
+
+  # A launch template name_prefix may be up to 102 characters (128 minus the
+  # 26-character unique suffix). name_base is capped below 63 on var.clusters,
+  # well inside that limit.
+  name_prefix = "${each.value.name_base}-"
+  description = "Managed node group ${each.key} in cluster ${each.value.cluster_name}"
+
+  dynamic "block_device_mappings" {
+    for_each = local.launch_template_configs[each.key].block_device_mappings
+
+    content {
+      device_name  = block_device_mappings.key
+      no_device    = block_device_mappings.value.no_device
+      virtual_name = block_device_mappings.value.virtual_name
+
+      dynamic "ebs" {
+        for_each = block_device_mappings.value.ebs == null ? [] : [block_device_mappings.value.ebs]
+
+        content {
+          delete_on_termination = ebs.value.delete_on_termination
+          encrypted             = ebs.value.encrypted
+          iops                  = ebs.value.iops
+          kms_key_id            = ebs.value.kms_key_id
+          snapshot_id           = ebs.value.snapshot_id
+          throughput            = ebs.value.throughput
+          volume_size           = ebs.value.volume_size
+          volume_type           = ebs.value.volume_type
+        }
+      }
+    }
+  }
+
+  metadata_options {
+    http_endpoint               = local.launch_template_configs[each.key].metadata_options.http_endpoint
+    http_put_response_hop_limit = local.launch_template_configs[each.key].metadata_options.http_put_response_hop_limit
+    http_tokens                 = local.launch_template_configs[each.key].metadata_options.http_tokens
+  }
+
+  monitoring {
+    enabled = local.launch_template_configs[each.key].monitoring.enabled
+  }
+
+  # Resource tags on the launch template tag only the template itself. These
+  # propagate the tags to what EKS launches from it. The resource types match
+  # the `resources_to_tag` default in cloudposse/terraform-aws-eks-node-group.
+  dynamic "tag_specifications" {
+    for_each = local.launch_template_configs[each.key].tag_specifications
+
+    content {
+      resource_type = tag_specifications.value
+      tags          = local.launch_template_configs[each.key].tags
+    }
+  }
+
+  tags = local.launch_template_configs[each.key].tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# The node group's name suffix, as in cloudposse/terraform-aws-eks-node-group.
+# The node group is create_before_destroy, so a replacement has to run beside
+# the live group under a different name, or EKS rejects it with
+# ResourceInUseException. The keepers are every node group input that the AWS
+# provider marks ForceNew: when one of them changes, a new pet is generated
+# and the replacement gets a fresh name. Keeper set and launch template
+# switch as in cloudposse/terraform-aws-eks-node-group main.tf.
+#
+# Not `node_group_name_prefix`: the provider caps that at 37 characters, and
+# the prod names run to 44.
+resource "random_pet" "node_groups" {
+  for_each = local.node_groups
+
+  # The pet is Name (length 1), Adjective-Name (2), or one Adverb per word
+  # beyond two, then Adjective-Name (3+). With the pinned random provider,
+  # names and adjectives are at most 8 characters and adverbs at most 10.
+  # The name_base validation on var.clusters budgets exactly that, "-" included.
+  length    = each.value.random_pet_length
+  separator = "-"
+
+  keepers = {
+    node_role_arn  = aws_iam_role.node[each.value.cluster_name].arn
+    subnet_ids     = join(",", sort(coalesce(each.value.subnet_ids, var.subnet_ids)))
+    instance_types = join(",", each.value.instance_types)
+    ami_type       = each.value.ami_type
+    capacity_type  = each.value.capacity_type
+    # immediately_apply_lt_changes (default: true, following
+    # create_before_destroy): any launch template change is a new pet, so the
+    # node group is replaced blue/green and every node gets the change at
+    # once. false: only a new template ID (launch_template.id is ForceNew)
+    # renames the group; a content change is a new template version that EKS
+    # rolls onto the existing group.
+    launch_template_id = (local.immediately_apply_lt_changes[each.key]
+      ? jsonencode(local.launch_template_configs[each.key])
+      : aws_launch_template.node_groups[each.key].id
+    )
+  }
+}
+
 resource "aws_eks_node_group" "node_groups" {
   for_each = local.node_groups
 
-  cluster_name    = aws_eks_cluster.clusters[each.value.cluster_name].name
-  node_group_name = "${var.tags["Environment"]}-${each.key}"
+  cluster_name = aws_eks_cluster.clusters[each.value.cluster_name].name
+  # EKS allows 63 characters. The validation on var.clusters caps name_base
+  # at 63 minus the longest possible "-<pet>", so the name always fits. The
+  # pet is unknown until apply, so the cap is the only plan-time check.
+  node_group_name = "${each.value.name_base}-${random_pet.node_groups[each.key].id}"
   node_role_arn   = aws_iam_role.node[each.value.cluster_name].arn
-  subnet_ids      = lookup(each.value, "subnet_ids", var.subnet_ids)
+  # A typed object always carries the attribute, so an unset value arrives as
+  # null rather than absent and `lookup` would no longer reach its default.
+  subnet_ids = coalesce(each.value.subnet_ids, var.subnet_ids)
 
-  instance_types = lookup(each.value, "instance_types", ["t3.medium"])
-  ami_type       = lookup(each.value, "ami_type", "AL2_x86_64")
-  capacity_type  = lookup(each.value, "capacity_type", "ON_DEMAND")
-  disk_size      = lookup(each.value, "disk_size", 50)
+  instance_types = each.value.instance_types
+  ami_type       = each.value.ami_type
+  capacity_type  = each.value.capacity_type
+  # No `disk_size`: AWS rejects a node group that sets it while a launch
+  # template is attached. Size lives in block_device_map instead.
+
+  launch_template {
+    id      = aws_launch_template.node_groups[each.key].id
+    version = aws_launch_template.node_groups[each.key].latest_version
+  }
 
   scaling_config {
-    desired_size = lookup(each.value, "desired_size", 2)
-    max_size     = lookup(each.value, "max_size", 4)
-    min_size     = lookup(each.value, "min_size", 1)
+    desired_size = each.value.desired_size
+    max_size     = each.value.max_size
+    min_size     = each.value.min_size
   }
 
   dynamic "taint" {
-    for_each = lookup(each.value, "taints", [])
+    for_each = each.value.taints
     content {
       key    = taint.value.key
-      value  = lookup(taint.value, "value", null)
+      value  = taint.value.value
       effect = taint.value.effect
     }
   }
 
   dynamic "update_config" {
-    for_each = lookup(each.value, "update_config", null) != null ? [1] : []
+    for_each = each.value.update_config == null ? [] : [each.value.update_config]
     content {
-      max_unavailable            = lookup(each.value.update_config, "max_unavailable", null)
-      max_unavailable_percentage = lookup(each.value.update_config, "max_unavailable_percentage", null)
+      max_unavailable            = update_config.value.max_unavailable
+      max_unavailable_percentage = update_config.value.max_unavailable_percentage
     }
   }
 
-  dynamic "launch_template" {
-    for_each = lookup(each.value, "launch_template", null) != null ? [1] : []
-    content {
-      id      = lookup(each.value.launch_template, "id", null)
-      name    = lookup(each.value.launch_template, "name", null)
-      version = lookup(each.value.launch_template, "version", null)
-    }
-  }
-
-  labels = lookup(each.value, "labels", {})
+  labels = each.value.labels
 
   tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name        = "${var.tags["Environment"]}-${each.key}",
-      ClusterName = aws_eks_cluster.clusters[each.value.cluster_name].name
-    }
+    local.node_group_tags[each.key],
+    { ClusterName = aws_eks_cluster.clusters[each.value.cluster_name].name }
   )
 
   # Explicit dependencies to avoid race conditions during creation and destruction
@@ -297,29 +496,32 @@ resource "aws_eks_node_group" "node_groups" {
       scaling_config[0].desired_size, # Allow autoscaling to manage desired size
 
       # Add other attributes that shouldn't trigger replacement if needed
-      # For example, labels and tags might be updated outside Terraform
+      # For example, labels and tags might be updated outside Terraform.
+      # Ignoring tags only matters with immediately_apply_lt_changes = false:
+      # under the default keeper, a tag change is also a launch template
+      # change, so it gives a new pet and replaces the group anyway.
       labels,
       tags
     ]
 
     # Validate taint effect values
     precondition {
-      condition = length(lookup(each.value, "taints", [])) == 0 || alltrue([
-        for taint in lookup(each.value, "taints", []) :
-        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], lookup(taint, "effect", "NO_SCHEDULE"))
+      condition = alltrue([
+        for taint in each.value.taints :
+        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], taint.effect)
       ])
       error_message = "Taint effect must be one of: NO_SCHEDULE, PREFER_NO_SCHEDULE, or NO_EXECUTE."
     }
 
     # Add precondition to check for required values
     precondition {
-      condition     = length(lookup(each.value, "subnet_ids", var.subnet_ids)) > 0
+      condition     = length(coalesce(each.value.subnet_ids, var.subnet_ids)) > 0
       error_message = "At least one subnet must be provided for the node group."
     }
 
     # Add precondition to validate instance types are valid
     precondition {
-      condition     = length(lookup(each.value, "instance_types", ["t3.medium"])) > 0
+      condition     = length(each.value.instance_types) > 0
       error_message = "At least one instance type must be specified."
     }
   }

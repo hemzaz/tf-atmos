@@ -107,7 +107,10 @@ components:
                 max_size: 4
                 labels:
                   role: data-processing
-                disk_size: 100
+                block_device_map:
+                  "/dev/xvda":
+                    ebs:
+                      volume_size: 100
 
       dependencies:
         components:

@@ -18,8 +18,103 @@ variable "clusters" {
     security_group_ids        = optional(list(string), [])
     kms_key_arn               = optional(string)
     enabled_cluster_log_types = optional(list(string), ["api", "audit", "authenticator", "controllerManager", "scheduler"])
-    node_groups               = optional(map(any), {})
     tags                      = optional(map(string), {})
+
+    # Typed, not `map(any)`. `map(any)` forces every node group to converge on
+    # one type, so a group with `taints` and a group without could not coexist:
+    # "all map elements must have the same type". It also silently discarded
+    # any key the component does not read.
+    node_groups = optional(map(object({
+      enabled        = optional(bool, true)
+      instance_types = optional(list(string), ["t3.medium"])
+      # instance_types and ami_type stay on the node group, never the launch
+      # template: a node group accepts up to 20 instance types and a launch
+      # template does not, and EKS uses ami_type to pick both the AMI and the
+      # bootstrap userdata. Matches cloudposse/terraform-aws-eks-node-group.
+      ami_type      = optional(string, "AL2_x86_64")
+      capacity_type = optional(string, "ON_DEMAND")
+      subnet_ids    = optional(list(string))
+      desired_size  = optional(number, 2)
+      min_size      = optional(number, 1)
+      max_size      = optional(number, 4)
+      labels        = optional(map(string), {})
+      tags          = optional(map(string), {})
+      taints = optional(list(object({
+        key    = string
+        value  = optional(string)
+        effect = string
+      })), [])
+      update_config = optional(object({
+        max_unavailable            = optional(number)
+        max_unavailable_percentage = optional(number)
+      }))
+
+      # Launch-template instance settings, names and defaults taken from
+      # cloudposse/terraform-aws-eks-node-group. IMDSv2 is required by default;
+      # the hop limit of 2 lets containerized workloads assume the instance
+      # profile, though IRSA service accounts are the better answer.
+      detailed_monitoring_enabled          = optional(bool, false)
+      metadata_http_endpoint_enabled       = optional(bool, true)
+      metadata_http_put_response_hop_limit = optional(number, 2)
+      metadata_http_tokens_required        = optional(bool, true)
+
+      # Per node group, as in cloudposse/terraform-aws-eks-node-group, where one
+      # module instance is one node group; same names, semantics and defaults.
+      # random_pet_length: words in the name suffix (Name, Adjective-Name, then
+      # one Adverb per extra word); 452 names alone at the default of 1.
+      # immediately_apply_lt_changes: null (default) follows
+      # create_before_destroy, which is always true here, so any launch
+      # template change replaces the node group blue/green. false: a content
+      # change becomes a new template version that EKS rolls onto the existing
+      # group in place; only a new template ID replaces the group.
+      random_pet_length            = optional(number, 1)
+      immediately_apply_lt_changes = optional(bool, null)
+
+      # Copied from cloudposse-terraform-components/aws-eks-cluster; keep in
+      # sync by copy and paste. Root-volume encryption and volume type are
+      # launch-template-only settings -- `aws_eks_node_group` has no argument
+      # for either, and AWS rejects a node group that sets `disk_size` while a
+      # launch template is attached. The defaults give an encrypted gp3 root
+      # volume, so a stack wanting the secure baseline sets nothing.
+      block_device_map = optional(map(object({
+        no_device    = optional(bool, null)
+        virtual_name = optional(string, null)
+        ebs = optional(object({
+          delete_on_termination = optional(bool, true)
+          encrypted             = optional(bool, true)
+          iops                  = optional(number, null)
+          kms_key_id            = optional(string, null) # null => AWS-managed aws/ebs key
+          snapshot_id           = optional(string, null)
+          throughput            = optional(number, null) # for gp3, MiB/s, up to 1000
+          volume_size           = optional(number, 50)   # disk size in GB
+          volume_type           = optional(string, "gp3")
+
+          # Catch common camel case typos. These have no effect, they just
+          # generate better errors. Without these defined they would be
+          # silently ignored and the default values used instead, which is
+          # difficult to debug.
+          deleteOnTermination = optional(any, null)
+          kmsKeyId            = optional(any, null)
+          snapshotId          = optional(any, null)
+          volumeSize          = optional(any, null)
+          volumeType          = optional(any, null)
+        }))
+      })), { "/dev/xvda" = { ebs = {} } })
+
+      # Decoys, like the camel case ones above: declared only so a validation
+      # below can reject them. `disk_size`, `disk_type` and `disk_encrypted` are
+      # what this component's stacks used before block_device_map existed.
+      # `disk_encryption_enabled` is upstream's name. Upstream
+      # (cloudposse-terraform-components/aws-eks-cluster) still accepts
+      # `disk_size` and `disk_encryption_enabled` as deprecated shims that it
+      # translates into block_device_map. This component has no translation, so
+      # without these declarations the type conversion would silently drop the
+      # keys and the volume would keep its default size.
+      disk_size               = optional(any, null)
+      disk_type               = optional(any, null)
+      disk_encrypted          = optional(any, null)
+      disk_encryption_enabled = optional(any, null)
+    })), {})
   }))
   description = "Map of EKS cluster configurations with typed schema"
   default     = {}
@@ -66,6 +161,113 @@ variable "clusters" {
       lookup(v, "endpoint_private_access", true) == true || lookup(v, "endpoint_public_access", false) == true
     ])
     error_message = "At least one of endpoint_private_access or endpoint_public_access must be enabled for the cluster."
+  }
+
+  # Node group validations. A nested object cannot carry its own validation
+  # block, so the checks that belong to a node group live on var.clusters.
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : ng.metadata_http_put_response_hop_limit >= 1
+      ])
+    ])
+    error_message = "metadata_http_put_response_hop_limit must be at least 1; IMDS is unreachable below that."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups :
+        ng.min_size <= ng.desired_size && ng.desired_size <= ng.max_size
+      ])
+    ])
+    error_message = "Each node group must satisfy min_size <= desired_size <= max_size."
+  }
+
+  # What makes the camel case decoys in block_device_map do anything. Declaring
+  # the misspellings is only half of it: it makes `volumeSize` arrive as a value
+  # instead of being dropped by the type constraint, and this is what turns that
+  # value into an error. Without it the decoys are dead weight and a typo still
+  # leaves the volume silently at its default size -- the very failure the typed
+  # schema exists to stop.
+  #
+  # cloudposse/terraform-aws-eks-node-group hangs this off a `random_pet`
+  # resource precondition. A precondition is the wrong host here: the eks
+  # component reads data sources, so `terraform plan` stops at
+  # InvalidClientTokenId before any resource is evaluated (verified against the
+  # plan-sweep logs), and the check would never run in a credential-less gate.
+  # Variable validations run before the provider authenticates, so this fires in
+  # CI, in the sweep, and in every apply.
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : length(compact(flatten([
+          for device_name, device in ng.block_device_map : [
+            device.ebs.deleteOnTermination,
+            device.ebs.kmsKeyId,
+            device.ebs.snapshotId,
+            device.ebs.volumeSize,
+            device.ebs.volumeType,
+          ] if device.ebs != null
+        ]))) == 0
+      ])
+    ])
+    error_message = "block_device_map does not support the camel case arguments deleteOnTermination, kmsKeyId, snapshotId, volumeSize or volumeType. Use delete_on_termination, kms_key_id, snapshot_id, volume_size and volume_type."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : length(compact([
+          for x in [ng.disk_size, ng.disk_type, ng.disk_encrypted, ng.disk_encryption_enabled] : x == null ? "" : "set"
+        ])) == 0
+      ])
+    ])
+    error_message = "Node groups no longer accept disk_size, disk_type, disk_encrypted or disk_encryption_enabled. Set the root volume in block_device_map instead, e.g. block_device_map = { \"/dev/xvda\" = { ebs = { volume_size = 100, volume_type = \"gp3\", encrypted = true } } }."
+  }
+
+  # Node group names are "<name_base>-<pet>", built in local.node_groups, where
+  # name_base is "<Environment>-<cluster key>-<node group key>", minus the
+  # Environment when the cluster key already starts with it. A validation cannot
+  # read locals, so name_base is written out again here. Keep the two in sync.
+  # The check runs here, not in a precondition, so it works without AWS
+  # credentials (see the camel case validation above). The pet is unknown
+  # until apply, so the limit is EKS's 63 characters minus the longest
+  # possible "-<pet>". golang-petname (as vendored by the pinned random
+  # provider) generates Name for 1 word, Adjective-Name for 2, and for 3 or
+  # more one Adverb per word beyond two followed by Adjective-Name. Names and
+  # adjectives are at most 8 characters, adverbs at most 10. Adding a "-"
+  # before each word, the budget is 9 * min(n, 2) + 11 * max(n - 2, 0):
+  # 9, 18, 29, 40 ... for n = 1, 2, 3, 4, so name_base may be 54, 45, 34, 23.
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : ng.random_pet_length >= 1 && floor(ng.random_pet_length) == ng.random_pet_length
+      ])
+    ])
+    error_message = "random_pet_length must be a whole number of at least 1."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.clusters : [
+        for ng_k, ng in v.node_groups :
+        length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") <= 63 - (9 * min(ng.random_pet_length, 2) + 11 * max(ng.random_pet_length - 2, 0))
+        if v.enabled && ng.enabled
+      ]
+    ]))
+    error_message = "Node group names are limited to 63 characters by EKS, and this component appends a random_pet suffix of up to 9 * min(n, 2) + 11 * max(n - 2, 0) characters for random_pet_length n. So \"<Environment>-<cluster key>-<node group key>\" (the Environment omitted when the cluster key already starts with it) may be at most 54, 45, 34 or 23 characters for n = 1, 2, 3 or 4. Too long: ${join(", ", flatten([for k, v in var.clusters : [for ng_k, ng in v.node_groups : "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k} (random_pet_length ${ng.random_pet_length})" if v.enabled && ng.enabled && length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") > 63 - (9 * min(ng.random_pet_length, 2) + 11 * max(ng.random_pet_length - 2, 0))]]))}."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.clusters : [
+        for ng_k, ng in v.node_groups :
+        can(regex("^[0-9A-Za-z][0-9A-Za-z_-]*$", "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}"))
+        if v.enabled && ng.enabled
+      ]
+    ]))
+    error_message = "Cluster and node group keys may only contain letters, digits, '-' and '_', because they become part of the EKS node group name."
   }
 
   validation {
