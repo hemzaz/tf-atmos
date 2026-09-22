@@ -106,7 +106,9 @@ resource "aws_iam_policy" "resource_management" {
   # CloudWatchMetrics always remain, so the document is valid without them. A
   # guard that forces extra write grants just to plan is the opposite of least
   # privilege, and it made every catalog/iam/defaults instance unplannable.
-  # Cloud Posse's aws-iam-role likewise accepts an empty resource list.
+  # Cloud Posse's aws-iam-role likewise treats the resource lists as optional
+  # and only guards against an invalid (empty) document (src/main.tf:7,38-40:
+  # policy_document_count is 0 when no statements or documents are given).
 }
 
 resource "aws_iam_role_policy_attachment" "resource_management" {

@@ -119,8 +119,9 @@ components:
 `external_id` is not optional decoration — it satisfies the `lifecycle`
 precondition at `cross-account-roles.tf:59`. Strip it and the component cannot
 plan. `managed_s3_bucket_arns` is optional: it adds write access to the listed
-buckets on top of the role's read-only, logs and metrics grants. Use `trusted_principal_org_id` instead of `external_id` if you prefer an
-org-wide condition; `require_mfa` also satisfies it, but CI cannot present MFA.
+buckets on top of the role's read-only, logs and metrics grants. Use
+`trusted_principal_org_id` instead of `external_id` if you prefer an org-wide
+condition; `require_mfa` also satisfies it, but CI cannot present MFA.
 
 Do **not** set `trusted_account_ids` to the spoke's own account id. That makes
 `local.trusts_other_accounts` false, short-circuits the precondition, goes green
