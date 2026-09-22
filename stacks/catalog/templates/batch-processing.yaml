@@ -109,13 +109,10 @@ components:
       vars:
         vpc_id: !terraform.state batch-processing/vpc .vpc_id
 
-        # NOTE: the rules below use source_security_group_id to name a
-        # sibling key in this map. The securitygroup component does not
-        # implement it -- the attribute was silently dropped, so the rule
-        # reached AWS with no source and was rejected at apply.
-        # var.security_groups now rejects it at plan instead, so importing
-        # this template as-is fails validation until the component grows
-        # separate aws_vpc_security_group_ingress_rule resources.
+        # source_security_group_id below names a sibling key in this map,
+        # not an sg- id: the component resolves it to that group's id once
+        # the group exists. An unknown key fails var.security_groups
+        # validation at plan.
         security_groups:
           # Batch compute security group
           batch_compute:

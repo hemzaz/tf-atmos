@@ -1,5 +1,9 @@
-# Security Group Helper Rules and Common Patterns
-# Provides pre-defined, secure rule templates for common use cases
+# Security group auditing: CloudWatch logging and alarms on security group
+# change events, a detector for rules open to the whole internet, and a set of
+# rule templates offered as an output for reference.
+#
+# The rules this component actually creates are in main.tf; what is normalized
+# and keyed for them is in normalize.tf.
 
 locals {
   # Common security group rule templates
@@ -131,31 +135,33 @@ locals {
     }
   }
 
-  # Security validation: Check for overly permissive rules
-  ingress_rules_flat = flatten([
-    for sg_key, sg_value in local.security_groups : [
-      for rule_idx, rule in lookup(sg_value, "ingress_rules", []) : {
-        sg_name     = sg_key
-        rule_index  = rule_idx
-        cidr_blocks = lookup(rule, "cidr_blocks", [])
-        from_port   = rule.from_port
-        to_port     = rule.to_port
-        protocol    = rule.protocol
-      }
-    ]
-  ])
-
-  # Find rules with 0.0.0.0/0 (overly permissive)
+  # Security validation: check for overly permissive rules.
+  #
+  # Read from the normalized rules in normalize.tf, not from var.security_groups
+  # directly: that is the same list the aws_security_group_rule resources are
+  # built from, so a rule cannot be created without passing under this check.
+  # The previous version walked the raw variable with lookup(rule,
+  # "cidr_blocks", []), which returns null -- not [] -- for a rule that declares
+  # the attribute and leaves it unset, and contains(null, ...) is an error. Any
+  # rule sourced from a security group rather than a CIDR crashed the plan.
   permissive_rules = [
-    for rule in local.ingress_rules_flat :
-    rule if contains(lookup(rule, "cidr_blocks", []), "0.0.0.0/0")
+    for key, r in local.keyed_rules : {
+      sg_name     = r.sg_key
+      rule_key    = key
+      from_port   = r.from_port
+      to_port     = r.to_port
+      protocol    = r.protocol
+      cidr_blocks = concat(r.cidr_blocks, r.ipv6_cidr_blocks)
+    }
+    # ::/0 is as open as 0.0.0.0/0 and was not checked before.
+    if r.type == "ingress" && (contains(r.cidr_blocks, "0.0.0.0/0") || contains(r.ipv6_cidr_blocks, "::/0"))
   ]
 
   # Validation flags
   has_permissive_rules = length(local.permissive_rules) > 0
   permissive_rule_warning = local.has_permissive_rules ? join(", ", [
     for rule in local.permissive_rules :
-    "${rule.sg_name}:${rule.from_port}-${rule.to_port}"
+    "${rule.rule_key} (${rule.from_port}-${rule.to_port})"
   ]) : ""
 }
 

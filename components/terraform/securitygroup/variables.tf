@@ -19,73 +19,109 @@ variable "security_groups" {
   # -- one with egress_rules, one without -- are rejected outright with "all
   # map elements must have the same type".
   #
-  # Every attribute is optional with the same fallback main.tf used to pass to
-  # lookup(), because lookup() on an object returns an attribute that exists
-  # even when it is null and only substitutes the default for one that is
-  # absent.
+  # Every list is optional with a [] default rather than a bare optional(): a
+  # bare optional leaves the attribute present and null, and null is not a list
+  # -- length() and contains() both fail on it, which is how the permissive-rule
+  # detector in audit.tf used to crash on the first rule that named a source
+  # security group instead of a CIDR.
   type = map(object({
     description = optional(string)
     ingress_rules = optional(list(object({
-      from_port       = number
-      to_port         = number
-      protocol        = string
-      cidr_blocks     = optional(list(string))
-      prefix_list_ids = optional(list(string))
-      security_groups = optional(list(string))
-      self            = optional(bool)
-      description     = optional(string)
-      # Declared so that a config using it gets the validation's explanation
-      # instead of "unexpected attribute". This component has never read it --
-      # see the validation below.
+      from_port        = number
+      to_port          = number
+      protocol         = string
+      cidr_blocks      = optional(list(string), [])
+      ipv6_cidr_blocks = optional(list(string), [])
+      prefix_list_ids  = optional(list(string), [])
+      # Sources given as security groups: either an id, or the key of another
+      # group in this same map. `security_groups` is a list, so one rule can
+      # name several; `source_security_group_id` is the singular spelling the
+      # catalog templates and the AWS provider both use. Both are accepted and
+      # both resolve the same way.
+      security_groups          = optional(list(string), [])
       source_security_group_id = optional(string)
+      self                     = optional(bool, false)
+      description              = optional(string)
+      # An explicit, stable identity for this rule. Rules are keyed by their
+      # position in the list unless they carry one, so deleting the second of
+      # four rules renumbers the two after it and replaces them. Set `key` on
+      # any rule whose identity must survive the list being reordered.
+      key = optional(string)
     })), [])
     egress_rules = optional(list(object({
-      from_port       = number
-      to_port         = number
-      protocol        = string
-      cidr_blocks     = optional(list(string))
-      prefix_list_ids = optional(list(string))
-      security_groups = optional(list(string))
-      self            = optional(bool)
-      description     = optional(string)
-      # Declared so that a config using it gets the validation's explanation
-      # instead of "unexpected attribute". This component has never read it --
-      # see the validation below.
+      from_port                = number
+      to_port                  = number
+      protocol                 = string
+      cidr_blocks              = optional(list(string), [])
+      ipv6_cidr_blocks         = optional(list(string), [])
+      prefix_list_ids          = optional(list(string), [])
+      security_groups          = optional(list(string), [])
       source_security_group_id = optional(string)
+      self                     = optional(bool, false)
+      description              = optional(string)
+      key                      = optional(string)
     })), [])
     tags = optional(map(string), {})
 
-    # Accepted and ignored: the group is named "<Environment>-<map key>-sg", so
-    # that two entries cannot claim the same name.
+    # Accepted and ignored: the group is named after its map key, so that two
+    # entries cannot claim the same name. See name_prefix in main.tf.
     name = optional(string)
   }))
   description = "Map of security groups to create"
   default     = {}
 
-  # source_security_group_id appears in catalog/templates/web-application.yaml
-  # and batch-processing.yaml, where it names a SIBLING key in this same map.
-  # Nothing here has ever read it: the rule reached AWS with no source at all,
-  # which AWS rejects at apply with a message that says nothing about the cause.
-  #
-  # Supporting it needs more than a lookup -- an inline rule block cannot
-  # reference aws_security_group.this without a self-reference cycle, so the
-  # rules would have to move to separate aws_vpc_security_group_ingress_rule
-  # resources.
-  #
-  # A validation and not a lifecycle precondition: validation is evaluated
-  # while the variable is read, before any provider is configured or any
-  # resource is walked, so it is reached even in a stack whose plan cannot get
-  # past provider auth. It also reports the offending input by position -- the
-  # stack file and line -- which a precondition cannot.
+  # A map key is resolvable as a rule source, so it must not be mistakable for
+  # an AWS security group id. This keeps the resolution in main.tf total: a
+  # source that is a key of this map is that group, anything else is an id.
   validation {
-    condition = alltrue([
-      for k, v in var.security_groups :
-      alltrue([
+    condition     = alltrue([for k, v in var.security_groups : !can(regex("^sg-", k))])
+    error_message = "Security group keys must not start with \"sg-\": ${join(", ", [for k, v in var.security_groups : k if can(regex("^sg-", k))])}. The key is how other rules refer to the group, and a key shaped like an id cannot be told apart from one."
+  }
+
+  # source_security_group_id and security_groups both name a source. Either the
+  # source is a sibling key in this map -- which is how
+  # stacks/catalog/templates/web-application.yaml uses it -- or it is a literal
+  # id. Anything else is a typo that AWS would only reject at apply, with a
+  # message that names neither the group nor the stack file.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.security_groups : [
+        for r in concat(v.ingress_rules, v.egress_rules) : [
+          for s in concat(r.security_groups, r.source_security_group_id == null ? [] : [r.source_security_group_id]) :
+          contains(keys(var.security_groups), s) || can(regex("^sg-[0-9a-f]+$", s))
+        ]
+      ]
+    ]))
+    error_message = "Every rule source must be either a key of this map (${join(", ", keys(var.security_groups))}) or a security group id matching sg-<hex>. Unresolvable: ${join(", ", distinct(flatten([for k, v in var.security_groups : [for r in concat(v.ingress_rules, v.egress_rules) : [for s in concat(r.security_groups, r.source_security_group_id == null ? [] : [r.source_security_group_id]) : "${k} -> ${s}" if !contains(keys(var.security_groups), s) && !can(regex("^sg-[0-9a-f]+$", s))]]])))}."
+  }
+
+  # A rule with no source authorizes nothing. The provider accepts it and AWS
+  # rejects it at apply, so catch it here, where the offending stack file and
+  # line are still known.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.security_groups : [
         for r in concat(v.ingress_rules, v.egress_rules) :
-        r.source_security_group_id == null
-      ])
-    ])
-    error_message = "Security groups ${join(", ", [for k, v in var.security_groups : k if anytrue([for r in concat(v.ingress_rules, v.egress_rules) : r.source_security_group_id != null])])} set source_security_group_id, which this component does not implement. Pass the security group IDs in the rule's `security_groups` list instead."
+        length(r.cidr_blocks) + length(r.ipv6_cidr_blocks) + length(r.prefix_list_ids) + length(r.security_groups) +
+        (r.source_security_group_id == null ? 0 : 1) + (r.self ? 1 : 0) > 0
+      ]
+    ]))
+    error_message = "Every rule needs at least one source: cidr_blocks, ipv6_cidr_blocks, prefix_list_ids, security_groups, source_security_group_id or self. Rules without one in: ${join(", ", [for k, v in var.security_groups : k if anytrue([for r in concat(v.ingress_rules, v.egress_rules) : length(r.cidr_blocks) + length(r.ipv6_cidr_blocks) + length(r.prefix_list_ids) + length(r.security_groups) + (r.source_security_group_id == null ? 0 : 1) + (r.self ? 1 : 0) == 0])])}."
+  }
+
+  # cidr_blocks and ipv6_cidr_blocks reach two different provider arguments, so
+  # an IPv6 prefix in cidr_blocks is not an address family the rule silently
+  # widens -- it is an apply-time error. Split them here instead.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.security_groups : [
+        for r in concat(v.ingress_rules, v.egress_rules) : concat(
+          [for c in r.cidr_blocks : !strcontains(c, ":")],
+          [for c in r.ipv6_cidr_blocks : strcontains(c, ":")],
+        )
+      ]
+    ]))
+    error_message = "cidr_blocks takes IPv4 prefixes and ipv6_cidr_blocks takes IPv6 prefixes; neither accepts the other."
   }
 }
 
@@ -114,7 +150,7 @@ variable "enable_security_group_alarms" {
 
 variable "enforce_no_public_ingress" {
   type        = bool
-  description = "Enforce that no security groups allow ingress from 0.0.0.0/0 (blocks creation)"
+  description = "Enforce that no security groups allow ingress from 0.0.0.0/0 or ::/0 (blocks creation)"
   default     = false
 }
 
