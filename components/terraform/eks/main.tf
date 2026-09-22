@@ -10,11 +10,21 @@ locals {
     for k, v in local.clusters : k => "/aws/eks/${var.tags["Environment"]}-${k}/cluster"
   }
 
-  # Merge node groups across all clusters
+  # Merge node groups across all clusters.
+  # `name_base` is the node group's name without its random_pet suffix:
+  # "<cluster>-<node group>", with the Environment prefixed only when the
+  # cluster key does not already start with it ("production-main", not
+  # "production-production-main"). It is a plain `-` join, never the `.` of the
+  # map key, which EKS does not document as valid in a node group name.
+  # Keep this expression in sync with the node group name validation on
+  # var.clusters, which has to repeat it because a validation cannot read locals.
   node_groups = merge([
     for cluster_key, cluster in local.clusters : {
       for ng_key, ng in lookup(cluster, "node_groups", {}) :
-      "${cluster_key}.${ng_key}" => merge(ng, { cluster_name = cluster_key })
+      "${cluster_key}.${ng_key}" => merge(ng, {
+        cluster_name = cluster_key
+        name_base    = "${var.tags["Environment"]}-${trimprefix(cluster_key, "${var.tags["Environment"]}-")}-${ng_key}"
+      })
       if lookup(ng, "enabled", true)
     }
   ]...)
@@ -281,7 +291,10 @@ resource "aws_launch_template" "node_groups" {
   #   over the instance profile and set the limit to 1 where no pod needs IMDS.
   for_each = local.node_groups
 
-  name_prefix = "${var.tags["Environment"]}-${each.key}-"
+  # A launch template name_prefix may be up to 102 characters (128 minus the
+  # 26-character unique suffix). The 54-character cap on name_base enforced
+  # on var.clusters keeps this well inside that limit.
+  name_prefix = "${each.value.name_base}-"
   description = "Managed node group ${each.key} in cluster ${each.value.cluster_name}"
 
   dynamic "block_device_mappings" {
@@ -321,6 +334,22 @@ resource "aws_launch_template" "node_groups" {
     enabled = each.value.detailed_monitoring_enabled
   }
 
+  # Resource tags on the launch template tag only the template itself. These
+  # propagate the tags to what EKS launches from it. The resource types match
+  # the `resources_to_tag` default in cloudposse/terraform-aws-eks-node-group.
+  dynamic "tag_specifications" {
+    for_each = toset(["instance", "volume", "network-interface"])
+
+    content {
+      resource_type = tag_specifications.value
+      tags = merge(
+        var.tags,
+        each.value.tags,
+        { Name = each.value.name_base }
+      )
+    }
+  }
+
   tags = merge(
     var.tags,
     each.value.tags,
@@ -332,16 +361,45 @@ resource "aws_launch_template" "node_groups" {
   }
 }
 
+# The node group's name suffix, as in cloudposse/terraform-aws-eks-node-group.
+# The node group is create_before_destroy, so a replacement has to run beside
+# the live group under a different name, or EKS rejects it with
+# ResourceInUseException. The keepers are every node group input that the AWS
+# provider marks ForceNew: when one of them changes, a new pet is generated
+# and the replacement gets a fresh name. Anything else, including a change to
+# the launch template's contents (a new version, rolled out in place by EKS),
+# updates the group without renaming it.
+#
+# Not `node_group_name_prefix`: the provider caps that at 37 characters, and
+# the prod names run to 44.
+resource "random_pet" "node_groups" {
+  for_each = local.node_groups
+
+  # One word of at most 8 characters, 452 to choose from. The 54-character
+  # cap on name_base assumes this length.
+  length    = 1
+  separator = "-"
+
+  keepers = {
+    node_role_arn  = aws_iam_role.node[each.value.cluster_name].arn
+    subnet_ids     = join(",", sort(coalesce(each.value.subnet_ids, var.subnet_ids)))
+    instance_types = join(",", each.value.instance_types)
+    ami_type       = each.value.ami_type
+    capacity_type  = each.value.capacity_type
+    # The ID changes only when the template is replaced. launch_template.id is
+    # ForceNew on the node group; launch_template.version is not.
+    launch_template_id = aws_launch_template.node_groups[each.key].id
+  }
+}
+
 resource "aws_eks_node_group" "node_groups" {
   for_each = local.node_groups
 
   cluster_name = aws_eks_cluster.clusters[each.value.cluster_name].name
-  # name_prefix, not name: this node group is create_before_destroy, so any
-  # replacement would collide with the live one on a fixed name
-  # (ResourceInUseException). Attaching a launch template forces replacement,
-  # because launch_template.id is ForceNew.
-  node_group_name_prefix = "${var.tags["Environment"]}-${each.key}-"
-  node_role_arn          = aws_iam_role.node[each.value.cluster_name].arn
+  # EKS allows 63 characters. name_base is capped at 54 on var.clusters, which
+  # leaves room for "-" and the pet.
+  node_group_name = "${each.value.name_base}-${random_pet.node_groups[each.key].id}"
+  node_role_arn   = aws_iam_role.node[each.value.cluster_name].arn
   # A typed object always carries the attribute, so an unset value arrives as
   # null rather than absent and `lookup` would no longer reach its default.
   subnet_ids = coalesce(each.value.subnet_ids, var.subnet_ids)

@@ -24,22 +24,36 @@ for IRSA.
 per-node-group instance settings follow `cloudposse/terraform-aws-eks-node-group`.
 
 - **Root volumes live in `block_device_map`**, not in `disk_size`/`disk_type`/
-  `disk_encrypted`. Those keys no longer exist: `aws_eks_node_group` has no
-  argument for volume type or encryption, so the component attaches a launch
-  template instead. Defaults give an encrypted gp3 50 GB root volume, so a stack
-  that wants the secure baseline sets nothing.
-- **Unknown keys are rejected, not ignored.** Terraform silently drops object
+  `disk_encrypted`. `aws_eks_node_group` has no argument for volume type or
+  encryption, so the component attaches a launch template instead. Defaults give
+  an encrypted gp3 50 GB root volume, so a stack that wants the secure baseline
+  sets nothing. The launch template tags the instances, volumes and network
+  interfaces it launches with `tags`.
+- **Known stale keys are rejected, not ignored.** Terraform silently drops object
   attributes a type constraint does not declare, which is how prod's
   `disk_type: gp3` and `disk_encrypted: true` were accepted and had no effect.
-  The camel case spellings (`volumeSize`, `kmsKeyId`, ...) are declared purely so
-  a typo fails validation instead of falling back to the default.
+  `disk_size`, `disk_type`, `disk_encrypted`, `disk_encryption_enabled` and the
+  camel case spellings in `block_device_map` (`volumeSize`, `kmsKeyId`, ...) are
+  declared only so that a validation can reject them. Other unknown keys are
+  still dropped.
+- **Node group names** are `<Environment>-<cluster key>-<node group key>-<pet>`.
+  The Environment is omitted when the cluster key already starts with it, so
+  prod's names look like `production-main-memory-optimized-<pet>`. The `random_pet` suffix
+  changes whenever an input that forces replacement changes (node role, subnets,
+  instance types, AMI type, capacity type, launch template ID). That lets
+  `create_before_destroy` start the replacement next to the live group under a
+  new name, the way `cloudposse/terraform-aws-eks-node-group` does. The part
+  before the pet may be at most 54 characters: EKS allows 63 and the pet takes
+  up to 9 including the separator. This is enforced by variable validation, so
+  it fails without AWS credentials.
 - **IMDSv2 is required by default** and the hop limit is 2, which is what AWS
   requires for a container off the host network to reach IMDS. Prefer IRSA and
   set `metadata_http_put_response_hop_limit = 1` where no pod needs IMDS.
 - **Attaching the launch template replaces existing node groups.**
   `launch_template.id` is ForceNew, and AWS does not let a node group created
   without a custom launch template adopt one. `create_before_destroy` plus the
-  name prefix make the rollout safe, but it is a rolling replacement.
+  pet suffix make the rollout safe, but each new group comes up at full size
+  before the old one drains, so capacity doubles for the length of the rollout.
 
 ## Dependencies & gotchas
 

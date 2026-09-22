@@ -62,10 +62,8 @@ variable "clusters" {
       # sync by copy and paste. Root-volume encryption and volume type are
       # launch-template-only settings -- `aws_eks_node_group` has no argument
       # for either, and AWS rejects a node group that sets `disk_size` while a
-      # launch template is attached. That is why the old `disk_size`,
-      # `disk_type` and `disk_encrypted` keys are gone; upstream removed theirs
-      # for the same reason. The defaults give an encrypted gp3 root volume, so
-      # a stack wanting the secure baseline sets nothing.
+      # launch template is attached. The defaults give an encrypted gp3 root
+      # volume, so a stack wanting the secure baseline sets nothing.
       block_device_map = optional(map(object({
         no_device    = optional(bool, null)
         virtual_name = optional(string, null)
@@ -90,6 +88,20 @@ variable "clusters" {
           volumeType          = optional(any, null)
         }))
       })), { "/dev/xvda" = { ebs = {} } })
+
+      # Decoys, like the camel case ones above: declared only so a validation
+      # below can reject them. `disk_size`, `disk_type` and `disk_encrypted` are
+      # what this component's stacks used before block_device_map existed.
+      # `disk_encryption_enabled` is upstream's name. Upstream
+      # (cloudposse-terraform-components/aws-eks-cluster) still accepts
+      # `disk_size` and `disk_encryption_enabled` as deprecated shims that it
+      # translates into block_device_map. This component has no translation, so
+      # without these declarations the type conversion would silently drop the
+      # keys and the volume would keep its default size.
+      disk_size               = optional(any, null)
+      disk_type               = optional(any, null)
+      disk_encrypted          = optional(any, null)
+      disk_encryption_enabled = optional(any, null)
     })), {})
   }))
   description = "Map of EKS cluster configurations with typed schema"
@@ -189,6 +201,57 @@ variable "clusters" {
       ])
     ])
     error_message = "block_device_map does not support the camel case arguments deleteOnTermination, kmsKeyId, snapshotId, volumeSize or volumeType. Use delete_on_termination, kms_key_id, snapshot_id, volume_size and volume_type."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : alltrue([
+        for ng_k, ng in v.node_groups : length(compact([
+          for x in [ng.disk_size, ng.disk_type, ng.disk_encrypted, ng.disk_encryption_enabled] : x == null ? "" : "set"
+        ])) == 0
+      ])
+    ])
+    error_message = "Node groups no longer accept disk_size, disk_type, disk_encrypted or disk_encryption_enabled. Set the root volume in block_device_map instead, e.g. block_device_map = { \"/dev/xvda\" = { ebs = { volume_size = 100, volume_type = \"gp3\", encrypted = true } } }."
+  }
+
+  # Node group names are "<name_base>-<pet>", built in local.node_groups, where
+  # name_base is "<Environment>-<cluster key>-<node group key>", minus the
+  # Environment when the cluster key already starts with it. A validation cannot
+  # read locals, so name_base is written out again here. Keep the two in sync.
+  # The check runs here, not in a precondition, so it works without AWS
+  # credentials (see the camel case validation above). 54 is EKS's
+  # 63-character limit minus the "-" and the longest random_pet word (8).
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.clusters : [
+        for ng_k, ng in v.node_groups :
+        length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") <= 54
+        if v.enabled && ng.enabled
+      ]
+    ]))
+    error_message = "Node group names are limited to 63 characters by EKS. This component appends '-' and a random_pet word of up to 8 characters, so \"<Environment>-<cluster key>-<node group key>\" (the Environment omitted when the cluster key already starts with it) must be at most 54 characters. Too long: ${join(", ", flatten([for k, v in var.clusters : [for ng_k, ng in v.node_groups : "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}" if v.enabled && ng.enabled && length("${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}") > 54]]))}."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.clusters : [
+        for ng_k, ng in v.node_groups :
+        can(regex("^[0-9A-Za-z][0-9A-Za-z_-]*$", "${lookup(var.tags, "Environment", "")}-${trimprefix(k, "${lookup(var.tags, "Environment", "")}-")}-${ng_k}"))
+        if v.enabled && ng.enabled
+      ]
+    ]))
+    error_message = "Cluster and node group keys may only contain letters, digits, '-' and '_', because they become part of the EKS node group name."
+  }
+
+  # Leaving out the Environment is safe only while no two clusters end up
+  # with the same prefix. With the keys "main" and "production-main" in the
+  # production environment, both would name their node groups
+  # "production-main-...".
+  validation {
+    condition = length(distinct([
+      for k, v in var.clusters : trimprefix(k, "${lookup(var.tags, "Environment", "")}-")
+    ])) == length(var.clusters)
+    error_message = "Two cluster keys give the same node group name prefix, e.g. \"main\" and \"<Environment>-main\". Rename one of them."
   }
 
   validation {
