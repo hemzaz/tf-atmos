@@ -10,6 +10,7 @@ import:
   - orgs/fnx/prod/eu-west-2/production/components/globals
   - catalog/iam/defaults
   - catalog/backend/defaults
+  - catalog/kms/defaults
   - catalog/secretsmanager/defaults
   - catalog/acm/defaults
 
@@ -85,15 +86,12 @@ components:
     kms/main:
       metadata:
         component: kms
+        inherits:
+          - kms/defaults
       vars:
-        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
         description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
-        key_spec: SYMMETRIC_DEFAULT
-        key_usage: ENCRYPT_DECRYPT
-        enable_key_rotation: true
-        rotation_period_in_days: 365
-        deletion_window_in_days: 30
         alias_name: production-main  # without the alias/ prefix
+        deletion_window_in_days: 30  # prod keeps the full window
         key_administrators:
           - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/Admin
         # IAM roles referenced here must exist before apply (the iam ci/eks-node

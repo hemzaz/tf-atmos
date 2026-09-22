@@ -12,6 +12,12 @@ components:
       metadata:
         component: secretsmanager
         type: abstract
+      # `default_kms_key_id` below reads kms/main, so the key must be applied
+      # first. workflows/scripts/common/check-dependencies.py enforces that
+      # every component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
       vars:
         # The lifecycle tier the component validates (dev/staging/prod).
         # context.environment is the instance name (`testenv-01`) and fails it.
@@ -20,8 +26,12 @@ components:
         context_name: "common"
         secrets_enabled: true
 
-        # Default KMS settings - should be overridden with account-specific KMS key
-        default_kms_key_id: null
+        # Every environment runs a `kms/main` instance (catalog/kms/defaults), so
+        # this resolves in all stacks. The precondition at
+        # components/terraform/secretsmanager/main.tf:62 requires either this or a
+        # per-secret `kms_key_id`; leaving it null failed the plan in every stack.
+        # Override per-secret only to encrypt with a different key.
+        default_kms_key_id: !terraform.state kms/main .key_arn
 
         # Default rotation settings
         default_rotation_days: 30

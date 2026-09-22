@@ -34,6 +34,11 @@ import:
   - catalog/eks/defaults
   - catalog/eks-addons/defaults
   - catalog/monitoring/defaults
+  # REQUIREMENT: secretsmanager/defaults reads `!terraform.state kms/main .key_arn`
+  # and declares `kms/main` in dependencies.components. This template does not
+  # define kms/main; the stack that imports it must (every fnx org stack does,
+  # in its components/security.yaml, from catalog/kms/defaults). Defining it
+  # here too would deep-merge over that stack's own alias_name/description.
   - catalog/secretsmanager/defaults
 
 # =============================================================================

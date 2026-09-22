@@ -1,0 +1,37 @@
+---
+##################################################
+# Catalog Configuration for AWS KMS
+##################################################
+# Every environment runs one `kms/main` instance so that components requiring a
+# customer-managed key (secretsmanager, rds, eks, ebs) resolve to a real key via
+# `!terraform.state kms/main .key_arn` in all stacks rather than only in prod.
+#
+# Concrete instances inherit this base and supply the env-specific `alias_name`,
+# `description`, and `key_users`.
+
+components:
+  terraform:
+    # Common configuration for all KMS key instances
+    kms/defaults:
+      metadata:
+        component: kms
+        type: abstract
+      vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        key_spec: SYMMETRIC_DEFAULT
+        key_usage: ENCRYPT_DECRYPT
+        enable_key_rotation: true
+        rotation_period_in_days: 365
+        deletion_window_in_days: 30
+        # Root-account access keeps the key usable by whichever role applies the
+        # stack. Instances add named roles to `key_users` only once those roles
+        # exist, because KMS rejects a policy naming a principal it cannot
+        # resolve.
+        enable_default_policy: true
+        # No named `key_administrators` here. The root-account statement above
+        # already delegates key administration to IAM (the Cloud Posse aws-kms
+        # design), and a templated ARN is unsafe in a shared base: Go templates
+        # render before YAML functions, so in dev `aws_account_id` (an `!env`
+        # tag) lands in the ARN as raw text and CreateKey rejects the policy.
+        # Add named administrators per instance, with a literal account id and
+        # only for roles known to exist (prod does).
