@@ -68,12 +68,19 @@ variable "zones" {
 
 variable "records" {
   type = map(object({
-    zone_name                        = string
-    name                             = string
-    type                             = string
-    ttl                              = optional(number)
-    records                          = optional(list(string), [])
-    alias                            = optional(map(any))
+    zone_name = string
+    name      = string
+    type      = string
+    ttl       = optional(number)
+    records   = optional(list(string), [])
+    # Typed, not map(any): map(any) infers one element type for the whole map,
+    # so an alias with evaluate_target_health set and one without cannot coexist
+    # in the same records map ("all map elements must have the same type").
+    alias = optional(object({
+      name                   = string
+      zone_id                = string
+      evaluate_target_health = optional(bool, true)
+    }))
     health_check_id                  = optional(string)
     set_identifier                   = optional(string)
     weighted_routing_policy          = optional(map(number))

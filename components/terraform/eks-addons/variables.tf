@@ -57,11 +57,16 @@ variable "clusters" {
     # Configuration options
     cert_manager_letsencrypt_email = optional(string)
     external_dns_domain_filters    = optional(list(string), [])
-    karpenter_provisioner_config   = optional(map(any), {})
     fluentbit_log_group_name       = optional(string)
     log_retention_days             = optional(number, 90)
-    istio_config                   = optional(map(any), {})
     additional_namespaces          = optional(list(string), [])
+
+    # karpenter_provisioner_config and istio_config used to sit here as
+    # map(any). Nothing in this component or any stack ever read either one, so
+    # a stack could write a whole Karpenter provisioner spec and have it go
+    # nowhere. They are gone rather than left looking configurable; pass
+    # Karpenter and Istio settings through helm_releases below, which main.tf
+    # does read.
 
     # Resources consumed by main.tf (flattened per cluster); previously undeclared,
     # so the object type silently dropped them
