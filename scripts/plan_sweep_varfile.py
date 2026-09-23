@@ -37,6 +37,10 @@ turns into the string "null null" -- would have passed it again.
 
 Only when the output's shape cannot be inferred does it fall back to guessing
 by the variable's name, as it always did; the fallback is counted, not silent.
+
+What is modelled is the S3 backend path, the one these stacks use. The static
+remote_state_backend differs in corners -- a missing output is an error there
+rather than null -- and those quirks are not modelled.
 """
 import csv
 import json
@@ -47,7 +51,8 @@ import sys
 
 # The shapes and the HCL reader live next to this file, in plan_sweep_hcl.py.
 from plan_sweep_hcl import (
-    IDENT, LIST, MAP, OBJ, SCALAR, UNKNOWN, Ctx, blocks, known, load_component, shape_of,
+    BOOL, IDENT, LIST, MAP, NUMBER, OBJ, SCALAR, UNKNOWN, Ctx, blocks, known, load_component,
+    shape_of,
 )
 
 # ---------------------------------------------------------------------------
@@ -295,12 +300,22 @@ def atmos_yq(expr, data):
     "null null" -- never as a list, and never as an error. Reproduced with the
     same yq: evaluate to YAML, then re-read the YAML with yq.
     """
-    out, err = run_yq(['-p=json', '-o=yaml', '-I=2', atmos_expr(expr)], json.dumps(data))
+    # Keys sorted, as Atmos's ConvertToYAML sorts them: `.[]` over a map, and
+    # anything joined from it, comes out in that order.
+    out, err = run_yq(['-p=json', '-o=yaml', '-I=2', atmos_expr(expr)],
+                      json.dumps(data, sort_keys=True))
     if err is not None:
         return None, err
     trimmed = out.strip()
     if is_scalar_string(trimmed):
         return trimmed, None
+    # Several MAP results print as one mapping. Distinct keys merge -- real
+    # Atmos returns the union -- but a repeated key makes Atmos's final
+    # unmarshal fail (`.m | to_entries | .[]`), while yq's own YAML reader
+    # would quietly keep one of them: a false PASS.
+    top_keys = TOP_KEY.findall(out)
+    if len(top_keys) != len(set(top_keys)):
+        return None, 'the result repeats a top-level key, which Atmos cannot unmarshal'
     parsed, err = run_yq(['-p=yaml', '-o=json', '-I=0', '.'], out)
     if err is not None:
         if '\n' not in trimmed:
@@ -318,6 +333,11 @@ def atmos_yq(expr, data):
     return value, None
 
 
+# A top-level mapping key in yq's block-style YAML output: at column 0, not a
+# sequence item or a comment, followed by ':' and a space or the line's end.
+TOP_KEY = re.compile(r'''^("(?:[^"\\]|\\.)*"|'[^']*'|[^\s#'"-][^:\n]*?):(?: |$)''', re.M)
+
+
 def synth_value(shape, names, keys=()):
     """A synthetic value of this shape, or None if any part of it is unknown.
 
@@ -327,6 +347,10 @@ def synth_value(shape, names, keys=()):
     and the verdict must not depend on how many keys other references happen
     to read.
     """
+    if shape == NUMBER:
+        return 0
+    if shape == BOOL:
+        return False
     if shape == SCALAR:
         for n in names:
             got = synth(n)
@@ -610,7 +634,11 @@ def self_test(components_dir, tmp):
         if isinstance(got, list) and isinstance(want, list):
             got, want = sorted(got), sorted(want)
         check('atmos_yq %s' % expr, (got, err), (want, None))
-    for bad in ('{"a": .vpc_id}', '.vpc_id | ]['):
+    check('atmos_yq merges distinct map results (real Atmos: the union)',
+          atmos_yq('.one_key, .certificate_arns', ATMOS_DATA),
+          ({'api': 'arn:b', 'main_wildcard': 'arn:a', 'only': 'arn:c'}, None))
+    for bad in ('{"a": .vpc_id}', '.vpc_id | ][', '.certificate_arns | to_entries | .[]',
+                '.one_key, .one_key'):
         check('atmos_yq rejects %s' % bad, atmos_yq(bad, ATMOS_DATA)[1] is not None, True)
 
     stack = 'selftest'
@@ -652,8 +680,13 @@ def self_test(components_dir, tmp):
                                                          LIST(SCALAR)),
         ('module.nowhere.key_arn', UNKNOWN), ('aws_x.y.tags', UNKNOWN), ('aws_x.y.id', SCALAR),
         ('aws_x.y.certificate_authority', UNKNOWN), ('aws_x.y.identity', UNKNOWN),
+        ('aws_x.y.data', UNKNOWN), ('aws_x.y.status', UNKNOWN), ('element_count(a)', UNKNOWN),
+        ('{ p = 443, e = true, n = aws_x.y.port }', OBJ({'p': NUMBER, 'e': BOOL, 'n': NUMBER})),
+        ('var.x', UNKNOWN),
     ]:
         check('shape of %s' % expr, shape_of(expr, Ctx(acm)), want)
+    check('number and bool leaves', synth_value(OBJ({'p': NUMBER, 'e': BOOL, 'id': SCALAR}), ['vpc_id']),
+          {'p': 0, 'e': False, 'id': 'vpc-0123456789abcdef0'})
     check('indented output block', [k for k, _ in blocks('  output "x" {\n  value = 1\n}\n', 'output')],
           ['x'])
 

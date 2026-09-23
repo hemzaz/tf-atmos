@@ -12,7 +12,10 @@ import re
 
 # ---------------------------------------------------------------------------
 # Shapes. Tuples, so they compare by value:
-#   SCALAR, UNKNOWN, NULL      -- a leaf, "cannot tell", and HCL's null
+#   SCALAR, NUMBER, BOOL       -- a string leaf, and the two leaves that are
+#                                 not strings: an object with a numeric
+#                                 attribute given a string would be a false FAIL
+#   UNKNOWN, NULL              -- "cannot tell", and HCL's null
 #   ('list', elem)             -- list, set or tuple
 #   ('map', elem)              -- keys decided at apply time ({ for ... })
 #   ('object', {attr: shape})  -- keys written in the source
@@ -21,6 +24,7 @@ import re
 # a guess, and a guess here is exactly what this file exists to replace.
 # ---------------------------------------------------------------------------
 SCALAR, UNKNOWN, NULL = ('scalar',), ('unknown',), ('null',)
+NUMBER, BOOL = ('scalar', 'number'), ('scalar', 'bool')
 
 
 def LIST(e):
@@ -274,9 +278,9 @@ SCALAR_ATTRS = {
     'domain_name', 'regional_domain_name', 'regional_zone_id', 'target_domain_name',
     'hosted_zone_id', 'key_id', 'key_name', 'version', 'stage_name', 'root_resource_id',
     'replication_group_id', 'primary_endpoint_address', 'reader_endpoint_address',
-    'configuration_endpoint_address', 'cluster_security_group_id', 'data', 'bucket',
+    'configuration_endpoint_address', 'cluster_security_group_id', 'bucket',
     'bucket_domain_name', 'bucket_regional_domain_name', 'invoke_url', 'url', 'identifier',
-    'secret_arn', 'owner_id', 'accept_status', 'enabled', 'status', 'db_name', 'username',
+    'secret_arn', 'owner_id', 'accept_status', 'db_name', 'username',
     'instance_id', 'function_url', 'queue_url', 'table_name', 'stream_arn', 'role_arn',
 }
 FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
@@ -289,18 +293,29 @@ RESOURCE_ATTR = re.compile(
 SPLAT = re.compile(r'^(.*?)(?:\[\*\]|\.\*)(?:\.(' + IDENT + r'))?$')
 STRING_FNS = {'format', 'join', 'jsonencode', 'tostring', 'lower', 'upper', 'replace',
               'trimprefix', 'trimsuffix', 'trimspace', 'substr', 'base64encode', 'md5',
-              'sha256', 'tonumber', 'tobool', 'length', 'element_count', 'title', 'abs'}
+              'sha256', 'title'}
+NUMBER_FNS = {'tonumber', 'length', 'abs', 'max', 'min', 'floor', 'ceil'}
+NUMBER_ATTRS = {'port'}
+BOOL_ATTRS = {'enabled'}
 
 
-def attr_shape(attr):
-    return SCALAR if attr in SCALAR_ATTRS else UNKNOWN
+def attr_shape(attr, indexed=False):
+    # `data` is a string only as a nested block's attribute --
+    # certificate_authority[0].data -- and something else anywhere else.
+    if attr in NUMBER_ATTRS:
+        return NUMBER
+    if attr in BOOL_ATTRS:
+        return BOOL
+    if attr in SCALAR_ATTRS or (attr == 'data' and indexed):
+        return SCALAR
+    return UNKNOWN
 
 
 def type_shape(t):
     """Shape of a variable's declared type expression."""
     t = t.strip()
     if t in ('string', 'number', 'bool'):
-        return SCALAR
+        return {'string': SCALAR, 'number': NUMBER, 'bool': BOOL}[t]
     m = re.match(r'^(list|set|map|tuple|object|optional)\s*\(', t)
     if not m or not whole(t, m.end() - 1):
         return UNKNOWN
@@ -436,8 +451,10 @@ def shape_of(expr, ctx):
         return LIST(shape_of(items[0], ctx.deeper()) if items else UNKNOWN)
     if e[0] == '"' and skip_string(e, 0) == len(e):
         return SCALAR
-    if re.match(r'^(-?[0-9][0-9.]*|true|false)$', e):
-        return SCALAR
+    if re.match(r'^-?[0-9][0-9.]*$', e):
+        return NUMBER
+    if e in ('true', 'false'):
+        return BOOL
     m = FN_CALL.match(e)
     if m and whole(e, m.end() - 1):
         return fn_shape(m.group(1), split_top(e[m.end():-1], ','), ctx)
@@ -450,6 +467,10 @@ def fn_shape(fn, args, ctx):
     a = [shape_of(x, ctx.deeper()) for x in args]
     if fn in STRING_FNS:
         return SCALAR
+    if fn in NUMBER_FNS:
+        return NUMBER
+    if fn == 'tobool':
+        return BOOL
     if fn in ('keys', 'split', 'range'):
         return LIST(SCALAR)
     if fn == 'values':
@@ -460,7 +481,7 @@ def fn_shape(fn, args, ctx):
     if fn == 'flatten':
         if a and a[0][0] == 'list':
             inner = elem(a[0])
-            return inner if inner[0] == 'list' else a[0] if inner == SCALAR else UNKNOWN
+            return inner if inner[0] == 'list' else a[0] if inner[0] == 'scalar' else UNKNOWN
         return UNKNOWN
     if fn == 'one':
         return elem(a[0]) if a and a[0][0] == 'list' else UNKNOWN
@@ -493,7 +514,9 @@ def ref_shape(e, ctx):
         return SCALAR
     if m and m.group(1) in ctx.value_vars:
         tail = re.findall(r'\.(' + IDENT + r')', m.group(2))
-        return attr_shape(tail[-1]) if tail and m.group(2).endswith(tail[-1]) else UNKNOWN
+        if not tail or not m.group(2).endswith(tail[-1]):
+            return UNKNOWN
+        return attr_shape(tail[-1], m.group(2).endswith('[0].' + tail[-1]))
     m = re.match(r'^var\.(' + IDENT + r')$', e)
     if m:
         return type_shape(comp.var_types.get(m.group(1), ''))
@@ -514,5 +537,5 @@ def ref_shape(e, ctx):
         return UNKNOWN if out is None else shape_of(out, Ctx(mod, depth=ctx.depth + 1))
     m = RESOURCE_ATTR.match(e)
     if m and not e.startswith(('var.', 'local.', 'each.', 'count.', 'path.', 'terraform.', 'module.')):
-        return attr_shape(m.group(1))
+        return attr_shape(m.group(1), e.endswith('[0].' + m.group(1)))
     return UNKNOWN
