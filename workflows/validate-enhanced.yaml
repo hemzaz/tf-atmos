@@ -67,3 +67,24 @@ workflows:
         type: atmos
         command: describe stacks --process-functions=false --format json
         output: none
+
+  # The rung between `terraform validate` and the emulator lanes: bind each
+  # stack's RESOLVED variables to its component and plan. `terraform validate`
+  # never binds values, so it exits 0 on a component whose every variable
+  # validation fails; tflint does not read them either. See the header of
+  # scripts/plan-sweep.sh for what a PASS here does and does not mean.
+  #
+  # No AWS credentials. Terraform evaluates variable validations before the
+  # provider authenticates, so the expected outcome is a plan that reaches
+  # InvalidClientTokenId with nothing having objected on the way.
+  plan-sweep:
+    description: Plan every stack/component pair against its resolved variables
+    dependencies:
+      tools:
+        terraform: "1.16.3"
+    steps:
+      - name: plan-sweep
+        # shell, not type: atmos -- the script drives atmos itself, once
+        # per pair.
+        type: shell
+        command: bash scripts/plan-sweep.sh
