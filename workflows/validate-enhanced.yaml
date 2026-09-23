@@ -82,6 +82,10 @@ workflows:
     dependencies:
       tools:
         terraform: "1.16.3"
+        # The sweep evaluates each !terraform.state expression with yq, as
+        # Atmos does internally; the atmos image ships no yq at all. It must be
+        # mikefarah v4 -- the script refuses anything else rather than guess.
+        mikefarah/yq: "v4.53.6"
     steps:
       - name: plan-sweep
         # shell, not type: atmos -- the script drives atmos itself, once

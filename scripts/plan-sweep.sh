@@ -25,8 +25,11 @@
 #
 #   caught          #145 iam RE2 repetition, #149 environment/stage mix-up,
 #                   #150 rds prod gates, #152 ec2 prefix-list default,
-#                   #153 iam/ci role prefix, #154 acm domain pattern, and
-#                   secretsmanager's missing KMS key (a precondition)
+#                   #153 iam/ci role prefix, #154 acm domain pattern,
+#                   secretsmanager's missing KMS key (a precondition), and
+#                   #166 acm's certificate_arns MAP passed to monitoring's
+#                   list(string) -- only since references are evaluated
+#                   against the target output's shape (see the builder)
 #   NOT caught      #144 monitoring's null api_gateway_name -- a templatefile()
 #                   failure in a component that does stop at auth. Verified:
 #                   reintroducing that null still reports PASS here.
@@ -42,8 +45,10 @@
 #   bash scripts/plan-sweep.sh fnx-prod-production   # only these stacks
 #
 # Exit status: 1 if any pair FAILs, ERRORs or is SKIPped, or if nothing was
-# planned at all; 2 if a required tool is missing or the diagnostic parser
-# fails its self-test; else 0. INCONCLUSIVE and UNATTRIBUTABLE do not fail the
+# planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
+# the diagnostic parser or the varfile builder fails its self-test; else 0. A
+# !terraform reference that cannot resolve even with real state -- a missing
+# instance or output, an expression yq rejects -- is a FAIL. INCONCLUSIVE and UNATTRIBUTABLE do not fail the
 # run, but neither is ever reported as a pass. A PASS says how the plan ended:
 # "full plan", or "stopped at an expected refusal" once everything before it
 # held -- the unissued key refused by AWS, or the synthetic EKS host that does
@@ -85,12 +90,24 @@ STACKS="${*:-fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production}"
 cd "$REPO" || exit 1
 
 # A missing tool is this script's failure, not ninety SKIPs to be read as one.
-for tool in atmos terraform python3 git tar; do
+for tool in atmos terraform python3 git tar yq; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     printf 'error: %s not found on PATH; nothing can be planned without it.\n' "$tool" >&2
     exit 2
   fi
 done
+
+# yq evaluates each !terraform.state expression the way Atmos does, and it has
+# to be the SAME yq: mikefarah's v4, the library Atmos embeds. The Python yq
+# (a jq wrapper) and mikefarah v3 share the name and disagree on the syntax, so
+# a wrong one would turn every reference into a "yq error" FAIL -- or, worse,
+# evaluate some differently and pass what Atmos would reject. No fallback.
+yq_version=$(yq --version 2>&1)
+if ! printf '%s\n' "$yq_version" | grep -Eq 'mikefarah/yq.* version v?4\.'; then
+  printf '%s\n' "error: yq on PATH is not mikefarah yq v4 (got: $yq_version)." \
+    "       The sweep evaluates !terraform.state expressions with it, as Atmos does." >&2
+  exit 2
+fi
 
 fail=0
 pass=0
@@ -99,6 +116,9 @@ unattributable=0
 errored=0
 skip=0
 swept=0
+refs_shaped=0
+refs_fallback=0
+refs_dropped=0
 pass_full=0
 interrupted=0
 
@@ -379,157 +399,40 @@ SYNTH_EKS_HOST=EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com
 export PLAN_SWEEP_EKS_HOST="$SYNTH_EKS_HOST"
 
 # ---------------------------------------------------------------------------
-# The varfile builder. Kept in its own file, and fed its inputs through the
-# environment and argv, because it used to be a `python3 -c "..."` inside a
-# DOUBLE-quoted shell string: every regex needed its '$' escaped, and the
-# certificate and the output path were spliced into the program text.
+# The varfile builder, scripts/plan_sweep_varfile.py. It used to be a
+# heredoc here, and before that a `python3 -c "..."` inside a DOUBLE-quoted
+# shell string where every regex needed its '$' escaped. It moved out when it
+# grew an HCL reader and a self-test of its own; its header says what it does.
+#
+# The short version: an Atmos !terraform.state reference is the target's
+# OUTPUT run through a yq expression, so the builder synthesizes that output
+# in the shape the target component declares and runs the real expression
+# over it. Before, it guessed a value from the consuming variable's name and
+# never looked at the expression -- which is how #166, a map output wired
+# into a list(string) variable, passed this sweep.
+#
+# Its self-test runs against this run's mirror, so an edit to acm or vpc
+# that the builder can no longer read fails here, not as ninety fallbacks.
 # ---------------------------------------------------------------------------
-SYNTH_PY="$WORK/build-varfile.py"
-cat >"$SYNTH_PY" <<'PYEOF'
-import sys, json, os, re
+# Not under scripts/lib/: .gitignore ignores every lib/ directory, and a
+# builder that exists only on the machine that wrote it is a CI run that
+# cannot start.
+SYNTH_PY="$REPO/scripts/plan_sweep_varfile.py"
+if ! python3 "$SYNTH_PY" --self-test "$MIRROR/components/terraform" "$WORK/varfile-selftest" \
+  2>"$WORK/varfile-selftest.err"; then
+  KEEP_WORK=1
+  printf '%s\n' "error: the varfile builder failed its self-test, so the values it builds" \
+    "       for !terraform.state references cannot be trusted:" >&2
+  sed 's/^/         /' "$WORK/varfile-selftest.err" >&2
+  exit 2
+fi
 
-d = json.load(sys.stdin)
-v = d.get('vars') or {}
-
-# --process-functions=false leaves Atmos's YAML functions as literal strings:
-# '!terraform.state vpc/main .vpc_id' needs another component's state, and
-# '!env PROD_ELASTICACHE_AUTH_TOKEN' needs an environment variable. Neither is
-# available here. Rather than drop them all and report INCONCLUSIVE, substitute
-# a SYNTHETIC value wherever the variable's type is known, so the component's
-# own validations are actually exercised.
-#
-# Passing an unresolved '!env ...' string THROUGH is the worst option: it is a
-# plausible-looking value that fails validations real input would pass. That is
-# a false positive, and a gate that cries wolf gets ignored.
-#
-# The values are deliberately WELL-FORMED -- vpc-0123456789abcdef0 is real hex,
-# so rds's ^vpc-[a-f0-9]+$ still tests something.
-#
-# Matched on the VARIABLE name, not the referenced output, because the variable
-# is what the component validates. Anything unmatched is dropped and the pair
-# stays INCONCLUSIVE: a wrong guess is worse than an honest 'not checked'.
-SYNTH = [
-    (r'(^|_)vpc_id$',                 'vpc-0123456789abcdef0'),
-    (r'subnet_ids$',                  ['subnet-0123456789abcdef0', 'subnet-0123456789abcdef1']),
-    (r'(kms_key_id|kms_key_arn)$',    'arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012'),
-    (r'^zone_id$',                    'Z1234567890ABCDEFGHIJ'),
-    (r'^certificate_arn$',            'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012'),
-    (r'^certificate_arns$',           ['arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
-    (r'^certificate_names$',          ['main_wildcard']),
-    (r'^certificate_domains$',        ['example.com']),
-    (r'^host$',                       'https://' + os.environ['PLAN_SWEEP_EKS_HOST']),
-    (r'^cluster_name$',               'example-cluster'),
-    (r'^oidc_provider_url$',          'oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
-    (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
-    (r'^ci_state_bucket_name$',       'example-terraform-state'),
-    (r'(^|_)auth_token$',             'SyntheticAuthToken0123456789abcd'),
-    (r'route_table_ids$',             ['rtb-0123456789abcdef0']),
-    # apigateway's api_integrations[] carries the Lambda wiring. Without these
-    # two the whole integration object was dropped, which tripped the
-    # component's own "AWS_PROXY requires uri" validation and reported six
-    # pairs as UNATTRIBUTABLE -- a script artefact, not a stack defect.
-    (r'^uri$',                        'arn:aws:apigateway:eu-west-2:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-2:123456789012:function:example-function/invocations'),
-    (r'^lambda_function_name$',       'example-function'),
-    (r'^cognito_user_pool_arns$',     ['arn:aws:cognito-idp:eu-west-2:123456789012:userpool/eu-west-2_EXAMPLE1']),
-    # Singular: ec2's instances[].subnet_id. The plural pattern above is
-    # anchored, so it never matched this one.
-    (r'^subnet_id$',                  'subnet-0123456789abcdef0'),
-    (r'^key_name$',                   'example-keypair'),
-    # ec2's allowed_ingress_rules[].security_groups -- source SG ids, not the
-    # instance's own attachments.
-    (r'^security_groups$',            ['sg-0123456789abcdef0']),
-    (r'^vpc_associations$',           ['vpc-0123456789abcdef0']),
-    # dns records[].records: a CNAME target, so it must be a hostname rather
-    # than one of the id shapes above.
-    (r'^records$',                    ['synthetic.example.com']),
-]
-
-# Only offered when the caller actually managed to generate one. An empty entry
-# here would substitute '' and trip the kubernetes provider's PEM decode, which
-# is exactly the self-inflicted failure the real certificate exists to avoid.
-CA_CERT = os.environ.get('PLAN_SWEEP_CA_CERT') or ''
-if CA_CERT:
-    SYNTH.append((r'^cluster_ca_certificate$', CA_CERT))
-
-
-def synth(name):
-    for pat, val in SYNTH:
-        if re.search(pat, name):
-            return val
-    return None
-
-
-# Match an ACTUAL Atmos function, not merely a leading '!'. secretsmanager sets
-# random_password_override_special to the literal '!#$%&*()-_=+[]{}<>:?', and
-# treating that as an unresolved function suppressed a REAL defect: the guard
-# in the caller downgraded its genuine precondition failure to INCONCLUSIVE.
-ATMOS_FN = re.compile(r'^!(terraform\.state|terraform\.output|env|exec|include|template|store)\b')
-
-SENTINEL = object()
-dropped = []
-
-
-def walk(key, node):
-    # Atmos functions are not only top-level: network/vpc-peering hides one in
-    # route_table_ids INSIDE a list of route objects. Missing those leaves the
-    # literal '!terraform.state ...' string in a typed structure, which fails as
-    # a type error and looks like a component defect. Recurse.
-    if isinstance(node, str) and ATMOS_FN.match(node):
-        got = synth(key)
-        if got is None:
-            dropped.append(key)
-            return SENTINEL
-        return got
-    if isinstance(node, dict):
-        out = {}
-        for k, x in node.items():
-            r = walk(k, x)
-            if r is not SENTINEL:
-                out[k] = r
-        return out
-    if isinstance(node, list):
-        out = []
-        for x in node:
-            r = walk(key, x)   # keep the owning key: list items are unnamed
-            if r is SENTINEL:
-                continue
-            if isinstance(x, str) and isinstance(r, list):
-                # x was an Atmos function replaced by a LIST-valued synthetic.
-                # Appending it would nest -- list(list(string)) where the
-                # component declares list(string) -- and the type error that
-                # follows is this script's, not the component's. Splice it,
-                # keeping order and dropping values already present.
-                for item in r:
-                    if item not in out:
-                        out.append(item)
-            else:
-                out.append(r)
-        return out
-    return node
-
-
-top = {}
-for k, x in v.items():
-    r = walk(k, x)
-    if r is not SENTINEL:
-        top[k] = r
-
-with open(sys.argv[1], 'w') as fh:
-    json.dump(top, fh)
-
-# Line 1: the TERRAFORM component, which is not the instance name. network/main
-# and network/services both set metadata.component: dns, and deriving the
-# directory from the instance name instead planned components/terraform/network
-# with dns's variables while never sweeping dns at all.
-#
-# Line 2: WHICH functions had no synthetic, not merely how many. Dropping one
-# can invalidate the structure AROUND it -- apigateway's AWS_PROXY integration
-# needs its uri, and removing it trips the component's own 'must set uri' rule.
-# A failure this script may have manufactured must not be reported as the
-# component's, and the names are what let a reader decide which one it was.
-print(d.get('component') or (d.get('metadata') or {}).get('component') or '')
-print(','.join(sorted(set(dropped))))
-PYEOF
+# One `atmos describe stacks` per stack, for the builder to resolve each
+# reference's instance to its component. --process-functions=false, like every
+# describe here: without it Atmos resolves the functions itself and needs the
+# live state this sweep has no credentials for.
+STACKS_DIR="$WORK/stacks"
+rm -rf "$STACKS_DIR" && mkdir -p "$STACKS_DIR" || exit 2
 
 # ---------------------------------------------------------------------------
 # Terraform boxes every diagnostic between U+2577 and U+2575. The SUMMARY line
@@ -792,6 +695,18 @@ for s in $STACKS; do
     continue
   fi
 
+  # Without the stack's map the builder cannot resolve a single reference, and
+  # guessing all of them by variable name is the blind spot this map exists to
+  # close. Better one loud ERROR than a stack of quietly weaker PASSes.
+  if ! atmos describe stacks --process-functions=false --format json -s "$s" \
+    >"$STACKS_DIR/$s.json" 2>"$STACKS_DIR/$s.json.err"; then
+    rm -f "$STACKS_DIR/$s.json"
+    printf '%-24s %-26s %s\n' "$s" "-" "ERROR describe stacks failed"
+    head -3 "$STACKS_DIR/$s.json.err" | cut -c1-160 | sed 's/^/        /'
+    errored=$((errored + 1))
+    continue
+  fi
+
   for c in $comps; do
     tag="${s}__$(printf '%s' "$c" | tr / _)"
     vf="$WORK/$tag.json"
@@ -810,7 +725,8 @@ for s in $STACKS; do
       skip=$((skip + 1))
       continue
     fi
-    if ! meta=$(python3 "$SYNTH_PY" "$vf" <"$desc" 2>"$WORK/$tag.build.err"); then
+    if ! meta=$(python3 "$SYNTH_PY" "$vf" "$s" "$STACKS_DIR" "$MIRROR/components/terraform" \
+      <"$desc" 2>"$WORK/$tag.build.err"); then
       printf '%-24s %-26s %s\n' "$s" "$c" "SKIP varfile build failed"
       tail -2 "$WORK/$tag.build.err" | cut -c1-160 | sed 's/^/        /'
       skip=$((skip + 1))
@@ -819,7 +735,26 @@ for s in $STACKS; do
 
     comp=$(printf '%s\n' "$meta" | sed -n 1p)
     dropped=$(printf '%s\n' "$meta" | sed -n 2p)
+    ref_defects=$(printf '%s\n' "$meta" | sed -n 3p)
+    read -r n_shaped n_fallback n_dropped <<<"$(printf '%s\n' "$meta" | sed -n 4p)"
+    refs_shaped=$((refs_shaped + ${n_shaped:-0}))
+    refs_fallback=$((refs_fallback + ${n_fallback:-0}))
+    refs_dropped=$((refs_dropped + ${n_dropped:-0}))
     [ -n "$comp" ] || comp="${c%%/*}"
+
+    # A reference that cannot resolve with real state either: an instance the
+    # stack does not have, an output the component does not declare, an
+    # expression yq rejects. Atmos would hand the variable null or stop, so
+    # this is the stack's defect, found before any plan. Not planned: the
+    # varfile lacks the broken values, and whatever the plan said about that
+    # would be this script's damage, reported on top of the real finding.
+    if [ -n "$ref_defects" ]; then
+      n=$(printf '%s\n' "$ref_defects" | tr '\t' '\n' | grep -c .)
+      printf '%-24s %-26s FAIL %s broken !terraform reference(s), not planned\n' "$s" "$c" "$n"
+      printf '%s\n' "$ref_defects" | tr '\t' '\n' | cut -c1-160 | sed 's/^/        /'
+      fail=$((fail + 1))
+      continue
+    fi
     dir="$MIRROR/components/terraform/$comp"
 
     if [ ! -d "$dir" ]; then
@@ -907,6 +842,10 @@ printf 'PASS %s   FAIL %s   ERROR %s   UNATTRIBUTABLE %s   INCONCLUSIVE %s   SKI
   "$pass" "$fail" "$errored" "$unattributable" "$inconclusive" "$skip"
 printf '  of the passes: %s planned in full, %s stopped at an expected refusal\n' \
   "$pass_full" "$((pass - pass_full))"
+# How much of the sweep rests on the target's real output shape, and how much
+# still on a guess from the variable's name -- the number to watch shrink.
+printf '  !terraform references: %s output-shaped, %s guessed by variable name, %s dropped\n' \
+  "$refs_shaped" "$refs_fallback" "$refs_dropped"
 
 if [ "$KEEP_WORK" = 0 ] && [ "$fail" = 0 ] && [ "$errored" = 0 ] &&
   [ "$unattributable" = 0 ] && [ "$inconclusive" = 0 ] && [ "$skip" = 0 ]; then
