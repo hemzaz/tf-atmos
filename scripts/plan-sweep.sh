@@ -28,8 +28,11 @@
 #                   #153 iam/ci role prefix, #154 acm domain pattern,
 #                   secretsmanager's missing KMS key (a precondition), and
 #                   #166 acm's certificate_arns MAP passed to monitoring's
-#                   list(string) -- only since references are evaluated
-#                   against the target output's shape (see the builder)
+#                   list(string), including its first fix: Atmos prepends
+#                   '.' to `[.certificate_arns // {} | .[]]`, making it an
+#                   index that yields the string "null null". Caught since
+#                   references are evaluated as Atmos evaluates them, over
+#                   outputs shaped like the target's (see the builder).
 #   NOT caught      #144 monitoring's null api_gateway_name -- a templatefile()
 #                   failure in a component that does stop at auth. Verified:
 #                   reintroducing that null still reports PASS here.
@@ -46,10 +49,11 @@
 #
 # Exit status: 1 if any pair FAILs, ERRORs or is SKIPped, or if nothing was
 # planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
-# the diagnostic parser or the varfile builder fails its self-test; else 0. A
-# !terraform reference that cannot resolve even with real state -- a missing
-# instance or output, an expression yq rejects -- is a FAIL. INCONCLUSIVE and UNATTRIBUTABLE do not fail the
-# run, but neither is ever reported as a pass. A PASS says how the plan ended:
+# the diagnostic parser or the varfile builder fails its self-test; else 0.
+# A broken !terraform reference is a FAIL: a stack, instance or output that is
+# not there, arguments Atmos cannot parse, an expression yq rejects.
+# INCONCLUSIVE and UNATTRIBUTABLE do not fail the run, but neither is ever
+# reported as a pass. A PASS says how the plan ended:
 # "full plan", or "stopped at an expected refusal" once everything before it
 # held -- the unissued key refused by AWS, or the synthetic EKS host that does
 # not resolve.
@@ -119,6 +123,8 @@ swept=0
 refs_shaped=0
 refs_fallback=0
 refs_dropped=0
+other_guessed=0
+other_dropped=0
 pass_full=0
 interrupted=0
 
@@ -402,23 +408,28 @@ export PLAN_SWEEP_EKS_HOST="$SYNTH_EKS_HOST"
 # The varfile builder, scripts/plan_sweep_varfile.py. It used to be a
 # heredoc here, and before that a `python3 -c "..."` inside a DOUBLE-quoted
 # shell string where every regex needed its '$' escaped. It moved out when it
-# grew an HCL reader and a self-test of its own; its header says what it does.
+# grew an HCL reader (scripts/plan_sweep_hcl.py) and a self-test of its own;
+# its header says what it does.
 #
 # The short version: an Atmos !terraform.state reference is the target's
-# OUTPUT run through a yq expression, so the builder synthesizes that output
-# in the shape the target component declares and runs the real expression
-# over it. Before, it guessed a value from the consuming variable's name and
-# never looked at the expression -- which is how #166, a map output wired
-# into a list(string) variable, passed this sweep.
+# OUTPUTS run through a yq expression, with a '.' prepended and several
+# results joined into one string. The builder synthesizes those outputs in
+# the shapes the target component declares and runs the reference through
+# the same steps. Before, it guessed a value from the consuming variable's
+# name and never looked at the expression -- which is how #166, a map output
+# wired into a list(string) variable, passed this sweep.
 #
-# Its self-test runs against this run's mirror, so an edit to acm or vpc
+# Its self-test checks the evaluation against results recorded from real
+# Atmos, and runs against this run's mirror, so an edit to acm, vpc or kms
 # that the builder can no longer read fails here, not as ninety fallbacks.
 # ---------------------------------------------------------------------------
 # Not under scripts/lib/: .gitignore ignores every lib/ directory, and a
 # builder that exists only on the machine that wrote it is a CI run that
 # cannot start.
 SYNTH_PY="$REPO/scripts/plan_sweep_varfile.py"
-if ! python3 "$SYNTH_PY" --self-test "$MIRROR/components/terraform" "$WORK/varfile-selftest" \
+# -B: the builder imports plan_sweep_hcl.py, and a sweep has no business
+# writing __pycache__/ into the repository (see the mirror, above).
+if ! python3 -B "$SYNTH_PY" --self-test "$MIRROR/components/terraform" "$WORK/varfile-selftest" \
   2>"$WORK/varfile-selftest.err"; then
   KEEP_WORK=1
   printf '%s\n' "error: the varfile builder failed its self-test, so the values it builds" \
@@ -725,7 +736,7 @@ for s in $STACKS; do
       skip=$((skip + 1))
       continue
     fi
-    if ! meta=$(python3 "$SYNTH_PY" "$vf" "$s" "$STACKS_DIR" "$MIRROR/components/terraform" \
+    if ! meta=$(python3 -B "$SYNTH_PY" "$vf" "$s" "$STACKS_DIR" "$MIRROR/components/terraform" \
       <"$desc" 2>"$WORK/$tag.build.err"); then
       printf '%-24s %-26s %s\n' "$s" "$c" "SKIP varfile build failed"
       tail -2 "$WORK/$tag.build.err" | cut -c1-160 | sed 's/^/        /'
@@ -736,22 +747,25 @@ for s in $STACKS; do
     comp=$(printf '%s\n' "$meta" | sed -n 1p)
     dropped=$(printf '%s\n' "$meta" | sed -n 2p)
     ref_defects=$(printf '%s\n' "$meta" | sed -n 3p)
-    read -r n_shaped n_fallback n_dropped <<<"$(printf '%s\n' "$meta" | sed -n 4p)"
+    read -r n_shaped n_fallback n_dropped n_oguess n_odrop <<<"$(printf '%s\n' "$meta" | sed -n 4p)"
     refs_shaped=$((refs_shaped + ${n_shaped:-0}))
     refs_fallback=$((refs_fallback + ${n_fallback:-0}))
     refs_dropped=$((refs_dropped + ${n_dropped:-0}))
+    other_guessed=$((other_guessed + ${n_oguess:-0}))
+    other_dropped=$((other_dropped + ${n_odrop:-0}))
     [ -n "$comp" ] || comp="${c%%/*}"
 
-    # A reference that cannot resolve with real state either: an instance the
-    # stack does not have, an output the component does not declare, an
-    # expression yq rejects. Atmos would hand the variable null or stop, so
-    # this is the stack's defect, found before any plan. Not planned: the
-    # varfile lacks the broken values, and whatever the plan said about that
-    # would be this script's damage, reported on top of the real finding.
+    # A reference that is broken whatever the state holds: a stack or
+    # instance that is not there, arguments Atmos cannot parse, an expression
+    # yq rejects -- Atmos stops -- or an output the component does not declare,
+    # which reads null from S3 (or, behind a '//' default, is simply stale).
+    # The stack's defect, found before any plan. Not planned: the varfile
+    # lacks the broken values, and whatever the plan said about that would be
+    # this script's damage, reported on top of the real finding.
     if [ -n "$ref_defects" ]; then
       n=$(printf '%s\n' "$ref_defects" | tr '\t' '\n' | grep -c .)
       printf '%-24s %-26s FAIL %s broken !terraform reference(s), not planned\n' "$s" "$c" "$n"
-      printf '%s\n' "$ref_defects" | tr '\t' '\n' | cut -c1-160 | sed 's/^/        /'
+      printf '%s\n' "$ref_defects" | tr '\t' '\n' | cut -c1-220 | sed 's/^/        /'
       fail=$((fail + 1))
       continue
     fi
@@ -846,6 +860,8 @@ printf '  of the passes: %s planned in full, %s stopped at an expected refusal\n
 # still on a guess from the variable's name -- the number to watch shrink.
 printf '  !terraform references: %s output-shaped, %s guessed by variable name, %s dropped\n' \
   "$refs_shaped" "$refs_fallback" "$refs_dropped"
+printf '  other functions (!env, !store, ...): %s guessed by variable name, %s dropped\n' \
+  "$other_guessed" "$other_dropped"
 
 if [ "$KEEP_WORK" = 0 ] && [ "$fail" = 0 ] && [ "$errored" = 0 ] &&
   [ "$unattributable" = 0 ] && [ "$inconclusive" = 0 ] && [ "$skip" = 0 ]; then

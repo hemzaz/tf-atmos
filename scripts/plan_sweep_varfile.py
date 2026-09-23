@@ -4,9 +4,10 @@ Called by scripts/plan-sweep.sh once per stack/component pair, as
 
     python3 plan_sweep_varfile.py VARFILE STACK STACKS_DIR COMPONENTS_DIR < describe.json
 
-and once at startup as `--self-test COMPONENTS_DIR`. Kept in its own file
-rather than a heredoc because it grew an HCL reader and a self-test; the
-contract with the shell is the four lines printed at the end, nothing else.
+and once at startup as `--self-test COMPONENTS_DIR TMPDIR` (which also runs
+by hand, from anywhere). Kept out of the shell script because it grew an HCL
+reader (plan_sweep_hcl.py) and a self-test; the contract with the shell is the
+four lines printed at the end, nothing else.
 
 --process-functions=false leaves Atmos's YAML functions as literal strings:
 '!terraform.state vpc/main .vpc_id' needs another component's state, and
@@ -15,25 +16,39 @@ available here. Rather than drop them all and report INCONCLUSIVE, substitute
 a SYNTHETIC value, so the component's own validations are actually exercised.
 
 For !terraform.state / !terraform.output the value is built the way Atmos
-builds the real one: Atmos reads the target instance's outputs as a map and
-evaluates the reference's yq expression over it (https://atmos.tools/functions/yaml/terraform.state).
-So this script infers the SHAPE of the referenced output from the target
-component's *.tf, builds a synthetic {output: value} document of that shape,
-and runs the reference's ACTUAL expression over it with mikefarah yq v4 -- the
-library Atmos itself uses. A map output fed through `[.x // {} | .[]]` comes
-out a list; the same map passed as-is stays a map, and a list(string) variable
-rejects it, exactly as it would with real state. Picking a value by the
-CONSUMING variable's name could never see that: that is how #166 (acm's
-certificate_arns map wired into monitoring's list(string)) passed this sweep.
+builds the real one (Atmos v1.229.0, https://atmos.tools/functions/yaml/terraform.state):
 
-Only when the output's shape cannot be inferred (a module output, say) does it
-fall back to guessing by the variable's name, as it always did.
+  - the arguments are split by Atmos's own grammar (pkg/function/parser,
+    ParseTerraform), ported below as parse_ref;
+  - the expression gets a leading '.' unless it already starts with one
+    (GetTerraformBackendVariable, extractYqValue) -- so `[.a | .[]]` is really
+    `.[.a | .[]]`, an INDEX into the outputs, not a list constructor;
+  - mikefarah yq v4 evaluates it over the outputs map, and the printed result
+    is re-read as YAML (pkg/utils EvaluateYqExpression): several results come
+    back as ONE string joined by spaces, not as a list. See atmos_yq.
+
+This script infers the SHAPE of each referenced output from the target
+component's *.tf, builds a synthetic outputs map of that shape, and runs the
+reference through the same three steps. Guessing a value from the CONSUMING
+variable's name could never see a shape mismatch: that is how #166 (acm's
+certificate_arns map wired into monitoring's list(string)) passed this sweep,
+and how its first fix, `[.certificate_arns // {} | .[]]` -- which real Atmos
+turns into the string "null null" -- would have passed it again.
+
+Only when the output's shape cannot be inferred does it fall back to guessing
+by the variable's name, as it always did; the fallback is counted, not silent.
 """
+import csv
 import json
 import os
 import re
 import subprocess
 import sys
+
+# The shapes and the HCL reader live next to this file, in plan_sweep_hcl.py.
+from plan_sweep_hcl import (
+    IDENT, LIST, MAP, OBJ, SCALAR, UNKNOWN, Ctx, blocks, known, load_component, shape_of,
+)
 
 # ---------------------------------------------------------------------------
 # Synthetic leaves.
@@ -56,7 +71,10 @@ SYNTH = [
     (r'^certificate_arns$',           ['arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
     (r'^certificate_names$',          ['main_wildcard']),
     (r'^certificate_domains$',        ['example.com']),
-    (r'^host$',                       'https://' + os.environ['PLAN_SWEEP_EKS_HOST']),
+    # A default, so that `--self-test` run by hand works without the shell's
+    # environment; the sweep always exports the real constant.
+    (r'^host$',                       'https://' + os.environ.get(
+        'PLAN_SWEEP_EKS_HOST', 'EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com')),
     (r'^cluster_name$',               'example-cluster'),
     (r'^oidc_provider_url$',          'oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
@@ -114,340 +132,234 @@ def singular(name):
 # treating that as an unresolved function suppressed a REAL defect: the guard
 # in the caller downgraded its genuine precondition failure to INCONCLUSIVE.
 ATMOS_FN = re.compile(r'^!(terraform\.state|terraform\.output|env|exec|include|template|store)\b')
-TF_REF = re.compile(r'^!terraform\.(state|output)\s+(.*)$', re.S)
-
-UNKNOWN, SCALAR, LIST, MAP = 'unknown', 'scalar', 'list', 'map'
+TF_REF = re.compile(r'^!terraform\.(state|output)(?:\s+(.*))?$', re.S)
 
 
 # ---------------------------------------------------------------------------
-# A small HCL reader. The CI image has python3 and nothing else -- no HCL
-# library -- so this is text scanning, but with strings, interpolations,
-# heredocs and comments skipped properly: a '{' inside "${...}" or a '#' in a
-# string must not move the brace depth, or an output's value runs on into the
-# next block and gets the wrong shape.
+# References: Atmos's own argument grammar, ported from
+# pkg/function/parser/parser.go (ParseTerraform, Atmos v1.229.0). Anything
+# Atmos rejects is rejected here, as a defect: `(.vpc_id // "x")` is a parse
+# error in Atmos, and reading it as a stack name and falling back used to pass
+# it silently.
 # ---------------------------------------------------------------------------
-OPEN = {'{': '}', '[': ']', '(': ')'}
-HEREDOC = re.compile(r'<<-?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\n')
+class ParseError(Exception):
+    pass
 
 
-def skip_string(s, i):
-    """s[i] is the opening quote; return the index just past the closing one."""
-    i += 1
+# Whitespace, then a quoted token ("" and '' escape their own quote), a pipe,
+# or a run of anything else. Tried in this order at each position, as the
+# participle lexer does.
+TOKEN = re.compile(r'''(\s+)|("(?:[^"\r\n]|"")*"|'(?:[^'\r\n]|'')*')|(\|)|([^\s|]+)''')
+
+
+def tokenize(s):
+    out, i = [], 0
     while i < len(s):
-        c = s[i]
-        if c == '\\':
-            i += 2
-            continue
-        if c == '"':
-            return i + 1
-        if s.startswith(('$${', '%%{'), i):   # escaped: a literal '${', no interpolation
-            i += 3
-            continue
-        if c in '$%' and s.startswith('{', i + 1):
-            i = skip_balanced(s, i + 1)
-            continue
-        i += 1
-    return i
-
-
-def skip_trivia(s, i):
-    """Skip a comment, string or heredoc starting at i; return i unchanged if none."""
-    if s.startswith('#', i) or s.startswith('//', i):
-        j = s.find('\n', i)
-        return len(s) if j < 0 else j
-    if s.startswith('/*', i):
-        j = s.find('*/', i + 2)
-        return len(s) if j < 0 else j + 2
-    if s[i] == '"':
-        return skip_string(s, i)
-    m = HEREDOC.match(s, i)
-    if m:
-        end = re.compile(r'^[ \t]*' + re.escape(m.group(1)) + r'[ \t]*$', re.M).search(s, m.end())
-        return len(s) if end is None else end.end()
-    return i
-
-
-def skip_balanced(s, i):
-    """s[i] opens a bracket; return the index just past its matching close."""
-    stack = [OPEN[s[i]]]
-    i += 1
-    while i < len(s) and stack:
-        j = skip_trivia(s, i)
-        if j != i:
-            i = j
-            continue
-        c = s[i]
-        if c in OPEN:
-            stack.append(OPEN[c])
-        elif stack and c == stack[-1]:
-            stack.pop()
-        i += 1
-    return i
-
-
-def read_expr(s, i):
-    """(expression, end) for the expression starting at i, up to the newline
-    that ends it at depth 0."""
-    start = i
-    while i < len(s):
-        j = skip_trivia(s, i)
-        if j != i:
-            if s.startswith('#', i) or s.startswith('//', i):
-                break
-            i = j
-            continue
-        c = s[i]
-        if c in OPEN:
-            i = skip_balanced(s, i)
-            continue
-        if c == '\n' or c == '}':
-            break
-        i += 1
-    return s[start:i].strip(), i
-
-
-def blocks(s, kind):
-    """Yield (label, body) for every top-level `kind "label" {` (or `locals {`) block."""
-    i = 0
-    while i < len(s):
-        j = skip_trivia(s, i)
-        if j != i:
-            i = j
-            continue
-        if s[i] == '{':
-            i = skip_balanced(s, i)
-            continue
-        if (i == 0 or s[i - 1] == '\n') and s.startswith(kind, i):
-            m = re.compile(re.escape(kind) + r'(?:[ \t]+"([^"]*)")?[ \t]*\{').match(s, i)
-            if m:
-                end = skip_balanced(s, m.end() - 1)
-                yield m.group(1), s[m.end():end - 1]
-                i = end
-                continue
-        i += 1
-
-
-def attributes(body):
-    """name -> expression for each top-level `name = expr` in a block body."""
-    out = {}
-    i = 0
-    while i < len(body):
-        j = skip_trivia(body, i)
-        if j != i:
-            i = j
-            continue
-        c = body[i]
-        if c in OPEN:
-            i = skip_balanced(body, i)
-            continue
-        m = re.compile(r'([A-Za-z_][A-Za-z0-9_-]*)[ \t]*=(?![=>])').match(body, i)
-        if m and (i == 0 or body[i - 1] in ' \t\n'):
-            expr, i = read_expr(body, m.end())
-            out.setdefault(m.group(1), expr)
-            continue
-        i += 1
+        m = TOKEN.match(s, i)
+        if m.group(1) is None:
+            kind = 'quoted' if m.group(2) else 'pipe' if m.group(3) else 'text'
+            if kind == 'text' and m.group(0)[0] in '"\'':
+                raise ParseError('unterminated quoted value at %d' % i)
+            out.append((m.group(0), kind, i))
+        i = m.end()
     return out
 
 
-class Component:
-    """Outputs, variable types and locals of one terraform component directory."""
-
-    def __init__(self, path):
-        self.outputs, self.var_types, self.locals = {}, {}, {}
-        self.readable = False
-        try:
-            names = sorted(f for f in os.listdir(path) if f.endswith('.tf'))
-        except OSError:
-            return
-        for name in names:
-            with open(os.path.join(path, name), encoding='utf-8') as fh:
-                s = fh.read()
-            self.readable = True
-            for label, body in blocks(s, 'output'):
-                self.outputs.setdefault(label, attributes(body).get('value', ''))
-            for label, body in blocks(s, 'variable'):
-                self.var_types.setdefault(label, attributes(body).get('type', ''))
-            for _, body in blocks(s, 'locals'):
-                for k, v in attributes(body).items():
-                    self.locals.setdefault(k, v)
+def unquote(v):
+    v = v.strip()
+    if len(v) < 2 or v[0] != v[-1]:
+        return v
+    if v[0] == "'":
+        return v[1:-1].replace("''", "'")
+    if v[0] == '"':
+        return v[1:-1].replace('""', '"')
+    return v
 
 
-def top_level(expr, chars):
-    """Indices of any of chars in expr at bracket depth 0, outside strings."""
-    hits, i = [], 0
-    while i < len(expr):
-        j = skip_trivia(expr, i)
-        if j != i:
-            i = j
-            continue
-        c = expr[i]
-        if c in OPEN:
-            i = skip_balanced(expr, i)
-            continue
-        if c in chars:
-            hits.append(i)
-        i += 1
-    return hits
+def is_expression_start(v):
+    v = v.strip()
+    return bool(v) and v[0] in '.[{|\'"'
 
 
-def whole(expr, i):
-    """True when the bracket opening at i closes at the very end of expr."""
-    return skip_balanced(expr, i) == len(expr)
+def parse_args(s):
+    """(instance, stack or None, expression) for `component [stack] expression`."""
+    tokens = tokenize(s)
+    last = tokens[-1] if tokens else None
+    if last and len(tokens) in (2, 3) and last[1] == 'quoted' and last[0].startswith('"') \
+            and '""' in last[0]:
+        # Atmos's legacy CSV form, kept for compatibility there, so here too.
+        parts = [p.strip() for p in next(csv.reader([s], delimiter=' ', skipinitialspace=True))]
+        if 2 <= len(parts) <= 3:
+            return (parts[0], None, parts[1]) if len(parts) == 2 else tuple(parts)
+    if not tokens:
+        raise ParseError('expected arguments')
+    if len(tokens) == 1:
+        raise ParseError('terraform function requires 2 or 3 arguments')
+    instance = unquote(tokens[0][0])
+    if len(tokens) == 2 or is_expression_start(tokens[1][0]):
+        expr = unquote(s[tokens[1][2]:].strip())
+        stack = None
+    else:
+        if len(tokens) > 3 and not is_expression_start(tokens[2][0]):
+            raise ParseError('terraform function requires 2 or 3 arguments')
+        stack = unquote(tokens[1][0])
+        expr = unquote(s[tokens[2][2]:].strip())
+    if not instance:
+        raise ParseError('component must not be empty')
+    if not expr:
+        raise ParseError('output expression must not be empty')
+    return instance, stack, expr
 
 
-LIST_FNS = {'values', 'keys', 'concat', 'compact', 'distinct', 'flatten', 'tolist',
-            'toset', 'sort', 'slice', 'split', 'reverse', 'setunion', 'setintersection',
-            'setsubtract', 'range', 'chunklist'}
-MAP_FNS = {'merge', 'tomap', 'zipmap'}
-# Obviously scalar: one() collapses a zero-or-one list; the rest build strings
-# or numbers. Nothing here is a guess about an attribute's type.
-SCALAR_FNS = {'one', 'format', 'join', 'jsonencode', 'tostring', 'tonumber', 'tobool',
-              'lower', 'upper', 'replace', 'trimprefix', 'trimsuffix', 'trimspace',
-              'substr', 'length', 'base64encode', 'md5', 'sha256'}
-FIRST_ARG_FNS = {'try', 'coalesce'}
-FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
-# A resource or data source attribute: aws_vpc.main.id, aws_x.y[0].arn,
-# data.aws_caller_identity.current.account_id. A plural attribute name is left
-# UNKNOWN rather than called scalar -- tags, subnet_ids and friends are
-# collections, and calling one a scalar would manufacture a type error.
-RESOURCE_ATTR = re.compile(
-    r'^(data\.)?[a-z][a-z0-9_]*\.[A-Za-z0-9_-]+(\[0\])?\.([A-Za-z_][A-Za-z0-9_]*)$')
-PLURAL_ATTR = re.compile(r'(^tags(_all)?|[^s]s)$')
-
-
-def split_args(inner):
-    cuts = top_level(inner, ',')
-    parts, prev = [], 0
-    for c in cuts + [len(inner)]:
-        parts.append(inner[prev:c].strip())
-        prev = c + 1
-    return [p for p in parts if p]
-
-
-def type_shape(t):
-    t = t.strip()
-    if re.match(r'^(list|set|tuple)\s*\(', t):
-        return LIST
-    if re.match(r'^(map|object)\s*\(', t):
-        return MAP
-    if t in ('string', 'number', 'bool'):
-        return SCALAR
-    return UNKNOWN
-
-
-def shape_of(expr, comp, depth=0):
-    """map / list / scalar / unknown for an output's value expression."""
-    e = expr.strip()
-    if not e or depth > 3:
-        return UNKNOWN
-    while e.startswith('(') and whole(e, 0):
-        e = e[1:-1].strip()
-    q = top_level(e, '?')
-    if q:
-        colons = top_level(e[q[0] + 1:], ':')
-        if colons:
-            a = e[q[0] + 1:q[0] + 1 + colons[0]]
-            b = e[q[0] + 2 + colons[0]:]
-            got = shape_of(a, comp, depth + 1)
-            return got if got != UNKNOWN else shape_of(b, comp, depth + 1)
-        return UNKNOWN
-    if e[0] == '{' and whole(e, 0):
-        return MAP
-    if e[0] == '[' and whole(e, 0):
-        return LIST
-    if e[0] == '"' and skip_string(e, 0) == len(e):
-        return SCALAR
-    if re.match(r'^(-?[0-9][0-9.]*|true|false)$', e):
-        return SCALAR
-    m = FN_CALL.match(e)
-    if m and whole(e, m.end() - 1):
-        fn, args = m.group(1), split_args(e[m.end():-1])
-        if fn in LIST_FNS:
-            return LIST
-        if fn in MAP_FNS:
-            return MAP
-        if fn in SCALAR_FNS:
-            return SCALAR
-        if fn in FIRST_ARG_FNS and args:
-            return shape_of(args[0], comp, depth + 1)
-        return UNKNOWN
-    if e.startswith('module.'):
-        return UNKNOWN
-    if '[*]' in e or '.*.' in e:
-        return LIST
-    m = re.match(r'^var\.([A-Za-z_][A-Za-z0-9_-]*)$', e)
-    if m:
-        return type_shape(comp.var_types.get(m.group(1), ''))
-    m = re.match(r'^local\.([A-Za-z_][A-Za-z0-9_-]*)$', e)
-    if m:
-        return shape_of(comp.locals.get(m.group(1), ''), comp, depth + 1) if depth < 2 else UNKNOWN
-    m = RESOURCE_ATTR.match(e)
-    if m and not e.startswith(('var.', 'local.', 'each.', 'count.', 'path.', 'terraform.')):
-        return UNKNOWN if PLURAL_ATTR.search(m.group(3)) else SCALAR
-    return UNKNOWN
-
-
-# ---------------------------------------------------------------------------
-# References.
-# ---------------------------------------------------------------------------
 def parse_ref(s):
-    """(kind, instance, stack-or-None, yq expression) for a !terraform.* string.
-
-    `<instance> <yq>` or `<instance> <stack> <yq>`. The yq expression is the
-    REST of the string and may hold spaces and pipes ('.bucket_name | "s3://"
-    + . + "/data/"'), so a stack is recognised by not starting with '.' or '['
-    -- a yq path always does. A bare output name (`vpc vpc_id`, Atmos's short
-    form) is the path `.vpc_id`.
-    """
+    """(kind, instance, stack or None, expression) for a !terraform.* string;
+    None if it is not one; ParseError where Atmos would refuse it."""
     m = TF_REF.match(s.strip())
     if not m:
         return None
-    parts = m.group(2).strip().split(None, 2)
-    if len(parts) < 2:
-        return None
-    instance, stack = parts[0], None
-    rest = m.group(2).strip()[len(instance):].strip()
-    if len(parts) == 3 and not parts[1].startswith(('.', '[')):
-        stack, rest = parts[1], parts[2].strip()
-    if re.match(r'^[A-Za-z_][A-Za-z0-9_-]*$', rest):
-        rest = '.' + rest
-    return m.group(1), instance, stack, rest
+    instance, stack, expr = parse_args(m.group(2) or '')
+    return (m.group(1), instance, stack, expr)
 
 
-def first_output(expr):
-    """The output an expression reads: the first `.name` path segment, outside strings."""
-    i = 0
-    while i < len(expr):
-        j = skip_trivia(expr, i)
-        if j != i:
-            i = j
+def atmos_expr(expr):
+    """The expression as Atmos hands it to yq: with a leading '.' prepended when
+    it has none (GetTerraformBackendVariable / extractYqValue). This is why
+    `[.a // {} | .[]]` is an index, `.[...]`, and not a list constructor."""
+    return expr if expr.startswith('.') else '.' + expr
+
+
+def root_outputs(expr):
+    """Every output an expression reads off the ROOT of the outputs map.
+
+    A yq-aware scan: only double-quoted strings are skipped -- '//' is yq's
+    alternative operator and '#' is not a comment, so the HCL skipper would
+    swallow the rest of `.a // .b`. A `.name` counts when no '|' has come
+    before it in its own bracket group or an enclosing one: after a pipe the
+    context is the piped value, not the outputs map.
+    """
+    e = atmos_expr(expr)
+    names, piped, i = [], [False], 0
+    while i < len(e):
+        c = e[i]
+        if c == '"':
+            i += 1
+            while i < len(e) and e[i] != '"':
+                i += 2 if e[i] == '\\' else 1
+            i += 1
             continue
-        m = re.compile(r'\.([A-Za-z_][A-Za-z0-9_-]*)').match(expr, i)
-        if m and (i == 0 or not re.match(r'[A-Za-z0-9_\]\)]', expr[i - 1])):
-            return m.group(1)
+        if c in '([{':
+            piped.append(piped[-1])
+        elif c in ')]}' and len(piped) > 1:
+            piped.pop()
+        elif c == '|':
+            piped[-1] = True
+        elif c == '.' and not piped[-1] and (i == 0 or not re.match(r'[\w\]\)".]', e[i - 1])):
+            m = re.compile(IDENT).match(e, i + 1)
+            if m and m.group(0) not in names:
+                names.append(m.group(0))
         i += 1
-    return None
+    return names
 
 
 def accessed_keys(expr, output):
     """Keys an expression reads directly off a map output: `.certificate_arns.main_wildcard`."""
-    pat = re.compile(r'\.' + re.escape(output) + r'(?:\.([A-Za-z_][A-Za-z0-9_-]*)|\["([^"]+)"\])')
+    pat = re.compile(r'\.' + re.escape(output) + r'(?:\.(' + IDENT + r')|\["([^"]+)"\])')
     return {a or b for a, b in pat.findall(expr)}
 
 
-def yq_eval(expr, doc):
-    """(value, error). Exactly one result document, or it is an error."""
+def is_scalar_string(s):
+    # EvaluateYqExpression's isScalarString, verbatim in behaviour.
+    if s.startswith('#') and '\n' not in s:
+        return True
+    if s == '' or s.startswith(('{', '[')) or '\n' in s:
+        return False
+    return s.endswith(':') and ': ' not in s
+
+
+def run_yq(args, stdin):
     try:
-        p = subprocess.run(['yq', '-p=json', '-o=json', '-I=0', expr], input=json.dumps(doc),
-                           capture_output=True, text=True, timeout=30)
+        p = subprocess.run(['yq'] + args, input=stdin, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, str(exc)
     if p.returncode != 0:
         return None, (p.stderr.strip().splitlines() or ['yq exited %d' % p.returncode])[-1]
-    lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
+    return p.stdout, None
+
+
+def atmos_yq(expr, data):
+    """(value, error) exactly as Atmos's !terraform.state would produce it.
+
+    pkg/utils EvaluateYqExpression prints the result as YAML with scalars
+    unwrapped and parses that text back as YAML. Several results therefore come
+    back as one plain scalar spanning lines -- `null\\nnull` reads as the STRING
+    "null null" -- never as a list, and never as an error. Reproduced with the
+    same yq: evaluate to YAML, then re-read the YAML with yq.
+    """
+    out, err = run_yq(['-p=json', '-o=yaml', '-I=2', atmos_expr(expr)], json.dumps(data))
+    if err is not None:
+        return None, err
+    trimmed = out.strip()
+    if is_scalar_string(trimmed):
+        return trimmed, None
+    parsed, err = run_yq(['-p=yaml', '-o=json', '-I=0', '.'], out)
+    if err is not None:
+        if '\n' not in trimmed:
+            return trimmed, None
+        return None, 'result is not YAML: %s' % err
+    lines = [ln for ln in parsed.splitlines() if ln.strip()]
     if len(lines) != 1:
-        return None, 'yielded %d results, not one' % len(lines)
-    return json.loads(lines[0]), None
+        return None, 'result is %d YAML documents' % len(lines)
+    value = json.loads(lines[0])
+    # isMisinterpretedScalar: "value:" parses as {"value": null}.
+    if isinstance(value, dict) and len(value) == 1:
+        (k, v), = value.items()
+        if v is None and trimmed in (k + ':', k + '::'):
+            return trimmed, None
+    return value, None
+
+
+def synth_value(shape, names, keys=()):
+    """A synthetic value of this shape, or None if any part of it is unknown.
+
+    names: where to look up a leaf, most specific first. keys: the keys other
+    references read off this map; a map always gets at least two, because with
+    one Atmos's joined multi-result and a single result are indistinguishable,
+    and the verdict must not depend on how many keys other references happen
+    to read.
+    """
+    if shape == SCALAR:
+        for n in names:
+            got = synth(n)
+            if isinstance(got, list):
+                got = got[0] if got else None
+            if got is not None:
+                return got
+        return None
+    if shape[0] == 'list':
+        if shape[1] == SCALAR and isinstance(synth(names[0]), list):
+            # A list output named like a synthetic list keeps all of it: two
+            # subnets, not one, for the reasons given at SYNTH.
+            return list(synth(names[0]))
+        v = synth_value(shape[1], names)
+        return None if v is None else [v]
+    if shape[0] == 'map':
+        v = synth_value(shape[1], names)
+        if v is None:
+            return None
+        ks = list(keys)
+        for pad in ('synthetic_a', 'synthetic_b'):
+            if len(ks) < 2:
+                ks.append(pad)
+        return {k: v for k in ks}
+    if shape[0] == 'object':
+        out = {}
+        for attr, s in shape[1].items():
+            v = synth_value(s, [attr, singular(attr)] + list(names))
+            if v is None:
+                return None
+            out[attr] = v
+        return out
+    return None
 
 
 class Resolver:
@@ -455,11 +367,15 @@ class Resolver:
 
     def __init__(self, stack, stacks_dir, components_dir):
         self.stack, self.stacks_dir, self.components_dir = stack, stacks_dir, components_dir
-        self._stacks, self._components, self._keys = {}, {}, {}
+        self._stacks, self._keys = {}, {}
 
     def instances(self, stack):
+        """(instances, None) or (None, why the stack cannot be read)."""
         # One `atmos describe stacks` per stack, written by the shell before the
         # loop. A stack named explicitly in a reference is described here, once.
+        # A stack that is not there -- a typo in the 3-arg form, say -- is a
+        # defect: Atmos would fail on it, so falling back would pass a broken
+        # reference.
         if stack not in self._stacks:
             path = os.path.join(self.stacks_dir, stack + '.json')
             if not os.path.exists(path):
@@ -468,19 +384,21 @@ class Resolver:
                                         '--format', 'json', '-s', stack],
                                        stdout=subprocess.PIPE, stderr=err, text=True)
                 if p.returncode != 0:
-                    self._stacks[stack] = None
-                    return None
+                    self._stacks[stack] = (None, 'atmos describe stacks -s %s failed' % stack)
+                    return self._stacks[stack]
                 with open(path, 'w') as fh:
                     fh.write(p.stdout)
             with open(path) as fh:
                 d = json.load(fh)
-            self._stacks[stack] = ((d.get(stack) or {}).get('components') or {}).get('terraform') or {}
+            if stack not in d:
+                self._stacks[stack] = (None, 'stack %s does not exist' % stack)
+            else:
+                self._stacks[stack] = (
+                    ((d[stack] or {}).get('components') or {}).get('terraform') or {}, None)
         return self._stacks[stack]
 
     def component(self, name):
-        if name not in self._components:
-            self._components[name] = Component(os.path.join(self.components_dir, name))
-        return self._components[name]
+        return load_component(os.path.join(self.components_dir, name))
 
     def keys(self, stack, instance, output):
         # Every key ANY reference in the stack reads off this map output, so
@@ -489,11 +407,14 @@ class Resolver:
         k = (stack, instance, output)
         if k not in self._keys:
             found = set()
-            for c in (self.instances(stack) or {}).values():
+            for c in (self.instances(stack)[0] or {}).values():
                 for ref in refs_in(c.get('vars') or {}):
-                    r = parse_ref(ref)
+                    try:
+                        r = parse_ref(ref)
+                    except ParseError:
+                        continue
                     if r and r[1] == instance and (r[2] or stack) == stack:
-                        found |= accessed_keys(r[3], output)
+                        found |= accessed_keys(atmos_expr(r[3]), output)
             self._keys[k] = sorted(found)
         return self._keys[k]
 
@@ -510,46 +431,24 @@ def refs_in(node):
             yield from refs_in(x)
 
 
-def leaf_for(output, var):
-    for name in (output, singular(output), var):
-        got = synth(name)
-        if isinstance(got, list):
-            got = got[0] if got else None
-        if got is not None:
-            return got
-    return None
-
-
-def synthetic_output(shape, output, var, keys):
-    """The synthetic value of an output of this shape, or None."""
-    if shape == LIST:
-        # A list output named like a synthetic list keeps all of it: two
-        # subnets, not one, for the reasons given at SYNTH.
-        whole_list = synth(output)
-        if isinstance(whole_list, list) and whole_list:
-            return list(whole_list)
-    leaf = leaf_for(output, var)
-    if leaf is None:
-        return None
-    if shape == SCALAR:
-        return leaf
-    if shape == LIST:
-        return [leaf]
-    if shape == MAP:
-        return {k: leaf for k in (keys or ['synthetic'])}
-    return None
-
-
 def resolve_ref(s, var, resolver):
-    """('shaped', value) | ('fallback', None) | ('defect', message)."""
-    r = parse_ref(s)
+    """('shaped', value) | ('fallback', None) | ('defect', message).
+
+    A shaped value may be None: Atmos hands the variable null, and so does
+    this. Falling back to a name guess there is how `[.certificate_arns // {}
+    | .[]]` would have passed.
+    """
+    try:
+        r = parse_ref(s)
+    except ParseError as exc:
+        return 'defect', '%s: Atmos cannot parse %r: %s' % (var, s, exc)
     if r is None:
         return 'fallback', None
     _, instance, stack, expr = r
     stack = stack or resolver.stack
-    instances = resolver.instances(stack)
+    instances, why = resolver.instances(stack)
     if instances is None:
-        return 'fallback', None
+        return 'defect', '%s: %s (%s)' % (var, why, s)
     target = instances.get(instance)
     # An abstract instance is never deployed, so it has no state to read either.
     if target is None:
@@ -560,23 +459,32 @@ def resolve_ref(s, var, resolver):
     comp_name = target.get('component') or (target.get('metadata') or {}).get('component') \
         or instance.split('/')[0]
     comp = resolver.component(comp_name)
-    output = first_output(expr)
-    if output is None or not comp.readable or not comp.outputs:
+    outputs = root_outputs(expr)
+    if not outputs or not comp.readable or not comp.outputs:
         return 'fallback', None
-    if output not in comp.outputs:
-        return 'defect', '%s: %s (component %s) declares no output "%s" (%s)' % (
-            var, instance, comp_name, output, s)
-    shape = shape_of(comp.outputs[output], comp)
-    if shape == UNKNOWN:
-        return 'fallback', None
-    value = synthetic_output(shape, output, var, resolver.keys(stack, instance, output))
-    if value is None:
-        return 'fallback', None
-    got, err = yq_eval(expr, {output: value})
+    doc = {}
+    for output in outputs:
+        if output not in comp.outputs:
+            if comp.declares_output(output):
+                return 'fallback', None   # declared, but the reader could not parse it
+            # With real state a missing output reads as null from an S3
+            # backend (an error from a static one). With a '//' default the
+            # default always wins, which is no failure but a stale reference.
+            if '//' in expr:
+                why = 'so its // default always applies: the reference is stale'
+            else:
+                why = 'so it reads null with real state'
+            return 'defect', '%s: %s (component %s) declares no output "%s", %s (%s)' % (
+                var, instance, comp_name, output, why, s)
+        shape = shape_of(comp.outputs[output], Ctx(comp))
+        value = synth_value(shape, [output, singular(output), var],
+                            resolver.keys(stack, instance, output)) if known(shape) else None
+        if value is None:
+            return 'fallback', None
+        doc[output] = value
+    got, err = atmos_yq(expr, doc)
     if err is not None:
-        return 'defect', '%s: yq cannot evaluate %r: %s' % (var, expr, err)
-    if got is None:
-        return 'fallback', None
+        return 'defect', '%s: yq cannot evaluate %r: %s' % (var, atmos_expr(expr), err)
     return 'shaped', got
 
 
@@ -587,11 +495,16 @@ class Builder:
     def __init__(self, resolver):
         self.resolver = resolver
         self.dropped, self.defects = [], []
-        self.counts = {'shaped': 0, 'fallback': 0, 'dropped': 0}
+        # !terraform references and every other function are counted apart:
+        # the first is the number this file exists to drive up, the second
+        # (!env, !store, ...) can only ever be guessed.
+        self.counts = {'shaped': 0, 'fallback': 0, 'dropped': 0, 'other_guessed': 0,
+                       'other_dropped': 0}
 
     def function(self, key, node):
-        """(value, from_fallback) for an Atmos function string, or (SENTINEL, _)."""
-        if TF_REF.match(node) and self.resolver is not None:
+        """(value, from_guess) for an Atmos function string, or (SENTINEL, _)."""
+        is_tf = bool(TF_REF.match(node))
+        if is_tf and self.resolver is not None:
             kind, got = resolve_ref(node, key, self.resolver)
             if kind == 'shaped':
                 self.counts['shaped'] += 1
@@ -601,10 +514,10 @@ class Builder:
                 return SENTINEL, False
         got = synth(key)
         if got is None:
-            self.counts['dropped'] += 1
+            self.counts['dropped' if is_tf else 'other_dropped'] += 1
             self.dropped.append(key)
             return SENTINEL, False
-        self.counts['fallback'] += 1
+        self.counts['fallback' if is_tf else 'other_guessed'] += 1
         return got, True
 
     def walk(self, key, node):
@@ -657,10 +570,32 @@ def build(describe, stack, stacks_dir, components_dir):
 
 
 # ---------------------------------------------------------------------------
-# Self-test, run by the shell before any pair. Built against the REAL acm and
-# vpc components, so a change there that this reader cannot follow fails here
-# rather than silently falling back.
+# Self-test, run by the shell before any pair. Built against the REAL acm,
+# vpc and kms components, so a change there that this reader cannot follow
+# fails here rather than silently falling back.
 # ---------------------------------------------------------------------------
+# Each row was run through real Atmos 1.229.0 (`atmos describe component`, a
+# static remote_state_backend holding ATMOS_DATA) and the result recorded
+# here, so atmos_yq is checked against Atmos itself, not against this file's
+# idea of it.
+ATMOS_DATA = {'certificate_arns': {'main_wildcard': 'arn:a', 'api': 'arn:b'},
+              'one_key': {'only': 'arn:c'}, 'vpc_id': 'vpc-1', 'subnets': ['s1', 's2'],
+              'nothing': None}
+ATMOS_CASES = [
+    ('[.certificate_arns // {} | .[]]', 'null null'),
+    ('.certificate_arns // {} | [.[]]', ['arn:a', 'arn:b']),
+    ('[.one_key // {} | .[]]', None),
+    ('.certificate_arns // {}', {'api': 'arn:b', 'main_wildcard': 'arn:a'}),
+    ('.certificate_arns // {} | keys', ['main_wildcard', 'api']),
+    ('.vpc_id | "s3://" + . + "/data/"', 's3://vpc-1/data/'),
+    ('vpc_id', 'vpc-1'),
+    ('.subnets[0]', 's1'),
+    ('.subnets[]', 's1 s2'),
+    ('.nothing', None),
+    ('.certificate_arns.main_wildcard', 'arn:a'),
+]
+
+
 def self_test(components_dir, tmp):
     failures = []
 
@@ -668,60 +603,122 @@ def self_test(components_dir, tmp):
         if got != want:
             failures.append('%s: got %r, want %r' % (what, got, want))
 
+    for expr, want in ATMOS_CASES:
+        got, err = atmos_yq(expr, ATMOS_DATA)
+        # Real Atmos sorted the map's keys; order within a list is not what
+        # any of these rows is about.
+        if isinstance(got, list) and isinstance(want, list):
+            got, want = sorted(got), sorted(want)
+        check('atmos_yq %s' % expr, (got, err), (want, None))
+    for bad in ('{"a": .vpc_id}', '.vpc_id | ]['):
+        check('atmos_yq rejects %s' % bad, atmos_yq(bad, ATMOS_DATA)[1] is not None, True)
+
     stack = 'selftest'
     stacks = {stack: {'components': {'terraform': {
         'acm/main': {'component': 'acm', 'vars': {
             'x': '!terraform.state acm/main .certificate_arns.main_wildcard'}},
         'vpc/main': {'component': 'vpc', 'vars': {}},
+        'kms/main': {'component': 'kms', 'vars': {}},
     }}}}
     os.makedirs(tmp, exist_ok=True)
     with open(os.path.join(tmp, stack + '.json'), 'w') as fh:
         json.dump(stacks, fh)
+    # What `atmos describe stacks -s <unknown>` prints: {} and exit 0. Seeded,
+    # so the self-test never shells out to atmos.
+    with open(os.path.join(tmp, 'no-such-stack.json'), 'w') as fh:
+        fh.write('{}')
     res = Resolver(stack, tmp, components_dir)
-    acm, vpc = res.component('acm'), res.component('vpc')
-    check('acm certificate_arns shape', shape_of(acm.outputs.get('certificate_arns', ''), acm), MAP)
-    check('vpc vpc_id shape', shape_of(vpc.outputs.get('vpc_id', ''), vpc), SCALAR)
-    check('vpc private_subnet_ids shape', shape_of(vpc.outputs.get('private_subnet_ids', ''), vpc), LIST)
+    acm, vpc, kms = res.component('acm'), res.component('vpc'), res.component('kms')
+    check('acm certificate_arns shape', shape_of(acm.outputs.get('certificate_arns', ''), Ctx(acm)),
+          MAP(SCALAR))
+    check('vpc vpc_id shape', shape_of(vpc.outputs.get('vpc_id', ''), Ctx(vpc)), SCALAR)
+    check('vpc private_subnet_ids shape',
+          shape_of(vpc.outputs.get('private_subnet_ids', ''), Ctx(vpc)), LIST(SCALAR))
+    check('kms key_arn through its local module',
+          shape_of(kms.outputs.get('key_arn', ''), Ctx(kms)), SCALAR)
     for expr, want in [
-        ('{ for k, v in x : k => "${v}}" }', MAP), ('[for c in var.a : c]', LIST),
-        ('aws_x.y[*].arn', LIST), ('one(aws_x.y[*].arn)', SCALAR), ('merge(a, {})', MAP),
-        ('var.enabled ? aws_x.y[0].id : null', SCALAR), ('try(values(a), [])', LIST),
-        ('module.kms.key_arn', UNKNOWN), ('aws_x.y.tags', UNKNOWN), ('aws_x.y.id', SCALAR),
+        ('{ for k, v in aws_x.y : k => v.arn }', MAP(SCALAR)),
+        ('{ for k, v in aws_x.y : k => v.vpc_config }', MAP(UNKNOWN)),
+        ('{ for k, v in aws_x.y : k => v.certificate_authority[0].data }', MAP(SCALAR)),
+        ('{ requester = [for r in aws_x.y : r.id], accepter = [] }',
+         OBJ({'requester': LIST(SCALAR), 'accepter': LIST(UNKNOWN)})),
+        ('{ a = aws_x.y.id, b = "s" }', OBJ({'a': SCALAR, 'b': SCALAR})),
+        ('[for c in var.a : aws_x.y[c].id]', LIST(SCALAR)),
+        ('aws_x.y[*].arn', LIST(SCALAR)), ('one(aws_x.y[*].arn)', SCALAR),
+        ('aws_x.y[*].arn[0]', UNKNOWN),
+        ('merge({ for k, v in aws_x.y : k => v.key_name }, var.g ? { "g" = aws_k.g[0].key_name } : {})',
+         MAP(SCALAR)),
+        ('var.enabled ? aws_x.y[0].id : null', SCALAR), ('try(values({ for k, v in a : k => v.id }), [])',
+                                                         LIST(SCALAR)),
+        ('module.nowhere.key_arn', UNKNOWN), ('aws_x.y.tags', UNKNOWN), ('aws_x.y.id', SCALAR),
+        ('aws_x.y.certificate_authority', UNKNOWN), ('aws_x.y.identity', UNKNOWN),
     ]:
-        check('shape of %s' % expr, shape_of(expr, acm), want)
+        check('shape of %s' % expr, shape_of(expr, Ctx(acm)), want)
+    check('indented output block', [k for k, _ in blocks('  output "x" {\n  value = 1\n}\n', 'output')],
+          ['x'])
 
-    # #166: the map, passed as-is, must stay a map -- so monitoring's
-    # list(string) rejects it -- and the fixed expression must yield a list.
-    kind, bug = resolve_ref('!terraform.state acm/main .certificate_arns // {}', 'certificate_arns', res)
-    check('#166 bug form kind', kind, 'shaped')
-    check('#166 bug form is an object', isinstance(bug, dict), True)
-    kind, fixed = resolve_ref('!terraform.state acm/main [.certificate_arns // {} | .[]]',
-                              'certificate_arns', res)
+    # #166. Passing the map as-is keeps it a map, which monitoring's
+    # list(string) rejects. The first fix, `[.certificate_arns // {} | .[]]`,
+    # is `.[...]` to Atmos -- an index -- and comes back as the STRING
+    # "null null", which list(string) rejects too. Only `... | [.[]]` is a list.
+    def ref(expr, var='certificate_arns'):
+        return resolve_ref('!terraform.state acm/main ' + expr, var, res)
+
+    kind, bug = ref('.certificate_arns // {}')
+    check('#166 bug form is an object', (kind, isinstance(bug, dict)), ('shaped', True))
+    kind, broken = ref('[.certificate_arns // {} | .[]]')
+    check('#166 bracket form is a string, not a list', (kind, isinstance(broken, str)), ('shaped', True))
+    kind, fixed = ref('.certificate_arns // {} | [.[]]')
     check('#166 fixed form is a list of strings',
-          (kind, isinstance(fixed, list) and all(isinstance(x, str) for x in fixed)), ('shaped', True))
-    _, key = resolve_ref('!terraform.state acm/main .certificate_arns.main_wildcard', 'certificate_arn', res)
-    check('map key accessor', isinstance(key, str) and key.startswith('arn:aws:acm:'), True)
-    check('s3:// concatenation', resolve_ref('!terraform.state vpc/main .vpc_id | "s3://" + . + "/data/"',
-                                             'x', res), ('shaped', 's3://vpc-0123456789abcdef0/data/'))
-    check('[0] index', resolve_ref('!terraform.state vpc/main .private_subnet_ids[0]', 'subnet_id', res),
+          (kind, isinstance(fixed, list) and len(fixed) >= 2 and all(isinstance(x, str) for x in fixed)),
+          ('shaped', True))
+    check('map key accessor', ref('.certificate_arns.main_wildcard', 'certificate_arn')[1],
+          'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012')
+    check('null passes through, no fallback', ref('.certificate_arns.no_such_key'), ('shaped', None))
+
+    def vref(args, var='x'):
+        return resolve_ref('!terraform.state ' + args, var, res)
+
+    check('s3:// concatenation', vref('vpc/main .vpc_id | "s3://" + . + "/data/"'),
+          ('shaped', 's3://vpc-0123456789abcdef0/data/'))
+    check('quoted expression', vref('vpc/main \'.vpc_id | "s3://" + .\''),
+          ('shaped', 's3://vpc-0123456789abcdef0'))
+    check('[0] index', vref('vpc/main .private_subnet_ids[0]', 'subnet_id'),
           ('shaped', 'subnet-0123456789abcdef0'))
-    check('missing instance', resolve_ref('!terraform.state nope/main .x', 'v', res)[0], 'defect')
-    check('missing output', resolve_ref('!terraform.state vpc/main .no_such_output', 'v', res)[0], 'defect')
-    check('yq error', resolve_ref('!terraform.state vpc/main .vpc_id | ][', 'v', res)[0], 'defect')
-    check('3-arg form', parse_ref('!terraform.state vpc other-stack .a | "x" + .'),
-          ('state', 'vpc', 'other-stack', '.a | "x" + .'))
-    check('short form', parse_ref('!terraform.state vpc vpc_id'), ('state', 'vpc', None, '.vpc_id'))
+    check('several results are joined', vref('vpc/main .private_subnet_ids[]'),
+          ('shaped', 'subnet-0123456789abcdef0 subnet-0123456789abcdef1'))
+    check('short form', vref('vpc/main vpc_id'), ('shaped', 'vpc-0123456789abcdef0'))
+    check('3-arg form, this stack', vref('vpc/main selftest .vpc_id'), ('shaped', 'vpc-0123456789abcdef0'))
+    for what, args in [
+        ('missing instance', 'nope/main .x'),
+        ('missing output', 'vpc/main .no_such_output'),
+        ('missing output behind //', 'vpc/main .no_such_output // "x"'),
+        ('missing second output', 'vpc/main .vpc_id // .no_such_output'),
+        ('yq error', 'vpc/main .vpc_id | ]['),
+        ('parenthesised expression is an Atmos parse error', 'vpc/main (.vpc_id // "x")'),
+        ('object expression gets the leading dot', 'vpc/main {"a": .vpc_id}'),
+        ('unknown stack', 'vpc/main no-such-stack .vpc_id'),
+        ('unterminated quote', 'vpc/main ".vpc_id'),
+    ]:
+        check(what, vref(args)[0], 'defect')
+    check('stale // wording', 'stale' in vref('vpc/main .no_such_output // "x"')[1], True)
+    check('parse: 3-arg with pipes', parse_ref('!terraform.state vpc other .a | "x" + .'),
+          ('state', 'vpc', 'other', '.a | "x" + .'))
+    check('root outputs', root_outputs('.a // .b | .c + "//#" + .d'), ['a', 'b'])
+    check('root outputs in brackets', root_outputs('[.a // {} | .[]]'), ['a'])
 
     # Only a name-guessed list is spliced into its parent list; an
     # output-shaped one is inserted as-is, as Atmos would.
-    top, _ = build({'vars': {
+    top, b = build({'vars': {
         'subnet_ids': ['!terraform.state vpc/main .private_subnet_ids'],
     }}, stack, tmp, components_dir)
     check('shaped list is not spliced', top['subnet_ids'],
           [['subnet-0123456789abcdef0', 'subnet-0123456789abcdef1']])
-    top, _ = build({'vars': {'subnet_ids': ['!env X']}}, None, None, None)
+    top, b = build({'vars': {'subnet_ids': ['!env X'], 'z': '!env Y'}}, None, None, None)
     check('guessed list is spliced', top['subnet_ids'],
           ['subnet-0123456789abcdef0', 'subnet-0123456789abcdef1'])
+    check('!env is not counted as a !terraform reference',
+          (b.counts['fallback'], b.counts['other_guessed'], b.counts['other_dropped']), (0, 1, 1))
     return failures
 
 
@@ -749,14 +746,18 @@ def main(argv):
     # A failure this script may have manufactured must not be reported as the
     # component's, and the names are what let a reader decide which one it was.
     #
-    # Line 3: reference defects -- a missing instance, a missing output, an
-    # expression yq rejects -- joined by TAB. Each fails with real state too.
+    # Line 3: reference defects -- a stack, instance or output that is not
+    # there, an argument Atmos cannot parse, an expression yq rejects -- joined
+    # by TAB.
     #
-    # Line 4: how many references were output-shaped, name-guessed, dropped.
+    # Line 4: !terraform references output-shaped, name-guessed, dropped; then
+    # other functions guessed, dropped.
+    c = b.counts
     print(d.get('component') or (d.get('metadata') or {}).get('component') or '')
     print(','.join(sorted(set(b.dropped))))
     print('\t'.join(m.replace('\t', ' ').replace('\n', ' ') for m in b.defects))
-    print('%d %d %d' % (b.counts['shaped'], b.counts['fallback'], b.counts['dropped']))
+    print('%d %d %d %d %d' % (c['shaped'], c['fallback'], c['dropped'], c['other_guessed'],
+                              c['other_dropped']))
     return 0
 
 
