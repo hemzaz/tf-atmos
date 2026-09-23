@@ -16,7 +16,11 @@ for IRSA.
 
 | Required inputs | Behavior-changing | Outputs |
 |---|---|---|
-| `subnet_ids` (>= 2, `subnet-*` format), `clusters` map (each needs a valid `X.Y` `kubernetes_version`), `tags.Environment` | `default_kubernetes_version`, `enable_cluster_protection`, `default_cluster_log_retention_days` (7 days; prod pins 90 in its own stack file); a cluster with `endpoint_public_access` must set `public_access_cidrs` (non-empty, no `0.0.0.0/0`) | `cluster_ids`, `cluster_endpoints`, `cluster_ca_data`, `oidc_provider_arns`, `node_role_arns` (all maps keyed by cluster name) |
+| `subnet_ids` (>= 2, `subnet-*` format), `clusters` map (each needs a valid `X.Y` `kubernetes_version`), `tags.Environment` | `default_kubernetes_version`, `enable_cluster_protection`, `default_cluster_log_retention_days` (7 days; prod pins 90 in its own stack file); a cluster with `endpoint_public_access` must set `public_access_cidrs` (non-empty, no `0.0.0.0/0`) | Maps keyed by cluster name: `cluster_ids`, `cluster_arns`, `cluster_endpoints`, `cluster_ca_data`, `oidc_provider_arns`, `cluster_security_group_ids`, `node_role_arns`, `node_group_arns` (keyed `<cluster>.<node group>`). Scalars for the instance's only cluster, named as in Cloud Posse's eks/cluster: `eks_cluster_id` (the name), `eks_cluster_arn`, `eks_cluster_endpoint`, `eks_cluster_certificate_authority_data` (base64, as EKS returns it), `eks_cluster_identity_oidc_issuer` (with `https://`), `eks_cluster_identity_oidc_issuer_arn` |
+
+The scalar outputs use `one()`: they are null when the instance has no enabled
+cluster, and the plan fails if it has more than one, so they never pick one
+cluster out of several. A multi-cluster instance must be read through the maps.
 
 ## Node groups
 
@@ -70,12 +74,13 @@ per-node-group instance settings follow `cloudposse/terraform-aws-eks-node-group
 
 - `eks/main` depends on `vpc/main`, `kms/main`; `eks/data` depends on
   `vpc/services`, `kms/main`.
-- `external-secrets/main` and `external-secrets/data` stack configs read
-  `!terraform.state eks/main .cluster_name` / `.cluster_endpoint` /
-  `.cluster_ca_certificate` / `.oidc_provider_arn` / `.oidc_provider_url`, but
-  outputs.tf only exposes map-valued outputs (`cluster_ids`, `cluster_endpoints`,
-  `cluster_ca_data`, `oidc_provider_arns`) keyed by cluster name — those flat
-  singular output names don't exist in this component.
+- `external-secrets/main` and `external-secrets/data` read the scalar outputs of
+  `eks/main` and `eks/data`: `.eks_cluster_id`, `.eks_cluster_endpoint`,
+  `.eks_cluster_certificate_authority_data` (external-secrets base64-decodes it),
+  `.eks_cluster_identity_oidc_issuer_arn` and `.eks_cluster_identity_oidc_issuer`
+  (external-secrets strips `https://`). Every eks instance in the three stacks
+  defines exactly one cluster.
+- `idp-platform` calls this component as a module and reads only the map outputs.
 - `deletion_protection` is only enabled when `enable_cluster_protection = true`
   AND `tags.Environment` (case-insensitive) is `prod` or `production`.
 

@@ -80,3 +80,24 @@ output "instances_using_individual_keys" {
   value       = keys(local.instances_requiring_keys)
   description = "List of instance names using individually generated SSH keys"
 }
+
+# Scalar outputs for the component's single EC2 instance, named as in Cloud Posse's
+# ec2-instance and ec2-bastion-server modules, so another instance reads
+# `!terraform.state ec2/bastion .ssh_key_pair` without knowing the instance's map key.
+#
+# one() never picks among several instances: with no enabled instance these are null,
+# and with more than one the plan fails ("must be a list, set, or tuple value with
+# either zero or one elements"). A multi-instance component must read the map outputs.
+
+output "ssh_key_pair" {
+  # The key the instance launched with, whichever way main.tf resolved it: its own
+  # key_name, its generated key, the global key, or default_key_name. Not
+  # global_key_name, which an instance with its own key_name does not use.
+  value       = one([for i in aws_instance.instances : i.key_name])
+  description = "Name of the SSH key pair on the component's only EC2 instance (null without an instance or key; the plan fails with more than one instance)"
+}
+
+output "security_group_id" {
+  value       = one([for sg in aws_security_group.instances : sg.id])
+  description = "ID of the security group created for the component's only EC2 instance (null without an instance; the plan fails with more than one)"
+}

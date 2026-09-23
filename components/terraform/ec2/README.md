@@ -18,7 +18,12 @@ are only launched from them when `create_instances_from_templates = true` (defau
 
 | Required inputs | Behavior-changing | Outputs |
 |---|---|---|
-| `vpc_id`, `subnet_ids`, `instances` (each needs `instance_type`), `tags.Environment` | `create_ssh_keys`, `store_ssh_keys_in_secrets_manager`, `global_key_name` | `instance_ids`, `security_group_ids`, `generated_key_names` (all maps keyed by instance name) |
+| `vpc_id`, `subnet_ids`, `instances` (each needs `instance_type`), `tags.Environment` | `create_ssh_keys`, `store_ssh_keys_in_secrets_manager`, `global_key_name` | Maps keyed by instance name: `instance_ids`, `instance_arns`, `instance_public_ips`, `instance_private_ips`, `security_group_ids`, `iam_role_arns`, `iam_role_names`, `iam_instance_profile_arns`, `iam_instance_profile_names`, `generated_key_names`, `ssh_key_secret_arns` (sensitive). Scalars: `global_key_name`, `global_key_secret_arn` (sensitive), and, for the component's only instance, named as in Cloud Posse's ec2-instance/ec2-bastion-server, `ssh_key_pair` and `security_group_id` |
+
+`ssh_key_pair` is the key the instance actually launched with (its own `key_name`, its
+generated key, the global key, or `default_key_name`), not `global_key_name`. The two
+scalar outputs use `one()`: null with no enabled instance, and the plan fails with more
+than one, so they never pick one instance out of several.
 
 `vpc_endpoint_prefix_list_ids` is required (validation fails if empty) — default egress uses it
 instead of `0.0.0.0/0`. An instance with `detailed_monitoring` unset follows `enable_detailed_monitoring` (default true).
@@ -27,9 +32,9 @@ instead of `0.0.0.0/0`. An instance with `detailed_monitoring` unset follows `en
 
 - Depends on `vpc/main` (all instances); `ec2/app-server` also depends on
   `ec2/bastion`; `ec2/bastion` also depends on `kms/main`.
-- Stack configs read `!terraform.state ec2/bastion .ssh_key_name` and
-  `.security_group_id`, but outputs.tf only exposes the map-valued
-  `generated_key_names` / `security_group_ids` — those flat names don't exist here.
+- `ec2/app-server` reads `!terraform.state ec2/bastion .ssh_key_pair` as its
+  `key_name` (dev, staging) and `.security_group_id` as an item of an ingress
+  rule's `security_groups` list (staging).
 - `tags` map must contain a non-empty `Environment` key or plan fails validation.
 
 ## Usage
