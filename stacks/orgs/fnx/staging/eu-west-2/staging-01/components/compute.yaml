@@ -184,7 +184,7 @@ components:
         instances:
           app-server:
             instance_type: "t3.medium"
-            key_name: !terraform.state ec2/bastion .ssh_key_name
+            key_name: !terraform.state ec2/bastion .ssh_key_pair
             subnet_id: !terraform.state vpc/main .private_subnet_ids[0]
             root_volume_type: "gp3"
             root_volume_size: 50
@@ -226,11 +226,11 @@ components:
           - external-secrets/defaults
       vars:
         enabled: true
-        cluster_name: !terraform.state eks/main .cluster_name
-        host: !terraform.state eks/main .cluster_endpoint
-        cluster_ca_certificate: !terraform.state eks/main .cluster_ca_certificate
-        oidc_provider_arn: !terraform.state eks/main .oidc_provider_arn
-        oidc_provider_url: !terraform.state eks/main .oidc_provider_url
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
 
         namespace: "external-secrets"
         service_account_name: "external-secrets"
@@ -247,11 +247,11 @@ components:
           - external-secrets/defaults
       vars:
         enabled: true
-        cluster_name: !terraform.state eks/data .cluster_name
-        host: !terraform.state eks/data .cluster_endpoint
-        cluster_ca_certificate: !terraform.state eks/data .cluster_ca_certificate
-        oidc_provider_arn: !terraform.state eks/data .oidc_provider_arn
-        oidc_provider_url: !terraform.state eks/data .oidc_provider_url
+        cluster_name: !terraform.state eks/data .eks_cluster_id
+        host: !terraform.state eks/data .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
 
         namespace: "external-secrets"
         service_account_name: "external-secrets"
