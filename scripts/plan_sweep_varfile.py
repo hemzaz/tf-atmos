@@ -347,10 +347,13 @@ def synth_value(shape, names, keys=()):
     and the verdict must not depend on how many keys other references happen
     to read.
     """
+    # Values that pass the usual validations and keep features ON: 0 fails
+    # checks like elasticache's `var.port > 0`, and false switches a feature
+    # off so that its own checks never run.
     if shape == NUMBER:
-        return 0
+        return 443 if any(n.endswith('port') for n in names) else 1
     if shape == BOOL:
-        return False
+        return True
     if shape == SCALAR:
         for n in names:
             got = synth(n)
@@ -682,11 +685,16 @@ def self_test(components_dir, tmp):
         ('aws_x.y.certificate_authority', UNKNOWN), ('aws_x.y.identity', UNKNOWN),
         ('aws_x.y.data', UNKNOWN), ('aws_x.y.status', UNKNOWN), ('element_count(a)', UNKNOWN),
         ('{ p = 443, e = true, n = aws_x.y.port }', OBJ({'p': NUMBER, 'e': BOOL, 'n': NUMBER})),
+        ('kubernetes_service.s.spec[0].port', UNKNOWN), ('kubernetes_x.y.enabled', UNKNOWN),
+        ('data.aws_x.y.enabled', BOOL), ('aws_x.y[*].port', LIST(NUMBER)),
+        ('{ for k, s in kubernetes_service.all : k => s.spec[0].port }', MAP(UNKNOWN)),
         ('var.x', UNKNOWN),
     ]:
         check('shape of %s' % expr, shape_of(expr, Ctx(acm)), want)
-    check('number and bool leaves', synth_value(OBJ({'p': NUMBER, 'e': BOOL, 'id': SCALAR}), ['vpc_id']),
-          {'p': 0, 'e': False, 'id': 'vpc-0123456789abcdef0'})
+    check('number and bool leaves', synth_value(OBJ({'n': NUMBER, 'e': BOOL, 'id': SCALAR}), ['vpc_id']),
+          {'n': 1, 'e': True, 'id': 'vpc-0123456789abcdef0'})
+    check('a port is 443', (synth_value(NUMBER, ['db_port']), synth_value(OBJ({'port': NUMBER}), ['x'])),
+          (443, {'port': 443}))
     check('indented output block', [k for k, _ in blocks('  output "x" {\n  value = 1\n}\n', 'output')],
           ['x'])
 

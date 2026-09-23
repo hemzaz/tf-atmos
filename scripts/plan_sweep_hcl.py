@@ -295,17 +295,21 @@ STRING_FNS = {'format', 'join', 'jsonencode', 'tostring', 'lower', 'upper', 'rep
               'trimprefix', 'trimsuffix', 'trimspace', 'substr', 'base64encode', 'md5',
               'sha256', 'title'}
 NUMBER_FNS = {'tonumber', 'length', 'abs', 'max', 'min', 'floor', 'ceil'}
+# Number and bool attribute names hold only on aws_* resources: on a
+# kubernetes_service, `port` is a list BLOCK (spec[0].port), and calling it a
+# number would manufacture a type error.
 NUMBER_ATTRS = {'port'}
 BOOL_ATTRS = {'enabled'}
+AWS_RESOURCE = re.compile(r'^(?:data\.)?aws_')
 
 
-def attr_shape(attr, indexed=False):
+def attr_shape(attr, indexed=False, aws=False):
     # `data` is a string only as a nested block's attribute --
     # certificate_authority[0].data -- and something else anywhere else.
-    if attr in NUMBER_ATTRS:
-        return NUMBER
-    if attr in BOOL_ATTRS:
-        return BOOL
+    if attr in NUMBER_ATTRS or attr in BOOL_ATTRS:
+        if not aws:
+            return UNKNOWN
+        return NUMBER if attr in NUMBER_ATTRS else BOOL
     if attr in SCALAR_ATTRS or (attr == 'data' and indexed):
         return SCALAR
     return UNKNOWN
@@ -508,7 +512,7 @@ def ref_shape(e, ctx):
         resource = re.match(r'^(?:data\.)?[a-z][a-z0-9_]*\.' + IDENT + '$', base)
         if not resource or base.startswith(('var.', 'local.', 'module.', 'each.', 'count.')):
             return UNKNOWN
-        return LIST(attr_shape(attr) if attr else UNKNOWN)
+        return LIST(attr_shape(attr, aws=bool(AWS_RESOURCE.match(base))) if attr else UNKNOWN)
     m = re.match(r'^(' + IDENT + r')((?:\.' + IDENT + r'|' + INDEX + r')*)$', e)
     if m and m.group(1) in ctx.key_vars and not m.group(2):
         return SCALAR
@@ -537,5 +541,5 @@ def ref_shape(e, ctx):
         return UNKNOWN if out is None else shape_of(out, Ctx(mod, depth=ctx.depth + 1))
     m = RESOURCE_ATTR.match(e)
     if m and not e.startswith(('var.', 'local.', 'each.', 'count.', 'path.', 'terraform.', 'module.')):
-        return attr_shape(m.group(1), e.endswith('[0].' + m.group(1)))
+        return attr_shape(m.group(1), e.endswith('[0].' + m.group(1)), bool(AWS_RESOURCE.match(e)))
     return UNKNOWN
