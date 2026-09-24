@@ -16,7 +16,9 @@
 # yet. A dependency only declared in dependencies.components may share a layer
 # (Atmos applies a layer in dependency order). That is why iam follows backend
 # (iam/ci reads backend/main), connectivity follows networking, security-monitoring
-# follows security, lambda (compute) precedes apigateway (services), and
+# follows security (it reads guardduty, securityhub and cloudtrail state; awsconfig
+# shares the security layer with securityhub, which only lists it in
+# dependencies.components), lambda (compute) precedes apigateway (services), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
 # A layer whose root modules no stack uses yet (eks-addons, backup,
 # eks-backend-services, cost-optimization) plans nothing: "No components matched".
@@ -115,6 +117,7 @@ workflows:
         command: >-
           terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
+          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito"'
       - name: confirm_security
         type: confirm
@@ -128,7 +131,8 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "acm"
           or .metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "cognito"'
+          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
+          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
       - name: plan-security-monitoring
         type: atmos
         command: terraform plan --query '.metadata.component == "security-monitoring"'
@@ -347,6 +351,7 @@ workflows:
         command: >-
           terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
+          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito"'
       - name: confirm
         type: confirm
@@ -360,7 +365,8 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "acm"
           or .metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "cognito"'
+          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
+          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
 
   deploy-security-monitoring:
     description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector and Security Hub)"
