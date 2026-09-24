@@ -120,14 +120,46 @@ variable "cors_configuration" {
     max_age           = number
     allow_credentials = bool
   })
-  description = "CORS configuration for the API Gateway"
-  default = {
-    allow_origins     = ["*"]
-    allow_methods     = ["*"]
-    allow_headers     = ["*"]
-    expose_headers    = []
-    max_age           = 3600
-    allow_credentials = false
+  description = "CORS configuration for an HTTP API; null for none. REST APIs ignore it"
+  default     = null
+
+  # Browsers refuse a credentialed response whose Access-Control-Allow-Origin
+  # is "*", and API Gateway rejects the combination on HTTP APIs.
+  validation {
+    condition     = var.cors_configuration == null ? true : !(var.cors_configuration.allow_credentials && contains(var.cors_configuration.allow_origins, "*"))
+    error_message = "cors_configuration cannot set allow_credentials = true with \"*\" in allow_origins; list the origins explicitly."
+  }
+
+  validation {
+    condition     = var.cors_configuration == null ? true : (var.cors_configuration.max_age >= 0 && var.cors_configuration.max_age <= 86400)
+    error_message = "cors_configuration.max_age must be between 0 and 86400 seconds."
+  }
+}
+
+variable "vpc_link_subnet_ids" {
+  type        = list(string)
+  description = "Private subnets for an HTTP API VPC link; empty creates no VPC link. REST APIs ignore it"
+  default     = []
+
+  validation {
+    condition     = alltrue([for s in var.vpc_link_subnet_ids : can(regex("^subnet-[a-f0-9]+$", s))])
+    error_message = "vpc_link_subnet_ids must be subnet IDs (subnet-...)."
+  }
+}
+
+variable "vpc_link_security_group_ids" {
+  type        = list(string)
+  description = "Security groups for the HTTP API VPC link's network interfaces; required with vpc_link_subnet_ids"
+  default     = []
+
+  validation {
+    condition     = alltrue([for s in var.vpc_link_security_group_ids : can(regex("^sg-[a-f0-9]+$", s))])
+    error_message = "vpc_link_security_group_ids must be security group IDs (sg-...)."
+  }
+
+  validation {
+    condition     = length(var.vpc_link_subnet_ids) == 0 || length(var.vpc_link_security_group_ids) > 0
+    error_message = "vpc_link_security_group_ids is required when vpc_link_subnet_ids is set."
   }
 }
 
@@ -473,7 +505,7 @@ variable "cache_ttl_seconds" {
 # Throttling Configuration Variables
 variable "throttling_rate_limit" {
   type        = number
-  description = "The steady-state request rate limit (requests per second)"
+  description = "The steady-state request rate limit (requests per second): REST method settings and the HTTP stage's default route settings"
   default     = 10000
   validation {
     condition     = var.throttling_rate_limit > 0
@@ -483,7 +515,7 @@ variable "throttling_rate_limit" {
 
 variable "throttling_burst_limit" {
   type        = number
-  description = "The burst request rate limit (requests per second)"
+  description = "The burst request rate limit (requests per second): REST method settings and the HTTP stage's default route settings"
   default     = 5000
   validation {
     condition     = var.throttling_burst_limit > 0
