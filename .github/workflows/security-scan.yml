@@ -24,8 +24,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The workspace is owned by the runner's user and the container runs as
+      # root, so upload-sarif's internal `git rev-parse` (for the commit oid
+      # and ref) hits "dubious ownership" without this -- same cause as the
+      # plan-sweep job in terraform-ci.yml.
       - name: Scan
-        run: atmos workflow security-scan-report -f lint
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          atmos workflow security-scan-report -f lint
       - uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         if: always()
         with:

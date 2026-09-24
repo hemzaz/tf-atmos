@@ -11,15 +11,25 @@
 # The PR gates (lint, security-scan) only fail on findings that are not in the
 # committed baselines (.trivyignore.yaml, .checkov.baseline). Regenerate the
 # baselines deliberately, to burn findings down, never to make a PR pass.
+#
+# tflint and trivy publish GitHub release tags with a `v` prefix (v0.64.0,
+# v0.74.0) and sign each release with a GitHub Attestation tied to that exact
+# tag ref. The toolchain's cosign verification compares the pin here against
+# `refs/tags/<pin>`, so an unprefixed pin ("0.64.0") never matches the
+# certificate's workflow ref and install fails with "expected GitHub Workflow
+# Ref not found in certificate" (tflint) / "expected GithubWorkflowRef to be
+# ...got refs/tags/v0.74.0" (trivy). Keep the `v`. terraform, go-yamllint,
+# jq, aws-cli and checkov are verified differently (or their upstream tags
+# have no `v`) and are confirmed to install correctly unprefixed.
 workflows:
   lint:
     description: Lint Terraform code, YAML files and run a Terraform security scan
     dependencies:
       tools:
         terraform: "1.16.3"
-        tflint: "0.64.0"
+        tflint: "v0.64.0"
         wasilibs/go-yamllint: "1.38.0"
-        trivy: "0.74.0"
+        trivy: "v0.74.0"
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
@@ -113,7 +123,7 @@ workflows:
     description: Install tflint and the provider plugins declared in .tflint.hcl
     dependencies:
       tools:
-        tflint: "0.64.0"
+        tflint: "v0.64.0"
     steps:
       - name: tflint-plugins
         type: shell
@@ -123,7 +133,7 @@ workflows:
     description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings
     dependencies:
       tools:
-        trivy: "0.74.0"
+        trivy: "v0.74.0"
         checkov: "3.3.19"
     steps:
       - name: reports-dir
@@ -151,7 +161,7 @@ workflows:
     description: Report-only scan for the nightly workflow (SARIF in reports/); never fails on findings
     dependencies:
       tools:
-        trivy: "0.74.0"
+        trivy: "v0.74.0"
         checkov: "3.3.19"
     steps:
       - name: reports-dir
@@ -176,7 +186,7 @@ workflows:
     description: Regenerate the PR-gate baselines (.trivyignore.yaml, .checkov.baseline) from the current code
     dependencies:
       tools:
-        trivy: "0.74.0"
+        trivy: "v0.74.0"
         checkov: "3.3.19"
     steps:
       - name: reports-dir
