@@ -1,8 +1,10 @@
 # Security audit and account-level hardening.
 #   security-audit - Security Hub findings mapped to components (read-only)
-#   harden         - deploy the guardduty/main and securityhub/main components
-#                    (atmos terraform deploy, never aws CLI create calls, so
-#                    Terraform keeps sole ownership), report their status,
+#   harden         - plan the guardduty/main and securityhub/main components
+#                    and print the plans BEFORE the confirm prompt, then apply
+#                    exactly those planfiles (atmos terraform deploy
+#                    --from-plan, never aws CLI create calls, so Terraform
+#                    keeps sole ownership), report their status,
 #                    enable default EBS encryption and the S3 account
 #                    public-access block; report open SGs / VPCs without
 #                    flow logs (workflows/scripts/security/harden.sh)
@@ -22,7 +24,7 @@ workflows:
         command: aws compliance report --framework cis-aws
 
   harden:
-    description: Deploy guardduty/main and securityhub/main, then apply account/region hardening (EBS, S3)
+    description: Plan guardduty/main and securityhub/main, confirm, apply those plans, then apply account/region hardening (EBS, S3)
     dependencies:
       tools:
         aws/aws-cli: "2.36.49"
@@ -32,9 +34,18 @@ workflows:
         type: input
         prompt: Stack
         default: '{{ env "STACK" }}'
+      # Read-only: plan and print, so the prompt below confirms a plan the
+      # operator has seen.
+      - name: plan
+        type: shell
+        command: ./workflows/scripts/security/harden.sh
+        env:
+          STACK: "{{ .steps.stack.value }}"
+          HARDEN_PHASE: plan
+          AWS_SDK_LOAD_CONFIG: "1"
       - name: confirm
         type: confirm
-        prompt: Deploy guardduty/main + securityhub/main and apply hardening? (No = report only)
+        prompt: Apply the guardduty/main + securityhub/main plans above and the account hardening? (No = report only)
         default: false
       - name: harden
         type: shell
@@ -42,6 +53,7 @@ workflows:
         env:
           STACK: "{{ .steps.stack.value }}"
           AUTO_APPROVE: "{{ .steps.confirm.value }}"
+          HARDEN_PHASE: apply
           AWS_SDK_LOAD_CONFIG: "1"
 
   harden-iam:

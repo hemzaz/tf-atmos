@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Apply security hardening configurations
 # Extracted from the inline `harden` workflow; run via `atmos workflow harden -f security-hardening`.
+#
+# HARDEN_PHASE picks what runs:
+#   plan  - plan every owned component and print the plans, change nothing
+#           (the workflow runs this BEFORE its confirm prompt)
+#   apply - apply exactly the planfiles the plan phase saved (after confirm)
+#   all   - (default, standalone use) plan and print, then apply when
+#           AUTO_APPROVE=true
+set -euo pipefail
+
 # shellcheck source=../common/stack-context.sh
 source "$(dirname "$0")/../common/stack-context.sh"
 
@@ -20,11 +29,26 @@ echo -e "\n${WHITE}=== Security Hardening ===${NC}\n"
 
 AUTO_APPROVE="${AUTO_APPROVE:-false}"
 DRY_RUN="${DRY_RUN:-false}"
+HARDEN_PHASE="${HARDEN_PHASE:-all}"
+case "$HARDEN_PHASE" in
+  plan | apply | all) ;;
+  *)
+    echo "HARDEN_PHASE must be plan, apply or all (got: ${HARDEN_PHASE})" >&2
+    exit 1
+    ;;
+esac
+
+# Owned by these components, deployed in every stack. Creating the services
+# with the aws CLI instead would leave Terraform failing with "already exists"
+# on its next apply, so hardening deploys the components and never touches the
+# services directly.
+COMPONENTS=(guardduty/main securityhub/main)
 
 echo "Configuration:"
 echo "  Stack: ${TENANT}-${ACCOUNT}-${ENVIRONMENT}"
 echo "  Region: $REGION"
 echo "  Auto-Approve: $AUTO_APPROVE"
+echo "  Phase: $HARDEN_PHASE"
 echo
 
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -35,14 +59,25 @@ fi
 # =================================================================
 # GuardDuty and Security Hub
 # =================================================================
-# Owned by the guardduty/main and securityhub/main components, deployed in
-# every stack. Creating them here with the aws CLI instead would leave
-# Terraform failing with "already exists" on its next apply, so hardening
-# deploys the components and never touches the services directly.
-for component in guardduty/main securityhub/main; do
+# Plan first and print the plan (atmos saves the planfile), so what is
+# confirmed is what is applied: the apply step uses --from-plan, and Terraform
+# rejects a planfile that went stale in between.
+if [[ "$HARDEN_PHASE" != "apply" ]]; then
+  for component in "${COMPONENTS[@]}"; do
+    log_info "Planning ${component} in ${STACK}..."
+    atmos terraform plan "$component" -s "$STACK"
+  done
+fi
+
+if [[ "$HARDEN_PHASE" == "plan" ]]; then
+  log_info "Plans above are saved. Confirm the workflow prompt to apply them."
+  exit 0
+fi
+
+for component in "${COMPONENTS[@]}"; do
   if [[ "$AUTO_APPROVE" == "true" ]]; then
-    log_info "Deploying ${component} to ${STACK}..."
-    atmos terraform deploy "$component" -s "$STACK"
+    log_info "Applying the saved ${component} plan to ${STACK}..."
+    atmos terraform deploy "$component" -s "$STACK" --from-plan
     log_success "${component} deployed"
   else
     log_info "${component} not deployed. Confirm the workflow prompt, or run: atmos terraform deploy ${component} -s ${STACK}"
@@ -145,7 +180,7 @@ fi
 # Check for VPCs without flow logs
 log_info "Checking VPC flow logs..."
 
-VPCS=$(aws ec2 describe-vpcs --region "$REGION" --query 'Vpcs[*].VpcId' --output text 2>/dev/null | tr '\t' '\n')
+VPCS=$(aws ec2 describe-vpcs --region "$REGION" --query 'Vpcs[*].VpcId' --output text 2>/dev/null | tr '\t' '\n' || echo "")
 
 for vpc in $VPCS; do
   HAS_FLOW_LOG=$(aws ec2 describe-flow-logs --region "$REGION" \

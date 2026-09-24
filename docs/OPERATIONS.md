@@ -182,7 +182,8 @@ atmos workflow report -f compliance-check -s <stack>             # writes compli
 
 `harden`/`harden-iam` ask before changing anything; declining runs report-only. GuardDuty and
 Security Hub are owned by the `guardduty/main` and `securityhub/main` components in every stack;
-`harden` deploys them with `atmos terraform deploy` (never with aws CLI create calls, which would
+`harden` plans them and prints the plans before its confirm prompt, then applies exactly those
+planfiles with `atmos terraform deploy --from-plan` (never with aws CLI create calls, which would
 collide with Terraform) and reports their status. `security-monitoring/main` routes their findings
 to SNS and reads their IDs with `!terraform.state`.
 

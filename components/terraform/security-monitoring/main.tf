@@ -4,10 +4,14 @@ locals {
   # The detector and the hub are owned by the guardduty and securityhub
   # components (one component per service, the Cloud Posse model). This
   # component only routes their findings, so a null ID turns the matching
-  # EventBridge rule and alarm off. Both are plain variables, so the counts
-  # below are known at plan time.
+  # EventBridge rule off -- unless require_*_route is set, in which case the
+  # topic's precondition fails the plan instead. Both are plain variables, so
+  # the counts below are known at plan time.
   guardduty_enabled    = var.guardduty_detector_id != null
   security_hub_enabled = var.securityhub_account_arn != null
+
+  account_id = data.aws_caller_identity.current.account_id
+  partition  = data.aws_partition.current.partition
 }
 
 # AWS Inspector V2
@@ -25,11 +29,28 @@ resource "aws_sns_topic" "security_alerts" {
   kms_master_key_id = var.kms_key_id
 
   tags = { Name = "${local.name_prefix}-alerts" }
+
+  # A null ID silently turns a finding route off. On a first deploy that means
+  # guardduty/securityhub had no state yet; failing here makes that loud.
+  lifecycle {
+    precondition {
+      condition     = !var.require_guardduty_route || local.guardduty_enabled
+      error_message = "require_guardduty_route is set but guardduty_detector_id is null. Apply guardduty/main first (its detector_id output), or set require_guardduty_route = false to run without GuardDuty alerting."
+    }
+
+    precondition {
+      condition     = !var.require_securityhub_route || local.security_hub_enabled
+      error_message = "require_securityhub_route is set but securityhub_account_arn is null. Apply securityhub/main first (its account_arn output), or set require_securityhub_route = false to run without Security Hub alerting."
+    }
+  }
 }
 
 resource "aws_sns_topic_policy" "security_alerts" {
   arn = aws_sns_topic.security_alerts.arn
 
+  # Same-account publishers only: aws:SourceAccount stops another account's
+  # rule or alarm from using this topic (confused deputy), and aws:SourceArn
+  # narrows each service to its own resource type in this region.
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -41,6 +62,10 @@ resource "aws_sns_topic_policy" "security_alerts" {
         }
         Action   = "SNS:Publish"
         Resource = aws_sns_topic.security_alerts.arn
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:events:${var.region}:${local.account_id}:rule/*" }
+        }
       },
       {
         Sid    = "AllowCloudWatchToPublish"
@@ -50,6 +75,10 @@ resource "aws_sns_topic_policy" "security_alerts" {
         }
         Action   = "SNS:Publish"
         Resource = aws_sns_topic.security_alerts.arn
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:cloudwatch:${var.region}:${local.account_id}:alarm:*" }
+        }
       }
     ]
   })
@@ -96,8 +125,11 @@ resource "aws_cloudwatch_event_rule" "securityhub_findings" {
   count = local.security_hub_enabled ? 1 : 0
 
   name        = "${local.name_prefix}-securityhub-findings"
-  description = "Capture Security Hub HIGH and CRITICAL findings"
+  description = "Capture new, active, failed Security Hub HIGH and CRITICAL findings"
 
+  # Security Hub re-imports a finding on every update. RecordState ACTIVE drops
+  # archived findings and Workflow.Status NEW drops those already triaged
+  # (NOTIFIED, SUPPRESSED, RESOLVED), so an alert fires once per new finding.
   event_pattern = jsonencode({
     source      = ["aws.securityhub"]
     detail-type = ["Security Hub Findings - Imported"]
@@ -108,6 +140,10 @@ resource "aws_cloudwatch_event_rule" "securityhub_findings" {
         }
         Compliance = {
           Status = ["FAILED"]
+        }
+        RecordState = ["ACTIVE"]
+        Workflow = {
+          Status = ["NEW"]
         }
       }
     }
@@ -258,23 +294,6 @@ resource "aws_cloudwatch_log_group" "alert_enrichment" {
   kms_key_id        = var.kms_key_id
 }
 
-# CloudWatch alarms for security events
-resource "aws_cloudwatch_metric_alarm" "guardduty_high_findings" {
-  count = local.guardduty_enabled ? 1 : 0
-
-  alarm_name          = "${local.name_prefix}-guardduty-high-findings"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "1"
-  metric_name         = "HighSeverityFindings"
-  namespace           = "AWS/GuardDuty"
-  period              = "300"
-  statistic           = "Sum"
-  threshold           = var.guardduty_finding_threshold
-  alarm_description   = "GuardDuty high severity findings detected"
-  alarm_actions       = [aws_sns_topic.security_alerts.arn]
-  treat_missing_data  = "notBreaching"
-}
-
 # Root account usage alarm
 resource "aws_cloudwatch_metric_alarm" "root_account_usage" {
   alarm_name          = "${local.name_prefix}-root-account-usage"
@@ -337,3 +356,5 @@ resource "aws_cloudwatch_metric_alarm" "security_group_changes" {
 
 # Data source for current AWS account
 data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}

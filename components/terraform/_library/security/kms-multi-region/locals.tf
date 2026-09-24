@@ -157,8 +157,10 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
-  # EventBridge event buses and archives, limited to this account and region
-  # (aws:SourceAccount / aws:SourceArn guard against the confused deputy).
+  # EventBridge event buses and archives in this account and region. KMS calls
+  # for a bus or an archive carry the encryption context
+  # aws:events:event-bus:arn, which is always present; aws:SourceArn is not
+  # sent for archive operations, so the crypto actions are scoped by context.
   dynamic "statement" {
     for_each = var.allow_eventbridge ? [1] : []
 
@@ -168,8 +170,56 @@ data "aws_iam_policy_document" "default" {
         "kms:Decrypt",
         "kms:GenerateDataKey",
         "kms:ReEncrypt*",
-        "kms:DescribeKey",
       ]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["events.amazonaws.com"]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:events:event-bus:arn"
+        values   = ["arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:event-bus/*"]
+      }
+    }
+  }
+
+  # DescribeKey carries no encryption context, so it gets its own statement,
+  # limited to this account (confused-deputy guard).
+  dynamic "statement" {
+    for_each = var.allow_eventbridge ? [1] : []
+
+    content {
+      sid       = "AllowEventBridgeDescribeKey"
+      actions   = ["kms:DescribeKey"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["events.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+    }
+  }
+
+  # EventBridge rules publishing to an SNS topic encrypted with this key (for
+  # example security-monitoring's alert topic). The data key is generated for
+  # the publisher, and SNS binds it to the topic with the encryption context
+  # aws:sns:topicArn, so the statement is limited to this account's topics in
+  # this region and to calls made for this account.
+  dynamic "statement" {
+    for_each = var.allow_eventbridge ? [1] : []
+
+    content {
+      sid       = "AllowEventBridgeSNSTopics"
+      actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
       resources = ["*"]
 
       principals {
@@ -185,11 +235,37 @@ data "aws_iam_policy_document" "default" {
 
       condition {
         test     = "ArnLike"
-        variable = "aws:SourceArn"
-        values = [
-          "arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:event-bus/*",
-          "arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:archive/*",
-        ]
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = ["arn:${data.aws_partition.current.partition}:sns:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*"]
+      }
+    }
+  }
+
+  # CloudWatch alarms publishing to an SNS topic encrypted with this key, on
+  # the same terms as EventBridge rules above.
+  dynamic "statement" {
+    for_each = var.allow_cloudwatch_alarms ? [1] : []
+
+    content {
+      sid       = "AllowCloudWatchAlarmsSNSTopics"
+      actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["cloudwatch.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = ["arn:${data.aws_partition.current.partition}:sns:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*"]
       }
     }
   }

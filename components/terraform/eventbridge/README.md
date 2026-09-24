@@ -33,7 +33,8 @@ instances inherit it and set `name` and `cloudwatch_event_rule_pattern`.
   `events.amazonaws.com`. With this repo's kms component that means setting
   `allow_cloudwatch_logs = true` and `allow_eventbridge = true` on the key
   instance (both scoped: logs by `kms:EncryptionContext:aws:logs:arn`, events
-  by `aws:SourceAccount`/`aws:SourceArn`) — not the library's unconditioned
+  by `kms:EncryptionContext:aws:events:event-bus:arn`, DescribeKey by
+  `aws:SourceAccount`) — not the library's unconditioned
   `key_service_users`. The root-only default policy is not enough, and apply
   fails on the log group without it.
 - EventBridge writes to the log group through a CloudWatch Logs resource

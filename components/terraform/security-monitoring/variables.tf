@@ -32,10 +32,10 @@ variable "guardduty_detector_id" {
   }
 }
 
-variable "guardduty_finding_threshold" {
-  type        = number
-  description = "Threshold for GuardDuty high severity findings alarm"
-  default     = 0
+variable "require_guardduty_route" {
+  type        = bool
+  description = "Fail the plan when guardduty_detector_id is null, instead of silently planning without the GuardDuty finding route (e.g. guardduty/main not applied yet)"
+  default     = true
 }
 
 variable "securityhub_account_arn" {
@@ -47,6 +47,12 @@ variable "securityhub_account_arn" {
     condition     = var.securityhub_account_arn == null || can(regex("^arn:aws[a-z-]*:securityhub:[a-z0-9-]+:[0-9]{12}:hub/default$", var.securityhub_account_arn))
     error_message = "securityhub_account_arn must be a Security Hub hub ARN (arn:aws:securityhub:<region>:<account>:hub/default), or null."
   }
+}
+
+variable "require_securityhub_route" {
+  type        = bool
+  description = "Fail the plan when securityhub_account_arn is null, instead of silently planning without the Security Hub finding route (e.g. securityhub/main not applied yet)"
+  default     = true
 }
 
 # Inspector Variables
@@ -96,8 +102,13 @@ variable "pagerduty_integration_key" {
 # Encryption Variables
 variable "kms_key_id" {
   type        = string
-  description = "KMS key ID for encrypting SNS topics and logs"
+  description = "KMS key ARN (kms/main's key_arn) encrypting the alert SNS topic and the enrichment log group. Its key policy must let events.amazonaws.com and cloudwatch.amazonaws.com use it (kms allow_eventbridge and allow_cloudwatch_alarms). Null leaves the topic unencrypted"
   default     = null
+
+  validation {
+    condition     = var.kms_key_id == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.kms_key_id))
+    error_message = "kms_key_id must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>), or null."
+  }
 }
 
 variable "log_retention_days" {

@@ -75,6 +75,9 @@ SYNTH = [
     # two AZs, and a one-element list would fail those checks on our account.
     (r'subnet_ids$',                  ['subnet-0123456789abcdef0', 'subnet-0123456789abcdef1']),
     (r'(kms_key_id|kms_key_arn)$',    'arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012'),
+    # kms/main's own output name, so `!terraform.state kms/main .key_arn` is
+    # valued by the output it reads rather than by the consuming variable.
+    (r'^key_arn$',                    'arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012'),
     (r'^zone_id$',                    'Z1234567890ABCDEFGHIJ'),
     (r'^certificate_arn$',            'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012'),
     (r'^certificate_arns$',           ['arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
