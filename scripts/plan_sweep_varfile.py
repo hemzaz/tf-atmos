@@ -118,6 +118,15 @@ SYNTH = [
     # security-monitoring consumes guardduty's detector and securityhub's hub.
     (r'^detector_id$',                '12abc34d567e8fa901bc2d34e56789f0'),
     (r'^account_arn$',                'arn:aws:securityhub:eu-west-2:123456789012:hub/default'),
+    # Output names read by stacks/catalog/templates/microservices-platform.yaml,
+    # each shaped like the value the component really returns.
+    (r'^table_name$',                 'example-table'),
+    (r'^http_api_id$',                'a1b2c3d4e5'),
+    (r'^event_bus_name$',             'example-bus'),
+    (r'^(cloudwatch_)?log_group_name$', '/aws/example/log-group'),
+    (r'^default_security_group_id$',  'sg-0123456789abcdef0'),
+    (r'^eks_cluster_managed_security_group_id$', 'sg-0123456789abcdef1'),
+    (r'^member_clusters$',            ['example-cache-0001-001', 'example-cache-0002-001']),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry
@@ -872,6 +881,9 @@ def self_test(components_dir, tmp):
         ('aws_x.y.data', UNKNOWN), ('aws_x.y.status', UNKNOWN), ('element_count(a)', UNKNOWN),
         ('{ p = 443, e = true, n = aws_x.y.port }', OBJ({'p': NUMBER, 'e': BOOL, 'n': NUMBER})),
         ('kubernetes_service.s.spec[0].port', UNKNOWN), ('kubernetes_x.y.enabled', UNKNOWN),
+        ('sort(aws_x.y[0].member_clusters)', LIST(SCALAR)),
+        ('kubernetes_x.y.member_clusters', UNKNOWN),
+        ('{ for k, v in random_password.this : k => v.result }', MAP(SCALAR)),
         ('data.aws_x.y.enabled', BOOL), ('aws_x.y[*].port', LIST(NUMBER)),
         ('{ for k, s in kubernetes_service.all : k => s.spec[0].port }', MAP(UNKNOWN)),
         ('var.x', UNKNOWN),

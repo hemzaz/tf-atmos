@@ -284,6 +284,14 @@ SCALAR_ATTRS = {
     'instance_id', 'function_url', 'queue_url', 'table_name', 'stream_arn', 'role_arn',
     # aws_eks_cluster identity[0].oidc[0].issuer: the OIDC issuer URL.
     'issuer',
+    # random_password / random_string .result. data.external's `result` is a
+    # map, but no component reads data.external.
+    'result',
+}
+# Attributes that are a list of strings on the AWS resources that have them.
+LIST_SCALAR_ATTRS = {
+    # aws_elasticache_replication_group: the node (cache cluster) IDs.
+    'member_clusters',
 }
 FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
 IDENT = r'[A-Za-z_][A-Za-z0-9_-]*'
@@ -320,6 +328,8 @@ def attr_shape(attr, indexed=False, aws=False):
         return NUMBER if attr in NUMBER_ATTRS else BOOL
     if attr in SCALAR_ATTRS or (attr == 'data' and indexed):
         return SCALAR
+    if attr in LIST_SCALAR_ATTRS and aws:
+        return LIST(SCALAR)
     return UNKNOWN
 
 
