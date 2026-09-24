@@ -35,8 +35,12 @@ locals {
   # Logging configuration 
   logs_enabled = var.enable_logging
 
-  # CORS configuration
-  enable_cors = var.cors_configuration != null && lookup(var.cors_configuration, "enabled", false)
+  # CORS applies to HTTP APIs (REST APIs answer OPTIONS through their methods).
+  # This used to look up an "enabled" key the object type does not have, so
+  # it was always false and no HTTP API ever got the CORS a stack set.
+  enable_cors = local.create_http_api && var.cors_configuration != null
+
+  create_vpc_link = local.create_http_api && length(var.vpc_link_subnet_ids) > 0
 
   # Resource path -> API Gateway resource id. Stacks declare methods and integrations
   # by path because they cannot know these ids before apply. "/" is the API root.
@@ -145,6 +149,12 @@ resource "aws_apigatewayv2_stage" "http_stage" {
   name        = var.stage_name
   auto_deploy = var.auto_deploy
 
+  # Stage-wide throttling. throttling_* used to reach only REST stages.
+  default_route_settings {
+    throttling_burst_limit = var.throttling_burst_limit
+    throttling_rate_limit  = var.throttling_rate_limit
+  }
+
   dynamic "access_log_settings" {
     for_each = local.logs_enabled ? [1] : []
     content {
@@ -152,6 +162,19 @@ resource "aws_apigatewayv2_stage" "http_stage" {
       format          = var.log_format
     }
   }
+
+  tags = local.tags
+}
+
+# VPC link: lets HTTP API routes reach private load balancers and services
+# in the VPC. Routes and integrations that use it are defined outside this
+# component (the target listener usually is not known to Terraform).
+resource "aws_apigatewayv2_vpc_link" "http" {
+  count = local.create_vpc_link ? 1 : 0
+
+  name               = "${local.name_prefix}-vpc-link"
+  subnet_ids         = var.vpc_link_subnet_ids
+  security_group_ids = var.vpc_link_security_group_ids
 
   tags = local.tags
 }

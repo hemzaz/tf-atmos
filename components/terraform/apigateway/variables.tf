@@ -120,14 +120,34 @@ variable "cors_configuration" {
     max_age           = number
     allow_credentials = bool
   })
-  description = "CORS configuration for the API Gateway"
-  default = {
-    allow_origins     = ["*"]
-    allow_methods     = ["*"]
-    allow_headers     = ["*"]
-    expose_headers    = []
-    max_age           = 3600
-    allow_credentials = false
+  description = "CORS configuration for an HTTP API; null for none. REST APIs ignore it"
+  default     = null
+}
+
+variable "vpc_link_subnet_ids" {
+  type        = list(string)
+  description = "Private subnets for an HTTP API VPC link; empty creates no VPC link. REST APIs ignore it"
+  default     = []
+
+  validation {
+    condition     = alltrue([for s in var.vpc_link_subnet_ids : can(regex("^subnet-[a-f0-9]+$", s))])
+    error_message = "vpc_link_subnet_ids must be subnet IDs (subnet-...)."
+  }
+}
+
+variable "vpc_link_security_group_ids" {
+  type        = list(string)
+  description = "Security groups for the HTTP API VPC link's network interfaces; required with vpc_link_subnet_ids"
+  default     = []
+
+  validation {
+    condition     = alltrue([for s in var.vpc_link_security_group_ids : can(regex("^sg-[a-f0-9]+$", s))])
+    error_message = "vpc_link_security_group_ids must be security group IDs (sg-...)."
+  }
+
+  validation {
+    condition     = length(var.vpc_link_subnet_ids) == 0 || length(var.vpc_link_security_group_ids) > 0
+    error_message = "vpc_link_security_group_ids is required when vpc_link_subnet_ids is set."
   }
 }
 

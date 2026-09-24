@@ -58,6 +58,11 @@ output "http_api_stage_arn" {
   value       = local.create_http_api ? aws_apigatewayv2_stage.http_stage[0].arn : null
 }
 
+output "http_api_vpc_link_id" {
+  description = "ID of the HTTP API VPC link (null unless vpc_link_subnet_ids is set)"
+  value       = local.create_vpc_link ? aws_apigatewayv2_vpc_link.http[0].id : null
+}
+
 output "rest_api_domain_name" {
   description = "Custom domain name for the REST API"
   value       = local.create_rest_api && local.domain_enabled ? aws_api_gateway_domain_name.rest_domain[0].domain_name : null
