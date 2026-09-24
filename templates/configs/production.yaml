@@ -47,7 +47,7 @@ settings:
     log_retention_days: 90
     backup_retention_days: 30
     # EKS: private endpoint only
-    eks_kubernetes_version: "1.33"
+    eks_kubernetes_version: "1.36"
     eks_public_access: false
     # RDS instance size
     rds_instance_class: "db.r6g.xlarge"
@@ -66,7 +66,7 @@ components:
 
     eks/defaults:
       vars:
-        default_cluster_log_retention_days: 90
+        cluster_log_retention_period: 90
         enable_cluster_protection: true
 
     # Maximum recovery window for deleted secrets

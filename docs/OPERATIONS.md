@@ -52,8 +52,10 @@ to be cosmetic.
 
 Put a `moved` block in the component, next to the resource, with a one-line
 reason. It is code: it is reviewed in the PR, it applies to every stack, and CI
-plans it like anything else. `components/terraform/eks/main.tf` is the
-precedent — five renames to snake_case for `terraform_naming_convention`:
+plans it like anything else. The eks component used it for five renames to
+snake_case for `terraform_naming_convention` (those blocks went away with the
+one-cluster-per-instance restructure, which changed every eks address while
+nothing had been applied, so there was no state to move):
 
 ```hcl
 # Renamed to snake_case (tflint terraform_naming_convention); keeps existing state.
