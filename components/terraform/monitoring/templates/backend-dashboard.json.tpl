@@ -29,10 +29,10 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{~ for lambda_function in lambda_functions ~}
-          ["AWS/Lambda", "Duration", "FunctionName", "${lambda_function}"],
+          %{~ for i, lambda_function in lambda_functions ~}
+          ${i > 0 ? "," : ""}["AWS/Lambda", "Duration", "FunctionName", "${lambda_function}"],
           [".", "Errors", ".", "."],
-          [".", "Throttles", ".", "."],
+          [".", "Throttles", ".", "."]
           %{~ endfor ~}
         ],
         "view": "timeSeries",
@@ -51,11 +51,11 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{~ for rds_instance in rds_instances ~}
-          ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${rds_instance}"],
+          %{~ for i, rds_instance in rds_instances ~}
+          ${i > 0 ? "," : ""}["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${rds_instance}"],
           [".", "DatabaseConnections", ".", "."],
           [".", "ReadLatency", ".", "."],
-          [".", "WriteLatency", ".", "."],
+          [".", "WriteLatency", ".", "."]
           %{~ endfor ~}
         ],
         "view": "timeSeries",
@@ -95,12 +95,12 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{~ for load_balancer in load_balancers ~}
-          ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${load_balancer}"],
+          %{~ for i, load_balancer in load_balancers ~}
+          ${i > 0 ? "," : ""}["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${load_balancer}"],
           [".", "RequestCount", ".", "."],
           [".", "HTTPCode_Target_2XX_Count", ".", "."],
           [".", "HTTPCode_Target_4XX_Count", ".", "."],
-          [".", "HTTPCode_Target_5XX_Count", ".", "."],
+          [".", "HTTPCode_Target_5XX_Count", ".", "."]
           %{~ endfor ~}
         ],
         "view": "timeSeries",
@@ -119,11 +119,11 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{~ for cache_cluster in elasticache_clusters ~}
-          ["AWS/ElastiCache", "CPUUtilization", "CacheClusterId", "${cache_cluster}"],
+          %{~ for i, cache_cluster in elasticache_clusters ~}
+          ${i > 0 ? "," : ""}["AWS/ElastiCache", "CPUUtilization", "CacheClusterId", "${cache_cluster}"],
           [".", "FreeableMemory", ".", "."],
           [".", "CurrConnections", ".", "."],
-          [".", "Evictions", ".", "."],
+          [".", "Evictions", ".", "."]
           %{~ endfor ~}
         ],
         "view": "timeSeries",

@@ -35,8 +35,8 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{ for rds in rds_instances ~}
-          [ "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${rds}" ],
+          %{ for i, rds in rds_instances ~}
+          ${i > 0 ? "," : ""}[ "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${rds}" ]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -54,8 +54,8 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{ for ecs in ecs_clusters ~}
-          [ "AWS/ECS", "CPUUtilization", "ClusterName", "${ecs}" ],
+          %{ for i, ecs in ecs_clusters ~}
+          ${i > 0 ? "," : ""}[ "AWS/ECS", "CPUUtilization", "ClusterName", "${ecs}" ]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -73,8 +73,8 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{ for lambda in lambda_functions ~}
-          [ "AWS/Lambda", "Invocations", "FunctionName", "${lambda}" ],
+          %{ for i, lambda in lambda_functions ~}
+          ${i > 0 ? "," : ""}[ "AWS/Lambda", "Invocations", "FunctionName", "${lambda}" ]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -92,8 +92,8 @@
       "height": 6,
       "properties": {
         "metrics": [
-          %{ for lb in load_balancers ~}
-          [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${lb}" ],
+          %{ for i, lb in load_balancers ~}
+          ${i > 0 ? "," : ""}[ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${lb}" ]
           %{ endfor ~}
         ],
         "view": "timeSeries",

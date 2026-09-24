@@ -57,6 +57,11 @@ Tests: `tests/metrics.tftest.hcl`, run against a mock provider with
 - `certificate_arns`/`certificate_domains` come from acm outputs via a
   `// {}` fallback, so this still plans cleanly with empty maps if acm has
   no certs yet.
+- The templated dashboards (`templates/*.json.tpl`) used to leave a trailing
+  comma after the last row of every non-empty list, so listing any RDS
+  instance, Lambda, load balancer, ECS or cache cluster failed the plan with
+  "dashboard_body contains an invalid JSON". Rows are now comma-separated;
+  `tests/metrics.tftest.hcl` renders every dashboard with several of each.
 - `enable_tracing` creates an X-Ray sampling rule `<Environment>-backend-services`
   (10% fixed rate), cut to X-Ray's 32-character limit. It used to be
   `<Environment>-monitoring-backend-services`, over the limit in every stack.

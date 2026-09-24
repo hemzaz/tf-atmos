@@ -41,9 +41,9 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for func in lambda_functions ~}
-          ["AWS/Lambda", "Duration", {"stat": "Average", "label": "${func} Avg"}, {"FunctionName": "${func}"}],
-          ["...", {"stat": "p99", "label": "${func} P99"}],
+          %{ for i, func in lambda_functions ~}
+          ${i > 0 ? "," : ""}["AWS/Lambda", "Duration", {"stat": "Average", "label": "${func} Avg"}, {"FunctionName": "${func}"}],
+          ["...", {"stat": "p99", "label": "${func} P99"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -63,8 +63,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for func in lambda_functions ~}
-          ["AWS/Lambda", "Errors", {"stat": "Sum", "label": "${func}"}],
+          %{ for i, func in lambda_functions ~}
+          ${i > 0 ? "," : ""}["AWS/Lambda", "Errors", {"stat": "Sum", "label": "${func}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -78,8 +78,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for func in lambda_functions ~}
-          ["AWS/Lambda", "ConcurrentExecutions", {"stat": "Maximum", "label": "${func}"}],
+          %{ for i, func in lambda_functions ~}
+          ${i > 0 ? "," : ""}["AWS/Lambda", "ConcurrentExecutions", {"stat": "Maximum", "label": "${func}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -93,9 +93,9 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for instance in rds_instances ~}
-          ["AWS/RDS", "ReadLatency", {"stat": "Average", "label": "${instance} Read"}],
-          [".", "WriteLatency", {"stat": "Average", "label": "${instance} Write"}],
+          %{ for i, instance in rds_instances ~}
+          ${i > 0 ? "," : ""}["AWS/RDS", "ReadLatency", {"stat": "Average", "label": "${instance} Read"}],
+          [".", "WriteLatency", {"stat": "Average", "label": "${instance} Write"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -115,8 +115,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for instance in rds_instances ~}
-          ["AWS/RDS", "DatabaseConnections", {"stat": "Average", "label": "${instance}"}],
+          %{ for i, instance in rds_instances ~}
+          ${i > 0 ? "," : ""}["AWS/RDS", "DatabaseConnections", {"stat": "Average", "label": "${instance}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -130,8 +130,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for cache in elasticache_clusters ~}
-          ["AWS/ElastiCache", "CacheHitRate", {"stat": "Average", "label": "${cache}"}],
+          %{ for i, cache in elasticache_clusters ~}
+          ${i > 0 ? "," : ""}["AWS/ElastiCache", "CacheHitRate", {"stat": "Average", "label": "${cache}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -151,10 +151,10 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for lb in load_balancers ~}
-          ["AWS/ApplicationELB", "HTTPCode_Target_2XX_Count", {"stat": "Sum", "label": "${lb} 2XX"}],
+          %{ for i, lb in load_balancers ~}
+          ${i > 0 ? "," : ""}["AWS/ApplicationELB", "HTTPCode_Target_2XX_Count", {"stat": "Sum", "label": "${lb} 2XX"}],
           [".", "HTTPCode_Target_4XX_Count", {"stat": "Sum", "label": "${lb} 4XX"}],
-          [".", "HTTPCode_Target_5XX_Count", {"stat": "Sum", "label": "${lb} 5XX"}],
+          [".", "HTTPCode_Target_5XX_Count", {"stat": "Sum", "label": "${lb} 5XX"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -168,8 +168,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for lb in load_balancers ~}
-          ["AWS/ApplicationELB", "ActiveConnectionCount", {"stat": "Sum", "label": "${lb}"}],
+          %{ for i, lb in load_balancers ~}
+          ${i > 0 ? "," : ""}["AWS/ApplicationELB", "ActiveConnectionCount", {"stat": "Sum", "label": "${lb}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -183,10 +183,10 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for lb in load_balancers ~}
-          ["AWS/ApplicationELB", "TargetResponseTime", {"stat": "p50", "label": "${lb} P50"}],
+          %{ for i, lb in load_balancers ~}
+          ${i > 0 ? "," : ""}["AWS/ApplicationELB", "TargetResponseTime", {"stat": "p50", "label": "${lb} P50"}],
           ["...", {"stat": "p95", "label": "${lb} P95"}],
-          ["...", {"stat": "p99", "label": "${lb} P99"}],
+          ["...", {"stat": "p99", "label": "${lb} P99"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",

@@ -166,6 +166,47 @@ run "xray_rule_name_fits_the_32_character_limit" {
   }
 }
 
+run "dashboards_render_valid_json_with_several_resources" {
+  command = plan
+
+  # The templated dashboards left a trailing comma after the last row of every
+  # non-empty list, so any stack listing a cache node, RDS instance, Lambda or
+  # load balancer failed at plan with "dashboard_body contains an invalid JSON".
+  variables {
+    enable_backend_monitoring       = true
+    create_dashboard                = true
+    create_infrastructure_dashboard = true
+    create_application_dashboard    = true
+    create_performance_dashboard    = true
+    create_security_dashboard       = true
+    create_cost_dashboard           = true
+    eks_cluster_name                = "test-cluster"
+    elasticache_clusters            = ["cache-0001-001", "cache-0002-001"]
+    rds_instances                   = ["db-1", "db-2"]
+    lambda_functions                = ["fn-1", "fn-2"]
+    load_balancers                  = ["app/lb-1/0123456789abcdef"]
+    ecs_clusters                    = ["ecs-1", "ecs-2"]
+  }
+
+  assert {
+    condition     = length(jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets[5].properties.metrics) == 8
+    error_message = "The backend dashboard's ElastiCache widget has four rows per node, as valid JSON."
+  }
+
+  assert {
+    condition     = length(jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets) > 0
+    error_message = "The infrastructure overview dashboard body is valid JSON."
+  }
+
+  assert {
+    condition = alltrue([for d in concat(
+      aws_cloudwatch_dashboard.infrastructure, aws_cloudwatch_dashboard.application,
+      aws_cloudwatch_dashboard.performance, aws_cloudwatch_dashboard.security, aws_cloudwatch_dashboard.cost,
+    ) : can(jsondecode(d.dashboard_body))])
+    error_message = "Every templated dashboard body is valid JSON with several resources listed."
+  }
+}
+
 run "rejects_both_statistics" {
   command = plan
 
