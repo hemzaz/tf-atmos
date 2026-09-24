@@ -36,10 +36,9 @@
 #    deep-merge over that stack's own alias_name/description. CloudWatch Logs
 #    (the EventBridge and API Gateway log groups) and EventBridge (the bus and
 #    archive) use the key as service principals, so the stack's kms/main must
-#    list them:
-#      key_service_users:
-#        - events.amazonaws.com
-#        - logs.<region>.amazonaws.com
+#    keep the two scoped grants that catalog/kms/defaults turns on:
+#      allow_cloudwatch_logs: true
+#      allow_eventbridge: true
 # 2. settings.microservices, read by eks-addons and apigateway:
 #      settings:
 #        microservices:
@@ -425,11 +424,16 @@ components:
         inherits:
           - eventbridge/defaults
       vars:
-        # The bus is "<Environment>-microservices".
+        # The bus and its archive are "<Environment>-microservices". AWS caps
+        # archive names at 48 characters and the component checks it at plan,
+        # so this leaves Environment up to 34 characters.
         name: microservices
         create_event_bus: true
         archive_enabled: true
         archive_retention_days: 30
+        # event_bus_dlq_arn stays unset: AWS recommends a dead-letter queue on
+        # a CMK-encrypted bus, but this repo has no SQS queue component yet.
+        # Set it to that queue's ARN once one exists.
         # Catch-all for auditing
         cloudwatch_event_rule_description: "Archive all microservices events for auditing"
         cloudwatch_event_rule_pattern:
