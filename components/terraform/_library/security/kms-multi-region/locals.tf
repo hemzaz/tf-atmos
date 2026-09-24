@@ -237,6 +237,40 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # EventBridge rules delivering to an SQS queue encrypted with this key (the
+  # sqs component), which the bus/archive and SNS statements above do not
+  # cover: SQS sends no bus or topic encryption context. Limited to this
+  # account's rules in this region. The SQS/EventBridge docs place
+  # aws:SourceAccount and aws:SourceArn in this key policy; confirm they are
+  # sent on the first real apply (delivery fails closed, to the rule's DLQ or
+  # FailedInvocations, if not).
+  dynamic "statement" {
+    for_each = var.allow_eventbridge ? [1] : []
+
+    content {
+      sid       = "AllowEventBridgeSQSQueues"
+      actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["events.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:rule/*"]
+      }
+    }
+  }
+
   # CloudWatch alarms publishing to an SNS topic encrypted with this key:
   # scoped to this account's topics by the same encryption context, and to
   # calls made for this account by aws:SourceAccount (supported for
@@ -342,6 +376,35 @@ data "aws_iam_policy_document" "default" {
         test     = "ArnLike"
         variable = "aws:SourceArn"
         values   = ["arn:${data.aws_partition.current.partition}:cloudtrail:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:trail/*"]
+      }
+    }
+  }
+
+  # SNS delivering to SQS queues encrypted with this key (an sns subscription
+  # to an sqs queue), limited to this account's topics in this region.
+  dynamic "statement" {
+    for_each = var.allow_sns ? [1] : []
+
+    content {
+      sid       = "AllowSNS"
+      actions   = ["kms:Decrypt", "kms:GenerateDataKey*"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["sns.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:sns:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*"]
       }
     }
   }
