@@ -39,6 +39,8 @@ components:
         # (EventBridge rules are covered by allow_eventbridge), limited to this
         # account's SNS topics.
         allow_cloudwatch_alarms: true
+        # cloudtrail/main encrypts its trail log files with this key.
+        allow_cloudtrail: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates

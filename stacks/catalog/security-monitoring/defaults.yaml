@@ -4,12 +4,12 @@
 ##################################################
 # Routes security findings to an SNS topic. It does NOT own the GuardDuty
 # detector or the Security Hub hub: the guardduty and securityhub components
-# do, and this component consumes their outputs. They and kms/main (the
-# topic's key) are declared in dependencies.components so they deploy first;
+# do, and this component consumes their outputs. They, kms/main (the topic's
+# key) and cloudtrail/main (the CIS filters' log group) are declared in dependencies.components so they deploy first;
 # workflows/scripts/common/check-dependencies.py enforces that.
 #
-# Every stack runs kms/main, guardduty/main and securityhub/main, so the
-# references resolve in all of them.
+# Every stack runs kms/main, cloudtrail/main, guardduty/main and
+# securityhub/main, so the references resolve in all of them.
 
 components:
   terraform:
@@ -20,6 +20,7 @@ components:
       dependencies:
         components:
           - component: kms/main
+          - component: cloudtrail/main
           - component: guardduty/main
           - component: securityhub/main
       vars:
@@ -29,6 +30,10 @@ components:
         # has no state yet) instead of silently planning with alerting off.
         require_guardduty_route: true
         require_securityhub_route: true
+        # The CIS metric filters (root usage, unauthorized API calls, IAM
+        # policy and security group changes) run on the trail's log group.
+        cloudtrail_log_group_name: !terraform.state cloudtrail/main .cloudtrail_logs_log_group_name
+        require_cloudtrail_route: true
         # The alert topic is encrypted with the stack's CMK. kms/defaults sets
         # allow_eventbridge and allow_cloudwatch_alarms so EventBridge and CloudWatch
         # can publish to it.

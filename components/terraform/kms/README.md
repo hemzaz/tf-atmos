@@ -18,7 +18,7 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_eventbridge/allow_cloudwatch_alarms, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
@@ -54,9 +54,16 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   this region. The CloudWatch one also requires `aws:SourceAccount`; the
   EventBridge one cannot: SNS documents that `aws:SourceAccount`,
   `aws:SourceArn` and `aws:SourceOrgID` in a KMS policy are not supported for
-  EventBridge-to-encrypted topics, and delivery fails with them. security-monitoring encrypts its alert
-  topic with this key; without them its EventBridge rules and CloudWatch
-  alarms cannot publish. Tested in `tests/service_access.tftest.hcl`.
+  EventBridge-to-encrypted topics, and delivery fails with them.
+  security-monitoring encrypts its alert topic with this key; without them its
+  EventBridge rules and CloudWatch alarms cannot publish. Tested in
+  `tests/service_access.tftest.hcl`.
+- `allow_cloudtrail` adds `AllowCloudTrailEncryptLogs` (`kms:GenerateDataKey*`,
+  `kms:EncryptionContext:aws:cloudtrail:arn` like this account's trails),
+  `AllowCloudTrailDecrypt` (`kms:Decrypt`, which AWS requires because the trail
+  bucket uses an S3 Bucket Key) and `AllowCloudTrailDescribeKey`, all limited by
+  `aws:SourceArn` to this account's trails in this region. cloudtrail/main
+  encrypts its log files with this key; `kms/defaults` turns it on.
 - `replica_regions` requires `is_multi_region = true` (validation).
 - `rotation_period_in_days` validated 90-2560; `deletion_window_in_days`
   validated 7-30.

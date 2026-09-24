@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowCloudWatchAlarmsSNSTopics"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -97,8 +97,10 @@ run "logs_and_events_are_scoped_to_this_account_and_region" {
     condition = (
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Principal.Service == "cloudwatch.amazonaws.com"
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Condition.StringEquals["aws:SourceAccount"] == "123456789012"
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Condition.ArnLike["kms:EncryptionContext:aws:sns:topicArn"] == "arn:aws:sns:eu-west-2:123456789012:*"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+      }
     )
     error_message = "CloudWatch alarms may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region, and only for this account (aws:SourceAccount)."
   }
@@ -119,5 +121,47 @@ run "cloudwatch_alarms_flag_is_independent" {
   assert {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]) == 1
     error_message = "allow_cloudwatch_alarms adds the CloudWatch alarms SNS statement."
+  }
+}
+
+run "cloudtrail_is_scoped_to_this_accounts_trails" {
+  command = plan
+
+  variables {
+    allow_cloudtrail = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Action == "kms:GenerateDataKey*"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Principal.Service == "cloudtrail.amazonaws.com"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Condition.StringLike["kms:EncryptionContext:aws:cloudtrail:arn"] == "arn:aws:cloudtrail:*:123456789012:trail/*"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Condition.ArnLike["aws:SourceArn"] == "arn:aws:cloudtrail:eu-west-2:123456789012:trail/*"
+    )
+    error_message = "CloudTrail may only generate data keys for this account's trails (encryption context and aws:SourceArn)."
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDescribeKey"]).Action == "kms:DescribeKey"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDescribeKey"]).Condition == { ArnLike = { "aws:SourceArn" = "arn:aws:cloudtrail:eu-west-2:123456789012:trail/*" } }
+    )
+    error_message = "CloudTrail DescribeKey is limited to this account's trails in this region."
+  }
+
+  # The trail bucket uses an S3 Bucket Key, which needs kms:Decrypt for the
+  # CloudTrail principal.
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDecrypt"]).Action == "kms:Decrypt"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDecrypt"]).Principal.Service == "cloudtrail.amazonaws.com"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDecrypt"]).Condition == { ArnLike = { "aws:SourceArn" = "arn:aws:cloudtrail:eu-west-2:123456789012:trail/*" } }
+    )
+    error_message = "CloudTrail may kms:Decrypt (S3 Bucket Key) only for this account's trails in this region (aws:SourceArn)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowEventBridge", "AllowCloudWatchLogs", "AllowCloudWatchAlarmsSNSTopics"], try(s.Sid, ""))]) == 0
+    error_message = "allow_cloudtrail must not grant other services anything."
   }
 }

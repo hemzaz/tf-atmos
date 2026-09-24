@@ -267,4 +267,82 @@ data "aws_iam_policy_document" "default" {
       }
     }
   }
+
+  # CloudTrail trails of this account (the cloudtrail component) encrypting
+  # their log files with this key. GenerateDataKey* is bound to the trail by
+  # the encryption context aws:cloudtrail:arn; every statement is limited to
+  # this account's trails by aws:SourceArn (confused-deputy guard). Principals
+  # reading the logs back get kms:Decrypt through IAM (the root statement).
+  dynamic "statement" {
+    for_each = var.allow_cloudtrail ? [1] : []
+
+    content {
+      sid       = "AllowCloudTrailEncryptLogs"
+      actions   = ["kms:GenerateDataKey*"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["cloudtrail.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringLike"
+        variable = "kms:EncryptionContext:aws:cloudtrail:arn"
+        values   = ["arn:${data.aws_partition.current.partition}:cloudtrail:*:${data.aws_caller_identity.current.account_id}:trail/*"]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:cloudtrail:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:trail/*"]
+      }
+    }
+  }
+
+  # The trail's S3 bucket uses an S3 Bucket Key (bucket_key_enabled, the Cloud
+  # Posse default). With a bucket key, AWS requires kms:Decrypt for
+  # cloudtrail.amazonaws.com as well: S3 decrypts the bucket-level key on the
+  # trail's behalf.
+  dynamic "statement" {
+    for_each = var.allow_cloudtrail ? [1] : []
+
+    content {
+      sid       = "AllowCloudTrailDecrypt"
+      actions   = ["kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["cloudtrail.amazonaws.com"]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:cloudtrail:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:trail/*"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.allow_cloudtrail ? [1] : []
+
+    content {
+      sid       = "AllowCloudTrailDescribeKey"
+      actions   = ["kms:DescribeKey"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["cloudtrail.amazonaws.com"]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:cloudtrail:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:trail/*"]
+      }
+    }
+  }
 }

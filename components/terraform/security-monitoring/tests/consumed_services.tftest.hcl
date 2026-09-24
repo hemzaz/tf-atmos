@@ -37,10 +37,11 @@ variables {
     Tenant      = "fnx"
     ManagedBy   = "Terraform"
   }
-  enable_inspector        = false
-  guardduty_detector_id   = "12abc34d567e8fa901bc2d34e56789f0"
-  securityhub_account_arn = "arn:aws:securityhub:eu-west-2:123456789012:hub/default"
-  kms_key_id              = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+  enable_inspector          = false
+  guardduty_detector_id     = "12abc34d567e8fa901bc2d34e56789f0"
+  securityhub_account_arn   = "arn:aws:securityhub:eu-west-2:123456789012:hub/default"
+  kms_key_id                = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+  cloudtrail_log_group_name = "/aws/cloudtrail/test-cloudtrail"
 }
 
 run "routes_consumed_detector_and_hub" {
@@ -79,6 +80,38 @@ run "routes_consumed_detector_and_hub" {
   assert {
     condition     = output.security_hub_account_arn == "arn:aws:securityhub:eu-west-2:123456789012:hub/default"
     error_message = "security_hub_account_arn must pass the consumed hub ARN through."
+  }
+}
+
+run "cis_filters_feed_the_cloudtrail_alarms" {
+  command = plan
+
+  assert {
+    condition     = length(aws_cloudwatch_log_metric_filter.cloudtrail) == 4
+    error_message = "One CIS metric filter per CloudTrailMetrics alarm."
+  }
+
+  assert {
+    condition     = alltrue([for f in aws_cloudwatch_log_metric_filter.cloudtrail : f.log_group_name == "/aws/cloudtrail/test-cloudtrail"])
+    error_message = "Every filter must read the trail's CloudWatch log group."
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in [
+        [aws_cloudwatch_metric_alarm.root_account_usage[0], aws_cloudwatch_log_metric_filter.cloudtrail["root_account_usage"]],
+        [aws_cloudwatch_metric_alarm.unauthorized_api_calls[0], aws_cloudwatch_log_metric_filter.cloudtrail["unauthorized_api_calls"]],
+        [aws_cloudwatch_metric_alarm.iam_policy_changes[0], aws_cloudwatch_log_metric_filter.cloudtrail["iam_policy_changes"]],
+        [aws_cloudwatch_metric_alarm.security_group_changes[0], aws_cloudwatch_log_metric_filter.cloudtrail["security_group_changes"]],
+      ] :
+      pair[0].namespace == one(pair[1].metric_transformation).namespace && pair[0].metric_name == one(pair[1].metric_transformation).name
+    ])
+    error_message = "Each alarm must watch exactly the metric its filter publishes (namespace and name)."
+  }
+
+  assert {
+    condition     = strcontains(aws_cloudwatch_log_metric_filter.cloudtrail["root_account_usage"].pattern, "$.userIdentity.type=\"Root\"") && strcontains(aws_cloudwatch_log_metric_filter.cloudtrail["root_account_usage"].pattern, "$.userIdentity.invokedBy NOT EXISTS")
+    error_message = "The root filter is the CIS pattern (root identity, not invoked by a service)."
   }
 }
 
@@ -130,14 +163,31 @@ run "null_hub_fails_when_route_required" {
   expect_failures = [aws_sns_topic.security_alerts]
 }
 
+run "null_log_group_fails_when_route_required" {
+  command = plan
+
+  variables {
+    cloudtrail_log_group_name = null
+  }
+
+  expect_failures = [aws_sns_topic.security_alerts]
+}
+
 run "null_ids_disable_optional_routes" {
   command = plan
 
   variables {
     guardduty_detector_id     = null
     securityhub_account_arn   = null
+    cloudtrail_log_group_name = null
     require_guardduty_route   = false
     require_securityhub_route = false
+    require_cloudtrail_route  = false
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_log_metric_filter.cloudtrail) == 0 && length(aws_cloudwatch_metric_alarm.root_account_usage) == 0
+    error_message = "Without a CloudTrail log group there must be no CIS filters or alarms watching unpublished metrics."
   }
 
   assert {

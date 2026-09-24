@@ -1,0 +1,35 @@
+---
+##################################################
+# Catalog Configuration for AWS CloudTrail
+##################################################
+# One multi-region trail per account, owned by this component (Cloud Posse
+# aws-cloudtrail with its aws-cloudtrail-bucket folded in: each stack is its
+# own account). The trail delivers to an S3 bucket and to a CloudWatch log
+# group, both encrypted with kms/main. security-monitoring reads
+# `cloudtrail_logs_log_group_name` with !terraform.state and puts the CIS
+# metric filters and alarms on it.
+#
+# kms/defaults sets allow_cloudtrail (trail log files) and
+# allow_cloudwatch_logs (the log group), so kms/main can be used here.
+
+components:
+  terraform:
+    cloudtrail/defaults:
+      metadata:
+        component: cloudtrail
+        type: abstract
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+        # CIS AWS Foundations 3.1 / 3.2 / 3.4.
+        is_multi_region_trail: true
+        include_global_service_events: true
+        enable_log_file_validation: true
+        # A year in CloudWatch Logs (the metric filters' source) and in S3.
+        cloudwatch_logs_retention_in_days: 365
+        bucket_glacier_transition_days: 90
+        bucket_expiration_days: 365
+        tags:
+          Component: "CloudTrail"
