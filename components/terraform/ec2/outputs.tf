@@ -1,82 +1,77 @@
-output "instance_ids" {
-  value       = { for k, v in aws_instance.instances : k => v.id }
-  description = "Map of instance names to instance IDs"
+# Names as in cloudposse/terraform-aws-ec2-instance. The instance values come
+# from whichever of aws_instance.default / aws_instance.from_launch_template
+# exists; every value is null when enabled = false.
+
+output "id" {
+  description = "ID of the instance"
+  value       = one(concat(aws_instance.default[*].id, aws_instance.from_launch_template[*].id))
 }
 
-output "instance_arns" {
-  value       = { for k, v in aws_instance.instances : k => v.arn }
-  description = "Map of instance names to instance ARNs"
+output "arn" {
+  description = "ARN of the instance"
+  value       = one(concat(aws_instance.default[*].arn, aws_instance.from_launch_template[*].arn))
 }
 
-output "instance_public_ips" {
-  value       = { for k, v in aws_instance.instances : k => v.public_ip }
-  description = "Map of instance names to public IP addresses"
+output "name" {
+  description = "Instance name (its Name tag): <tags.Environment>-<name>"
+  value       = local.enabled ? local.name_prefix : null
 }
 
-output "instance_private_ips" {
-  value       = { for k, v in aws_instance.instances : k => v.private_ip }
-  description = "Map of instance names to private IP addresses"
+output "private_ip" {
+  description = "Private IP of the instance"
+  value       = one(concat(aws_instance.default[*].private_ip, aws_instance.from_launch_template[*].private_ip))
+}
+
+output "public_ip" {
+  description = "Public IP of the instance, or null"
+  value       = one(concat(aws_instance.default[*].public_ip, aws_instance.from_launch_template[*].public_ip))
+}
+
+output "private_dns" {
+  description = "Private DNS name of the instance"
+  value       = one(concat(aws_instance.default[*].private_dns, aws_instance.from_launch_template[*].private_dns))
+}
+
+# Cloud Posse outputs its ssh_key_pair input; this is the key the instance
+# actually launched with (given or generated), which is what a consumer's
+# ssh_key_pair needs.
+output "ssh_key_pair" {
+  description = "Name of the SSH key pair the instance launched with"
+  value       = one(concat(aws_instance.default[*].key_name, aws_instance.from_launch_template[*].key_name))
+}
+
+output "security_group_id" {
+  description = "ID of the instance's own security group (a string)"
+  value       = one(aws_security_group.default[*].id)
 }
 
 output "security_group_ids" {
-  value       = { for k, v in aws_security_group.instances : k => v.id }
-  description = "Map of instance names to security group IDs"
+  description = "IDs of all security groups attached to the instance"
+  value       = local.enabled ? local.security_group_ids : []
 }
 
-output "iam_role_arns" {
-  value       = { for k, v in aws_iam_role.instances : k => v.arn }
-  description = "Map of instance names to IAM role ARNs"
+output "role" {
+  description = "Name of the instance's IAM role"
+  value       = one(aws_iam_role.default[*].name)
 }
 
-output "iam_role_names" {
-  value       = { for k, v in aws_iam_role.instances : k => v.name }
-  description = "Map of instance names to IAM role names"
+output "role_arn" {
+  description = "ARN of the instance's IAM role"
+  value       = one(aws_iam_role.default[*].arn)
 }
 
-output "iam_instance_profile_arns" {
-  value       = { for k, v in aws_iam_instance_profile.instances : k => v.arn }
-  description = "Map of instance names to IAM instance profile ARNs"
+output "instance_profile" {
+  description = "Name of the instance profile"
+  value       = one(aws_iam_instance_profile.default[*].name)
 }
 
-output "iam_instance_profile_names" {
-  value       = { for k, v in aws_iam_instance_profile.instances : k => v.name }
-  description = "Map of instance names to IAM instance profile names"
+output "launch_template_id" {
+  description = "ID of the launch template, if enable_launch_templates"
+  value       = one(aws_launch_template.default[*].id)
 }
 
-output "generated_key_names" {
-  value = merge(
-    { for k, v in aws_key_pair.generated : k => v.key_name },
-    local.create_global_key ? { "global" = aws_key_pair.global[0].key_name } : {}
-  )
-  description = "Map of instance names to generated SSH key names, includes global key if created"
-}
-
-output "ssh_key_secret_arns" {
-  value = merge(
-    { for k, v in aws_secretsmanager_secret.ssh_key : k => v.arn },
-    local.create_global_key && var.store_ssh_keys_in_secrets_manager ? { "global" = aws_secretsmanager_secret.global_ssh_key[0].arn } : {}
-  )
-  description = "Map of instance names to Secret Manager ARNs containing SSH keys"
+output "ssh_key_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the generated private key, if any"
+  value       = one(aws_secretsmanager_secret.ssh_key[*].arn)
   sensitive   = true
-}
-
-output "global_key_name" {
-  value       = local.create_global_key ? aws_key_pair.global[0].key_name : null
-  description = "Name of the generated global SSH key, if created"
-}
-
-output "global_key_secret_arn" {
-  value       = local.create_global_key && var.store_ssh_keys_in_secrets_manager ? aws_secretsmanager_secret.global_ssh_key[0].arn : null
-  description = "ARN of the Secret Manager secret containing the global SSH key, if created"
-  sensitive   = true
-}
-
-output "instances_using_global_key" {
-  value       = local.create_global_key ? keys(local.instances_using_global_key) : []
-  description = "List of instance names using the global SSH key"
-}
-
-output "instances_using_individual_keys" {
-  value       = keys(local.instances_requiring_keys)
-  description = "List of instance names using individually generated SSH keys"
 }
