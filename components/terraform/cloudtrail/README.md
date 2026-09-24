@@ -30,7 +30,10 @@ follow Cloud Posse's.
 Each stack is its own AWS account. Stack names are
 `<tenant>-<account>-<environment>`, with separate dev, staging and prod
 accounts, and `guardduty` and `securityhub` already assume one instance per
-account. So each stack runs one multi-region trail (`cloudtrail/main`) with its own bucket and log group. If two stacks ever share an account, disable `cloudtrail/main` in all but one of them (`metadata.enabled: false`): a second multi-region trail duplicates every management event and its cost.
+account. So each stack runs one multi-region trail (`cloudtrail/main`) with its
+own bucket and log group. If two stacks ever share an account, disable
+`cloudtrail/main` in all but one of them (`metadata.enabled: false`): a second
+multi-region trail duplicates every management event and its cost.
 
 ## Deployed instances
 

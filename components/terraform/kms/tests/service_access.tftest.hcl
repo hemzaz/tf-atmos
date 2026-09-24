@@ -97,8 +97,10 @@ run "logs_and_events_are_scoped_to_this_account_and_region" {
     condition = (
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Principal.Service == "cloudwatch.amazonaws.com"
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Condition.StringEquals["aws:SourceAccount"] == "123456789012"
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Condition.ArnLike["kms:EncryptionContext:aws:sns:topicArn"] == "arn:aws:sns:eu-west-2:123456789012:*"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+      }
     )
     error_message = "CloudWatch alarms may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region, and only for this account (aws:SourceAccount)."
   }

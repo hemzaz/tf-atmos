@@ -54,15 +54,16 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   this region. The CloudWatch one also requires `aws:SourceAccount`; the
   EventBridge one cannot: SNS documents that `aws:SourceAccount`,
   `aws:SourceArn` and `aws:SourceOrgID` in a KMS policy are not supported for
-  EventBridge-to-encrypted topics, and delivery fails with them. security-monitoring encrypts its alert
-  topic with this key; without them its EventBridge rules and CloudWatch
-  alarms cannot publish. Tested in `tests/service_access.tftest.hcl`.
+  EventBridge-to-encrypted topics, and delivery fails with them.
+  security-monitoring encrypts its alert topic with this key; without them its
+  EventBridge rules and CloudWatch alarms cannot publish. Tested in
+  `tests/service_access.tftest.hcl`.
 - `allow_cloudtrail` adds `AllowCloudTrailEncryptLogs` (`kms:GenerateDataKey*`,
   `kms:EncryptionContext:aws:cloudtrail:arn` like this account's trails),
   `AllowCloudTrailDecrypt` (`kms:Decrypt`, which AWS requires because the trail
-  bucket uses an S3 Bucket Key) and `AllowCloudTrailDescribeKey`, all limited
-  by `aws:SourceArn` to this account's trails in this region. cloudtrail/main encrypts its log files with
-  this key; `kms/defaults` turns it on.
+  bucket uses an S3 Bucket Key) and `AllowCloudTrailDescribeKey`, all limited by
+  `aws:SourceArn` to this account's trails in this region. cloudtrail/main
+  encrypts its log files with this key; `kms/defaults` turns it on.
 - `replica_regions` requires `is_multi_region = true` (validation).
 - `rotation_period_in_days` validated 90-2560; `deletion_window_in_days`
   validated 7-30.

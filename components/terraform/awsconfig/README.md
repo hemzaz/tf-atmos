@@ -30,7 +30,11 @@ bucket lives with the recorder.
 Each stack is its own AWS account. Stack names are
 `<tenant>-<account>-<environment>`, with separate dev, staging and prod
 accounts, and `guardduty` and `securityhub` already assume one instance per
-account. So each stack runs one recorder (`awsconfig/main`) that also records global resource types (`include_global_resource_types: true`). If two stacks ever share an account, keep the recorder in one of them only (`metadata.enabled: false` elsewhere). AWS allows one recorder per account and region, and global resource types must be recorded in exactly one region.
+account. So each stack runs one recorder (`awsconfig/main`) that also records
+global resource types (`include_global_resource_types: true`). If two stacks
+ever share an account, keep the recorder in one of them only
+(`metadata.enabled: false` elsewhere). AWS allows one recorder per account and
+region, and global resource types must be recorded in exactly one region.
 
 ## Deployed instances
 
