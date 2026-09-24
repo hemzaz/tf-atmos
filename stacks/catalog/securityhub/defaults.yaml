@@ -17,6 +17,11 @@ components:
       metadata:
         component: securityhub
         type: abstract
+      # Security Hub's FSBP and CIS controls are AWS Config rules: without a
+      # recorder they report no data. Ordering only (no state is read).
+      dependencies:
+        components:
+          - component: awsconfig/main
       vars:
         enable: true
         enable_default_standards: true

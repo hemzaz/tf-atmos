@@ -1,0 +1,35 @@
+---
+##################################################
+# Catalog Configuration for AWS Config
+##################################################
+# One configuration recorder per account/region, owned by this component
+# (Cloud Posse aws-config with its aws-config-bucket folded in: each stack is
+# its own account). Security Hub's FSBP and CIS controls are evaluated by AWS
+# Config rules, so securityhub/defaults lists awsconfig/main as a dependency.
+#
+# The recorder role uses the AWS managed AWS_ConfigRole policy. Snapshots go
+# to an S3 bucket encrypted with kms/main; the role is granted the key through
+# IAM (the key's root-account statement), so no key-policy flag is needed.
+#
+# AWS Config bills per configuration item recorded and per rule evaluation.
+
+components:
+  terraform:
+    awsconfig/defaults:
+      metadata:
+        component: awsconfig
+        type: abstract
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+        # Every stack is its own account in one region, so each recorder is
+        # also the account's global-resource (IAM) collector.
+        include_global_resource_types: true
+        recording_frequency: "CONTINUOUS"
+        delivery_frequency: "TwentyFour_Hours"
+        bucket_glacier_transition_days: 90
+        bucket_expiration_days: 365
+        tags:
+          Component: "AWSConfig"

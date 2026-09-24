@@ -180,12 +180,13 @@ atmos workflow check -f compliance-check -s <stack>              # CIS, FSBP, PC
 atmos workflow report -f compliance-check -s <stack>             # writes compliance-report.md
 ```
 
-`harden`/`harden-iam` ask before changing anything; declining runs report-only. GuardDuty and
-Security Hub are owned by the `guardduty/main` and `securityhub/main` components in every stack;
-`harden` plans them and prints the plans before its confirm prompt, then applies exactly those
+`harden`/`harden-iam` ask before changing anything; declining runs report-only. CloudTrail, AWS
+Config, GuardDuty and Security Hub are owned by the `cloudtrail/main`, `awsconfig/main`,
+`guardduty/main` and `securityhub/main` components in every stack; `harden` plans them and prints the plans before its confirm prompt, then applies exactly those
 planfiles with `atmos terraform deploy --from-plan` (never with aws CLI create calls, which would
 collide with Terraform) and reports their status. `security-monitoring/main` routes their findings
-to SNS and reads their IDs with `!terraform.state`.
+to SNS, puts the CIS metric filters and alarms on the trail's log group, and reads their IDs with
+`!terraform.state`.
 
 ## Certificate rotation
 

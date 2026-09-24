@@ -129,6 +129,8 @@ SYNTH = [
     (r'^(cloudwatch_)?log_group_name$', '/aws/example/log-group'),
     (r'^eks_cluster_managed_security_group_id$', 'sg-0123456789abcdef1'),
     (r'^member_clusters$',            ['example-cache-0001-001', 'example-cache-0002-001']),
+    # ...and the cloudtrail component's log group for its CIS metric filters.
+    (r'^cloudtrail_logs_log_group_name$', '/aws/cloudtrail/example-cloudtrail'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry

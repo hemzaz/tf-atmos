@@ -5,10 +5,35 @@ locals {
   # components (one component per service, the Cloud Posse model). This
   # component only routes their findings, so a null ID turns the matching
   # EventBridge rule off -- unless require_*_route is set, in which case the
-  # topic's precondition fails the plan instead. Both are plain variables, so
-  # the counts below are known at plan time.
+  # topic's precondition fails the plan instead. The CloudTrail log group
+  # works the same way for the CIS metric filters and alarms. All are plain
+  # variables, so the counts below are known at plan time.
   guardduty_enabled    = var.guardduty_detector_id != null
   security_hub_enabled = var.securityhub_account_arn != null
+  cloudtrail_enabled   = var.cloudtrail_log_group_name != null
+
+  # CIS AWS Foundations Benchmark v1.2.0 metric filters (the version Security
+  # Hub's default CIS standard checks, controls CloudWatch.1/.2/.4/.10), on the
+  # log group the cloudtrail component's trail delivers to. Metric names are
+  # the CloudTrailMetrics names the alarms below watch.
+  cloudtrail_metric_filters = {
+    root_account_usage = {
+      metric  = "RootAccountUsage"
+      pattern = "{$.userIdentity.type=\"Root\" && $.userIdentity.invokedBy NOT EXISTS && $.eventType !=\"AwsServiceEvent\"}"
+    }
+    unauthorized_api_calls = {
+      metric  = "UnauthorizedAPICalls"
+      pattern = "{($.errorCode=\"*UnauthorizedOperation\") || ($.errorCode=\"AccessDenied*\")}"
+    }
+    iam_policy_changes = {
+      metric  = "IAMPolicyChanges"
+      pattern = "{($.eventName=DeleteGroupPolicy)||($.eventName=DeleteRolePolicy)||($.eventName=DeleteUserPolicy)||($.eventName=PutGroupPolicy)||($.eventName=PutRolePolicy)||($.eventName=PutUserPolicy)||($.eventName=CreatePolicy)||($.eventName=DeletePolicy)||($.eventName=CreatePolicyVersion)||($.eventName=DeletePolicyVersion)||($.eventName=AttachRolePolicy)||($.eventName=DetachRolePolicy)||($.eventName=AttachUserPolicy)||($.eventName=DetachUserPolicy)||($.eventName=AttachGroupPolicy)||($.eventName=DetachGroupPolicy)}"
+    }
+    security_group_changes = {
+      metric  = "SecurityGroupChanges"
+      pattern = "{($.eventName=AuthorizeSecurityGroupIngress) || ($.eventName=AuthorizeSecurityGroupEgress) || ($.eventName=RevokeSecurityGroupIngress) || ($.eventName=RevokeSecurityGroupEgress) || ($.eventName=CreateSecurityGroup) || ($.eventName=DeleteSecurityGroup)}"
+    }
+  }
 
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
@@ -41,6 +66,11 @@ resource "aws_sns_topic" "security_alerts" {
     precondition {
       condition     = !var.require_securityhub_route || local.security_hub_enabled
       error_message = "require_securityhub_route is set but securityhub_account_arn is null. Apply securityhub/main first (its account_arn output), or set require_securityhub_route = false to run without Security Hub alerting."
+    }
+
+    precondition {
+      condition     = !var.require_cloudtrail_route || local.cloudtrail_enabled
+      error_message = "require_cloudtrail_route is set but cloudtrail_log_group_name is null. Apply cloudtrail/main first (its cloudtrail_logs_log_group_name output), or set require_cloudtrail_route = false to run without the CIS CloudTrail alarms."
     }
   }
 }
@@ -295,8 +325,26 @@ resource "aws_cloudwatch_log_group" "alert_enrichment" {
   kms_key_id        = var.kms_key_id
 }
 
+# CIS metric filters feeding the CloudTrailMetrics alarms below. Without them
+# the alarms watch metrics nothing publishes.
+resource "aws_cloudwatch_log_metric_filter" "cloudtrail" {
+  for_each = local.cloudtrail_enabled ? local.cloudtrail_metric_filters : {}
+
+  name           = "${local.name_prefix}-${replace(each.key, "_", "-")}"
+  log_group_name = var.cloudtrail_log_group_name
+  pattern        = each.value.pattern
+
+  metric_transformation {
+    name      = each.value.metric
+    namespace = "CloudTrailMetrics"
+    value     = "1"
+  }
+}
+
 # Root account usage alarm
 resource "aws_cloudwatch_metric_alarm" "root_account_usage" {
+  count = local.cloudtrail_enabled ? 1 : 0
+
   alarm_name          = "${local.name_prefix}-root-account-usage"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
@@ -308,10 +356,14 @@ resource "aws_cloudwatch_metric_alarm" "root_account_usage" {
   alarm_description   = "Root account has been used"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
+
+  depends_on = [aws_cloudwatch_log_metric_filter.cloudtrail]
 }
 
 # Unauthorized API calls alarm
 resource "aws_cloudwatch_metric_alarm" "unauthorized_api_calls" {
+  count = local.cloudtrail_enabled ? 1 : 0
+
   alarm_name          = "${local.name_prefix}-unauthorized-api-calls"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
@@ -323,10 +375,14 @@ resource "aws_cloudwatch_metric_alarm" "unauthorized_api_calls" {
   alarm_description   = "Unauthorized API calls detected"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
+
+  depends_on = [aws_cloudwatch_log_metric_filter.cloudtrail]
 }
 
 # IAM policy changes alarm
 resource "aws_cloudwatch_metric_alarm" "iam_policy_changes" {
+  count = local.cloudtrail_enabled ? 1 : 0
+
   alarm_name          = "${local.name_prefix}-iam-policy-changes"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
@@ -338,10 +394,14 @@ resource "aws_cloudwatch_metric_alarm" "iam_policy_changes" {
   alarm_description   = "IAM policy changes detected"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
+
+  depends_on = [aws_cloudwatch_log_metric_filter.cloudtrail]
 }
 
 # Security group changes alarm
 resource "aws_cloudwatch_metric_alarm" "security_group_changes" {
+  count = local.cloudtrail_enabled ? 1 : 0
+
   alarm_name          = "${local.name_prefix}-security-group-changes"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
@@ -353,6 +413,8 @@ resource "aws_cloudwatch_metric_alarm" "security_group_changes" {
   alarm_description   = "Security group changes detected"
   alarm_actions       = [aws_sns_topic.security_alerts.arn]
   treat_missing_data  = "notBreaching"
+
+  depends_on = [aws_cloudwatch_log_metric_filter.cloudtrail]
 }
 
 # Data source for current AWS account

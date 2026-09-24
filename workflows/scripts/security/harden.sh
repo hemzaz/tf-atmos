@@ -43,8 +43,9 @@ esac
 # Owned by these components, deployed in every stack. Creating the services
 # with the aws CLI instead would leave Terraform failing with "already exists"
 # on its next apply, so hardening deploys the components and never touches the
-# services directly.
-COMPONENTS=(guardduty/main securityhub/main)
+# services directly. awsconfig/main comes before securityhub/main, whose
+# controls are AWS Config rules.
+COMPONENTS=(cloudtrail/main awsconfig/main guardduty/main securityhub/main)
 
 echo "Configuration:"
 echo "  Stack: ${TENANT}-${ACCOUNT}-${ENVIRONMENT}"
@@ -59,7 +60,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 # =================================================================
-# GuardDuty and Security Hub
+# CloudTrail, AWS Config, GuardDuty and Security Hub
 # =================================================================
 # Plan first and print the plan (atmos saves the planfile), so what is
 # confirmed is what is applied: the apply step uses --from-plan, and Terraform

@@ -18,8 +18,10 @@ standards (AWS FSBP v1.0.0 and CIS v1.2.0); only prod adds `pci-dss/v/3.2.1`.
 
 ## Dependencies & gotchas
 
-- No `dependencies.components` of its own. `security-monitoring/defaults`
-  lists `securityhub/main` as a dependency and reads `.account_arn`.
+- `securityhub/defaults` lists `awsconfig/main` in `dependencies.components`
+  (ordering only; no state is read) because the controls are AWS Config
+  rules. `security-monitoring/defaults` lists `securityhub/main` as a
+  dependency and reads `.account_arn`.
 - `enable_default_standards = true` makes Security Hub subscribe AWS
   Foundational Security Best Practices v1.0.0 and CIS AWS Foundations
   Benchmark v1.2.0 itself. Those two are filtered out of `standards` so the
@@ -33,8 +35,9 @@ standards (AWS FSBP v1.0.0 and CIS v1.2.0); only prod adds `pci-dss/v/3.2.1`.
   consumes `account_arn` and enables no hub, and
   `workflows/scripts/security/harden.sh` deploys this component instead of
   calling `aws securityhub enable-security-hub`.
-- Most Security Hub controls evaluate AWS Config recordings; without an AWS
-  Config recorder in the account they report as failed or unavailable.
+- Most Security Hub controls evaluate AWS Config recordings. The
+  `awsconfig/main` recorder, in every stack, provides them. Without it they
+  report as failed or unavailable.
 
 ## Usage
 

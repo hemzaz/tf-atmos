@@ -55,6 +55,23 @@ variable "require_securityhub_route" {
   default     = true
 }
 
+variable "cloudtrail_log_group_name" {
+  type        = string
+  description = "CloudWatch log group the account trail delivers to (the cloudtrail component's `cloudtrail_logs_log_group_name` output). The CIS metric filters and their four CloudTrailMetrics alarms are created on it"
+  default     = null
+
+  validation {
+    condition     = var.cloudtrail_log_group_name == null || can(regex("^[.\\-_/#A-Za-z0-9]{1,512}$", var.cloudtrail_log_group_name))
+    error_message = "cloudtrail_log_group_name must be a CloudWatch log group name, or null."
+  }
+}
+
+variable "require_cloudtrail_route" {
+  type        = bool
+  description = "Fail the plan when cloudtrail_log_group_name is null, instead of silently planning without the CIS CloudTrail metric filters and alarms (e.g. cloudtrail/main not applied yet)"
+  default     = true
+}
+
 # Inspector Variables
 variable "enable_inspector" {
   type        = bool

@@ -6,6 +6,8 @@ import:
   - catalog/kms/defaults
   - catalog/secretsmanager/defaults
   - catalog/acm/defaults
+  - catalog/cloudtrail/defaults
+  - catalog/awsconfig/defaults
   - catalog/guardduty/defaults
   - catalog/securityhub/defaults
   - catalog/security-monitoring/defaults
@@ -155,6 +157,26 @@ components:
                 "reference_only": "true"
               }
         context_name: "infra"
+
+    # ==========================================================================
+    # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,
+    # both encrypted with kms/main). security-monitoring's CIS metric filters
+    # read its log group.
+    # ==========================================================================
+    cloudtrail/main:
+      metadata:
+        component: cloudtrail
+        inherits:
+          - cloudtrail/defaults
+
+    # ==========================================================================
+    # AWS Config - the recorder Security Hub's FSBP/CIS controls evaluate on.
+    # ==========================================================================
+    awsconfig/main:
+      metadata:
+        component: awsconfig
+        inherits:
+          - awsconfig/defaults
 
     # ==========================================================================
     # GuardDuty - owns the detector (security-monitoring only consumes it).
