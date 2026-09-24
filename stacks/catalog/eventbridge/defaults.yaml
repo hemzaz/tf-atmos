@@ -1,0 +1,32 @@
+---
+##################################################
+# Catalog Configuration for Amazon EventBridge
+##################################################
+# One rule per instance, logged to CloudWatch (the Cloud Posse aws-eventbridge
+# model). Instances inherit this base and set `name` and
+# `cloudwatch_event_rule_pattern`; one instance per bus sets
+# `create_event_bus: true`, and rules on that bus read its `event_bus_name`.
+
+components:
+  terraform:
+    eventbridge/defaults:
+      metadata:
+        component: eventbridge
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults). Its key
+        # policy must list events.amazonaws.com and logs.<region>.amazonaws.com
+        # in key_service_users (see components/terraform/eventbridge/README.md).
+        kms_key_arn: !terraform.state kms/main .key_arn
+        event_log_retention_in_days: 3
+        create_event_bus: false
+        archive_enabled: false
+        tags:
+          Component: "EventBridge"
