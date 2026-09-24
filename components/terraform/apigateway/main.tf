@@ -176,7 +176,7 @@ resource "aws_apigatewayv2_vpc_link" "http" {
   subnet_ids         = var.vpc_link_subnet_ids
   security_group_ids = var.vpc_link_security_group_ids
 
-  tags = local.tags
+  tags = merge(local.tags, { Name = "${local.name_prefix}-vpc-link" })
 }
 
 # Custom Domain Name for REST API

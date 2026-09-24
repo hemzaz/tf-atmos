@@ -122,6 +122,18 @@ variable "cors_configuration" {
   })
   description = "CORS configuration for an HTTP API; null for none. REST APIs ignore it"
   default     = null
+
+  # Browsers refuse a credentialed response whose Access-Control-Allow-Origin
+  # is "*", and API Gateway rejects the combination on HTTP APIs.
+  validation {
+    condition     = var.cors_configuration == null ? true : !(var.cors_configuration.allow_credentials && contains(var.cors_configuration.allow_origins, "*"))
+    error_message = "cors_configuration cannot set allow_credentials = true with \"*\" in allow_origins; list the origins explicitly."
+  }
+
+  validation {
+    condition     = var.cors_configuration == null ? true : (var.cors_configuration.max_age >= 0 && var.cors_configuration.max_age <= 86400)
+    error_message = "cors_configuration.max_age must be between 0 and 86400 seconds."
+  }
 }
 
 variable "vpc_link_subnet_ids" {
@@ -493,7 +505,7 @@ variable "cache_ttl_seconds" {
 # Throttling Configuration Variables
 variable "throttling_rate_limit" {
   type        = number
-  description = "The steady-state request rate limit (requests per second)"
+  description = "The steady-state request rate limit (requests per second): REST method settings and the HTTP stage's default route settings"
   default     = 10000
   validation {
     condition     = var.throttling_rate_limit > 0
@@ -503,7 +515,7 @@ variable "throttling_rate_limit" {
 
 variable "throttling_burst_limit" {
   type        = number
-  description = "The burst request rate limit (requests per second)"
+  description = "The burst request rate limit (requests per second): REST method settings and the HTTP stage's default route settings"
   default     = 5000
   validation {
     condition     = var.throttling_burst_limit > 0

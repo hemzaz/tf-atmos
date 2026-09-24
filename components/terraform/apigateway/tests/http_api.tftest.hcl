@@ -122,3 +122,95 @@ run "rejects_a_vpc_link_without_security_groups" {
 
   expect_failures = [var.vpc_link_security_group_ids]
 }
+
+run "vpc_link_is_named_for_itself" {
+  command = plan
+
+  variables {
+    vpc_link_subnet_ids         = ["subnet-0123456789abcdef0"]
+    vpc_link_security_group_ids = ["sg-0123456789abcdef0"]
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_vpc_link.http[0].tags["Name"] == "test-microservices-api-vpc-link"
+    error_message = "The VPC link's Name tag is <prefix>-vpc-link, not the API's name."
+  }
+}
+
+run "disabled_creates_nothing" {
+  command = plan
+
+  variables {
+    enabled                     = false
+    vpc_link_subnet_ids         = ["subnet-0123456789abcdef0"]
+    vpc_link_security_group_ids = ["sg-0123456789abcdef0"]
+  }
+
+  assert {
+    condition     = length(aws_apigatewayv2_api.http_api) == 0 && length(aws_apigatewayv2_stage.http_stage) == 0 && length(aws_apigatewayv2_vpc_link.http) == 0
+    error_message = "enabled = false creates no HTTP API, stage or VPC link."
+  }
+
+  assert {
+    condition     = output.http_api_id == null && output.http_api_vpc_link_id == null && output.http_api_vpc_link_arn == null
+    error_message = "Outputs are null when disabled."
+  }
+}
+
+# Live staging and prod apigateway/main set cors_configuration on REST APIs.
+# REST ignores it (CORS there is answered by OPTIONS methods); the plan must
+# still succeed and create no HTTP resources.
+run "rest_api_with_cors_set_plans_and_ignores_it" {
+  command = plan
+
+  variables {
+    api_type = "REST"
+    cors_configuration = {
+      allow_origins     = ["*"]
+      allow_methods     = ["GET"]
+      allow_headers     = ["*"]
+      expose_headers    = []
+      max_age           = 300
+      allow_credentials = false
+    }
+  }
+
+  assert {
+    condition     = length(aws_api_gateway_rest_api.rest_api) == 1 && length(aws_apigatewayv2_api.http_api) == 0
+    error_message = "A REST API with cors_configuration set still plans, and no HTTP API is created."
+  }
+}
+
+run "rejects_credentials_with_a_wildcard_origin" {
+  command = plan
+
+  variables {
+    cors_configuration = {
+      allow_origins     = ["*"]
+      allow_methods     = ["GET"]
+      allow_headers     = ["Content-Type"]
+      expose_headers    = []
+      max_age           = 300
+      allow_credentials = true
+    }
+  }
+
+  expect_failures = [var.cors_configuration]
+}
+
+run "rejects_max_age_over_a_day" {
+  command = plan
+
+  variables {
+    cors_configuration = {
+      allow_origins     = ["https://app.example.com"]
+      allow_methods     = ["GET"]
+      allow_headers     = ["Content-Type"]
+      expose_headers    = []
+      max_age           = 86401
+      allow_credentials = false
+    }
+  }
+
+  expect_failures = [var.cors_configuration]
+}
