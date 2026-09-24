@@ -422,6 +422,15 @@ variable "custom_ingress_rules" {
   }))
   description = "Custom ingress rules for RDS security group"
   default     = []
+
+  # Prefix-length check (not a literal-string check) so it also catches
+  # ::/0 and any other /0, per components/terraform/ec2/variables.tf.
+  validation {
+    condition = alltrue([for r in var.custom_ingress_rules : alltrue([
+      for c in(r.cidr_blocks == null ? [] : r.cidr_blocks) : try(split("/", c)[1] != "0", true)
+    ])])
+    error_message = "custom_ingress_rules must not be open to everywhere (0.0.0.0/0 or any other /0)."
+  }
 }
 
 # Performance Monitoring Variables

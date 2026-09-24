@@ -221,7 +221,7 @@ variable "allowed_security_group_ids" {
 
 variable "allowed_cidr_blocks" {
   type        = list(string)
-  description = "CIDR blocks allowed to reach the cache port; must be private ranges, never 0.0.0.0/0"
+  description = "CIDR blocks allowed to reach the cache port; must be private ranges, never 0.0.0.0/0 or ::/0"
   default     = []
 
   validation {
@@ -229,9 +229,11 @@ variable "allowed_cidr_blocks" {
     error_message = "All entries must be valid IPv4 CIDR blocks."
   }
 
+  # Prefix-length check (not a literal-string check) so it also catches
+  # ::/0 and any other /0, per components/terraform/ec2/variables.tf.
   validation {
-    condition     = !contains(var.allowed_cidr_blocks, "0.0.0.0/0")
-    error_message = "allowed_cidr_blocks must not contain 0.0.0.0/0; grant access from explicit private ranges or source security groups."
+    condition     = alltrue([for c in var.allowed_cidr_blocks : try(split("/", c)[1] != "0", true)])
+    error_message = "allowed_cidr_blocks must not be open to everywhere (0.0.0.0/0 or any other /0); grant access from explicit private ranges or source security groups."
   }
 }
 

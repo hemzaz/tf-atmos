@@ -3,9 +3,10 @@
 # This repo's "never 0.0.0.0/0 or ::/0" rule governs INGRESS only -- what the
 # outside can reach inside. allow_all_egress now defaults to `true`, matching
 # Cloudposse; a prior revision defaulted it to `false` as a misreading of the
-# ingress-only rule. These two runs prove both halves stayed true after the
-# revert: egress is unrestricted by default, and the opt-in ingress guard
-# (enforce_no_public_ingress) still rejects 0.0.0.0/0 and ::/0.
+# ingress-only rule. These runs prove both halves stayed true after the
+# revert: egress is unrestricted by default, and the ingress guard
+# (enforce_no_public_ingress, itself now defaulting to `true`) rejects
+# 0.0.0.0/0 and ::/0 whether set explicitly or left at its default.
 #
 # mock_provider avoids needing real AWS credentials; `command = plan` is
 # enough since every assertion below is knowable without calling AWS.
@@ -138,6 +139,35 @@ run "ingress_ipv6_public_cidr_still_rejected" {
             to_port          = 443
             protocol         = "tcp"
             ipv6_cidr_blocks = ["::/0"]
+          }
+        ]
+        egress_rules = []
+      }
+    }
+  }
+
+  expect_failures = [
+    terraform_data.validate_no_permissive_rules[0],
+  ]
+}
+
+run "default_now_enforces_no_public_ingress" {
+  command = plan
+
+  # enforce_no_public_ingress is not set here: this proves the component's
+  # own default (now `true`) blocks public ingress without a stack having to
+  # opt in explicitly.
+  variables {
+    security_groups = {
+      app = {
+        description = "test group"
+        ingress_rules = [
+          {
+            key         = "https-public"
+            from_port   = 443
+            to_port     = 443
+            protocol    = "tcp"
+            cidr_blocks = ["0.0.0.0/0"]
           }
         ]
         egress_rules = []

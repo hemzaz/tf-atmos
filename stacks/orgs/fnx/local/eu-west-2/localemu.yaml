@@ -46,10 +46,14 @@
 # LocalEmu is clean (vpc 16 resources, lambda 4, rds 6). A SECOND cycle in the
 # same process is not: leftover objects make CreateDBParameterGroup and
 # CreateRole return AlreadyExists, and aws_db_subnet_group then fails with
-# "Provider produced inconsistent result after apply". Restart LocalEmu and
-# clear terraform.tfstate.d/fnx-local-localemu-* between runs. This is emulator
-# fidelity, not a component defect, but it is why the lane is not yet wired
-# into a repeatable workflow the way the Floci sandbox is.
+# "Provider produced inconsistent result after apply". This is emulator
+# fidelity, not a component defect. The `localemu` workflow
+# (workflows/localemu.yaml, run in CI by .github/workflows/emulator.yml) works
+# around it with a clear-lane-state step that removes this lane's
+# fnx-local-localemu-* workspace state before every apply, so a fresh cycle is
+# what actually runs even when the same LocalEmu process is reused; a manual
+# run without that workflow still needs a freshly started LocalEmu or the
+# state cleared by hand.
 #
 # This is a SEPARATE STACK, not extra instances in sandbox.yaml, because
 # Terraform state is keyed by component+stack: applying one instance against
@@ -59,12 +63,14 @@
 # LocalEmu (localemu.cloud, Apache 2.0) is NOT an Atmos emulator component -
 # Atmos has no localemu driver. It is started by hand, outside Atmos, and is
 # reached through the `local-emu` identity in atmos.yaml, whose
-# spec.endpoint_url points at http://localhost:4566. Install it with pip into a
-# venv outside this repo and start it by hand; there is no workflow step yet,
-# for the reason in the FRESH EMULATOR note above. Apply with BOTH the dummy
-# credentials and AWS_ENDPOINT_URL exported - spec.endpoint_url only redirects
-# Atmos's own AWS calls, not the Terraform provider, so without the env var the
-# apply reaches real AWS and fails on an STS 403:
+# spec.endpoint_url points at http://localhost:4566. `atmos workflow
+# localemu-up -f localemu` installs (via pip into a venv) and starts it;
+# `atmos workflow localemu -f localemu` does that, applies every component
+# above, destroys them, and stops it again — see workflows/localemu.yaml. A
+# manual apply outside that workflow still needs BOTH the dummy credentials
+# and AWS_ENDPOINT_URL exported - spec.endpoint_url only redirects Atmos's own
+# AWS calls, not the Terraform provider, so without the env var the apply
+# reaches real AWS and fails on an STS 403:
 #
 #   export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test \
 #          AWS_ENDPOINT_URL=http://localhost:4566

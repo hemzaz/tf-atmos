@@ -208,3 +208,24 @@ run "cluster_mode_allows_zero_replicas_per_shard" {
     error_message = "AWS allows 0 replicas per shard in cluster mode (cheaper dev/test); the component must not forbid it."
   }
 }
+
+run "ingress_open_to_everywhere_is_rejected" {
+  command = plan
+
+  variables {
+    allowed_cidr_blocks = ["10.0.0.0/8", "0.0.0.0/0"]
+  }
+
+  expect_failures = [var.allowed_cidr_blocks]
+}
+
+run "ingress_ipv6_open_to_everywhere_is_rejected" {
+  command = plan
+
+  # ::/0 is as open as 0.0.0.0/0; the prefix-length check must catch both.
+  variables {
+    allowed_cidr_blocks = ["::/0"]
+  }
+
+  expect_failures = [var.allowed_cidr_blocks]
+}
