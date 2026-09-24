@@ -26,8 +26,9 @@
 name: Emulator
 
 on:
+  # No `branches:` filter on pull_request: stacked PRs (PR -> feature branch,
+  # not master) must get the same emulator coverage as PRs into master.
   pull_request:
-    branches: [main, master]
     paths:
       - "components/terraform/**"
       - "stacks/**"

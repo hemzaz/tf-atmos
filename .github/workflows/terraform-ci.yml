@@ -30,8 +30,11 @@
 name: Terraform CI
 
 on:
+  # No `branches:` filter: stacked PRs (PR -> feature branch, not master) must
+  # get the same static-analysis gates as PRs into master. Without this, a
+  # stacked PR only gets GitGuardian and the integration PR becomes the first
+  # real gate (see #171-#179).
   pull_request:
-    branches: [main, master]
     paths:
       - atmos.yaml
       - components/**
@@ -153,18 +156,39 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # Same "dubious ownership" cause as the plan-sweep and security-scan jobs
+      # above: the workspace is owned by the runner's user, the container runs
+      # as root, and checkout's own safe.directory entry doesn't reach later
+      # steps. `atmos describe affected` shells out to `git worktree add` to
+      # check out the base ref for diffing, and that failed here with
+      # "failed to create git worktree: exit status 128" without this.
+      - name: Allow git operations in the container's workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # describe affected also parses the base branch. When the base cannot be
       # parsed (e.g. pre-migration stacks invalid for this Atmos version), plan
       # every enabled, non-abstract instance instead of failing the PR.
+      #
+      # Without --base, `atmos describe affected` diffs against the repo's
+      # default branch. That is wrong for a stacked PR (base = a feature
+      # branch, not master): pass the PR's actual base commit so the affected
+      # set is computed against what the PR will actually merge into. This
+      # context is only present on pull_request events; merge_group keeps the
+      # previous (default-branch) behaviour, which is already correct there.
+      # (--sha is a deprecated alias for --base as of Atmos 1.229.0.)
       - id: affected
         shell: python3 {0}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           import json, os, subprocess
 
           out_file = os.environ["GITHUB_OUTPUT"]
-          affected = subprocess.run(
-              ["atmos", "describe", "affected", "--format=matrix", "--include-dependents",
-               "--process-functions=false", "--output-file", "affected.out"])
+          cmd = ["atmos", "describe", "affected", "--format=matrix", "--include-dependents",
+                 "--process-functions=false", "--output-file", "affected.out"]
+          base_sha = os.environ.get("BASE_SHA")
+          if base_sha:
+              cmd += ["--base", base_sha]
+          affected = subprocess.run(cmd)
           if affected.returncode == 0:
               with open("affected.out") as src, open(out_file, "a") as out:
                   out.write(src.read())

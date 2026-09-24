@@ -70,7 +70,7 @@ variable "cluster_kubernetes_version" {
 
   validation {
     condition     = var.cluster_kubernetes_version == null || can(regex("^\\d+\\.(\\d+)$", var.cluster_kubernetes_version))
-    error_message = "Kubernetes version must be valid and in the format 'X.Y' (e.g., 1.28)."
+    error_message = "Kubernetes version must be valid and in the format 'X.Y' (e.g., 1.36)."
   }
 }
 
