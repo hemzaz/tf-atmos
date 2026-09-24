@@ -73,10 +73,11 @@ variable "security_groups" {
     preserve_security_group_id = optional(bool, false)
 
     # Cloudposse's allow_all_egress, per group: adds their "_allow_all_egress_"
-    # rule (egress, -1, 0.0.0.0/0 and ::/0). Their default is true; the repo
-    # owner set it false here because this repo forbids 0.0.0.0/0 and this
-    # component audits permissive rules. See the README.
-    allow_all_egress = optional(bool, false)
+    # rule (egress, -1, 0.0.0.0/0 and ::/0). Defaults to true, matching
+    # Cloudposse: this repo's "never 0.0.0.0/0 or ::/0" rule governs INGRESS
+    # only (what the outside can reach inside, see enforce_no_public_ingress
+    # below and audit.tf); outbound is unrestricted by policy. See the README.
+    allow_all_egress = optional(bool, true)
 
     # Not a setting: rejected by the validation below. It exists in the type
     # only so that a stack still setting it fails loudly -- an attribute

@@ -232,6 +232,13 @@ components:
             # ones after it. Adding or renaming a key on a live rule takes two
             # applies (see the README).
             preserve_security_group_id: true
+            # The component's own default for allow_all_egress is now `true`
+            # (matches Cloudposse). This group already has its own explicit
+            # all-outbound egress rule below, so leaving the default in place
+            # would add the reserved `_allow_all_egress_` rule on top of it —
+            # same permission, authorized twice — and apply would fail with
+            # InvalidPermission.Duplicate. Set explicitly to false instead.
+            allow_all_egress: false
             description: "Sandbox application tier"
             ingress_rules:
               - key: "https-vpc"

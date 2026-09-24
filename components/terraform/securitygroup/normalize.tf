@@ -103,8 +103,8 @@ locals {
     self                     = false
   }]])
 
-  # Cloudposse normalize.tf allow_egress_rule / extra_rules, per group. Their
-  # allow_all_egress defaults to true; here it defaults to false (see
+  # Cloudposse normalize.tf allow_egress_rule / extra_rules, per group. Both
+  # here and in Cloudposse, allow_all_egress defaults to true (see
   # variables.tf and the README). The rule joins all_resource_rules like any
   # other, so it takes the keyed/dbc path and feeds the random_id keepers.
   extra_rules = [for k, sg in var.security_groups : {
