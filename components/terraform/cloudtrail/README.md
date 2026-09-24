@@ -25,6 +25,13 @@ share one audit-account bucket. Every stack here is its own account with its
 own trail, so the bucket lives with the trail. The input and output names
 follow Cloud Posse's.
 
+## Account model
+
+Each stack is its own AWS account. Stack names are
+`<tenant>-<account>-<environment>`, with separate dev, staging and prod
+accounts, and `guardduty` and `securityhub` already assume one instance per
+account. So each stack runs one multi-region trail (`cloudtrail/main`) with its own bucket and log group. If two stacks ever share an account, disable `cloudtrail/main` in all but one of them (`metadata.enabled: false`): a second multi-region trail duplicates every management event and its cost.
+
 ## Deployed instances
 
 `cloudtrail/main` in all three stacks (`components/security.yaml`), inheriting
@@ -56,7 +63,8 @@ vars:
 
 - The `kms/main` key policy must allow CloudTrail and CloudWatch Logs.
   `kms/defaults` sets `allow_cloudtrail` (`kms:GenerateDataKey*`, scoped by
-  `kms:EncryptionContext:aws:cloudtrail:arn` and `aws:SourceArn`) and
+  `kms:EncryptionContext:aws:cloudtrail:arn` and `aws:SourceArn`, plus
+  `kms:Decrypt`, which the bucket's S3 Bucket Key needs) and
   `allow_cloudwatch_logs`. Without them the trail or the log group fails to
   create.
 - ARNs are built from names, not read from the resources. The bucket policy

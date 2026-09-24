@@ -172,7 +172,7 @@ variable "allow_cloudwatch_alarms" {
 
 variable "allow_cloudtrail" {
   type        = bool
-  description = "Let CloudTrail (cloudtrail.amazonaws.com) encrypt this account's trail log files with the key (kms:GenerateDataKey*, scoped by kms:EncryptionContext:aws:cloudtrail:arn) and describe it, both limited to this account's trails in this region by aws:SourceArn"
+  description = "Let CloudTrail (cloudtrail.amazonaws.com) encrypt this account's trail log files with the key (kms:GenerateDataKey*, scoped by kms:EncryptionContext:aws:cloudtrail:arn), decrypt (needed when the trail bucket uses an S3 Bucket Key) and describe it, all limited to this account's trails in this region by aws:SourceArn"
   default     = false
 }
 

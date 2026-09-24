@@ -62,6 +62,9 @@ resource "aws_s3_bucket_versioning" "this" {
   }
 }
 
+# S3 Bucket Key on (the Cloud Posse default): fewer KMS calls. It needs
+# kms:Decrypt for cloudtrail.amazonaws.com in the key policy, which kms
+# allow_cloudtrail grants (AllowCloudTrailDecrypt).
 resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   bucket = aws_s3_bucket.this.id
 

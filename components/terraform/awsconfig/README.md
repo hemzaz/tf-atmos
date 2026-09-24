@@ -25,6 +25,13 @@ Cloud Posse keeps the bucket in a separate component so an organization can
 share one audit-account bucket. Every stack here is its own account, so the
 bucket lives with the recorder.
 
+## Account model
+
+Each stack is its own AWS account. Stack names are
+`<tenant>-<account>-<environment>`, with separate dev, staging and prod
+accounts, and `guardduty` and `securityhub` already assume one instance per
+account. So each stack runs one recorder (`awsconfig/main`) that also records global resource types (`include_global_resource_types: true`). If two stacks ever share an account, keep the recorder in one of them only (`metadata.enabled: false` elsewhere). AWS allows one recorder per account and region, and global resource types must be recorded in exactly one region.
+
 ## Deployed instances
 
 `awsconfig/main` in all three stacks (`components/security.yaml`), inheriting
