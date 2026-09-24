@@ -347,8 +347,11 @@ components:
         # Routes are not declared here: an HTTP API route to the cluster
         # targets the listener of the ALB that the in-cluster load balancer
         # controller creates from an Ingress, which no Terraform state holds.
+        # The link's network interfaces get their own group
+        # (microservices/securitygroup/vpc-link below), which services in the
+        # cluster admit as a source.
         vpc_link_subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
-        vpc_link_security_group_ids: !terraform.state microservices/vpc '.default_security_group_id | [.]'
+        vpc_link_security_group_ids: !terraform.state microservices/securitygroup/vpc-link '.security_group_ids.vpc_link | [.]'
 
         # JWT authorization via Cognito
         authorizer_type: "JWT"
@@ -381,7 +384,32 @@ components:
       dependencies:
         components:
           - component: microservices/vpc
+          - component: microservices/securitygroup/vpc-link
           - component: kms/main
+
+    # The API Gateway VPC link's own security group. The link's interfaces
+    # only open connections to targets in the VPC, so the group admits no
+    # ingress at all (and 0.0.0.0/0 ingress is refused outright); egress is
+    # open, which this repo allows. Not the vpc component's shared default
+    # group: the link should be a distinct source that services admit.
+    microservices/securitygroup/vpc-link:
+      metadata:
+        component: securitygroup
+        type: real
+      vars:
+        vpc_id: !terraform.state microservices/vpc .vpc_id
+        enforce_no_public_ingress: true
+        security_groups:
+          vpc_link:
+            description: "API Gateway VPC link for the microservices HTTP API"
+            ingress_rules: []
+            allow_all_egress: true
+        tags:
+          Layer: "api-gateway"
+          Platform: "microservices"
+      dependencies:
+        components:
+          - component: microservices/vpc
 
     # =========================================================================
     # EVENT BUS (EventBridge)
