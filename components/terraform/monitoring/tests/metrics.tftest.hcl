@@ -148,6 +148,24 @@ run "saved_logs_insights_query" {
   }
 }
 
+run "xray_rule_name_fits_the_32_character_limit" {
+  command = plan
+
+  variables {
+    enable_tracing = true
+    tags = {
+      Environment = "a-rather-long-environment-name"
+      Tenant      = "fnx"
+      ManagedBy   = "Terraform"
+    }
+  }
+
+  assert {
+    condition     = length(aws_xray_sampling_rule.backend_services[0].rule_name) <= 32
+    error_message = "X-Ray rejects rule names over 32 characters."
+  }
+}
+
 run "rejects_both_statistics" {
   command = plan
 

@@ -57,6 +57,9 @@ Tests: `tests/metrics.tftest.hcl`, run against a mock provider with
 - `certificate_arns`/`certificate_domains` come from acm outputs via a
   `// {}` fallback, so this still plans cleanly with empty maps if acm has
   no certs yet.
+- `enable_tracing` creates an X-Ray sampling rule `<Environment>-backend-services`
+  (10% fixed rate), cut to X-Ray's 32-character limit. It used to be
+  `<Environment>-monitoring-backend-services`, over the limit in every stack.
 - Alarms only send notifications if `create_sns_topic = true`; alarm
   actions reference `aws_sns_topic.alarms[0]` conditionally.
 
