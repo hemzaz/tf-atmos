@@ -774,7 +774,7 @@ for s in $STACKS; do
     # A reference that is broken whatever the state holds: a stack or
     # instance that is not there, arguments Atmos cannot parse, an expression
     # yq rejects -- Atmos stops -- or an output the component does not declare,
-    # which reads null from S3 (or, behind a '//' default, is simply stale).
+    # read with no '//' default, which reads null from S3.
     # The stack's defect, found before any plan. Not planned: the varfile
     # lacks the broken values, and whatever the plan said about that would be
     # this script's damage, reported on top of the real finding.

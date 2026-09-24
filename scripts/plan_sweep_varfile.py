@@ -245,6 +245,29 @@ def atmos_expr(expr):
     return expr if expr.startswith('.') else '.' + expr
 
 
+def skip_yq_string(e, i):
+    """e[i] opens a double-quoted yq string; the index just past its close."""
+    i += 1
+    while i < len(e) and e[i] != '"':
+        i += 2 if e[i] == '\\' else 1
+    return i + 1
+
+
+def has_alternative(expr):
+    """True when the expression uses yq's '//' alternative operator -- outside
+    a string: the '//' of `"s3://" + .` is no default, and reading it as one
+    turned a broken reference into a stale warning."""
+    i = 0
+    while i < len(expr):
+        if expr[i] == '"':
+            i = skip_yq_string(expr, i)
+            continue
+        if expr.startswith('//', i) and not expr.startswith('//=', i):
+            return True
+        i += 1
+    return False
+
+
 def root_outputs(expr):
     """Every output an expression reads off the ROOT of the outputs map.
 
@@ -259,10 +282,7 @@ def root_outputs(expr):
     while i < len(e):
         c = e[i]
         if c == '"':
-            i += 1
-            while i < len(e) and e[i] != '"':
-                i += 2 if e[i] == '\\' else 1
-            i += 1
+            i = skip_yq_string(e, i)
             continue
         if c in '([{':
             piped.append(piped[-1])
@@ -286,6 +306,12 @@ def accessed_keys(expr, output):
     expression that reads the output (`to_entries | map(select(...))`,
     `with_entries(select(...))`). A key read any other way is not collected,
     and resolve_ref falls back when that is what made the result null.
+
+    Deliberately broad: the sweep cannot see a map's real keys, so every key
+    a reference names is assumed to exist -- a typo'd key included, as
+    `.m.typo` always was -- and a select() adds its key to every output its
+    expression reads, even when it filters a different map. More keys only
+    mean more values, never a missed parse or yq error.
     """
     o = re.escape(output)
     quoted = r'"([^"\\]+)"'
@@ -532,38 +558,44 @@ def resolve_ref(s, var, resolver, warnings=None):
     if not outputs or not comp.readable or not comp.outputs:
         return 'fallback', None
     doc, maps, stale = {}, [], []
+
+    def done(kind, value):
+        # A stale reference is reported whenever the reference itself does
+        # not fail -- a fallback included -- and never on top of a FAIL.
+        if kind != 'defect' and warnings is not None:
+            warnings.extend(stale)
+        return kind, value
+
     for output in outputs:
         if output not in comp.outputs:
             if comp.declares_output(output):
-                return 'fallback', None   # declared, but the reader could not parse it
+                return done('fallback', None)   # declared, but the reader could not parse it
             # With real state a missing output reads as null from an S3
             # backend (an error from a static one). Without a '//' default
             # that null is the stack's defect.
-            if '//' not in expr:
+            if not has_alternative(expr):
                 return 'defect', '%s: %s (component %s) declares no output "%s", so it reads ' \
                     'null with real state (%s)' % (var, instance, comp_name, output, s)
             # With one, Atmos succeeds (both backends: the recorded rows in
-            # ATMOS_CASES and STALE_CASES), so it is evaluated as Atmos would,
-            # the output absent, and reported as stale without failing.
-            stale.append('%s: %s (component %s) declares no output "%s", so its // default '
-                         'always applies: the reference is stale (%s)' % (
+            # ATMOS_CASES), so it is evaluated as Atmos would, the output
+            # absent, and reported as stale without failing.
+            stale.append('%s: %s (component %s) declares no output "%s", read in an expression '
+                         'with a // default: the reference is stale (%s)' % (
                              var, instance, comp_name, output, s))
             continue
         shape = shape_of(comp.outputs[output], Ctx(comp))
         value = synth_value(shape, [output, singular(output), var],
                             resolver.keys(stack, instance, output)) if known(shape) else None
         if value is None:
-            return 'fallback', None
+            return done('fallback', None)
         doc[output] = value
         if shape[0] == 'map':
             maps.append(output)
-    if warnings is not None:
-        warnings.extend(stale)
     got, err = atmos_yq(expr, doc)
     if err is not None:
         return 'defect', '%s: yq cannot evaluate %r: %s' % (var, atmos_expr(expr), err)
-    if got is None and maps:
-        # Would the result still be null if every map held every key the
+    if has_null(got) and maps:
+        # Would the result still hold that null if every map held every key the
         # expression could name? If not, the null is a key the builder did
         # not collect -- `.m as $x | $x.k` -- and passing it would be this
         # script's value. A key built at run time
@@ -572,9 +604,21 @@ def resolve_ref(s, var, resolver, warnings=None):
         for output in maps:
             leaf = next(iter(doc[output].values()))
             probe[output] = dict({k: leaf for k in candidate_keys(expr)}, **doc[output])
-        if atmos_yq(expr, probe)[0] is not None:
-            return 'fallback', None
-    return 'shaped', got
+        # `.m | [.a, .x]` or `.m | {"a": .x}`: the null can sit inside the
+        # result as well as be it.
+        if atmos_yq(expr, probe)[0] != got:
+            return done('fallback', None)
+    return done('shaped', got)
+
+
+def has_null(v):
+    if v is None:
+        return True
+    if isinstance(v, dict):
+        return any(has_null(x) for x in v.values())
+    if isinstance(v, list):
+        return any(has_null(x) for x in v)
+    return False
 
 
 SENTINEL = object()
@@ -704,6 +748,13 @@ ATMOS_CASES = [
     ('.no_such_output // "x"', 'x'),
     ('.vpc_id // .no_such_output', 'vpc-1'),
     ('.no_such_output | .x // "d"', 'd'),
+    # A '//' inside a string is no default: Atmos hands the variable a
+    # broken URI, which the sweep must FAIL, not call stale.
+    ('.no_such_output | "s3://" + . + "/"', 's3:///'),
+    ('"x//y" + .no_such_output', None),
+    # A key missing inside the result, not as the result.
+    ('.certificate_arns | [.main_wildcard, .missing]', ['arn:a', None]),
+    ('.certificate_arns | {"a": .missing}', {'a': None}),
     ('.arn_keyed', {'arn:aws:acm:eu-west-2:1:certificate/x': 'a'}),
 ]
 # Also recorded on the local backend, and rejected by real Atmos:
@@ -738,6 +789,9 @@ output "pairs" {
 output "obj" {
   value = { vpc_id = aws_x.y.id }
 }
+output "unreadable" {
+  value = some_function_the_reader_does_not_know(aws_x.y.id)
+}
 '''
 
 
@@ -753,7 +807,7 @@ def self_test(components_dir, tmp):
         # Real Atmos sorted the map's keys; order within a list is not what
         # any of these rows is about.
         if isinstance(got, list) and isinstance(want, list):
-            got, want = sorted(got), sorted(want)
+            got, want = sorted(got, key=repr), sorted(want, key=repr)
         check('atmos_yq %s' % expr, (got, err), (want, None))
     check('atmos_yq merges distinct map results (real Atmos: the union)',
           atmos_yq('.one_key, .certificate_arns', ATMOS_DATA),
@@ -907,6 +961,11 @@ def self_test(components_dir, tmp):
     # hand the variable a null Atmos would not.
     check('uncollected key falls back', ref('.certificate_arns.no_such_key'), ('fallback', None))
     check('uncollected $var key falls back', ref('.certificate_arns as $x | $x.api'), ('fallback', None))
+    # A null INSIDE the result from an uncollected key falls back too.
+    check('uncollected key in a list falls back', ref('.certificate_arns | [.main_wildcard, .api]'),
+          ('fallback', None))
+    check('uncollected key in an object falls back', ref('.certificate_arns | {"a": .api}'),
+          ('fallback', None))
     # A genuine null still passes through: an object attribute that the
     # output does not have.
     check('null passes through, no fallback',
@@ -930,6 +989,9 @@ def self_test(components_dir, tmp):
         ('missing output', 'vpc/main .no_such_output'),
         ('missing output, no default', 'vpc/main .no_such_output | .x'),
         ('missing output behind // but yq rejects it', 'vpc/main .no_such_output // "x" | ]['),
+        # A '//' inside a string is no default: the repo's own s3:// idiom.
+        ('missing output, // only in a string', 'vpc/main .no_such_output | "s3://" + . + "/"'),
+        ('missing output, // only in a string before it', 'vpc/main "x//y" + .no_such_output'),
         ('yq error', 'vpc/main .vpc_id | ]['),
         ('parenthesised expression is an Atmos parse error', 'vpc/main (.vpc_id // "x")'),
         ('object expression gets the leading dot', 'vpc/main {"a": .vpc_id}'),
@@ -948,9 +1010,20 @@ def self_test(components_dir, tmp):
         got = resolve_ref('!terraform.state ' + args, 'x', res, warned)
         check('stale %s' % args, (got, len(warned), all('stale' in w for w in warned)),
               (('shaped', want), 1, True))
+    for args in ['vpc/main .no_such_output', 'vpc/main .no_such_output // "x" | ][',
+                 'vpc/main .no_such_output | "s3://" + . + "/"']:
+        warned = []
+        resolve_ref('!terraform.state ' + args, 'x', res, warned)
+        check('a FAIL is not also a warning: %s' % args, warned, [])
+    # A stale reference stays reported when another output in the same
+    # expression falls back: fake's `unreadable` has a shape the reader
+    # cannot tell.
     warned = []
-    resolve_ref('!terraform.state vpc/main .no_such_output', 'x', res, warned)
-    check('a FAIL is not also a warning', warned, [])
+    got = resolve_ref('!terraform.state fake/main .no_such_output // .unreadable', 'x', res, warned)
+    check('stale kept when a later output falls back', (got, len(warned)), (('fallback', None), 1))
+    check('has_alternative', [has_alternative(e) for e in
+                              ['.a // "x"', '.a | "s3://" + .', '"x//y" + .a', '"a\\"//" + .b', '.a //= 1']],
+          [True, False, False, False, False])
     top, b = build({'vars': {'x': '!terraform.state vpc/main .no_such_output // "x"'}},
                    stack, tmp, components_dir)
     check('stale reference is a warning, not a defect', (top, b.defects, len(b.warnings)),
