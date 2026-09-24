@@ -17,6 +17,8 @@ module "kms" {
   key_administrators              = var.key_administrators
   key_users                       = var.key_users
   key_service_users               = var.key_service_users
+  allow_cloudwatch_logs           = var.allow_cloudwatch_logs
+  allow_eventbridge               = var.allow_eventbridge
   alias_name                      = var.alias_name
   create_alias                    = var.create_alias
   replica_regions                 = var.replica_regions

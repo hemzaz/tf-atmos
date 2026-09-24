@@ -12,6 +12,11 @@ output "key_arn" {
   value       = aws_kms_key.main.arn
 }
 
+output "key_policy" {
+  description = "The key policy JSON applied to the key"
+  value       = local.use_custom_policy ? var.key_policy : local.default_policy
+}
+
 output "key_alias_name" {
   description = "KMS key alias name"
   value       = var.create_alias ? aws_kms_alias.main[0].name : ""
