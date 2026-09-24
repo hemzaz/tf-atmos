@@ -1,0 +1,30 @@
+---
+##################################################
+# Catalog Configuration for Amazon DynamoDB
+##################################################
+# One table per instance (the Cloud Posse aws-dynamodb model). Instances
+# inherit this base and set `name`, `hash_key` and, as needed, `range_key`,
+# `dynamodb_attributes` and the index maps.
+
+components:
+  terraform:
+    dynamodb/defaults:
+      metadata:
+        component: dynamodb
+        type: abstract
+      # server_side_encryption_kms_key_arn reads kms/main, so the key is applied
+      # first. workflows/scripts/common/check-dependencies.py enforces that
+      # every component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        billing_mode: PAY_PER_REQUEST
+        # Every stack runs a kms/main instance (catalog/kms/defaults), so this
+        # resolves everywhere. The component accepts only a KMS key ARN.
+        server_side_encryption_kms_key_arn: !terraform.state kms/main .key_arn
+        point_in_time_recovery_enabled: true
+        deletion_protection_enabled: false
+        tags:
+          Component: "DynamoDB"
