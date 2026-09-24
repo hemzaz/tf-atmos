@@ -1,0 +1,30 @@
+---
+##################################################
+# Catalog Configuration for Amazon SNS
+##################################################
+# One topic per instance with its subscriptions (the Cloud Posse
+# aws-sns-topic model). Instances inherit this base and set `name`,
+# `subscribers` and the allowed publishers.
+
+components:
+  terraform:
+    sns/defaults:
+      metadata:
+        component: sns
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults) with
+        # allow_eventbridge on, so EventBridge rules can publish to topics
+        # encrypted with it.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        fifo_topic: false
+        subscribers: {}
+        tags:
+          Component: "SNS"
