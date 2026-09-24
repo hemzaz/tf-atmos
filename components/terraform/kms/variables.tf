@@ -152,6 +152,18 @@ variable "key_service_users" {
   default     = []
 }
 
+variable "allow_cloudwatch_logs" {
+  type        = bool
+  description = "Let CloudWatch Logs encrypt this account's log groups in this region with the key (scoped by kms:EncryptionContext:aws:logs:arn)"
+  default     = false
+}
+
+variable "allow_eventbridge" {
+  type        = bool
+  description = "Let EventBridge encrypt this account's event buses and archives in this region with the key (scoped by aws:SourceAccount and aws:SourceArn)"
+  default     = false
+}
+
 ##############################################
 # Alias Configuration
 ##############################################

@@ -125,4 +125,72 @@ data "aws_iam_policy_document" "default" {
       }
     }
   }
+
+  # CloudWatch Logs, limited to this account's log groups in this region (the
+  # pattern vpc/flow-logs.tf uses for its own key). Without it a log group
+  # given this key fails to create: IAM delegation does not reach service
+  # principals.
+  dynamic "statement" {
+    for_each = var.allow_cloudwatch_logs ? [1] : []
+
+    content {
+      sid = "AllowCloudWatchLogs"
+      actions = [
+        "kms:Encrypt*",
+        "kms:Decrypt*",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:Describe*",
+      ]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["logs.${data.aws_region.current.region}.amazonaws.com"]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:logs:arn"
+        values   = ["arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:*"]
+      }
+    }
+  }
+
+  # EventBridge event buses and archives, limited to this account and region
+  # (aws:SourceAccount / aws:SourceArn guard against the confused deputy).
+  dynamic "statement" {
+    for_each = var.allow_eventbridge ? [1] : []
+
+    content {
+      sid = "AllowEventBridge"
+      actions = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+        "kms:ReEncrypt*",
+        "kms:DescribeKey",
+      ]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["events.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values = [
+          "arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:event-bus/*",
+          "arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:archive/*",
+        ]
+      }
+    }
+  }
 }

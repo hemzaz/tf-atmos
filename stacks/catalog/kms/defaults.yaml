@@ -28,6 +28,12 @@ components:
         # exist, because KMS rejects a policy naming a principal it cannot
         # resolve.
         enable_default_policy: true
+        # CloudWatch Logs and EventBridge are service principals, which the
+        # root-account statement does not reach. Components encrypting log
+        # groups (eventbridge, apigateway, ...) or event buses with this key
+        # need these; each statement is limited to this account and region.
+        allow_cloudwatch_logs: true
+        allow_eventbridge: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates
