@@ -130,7 +130,7 @@
             "file": "/ec2/launch-template.tf",
             "findings": [
                 {
-                    "resource": "aws_instance.from_launch_template",
+                    "resource": "aws_instance.from_launch_template[0]",
                     "check_ids": [
                         "CKV2_AWS_41"
                     ]
@@ -141,17 +141,9 @@
             "file": "/ec2/main.tf",
             "findings": [
                 {
-                    "resource": "aws_secretsmanager_secret.global_ssh_key[0]",
+                    "resource": "aws_secretsmanager_secret.ssh_key[0]",
                     "check_ids": [
-                        "CKV2_AWS_57",
-                        "CKV_AWS_149"
-                    ]
-                },
-                {
-                    "resource": "aws_secretsmanager_secret.ssh_key",
-                    "check_ids": [
-                        "CKV2_AWS_57",
-                        "CKV_AWS_149"
+                        "CKV2_AWS_57"
                     ]
                 }
             ]
@@ -175,7 +167,7 @@
             "file": "/eks/main.tf",
             "findings": [
                 {
-                    "resource": "module.eks_cluster.aws_eks_cluster.clusters",
+                    "resource": "module.eks_cluster.aws_eks_cluster.default[0]",
                     "check_ids": [
                         "CKV_AWS_339"
                     ]

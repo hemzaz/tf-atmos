@@ -95,13 +95,15 @@ components:
         enable_dns_hostnames: true
         enable_dns_support: true
 
-        # Subnet tags for EKS auto-discovery
+        # Subnet tags for EKS auto-discovery. The key names the cluster, which
+        # the eks component names "<Environment>-<name>": microservices/eks
+        # below sets name: microservices.
         public_subnet_tags:
           "kubernetes.io/role/elb": "1"
-          "kubernetes.io/cluster/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eks": "shared"
+          "kubernetes.io/cluster/{{ .settings.context.environment }}-microservices": "shared"
         private_subnet_tags:
           "kubernetes.io/role/internal-elb": "1"
-          "kubernetes.io/cluster/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eks": "shared"
+          "kubernetes.io/cluster/{{ .settings.context.environment }}-microservices": "shared"
 
         tags:
           Layer: "networking"
@@ -118,59 +120,31 @@ components:
         inherits:
           - eks/defaults
       vars:
-        cluster_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eks"
-        kubernetes_version: "1.29"
+        # One cluster per instance (components/terraform/eks): the cluster is
+        # "<Environment>-microservices". Not part of the eks component, and
+        # dropped from this template: vpc_id (derived from subnet_ids), the
+        # extra cluster/node security group rules, cluster_addons (installed by
+        # eks-addons), authentication_mode and access_entries. IRSA (the OIDC
+        # provider) and secrets encryption are always on; the component creates
+        # its own KMS key unless cluster_encryption_config_kms_key_id is set.
+        name: microservices
+        cluster_kubernetes_version: "1.36"
 
-        vpc_id: !terraform.state microservices/vpc .vpc_id
         subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
 
-        # Cluster endpoint access
-        endpoint_private_access: true
-        endpoint_public_access: "{{ .vars.eks_public_access | default true }}"
-        public_access_cidrs:
-          - "0.0.0.0/0"
-
-        # Cluster encryption
-        encrypt_secrets: true
-        kms_key_arn: "{{ .vars.eks_kms_key_arn }}"
+        # Cluster endpoint access. A public endpoint must name its CIDRs in
+        # public_access_cidrs; 0.0.0.0/0 is rejected.
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
 
         # Cluster logging
-        enable_cluster_logging: true
         enabled_cluster_log_types:
           - "api"
           - "audit"
           - "authenticator"
           - "controllerManager"
           - "scheduler"
-        cloudwatch_log_group_retention_in_days: "{{ .vars.log_retention_days | default 30 }}"
-
-        # Cluster security group rules
-        cluster_security_group_additional_rules:
-          egress_nodes_ephemeral_ports_tcp:
-            description: "Cluster API to node groups"
-            protocol: "tcp"
-            from_port: 1025
-            to_port: 65535
-            type: "egress"
-            source_node_security_group: true
-
-        # Node security group rules
-        node_security_group_additional_rules:
-          ingress_self_all:
-            description: "Node to node all ports/protocols"
-            protocol: "-1"
-            from_port: 0
-            to_port: 0
-            type: "ingress"
-            self: true
-          egress_all:
-            description: "Node all egress"
-            protocol: "-1"
-            from_port: 0
-            to_port: 0
-            type: "egress"
-            cidr_blocks:
-              - "0.0.0.0/0"
+        cluster_log_retention_period: "{{ .vars.log_retention_days | default 30 }}"
 
         # Managed node groups
         node_groups:
@@ -179,23 +153,23 @@ components:
             instance_types:
               - "t3.medium"
             capacity_type: "ON_DEMAND"
-            min_size: 2
-            max_size: 4
-            desired_size: 2
+            min_group_size: 2
+            max_group_size: 4
+            desired_group_size: 2
             block_device_map:
               "/dev/xvda":
                 ebs:
                   volume_size: 50
-            labels:
+            kubernetes_labels:
               role: "system"
               node-type: "system"
-            taints:
+            kubernetes_taints:
               - key: "CriticalAddonsOnly"
                 value: "true"
                 effect: "NO_SCHEDULE"
             update_config:
               max_unavailable_percentage: 33
-            ami_type: "AL2_x86_64"
+            ami_type: "AL2023_x86_64_STANDARD" # no AL2 EKS AMIs for 1.33+
             detailed_monitoring_enabled: true
 
           # Application node group for microservices
@@ -203,19 +177,19 @@ components:
             instance_types:
               - "t3.large"
             capacity_type: "ON_DEMAND"
-            min_size: 3
-            max_size: 20
-            desired_size: 3
+            min_group_size: 3
+            max_group_size: 20
+            desired_group_size: 3
             block_device_map:
               "/dev/xvda":
                 ebs:
                   volume_size: 100
-            labels:
+            kubernetes_labels:
               role: "application"
               node-type: "application"
             update_config:
               max_unavailable_percentage: 25
-            ami_type: "AL2_x86_64"
+            ami_type: "AL2023_x86_64_STANDARD" # no AL2 EKS AMIs for 1.33+
             detailed_monitoring_enabled: true
 
           # Spot node group for cost optimization (non-critical workloads)
@@ -226,67 +200,24 @@ components:
               - "m5.large"
               - "m5.xlarge"
             capacity_type: "SPOT"
-            min_size: 0
-            max_size: 10
-            desired_size: 0
+            min_group_size: 0
+            max_group_size: 10
+            desired_group_size: 0
             block_device_map:
               "/dev/xvda":
                 ebs:
                   volume_size: 100
-            labels:
+            kubernetes_labels:
               role: "spot"
               node-type: "spot"
-            taints:
+            kubernetes_taints:
               - key: "spot"
                 value: "true"
                 effect: "NO_SCHEDULE"
             update_config:
               max_unavailable_percentage: 50
-            ami_type: "AL2_x86_64"
+            ami_type: "AL2023_x86_64_STANDARD" # no AL2 EKS AMIs for 1.33+
             detailed_monitoring_enabled: true
-
-        # OIDC provider for IRSA
-        enable_irsa: true
-
-        # Cluster addons
-        cluster_addons:
-          coredns:
-            most_recent: true
-            resolve_conflicts_on_create: "OVERWRITE"
-            resolve_conflicts_on_update: "OVERWRITE"
-          kube-proxy:
-            most_recent: true
-            resolve_conflicts_on_create: "OVERWRITE"
-            resolve_conflicts_on_update: "OVERWRITE"
-          vpc-cni:
-            most_recent: true
-            resolve_conflicts_on_create: "OVERWRITE"
-            resolve_conflicts_on_update: "OVERWRITE"
-            configuration_values: |
-              {
-                "env": {
-                  "ENABLE_PREFIX_DELEGATION": "true",
-                  "WARM_PREFIX_TARGET": "1"
-                }
-              }
-          aws-ebs-csi-driver:
-            most_recent: true
-            resolve_conflicts_on_create: "OVERWRITE"
-            service_account_role_arn: "{{ .vars.ebs_csi_role_arn }}"
-
-        # Authentication mode
-        authentication_mode: "API_AND_CONFIG_MAP"
-
-        # Access entries (RBAC)
-        access_entries:
-          admin:
-            principal_arn: "{{ .vars.eks_admin_role_arn }}"
-            type: "STANDARD"
-            policy_associations:
-              admin:
-                policy_arn: "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-                access_scope:
-                  type: "cluster"
 
         tags:
           Layer: "compute"
@@ -306,10 +237,10 @@ components:
         inherits:
           - eks-addons/defaults
       vars:
-        cluster_name: !terraform.state microservices/eks .cluster_id
-        cluster_endpoint: !terraform.state microservices/eks .cluster_endpoint
-        cluster_certificate_authority_data: !terraform.state microservices/eks .cluster_certificate_authority_data
-        oidc_provider_arn: !terraform.state microservices/eks .oidc_provider_arn
+        cluster_name: !terraform.state microservices/eks .eks_cluster_id
+        cluster_endpoint: !terraform.state microservices/eks .eks_cluster_endpoint
+        cluster_certificate_authority_data: !terraform.state microservices/eks .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state microservices/eks .eks_cluster_identity_oidc_issuer_arn
 
         # AWS Load Balancer Controller
         enable_aws_load_balancer_controller: true
@@ -717,7 +648,7 @@ components:
 
         # Container Insights metrics
         container_insights:
-          cluster_name: !terraform.state microservices/eks .cluster_id
+          cluster_name: !terraform.state microservices/eks .eks_cluster_id
           namespace_filter:
             - "*"
 
@@ -739,11 +670,11 @@ components:
                     - namespace: "ContainerInsights"
                       metric: "node_cpu_utilization"
                       dimensions:
-                        ClusterName: !terraform.state microservices/eks .cluster_id
+                        ClusterName: !terraform.state microservices/eks .eks_cluster_id
                     - namespace: "ContainerInsights"
                       metric: "node_memory_utilization"
                       dimensions:
-                        ClusterName: !terraform.state microservices/eks .cluster_id
+                        ClusterName: !terraform.state microservices/eks .eks_cluster_id
                   title: "Node Resource Utilization"
                   period: 300
 
@@ -796,7 +727,7 @@ components:
             period: 300
             statistic: "Maximum"
             dimensions:
-              ClusterName: !terraform.state microservices/eks .cluster_id
+              ClusterName: !terraform.state microservices/eks .eks_cluster_id
 
           # API Gateway alarms
           api_5xx_errors:
@@ -871,7 +802,7 @@ components:
         log_insights_queries:
           error_analysis:
             name: "Error Analysis"
-            log_group_name: !terraform.state microservices/eks .cluster_id | "/aws/eks/" + . + "/cluster"
+            log_group_name: !terraform.state microservices/eks .cloudwatch_log_group_name
             query: |
               fields @timestamp, @message
               | filter @message like /error|Error|ERROR/
@@ -968,7 +899,7 @@ components:
 # Development:
 #   vars:
 #     nat_gateway_strategy: "single"
-#     kubernetes_version: "1.29"
+#     kubernetes_version: "1.36"
 #     system_node_min: 1
 #     system_node_max: 2
 #     app_node_min: 1
@@ -983,7 +914,7 @@ components:
 # Staging:
 #   vars:
 #     nat_gateway_strategy: "single"
-#     kubernetes_version: "1.29"
+#     kubernetes_version: "1.36"
 #     system_node_min: 2
 #     system_node_max: 3
 #     app_node_min: 2
@@ -999,7 +930,7 @@ components:
 # Production:
 #   vars:
 #     nat_gateway_strategy: "one_per_az"
-#     kubernetes_version: "1.29"
+#     kubernetes_version: "1.36"
 #     eks_public_access: false
 #     system_node_min: 3
 #     system_node_max: 6

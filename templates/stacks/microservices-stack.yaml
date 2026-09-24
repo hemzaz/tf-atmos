@@ -35,7 +35,7 @@ settings:
   environment:
     description: "Microservices platform (EKS, service mesh, API Gateway)"
     vpc_cidr: "10.40.0.0/16"
-    eks_kubernetes_version: "1.33"
+    eks_kubernetes_version: "1.36"
     eks_public_access: false
     ops_email: "ops@example.com"
     # Cognito user pool that issues the API's JWTs
@@ -92,35 +92,32 @@ components:
         inherits:
           - eks/defaults
       vars:
-        clusters:
-          main:
-            kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
-            endpoint_private_access: true
-            endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
-            security_group_ids:
-              - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
-            node_groups:
-              general:
-                enabled: true
-                instance_types: ["m6i.large"]
-                min_size: 3
-                max_size: 20
-                desired_size: 6
-                labels:
-                  workload-type: "general"
-              # Compute-optimized nodes for CPU-intensive services (scaled from zero)
-              compute:
-                enabled: true
-                instance_types: ["c6i.xlarge"]
-                min_size: 0
-                max_size: 10
-                desired_size: 0
-                labels:
-                  workload-type: "compute"
-                taints:
-                  - key: "workload-type"
-                    value: "compute"
-                    effect: "NO_SCHEDULE"
+        name: main
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
+        associated_security_group_ids:
+          - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+        node_groups:
+          general:
+            instance_types: ["m6i.large"]
+            min_group_size: 3
+            max_group_size: 20
+            desired_group_size: 6
+            kubernetes_labels:
+              workload-type: "general"
+          # Compute-optimized nodes for CPU-intensive services (scaled from zero)
+          compute:
+            instance_types: ["c6i.xlarge"]
+            min_group_size: 0
+            max_group_size: 10
+            desired_group_size: 0
+            kubernetes_labels:
+              workload-type: "compute"
+            kubernetes_taints:
+              - key: "workload-type"
+                value: "compute"
+                effect: "NO_SCHEDULE"
       dependencies:
         components:
           - component: vpc/main
@@ -139,11 +136,11 @@ components:
         kiali_enabled: true
         clusters:
           main:
-            cluster_name: !terraform.state eks/main .cluster_ids.main
-            kubernetes_host: !terraform.state eks/main .cluster_endpoints.main
-            cluster_ca_certificate: !terraform.state eks/main .cluster_ca_data.main
-            oidc_provider_arn: !terraform.state eks/main .oidc_provider_arns.main
-            oidc_provider_url: !terraform.state eks/main .oidc_provider_arns.main | split("oidc-provider/") | .[1]
+            cluster_name: !terraform.state eks/main .eks_cluster_id
+            kubernetes_host: !terraform.state eks/main .eks_cluster_endpoint
+            cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+            oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+            oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
             enable_aws_load_balancer_controller: true
             enable_cluster_autoscaler: false
             enable_karpenter: true
@@ -187,7 +184,7 @@ components:
           - monitoring/defaults
       vars:
         create_dashboard: true
-        eks_cluster_name: !terraform.state eks/main .cluster_ids.main
+        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
         eks_pod_cpu_threshold: 80
         eks_pod_memory_threshold: 85
         api_gateway_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api"

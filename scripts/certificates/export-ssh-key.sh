@@ -9,23 +9,24 @@ usage() {
   echo "Usage: $0 [OPTIONS]"
   echo
   echo "Options:"
-  echo "  -r, --region         AWS region (default: us-west-2)"
-  echo "  -p, --profile        AWS profile (default: default)"
+  echo "  -r, --region         AWS region (default: \$AWS_REGION, then \$AWS_DEFAULT_REGION, then the AWS CLI config)"
+  echo "  -p, --profile        AWS profile (default: the AWS CLI's own resolution, e.g. \$AWS_PROFILE)"
   echo "  -s, --secret-id      Secret ID/name in AWS Secrets Manager (required)"
   echo "  -i, --instance-id    EC2 instance ID (optional, needed for instance-specific keys)"
   echo "  -o, --output-file    Output file path (default: ./id_rsa)"
-  echo "  -f, --force          Force overwrite if output file exists"
+  echo "  -f, --force          Replace the output file if it exists (never done silently)"
   echo "  -h, --help           Display this help message"
   echo
   echo "Example:"
-  echo "  $0 -r us-east-1 -p myprofile -s dev/ec2/ssh-keys -o ~/.ssh/my_key"
-  echo "  $0 -s dev/ec2/ssh-keys -i i-01234567890abcdef -o ~/.ssh/instance_key"
+  echo "  $0 -r eu-west-2 -p myprofile -s ssh-key/testenv-01/bastion -o ~/.ssh/testenv-01-bastion"
+  echo "  $0 -s ssh-key/testenv-01/bastion -i i-01234567890abcdef -o ~/.ssh/instance_key"
   exit 1
 }
 
-# Parse command line arguments
-REGION="us-west-2"
-PROFILE="default"
+# Parse command line arguments. Region and profile default to the ambient AWS
+# configuration: each is passed to the AWS CLI only when set.
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
+PROFILE=""
 SECRET_ID=""
 INSTANCE_ID=""
 OUTPUT_FILE="./id_rsa"
@@ -73,8 +74,8 @@ if [[ -z "$SECRET_ID" ]]; then
   usage
 fi
 
-# Check if output file exists and handle accordingly
-if [[ -f "$OUTPUT_FILE" && "$FORCE" != "true" ]]; then
+# Never overwrite silently: anything at the output path needs -f
+if [[ -e "$OUTPUT_FILE" && "$FORCE" != "true" ]]; then
   echo "Error: Output file '$OUTPUT_FILE' already exists. Use -f to force overwrite."
   exit 1
 fi
@@ -85,49 +86,57 @@ mkdir -p "$OUTPUT_DIR"
 
 # Get the secret from AWS Secrets Manager
 echo "Retrieving SSH key from AWS Secrets Manager..."
-if [[ -n "$INSTANCE_ID" ]]; then
-  # For instance-specific keys
-  SECRET_VALUE=$(aws secretsmanager get-secret-value \
-    --region "$REGION" \
-    --profile "$PROFILE" \
-    --secret-id "$SECRET_ID" \
-    --query "SecretString" \
-    --output text)
-  
-  # Extract the private key for the specific instance
-  PRIVATE_KEY=$(echo "$SECRET_VALUE" | jq -r --arg instance "$INSTANCE_ID" '.[$instance].private_key // empty')
-  
-  if [[ -z "$PRIVATE_KEY" ]]; then
-    echo "Error: No key found for instance ID $INSTANCE_ID in secret $SECRET_ID"
-    exit 1
-  fi
-else
-  # For environment-wide keys
-  SECRET_VALUE=$(aws secretsmanager get-secret-value \
-    --region "$REGION" \
-    --profile "$PROFILE" \
-    --secret-id "$SECRET_ID" \
-    --query "SecretString" \
-    --output text)
-  
-  # For environment-wide keys, the secret should contain the private key directly
-  # Try to parse as JSON first (new format)
-  if echo "$SECRET_VALUE" | jq -e . >/dev/null 2>&1; then
-    PRIVATE_KEY=$(echo "$SECRET_VALUE" | jq -r '.private_key // empty')
-    
-    # If not found, check for legacy format where the entire value is the key
-    if [[ -z "$PRIVATE_KEY" ]]; then
-      PRIVATE_KEY="$SECRET_VALUE"
+AWS_ARGS=()
+if [[ -n "$REGION" ]]; then
+  AWS_ARGS+=(--region "$REGION")
+fi
+if [[ -n "$PROFILE" ]]; then
+  AWS_ARGS+=(--profile "$PROFILE")
+fi
+SECRET_VALUE=$(aws secretsmanager get-secret-value \
+  "${AWS_ARGS[@]}" \
+  --secret-id "$SECRET_ID" \
+  --query "SecretString" \
+  --output text)
+
+# The ec2 component writes one JSON secret per instance
+# (ssh-key/<Environment>/<name>) holding private_key_openssh, private_key_pem,
+# public_key_openssh, key_name and instance_id. Prefer the OpenSSH form: for
+# ED25519 keys private_key_pem is PKCS#8, which OpenSSH rejects ("invalid
+# format"). private_key is the legacy field name.
+KEY_FILTER='.private_key_openssh // .private_key_pem // .private_key // empty'
+if echo "$SECRET_VALUE" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  if [[ -n "$INSTANCE_ID" ]]; then
+    SECRET_INSTANCE=$(echo "$SECRET_VALUE" | jq -r '.instance_id // empty')
+    if [[ -n "$SECRET_INSTANCE" ]]; then
+      if [[ "$SECRET_INSTANCE" != "$INSTANCE_ID" ]]; then
+        echo "Error: secret $SECRET_ID belongs to instance $SECRET_INSTANCE, not $INSTANCE_ID"
+        exit 1
+      fi
+      PRIVATE_KEY=$(echo "$SECRET_VALUE" | jq -r "$KEY_FILTER")
+    else
+      # Legacy layout: one secret with a map keyed by instance ID
+      PRIVATE_KEY=$(echo "$SECRET_VALUE" | jq -r --arg instance "$INSTANCE_ID" ".[\$instance] | $KEY_FILTER")
     fi
   else
-    # If not valid JSON, assume the entire value is the key (legacy format)
-    PRIVATE_KEY="$SECRET_VALUE"
+    PRIVATE_KEY=$(echo "$SECRET_VALUE" | jq -r "$KEY_FILTER")
   fi
+else
+  # Not JSON: the whole value is the key (legacy format)
+  PRIVATE_KEY="$SECRET_VALUE"
 fi
 
-# Save the private key to the output file
-echo "$PRIVATE_KEY" > "$OUTPUT_FILE"
-chmod 600 "$OUTPUT_FILE"
+if [[ -z "$PRIVATE_KEY" ]]; then
+  echo "Error: no private key found in secret $SECRET_ID${INSTANCE_ID:+ for instance $INSTANCE_ID}"
+  exit 1
+fi
 
-echo "Successfully saved SSH key to $OUTPUT_FILE"
-echo "Remember to set the correct permissions: chmod 600 $OUTPUT_FILE"
+# Save the private key: created under umask 077, so it is never readable by
+# others, not even for a moment. With -f the old file is removed first, so a
+# looser mode on it does not carry over.
+if [[ -e "$OUTPUT_FILE" ]]; then
+  rm -f "$OUTPUT_FILE"
+fi
+(umask 077; printf '%s\n' "$PRIVATE_KEY" > "$OUTPUT_FILE")
+
+echo "Successfully saved SSH key to $OUTPUT_FILE (mode 600)"

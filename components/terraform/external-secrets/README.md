@@ -22,7 +22,19 @@ deploy nothing if that flag is false.
 ## Dependencies & gotchas
 
 - Depends on `eks/main` (main instance) / `eks/data` (data instance) for
-  cluster_name, host, CA cert, OIDC provider.
+  cluster_name (`.eks_cluster_id`), host (`.eks_cluster_endpoint`), the CA cert
+  (`.eks_cluster_certificate_authority_data`, base64, decoded here) and the OIDC
+  provider (`.eks_cluster_identity_oidc_issuer_arn`, and
+  `.eks_cluster_identity_oidc_issuer` with `https://`, stripped here).
+- IAM names are `<cluster_name>-external-secrets-{role,policy}`. The eks cluster
+  name already starts with the Environment, so it is not prefixed again (it was:
+  `production-production-production-main-external-secrets-role`); a bare cluster
+  name gets `<Environment>-`. Prod: `production-main-external-secrets-role` (37 of
+  IAM's 64 characters). The Environment match is case-insensitive, as in the eks
+  name validation. Validations reject a role name over 64 characters, a cluster
+  ARN in `cluster_name`, and a null `cluster_name` (the eks instance is disabled),
+  each with its own message. `tests/names.tftest.hcl` covers this with mock
+  providers.
 - `tags` must have a non-empty `Environment` value (validated).
 - The CRD-wait step shells out to `kubectl` via `local-exec`; the apply host
   needs `kubectl` configured for the target cluster.

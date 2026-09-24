@@ -52,8 +52,10 @@ to be cosmetic.
 
 Put a `moved` block in the component, next to the resource, with a one-line
 reason. It is code: it is reviewed in the PR, it applies to every stack, and CI
-plans it like anything else. `components/terraform/eks/main.tf` is the
-precedent — five renames to snake_case for `terraform_naming_convention`:
+plans it like anything else. The eks component used it for five renames to
+snake_case for `terraform_naming_convention` (those blocks went away with the
+one-cluster-per-instance restructure, which changed every eks address while
+nothing had been applied, so there was no state to move):
 
 ```hcl
 # Renamed to snake_case (tflint terraform_naming_convention); keeps existing state.
@@ -209,3 +211,67 @@ atmos workflow destroy -f destroy-backend       # the state bucket and every sta
 
 Both prompt for the stack name and require it typed again to confirm; do not pass `-s`. Destroying
 the backend is irreversible and removes the state of every stack that shares the bucket.
+
+## eks and ec2: one cluster or instance per component instance (2026-09-24)
+
+`eks` and `ec2` follow the Cloud Posse model: each component instance is one
+cluster (`eks/main`, `eks/data`) or one instance (`ec2/bastion`,
+`ec2/app-server`). The `clusters` and `instances` maps and the map outputs are
+gone; instances set `name` and top-level variables, and readers use the Cloud
+Posse scalar outputs (`eks_cluster_id`, `eks_cluster_endpoint`,
+`eks_cluster_certificate_authority_data`, `eks_cluster_identity_oidc_issuer`,
+`eks_cluster_identity_oidc_issuer_arn`; ec2 `ssh_key_pair`, `security_group_id`).
+See each component's README.
+
+Every name is `<Environment>-<name>`, and `name` may not repeat the
+Environment, so no name doubles it any more:
+
+| Stack | Clusters | ESO roles | EC2 instances |
+|---|---|---|---|
+| fnx-dev-testenv-01 | `testenv-01-main`, `testenv-01-data` | `testenv-01-{main,data}-external-secrets-role` | `testenv-01-bastion`, `testenv-01-app-server` |
+| fnx-staging-staging-01 | `staging-01-main`, `staging-01-data` | `staging-01-{main,data}-external-secrets-role` | `staging-01-bastion`, `staging-01-app-server` |
+| fnx-prod-production | `production-main`, `production-data` (were `production-production-*`) | `production-{main,data}-external-secrets-role` | `production-bastion` (was `production-production-bastion`) |
+
+Nothing from these components had been applied (CD's AWS jobs were always
+skipped), so the change ships as plain code with no state migration. Were
+state to exist, every eks and ec2 address changed and the prod names changed:
+a plan would replace the resources, which is the signal to stop.
+
+**SSH keys: nothing to create by hand.** No bastion names an existing key
+pair. The component generates one ED25519 key per instance, the key pair
+`<Environment>-<name>-ec2-ssh-key`, and stores its private key in Secrets
+Manager at `ssh-key/<Environment>/<name>`, encrypted with the stack's
+`kms/main` key: `testenv-01-bastion-ec2-ssh-key` / `ssh-key/testenv-01/bastion`,
+`staging-01-bastion-ec2-ssh-key` / `ssh-key/staging-01/bastion`,
+`production-bastion-ec2-ssh-key` / `ssh-key/production/bastion`. Each
+`ec2/app-server` launches with its bastion's key
+(`!terraform.state ec2/bastion .ssh_key_pair`) and never generates its own
+(`create_ssh_keys: false`).
+
+Apply order within a stack: `kms/main`, then `ec2/bastion`, then
+`ec2/app-server`.
+
+To fetch a private key, read `private_key_openssh`: for an ED25519 key,
+`private_key_pem` is PKCS#8, which OpenSSH rejects ("Load key: invalid
+format").
+
+```bash
+aws secretsmanager get-secret-value --secret-id ssh-key/<Environment>/bastion \
+  --query SecretString --output text | jq -r .private_key_openssh > bastion.key
+chmod 600 bastion.key
+# or: scripts/certificates/export-ssh-key.sh -r eu-west-2 -s ssh-key/<Environment>/bastion -o bastion.key
+```
+
+The private key is also in the component's Terraform state (in
+`fnx-terraform-state`), as it was on master: whoever can read that state can
+reach the bastion.
+
+**Egress.** The repo's 0.0.0.0/0 rule restricts inbound traffic only
+(ingress, EKS public access). Instances may reach any address outside; the ec2
+default egress is Cloud Posse's, all outbound traffic.
+
+**Kubernetes 1.36.** Every stack pins `eks_kubernetes_version: "1.36"`, and
+node groups default to `AL2023_x86_64_STANDARD` (Cloud Posse's
+aws-eks-node-group default). AWS publishes no Amazon Linux 2 EKS AMIs for 1.33
+and later, so the eks component rejects an `AL2_*` `ami_type` on such a
+cluster.

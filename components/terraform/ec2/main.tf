@@ -1,346 +1,226 @@
+# One EC2 instance per component instance, as in
+# cloudposse-terraform-components/aws-ec2-instance: every resource is
+# `count = ... ? 1 : 0`, and the outputs are cloudposse/terraform-aws-ec2-instance's.
+
 locals {
-  # Filter enabled instances
-  instances = {
-    for k, v in var.instances : k => v if lookup(v, "enabled", true)
+  enabled     = var.enabled
+  environment = var.tags["Environment"]
+
+  # Every name is "<Environment>-<name>", the repo's name_prefix convention.
+  # var.name must not repeat the Environment (see its validation).
+  name_prefix = "${local.environment}-${var.name}"
+
+  subnet = try(coalesce(var.subnet, try(var.subnet_ids[0], null)), null)
+
+  ssh_key_pair = var.ssh_key_pair == "" ? null : var.ssh_key_pair
+  # A key is generated only when none is given: one per instance, named after
+  # it, so two instances in a stack never create the same key or secret.
+  generate_key = local.enabled && var.create_ssh_keys && local.ssh_key_pair == null
+  key_name     = local.generate_key ? one(aws_key_pair.generated[*].key_name) : local.ssh_key_pair
+
+  ami = var.ami != "" ? var.ami : one(data.aws_ami.default[*].id)
+
+  # Exactly one of aws_instance.default and aws_instance.from_launch_template
+  # exists. create_instances_from_templates requires enable_launch_templates
+  # (validated), so it alone decides.
+  from_template = var.create_instances_from_templates
+  # Attribute by attribute: referencing the whole instance object would read
+  # its deprecated network_interface attribute.
+  instance = {
+    id         = one(concat(aws_instance.default[*].id, aws_instance.from_launch_template[*].id))
+    private_ip = one(concat(aws_instance.default[*].private_ip, aws_instance.from_launch_template[*].private_ip))
+    public_ip  = one(concat(aws_instance.default[*].public_ip, aws_instance.from_launch_template[*].public_ip))
+    subnet_id  = one(concat(aws_instance.default[*].subnet_id, aws_instance.from_launch_template[*].subnet_id))
   }
 
-  # Check if we need a global key
-  create_global_key = var.create_ssh_keys && var.global_key_name != null
+  security_group_ids = concat(aws_security_group.default[*].id, var.security_groups)
 
-  # Normalize the key_name value to handle different ways of specifying null/empty values
-  instances_with_normalized_key_names = {
-    for k, v in local.instances : k => merge(v, {
-      normalized_key_name = try(
-        # Check if key_name is explicitly set to null
-        v.key_name == null ? null :
-        # Check if key_name is an empty string
-        v.key_name == "" ? null :
-        # Use the specified key_name value
-        v.key_name,
-        # Default to null if key_name is not specified at all
-        null
-      )
-    })
-  }
-
-  # Define global key name with a consistent prefix pattern
-  global_key_name = local.create_global_key ? "${var.tags["Environment"]}-global-${var.global_key_name}" : null
-
-  # Determine which instances need individual SSH keys to be created
-  instances_requiring_keys = {
-    for k, v in local.instances_with_normalized_key_names : k => v
-    if var.create_ssh_keys &&
-    v.normalized_key_name == null &&
-    var.default_key_name == null &&
-    !local.create_global_key
-  }
-
-  # Determine instances that will use the global key
-  instances_using_global_key = {
-    for k, v in local.instances_with_normalized_key_names : k => v
-    if var.create_ssh_keys &&
-    v.normalized_key_name == null &&
-    var.default_key_name == null &&
-    local.create_global_key
+  metadata_options = {
+    http_endpoint               = "enabled"
+    http_tokens                 = var.metadata_http_tokens_required ? "required" : "optional"
+    http_put_response_hop_limit = var.metadata_http_put_response_hop_limit
+    instance_metadata_tags      = var.metadata_tags_enabled ? "enabled" : "disabled"
   }
 }
 
-# Generate individual keys for instances
+# Generated key pair, when the instance is given none
 resource "tls_private_key" "ssh_key" {
-  for_each  = local.instances_requiring_keys
+  count = local.generate_key ? 1 : 0
+
   algorithm = var.ssh_key_algorithm
   rsa_bits  = var.ssh_key_algorithm == "RSA" ? var.ssh_key_rsa_bits : null
-
-  lifecycle {
-    # Prevent recreation of keys, which helps with idempotency
-    # Terraform will error if this can't be achieved rather than replacing the key
-    prevent_destroy = true
-
-    # Add preconditions to validate that key parameters haven't changed
-    precondition {
-      condition     = var.ssh_key_algorithm == "RSA" || var.ssh_key_algorithm == "ED25519"
-      error_message = "Only RSA and ED25519 algorithms are supported for SSH key generation."
-    }
-
-    # For RSA keys, validate the bit size
-    precondition {
-      condition     = var.ssh_key_algorithm != "RSA" || (var.ssh_key_rsa_bits >= 2048 && var.ssh_key_rsa_bits <= 8192)
-      error_message = "For RSA keys, rsa_bits must be between 2048 and 8192."
-    }
-  }
 }
 
-# Generate global SSH key if specified
-resource "tls_private_key" "global_ssh_key" {
-  count     = local.create_global_key ? 1 : 0
-  algorithm = var.ssh_key_algorithm
-  rsa_bits  = var.ssh_key_algorithm == "RSA" ? var.ssh_key_rsa_bits : null
-
-  lifecycle {
-    # Prevent recreation of keys, which helps with idempotency
-    # Terraform will error if this can't be achieved rather than replacing the key
-    prevent_destroy = true
-
-    # Add preconditions to validate that key parameters haven't changed
-    precondition {
-      condition     = var.ssh_key_algorithm == "RSA" || var.ssh_key_algorithm == "ED25519"
-      error_message = "Only RSA and ED25519 algorithms are supported for SSH key generation."
-    }
-
-    # For RSA keys, validate the bit size
-    precondition {
-      condition     = var.ssh_key_algorithm != "RSA" || (var.ssh_key_rsa_bits >= 2048 && var.ssh_key_rsa_bits <= 8192)
-      error_message = "For RSA keys, rsa_bits must be between 2048 and 8192."
-    }
-  }
-}
-
-# Create individual key pairs for instances
 resource "aws_key_pair" "generated" {
-  for_each   = local.instances_requiring_keys
-  key_name   = "${var.tags["Environment"]}-${each.key}-ec2-ssh-key"
-  public_key = tls_private_key.ssh_key[each.key].public_key_openssh
+  count = local.generate_key ? 1 : 0
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-ec2-ssh-key"
-    }
-  )
+  key_name   = "${local.name_prefix}-ec2-ssh-key"
+  public_key = tls_private_key.ssh_key[0].public_key_openssh
+
+  tags = merge(var.tags, { Name = "${local.name_prefix}-ec2-ssh-key" })
 }
 
-# Create global key pair if specified
-resource "aws_key_pair" "global" {
-  count      = local.create_global_key ? 1 : 0
-  key_name   = local.global_key_name
-  public_key = tls_private_key.global_ssh_key[0].public_key_openssh
-
-  tags = merge(
-    var.tags,
-    {
-      Name = local.global_key_name
-      Type = "global"
-    }
-  )
-}
-
-# Store individual instance SSH keys in Secrets Manager
 resource "aws_secretsmanager_secret" "ssh_key" {
-  for_each = var.store_ssh_keys_in_secrets_manager ? local.instances_requiring_keys : {}
+  count = local.generate_key && var.store_ssh_keys_in_secrets_manager ? 1 : 0
 
-  name        = "ssh-key/${var.tags["Environment"]}/${each.key}"
-  description = "SSH private key for ${each.key} EC2 instance"
+  name        = "ssh-key/${local.environment}/${var.name}"
+  description = "SSH private key for the ${local.name_prefix} EC2 instance"
+  kms_key_id  = var.ssh_key_secret_kms_key_id
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name         = "${var.tags["Environment"]}-${each.key}-ssh-key"
-      InstanceName = "${var.tags["Environment"]}-${each.key}"
-      KeyType      = "instance"
-    }
-  )
-}
+  # Days a deleted secret stays recoverable (0: delete at once), as
+  # recovery_window_in_days in Cloud Posse's secrets-manager.
+  recovery_window_in_days = var.ssh_key_secret_recovery_window_in_days
 
-resource "aws_secretsmanager_secret_version" "ssh_key" {
-  for_each  = var.store_ssh_keys_in_secrets_manager ? local.instances_requiring_keys : {}
-  secret_id = aws_secretsmanager_secret.ssh_key[each.key].id
-
-  # Include all metadata directly in the secret value, including instance_id
-  # This eliminates the need for local-exec provisioner
-  secret_string = jsonencode({
-    private_key_pem     = tls_private_key.ssh_key[each.key].private_key_pem
-    public_key_openssh  = tls_private_key.ssh_key[each.key].public_key_openssh
-    key_name            = aws_key_pair.generated[each.key].key_name
-    instance_name       = each.key
-    instance_id         = aws_instance.instances[each.key].id
-    instance_private_ip = aws_instance.instances[each.key].private_ip
-    instance_public_ip  = aws_instance.instances[each.key].public_ip
-    vpc_id              = var.vpc_id
-    subnet_id           = aws_instance.instances[each.key].subnet_id
-    security_group_id   = aws_security_group.instances[each.key].id
-    environment         = var.tags["Environment"]
+  tags = merge(var.tags, {
+    Name         = "${local.name_prefix}-ssh-key"
+    InstanceName = local.name_prefix
+    KeyType      = "instance"
   })
-
-  depends_on = [aws_instance.instances]
-
-  lifecycle {
-    # Add validation to ensure all required information is available
-    precondition {
-      condition     = aws_instance.instances[each.key].id != ""
-      error_message = "Instance ID must be available before creating secret version."
-    }
-  }
 }
 
 # SSH private keys stay regular (non-ephemeral) values: aws_key_pair.public_key is not a
 # write-only argument, so an ephemeral tls_private_key cannot feed it, and the key pair is
 # already in state through tls_private_key. secret_string_wo would therefore hide nothing.
+resource "aws_secretsmanager_secret_version" "ssh_key" {
+  count = local.generate_key && var.store_ssh_keys_in_secrets_manager ? 1 : 0
 
-# Store global SSH key in Secrets Manager
-resource "aws_secretsmanager_secret" "global_ssh_key" {
-  count = var.store_ssh_keys_in_secrets_manager && local.create_global_key ? 1 : 0
-
-  name        = "ssh-key/${var.tags["Environment"]}/global-keys/${var.global_key_name}"
-  description = "Global SSH private key for ${var.tags["Environment"]} environment"
-
-  tags = merge(
-    var.tags,
-    {
-      Name    = "${var.tags["Environment"]}-global-ssh-key"
-      KeyType = "global"
-    }
-  )
-}
-
-resource "aws_secretsmanager_secret_version" "global_ssh_key" {
-  count     = var.store_ssh_keys_in_secrets_manager && local.create_global_key ? 1 : 0
-  secret_id = aws_secretsmanager_secret.global_ssh_key[0].id
+  secret_id = aws_secretsmanager_secret.ssh_key[0].id
   secret_string = jsonencode({
-    private_key_pem    = tls_private_key.global_ssh_key[0].private_key_pem
-    public_key_openssh = tls_private_key.global_ssh_key[0].public_key_openssh
-    key_name           = aws_key_pair.global[0].key_name
-    environment        = var.tags["Environment"]
-    used_by_instances  = keys(local.instances_using_global_key)
-    # Instance IDs are included directly, replacing the local-exec secret update that
-    # overwrote this version out of band
-    instance_details = { for k, v in local.instances_using_global_key : k => aws_instance.instances[k].id }
+    private_key_openssh = tls_private_key.ssh_key[0].private_key_openssh
+    private_key_pem     = tls_private_key.ssh_key[0].private_key_pem
+    public_key_openssh  = tls_private_key.ssh_key[0].public_key_openssh
+    key_name            = aws_key_pair.generated[0].key_name
+    instance_name       = local.name_prefix
+    instance_id         = local.instance.id
+    instance_private_ip = local.instance.private_ip
+    instance_public_ip  = local.instance.public_ip
+    vpc_id              = var.vpc_id
+    subnet_id           = local.instance.subnet_id
+    security_group_id   = aws_security_group.default[0].id
+    environment         = local.environment
   })
 }
 
-locals {
-  # Determine the AMI to use, with proper fallback to data source
-  default_ami = var.default_ami_id != "" ? var.default_ami_id : data.aws_ami.default.id
+resource "aws_instance" "default" {
+  #checkov:skip=CKV_AWS_79:http_tokens is "required" unless a stack sets metadata_http_tokens_required = false
+  count = local.enabled && !local.from_template ? 1 : 0
 
-  # Same shape as default_ami: caller's value wins, otherwise resolve it.
-  default_egress_prefix_list_ids = length(var.vpc_endpoint_prefix_list_ids) > 0 ? var.vpc_endpoint_prefix_list_ids : [data.aws_prefix_list.s3[0].id]
-}
-
-resource "aws_instance" "instances" {
-  for_each = local.instances
-
-  ami                    = coalesce(each.value.ami_id, local.default_ami)
-  instance_type          = each.value.instance_type
-  key_name               = contains(keys(local.instances_requiring_keys), each.key) ? aws_key_pair.generated[each.key].key_name : (contains(keys(local.instances_using_global_key), each.key) ? aws_key_pair.global[0].key_name : lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", var.default_key_name))
-  vpc_security_group_ids = concat([aws_security_group.instances[each.key].id], lookup(each.value, "additional_security_group_ids", []))
-  subnet_id              = coalesce(each.value.subnet_id, var.subnet_ids[0])
-  user_data              = lookup(each.value, "user_data", null)
-  iam_instance_profile   = aws_iam_instance_profile.instances[each.key].name
-  monitoring             = lookup(each.value, "detailed_monitoring", false)
-  ebs_optimized          = lookup(each.value, "ebs_optimized", true)
+  ami                         = local.ami
+  instance_type               = var.instance_type
+  key_name                    = local.key_name
+  vpc_security_group_ids      = local.security_group_ids
+  subnet_id                   = local.subnet
+  associate_public_ip_address = var.associate_public_ip_address
+  user_data                   = var.user_data
+  iam_instance_profile        = aws_iam_instance_profile.default[0].name
+  monitoring                  = var.monitoring
+  ebs_optimized               = var.ebs_optimized
+  disable_api_termination     = var.disable_api_termination
 
   root_block_device {
-    volume_type           = lookup(each.value, "root_volume_type", "gp3")
-    volume_size           = lookup(each.value, "root_volume_size", 20)
-    delete_on_termination = lookup(each.value, "root_volume_delete_on_termination", true)
-    encrypted             = lookup(each.value, "root_volume_encrypted", true)
-    kms_key_id            = lookup(each.value, "root_volume_kms_key_id", null)
+    volume_type           = var.root_volume_type
+    volume_size           = var.root_volume_size
+    delete_on_termination = var.delete_on_termination
+    encrypted             = var.root_block_device_encrypted
+    kms_key_id            = var.root_block_device_kms_key_id
   }
 
   dynamic "ebs_block_device" {
-    for_each = lookup(each.value, "ebs_block_devices", [])
+    for_each = var.ebs_block_devices
     content {
       device_name           = ebs_block_device.value.device_name
-      volume_type           = lookup(ebs_block_device.value, "volume_type", "gp3")
+      volume_type           = ebs_block_device.value.volume_type
       volume_size           = ebs_block_device.value.volume_size
-      iops                  = lookup(ebs_block_device.value, "iops", null)
-      throughput            = lookup(ebs_block_device.value, "throughput", null)
-      delete_on_termination = lookup(ebs_block_device.value, "delete_on_termination", true)
-      encrypted             = lookup(ebs_block_device.value, "encrypted", true)
-      kms_key_id            = lookup(ebs_block_device.value, "kms_key_id", null)
+      iops                  = ebs_block_device.value.iops
+      throughput            = ebs_block_device.value.throughput
+      delete_on_termination = ebs_block_device.value.delete_on_termination
+      encrypted             = ebs_block_device.value.encrypted
+      kms_key_id            = try(coalesce(ebs_block_device.value.kms_key_id, var.root_block_device_kms_key_id), null)
+      snapshot_id           = ebs_block_device.value.snapshot_id
     }
   }
 
-  # SECURITY: Enforce IMDSv2 to prevent SSRF attacks
   metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required" # Enforce IMDSv2 (not optional)
-    http_put_response_hop_limit = 1          # Limit to instance itself
-    instance_metadata_tags      = "enabled"  # Allow instance tags in metadata
+    http_endpoint               = local.metadata_options.http_endpoint
+    http_tokens                 = local.metadata_options.http_tokens
+    http_put_response_hop_limit = local.metadata_options.http_put_response_hop_limit
+    instance_metadata_tags      = local.metadata_options.instance_metadata_tags
   }
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}"
-    }
-  )
+  tags = merge(var.tags, { Name = local.name_prefix })
 
   lifecycle {
     # AMI updates never replace instances in place
     ignore_changes = [ami]
 
-    # Check that we have a valid key_name
+    # No key precondition: a keyless instance (ssh_key_pair unset and
+    # create_ssh_keys false) is reached through SSM, as Cloud Posse's
+    # aws-ec2-instance allows.
+
     precondition {
-      condition = (
-        contains(keys(local.instances_requiring_keys), each.key) ||
-        contains(keys(local.instances_using_global_key), each.key) ||
-        lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null) != null ||
-        var.default_key_name != null
-      )
-      error_message = "Instance ${each.key} does not have a valid key_name (either individual, global, or default)."
+      condition     = local.subnet != null
+      error_message = "Instance ${local.name_prefix} has no subnet: set subnet or subnet_ids."
     }
 
-    # Validate that existing keys referenced actually exist (validation happens via data source)
+    # data.aws_key_pair.existing fails the plan when the named key does not
+    # exist; this ties that check to the instance that needs it.
     precondition {
-      condition     = lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null) == null || contains(keys(data.aws_key_pair.existing), each.key) || var.default_key_name == lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", null)
-      error_message = "Instance ${each.key} references key_name '${lookup(local.instances_with_normalized_key_names[each.key], "normalized_key_name", "")}' which does not exist in AWS. Verify the key exists or let the component create it."
+      condition     = local.ssh_key_pair == null || one(data.aws_key_pair.existing[*].key_name) == local.ssh_key_pair
+      error_message = "Instance ${local.name_prefix} references a key pair (ssh_key_pair) that does not exist in AWS."
     }
   }
 }
 
-resource "aws_security_group" "instances" {
-  for_each    = local.instances
-  name        = "${var.tags["Environment"]}-${each.key}-sg"
-  description = "Security group for ${each.key} EC2 instance"
+#trivy:ignore:AVD-AWS-0104 Egress is unrestricted by policy (owner decision): the repo's 0.0.0.0/0 rule covers inbound traffic only, and all-outbound is Cloud Posse aws-ec2-instance's default. Ingress rejects any /0 (variable validation).
+resource "aws_security_group" "default" {
+  #checkov:skip=CKV2_AWS_5:Attached to the instance (vpc_security_group_ids) or its launch template; checkov's graph does not follow count-indexed references through locals
+  count = local.enabled ? 1 : 0
+
+  name        = "${local.name_prefix}-sg"
+  description = "Security group for the ${local.name_prefix} EC2 instance"
   vpc_id      = var.vpc_id
 
   dynamic "ingress" {
-    for_each = lookup(each.value, "allowed_ingress_rules", [])
+    for_each = var.allowed_ingress_rules
     content {
       from_port       = ingress.value.from_port
       to_port         = ingress.value.to_port
       protocol        = ingress.value.protocol
-      cidr_blocks     = lookup(ingress.value, "cidr_blocks", null)
-      security_groups = lookup(ingress.value, "security_groups", null)
-      description     = lookup(ingress.value, "description", null)
+      cidr_blocks     = ingress.value.cidr_blocks
+      security_groups = ingress.value.security_groups
+      description     = ingress.value.description
     }
   }
 
+  # Egress is unrestricted by policy (the repo's 0.0.0.0/0 rule is about
+  # inbound traffic). The default is Cloud Posse aws-ec2-instance's: all
+  # outbound traffic. allowed_egress_rules replaces it.
   dynamic "egress" {
-    for_each = lookup(each.value, "allowed_egress_rules", [{
-      from_port       = 443
-      to_port         = 443
-      protocol        = "tcp"
-      prefix_list_ids = local.default_egress_prefix_list_ids
-      description     = "Allow HTTPS outbound traffic to AWS services via VPC endpoints"
-    }])
-
+    for_each = var.allowed_egress_rules != null ? var.allowed_egress_rules : [{
+      from_port       = 0
+      to_port         = 0
+      protocol        = "-1"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = null
+      description     = "Allow all outbound traffic"
+    }]
     content {
       from_port       = egress.value.from_port
       to_port         = egress.value.to_port
       protocol        = egress.value.protocol
-      cidr_blocks     = lookup(egress.value, "cidr_blocks", null)
-      prefix_list_ids = lookup(egress.value, "prefix_list_ids", null)
-      security_groups = lookup(egress.value, "security_groups", null)
-      description     = lookup(egress.value, "description", null)
+      cidr_blocks     = egress.value.cidr_blocks
+      security_groups = egress.value.security_groups
+      description     = egress.value.description
     }
   }
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-sg"
-    }
-  )
+  tags = merge(var.tags, { Name = "${local.name_prefix}-sg" })
 }
 
-resource "aws_iam_role" "instances" {
-  for_each = local.instances
-  name     = "${var.tags["Environment"]}-${each.key}-role"
+resource "aws_iam_role" "default" {
+  count = local.enabled ? 1 : 0
+
+  name = "${local.name_prefix}-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -355,72 +235,56 @@ resource "aws_iam_role" "instances" {
     ]
   })
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-role"
-    }
-  )
+  tags = merge(var.tags, { Name = "${local.name_prefix}-role" })
 }
 
-resource "aws_iam_instance_profile" "instances" {
-  for_each = local.instances
-  name     = "${var.tags["Environment"]}-${each.key}-profile"
-  role     = aws_iam_role.instances[each.key].name
+resource "aws_iam_instance_profile" "default" {
+  count = local.enabled ? 1 : 0
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-profile"
-    }
-  )
+  name = "${local.name_prefix}-profile"
+  role = aws_iam_role.default[0].name
+
+  tags = merge(var.tags, { Name = "${local.name_prefix}-profile" })
 }
 
 resource "aws_iam_role_policy_attachment" "ssm" {
-  for_each   = { for k, v in local.instances : k => v if lookup(v, "enable_ssm", true) }
-  role       = aws_iam_role.instances[each.key].name
+  count = local.enabled && var.enable_ssm ? 1 : 0
+
+  role       = aws_iam_role.default[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 resource "aws_iam_role_policy" "custom" {
-  for_each = { for k, v in local.instances : k => v if lookup(v, "custom_iam_policy", "") != "" }
-  name     = "${var.tags["Environment"]}-${each.key}-custom-policy"
-  role     = aws_iam_role.instances[each.key].id
-  policy   = each.value.custom_iam_policy
+  count = local.enabled && var.custom_iam_policy != "" ? 1 : 0
+
+  name   = "${local.name_prefix}-custom-policy"
+  role   = aws_iam_role.default[0].id
+  policy = var.custom_iam_policy
 }
 
-# The default egress rule restricts outbound HTTPS to AWS service prefix lists
-# instead of 0.0.0.0/0. Callers may pass their own ids; when they do not, the
-# region's S3 gateway prefix list is resolved here rather than demanded as an
-# input. Requiring that input is what made this component unplannable in every
-# stack, since no stack supplied it.
-data "aws_prefix_list" "s3" {
-  count = length(var.vpc_endpoint_prefix_list_ids) == 0 ? 1 : 0
-  name  = "com.amazonaws.${var.region}.s3"
-}
-
-# Verify existing key pairs exist
-data "aws_key_pair" "existing" {
-  for_each = { for k, v in local.instances_with_normalized_key_names : k => v
-    if v.normalized_key_name != null &&
-    !contains(keys(local.instances_requiring_keys), k) &&
-    !contains(keys(local.instances_using_global_key), k)
-  }
-
-  key_name = each.value.normalized_key_name
-
-  # The data source will fail if the key doesn't exist
-  # This provides validation at plan time
-}
-
+# Latest Amazon Linux 2023 when no ami is given (Amazon Linux 2 reached end of
+# life on 2026-06-30). Read only when used, as Cloud Posse does.
 data "aws_ami" "default" {
+  count = local.enabled && var.ami == "" ? 1 : 0
+
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    values = ["al2023-ami-2023.*-x86_64"]
   }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+}
+
+# Fails the plan when ssh_key_pair names a key that does not exist, rather
+# than the launch.
+data "aws_key_pair" "existing" {
+  count = local.enabled && local.ssh_key_pair != null ? 1 : 0
+
+  key_name = local.ssh_key_pair
 }

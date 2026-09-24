@@ -21,53 +21,53 @@ resource "terraform_data" "unsupported" {
   }
 }
 
-# EKS cluster for IDP platform (via the eks component; EKS addons and public-access CIDRs
-# are not supported by that component and are managed by eks-addons instead)
+# EKS cluster for IDP platform (via the eks component, one cluster named
+# "<Environment>-idp"; EKS addons are not part of that component and are managed by
+# eks-addons instead)
 module "eks_cluster" {
   source = "../eks"
 
   region     = var.region
   subnet_ids = data.aws_subnets.private.ids
 
-  clusters = {
-    idp = {
-      kubernetes_version        = var.cluster_version
-      endpoint_private_access   = true
-      endpoint_public_access    = var.cluster_endpoint_public_access
-      public_access_cidrs       = var.cluster_endpoint_public_access_cidrs
-      enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  name                            = "idp"
+  cluster_kubernetes_version      = var.cluster_version
+  cluster_endpoint_private_access = true
+  cluster_endpoint_public_access  = var.cluster_endpoint_public_access
+  # null with the endpoint off. With it on, eks rejects an empty list (AWS
+  # would read it as 0.0.0.0/0), so the [] default must be replaced.
+  public_access_cidrs       = var.cluster_endpoint_public_access ? var.cluster_endpoint_public_access_cidrs : null
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
-      node_groups = {
-        platform_services = {
-          instance_types = ["m5.xlarge", "m5a.xlarge"]
-          capacity_type  = "ON_DEMAND"
-          min_size       = 3
-          max_size       = 10
-          desired_size   = 3
-          labels = {
-            "workload-type" = "platform-services"
-          }
-          taints = [
-            {
-              key    = "platform-services"
-              value  = "true"
-              effect = "NO_SCHEDULE"
-            }
-          ]
-        }
-
-        user_workloads = {
-          instance_types = ["m5.large", "m5a.large", "c5.large"]
-          capacity_type  = "SPOT"
-          min_size       = 2
-          max_size       = 20
-          desired_size   = 5
-          labels = {
-            "workload-type" = "user-workloads"
-          }
-          taints = []
-        }
+  node_groups = {
+    platform_services = {
+      instance_types     = ["m5.xlarge", "m5a.xlarge"]
+      capacity_type      = "ON_DEMAND"
+      min_group_size     = 3
+      max_group_size     = 10
+      desired_group_size = 3
+      kubernetes_labels = {
+        "workload-type" = "platform-services"
       }
+      kubernetes_taints = [
+        {
+          key    = "platform-services"
+          value  = "true"
+          effect = "NO_SCHEDULE"
+        }
+      ]
+    }
+
+    user_workloads = {
+      instance_types     = ["m5.large", "m5a.large", "c5.large"]
+      capacity_type      = "SPOT"
+      min_group_size     = 2
+      max_group_size     = 20
+      desired_group_size = 5
+      kubernetes_labels = {
+        "workload-type" = "user-workloads"
+      }
+      kubernetes_taints = []
     }
   }
 
@@ -84,7 +84,7 @@ module "idp_database" {
   vpc_id      = data.aws_vpc.selected.id
   subnet_ids  = data.aws_subnets.private.ids
 
-  allowed_security_groups = [module.eks_cluster.cluster_security_group_ids["idp"]]
+  allowed_security_groups = [module.eks_cluster.eks_cluster_managed_security_group_id]
 
   identifier     = "idp-db"
   engine         = "postgres"
@@ -160,7 +160,7 @@ resource "aws_security_group" "redis" {
 resource "aws_vpc_security_group_ingress_rule" "redis_from_eks" {
   security_group_id            = aws_security_group.redis.id
   description                  = "Redis from the IDP EKS cluster"
-  referenced_security_group_id = module.eks_cluster.cluster_security_group_ids["idp"]
+  referenced_security_group_id = module.eks_cluster.eks_cluster_managed_security_group_id
   from_port                    = 6379
   to_port                      = 6379
   ip_protocol                  = "tcp"

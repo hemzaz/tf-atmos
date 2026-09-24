@@ -44,7 +44,7 @@ settings:
     log_retention_days: 7
     backup_retention_days: 1
     # EKS: public endpoint for developer access
-    eks_kubernetes_version: "1.33"
+    eks_kubernetes_version: "1.36"
     eks_public_access: true
     # RDS instance size
     rds_instance_class: "db.t4g.micro"
@@ -61,7 +61,7 @@ components:
 
     eks/defaults:
       vars:
-        default_cluster_log_retention_days: 7
+        cluster_log_retention_period: 7
         enable_cluster_protection: false
 
     # Short recovery window so secrets can be recreated quickly

@@ -6,8 +6,8 @@ components:
         component: ec2
         type: abstract
         custom:
-          version: "1.0.0"
-          description: "Manages EC2 instances and SSH keys"
+          version: "2.0.0"
+          description: "Manages one EC2 instance per component instance"
           category: "compute"
       vars:
         # The lifecycle tier the component validates (dev/staging/prod).
@@ -16,17 +16,15 @@ components:
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
-        # SSH key configuration
+        # SSH key configuration: an ED25519 key pair is generated per instance
+        # (named after it, private key in Secrets Manager at
+        # ssh-key/<Environment>/<name>) unless the instance sets `ssh_key_pair`
+        # to an existing one. No shared "global" key: with one instance per
+        # component, every instance in a stack would create the same key pair
+        # and secret.
         create_ssh_keys: true
         store_ssh_keys_in_secrets_manager: true
-        ssh_key_algorithm: "RSA"
-        ssh_key_rsa_bits: 4096
-
-        # Global SSH key for environment-wide use
-        global_key_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-ssh-key"
-
-        # Instances configuration
-        instances: {}
+        ssh_key_algorithm: "ED25519"
 
         tags:
           Component: "EC2"

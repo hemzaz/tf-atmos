@@ -22,7 +22,26 @@ variable "enabled" {
 
 variable "cluster_name" {
   type        = string
-  description = "EKS cluster name"
+  description = "EKS cluster name (the eks component's eks_cluster_id); also the IAM name prefix"
+
+  # eks outputs a null eks_cluster_id when its instance is disabled.
+  validation {
+    condition     = var.cluster_name != null
+    error_message = "cluster_name is null: the eks instance this reads (eks_cluster_id) is disabled or has no cluster. Set metadata.enabled: false on this external-secrets instance in the stack, or enable the cluster."
+  }
+
+  validation {
+    condition     = var.cluster_name == null ? true : can(regex("^[0-9A-Za-z][0-9A-Za-z_-]*$", var.cluster_name))
+    error_message = "cluster_name must be an EKS cluster name, not an ARN."
+  }
+
+  # IAM role names are limited to 64 characters. The role is
+  # "<cluster_name>-external-secrets-role", with the Environment prefixed only
+  # when cluster_name lacks it, case-insensitively (see local.name_prefix).
+  validation {
+    condition     = var.cluster_name == null ? true : length("${startswith(lower(var.cluster_name), "${lower(lookup(var.tags, "Environment", ""))}-") ? var.cluster_name : "${lookup(var.tags, "Environment", "")}-${var.cluster_name}"}-external-secrets-role") <= 64
+    error_message = "<cluster name>-external-secrets-role must fit IAM's 64-character role name limit."
+  }
 }
 
 variable "host" {
