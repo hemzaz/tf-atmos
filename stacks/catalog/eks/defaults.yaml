@@ -6,18 +6,18 @@ components:
         component: eks
         type: abstract
         custom:
-          version: "1.0.0"
-          description: "Manages EKS clusters"
+          version: "2.0.0"
+          description: "Manages one EKS cluster per component instance"
           category: "container-orchestration"
           namespace: "k8s"
       vars:
-        default_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version | default \"1.28\" }}"
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version | default \"1.36\" }}"
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
 
-        # One entry per cluster (key = cluster name); instances define theirs.
-        # Endpoint access, log types and secrets encryption are per cluster;
-        # the module defaults are private endpoint only and all log types.
-        clusters: {}
+        # One cluster per instance, as in cloudposse-terraform-components/aws-eks-cluster.
+        # Each instance sets `name` and its `node_groups` map. The cluster is
+        # "<Environment>-<name>", so `name` must not repeat the Environment
+        # (`main`, not `production-main`).
 
         tags:
           Component: "EKS"

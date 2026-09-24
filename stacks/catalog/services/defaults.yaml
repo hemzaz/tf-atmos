@@ -59,18 +59,11 @@ components:
         # SSH Key Management Configuration
         create_ssh_keys: true
         store_ssh_keys_in_secrets_manager: true
-        ssh_key_algorithm: "RSA"
-        ssh_key_rsa_bits: 4096
+        ssh_key_algorithm: "ED25519"
 
-        # Optional: Define a global key for the environment
-        # global_key_name: "{{ .settings.context.environment }}-shared-key" # Uncomment to use a global key
-
-        # Optional: Use an existing key as default
-        # default_key_name: "existing-key-name" # Uncomment to use an existing key
-
-        # Default configuration for a secure EC2 deployment
-        default_ami_id: ""  # Will be selected based on data source if not specified
-        instances: {}  # Will be defined in environment-specific configuration
+        # One instance per component instance. A key pair is generated per
+        # instance unless the instance names an existing one in `ssh_key_pair`;
+        # `ami` empty resolves the latest Amazon Linux 2.
 
         tags:
           Component: "EC2"
