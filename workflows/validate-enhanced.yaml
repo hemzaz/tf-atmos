@@ -33,6 +33,18 @@ workflows:
           stacks_json="$(mktemp)"
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-dependencies.py components/terraform < "$stacks_json"
+      # deploy-full-stack selects each layer by component type: every deployable
+      # instance must fall in a layer, and no layer may come before one it
+      # depends on (a new component type, or a new cross-layer read, fails here).
+      - name: check-deploy-layers
+        type: shell
+        command: |
+          set -eu
+          stacks_json="$(mktemp)"
+          workflows_json="$(mktemp)"
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          atmos describe workflows --output all --format json > "$workflows_json"
+          python3 workflows/scripts/common/check-deploy-layers.py "$stacks_json" "$workflows_json"
       - name: list-stacks
         type: shell
         command: atmos list stacks

@@ -8,10 +8,16 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: foundation, kms, networking, security, compute, platform, data, services, monitoring
+#   layers: foundation, kms, networking, security, compute, platform, data, dns, services, monitoring
 #   The kms layer applies kms/main, which every stack defines. secretsmanager
 #   reads its key_arn via !terraform.state in every stack (and declares the
 #   dependency), and in prod rds/eks/ec2 read it too, so kms runs before them.
+#
+# Every enabled, non-abstract instance of every stack must fall in exactly one
+# layer, and no layer may come before a layer it depends on (through
+# dependencies.components or a !terraform.state/!terraform.output read).
+# validate-all enforces both with scripts/common/check-deploy-layers.py, so a
+# new component type must be added to a layer below before it can merge.
 workflows:
   deploy:
     description: Deploy the complete stack layer by layer (foundation -> kms -> monitoring), each layer planned, confirmed, then applied from its saved plan
@@ -55,7 +61,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
       - name: plan-networking
         type: atmos
-        command: terraform plan --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
+        command: terraform plan --query '.metadata.component == "vpc" or .metadata.component == "securitygroup" or .metadata.component == "network"'
       - name: confirm_networking
         type: confirm
         prompt: Apply the networking layer plan above?
@@ -65,10 +71,10 @@ workflows:
         command: test "{{ .steps.confirm_networking.value }}" = "true" || { echo "Deployment cancelled before the networking layer."; exit 1; }
       - name: deploy-networking
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
+        command: terraform deploy --from-plan --query '.metadata.component == "vpc" or .metadata.component == "securitygroup" or .metadata.component == "network"'
       - name: plan-security
         type: atmos
-        command: terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring"'
+        command: terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring" or .metadata.component == "guardduty" or .metadata.component == "securityhub" or .metadata.component == "cognito"'
       - name: confirm_security
         type: confirm
         prompt: Apply the security layer plan above?
@@ -78,7 +84,7 @@ workflows:
         command: test "{{ .steps.confirm_security.value }}" = "true" || { echo "Deployment cancelled before the security layer."; exit 1; }
       - name: deploy-security
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring"'
+        command: terraform deploy --from-plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring" or .metadata.component == "guardduty" or .metadata.component == "securityhub" or .metadata.component == "cognito"'
       - name: plan-compute
         type: atmos
         command: terraform plan --query '.metadata.component == "eks" or .metadata.component == "ec2" or .metadata.component == "ecs"'
@@ -107,7 +113,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "external-secrets"'
       - name: plan-data
         type: atmos
-        command: terraform plan --query '.metadata.component == "rds" or .metadata.component == "backup"'
+        command: terraform plan --query '.metadata.component == "rds" or .metadata.component == "elasticache" or .metadata.component == "backup"'
       - name: confirm_data
         type: confirm
         prompt: Apply the data layer plan above?
@@ -117,7 +123,23 @@ workflows:
         command: test "{{ .steps.confirm_data.value }}" = "true" || { echo "Deployment cancelled before the data layer."; exit 1; }
       - name: deploy-data
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "backup"'
+        command: terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache" or .metadata.component == "backup"'
+      # DNS records point at data-layer endpoints (prod network/main reads
+      # rds/main .instance_address), so dns plans only after the data layer is
+      # applied; apigateway (services) reads the zones, so dns precedes it.
+      - name: plan-dns
+        type: atmos
+        command: terraform plan --query '.metadata.component == "dns"'
+      - name: confirm_dns
+        type: confirm
+        prompt: Apply the dns layer plan above?
+        default: false
+      - name: guard-dns
+        type: shell
+        command: test "{{ .steps.confirm_dns.value }}" = "true" || { echo "Deployment cancelled before the dns layer."; exit 1; }
+      - name: deploy-dns
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "dns"'
       - name: plan-services
         type: atmos
         command: terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "lambda" or .metadata.component == "eks-backend-services"'
@@ -189,11 +211,11 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
 
   deploy-networking:
-    description: "Deploy the networking layer: VPCs, DNS and security groups"
+    description: "Deploy the networking layer: VPCs, security groups and VPC peering"
     steps:
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
+        command: terraform plan --query '.metadata.component == "vpc" or .metadata.component == "securitygroup" or .metadata.component == "network"'
       - name: confirm
         type: confirm
         prompt: Deploy the networking layer?
@@ -203,14 +225,14 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "vpc" or .metadata.component == "dns" or .metadata.component == "securitygroup"'
+        command: terraform deploy --from-plan --query '.metadata.component == "vpc" or .metadata.component == "securitygroup" or .metadata.component == "network"'
 
   deploy-security:
-    description: "Deploy the security layer: Certificates, secrets and security monitoring"
+    description: "Deploy the security layer: Certificates, secrets, security monitoring, GuardDuty, Security Hub and Cognito"
     steps:
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring"'
+        command: terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring" or .metadata.component == "guardduty" or .metadata.component == "securityhub" or .metadata.component == "cognito"'
       - name: confirm
         type: confirm
         prompt: Deploy the security layer?
@@ -220,7 +242,7 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring"'
+        command: terraform deploy --from-plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager" or .metadata.component == "security-monitoring" or .metadata.component == "guardduty" or .metadata.component == "securityhub" or .metadata.component == "cognito"'
 
   deploy-compute:
     description: "Deploy the compute layer: EKS clusters, EC2 and ECS"
@@ -257,11 +279,11 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "external-secrets"'
 
   deploy-data:
-    description: "Deploy the data layer: Databases and backups"
+    description: "Deploy the data layer: Databases, caches and backups"
     steps:
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "rds" or .metadata.component == "backup"'
+        command: terraform plan --query '.metadata.component == "rds" or .metadata.component == "elasticache" or .metadata.component == "backup"'
       - name: confirm
         type: confirm
         prompt: Deploy the data layer?
@@ -271,7 +293,24 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "backup"'
+        command: terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache" or .metadata.component == "backup"'
+
+  deploy-dns:
+    description: "Deploy the dns layer: Route 53 zones and records (after the data layer, whose endpoints they point at)"
+    steps:
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.metadata.component == "dns"'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the dns layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "dns"'
 
   deploy-services:
     description: "Deploy the services layer: API Gateway, Lambda and backend services"

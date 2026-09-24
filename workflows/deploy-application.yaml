@@ -7,7 +7,7 @@
 #   atmos workflow component -f deploy-application -s <stack>
 workflows:
   deploy-app:
-    description: Deploy application layer components (secrets, Lambda, API Gateway, ECS, monitoring)
+    description: Deploy application layer components (secrets, Cognito, Lambda, API Gateway, ECS, monitoring)
     steps:
       - name: check-foundation
         type: atmos
@@ -16,8 +16,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --log-order grouped --query '.metadata.component == "secretsmanager"
-          or .metadata.component == "external-secrets" or .metadata.component == "lambda"
-          or .metadata.component == "apigateway" or .metadata.component == "ecs"
+          or .metadata.component == "external-secrets" or .metadata.component == "cognito"
+          or .metadata.component == "lambda" or .metadata.component == "apigateway" or .metadata.component == "ecs"
           or .metadata.component == "monitoring"'
       - name: confirm
         type: confirm
@@ -29,6 +29,10 @@ workflows:
       - name: deploy-secrets
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "secretsmanager" or .metadata.component == "external-secrets"'
+      # apigateway/main reads cognito/main .user_pool_arn, so cognito is applied before the API.
+      - name: deploy-identity
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "cognito"'
       - name: deploy-compute
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
@@ -43,8 +47,12 @@ workflows:
         content: Application layer deployed
 
   hot-deploy:
-    description: Quick application deployment (Lambda and API Gateway only)
+    description: Quick application deployment (Cognito, Lambda and API Gateway only)
     steps:
+      # Cognito first: apigateway/main reads cognito/main .user_pool_arn.
+      - name: deploy-identity
+        type: atmos
+        command: terraform deploy --query '.metadata.component == "cognito"'
       - name: deploy
         type: atmos
         command: terraform deploy --query '.metadata.component == "lambda" or .metadata.component == "apigateway"'

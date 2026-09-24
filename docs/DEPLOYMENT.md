@@ -78,13 +78,18 @@ those planfiles (`terraform deploy --from-plan`).
 |-------|----------|--------------|
 | foundation | `deploy-foundation` | `backend`, `iam` |
 | kms | `deploy-kms` | `kms` |
-| networking | `deploy-networking` | `vpc`, `dns`, `securitygroup` |
-| security | `deploy-security` | `acm`, `secretsmanager`, `security-monitoring` |
+| networking | `deploy-networking` | `vpc`, `securitygroup`, `network` |
+| security | `deploy-security` | `acm`, `secretsmanager`, `security-monitoring`, `guardduty`, `securityhub`, `cognito` |
 | compute | `deploy-compute` | `eks`, `ec2`, `ecs` |
 | platform | `deploy-platform` | `eks-addons`, `external-secrets` |
-| data | `deploy-data` | `rds`, `backup` |
+| data | `deploy-data` | `rds`, `elasticache`, `backup` |
+| dns | `deploy-dns` | `dns` (after data: records point at RDS endpoints) |
 | services | `deploy-services` | `apigateway`, `lambda`, `eks-backend-services` |
 | monitoring | `deploy-monitoring` | `monitoring`, `cost-optimization` |
+
+Every enabled, non-abstract instance must fall in exactly one layer, and no layer may come before a
+layer it depends on (`dependencies.components` or a `!terraform.state` read). `validate-all` enforces
+both (`workflows/scripts/common/check-deploy-layers.py`), so a new root module needs a layer here.
 
 ```bash
 atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01                 # all layers
