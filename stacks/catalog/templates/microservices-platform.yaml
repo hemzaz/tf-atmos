@@ -47,7 +47,8 @@
 #          letsencrypt_email: ops@example.com    # cert-manager ACME account
 #          cognito_user_pool_id: eu-west-2_xxxx  # JWT issuer
 #          cognito_client_id: xxxxxxxx           # JWT audience
-#    A missing key fails the stack at load time (gomplate `required`).
+#    A missing key fails every describe/plan of the stack with its name
+#    (gomplate `required`); `atmos validate stacks` does not render templates.
 # 3. On-call addresses, if any, in microservices/monitoring's
 #    alarm_email_subscriptions.
 # =============================================================================
