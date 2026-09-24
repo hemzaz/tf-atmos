@@ -11,9 +11,13 @@ Usage:
 A layered workflow is a run of phases. A `terraform plan --query '<q>'` step
 starts a phase (it saves a planfile for every instance <q> selects); the
 `terraform deploy --from-plan --query '<q>'` steps after it apply those
-planfiles. Queries must be disjunctions (` or `) of conjunctions (` and `) of
-`.metadata.component` / `.atmos_component` `==` / `!=` "<value>" terms, which
-this script evaluates exactly (yq binds `and` tighter than `or`).
+planfiles. Queries are `.metadata.component` / `.atmos_component` `==` / `!=`
+"<value>" terms joined by ` or ` and ` and `. yq (v4.52) gives `and` and `or`
+equal precedence and groups them to the right, so `a or b and c` is
+`a or (b and c)` but `a and b or c` is `a and (b or c)`. Only the last ` or `
+operand may contain ` and `; then right-grouping equals or-of-ands, which this
+script evaluates exactly. Any other query, and any `terraform plan|deploy|apply`
+step of a checked workflow that is not one of the forms here, is an error.
 `terraform plan <instance>` and `terraform deploy <instance> --from-plan`
 select that one instance.
 
@@ -55,6 +59,8 @@ DEPLOY = re.compile(r"^terraform deploy --from-plan --query '(?P<query>[^']*)'$"
 # One named instance: `terraform plan <instance>` / `terraform deploy <instance> --from-plan`.
 PLAN_ONE = re.compile(r"^terraform plan (?P<instance>[\w./-]+)$")
 DEPLOY_ONE = re.compile(r"^terraform deploy (?P<instance>[\w./-]+) --from-plan$")
+# Any terraform step that plans or applies; a checked workflow must use only the forms above.
+TERRAFORM_STEP = re.compile(r"^terraform (plan|deploy|apply)\b")
 TERM = re.compile(r'^\.(?P<field>metadata\.component|atmos_component) (?P<op>==|!=) "(?P<value>[^"]+)"$')
 # A dependencies.components entry with a `stack` other than its own, or any of
 # these context keys, names an instance in another stack: not ordered here.
@@ -70,9 +76,16 @@ Query = list[list[tuple[str, str, str]]]
 
 
 def parse_query(query: str) -> Optional[Query]:
-    """The query as OR-ed lists of AND-ed (field, op, value) terms; None if it is not of that form."""
+    """The query as OR-ed lists of AND-ed (field, op, value) terms; None if it is not of that form.
+
+    ` and ` is accepted in the last disjunct only: yq groups `and`/`or` to the right
+    with equal precedence, so an earlier `and` would take everything after it.
+    """
     disjuncts = []
-    for disjunct in query.split(" or "):
+    parts = query.split(" or ")
+    if any(" and " in part for part in parts[:-1]):
+        return None
+    for disjunct in parts:
         terms = []
         for term in disjunct.split(" and "):
             match = TERM.match(term.strip())
@@ -103,6 +116,10 @@ def phases(steps: list[dict], where: str) -> tuple[list[dict], list[str]]:
     result, errors = [], []
     for step in steps:
         name = step.get("name") or "(unnamed)"
+        forms = (PLAN, DEPLOY, PLAN_ONE, DEPLOY_ONE)
+        if TERRAFORM_STEP.match(command(step)) and not any(form.match(command(step)) for form in forms):
+            errors.append(f"{where}: step {name}: `{command(step)}` is not a plan/deploy form this check understands")
+            continue
         for pattern, kind in ((PLAN, "plan"), (DEPLOY, "deploy"), (PLAN_ONE, "plan"), (DEPLOY_ONE, "deploy")):
             match = pattern.match(command(step))
             if match is None:
@@ -112,7 +129,10 @@ def phases(steps: list[dict], where: str) -> tuple[list[dict], list[str]]:
             else:
                 query = parse_query(match.group("query"))
             if query is None:
-                errors.append(f"{where}: step {name}: query is not an or/and of .metadata.component/.atmos_component terms")
+                errors.append(
+                    f"{where}: step {name}: query is not an or/and of .metadata.component/.atmos_component "
+                    "terms with ` and ` only after the last ` or `"
+                )
             elif kind == "plan":
                 result.append({"name": name, "plan": query, "deploys": []})
             elif not result:

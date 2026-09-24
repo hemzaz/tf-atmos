@@ -18,8 +18,8 @@
 # (iam/ci reads backend/main), connectivity follows networking, security-monitoring
 # follows security, lambda (compute) precedes apigateway (services), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
-# A layer whose root modules no stack uses yet (security-monitoring, eks-addons,
-# backup, eks-backend-services, cost-optimization) plans nothing: "No components matched".
+# A layer whose root modules no stack uses yet (eks-addons, backup,
+# eks-backend-services, cost-optimization) plans nothing: "No components matched".
 #
 # Every enabled, non-abstract instance of every stack must be selected by exactly
 # one layer, in that order. validate-all enforces it with

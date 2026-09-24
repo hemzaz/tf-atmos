@@ -320,6 +320,37 @@ class SubsetWorkflowTest(unittest.TestCase):
         errors = [e for e in check_deploy_layers.check(self.STACKS, files) if e.startswith("deploy-application.yaml")]
         self.assertEqual(errors, [])
 
+    def test_and_before_the_last_or_is_rejected(self):
+        # yq v4.52: `a and b or c` groups as `a and (b or c)`, not `(a and b) or c`.
+        errors = self.errors(
+            ("plan", ['.metadata.component == "ec2" and .atmos_component != "ec2/x"', "cognito"]),
+            ("deploy", ["cognito"]),
+        )
+        self.assertIn("step plan-0: query is not an or/and", errors[0], errors)
+
+    def test_and_in_the_last_disjunct_groups_to_the_right(self):
+        query = check_deploy_layers.parse_query(
+            '.metadata.component == "cognito" or .metadata.component == "lambda" and .atmos_component != "lambda/fn"'
+        )
+        self.assertIsNotNone(query)
+        instances = self.STACKS["s1"]["components"]["terraform"]
+        selected = sorted(n for n, i in instances.items() if check_deploy_layers.selects(query, n, i))
+        self.assertEqual(selected, ["cognito/main"])
+
+    def test_unparsed_terraform_step_fails(self):
+        files = workflow_files(("networking", ["vpc"]))
+        files["deploy-application.yaml"] = {"workflows": {"deploy-app": {"steps": [
+            {"name": "plan", "command": "terraform plan --query '.metadata.component == \"x\"'"},
+            {"name": "deploy", "command": "terraform deploy --from-plan --query '.metadata.component == \"x\"'"},
+            {"name": "apply", "command": "terraform apply cognito/main -auto-approve"},
+            {"name": "sneaky", "command": "terraform deploy --query '.metadata.component == \"cognito\"'"},
+            {"name": "output", "command": "terraform output vpc/main vpc_id"},
+        ]}}}
+        errors = [e for e in check_deploy_layers.check(self.STACKS, files) if e.startswith("deploy-application.yaml")]
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("step apply: `terraform apply cognito/main -auto-approve` is not a plan/deploy form", errors[0])
+        self.assertIn("step sneaky:", errors[1])
+
     def test_deploy_before_any_plan_fails(self):
         errors = self.errors(("deploy", ["cognito"]))
         self.assertTrue(any("applies planfiles before any plan step" in e for e in errors), errors)

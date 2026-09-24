@@ -106,9 +106,10 @@ atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01                
 atmos workflow deploy-networking -f deploy-full-stack -s fnx-dev-testenv-01      # one layer
 ```
 
-The `kms` layer only has work in stacks with an enabled `kms` component (today
-`fnx-prod-production`, whose EKS/EC2/RDS read the key via `!terraform.state`); elsewhere it plans
-nothing and the prompt just asks to continue.
+The `kms` layer applies `kms/main`, which is enabled in dev, staging, prod and the local sandbox
+(secretsmanager, EC2, EKS, RDS and others read its key via `!terraform.state`). A stack without an
+enabled `kms` component (`fnx-local-localemu`) plans nothing there, and the prompt just asks to
+continue.
 
 Other ways to deploy (`apply-environment` plans every instance before applying any, so it only
 works once every instance it reads has state; use `deploy-full-stack` for a stack's first deploy):
@@ -118,7 +119,17 @@ atmos workflow apply -f apply-environment -s <stack>      # whole stack: plan, o
 atmos terraform plan <component> -s <stack>               # one instance
 atmos terraform deploy <component> -s <stack>              # one instance: plan + apply
 atmos workflow component -f deploy-application -s <stack> # one instance, name entered at a prompt
+atmos workflow deploy-app -f deploy-application -s <stack> # secrets, Cognito, Lambda, ECS, then API Gateway and monitoring
+atmos workflow hot-deploy -f deploy-application -s <stack> # Cognito, Lambda, API Gateway: no plan review
 ```
+
+`deploy-app` and `hot-deploy` assume the instances they read are already applied: `kms/main`,
+`vpc/*`, `eks/*` (where present), `acm/*` and the dns zones `network/main` and `network/services`
+(deploy-full-stack layers backend through dns).
+
+`hot-deploy` is the one deliberate exception to reviewing a saved plan before applying it. It is
+a fast path that runs `terraform deploy` (plan and auto-approve per instance, in dependency order)
+without a confirmation. Use `deploy-app` when the change should be reviewed.
 
 Disabled instances (`metadata.enabled: false`) are skipped: `iam/ci`, `iam/eks-node`,
 `iam/eks-cluster`, `infrastructure/*`, `vpc-flow-logs-bucket`, and in prod

@@ -55,6 +55,17 @@ class CheckDependenciesTest(unittest.TestCase):
         reader = instance({"b": "!terraform.output vpc/main vpc_id"}, [{"component": "vpc/main"}])
         self.assert_errors(stacks_with(reader))
 
+    def test_expression_start_characters_are_not_stacks(self):
+        for expression in (".id", "[.a]", "{a: .b}", "| .id", "'.id'", '".id"'):
+            with self.subTest(expression=expression):
+                reader = instance(
+                    {"x": f"!terraform.state vpc/main {expression} // null"}, [{"component": "vpc/main"}]
+                )
+                self.assertEqual(
+                    list(check_dependencies.references(reader["vars"])), [("vpc/main", None)]
+                )
+                self.assert_errors(stacks_with(reader))
+
     def test_missing_target_fails(self):
         reader = instance({"x": "!terraform.state nope .id"}, [{"component": "nope"}])
         self.assert_errors(stacks_with(reader), "does not exist")

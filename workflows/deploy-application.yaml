@@ -1,5 +1,12 @@
-# Application-layer deployments on top of an existing foundation
-# (vpc/main and, where present, eks/main must already be deployed).
+# Application-layer deployments on top of an existing foundation. What these
+# workflows select reads state they do not deploy, so these must already be
+# applied (deploy-full-stack, layers backend through dns): kms/main, vpc/*,
+# eks/* (where present), acm/* and the dns zones (network/main, network/services).
+#
+# hot-deploy is the one exception to "review a saved plan, then apply exactly
+# that plan": it is a fast path for redeploying Cognito, Lambda and API Gateway,
+# and runs `terraform deploy` (plan + auto-approve per instance, in dependency
+# order) with no confirmation. Use deploy-app to review before applying.
 #
 # Usage:
 #   atmos workflow deploy-app -f deploy-application -s <stack>
@@ -61,8 +68,9 @@ workflows:
   hot-deploy:
     description: Quick application deployment (Cognito, Lambda and API Gateway only)
     steps:
-      # No saved plans here: each instance is planned just before it is applied,
-      # in dependency order, so apigateway sees cognito's and lambda's state.
+      # Unreviewed by design (see the header): no saved plans and no confirm. Each
+      # instance is planned just before it is applied, in dependency order, so
+      # apigateway sees cognito's and lambda's state.
       # Cognito first: apigateway/main reads cognito/main .user_pool_arn.
       - name: deploy-identity
         type: atmos

@@ -13,6 +13,8 @@ import sys
 from typing import Any, Iterator, Optional
 
 FUNCTIONS = ("!terraform.state", "!terraform.output")
+# Characters that open a yq expression rather than a stack name (Atmos 1.229.0 isExpressionStart).
+EXPRESSION_STARTS = tuple(".[{|'\"")
 COMPONENTS_DIR = "components/terraform"
 
 
@@ -29,8 +31,9 @@ def references(value: Any) -> Iterator[tuple[str, Optional[str]]]:
         if len(tokens) < 3:
             return
         # `!fn <component> <expr>` or `!fn <component> <stack> <expr>`; the
-        # !terraform.output <expr> may be a bare output name (`vpc_id`).
-        stack = None if len(tokens) == 3 or tokens[2].startswith((".", "[")) else tokens[2]
+        # !terraform.output <expr> may be a bare output name (`vpc_id`). A third
+        # token that starts an expression is not a stack (Atmos isExpressionStart).
+        stack = None if len(tokens) == 3 or tokens[2].startswith(EXPRESSION_STARTS) else tokens[2]
         yield tokens[1], stack
 
 
