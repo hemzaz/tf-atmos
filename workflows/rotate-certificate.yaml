@@ -5,6 +5,11 @@
 workflows:
   rotate:
     description: Rotate a certificate in AWS Secrets Manager / ACM and Kubernetes
+    dependencies:
+      tools:
+        aws/aws-cli: "2.36.49"
+        jqlang/jq: "1.8.2"
+        kubernetes/kubernetes/kubectl: "1.37.0"
     steps:
       - name: secret
         type: input

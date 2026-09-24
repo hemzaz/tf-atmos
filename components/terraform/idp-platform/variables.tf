@@ -159,7 +159,7 @@ variable "redis_num_cache_clusters" {
 
 variable "allowed_cidr_blocks" {
   type        = list(string)
-  description = "CIDR blocks allowed to access the platform"
+  description = "CIDR blocks allowed to access the platform (feeds the ALB's HTTPS ingress rule)"
   default     = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 
   validation {
@@ -167,6 +167,16 @@ variable "allowed_cidr_blocks" {
       for cidr in var.allowed_cidr_blocks : can(cidrhost(cidr, 0))
     ])
     error_message = "All values must be valid CIDR blocks."
+  }
+
+  # Prefix-length check (not a literal-string check), compared as a number so
+  # "/00" (which AWS parses the same as "/0") counts too -- also catches ::/0
+  # and any other /0, per components/terraform/eks/variables.tf. This feeds
+  # aws_vpc_security_group_ingress_rule.alb_https in main.tf, so this is
+  # ingress-only; the ALB's egress is unrestricted by policy.
+  validation {
+    condition     = alltrue([for cidr in var.allowed_cidr_blocks : try(tonumber(split("/", cidr)[1]) != 0, true)])
+    error_message = "allowed_cidr_blocks must not be open to everywhere (0.0.0.0/0 or any other /0)."
   }
 }
 

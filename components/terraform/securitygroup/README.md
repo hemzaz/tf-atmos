@@ -42,7 +42,7 @@ stack today.
 | `security_groups.<key>.allow_all_egress` | default `true`, matching Cloudposse; see [`allow_all_egress`](#allow_all_egress-default-true-matches-cloudposse) |
 | `security_groups.<key>.name` | rejected by validation: names are generated, see below |
 | `tags` | required; must include a non-empty `Environment` (validated), used in the group names `${Environment}-${key}-sg` |
-| `enforce_no_public_ingress` | when `true`, apply fails if any rule allows ingress from `0.0.0.0/0` or `::/0` |
+| `enforce_no_public_ingress` | default `true`; apply fails if any rule allows ingress from `0.0.0.0/0` or `::/0` |
 | `log_retention_days` | must be a valid CloudWatch retention value (validated) |
 | out: `security_group_ids`, `security_group_arns`, `security_group_vpc_id` | maps keyed by the `security_groups` key |
 | out: `security_group_names` | the generated group names; the group is created from a `name_prefix`, so the full name is only known after apply |

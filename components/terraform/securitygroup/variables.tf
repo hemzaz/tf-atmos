@@ -228,7 +228,7 @@ variable "enable_security_group_alarms" {
 variable "enforce_no_public_ingress" {
   type        = bool
   description = "Enforce that no security groups allow ingress from 0.0.0.0/0 or ::/0 (blocks creation)"
-  default     = false
+  default     = true
 }
 
 variable "log_retention_days" {
