@@ -54,7 +54,7 @@ settings:
       warning_alerts: ["team@example.com"]
     tenant_name: testenv-01
     hosted_zone_id: "Z1234567890EXAMPLE"
-    eks_kubernetes_version: "1.28"
+    eks_kubernetes_version: "1.36"
     eks_public_access: false
     rds_engine: "postgres"
     rds_engine_version: "14"
