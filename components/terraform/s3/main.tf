@@ -139,6 +139,7 @@ resource "aws_s3_bucket_policy" "this" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "this" {
+  #checkov:skip=CKV_AWS_300:Rules are an input; each sets abort_incomplete_multipart_upload_days (a dynamic block checkov cannot see), and AWS rejects it on tag-filtered rules
   count = local.enabled && length(local.lifecycle_rules) > 0 ? 1 : 0
 
   bucket = aws_s3_bucket.this[0].id
