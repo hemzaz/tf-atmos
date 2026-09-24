@@ -38,7 +38,7 @@ settings:
   environment:
     description: "Full production platform (EKS, RDS, monitoring)"
     vpc_cidr: "10.30.0.0/16"
-    eks_kubernetes_version: "1.33"
+    eks_kubernetes_version: "1.36"
     eks_public_access: false
     rds_engine: "postgres"
     rds_engine_version: "16"
@@ -153,21 +153,19 @@ components:
         inherits:
           - eks/defaults
       vars:
-        clusters:
-          main:
-            kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
-            endpoint_private_access: true
-            endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
-            security_group_ids:
-              - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
-            node_groups:
-              general:
-                enabled: true
-                instance_types: ["m6i.large", "m6i.xlarge"]
-                capacity_type: "ON_DEMAND"
-                min_size: 2
-                max_size: 10
-                desired_size: 3
+        name: main
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
+        associated_security_group_ids:
+          - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+        node_groups:
+          general:
+            instance_types: ["m6i.large", "m6i.xlarge"]
+            capacity_type: "ON_DEMAND"
+            min_group_size: 2
+            max_group_size: 10
+            desired_group_size: 3
       dependencies:
         components:
           - component: vpc/main
@@ -182,11 +180,11 @@ components:
       vars:
         clusters:
           main:
-            cluster_name: !terraform.state eks/main .cluster_ids.main
-            kubernetes_host: !terraform.state eks/main .cluster_endpoints.main
-            cluster_ca_certificate: !terraform.state eks/main .cluster_ca_data.main
-            oidc_provider_arn: !terraform.state eks/main .oidc_provider_arns.main
-            oidc_provider_url: !terraform.state eks/main .oidc_provider_arns.main | split("oidc-provider/") | .[1]
+            cluster_name: !terraform.state eks/main .eks_cluster_id
+            kubernetes_host: !terraform.state eks/main .eks_cluster_endpoint
+            cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+            oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+            oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
             enable_aws_load_balancer_controller: true
             enable_cluster_autoscaler: true
             enable_external_dns: true
@@ -248,7 +246,7 @@ components:
           - monitoring/defaults
       vars:
         create_dashboard: true
-        eks_cluster_name: !terraform.state eks/main .cluster_ids.main
+        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
         enable_rds_monitoring: true
         rds_instances:
           - !terraform.state rds/main .instance_id
