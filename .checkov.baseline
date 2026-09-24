@@ -175,7 +175,7 @@
             "file": "/eks/main.tf",
             "findings": [
                 {
-                    "resource": "module.eks_cluster.aws_eks_cluster.clusters",
+                    "resource": "module.eks_cluster.aws_eks_cluster.default[0]",
                     "check_ids": [
                         "CKV_AWS_339"
                     ]

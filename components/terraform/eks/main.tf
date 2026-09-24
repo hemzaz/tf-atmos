@@ -1,33 +1,31 @@
+# One EKS cluster per component instance, as in
+# cloudposse-terraform-components/aws-eks-cluster: every resource is
+# `count = local.enabled ? 1 : 0` (or a map of node groups), and the outputs
+# are Cloud Posse's scalar outputs.
+
 # Add AWS caller identity data source for IAM policies
 data "aws_caller_identity" "current" {}
 
 locals {
-  clusters = {
-    for k, v in var.clusters : k => v if lookup(v, "enabled", true)
-  }
+  enabled     = var.enabled
+  environment = var.tags["Environment"]
 
-  cluster_log_group_names = {
-    for k, v in local.clusters : k => "/aws/eks/${var.tags["Environment"]}-${k}/cluster"
-  }
+  # Every name is "<Environment>-<name>", the repo's name_prefix convention.
+  # var.name must not repeat the Environment (see its validation), so the
+  # prod cluster is "production-main", not "production-production-main".
+  name_prefix            = "${local.environment}-${var.name}"
+  cluster_name           = local.name_prefix
+  cluster_log_group_name = "/aws/eks/${local.cluster_name}/cluster"
 
-  # Merge node groups across all clusters.
   # `name_base` is the node group's name without its random_pet suffix:
-  # "<cluster>-<node group>", with the Environment prefixed only when the
-  # cluster key does not already start with it ("production-main", not
-  # "production-production-main"). It is a plain `-` join, never the `.` of the
-  # map key, which EKS does not document as valid in a node group name.
-  # Keep this expression in sync with the node group name validation on
-  # var.clusters, which has to repeat it because a validation cannot read locals.
-  node_groups = merge([
-    for cluster_key, cluster in local.clusters : {
-      for ng_key, ng in lookup(cluster, "node_groups", {}) :
-      "${cluster_key}.${ng_key}" => merge(ng, {
-        cluster_name = cluster_key
-        name_base    = "${var.tags["Environment"]}-${trimprefix(cluster_key, "${var.tags["Environment"]}-")}-${ng_key}"
-      })
-      if lookup(ng, "enabled", true)
-    }
-  ]...)
+  # "<cluster>-<node group>". The node group name validation on
+  # var.node_groups repeats this expression because a validation cannot read
+  # locals; keep the two in sync.
+  node_groups = local.enabled ? {
+    for k, ng in var.node_groups : k => merge(ng, {
+      name_base = "${local.name_prefix}-${k}"
+    }) if ng.enabled
+  } : {}
 
   # One label for everything a node group creates, as Cloud Posse does: the
   # node group, its launch template, and what the template launches.
@@ -64,63 +62,54 @@ locals {
   immediately_apply_lt_changes = {
     for k, ng in local.node_groups : k => coalesce(ng.immediately_apply_lt_changes, true)
   }
+
+  # The caller's key when set, otherwise the key this component creates.
+  kms_key_arn = var.cluster_encryption_config_kms_key_id != "" ? var.cluster_encryption_config_kms_key_id : one(aws_kms_key.cluster[*].arn)
 }
 
-resource "aws_cloudwatch_log_group" "eks" {
-  for_each = local.clusters
+resource "aws_cloudwatch_log_group" "default" {
+  # checkov:skip=CKV_AWS_338:Retention is a per-stack cost decision, not a module one. Only prod pins cluster_log_retention_period (90); dev and staging keep the 7-day default, so raising the default to the year this check wants would multiply their audit-log spend without anyone deciding to. The repo accepts the same finding on its other log groups.
+  count = local.enabled ? 1 : 0
 
-  # checkov:skip=CKV_AWS_338:Retention is a per-stack cost decision, not a module one. Only prod pins default_cluster_log_retention_days (90); dev and staging inherit it, so raising the default to the year this check wants would quadruple their audit-log spend without anyone deciding to. The repo accepts the same finding on its five other log groups. Removing the dead lookup() below is what made this check resolvable at all -- it was never passing, only invisible.
-  name = local.cluster_log_group_names[each.key]
-  # No per-cluster override: `clusters` is a typed object and declares neither
-  # `log_retention_days` nor `log_kms_key_id`, so a stack setting either would be
-  # dropped by the type constraint and silently ignored here.
-  retention_in_days = var.default_cluster_log_retention_days
-  # The cluster's own key, the one already encrypting its secrets. Until now
-  # this read a `log_kms_key_id` key that the typed schema does not declare, so
-  # it always resolved to null and the control-plane logs -- which carry the
-  # audit trail -- were written unencrypted. Checkov could not see that, because
-  # it cannot resolve a lookup(): removing the dead expression is what surfaced
-  # CKV_AWS_158.
-  kms_key_id = aws_kms_key.eks[each.key].arn
+  name              = local.cluster_log_group_name
+  retention_in_days = var.cluster_log_retention_period
+  # The cluster's own key, the one already encrypting its secrets, so the
+  # control-plane logs (which carry the audit trail) are encrypted too.
+  kms_key_id = aws_kms_key.cluster[0].arn
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name        = "/aws/eks/${var.tags["Environment"]}-${each.key}/cluster"
-      Environment = var.tags["Environment"]
-      Component   = "eks"
-      ClusterName = "${var.tags["Environment"]}-${each.key}"
-    }
-  )
+  tags = merge(var.tags, {
+    Name        = local.cluster_log_group_name
+    Environment = local.environment
+    Component   = "eks"
+    ClusterName = local.cluster_name
+  })
 }
 
-#trivy:ignore:AWS-0040 Public endpoint is off unless a cluster sets endpoint_public_access = true
-resource "aws_eks_cluster" "clusters" {
-  #checkov:skip=CKV_AWS_38:Public endpoint is off unless a cluster sets endpoint_public_access = true
-  for_each = local.clusters
+#trivy:ignore:AWS-0040 Public endpoint is off unless cluster_endpoint_public_access = true
+resource "aws_eks_cluster" "default" {
+  #checkov:skip=CKV_AWS_38:Public endpoint is off unless cluster_endpoint_public_access = true
+  count = local.enabled ? 1 : 0
 
-  name     = "${var.tags["Environment"]}-${each.key}"
-  role_arn = aws_iam_role.cluster[each.key].arn
-  version  = coalesce(each.value.kubernetes_version, var.default_kubernetes_version)
+  name     = local.cluster_name
+  role_arn = aws_iam_role.default[0].arn
+  version  = var.cluster_kubernetes_version
 
   vpc_config {
-    subnet_ids              = coalesce(each.value.subnet_ids, var.subnet_ids)
-    endpoint_private_access = lookup(each.value, "endpoint_private_access", true)
-    endpoint_public_access  = lookup(each.value, "endpoint_public_access", false)
-    public_access_cidrs     = each.value.public_access_cidrs
-    security_group_ids      = lookup(each.value, "security_group_ids", [])
+    subnet_ids              = var.subnet_ids
+    endpoint_private_access = var.cluster_endpoint_private_access
+    endpoint_public_access  = var.cluster_endpoint_public_access
+    public_access_cidrs     = var.public_access_cidrs
+    security_group_ids      = var.associated_security_group_ids
   }
 
   encryption_config {
     provider {
-      # Use explicit fallback logic to avoid dependency cycle
-      key_arn = lookup(each.value, "kms_key_arn", null) != null ? lookup(each.value, "kms_key_arn", null) : aws_kms_key.eks[each.key].arn
+      key_arn = local.kms_key_arn
     }
     resources = ["secrets"]
   }
 
-  enabled_cluster_log_types = lookup(each.value, "enabled_cluster_log_types", ["api", "audit", "authenticator", "controllerManager", "scheduler"])
+  enabled_cluster_log_types = var.enabled_cluster_log_types
 
   # Add timeouts to allow for longer cluster creation/update
   timeouts {
@@ -129,50 +118,40 @@ resource "aws_eks_cluster" "clusters" {
     delete = "30m"
   }
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name        = "${var.tags["Environment"]}-${each.key}"
-      Environment = var.tags["Environment"]
-      Component   = "eks"
-      ClusterName = "${var.tags["Environment"]}-${each.key}"
-      CreatedBy   = "terraform"
-    }
-  )
+  tags = merge(var.tags, {
+    Name        = local.cluster_name
+    Environment = local.environment
+    Component   = "eks"
+    ClusterName = local.cluster_name
+    CreatedBy   = "terraform"
+  })
 
   depends_on = [
-    aws_iam_role_policy_attachment.cluster_eks_cluster_policy,
-    aws_iam_role_policy_attachment.cluster_eks_vpc_resource_controller,
-    aws_cloudwatch_log_group.eks
+    aws_iam_role_policy_attachment.amazon_eks_cluster_policy,
+    aws_iam_role_policy_attachment.amazon_eks_vpc_resource_controller,
+    aws_cloudwatch_log_group.default,
   ]
 
   # prevent_destroy only accepts literals, so production protection uses EKS deletion protection instead
-  deletion_protection = var.enable_cluster_protection && contains(["prod", "production"], lower(var.tags["Environment"]))
+  deletion_protection = var.enable_cluster_protection && contains(["prod", "production"], lower(local.environment))
 
-  lifecycle {
-    # Add preconditions for various cluster requirements
-    precondition {
-      condition     = length(coalesce(each.value.subnet_ids, var.subnet_ids)) >= 2
-      error_message = "At least 2 subnet IDs are required for the EKS cluster ${each.key} to ensure high availability."
-    }
-
-    precondition {
-      condition     = can(regex("^\\d+\\.(\\d+)$", coalesce(each.value.kubernetes_version, var.default_kubernetes_version)))
-      error_message = "Kubernetes version for cluster ${each.key} must be in the format 'X.Y' (e.g., 1.28)."
-    }
-
-    precondition {
-      condition     = length(lookup(each.value, "enabled_cluster_log_types", [])) > 0
-      error_message = "At least one cluster log type must be enabled for cluster ${each.key}."
-    }
-  }
+  # The endpoint rules are variable validations on cluster_endpoint_public_access
+  # and public_access_cidrs, so they also run in a credential-less plan.
 }
 
-resource "aws_kms_key" "eks" {
-  for_each = local.clusters
+# The component's own key. It always encrypts the control-plane log group, and
+# it encrypts Kubernetes secrets only when cluster_encryption_config_kms_key_id
+# is empty (prod passes kms/main's key for secrets, so there this key serves
+# the log group alone). Kept for the log group either way: a caller's key would
+# need a CloudWatch Logs statement scoped to this log group, which kms/main
+# does not grant.
+resource "aws_kms_key" "cluster" {
+  count = local.enabled ? 1 : 0
 
-  description             = "KMS key for EKS ${each.key} secrets and control-plane log encryption"
+  description = (var.cluster_encryption_config_kms_key_id == ""
+    ? "KMS key for EKS ${local.cluster_name} secrets and control-plane log encryption"
+    : "KMS key for EKS ${local.cluster_name} control-plane log encryption (secrets use the caller's key)"
+  )
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
@@ -226,12 +205,10 @@ resource "aws_kms_key" "eks" {
         }
       },
       {
-        # Required for the log group below to use this key. Without it, CloudWatch
+        # Required for the log group to use this key. Without it, CloudWatch
         # Logs cannot write and AWS rejects the key association outright, so a
         # missing statement fails the apply rather than silently dropping logs.
-        # Scoped by encryption context to this cluster's log group, which is why
-        # the name comes from local.cluster_log_group_names rather than being
-        # spelled out a second time.
+        # Scoped by encryption context to this cluster's log group.
         Sid    = "Allow CloudWatch Logs to use the key for this cluster's log group",
         Effect = "Allow",
         Principal = {
@@ -247,32 +224,26 @@ resource "aws_kms_key" "eks" {
         Resource = "*",
         Condition = {
           ArnEquals = {
-            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:${local.cluster_log_group_names[each.key]}"
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:${local.cluster_log_group_name}"
           }
         }
       }
     ]
   })
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name        = "${var.tags["Environment"]}-${each.key}-kms-key"
-      Environment = var.tags["Environment"]
-      Cluster     = each.key
-      ManagedBy   = "terraform"
-    }
-  )
+  tags = merge(var.tags, {
+    Name        = "${local.cluster_name}-kms-key"
+    Environment = local.environment
+    ClusterName = local.cluster_name
+    ManagedBy   = "terraform"
+  })
 }
 
-// Log group configuration moved to aws_cloudwatch_log_group.eks above
+# IAM Role for the EKS cluster
+resource "aws_iam_role" "default" {
+  count = local.enabled ? 1 : 0
 
-# IAM Role for EKS Cluster
-resource "aws_iam_role" "cluster" {
-  for_each = local.clusters
-
-  name = "${var.tags["Environment"]}-${each.key}-cluster-role"
+  name = "${local.cluster_name}-cluster-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -287,27 +258,21 @@ resource "aws_iam_role" "cluster" {
     ]
   })
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-cluster-role"
-    }
-  )
+  tags = merge(var.tags, { Name = "${local.cluster_name}-cluster-role" })
 }
 
-resource "aws_iam_role_policy_attachment" "cluster_eks_cluster_policy" {
-  for_each = local.clusters
+resource "aws_iam_role_policy_attachment" "amazon_eks_cluster_policy" {
+  count = local.enabled ? 1 : 0
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.cluster[each.key].name
+  role       = aws_iam_role.default[0].name
 }
 
-resource "aws_iam_role_policy_attachment" "cluster_eks_vpc_resource_controller" {
-  for_each = local.clusters
+resource "aws_iam_role_policy_attachment" "amazon_eks_vpc_resource_controller" {
+  count = local.enabled ? 1 : 0
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
-  role       = aws_iam_role.cluster[each.key].name
+  role       = aws_iam_role.default[0].name
 }
 
 # EKS Node Groups
@@ -316,7 +281,7 @@ resource "aws_iam_role_policy_attachment" "cluster_eks_vpc_resource_controller" 
 # One template per node group, because block_device_map is per node group.
 # Deliberately no `image_id`/`user_data`: leaving them unset lets EKS supply the
 # AMI matching `ami_type` and inject its own bootstrap script.
-resource "aws_launch_template" "node_groups" {
+resource "aws_launch_template" "default" {
   # checkov:skip=CKV_AWS_79: http_tokens is "required" unless a stack sets
   #   metadata_http_tokens_required = false. Checkov cannot evaluate the
   #   conditional below and flags the resource whatever the value resolves to.
@@ -328,10 +293,10 @@ resource "aws_launch_template" "node_groups" {
   for_each = local.node_groups
 
   # A launch template name_prefix may be up to 102 characters (128 minus the
-  # 26-character unique suffix). name_base is capped below 63 on var.clusters,
-  # well inside that limit.
+  # 26-character unique suffix). name_base is capped below 63 on
+  # var.node_groups, well inside that limit.
   name_prefix = "${each.value.name_base}-"
-  description = "Managed node group ${each.key} in cluster ${each.value.cluster_name}"
+  description = "Managed node group ${each.key} in cluster ${local.cluster_name}"
 
   dynamic "block_device_mappings" {
     for_each = local.launch_template_configs[each.key].block_device_mappings
@@ -396,19 +361,19 @@ resource "aws_launch_template" "node_groups" {
 # switch as in cloudposse/terraform-aws-eks-node-group main.tf.
 #
 # Not `node_group_name_prefix`: the provider caps that at 37 characters, and
-# the prod names run to 44.
-resource "random_pet" "node_groups" {
+# the prod names run longer.
+resource "random_pet" "default" {
   for_each = local.node_groups
 
   # The pet is Name (length 1), Adjective-Name (2), or one Adverb per word
   # beyond two, then Adjective-Name (3+). With the pinned random provider,
   # names and adjectives are at most 8 characters and adverbs at most 10.
-  # The name_base validation on var.clusters budgets exactly that, "-" included.
+  # The name_base validation on var.node_groups budgets exactly that, "-" included.
   length    = each.value.random_pet_length
   separator = "-"
 
   keepers = {
-    node_role_arn  = aws_iam_role.node[each.value.cluster_name].arn
+    node_role_arn  = aws_iam_role.node[0].arn
     subnet_ids     = join(",", sort(coalesce(each.value.subnet_ids, var.subnet_ids)))
     instance_types = join(",", each.value.instance_types)
     ami_type       = each.value.ami_type
@@ -421,23 +386,21 @@ resource "random_pet" "node_groups" {
     # rolls onto the existing group.
     launch_template_id = (local.immediately_apply_lt_changes[each.key]
       ? jsonencode(local.launch_template_configs[each.key])
-      : aws_launch_template.node_groups[each.key].id
+      : aws_launch_template.default[each.key].id
     )
   }
 }
 
-resource "aws_eks_node_group" "node_groups" {
+resource "aws_eks_node_group" "default" {
   for_each = local.node_groups
 
-  cluster_name = aws_eks_cluster.clusters[each.value.cluster_name].name
-  # EKS allows 63 characters. The validation on var.clusters caps name_base
+  cluster_name = aws_eks_cluster.default[0].name
+  # EKS allows 63 characters. The validation on var.node_groups caps name_base
   # at 63 minus the longest possible "-<pet>", so the name always fits. The
   # pet is unknown until apply, so the cap is the only plan-time check.
-  node_group_name = "${each.value.name_base}-${random_pet.node_groups[each.key].id}"
-  node_role_arn   = aws_iam_role.node[each.value.cluster_name].arn
-  # A typed object always carries the attribute, so an unset value arrives as
-  # null rather than absent and `lookup` would no longer reach its default.
-  subnet_ids = coalesce(each.value.subnet_ids, var.subnet_ids)
+  node_group_name = "${each.value.name_base}-${random_pet.default[each.key].id}"
+  node_role_arn   = aws_iam_role.node[0].arn
+  subnet_ids      = coalesce(each.value.subnet_ids, var.subnet_ids)
 
   instance_types = each.value.instance_types
   ami_type       = each.value.ami_type
@@ -446,18 +409,18 @@ resource "aws_eks_node_group" "node_groups" {
   # template is attached. Size lives in block_device_map instead.
 
   launch_template {
-    id      = aws_launch_template.node_groups[each.key].id
-    version = aws_launch_template.node_groups[each.key].latest_version
+    id      = aws_launch_template.default[each.key].id
+    version = aws_launch_template.default[each.key].latest_version
   }
 
   scaling_config {
-    desired_size = each.value.desired_size
-    max_size     = each.value.max_size
-    min_size     = each.value.min_size
+    desired_size = each.value.desired_group_size
+    max_size     = each.value.max_group_size
+    min_size     = each.value.min_group_size
   }
 
   dynamic "taint" {
-    for_each = each.value.taints
+    for_each = each.value.kubernetes_taints
     content {
       key    = taint.value.key
       value  = taint.value.value
@@ -473,60 +436,36 @@ resource "aws_eks_node_group" "node_groups" {
     }
   }
 
-  labels = each.value.labels
+  labels = each.value.kubernetes_labels
 
-  tags = merge(
-    local.node_group_tags[each.key],
-    { ClusterName = aws_eks_cluster.clusters[each.value.cluster_name].name }
-  )
+  tags = merge(local.node_group_tags[each.key], { ClusterName = aws_eks_cluster.default[0].name })
 
   # Explicit dependencies to avoid race conditions during creation and destruction
   depends_on = [
-    aws_iam_role_policy_attachment.node_eks_worker_node_policy,
-    aws_iam_role_policy_attachment.node_eks_cni_policy,
-    aws_iam_role_policy_attachment.node_ecr_read_only,
-    aws_eks_cluster.clusters, # Ensure clusters are fully created before node groups
-    aws_iam_role.node         # Ensure roles are fully created before node groups
+    aws_iam_role_policy_attachment.amazon_eks_worker_node_policy,
+    aws_iam_role_policy_attachment.amazon_eks_cni_policy,
+    aws_iam_role_policy_attachment.amazon_ec2_container_registry_read_only,
   ]
 
   lifecycle {
-    # Prevent replacement of node groups when certain changes occur
     create_before_destroy = true
     ignore_changes = [
       scaling_config[0].desired_size, # Allow autoscaling to manage desired size
 
-      # Add other attributes that shouldn't trigger replacement if needed
-      # For example, labels and tags might be updated outside Terraform.
-      # Ignoring tags only matters with immediately_apply_lt_changes = false:
-      # under the default keeper, a tag change is also a launch template
-      # change, so it gives a new pet and replaces the group anyway.
+      # Labels and tags might be updated outside Terraform. Ignoring tags only
+      # matters with immediately_apply_lt_changes = false: under the default
+      # keeper, a tag change is also a launch template change, so it gives a
+      # new pet and replaces the group anyway.
       labels,
       tags
     ]
 
-    # Validate taint effect values
-    precondition {
-      condition = alltrue([
-        for taint in each.value.taints :
-        contains(["NO_SCHEDULE", "PREFER_NO_SCHEDULE", "NO_EXECUTE"], taint.effect)
-      ])
-      error_message = "Taint effect must be one of: NO_SCHEDULE, PREFER_NO_SCHEDULE, or NO_EXECUTE."
-    }
-
-    # Add precondition to check for required values
-    precondition {
-      condition     = length(coalesce(each.value.subnet_ids, var.subnet_ids)) > 0
-      error_message = "At least one subnet must be provided for the node group."
-    }
-
-    # Add precondition to validate instance types are valid
     precondition {
       condition     = length(each.value.instance_types) > 0
       error_message = "At least one instance type must be specified."
     }
   }
 
-  # Add a timeouts block to extend default timeouts for creation/deletion
   timeouts {
     create = "30m"
     update = "30m"
@@ -534,11 +473,11 @@ resource "aws_eks_node_group" "node_groups" {
   }
 }
 
-# IAM Role for EKS Node Group
+# IAM Role for the EKS node groups
 resource "aws_iam_role" "node" {
-  for_each = local.clusters
+  count = local.enabled ? 1 : 0
 
-  name = "${var.tags["Environment"]}-${each.key}-node-role"
+  name = "${local.cluster_name}-node-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -553,52 +492,42 @@ resource "aws_iam_role" "node" {
     ]
   })
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name = "${var.tags["Environment"]}-${each.key}-node-role"
-    }
-  )
+  tags = merge(var.tags, { Name = "${local.cluster_name}-node-role" })
 }
 
-resource "aws_iam_role_policy_attachment" "node_eks_worker_node_policy" {
-  for_each = local.clusters
+resource "aws_iam_role_policy_attachment" "amazon_eks_worker_node_policy" {
+  count = local.enabled ? 1 : 0
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-  role       = aws_iam_role.node[each.key].name
+  role       = aws_iam_role.node[0].name
 }
 
-resource "aws_iam_role_policy_attachment" "node_eks_cni_policy" {
-  for_each = local.clusters
+resource "aws_iam_role_policy_attachment" "amazon_eks_cni_policy" {
+  count = local.enabled ? 1 : 0
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.node[each.key].name
+  role       = aws_iam_role.node[0].name
 }
 
-resource "aws_iam_role_policy_attachment" "node_ecr_read_only" {
-  for_each = local.clusters
+resource "aws_iam_role_policy_attachment" "amazon_ec2_container_registry_read_only" {
+  count = local.enabled ? 1 : 0
 
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.node[each.key].name
+  role       = aws_iam_role.node[0].name
 }
 
 # IRSA (IAM Roles for Service Accounts)
-resource "aws_iam_openid_connect_provider" "oidc_provider" {
-  for_each = local.clusters
+resource "aws_iam_openid_connect_provider" "default" {
+  count = local.enabled ? 1 : 0
 
   client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.eks[each.key].certificates[0].sha1_fingerprint]
-  url             = aws_eks_cluster.clusters[each.key].identity[0].oidc[0].issuer
+  thumbprint_list = [data.tls_certificate.cluster[0].certificates[0].sha1_fingerprint]
+  url             = aws_eks_cluster.default[0].identity[0].oidc[0].issuer
 
-  tags = merge(
-    var.tags,
-    lookup(each.value, "tags", {}),
-    {
-      Name        = "${var.tags["Environment"]}-${each.key}-oidc"
-      ClusterName = "${var.tags["Environment"]}-${each.key}"
-    }
-  )
+  tags = merge(var.tags, {
+    Name        = "${local.cluster_name}-oidc"
+    ClusterName = local.cluster_name
+  })
 
   lifecycle {
     # Thumbprint list may be updated by AWS, but we want to trigger rotation only
@@ -608,45 +537,15 @@ resource "aws_iam_openid_connect_provider" "oidc_provider" {
   }
 }
 
-# AWS caller identity data source moved to top of file
+data "tls_certificate" "cluster" {
+  count = local.enabled ? 1 : 0
 
-data "tls_certificate" "eks" {
-  for_each = local.clusters
+  url = aws_eks_cluster.default[0].identity[0].oidc[0].issuer
 
-  url = aws_eks_cluster.clusters[each.key].identity[0].oidc[0].issuer
-
-  # Add retry logic for certificate lookup which can sometimes fail
   lifecycle {
-    # Add explicit error messages to help with troubleshooting
     postcondition {
       condition     = length(self.certificates) > 0
-      error_message = "Failed to retrieve OIDC certificates for cluster ${each.key}. Check if the cluster API is accessible."
+      error_message = "Failed to retrieve OIDC certificates for cluster ${local.cluster_name}. Check if the cluster API is accessible."
     }
   }
-}
-
-# Renamed to snake_case (tflint terraform_naming_convention); keeps existing state.
-moved {
-  from = aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy
-  to   = aws_iam_role_policy_attachment.cluster_eks_cluster_policy
-}
-
-moved {
-  from = aws_iam_role_policy_attachment.cluster_AmazonEKSVPCResourceController
-  to   = aws_iam_role_policy_attachment.cluster_eks_vpc_resource_controller
-}
-
-moved {
-  from = aws_iam_role_policy_attachment.node_AmazonEKSWorkerNodePolicy
-  to   = aws_iam_role_policy_attachment.node_eks_worker_node_policy
-}
-
-moved {
-  from = aws_iam_role_policy_attachment.node_AmazonEKS_CNI_Policy
-  to   = aws_iam_role_policy_attachment.node_eks_cni_policy
-}
-
-moved {
-  from = aws_iam_role_policy_attachment.node_AmazonEC2ContainerRegistryReadOnly
-  to   = aws_iam_role_policy_attachment.node_ecr_read_only
 }
