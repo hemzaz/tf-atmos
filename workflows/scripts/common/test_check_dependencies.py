@@ -51,6 +51,10 @@ class CheckDependenciesTest(unittest.TestCase):
         reader = instance({"a": [{"b": "!terraform.output vpc/main .id"}]})
         self.assert_errors(stacks_with(reader), "does not list it")
 
+    def test_terraform_output_bare_name_is_not_a_stack(self):
+        reader = instance({"b": "!terraform.output vpc/main vpc_id"}, [{"component": "vpc/main"}])
+        self.assert_errors(stacks_with(reader))
+
     def test_missing_target_fails(self):
         reader = instance({"x": "!terraform.state nope .id"}, [{"component": "nope"}])
         self.assert_errors(stacks_with(reader), "does not exist")

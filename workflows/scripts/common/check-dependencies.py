@@ -28,8 +28,9 @@ def references(value: Any) -> Iterator[tuple[str, Optional[str]]]:
         tokens = value.split()
         if len(tokens) < 3:
             return
-        # `!fn <component> <expr>` or `!fn <component> <stack> <expr>`
-        stack = tokens[2] if not tokens[2].startswith((".", "[")) else None
+        # `!fn <component> <expr>` or `!fn <component> <stack> <expr>`; the
+        # !terraform.output <expr> may be a bare output name (`vpc_id`).
+        stack = None if len(tokens) == 3 or tokens[2].startswith((".", "[")) else tokens[2]
         yield tokens[1], stack
 
 
