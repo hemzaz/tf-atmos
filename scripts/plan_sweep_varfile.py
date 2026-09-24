@@ -65,6 +65,10 @@ from plan_sweep_hcl import (
 # then by the consuming variable's name. Anything unmatched is dropped and the
 # pair stays INCONCLUSIVE: a wrong guess is worse than an honest 'not checked'.
 # ---------------------------------------------------------------------------
+# A default, so that `--self-test` run by hand works without the shell's
+# environment; the sweep always exports the real constant.
+EKS_HOST = os.environ.get('PLAN_SWEEP_EKS_HOST', 'EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com')
+
 SYNTH = [
     (r'(^|_)vpc_id$',                 'vpc-0123456789abcdef0'),
     # Two subnets, not one: rds's subnet group and eks both require subnets in
@@ -76,11 +80,18 @@ SYNTH = [
     (r'^certificate_arns$',           ['arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
     (r'^certificate_names$',          ['main_wildcard']),
     (r'^certificate_domains$',        ['example.com']),
-    # A default, so that `--self-test` run by hand works without the shell's
-    # environment; the sweep always exports the real constant.
-    (r'^host$',                       'https://' + os.environ.get(
-        'PLAN_SWEEP_EKS_HOST', 'EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com')),
+    (r'^host$',                       'https://' + EKS_HOST),
     (r'^cluster_name$',               'example-cluster'),
+    # Cloud Posse eks/cluster and ec2-instance output names, so a reference is
+    # valued by the output it reads, not by the consuming variable's name.
+    (r'^eks_cluster_id$',             'example-cluster'),
+    # The same synthetic host as `host`, which the diagnostic classifier
+    # recognises when it fails to resolve.
+    (r'^eks_cluster_endpoint$',       'https://' + EKS_HOST),
+    (r'^eks_cluster_identity_oidc_issuer$', 'https://oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
+    (r'^eks_cluster_identity_oidc_issuer_arn$', 'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
+    (r'^ssh_key_pair$',               'example-keypair'),
+    (r'^security_group_id$',          'sg-0123456789abcdef0'),
     (r'^oidc_provider_url$',          'oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^ci_state_bucket_name$',       'example-terraform-state'),
@@ -112,6 +123,7 @@ SYNTH = [
 CA_CERT = os.environ.get('PLAN_SWEEP_CA_CERT') or ''
 if CA_CERT:
     SYNTH.append((r'^cluster_ca_certificate$', CA_CERT))
+    SYNTH.append((r'^eks_cluster_certificate_authority_data$', CA_CERT))
 
 
 def synth(name):
@@ -695,6 +707,22 @@ def self_test(components_dir, tmp):
           {'n': 1, 'e': True, 'id': 'vpc-0123456789abcdef0'})
     check('a port is 443', (synth_value(NUMBER, ['db_port']), synth_value(OBJ({'port': NUMBER}), ['x'])),
           (443, {'port': 443}))
+    for expr, want in [
+        ('one(aws_eks_cluster.default[*].certificate_authority[0].data)', SCALAR),
+        ('one(aws_eks_cluster.default[*].identity[0].oidc[0].issuer)', SCALAR),
+        ('aws_eks_cluster.default[*].certificate_authority[0].data', LIST(SCALAR)),
+        ('aws_x.y[*].data', LIST(UNKNOWN)),
+        ('aws_x.y[*].blk.id', UNKNOWN),
+        ('aws_x.y[*].blk[0]', UNKNOWN),
+        ('kubernetes_service.s[*].spec[0].port', LIST(UNKNOWN)),
+    ]:
+        check('shape of %s' % expr, shape_of(expr, Ctx(acm)), want)
+    check('Cloud Posse eks leaves', (
+        synth_value(SCALAR, ['eks_cluster_identity_oidc_issuer']),
+        synth_value(SCALAR, ['eks_cluster_endpoint']),
+        synth_value(SCALAR, ['eks_cluster_certificate_authority_data']),
+    ), ('https://oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E',
+        'https://' + EKS_HOST, CA_CERT or None))
     check('indented output block', [k for k, _ in blocks('  output "x" {\n  value = 1\n}\n', 'output')],
           ['x'])
 

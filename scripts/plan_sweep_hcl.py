@@ -282,6 +282,8 @@ SCALAR_ATTRS = {
     'bucket_domain_name', 'bucket_regional_domain_name', 'invoke_url', 'url', 'identifier',
     'secret_arn', 'owner_id', 'accept_status', 'db_name', 'username',
     'instance_id', 'function_url', 'queue_url', 'table_name', 'stream_arn', 'role_arn',
+    # aws_eks_cluster identity[0].oidc[0].issuer: the OIDC issuer URL.
+    'issuer',
 }
 FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
 IDENT = r'[A-Za-z_][A-Za-z0-9_-]*'
@@ -290,7 +292,9 @@ INDEX = r'(?:\[[^\[\]]*\])'
 # aws_eks_cluster.c.certificate_authority[0].data, data.aws_x.y.id
 RESOURCE_ATTR = re.compile(
     r'^(?:data\.)?[a-z][a-z0-9_]*\.' + IDENT + INDEX + r'?(?:\.' + IDENT + r'\[0\])*\.(' + IDENT + r')$')
-SPLAT = re.compile(r'^(.*?)(?:\[\*\]|\.\*)(?:\.(' + IDENT + r'))?$')
+# aws_x.y[*].arn, and a nested block's leaf after the splat:
+# aws_eks_cluster.default[*].certificate_authority[0].data (one per instance).
+SPLAT = re.compile(r'^(.*?)(?:\[\*\]|\.\*)(?:((?:\.' + IDENT + r'\[0\])*)\.(' + IDENT + r'))?$')
 STRING_FNS = {'format', 'join', 'jsonencode', 'tostring', 'lower', 'upper', 'replace',
               'trimprefix', 'trimsuffix', 'trimspace', 'substr', 'base64encode', 'md5',
               'sha256', 'title'}
@@ -508,11 +512,11 @@ def ref_shape(e, ctx):
     # a list of ARNs, `aws_x.y[*].arn[0]` is one ARN.
     m = SPLAT.match(e)
     if m:
-        base, attr = m.group(1), m.group(2)
+        base, blocks, attr = m.group(1), m.group(2), m.group(3)
         resource = re.match(r'^(?:data\.)?[a-z][a-z0-9_]*\.' + IDENT + '$', base)
         if not resource or base.startswith(('var.', 'local.', 'module.', 'each.', 'count.')):
             return UNKNOWN
-        return LIST(attr_shape(attr, aws=bool(AWS_RESOURCE.match(base))) if attr else UNKNOWN)
+        return LIST(attr_shape(attr, bool(blocks), bool(AWS_RESOURCE.match(base))) if attr else UNKNOWN)
     m = re.match(r'^(' + IDENT + r')((?:\.' + IDENT + r'|' + INDEX + r')*)$', e)
     if m and m.group(1) in ctx.key_vars and not m.group(2):
         return SCALAR
