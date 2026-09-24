@@ -124,7 +124,6 @@ SYNTH = [
     (r'^http_api_id$',                'a1b2c3d4e5'),
     (r'^event_bus_name$',             'example-bus'),
     (r'^(cloudwatch_)?log_group_name$', '/aws/example/log-group'),
-    (r'^default_security_group_id$',  'sg-0123456789abcdef0'),
     (r'^eks_cluster_managed_security_group_id$', 'sg-0123456789abcdef1'),
     (r'^member_clusters$',            ['example-cache-0001-001', 'example-cache-0002-001']),
 ]
@@ -884,6 +883,12 @@ def self_test(components_dir, tmp):
         ('sort(aws_x.y[0].member_clusters)', LIST(SCALAR)),
         ('kubernetes_x.y.member_clusters', UNKNOWN),
         ('{ for k, v in random_password.this : k => v.result }', MAP(SCALAR)),
+        ('random_string.x.result', SCALAR), ('random_password.x[*].result', LIST(SCALAR)),
+        # `result` is a string only on random_password / random_string:
+        # random_shuffle's is a list, data.external's a map.
+        ('random_shuffle.x.result', UNKNOWN), ('data.external.x.result', UNKNOWN),
+        ('{ for k, v in random_shuffle.this : k => v.result }', MAP(UNKNOWN)),
+        ('aws_x.y.result', UNKNOWN),
         ('data.aws_x.y.enabled', BOOL), ('aws_x.y[*].port', LIST(NUMBER)),
         ('{ for k, s in kubernetes_service.all : k => s.spec[0].port }', MAP(UNKNOWN)),
         ('var.x', UNKNOWN),
