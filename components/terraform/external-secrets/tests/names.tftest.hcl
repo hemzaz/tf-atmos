@@ -1,7 +1,20 @@
 # Mock-provider tests of the IAM names: no AWS or cluster access. Run from the
 # component directory with `terraform init -backend=false && terraform test`.
 
-mock_provider "aws" {}
+mock_provider "aws" {
+  override_data {
+    target = data.aws_region.current
+    values = {
+      region = "eu-west-2"
+    }
+  }
+  override_data {
+    target = data.aws_caller_identity.current
+    values = {
+      account_id = "123456789012"
+    }
+  }
+}
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
 
@@ -13,6 +26,7 @@ variables {
   oidc_provider_url                   = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
   create_default_cluster_secret_store = false
   create_certificate_secret_store     = false
+  kms_key_arn                         = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
 }
 
 run "prod_role_does_not_repeat_the_environment" {
@@ -164,5 +178,54 @@ run "environment_in_another_case_is_not_prefixed_again" {
   assert {
     condition     = aws_iam_role.external_secrets[0].name == "Production-main-external-secrets-role"
     error_message = "A cluster name starting with the Environment in another case is not prefixed again."
+  }
+}
+
+# The rendered IAM policy must be scoped to this account/region (no "*:*" in
+# any ARN) and must decrypt only through var.kms_key_arn, gated by
+# kms:ViaService.
+run "policy_is_scoped_to_account_region_and_kms_key" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_policy.external_secrets[0].policy, ":*:*:")
+    error_message = "The policy must not use \"*:*\" (any account, any region) anywhere in a resource ARN."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws:secretsmanager:eu-west-2:123456789012:secret:")
+    error_message = "Secrets Manager resources must be scoped to this region and account."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws:ssm:eu-west-2:123456789012:parameter/")
+    error_message = "SSM parameter resources must be scoped to this region and account."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, var.kms_key_arn)
+    error_message = "The policy must grant kms:Decrypt on var.kms_key_arn, not a wildcard key ARN."
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws:kms:*:*:key/*")
+    error_message = "The policy must not grant kms:Decrypt on a wildcard key ARN."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "\"kms:ViaService\"")
+    error_message = "kms:Decrypt must be gated by a kms:ViaService condition."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "secretsmanager.eu-west-2.amazonaws.com") && strcontains(aws_iam_policy.external_secrets[0].policy, "ssm.eu-west-2.amazonaws.com")
+    error_message = "kms:ViaService must name both secretsmanager.<region>.amazonaws.com and ssm.<region>.amazonaws.com."
   }
 }

@@ -6,6 +6,24 @@ locals {
   # eks name validation does. Keep in sync with the length validation on
   # var.cluster_name.
   name_prefix = startswith(lower(var.cluster_name), "${lower(var.tags["Environment"])}-") ? var.cluster_name : "${var.tags["Environment"]}-${var.cluster_name}"
+
+  # Secrets Manager and SSM ARNs, scoped to this account/region and to the
+  # configured path prefixes, both as a top-level prefix and nested one level
+  # down (secretsmanager's full_path nests context_name/environment/path/name,
+  # e.g. "production/app/prod/production/app/credentials").
+  secretsmanager_resource_arns = flatten([
+    for prefix in var.secret_path_prefixes : [
+      "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${prefix}/*",
+      "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:*/${prefix}/*",
+    ]
+  ])
+
+  ssm_resource_arns = flatten([
+    for prefix in var.ssm_parameter_path_prefixes : [
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${prefix}/*",
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/*/${prefix}/*",
+    ]
+  ])
 }
 
 # Create IAM role for external-secrets to access AWS Secrets Manager
@@ -36,12 +54,23 @@ resource "aws_iam_role" "external_secrets" {
 }
 
 # Create IAM policy for external-secrets to access AWS Secrets Manager
+# Rendered from a template (not a static file) so the resource ARNs are
+# scoped to this account/region, and to the configured secret path prefixes,
+# instead of "arn:aws:secretsmanager:*:*:secret:*". kms:Decrypt is scoped to
+# the stack's kms/main key with a kms:ViaService condition.
+# secretsmanager:ListSecrets is left on "*": AWS does not support
+# resource-level restriction for that action.
 resource "aws_iam_policy" "external_secrets" {
   count = local.enabled ? 1 : 0
 
   name        = "${local.name_prefix}-external-secrets-policy"
   description = "Policy for external-secrets to access AWS Secrets Manager"
-  policy      = file("${path.module}/policies/external-secrets-policy.json")
+  policy = templatefile("${path.module}/policies/external-secrets-policy.json.tpl", {
+    region                       = data.aws_region.current.region
+    kms_key_arn                  = var.kms_key_arn
+    secretsmanager_resource_arns = local.secretsmanager_resource_arns
+    ssm_resource_arns            = local.ssm_resource_arns
+  })
 
   tags = { Name = "${local.name_prefix}-external-secrets-policy" }
 }

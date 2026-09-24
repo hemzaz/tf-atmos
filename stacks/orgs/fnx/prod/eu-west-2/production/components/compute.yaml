@@ -237,6 +237,7 @@ components:
       dependencies:
         components:
           - component: eks/main
+          - component: kms/main
     external-secrets/data:
       metadata:
         component: external-secrets
@@ -257,3 +258,4 @@ components:
       dependencies:
         components:
           - component: eks/data
+          - component: kms/main

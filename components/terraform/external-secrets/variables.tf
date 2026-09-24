@@ -109,3 +109,35 @@ variable "tags" {
     error_message = "tags must include a non-empty Environment value."
   }
 }
+
+variable "kms_key_arn" {
+  type        = string
+  description = "ARN of the customer-managed KMS key external-secrets is allowed to decrypt through (this stack's kms/main key, which secretsmanager/defaults also uses as default_kms_key_id)."
+
+  validation {
+    condition     = can(regex("^arn:aws:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.kms_key_arn))
+    error_message = "kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account-id>:key/<key-id>)."
+  }
+}
+
+variable "secret_path_prefixes" {
+  type        = list(string)
+  description = "Secrets Manager secret-name path prefixes external-secrets may read, matched both as a top-level prefix (\"<prefix>/*\") and nested one level down (\"*/<prefix>/*\"). Defaults cover this repo's certificate secrets (components/terraform/secretsmanager), bastion SSH keys (ec2's \"ssh-key/<Environment>/<name>\"), and the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod)."
+  default     = ["certificates", "ssh-key", "app", "infra"]
+
+  validation {
+    condition     = alltrue([for p in var.secret_path_prefixes : can(regex("^[0-9A-Za-z_.-]+$", p))])
+    error_message = "secret_path_prefixes entries must be a single non-empty path segment, without leading/trailing slashes or wildcards."
+  }
+}
+
+variable "ssm_parameter_path_prefixes" {
+  type        = list(string)
+  description = "SSM Parameter Store path prefixes external-secrets may read, matched both as a top-level prefix (\"/<prefix>/*\") and nested one level down (\"/*/<prefix>/*\")."
+  default     = ["certificates"]
+
+  validation {
+    condition     = alltrue([for p in var.ssm_parameter_path_prefixes : can(regex("^[0-9A-Za-z_.-]+$", p))])
+    error_message = "ssm_parameter_path_prefixes entries must be a single non-empty path segment, without leading/trailing slashes or wildcards."
+  }
+}
