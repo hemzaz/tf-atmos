@@ -40,8 +40,6 @@ run "cluster_mode_creates_a_cluster_enabled_group" {
     family                               = "redis7"
     parameters = [
       { name = "maxmemory-policy", value = "volatile-lru" },
-      # Set by the component in cluster mode; a stack's own value is dropped.
-      { name = "cluster-enabled", value = "no" },
     ]
   }
 
@@ -51,8 +49,8 @@ run "cluster_mode_creates_a_cluster_enabled_group" {
   }
 
   assert {
-    condition     = aws_elasticache_parameter_group.main[0].family == "redis7" && aws_elasticache_parameter_group.main[0].name == "test-cache"
-    error_message = "The parameter group is <Environment>-<cluster_id> in the given family."
+    condition     = aws_elasticache_parameter_group.main[0].family == "redis7" && aws_elasticache_parameter_group.main[0].name == "test-cache-redis7"
+    error_message = "The parameter group is <Environment>-<cluster_id>-<family>, so a family change (which forces replacement) doesn't collide with the old group's name."
   }
 
   assert {
@@ -64,9 +62,99 @@ run "cluster_mode_creates_a_cluster_enabled_group" {
   }
 
   assert {
-    condition     = aws_elasticache_replication_group.main[0].parameter_group_name == "test-cache"
+    condition     = aws_elasticache_replication_group.main[0].parameter_group_name == "test-cache-redis7"
     error_message = "The created parameter group is attached."
   }
+}
+
+run "changing_family_changes_the_parameter_group_name" {
+  command = plan
+
+  variables {
+    family     = "valkey8"
+    engine     = "valkey"
+    parameters = [{ name = "maxmemory-policy", value = "volatile-lru" }]
+  }
+
+  assert {
+    condition     = aws_elasticache_parameter_group.main[0].name == "test-cache-valkey8"
+    error_message = "A different family must produce a different parameter group name so create_before_destroy doesn't collide with the old group."
+  }
+}
+
+run "rejects_user_supplied_cluster_enabled_parameter" {
+  command = plan
+
+  variables {
+    family     = "redis7"
+    parameters = [{ name = "cluster-enabled", value = "yes" }]
+  }
+
+  expect_failures = [var.parameters]
+}
+
+run "family_accepts_redis6_x" {
+  command = plan
+
+  variables {
+    family = "redis6.x"
+  }
+
+  assert {
+    condition     = length(aws_elasticache_replication_group.main) == 1
+    error_message = "redis6.x is a real ElastiCache Redis 6 parameter group family and must be accepted."
+  }
+}
+
+run "family_accepts_redis5_0" {
+  command = plan
+
+  variables {
+    family = "redis5.0"
+  }
+
+  assert {
+    condition     = length(aws_elasticache_replication_group.main) == 1
+    error_message = "redis5.0 must be accepted."
+  }
+}
+
+run "family_accepts_redis7" {
+  command = plan
+
+  variables {
+    family = "redis7"
+  }
+
+  assert {
+    condition     = length(aws_elasticache_replication_group.main) == 1
+    error_message = "redis7 must be accepted."
+  }
+}
+
+run "family_accepts_valkey8" {
+  command = plan
+
+  variables {
+    engine = "valkey"
+    family = "valkey8"
+  }
+
+  assert {
+    condition     = length(aws_elasticache_replication_group.main) == 1
+    error_message = "valkey8 must be accepted when engine is valkey."
+  }
+}
+
+run "rejects_family_that_does_not_match_engine" {
+  command = plan
+
+  variables {
+    engine = "redis"
+    family = "valkey8"
+  }
+
+  expect_failures = [var.family]
 }
 
 run "existing_parameter_group_is_used_as_is" {
@@ -105,14 +193,18 @@ run "rejects_parameters_and_a_named_group" {
   expect_failures = [var.parameter_group_name]
 }
 
-run "rejects_cluster_mode_failover_without_replicas" {
+run "cluster_mode_allows_zero_replicas_per_shard" {
   command = plan
 
   variables {
     cluster_mode_enabled                 = true
+    cluster_mode_num_node_groups         = 3
     cluster_mode_replicas_per_node_group = 0
     family                               = "redis7"
   }
 
-  expect_failures = [var.automatic_failover_enabled]
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].replicas_per_node_group == 0
+    error_message = "AWS allows 0 replicas per shard in cluster mode (cheaper dev/test); the component must not forbid it."
+  }
 }

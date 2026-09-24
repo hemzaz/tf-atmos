@@ -102,11 +102,6 @@ variable "automatic_failover_enabled" {
   }
 
   validation {
-    condition     = !var.automatic_failover_enabled || !var.cluster_mode_enabled || var.cluster_mode_replicas_per_node_group >= 1
-    error_message = "automatic_failover_enabled requires cluster_mode_replicas_per_node_group >= 1 in cluster mode."
-  }
-
-  validation {
     condition     = !var.cluster_mode_enabled || var.automatic_failover_enabled
     error_message = "Cluster mode requires automatic_failover_enabled."
   }
@@ -115,7 +110,7 @@ variable "automatic_failover_enabled" {
 # Cluster mode, named as in Cloud Posse's aws-elasticache-redis component.
 variable "cluster_mode_enabled" {
   type        = bool
-  description = "Shard the keyspace across node groups (Redis cluster mode). Off: one primary plus num_cache_nodes - 1 replicas"
+  description = "Shard the keyspace across node groups (Redis cluster mode). Off: one primary plus num_cache_nodes - 1 replicas. WARNING: changing this value on an existing cache is not an in-place migration in this component (AWS's num_cache_clusters <-> num_node_groups topologies don't convert live through this provider); treat it as a replacement of the cache"
   default     = false
 }
 
@@ -132,7 +127,7 @@ variable "cluster_mode_num_node_groups" {
 
 variable "cluster_mode_replicas_per_node_group" {
   type        = number
-  description = "Replicas in each shard in cluster mode"
+  description = "Replicas in each shard in cluster mode; 0 is allowed, as AWS does, for cheaper dev/test shards with no failover target"
   default     = 1
 
   validation {
@@ -242,7 +237,7 @@ variable "allowed_cidr_blocks" {
 
 variable "parameter_group_name" {
   type        = string
-  description = "Existing cache parameter group to attach. When null, this component creates one if family is set (always in cluster mode), else the engine default is used"
+  description = "Existing cache parameter group to attach. When null, this component creates one if parameters are set or cluster mode is enabled (family is then required), else the engine default is used. WARNING: when cluster_mode_enabled is true, a name given here must itself be a cluster-enabled group (e.g. AWS's default.<family>.cluster.on, or a custom group with cluster-enabled=yes); this is not validated, only documented, because plan-time validation cannot inspect an existing group's parameters"
   default     = null
 
   validation {
@@ -258,13 +253,18 @@ variable "family" {
   default     = null
 
   validation {
-    condition     = var.family == null || can(regex("^(redis|valkey)[0-9.]+$", var.family))
-    error_message = "family must be a redis or valkey parameter group family, e.g. redis7 or valkey8."
+    condition     = var.family == null || can(regex("^(redis|valkey)[0-9]+(\\.[0-9x]+)?$", var.family))
+    error_message = "family must be a redis or valkey parameter group family, e.g. redis6.x, redis7, redis5.0 or valkey8."
   }
 
   validation {
     condition     = var.family != null || var.parameter_group_name != null || (length(var.parameters) == 0 && !var.cluster_mode_enabled)
     error_message = "family is required when parameters are set or cluster mode is on (unless parameter_group_name names an existing group)."
+  }
+
+  validation {
+    condition     = var.family == null || startswith(var.family, var.engine)
+    error_message = "family must match engine: family must start with the engine name, e.g. engine = \"redis\" needs a family like redis6.x/redis7, engine = \"valkey\" needs a family like valkey8."
   }
 }
 
@@ -273,8 +273,13 @@ variable "parameters" {
     name  = string
     value = string
   }))
-  description = "Engine parameters for the group this component creates. In cluster mode cluster-enabled=yes is added"
+  description = "Engine parameters for the group this component creates"
   default     = []
+
+  validation {
+    condition     = !anytrue([for p in var.parameters : p.name == "cluster-enabled"])
+    error_message = "Do not set cluster-enabled in parameters; use cluster_mode_enabled instead. It is not merged or overridden silently."
+  }
 }
 
 variable "snapshot_retention_limit" {
