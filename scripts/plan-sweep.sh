@@ -51,7 +51,9 @@
 # planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
 # the diagnostic parser or the varfile builder fails its self-test; else 0.
 # A broken !terraform reference is a FAIL: a stack, instance or output that is
-# not there, arguments Atmos cannot parse, an expression yq rejects.
+# not there, arguments Atmos cannot parse, an expression yq rejects. An output
+# that is not there BEHIND a '//' default is not broken -- Atmos succeeds with
+# the default -- but it is stale: a STALE line, counted, never failing.
 # INCONCLUSIVE and UNATTRIBUTABLE do not fail the run, but neither is ever
 # reported as a pass. A PASS says how the plan ended:
 # "full plan", or "stopped at an expected refusal" once everything before it
@@ -123,6 +125,7 @@ swept=0
 refs_shaped=0
 refs_fallback=0
 refs_dropped=0
+refs_stale=0
 other_guessed=0
 other_dropped=0
 pass_full=0
@@ -747,6 +750,7 @@ for s in $STACKS; do
     comp=$(printf '%s\n' "$meta" | sed -n 1p)
     dropped=$(printf '%s\n' "$meta" | sed -n 2p)
     ref_defects=$(printf '%s\n' "$meta" | sed -n 3p)
+    ref_stale=$(printf '%s\n' "$meta" | sed -n 5p)
     read -r n_shaped n_fallback n_dropped n_oguess n_odrop <<<"$(printf '%s\n' "$meta" | sed -n 4p)"
     refs_shaped=$((refs_shaped + ${n_shaped:-0}))
     refs_fallback=$((refs_fallback + ${n_fallback:-0}))
@@ -755,10 +759,22 @@ for s in $STACKS; do
     other_dropped=$((other_dropped + ${n_odrop:-0}))
     [ -n "$comp" ] || comp="${c%%/*}"
 
+    # An output the target does not declare, read behind a '//' default:
+    # Atmos returns the default, so the pair is planned with it, but the
+    # reference points at nothing and the owner wants it seen. Listed, counted
+    # in the summary, never failing the run; the pair's own verdict follows.
+    if [ -n "$ref_stale" ]; then
+      n=$(printf '%s\n' "$ref_stale" | tr '\t' '\n' | grep -c .)
+      refs_stale=$((refs_stale + n))
+      printf '%-24s %-26s STALE %s !terraform reference(s) whose // default always applies (warning)\n' \
+        "$s" "$c" "$n"
+      printf '%s\n' "$ref_stale" | tr '\t' '\n' | cut -c1-220 | sed 's/^/        /'
+    fi
+
     # A reference that is broken whatever the state holds: a stack or
     # instance that is not there, arguments Atmos cannot parse, an expression
     # yq rejects -- Atmos stops -- or an output the component does not declare,
-    # which reads null from S3 (or, behind a '//' default, is simply stale).
+    # read with no '//' default, which reads null from S3.
     # The stack's defect, found before any plan. Not planned: the varfile
     # lacks the broken values, and whatever the plan said about that would be
     # this script's damage, reported on top of the real finding.
@@ -860,6 +876,7 @@ printf '  of the passes: %s planned in full, %s stopped at an expected refusal\n
 # still on a guess from the variable's name -- the number to watch shrink.
 printf '  !terraform references: %s output-shaped, %s guessed by variable name, %s dropped\n' \
   "$refs_shaped" "$refs_fallback" "$refs_dropped"
+printf '  stale !terraform references (warning, not failing): %s\n' "$refs_stale"
 printf '  other functions (!env, !store, ...): %s guessed by variable name, %s dropped\n' \
   "$other_guessed" "$other_dropped"
 

@@ -292,9 +292,13 @@ INDEX = r'(?:\[[^\[\]]*\])'
 # aws_eks_cluster.c.certificate_authority[0].data, data.aws_x.y.id
 RESOURCE_ATTR = re.compile(
     r'^(?:data\.)?[a-z][a-z0-9_]*\.' + IDENT + INDEX + r'?(?:\.' + IDENT + r'\[0\])*\.(' + IDENT + r')$')
-# aws_x.y[*].arn, and a nested block's leaf after the splat:
+# aws_x.y[*].arn, and a nested block's leaf after the full splat:
 # aws_eks_cluster.default[*].certificate_authority[0].data (one per instance).
-SPLAT = re.compile(r'^(.*?)(?:\[\*\]|\.\*)(?:((?:\.' + IDENT + r'\[0\])*)\.(' + IDENT + r'))?$')
+# The legacy attribute splat `.*` carries attribute access only: in
+# `aws_x.y.*.blk[0].id` the [0] indexes the RESULT list, so it takes no
+# `.blk[0]` part and matches `.*` and `.*.attr` alone.
+SPLAT = re.compile(r'^(.*?)(?:\[\*\](?:((?:\.' + IDENT + r'\[0\])*)\.(' + IDENT + r'))?'
+                   r'|\.\*(?:\.(' + IDENT + r'))?)$')
 STRING_FNS = {'format', 'join', 'jsonencode', 'tostring', 'lower', 'upper', 'replace',
               'trimprefix', 'trimsuffix', 'trimspace', 'substr', 'base64encode', 'md5',
               'sha256', 'title'}
@@ -384,7 +388,12 @@ def elem(shape):
 
 
 class Ctx:
-    """What an expression can refer to: its component, and any `for` iterators."""
+    """What an expression can refer to: its component, and any `for` iterators.
+
+    value_vars pairs each iterator's name with what it is bound to: the
+    ELEMENT shape of the collection it walks, or RESOURCE_ELEM for an instance
+    of an aws_* resource, the one place the attribute allowlists apply.
+    """
 
     def __init__(self, comp, key_vars=(), value_vars=(), depth=0):
         self.comp, self.key_vars, self.value_vars, self.depth = comp, key_vars, value_vars, depth
@@ -393,22 +402,80 @@ class Ctx:
         return Ctx(self.comp, self.key_vars + tuple(key_vars),
                    self.value_vars + tuple(value_vars), self.depth + 1)
 
+    def binding(self, name):
+        """What a `for` value variable is bound to (the innermost wins), or None."""
+        for n, b in reversed(self.value_vars):
+            if n == name:
+                return b
+        return None
+
+
+# A `for` value variable walking an aws_* resource: each element is one
+# instance, so `v.arn` is read through the attribute allowlists. Not a shape.
+RESOURCE_ELEM = ('resource',)
+RESOURCE_REF = re.compile(r'^(?:data\.)?[a-z][a-z0-9_]*\.' + IDENT + r'$')
+NOT_RESOURCE = ('var.', 'local.', 'module.', 'each.', 'count.', 'path.', 'terraform.')
+
 
 def for_parts(body):
-    """(key_vars, value_vars, element expr, grouped) of `for k, v in coll : ...`."""
+    """(key_vars, value_vars, collection, element expr, grouped) of `for k, v in coll : ...`."""
     m = re.match(r'^\s*for\s+(' + IDENT + r')(?:\s*,\s*(' + IDENT + r'))?\s+in\s', body)
     colon = top_level(body, ':')
-    if not m or not colon:
+    if not m or not colon or colon[0] < m.end():
         return None
     first, second = m.group(1), m.group(2)
     keys, values = ((first,), (second,)) if second else ((), (first,))
+    coll = body[m.end():colon[0]].strip()
     rest = body[colon[0] + 1:]
     cut = top_level_word(rest, 'if')
     if cut >= 0:
         rest = rest[:cut]
     rest = rest.strip()
     grouped = rest.endswith('...')
-    return keys, values, (rest[:-3] if grouped else rest).strip(), grouped
+    return keys, values, coll, (rest[:-3] if grouped else rest).strip(), grouped
+
+
+def resource_collection(coll, comp, depth=0):
+    """True when a `for` collection is instances of aws_* resources only: a
+    resource, a local holding one, or a merge()/concat() of them (dns's
+    managed_zones). False when it is a resource that is not aws_*, None when
+    it is not a resource at all."""
+    c = coll.strip()
+    if depth > 6:
+        return None
+    if RESOURCE_REF.match(c) and not c.startswith(NOT_RESOURCE):
+        return bool(AWS_RESOURCE.match(c))
+    m = re.match(r'^local\.(' + IDENT + r')$', c)
+    if m and m.group(1) in comp.locals:
+        return resource_collection(comp.locals[m.group(1)], comp, depth + 1)
+    m = FN_CALL.match(c)
+    if m and m.group(1) in ('merge', 'concat') and whole(c, m.end() - 1):
+        flags = [resource_collection(a, comp, depth + 1) for a in split_top(c[m.end():-1], ',')]
+        if flags and None not in flags:
+            return all(flags)
+    return None
+
+
+def element_binding(coll, ctx):
+    """What a `for` value variable over coll is bound to (see Ctx)."""
+    # `v.name` in a nested for is the outer loop's element, not a resource
+    # of type `v`.
+    head = re.match(IDENT, coll.strip())
+    bound_name = head and (head.group(0) in ctx.key_vars or ctx.binding(head.group(0)) is not None)
+    aws = None if bound_name else resource_collection(coll, ctx.comp)
+    if aws is not None:
+        # Only an aws_* instance reads through the allowlists; on any other
+        # provider's resource the same attribute name can be a block.
+        return RESOURCE_ELEM if aws else UNKNOWN
+    s = shape_of(coll, ctx.deeper())
+    if s[0] in ('list', 'map'):
+        return s[1]
+    if s[0] == 'object':
+        # Walking an object yields its attribute values: one shape only if
+        # they all agree.
+        shapes = list(s[1].values())
+        return shapes[0] if shapes and all(x == shapes[0] for x in shapes) else UNKNOWN
+    return UNKNOWN
 
 
 def shape_of(expr, ctx):
@@ -436,11 +503,12 @@ def shape_of(expr, ctx):
             return MAP(UNKNOWN)
         f = for_parts(inner)
         if f:
-            keys, values, body, grouped = f
+            keys, values, coll, body, grouped = f
             arrow = [i for i in top_level(body, '=') if body.startswith('=>', i)]
             if not arrow:
                 return UNKNOWN
-            v = shape_of(body[arrow[0] + 2:], ctx.deeper(keys, values))
+            bound = [(n, element_binding(coll, ctx)) for n in values]
+            v = shape_of(body[arrow[0] + 2:], ctx.deeper(keys, bound))
             return MAP(LIST(v) if grouped else v)
         items = object_items(inner)
         if items is None:
@@ -453,8 +521,9 @@ def shape_of(expr, ctx):
         inner = e[1:-1].strip()
         f = for_parts(inner) if inner else None
         if f:
-            keys, values, body, _ = f
-            return LIST(shape_of(body, ctx.deeper(keys, values)))
+            keys, values, coll, body, _ = f
+            bound = [(n, element_binding(coll, ctx)) for n in values]
+            return LIST(shape_of(body, ctx.deeper(keys, bound)))
         items = split_top(inner, ',\n')
         return LIST(shape_of(items[0], ctx.deeper()) if items else UNKNOWN)
     if e[0] == '"' and skip_string(e, 0) == len(e):
@@ -466,7 +535,10 @@ def shape_of(expr, ctx):
     m = FN_CALL.match(e)
     if m and whole(e, m.end() - 1):
         return fn_shape(m.group(1), split_top(e[m.end():-1], ','), ctx)
-    if top_level(e, '+*/%<>=!&|') or re.search(r'\s-\s', e):
+    # An operator makes the value unreadable -- but the '*' of a legacy
+    # attribute splat, `aws_x.y.*.arn`, is no multiplication.
+    if [i for i in top_level(e, '+*/%<>=!&|') if not e.startswith('.*', i - 1)] \
+            or re.search(r'\s-\s', e):
         return UNKNOWN
     return ref_shape(e, ctx)
 
@@ -512,7 +584,7 @@ def ref_shape(e, ctx):
     # a list of ARNs, `aws_x.y[*].arn[0]` is one ARN.
     m = SPLAT.match(e)
     if m:
-        base, blocks, attr = m.group(1), m.group(2), m.group(3)
+        base, blocks, attr = m.group(1), m.group(2), m.group(3) or m.group(4)
         resource = re.match(r'^(?:data\.)?[a-z][a-z0-9_]*\.' + IDENT + '$', base)
         if not resource or base.startswith(('var.', 'local.', 'module.', 'each.', 'count.')):
             return UNKNOWN
@@ -520,11 +592,23 @@ def ref_shape(e, ctx):
     m = re.match(r'^(' + IDENT + r')((?:\.' + IDENT + r'|' + INDEX + r')*)$', e)
     if m and m.group(1) in ctx.key_vars and not m.group(2):
         return SCALAR
-    if m and m.group(1) in ctx.value_vars:
+    bound = ctx.binding(m.group(1)) if m else None
+    if bound == RESOURCE_ELEM:
         tail = re.findall(r'\.(' + IDENT + r')', m.group(2))
         if not tail or not m.group(2).endswith(tail[-1]):
             return UNKNOWN
-        return attr_shape(tail[-1], m.group(2).endswith('[0].' + tail[-1]))
+        return attr_shape(tail[-1], m.group(2).endswith('[0].' + tail[-1]), aws=True)
+    if bound is not None:
+        # An element of a var, local or module output: walk its known shape.
+        # `v.name` is whatever the object says `name` is, not the allowlist's
+        # idea of a `name` -- that holds on aws_* resources only.
+        s = bound
+        for attr, index in re.findall(r'\.(' + IDENT + r')|(' + INDEX + r')', m.group(2)):
+            if attr:
+                s = s[1].get(attr, UNKNOWN) if s[0] == 'object' else UNKNOWN
+            else:
+                s = elem(s)
+        return s
     m = re.match(r'^var\.(' + IDENT + r')$', e)
     if m:
         return type_shape(comp.var_types.get(m.group(1), ''))
