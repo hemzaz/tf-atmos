@@ -54,6 +54,7 @@ import:
   - orgs/fnx/local/_defaults
   - catalog/emulator/aws
   - catalog/vpc/defaults
+  - catalog/kms/defaults
 
 vars:
   region: eu-west-2
@@ -117,6 +118,8 @@ components:
     kms/main:
       metadata:
         component: kms
+        inherits:
+          - kms/defaults
       vars:
         name_prefix: sandbox
         description: "Sandbox CMK"

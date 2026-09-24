@@ -119,3 +119,14 @@ variable "archive_retention_days" {
     error_message = "archive_retention_days must be 0 or more."
   }
 }
+
+variable "event_bus_dlq_arn" {
+  type        = string
+  description = "ARN of an SQS queue EventBridge uses as a dead-letter queue for the created bus. AWS strongly recommends one on a CMK-encrypted bus, so failed encrypt/decrypt deliveries (for example after a key-policy change or key disable) are kept, not dropped. Only used when create_event_bus is true"
+  default     = null
+
+  validation {
+    condition     = var.event_bus_dlq_arn == null || can(regex("^arn:aws[a-z-]*:sqs:[a-z0-9-]+:[0-9]{12}:.+$", var.event_bus_dlq_arn))
+    error_message = "event_bus_dlq_arn must be an SQS queue ARN (arn:aws:sqs:<region>:<account>:<queue-name>)."
+  }
+}

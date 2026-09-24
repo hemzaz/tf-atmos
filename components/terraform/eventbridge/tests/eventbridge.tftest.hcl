@@ -7,6 +7,16 @@ mock_provider "aws" {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
     }
   }
+
+  # A well-formed ARN, needed only for the one run below that applies (and so
+  # resolves this otherwise-unknown-until-apply attribute): the mocked value
+  # is fed into aws_cloudwatch_log_resource_policy.resource_arn and
+  # aws_cloudwatch_event_target.arn, both of which validate the ARN format.
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:eu-west-2:123456789012:log-group:/aws/events/mock"
+    }
+  }
 }
 
 variables {
@@ -163,4 +173,81 @@ run "rejects_an_unsupported_retention" {
   }
 
   expect_failures = [var.event_log_retention_in_days]
+}
+
+run "log_resource_policy_is_scoped_to_the_log_group" {
+  command = apply
+
+  assert {
+    condition     = aws_cloudwatch_log_resource_policy.this[0].policy_name == null
+    error_message = "The policy must not be account-scoped (policy_name), which shares a 10-per-region quota with every other component."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_resource_policy.this[0].resource_arn == aws_cloudwatch_log_group.this[0].arn
+    error_message = "The policy must be resource-scoped to this instance's log group (resource_arn), consuming none of the account quota."
+  }
+}
+
+run "custom_bus_wires_a_dead_letter_queue" {
+  command = plan
+
+  variables {
+    name              = "microservices"
+    create_event_bus  = true
+    event_bus_dlq_arn = "arn:aws:sqs:eu-west-2:123456789012:microservices-eventbridge-dlq"
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_event_bus.this[0].dead_letter_config) == 1
+    error_message = "event_bus_dlq_arn must add a dead_letter_config block to the created bus."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_bus.this[0].dead_letter_config[0].arn == var.event_bus_dlq_arn
+    error_message = "dead_letter_config.arn must be the given DLQ ARN."
+  }
+}
+
+run "custom_bus_without_a_dlq_has_no_dead_letter_config" {
+  command = plan
+
+  variables {
+    name             = "microservices"
+    create_event_bus = true
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_event_bus.this[0].dead_letter_config) == 0
+    error_message = "Without event_bus_dlq_arn the bus must have no dead_letter_config block."
+  }
+}
+
+run "rejects_a_non_sqs_dlq_arn" {
+  command = plan
+
+  variables {
+    name              = "microservices"
+    create_event_bus  = true
+    event_bus_dlq_arn = "arn:aws:sns:eu-west-2:123456789012:not-a-queue"
+  }
+
+  expect_failures = [var.event_bus_dlq_arn]
+}
+
+run "rejects_an_archive_name_over_48_characters" {
+  command = plan
+
+  variables {
+    name             = "microservices-event-archive-01"
+    create_event_bus = true
+    archive_enabled  = true
+    tags = {
+      Environment = "an-environment-name"
+      Tenant      = "fnx"
+      ManagedBy   = "Terraform"
+    }
+  }
+
+  expect_failures = [aws_cloudwatch_event_archive.this[0]]
 }

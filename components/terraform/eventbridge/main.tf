@@ -20,6 +20,14 @@ resource "aws_cloudwatch_event_bus" "this" {
   description        = local.description
   kms_key_identifier = var.kms_key_arn
 
+  dynamic "dead_letter_config" {
+    for_each = var.event_bus_dlq_arn != null ? [var.event_bus_dlq_arn] : []
+
+    content {
+      arn = dead_letter_config.value
+    }
+  }
+
   tags = { Name = local.name }
 }
 
@@ -31,6 +39,15 @@ resource "aws_cloudwatch_event_archive" "this" {
   event_source_arn   = aws_cloudwatch_event_bus.this[0].arn
   retention_days     = var.archive_retention_days
   kms_key_identifier = var.kms_key_arn
+
+  lifecycle {
+    precondition {
+      # AWS caps archive names at 48 characters; name is capped at 30 in
+      # variables.tf, which only covers this with Environment <= 17 characters.
+      condition     = length(local.name) <= 48
+      error_message = "The archive name (<Environment>-<name>, currently \"${local.name}\") must be 48 characters or fewer."
+    }
+  }
 }
 
 # EventBridge only delivers to log groups under /aws/events/.
@@ -66,6 +83,8 @@ resource "aws_cloudwatch_event_target" "logs" {
   arn            = aws_cloudwatch_log_group.this[0].arn
 }
 
+data "aws_caller_identity" "current" {}
+
 # EventBridge writes to the log group under a resource policy, not a role
 # (Cloud Posse's policies.tf).
 data "aws_iam_policy_document" "logs" {
@@ -78,12 +97,25 @@ data "aws_iam_policy_document" "logs" {
     }
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.this[0].arn}:*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
   }
 }
 
+# Deviation from Cloud Posse: a resource-scoped policy (resource_arn, provider
+# >= 6.36) instead of an account-scoped one (policy_name). Account-scoped
+# policies are capped at 10 per region, shared with every other component and
+# service in the account; a resource-scoped policy is attached to this log
+# group alone and consumes none of that quota. aws_cloudwatch_log_group.arn
+# already has the API's trailing `:*` stripped (see its docs), which is the
+# format `resource_arn` requires here.
 resource "aws_cloudwatch_log_resource_policy" "this" {
   count = local.enabled ? 1 : 0
 
-  policy_name     = local.name
+  resource_arn    = aws_cloudwatch_log_group.this[0].arn
   policy_document = data.aws_iam_policy_document.logs[0].json
 }

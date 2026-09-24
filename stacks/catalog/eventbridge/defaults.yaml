@@ -21,9 +21,10 @@ components:
           - component: kms/main
       vars:
         enabled: true
-        # Every stack runs a kms/main instance (catalog/kms/defaults). Its key
-        # policy must list events.amazonaws.com and logs.<region>.amazonaws.com
-        # in key_service_users (see components/terraform/eventbridge/README.md).
+        # Every stack runs a kms/main instance (catalog/kms/defaults), with
+        # allow_cloudwatch_logs and allow_eventbridge both on so the key policy
+        # covers events.amazonaws.com and logs.<region>.amazonaws.com (see
+        # components/terraform/eventbridge/README.md).
         kms_key_arn: !terraform.state kms/main .key_arn
         event_log_retention_in_days: 3
         create_event_bus: false
