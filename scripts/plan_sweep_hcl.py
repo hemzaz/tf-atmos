@@ -285,6 +285,11 @@ SCALAR_ATTRS = {
     # aws_eks_cluster identity[0].oidc[0].issuer: the OIDC issuer URL.
     'issuer',
 }
+# Attributes that are a list of strings on the AWS resources that have them.
+LIST_SCALAR_ATTRS = {
+    # aws_elasticache_replication_group: the node (cache cluster) IDs.
+    'member_clusters',
+}
 FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
 IDENT = r'[A-Za-z_][A-Za-z0-9_-]*'
 INDEX = r'(?:\[[^\[\]]*\])'
@@ -309,17 +314,29 @@ NUMBER_FNS = {'tonumber', 'length', 'abs', 'max', 'min', 'floor', 'ceil'}
 NUMBER_ATTRS = {'port'}
 BOOL_ATTRS = {'enabled'}
 AWS_RESOURCE = re.compile(r'^(?:data\.)?aws_')
+# random_password / random_string: every attribute is a plain value, never a
+# block, and `result` is a string -- on these two only (attr_shape's rand).
+# A `for` over their instances binds RANDOM_ELEM (secretsmanager's
+# generated_passwords is `v.result` over random_password).
+RANDOM_RESOURCE = re.compile(r'^random_(?:password|string)\.')
+RANDOM_ELEM = ('random_resource',)
 
 
-def attr_shape(attr, indexed=False, aws=False):
+def attr_shape(attr, indexed=False, aws=False, rand=False):
     # `data` is a string only as a nested block's attribute --
     # certificate_authority[0].data -- and something else anywhere else.
+    # `result` is a string on random_password / random_string (rand) only:
+    # random_shuffle's is a list and data.external's a map.
+    if rand and attr == 'result':
+        return SCALAR
     if attr in NUMBER_ATTRS or attr in BOOL_ATTRS:
         if not aws:
             return UNKNOWN
         return NUMBER if attr in NUMBER_ATTRS else BOOL
     if attr in SCALAR_ATTRS or (attr == 'data' and indexed):
         return SCALAR
+    if attr in LIST_SCALAR_ATTRS and aws:
+        return LIST(SCALAR)
     return UNKNOWN
 
 
@@ -436,15 +453,15 @@ def for_parts(body):
 
 
 def resource_collection(coll, comp, depth=0):
-    """True when a `for` collection is instances of aws_* resources only: a
-    resource, a local holding one, or a merge()/concat() of them (dns's
-    managed_zones). False when it is a resource that is not aws_*, None when
-    it is not a resource at all."""
+    """'aws' when a `for` collection is instances of aws_* resources only, and
+    'random' when of random_password / random_string only: a resource, a local
+    holding one, or a merge()/concat() of them (dns's managed_zones). False
+    when it is any other resource or a mix, None when it is not a resource."""
     c = coll.strip()
     if depth > 6:
         return None
     if RESOURCE_REF.match(c) and not c.startswith(NOT_RESOURCE):
-        return bool(AWS_RESOURCE.match(c))
+        return 'aws' if AWS_RESOURCE.match(c) else 'random' if RANDOM_RESOURCE.match(c) else False
     m = re.match(r'^local\.(' + IDENT + r')$', c)
     if m and m.group(1) in comp.locals:
         return resource_collection(comp.locals[m.group(1)], comp, depth + 1)
@@ -452,7 +469,7 @@ def resource_collection(coll, comp, depth=0):
     if m and m.group(1) in ('merge', 'concat') and whole(c, m.end() - 1):
         flags = [resource_collection(a, comp, depth + 1) for a in split_top(c[m.end():-1], ',')]
         if flags and None not in flags:
-            return all(flags)
+            return flags[0] if all(f == flags[0] for f in flags) else False
     return None
 
 
@@ -466,7 +483,7 @@ def element_binding(coll, ctx):
     if aws is not None:
         # Only an aws_* instance reads through the allowlists; on any other
         # provider's resource the same attribute name can be a block.
-        return RESOURCE_ELEM if aws else UNKNOWN
+        return {'aws': RESOURCE_ELEM, 'random': RANDOM_ELEM}.get(aws, UNKNOWN)
     s = shape_of(coll, ctx.deeper())
     if s[0] in ('list', 'map'):
         return s[1]
@@ -588,16 +605,18 @@ def ref_shape(e, ctx):
         resource = re.match(r'^(?:data\.)?[a-z][a-z0-9_]*\.' + IDENT + '$', base)
         if not resource or base.startswith(('var.', 'local.', 'module.', 'each.', 'count.')):
             return UNKNOWN
-        return LIST(attr_shape(attr, bool(blocks), bool(AWS_RESOURCE.match(base))) if attr else UNKNOWN)
+        return LIST(attr_shape(attr, bool(blocks), bool(AWS_RESOURCE.match(base)),
+                               bool(RANDOM_RESOURCE.match(base))) if attr else UNKNOWN)
     m = re.match(r'^(' + IDENT + r')((?:\.' + IDENT + r'|' + INDEX + r')*)$', e)
     if m and m.group(1) in ctx.key_vars and not m.group(2):
         return SCALAR
     bound = ctx.binding(m.group(1)) if m else None
-    if bound == RESOURCE_ELEM:
+    if bound in (RESOURCE_ELEM, RANDOM_ELEM):
         tail = re.findall(r'\.(' + IDENT + r')', m.group(2))
         if not tail or not m.group(2).endswith(tail[-1]):
             return UNKNOWN
-        return attr_shape(tail[-1], m.group(2).endswith('[0].' + tail[-1]), aws=True)
+        return attr_shape(tail[-1], m.group(2).endswith('[0].' + tail[-1]),
+                          aws=bound == RESOURCE_ELEM, rand=bound == RANDOM_ELEM)
     if bound is not None:
         # An element of a var, local or module output: walk its known shape.
         # `v.name` is whatever the object says `name` is, not the allowlist's
@@ -629,5 +648,6 @@ def ref_shape(e, ctx):
         return UNKNOWN if out is None else shape_of(out, Ctx(mod, depth=ctx.depth + 1))
     m = RESOURCE_ATTR.match(e)
     if m and not e.startswith(('var.', 'local.', 'each.', 'count.', 'path.', 'terraform.', 'module.')):
-        return attr_shape(m.group(1), e.endswith('[0].' + m.group(1)), bool(AWS_RESOURCE.match(e)))
+        return attr_shape(m.group(1), e.endswith('[0].' + m.group(1)), bool(AWS_RESOURCE.match(e)),
+                          bool(RANDOM_RESOURCE.match(e)))
     return UNKNOWN

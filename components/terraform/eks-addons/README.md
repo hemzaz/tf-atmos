@@ -27,6 +27,16 @@ instances exist today. No stack imports it.
   `cluster_ca_certificate`, `cluster_name`) — a single cluster connection, so
   `helm_release`/`kubernetes_manifest` resources for a second map entry would
   still apply against that one connection.
+- `clusters.<key>` declares `enable_*` add-on switches (load balancer
+  controller, cluster autoscaler, metrics server, external-dns, cert-manager,
+  External Secrets, ...), but `main.tf` does not read them: it installs only
+  what `addons`, `helm_releases` and `kubernetes_manifests` list. Setting a
+  switch records intent and installs nothing. The IRSA role an `addons` entry
+  gets from `create_service_account_role` is not attached to the add-on
+  either (only an explicit `service_account_role_arn` is), and nothing reads
+  `policies/*.json`.
+- `data.aws_eks_cluster` is looked up by the `clusters` key, so the key must
+  be the cluster's real name.
 - The Istio TLS secret needs either `acm_certificate_crt`/`acm_certificate_key` or
   `use_external_secrets = true` with `secrets_manager_secret_path` set.
 

@@ -84,6 +84,19 @@ class CheckDependenciesTest(unittest.TestCase):
         reader = instance({"x": "!terraform.state vpc/main [.a // {} | .[]]"}, [{"component": "vpc/main"}])
         self.assert_errors(stacks_with(reader))
 
+    def test_quoted_expression_with_spaces_is_not_a_stack(self):
+        # Atmos reads a quoted token as one expression: '.id | [.]' wraps the
+        # output in a list. Splitting it on spaces read "'.id" as a stack name.
+        reader = instance(
+            {"x": "!terraform.state vpc/main '.id | [.]'", "y": '!terraform.state vpc/main ".id | [.]"'},
+            [{"component": "vpc/main"}],
+        )
+        self.assert_errors(stacks_with(reader))
+
+    def test_cross_stack_reference_with_quoted_expression(self):
+        reader = instance({"x": "!terraform.state vpc/main s2 '.id | [.]'"}, [{"component": "vpc/main", "stack": "s2"}])
+        self.assert_errors(stacks_with(reader, s2={"vpc/main": instance()}))
+
     def test_cross_stack_reference_needs_stack_in_dependency(self):
         reader = instance({"x": "!terraform.state vpc/main s2 .id"}, [{"component": "vpc/main"}])
         self.assert_errors(stacks_with(reader, s2={"vpc/main": instance()}), "in s2 but does not list it")
