@@ -46,7 +46,7 @@ variable "secrets_version" {
 variable "cluster_version" {
   type        = string
   description = "EKS cluster version"
-  default     = "1.28"
+  default     = "1.36"
 
   validation {
     condition     = can(regex("^1\\.(2[4-9]|[3-9][0-9])$", var.cluster_version))

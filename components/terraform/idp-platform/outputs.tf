@@ -3,39 +3,39 @@
 # EKS Cluster Outputs
 output "eks_cluster_id" {
   description = "EKS cluster ID"
-  value       = module.eks_cluster.cluster_ids["idp"]
+  value       = module.eks_cluster.eks_cluster_id
 }
 
 output "eks_cluster_arn" {
   description = "EKS cluster ARN"
-  value       = module.eks_cluster.cluster_arns["idp"]
+  value       = module.eks_cluster.eks_cluster_arn
 }
 
 output "eks_cluster_endpoint" {
   description = "EKS cluster endpoint URL"
-  value       = module.eks_cluster.cluster_endpoints["idp"]
+  value       = module.eks_cluster.eks_cluster_endpoint
   sensitive   = true
 }
 
 output "eks_cluster_certificate_authority_data" {
   description = "EKS cluster certificate authority data"
-  value       = module.eks_cluster.cluster_ca_data["idp"]
+  value       = module.eks_cluster.eks_cluster_certificate_authority_data
   sensitive   = true
 }
 
 output "eks_cluster_security_group_id" {
   description = "EKS cluster security group ID"
-  value       = module.eks_cluster.cluster_security_group_ids["idp"]
+  value       = module.eks_cluster.eks_cluster_managed_security_group_id
 }
 
 output "eks_node_group_arns" {
   description = "EKS node group ARNs"
-  value       = module.eks_cluster.node_group_arns
+  value       = module.eks_cluster.eks_node_group_arns
 }
 
 output "eks_oidc_provider_arn" {
   description = "EKS OIDC provider ARN for service account roles"
-  value       = module.eks_cluster.oidc_provider_arns["idp"]
+  value       = module.eks_cluster.eks_cluster_identity_oidc_issuer_arn
 }
 
 # Database Outputs
@@ -253,11 +253,11 @@ output "platform_configuration" {
   value = {
     # Cluster configuration
     cluster = {
-      name                  = module.eks_cluster.cluster_ids["idp"]
-      endpoint              = module.eks_cluster.cluster_endpoints["idp"]
-      certificate_authority = module.eks_cluster.cluster_ca_data["idp"]
-      oidc_provider_arn     = module.eks_cluster.oidc_provider_arns["idp"]
-      security_group_id     = module.eks_cluster.cluster_security_group_ids["idp"]
+      name                  = module.eks_cluster.eks_cluster_id
+      endpoint              = module.eks_cluster.eks_cluster_endpoint
+      certificate_authority = module.eks_cluster.eks_cluster_certificate_authority_data
+      oidc_provider_arn     = module.eks_cluster.eks_cluster_identity_oidc_issuer_arn
+      security_group_id     = module.eks_cluster.eks_cluster_managed_security_group_id
     }
 
     # Database configuration
