@@ -55,7 +55,7 @@ atmos workflow deploy -f deploy-full-stack -s <stack>    # layered, confirmed pe
 - snake_case for resources/variables/outputs; `sensitive = true` on sensitive outputs; validation
   blocks on variable definitions.
 - Encrypt at rest and in transit; least-privilege IAM; secrets in Secrets Manager, never committed;
-  specific CIDRs, never `0.0.0.0/0`.
+  inbound access uses specific CIDRs and never `0.0.0.0/0` or `::/0`; outbound is unrestricted.
 
 ## Before marking work complete
 

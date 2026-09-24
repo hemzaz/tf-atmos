@@ -18,8 +18,13 @@ the whole group, so changing one rule updates the group itself.
 `securitygroup/app` in `fnx-local-sandbox` only
 (`stacks/orgs/fnx/local/eu-west-2/sandbox.yaml`) — one group, one ingress
 rule, one egress rule, with `enforce_no_public_ingress: true` so the guard is
-exercised, and `preserve_security_group_id: true`. Floci does not implement
-`PutMetricFilter`, so that instance sets
+exercised, `preserve_security_group_id: true`, and `allow_all_egress: false`
+explicit — the group already has its own `-1`/`0.0.0.0/0` egress rule, and
+leaving the now-`true` component default in place would add the reserved
+`_allow_all_egress_` rule on top of it, which AWS rejects at apply as
+`InvalidPermission.Duplicate` (see
+[`allow_all_egress`](#allow_all_egress-default-true-matches-cloudposse)).
+Floci does not implement `PutMetricFilter`, so that instance sets
 `enable_security_group_logging`/`enable_security_group_alarms` to `false`.
 
 None of the three real stacks (fnx-dev-testenv-01, fnx-staging-staging-01,
@@ -34,7 +39,7 @@ stack today.
 | `vpc_id` (required) | — |
 | `security_groups` (map, default `{}`) | typed `map(object(...))`; keys name the groups and are how rules refer to each other |
 | `security_groups.<key>.preserve_security_group_id` | default `false`; see [Rule changes](#rule-changes-preserve_security_group_id) |
-| `security_groups.<key>.allow_all_egress` | default `false` (Cloudposse: `true`); see [`allow_all_egress`](#allow_all_egress-default-false-unlike-cloudposse) |
+| `security_groups.<key>.allow_all_egress` | default `true`, matching Cloudposse; see [`allow_all_egress`](#allow_all_egress-default-true-matches-cloudposse) |
 | `security_groups.<key>.name` | rejected by validation: names are generated, see below |
 | `tags` | required; must include a non-empty `Environment` (validated), used in the group names `${Environment}-${key}-sg` |
 | `enforce_no_public_ingress` | when `true`, apply fails if any rule allows ingress from `0.0.0.0/0` or `::/0` |
@@ -170,7 +175,7 @@ point at the new id. Its destroy does not wait for the sibling's new group, but
 its create does, so the rule is absent for the whole of the sibling's
 replacement, not just briefly.
 
-### `allow_all_egress` (default `false`, unlike Cloudposse)
+### `allow_all_egress` (default `true`, matches Cloudposse)
 
 `security_groups.<key>.allow_all_egress` mirrors Cloudposse's input of the same
 name: when `true` it adds their rule verbatim, keyed `<group>/_allow_all_egress_`
@@ -178,17 +183,23 @@ name: when `true` it adds their rule verbatim, keyed `<group>/_allow_all_egress_
 `0.0.0.0/0` and `::/0`, description "Allow all egress". It goes through the
 same `keyed`/`dbc` resources and `random_id` keepers as every other rule.
 
-Cloudposse defaults it to `true`. It defaults to `false` here, a deliberate
-divergence decided by the repo owner: this repo's `CLAUDE.md` forbids
-`0.0.0.0/0`, and this component audits permissive rules. The permissive-rule
-audit in `audit.tf` does not flag the generated rule. It checks ingress only,
-because `enforce_no_public_ingress` is about ingress, so it treats this rule
-like any explicit egress rule to `0.0.0.0/0`. The rule is visible only because
-setting the flag is explicit. Setting it on a group that already has an
-explicit `-1`/`0.0.0.0/0` egress rule, as the sandbox's `app` has, authorizes
+Cloudposse defaults it to `true`, and so does this component: this repo's
+"never `0.0.0.0/0` or `::/0`" rule (`CLAUDE.md`) governs INGRESS only — what
+the outside can reach inside — and is enforced by `enforce_no_public_ingress`
+and the permissive-rule audit below, both of which check ingress rules only.
+Outbound is unrestricted by policy, matching Cloudposse's default. An earlier
+revision defaulted this to `false` as a misreading of the ingress-only rule;
+that deviation is reverted.
+
+The permissive-rule audit in `audit.tf` does not flag the generated rule: it
+checks ingress only, so it treats this rule like any explicit egress rule to
+`0.0.0.0/0`. Setting `allow_all_egress: true` (or leaving it at its default) on
+a group that already has an explicit `-1`/`0.0.0.0/0` egress rule authorizes
 that permission twice. That is the overlapping-CIDR limit above, and apply
-fails with `InvalidPermission.Duplicate`. Remove the explicit rule when you turn
-the flag on.
+fails with `InvalidPermission.Duplicate`. Set `allow_all_egress: false`
+explicitly on such a group instead — the sandbox's `app` and the
+`web-application` template's `alb` both already have their own all-outbound
+rule and set it that way.
 
 Cloudposse's `null_resource.sync_rules_and_sg_lifecycles` is ported, one per
 `false` group: it is triggered by the group's id, depends on the
@@ -205,6 +216,10 @@ under [Replacing a group](#replacing-a-group) remains.
 - `tags` without a non-empty `Environment` fails validation before any plan.
 - `enforce_no_public_ingress = true` is a hard gate via a `terraform_data`
   precondition, not a warning. It now covers `::/0` as well as `0.0.0.0/0`.
+  It is opt-in (default `false`) and, like the permissive-rule audit, checks
+  ingress only: this repo's "never `0.0.0.0/0` or `::/0`" rule governs what
+  the outside can reach inside. Egress is unrestricted by policy — see
+  [`allow_all_egress`](#allow_all_egress-default-true-matches-cloudposse).
 - Nine `validation` blocks on `var.security_groups` reject, before any provider
   is configured: a `name` on a group; a map key shaped like `sg-...` or
   containing `/` or `#`; a rule `key` outside `^[A-Za-z0-9_.-]+$` or equal to
