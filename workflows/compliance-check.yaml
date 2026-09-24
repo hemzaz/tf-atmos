@@ -1,6 +1,8 @@
 # Compliance posture from AWS Security Hub standards, mapped to Atmos
-# components by `atmos aws compliance report` (Security Hub must be enabled,
-# see `atmos workflow harden -f security-hardening`).
+# components by `atmos aws compliance report`. Security Hub must be enabled:
+# the securityhub/main component owns it in every stack
+# (`atmos terraform deploy securityhub/main -s <stack>`, or
+# `atmos workflow harden -f security-hardening`, which deploys it).
 #
 # Usage:
 #   atmos workflow check -f compliance-check -s <stack>

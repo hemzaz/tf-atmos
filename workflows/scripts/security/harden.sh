@@ -33,43 +33,39 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 # =================================================================
-# Enable GuardDuty
+# GuardDuty and Security Hub
 # =================================================================
-log_info "Checking GuardDuty..."
-GD_DETECTOR=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text 2>/dev/null || echo "")
-
-if [[ -z "$GD_DETECTOR" ]] || [[ "$GD_DETECTOR" == "None" ]]; then
+# Owned by the guardduty/main and securityhub/main components, deployed in
+# every stack. Creating them here with the aws CLI instead would leave
+# Terraform failing with "already exists" on its next apply, so hardening
+# deploys the components and never touches the services directly.
+for component in guardduty/main securityhub/main; do
   if [[ "$AUTO_APPROVE" == "true" ]]; then
-    log_info "Enabling GuardDuty..."
-    DETECTOR_ID=$(aws guardduty create-detector \
-      --region "$REGION" \
-      --enable \
-      --finding-publishing-frequency FIFTEEN_MINUTES \
-      --query 'DetectorId' --output text 2>/dev/null)
-    log_success "GuardDuty enabled (Detector: $DETECTOR_ID)"
+    log_info "Deploying ${component} to ${STACK}..."
+    atmos terraform deploy "$component" -s "$STACK"
+    log_success "${component} deployed"
   else
-    log_info "GuardDuty not enabled. Confirm the workflow prompt to enable."
+    log_info "${component} not deployed. Confirm the workflow prompt, or run: atmos terraform deploy ${component} -s ${STACK}"
   fi
+done
+
+# Report (read-only): what is actually enabled in the account/region now.
+log_info "GuardDuty / Security Hub status in ${REGION}:"
+GD_DETECTOR=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text 2>/dev/null || echo "None")
+if [[ -n "$GD_DETECTOR" ]] && [[ "$GD_DETECTOR" != "None" ]]; then
+  GD_STATUS=$(aws guardduty get-detector --region "$REGION" --detector-id "$GD_DETECTOR" --query 'Status' --output text 2>/dev/null || echo "unknown")
+  echo "  GuardDuty:    detector ${GD_DETECTOR} (${GD_STATUS})"
 else
-  log_skip "GuardDuty already enabled"
+  echo "  GuardDuty:    no detector"
 fi
-
-# =================================================================
-# Enable Security Hub
-# =================================================================
-log_info "Checking Security Hub..."
-if ! aws securityhub describe-hub --region "$REGION" >/dev/null 2>&1; then
-  if [[ "$AUTO_APPROVE" == "true" ]]; then
-    log_info "Enabling Security Hub..."
-    aws securityhub enable-security-hub \
-      --region "$REGION" \
-      --enable-default-standards 2>/dev/null || true
-    log_success "Security Hub enabled"
-  else
-    log_info "Security Hub not enabled. Confirm the workflow prompt to enable."
-  fi
+SH_HUB=$(aws securityhub describe-hub --region "$REGION" --query 'HubArn' --output text 2>/dev/null || echo "")
+if [[ -n "$SH_HUB" ]] && [[ "$SH_HUB" != "None" ]]; then
+  SH_STANDARDS_RAW=$(aws securityhub get-enabled-standards --region "$REGION" \
+    --query 'StandardsSubscriptions[].StandardsArn' --output text 2>/dev/null || echo "unknown")
+  SH_STANDARDS=$(tr '\t' '\n' <<<"$SH_STANDARDS_RAW" | sed 's|.*:standards/||; s|.*:ruleset/||' | paste -sd, -)
+  echo "  Security Hub: ${SH_HUB} (standards: ${SH_STANDARDS:-none})"
 else
-  log_skip "Security Hub already enabled"
+  echo "  Security Hub: not enabled"
 fi
 
 # =================================================================

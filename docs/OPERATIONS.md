@@ -174,15 +174,17 @@ read-only checks.
 
 ```bash
 atmos workflow security-audit -f security-hardening -s <stack>   # Security Hub findings mapped to components
-STACK=<stack> atmos workflow harden -f security-hardening        # GuardDuty, Security Hub, EBS/S3 defaults
+STACK=<stack> atmos workflow harden -f security-hardening        # deploy guardduty/securityhub, EBS/S3 defaults
 STACK=<stack> atmos workflow harden-iam -f security-hardening    # account password policy
 atmos workflow check -f compliance-check -s <stack>              # CIS, FSBP, PCI DSS, ... from Security Hub
 atmos workflow report -f compliance-check -s <stack>             # writes compliance-report.md
 ```
 
-`harden`/`harden-iam` ask before changing anything; declining runs report-only. In production,
-`guardduty/main` and `securityhub/main` are disabled stack instances, so `harden` manages those
-services instead of Terraform.
+`harden`/`harden-iam` ask before changing anything; declining runs report-only. GuardDuty and
+Security Hub are owned by the `guardduty/main` and `securityhub/main` components in every stack;
+`harden` deploys them with `atmos terraform deploy` (never with aws CLI create calls, which would
+collide with Terraform) and reports their status. `security-monitoring/main` routes their findings
+to SNS and reads their IDs with `!terraform.state`.
 
 ## Certificate rotation
 

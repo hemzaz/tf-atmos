@@ -1,0 +1,31 @@
+---
+##################################################
+# Catalog Configuration for Amazon GuardDuty
+##################################################
+# One detector per account/region, owned by this component (the Cloud Posse
+# aws-guardduty model: one component per service). security-monitoring reads
+# `detector_id` from here with !terraform.state and never creates a detector.
+#
+# Protection plans follow the Cloud Posse aws-guardduty defaults: S3 data
+# events on, EKS audit logs and EBS malware scanning off. Those two bill per
+# event / per GB scanned, so they are opt-in per stack (prod turns them on).
+# The detector itself bills on CloudTrail management events, VPC flow logs
+# and DNS logs analysed.
+
+components:
+  terraform:
+    guardduty/defaults:
+      metadata:
+        component: guardduty
+        type: abstract
+      vars:
+        enable: true
+        enable_s3_protection: true
+        enable_kubernetes_protection: false
+        enable_malware_protection: false
+        # Free: only how often updates to EXISTING findings are re-published.
+        # New findings reach EventBridge within minutes regardless.
+        finding_publishing_frequency: "FIFTEEN_MINUTES"
+        auto_archive_filter: []
+        tags:
+          Component: "GuardDuty"

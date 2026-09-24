@@ -18,38 +18,17 @@ variable "tags" {
   }
 }
 
-# GuardDuty Variables
-variable "enable_guardduty" {
-  type        = bool
-  description = "Enable GuardDuty threat detection"
-  default     = true
-}
-
-variable "enable_s3_protection" {
-  type        = bool
-  description = "Enable GuardDuty S3 protection"
-  default     = true
-}
-
-variable "enable_eks_protection" {
-  type        = bool
-  description = "Enable GuardDuty EKS protection"
-  default     = true
-}
-
-variable "enable_malware_protection" {
-  type        = bool
-  description = "Enable GuardDuty malware protection for EC2"
-  default     = true
-}
-
-variable "guardduty_finding_frequency" {
+# GuardDuty and Security Hub are owned by the guardduty and securityhub
+# components. Stacks pass their outputs in with !terraform.state; null turns
+# the matching finding route off.
+variable "guardduty_detector_id" {
   type        = string
-  description = "GuardDuty finding publishing frequency"
-  default     = "FIFTEEN_MINUTES"
+  description = "ID of the GuardDuty detector owned by the guardduty component (its `detector_id` output). Null disables GuardDuty finding routing."
+  default     = null
+
   validation {
-    condition     = contains(["FIFTEEN_MINUTES", "ONE_HOUR", "SIX_HOURS"], var.guardduty_finding_frequency)
-    error_message = "GuardDuty finding frequency must be FIFTEEN_MINUTES, ONE_HOUR, or SIX_HOURS"
+    condition     = var.guardduty_detector_id == null || can(regex("^[a-z0-9]{1,300}$", var.guardduty_detector_id))
+    error_message = "guardduty_detector_id must be a GuardDuty detector ID (lowercase letters and digits), or null."
   }
 }
 
@@ -59,41 +38,15 @@ variable "guardduty_finding_threshold" {
   default     = 0
 }
 
-# Security Hub Variables
-variable "enable_security_hub" {
-  type        = bool
-  description = "Enable AWS Security Hub"
-  default     = true
-}
+variable "securityhub_account_arn" {
+  type        = string
+  description = "ARN of the Security Hub hub owned by the securityhub component (its `account_arn` output). Null disables Security Hub finding routing."
+  default     = null
 
-variable "enable_default_standards" {
-  type        = bool
-  description = "Enable default Security Hub standards"
-  default     = true
-}
-
-variable "auto_enable_controls" {
-  type        = bool
-  description = "Automatically enable new Security Hub controls"
-  default     = true
-}
-
-variable "enable_cis_standard" {
-  type        = bool
-  description = "Enable CIS AWS Foundations Benchmark"
-  default     = true
-}
-
-variable "enable_fsbp_standard" {
-  type        = bool
-  description = "Enable AWS Foundational Security Best Practices"
-  default     = true
-}
-
-variable "enable_pci_standard" {
-  type        = bool
-  description = "Enable PCI-DSS standard"
-  default     = false
+  validation {
+    condition     = var.securityhub_account_arn == null || can(regex("^arn:aws[a-z-]*:securityhub:[a-z0-9-]+:[0-9]{12}:hub/default$", var.securityhub_account_arn))
+    error_message = "securityhub_account_arn must be a Security Hub hub ARN (arn:aws:securityhub:<region>:<account>:hub/default), or null."
+  }
 }
 
 # Inspector Variables

@@ -1,8 +1,11 @@
 # Security audit and account-level hardening.
 #   security-audit - Security Hub findings mapped to components (read-only)
-#   harden         - enable GuardDuty, Security Hub, default EBS encryption and
-#                    S3 account public-access block; report open SGs / VPCs
-#                    without flow logs (workflows/scripts/security/harden.sh)
+#   harden         - deploy the guardduty/main and securityhub/main components
+#                    (atmos terraform deploy, never aws CLI create calls, so
+#                    Terraform keeps sole ownership), report their status,
+#                    enable default EBS encryption and the S3 account
+#                    public-access block; report open SGs / VPCs without
+#                    flow logs (workflows/scripts/security/harden.sh)
 #   harden-iam     - account password policy (workflows/scripts/security/harden-iam.sh)
 # Changes are applied only after confirmation; declining runs report-only.
 #
@@ -19,7 +22,7 @@ workflows:
         command: aws compliance report --framework cis-aws
 
   harden:
-    description: Apply account/region security hardening (GuardDuty, Security Hub, EBS, S3)
+    description: Deploy guardduty/main and securityhub/main, then apply account/region hardening (EBS, S3)
     dependencies:
       tools:
         aws/aws-cli: "2.36.49"
@@ -31,7 +34,7 @@ workflows:
         default: '{{ env "STACK" }}'
       - name: confirm
         type: confirm
-        prompt: Apply hardening changes? (No = report only)
+        prompt: Deploy guardduty/main + securityhub/main and apply hardening? (No = report only)
         default: false
       - name: harden
         type: shell

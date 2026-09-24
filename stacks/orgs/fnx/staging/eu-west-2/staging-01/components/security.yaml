@@ -12,6 +12,9 @@ import:
   - catalog/kms/defaults
   - catalog/secretsmanager/defaults
   - catalog/acm/defaults
+  - catalog/guardduty/defaults
+  - catalog/securityhub/defaults
+  - catalog/security-monitoring/defaults
 
 components:
   terraform:
@@ -169,3 +172,33 @@ components:
             path: "staging/ssh"
         context_name: "staging/infra"
         default_recovery_window_in_days: 7
+
+    # ==========================================================================
+    # GuardDuty - owns the detector (security-monitoring only consumes it).
+    # Catalog defaults: S3 protection on; EKS audit logs and EBS malware
+    # scanning stay off in non-prod to avoid per-event/per-GB charges.
+    # ==========================================================================
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/defaults
+
+    # ==========================================================================
+    # Security Hub - owns the hub (security-monitoring only consumes it).
+    # Default standards (AWS FSBP + CIS 1.2.0) only; no PCI DSS in non-prod.
+    # ==========================================================================
+    securityhub/main:
+      metadata:
+        component: securityhub
+        inherits:
+          - securityhub/defaults
+
+    # ==========================================================================
+    # Security finding routing (GuardDuty + Security Hub -> SNS)
+    # ==========================================================================
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+        inherits:
+          - security-monitoring/defaults

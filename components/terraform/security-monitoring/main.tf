@@ -1,79 +1,13 @@
 locals {
   name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "security")}"
 
-  # GuardDuty protection plans (AWS provider v6 deprecates detector datasources)
-  guardduty_features = {
-    S3_DATA_EVENTS         = var.enable_s3_protection
-    EKS_AUDIT_LOGS         = var.enable_eks_protection
-    EBS_MALWARE_PROTECTION = var.enable_malware_protection
-  }
-}
-
-# GuardDuty Detector
-resource "aws_guardduty_detector" "main" {
-  enable = var.enable_guardduty
-
-  finding_publishing_frequency = var.guardduty_finding_frequency
-
-  tags = { Name = "${local.name_prefix}-detector" }
-}
-
-resource "aws_guardduty_detector_feature" "main" {
-  for_each = var.enable_guardduty ? local.guardduty_features : {}
-
-  detector_id = aws_guardduty_detector.main.id
-  name        = each.key
-  status      = each.value ? "ENABLED" : "DISABLED"
-}
-
-# GuardDuty Filter for high/critical findings
-resource "aws_guardduty_filter" "high_severity" {
-  count = var.enable_guardduty ? 1 : 0
-
-  name        = "${local.name_prefix}-high-severity-findings"
-  action      = "ARCHIVE"
-  detector_id = aws_guardduty_detector.main.id
-  rank        = 1
-
-  finding_criteria {
-    criterion {
-      field  = "severity"
-      equals = ["0", "1", "2", "3"]
-    }
-  }
-}
-
-# Security Hub
-resource "aws_securityhub_account" "main" {
-  count = var.enable_security_hub ? 1 : 0
-
-  enable_default_standards  = var.enable_default_standards
-  control_finding_generator = "SECURITY_CONTROL"
-  auto_enable_controls      = var.auto_enable_controls
-}
-
-# Enable CIS AWS Foundations Benchmark
-resource "aws_securityhub_standards_subscription" "cis" {
-  count = var.enable_security_hub && var.enable_cis_standard ? 1 : 0
-
-  depends_on    = [aws_securityhub_account.main]
-  standards_arn = "arn:aws:securityhub:${var.region}::standards/cis-aws-foundations-benchmark/v/1.4.0"
-}
-
-# Enable AWS Foundational Security Best Practices
-resource "aws_securityhub_standards_subscription" "fsbp" {
-  count = var.enable_security_hub && var.enable_fsbp_standard ? 1 : 0
-
-  depends_on    = [aws_securityhub_account.main]
-  standards_arn = "arn:aws:securityhub:${var.region}::standards/aws-foundational-security-best-practices/v/1.0.0"
-}
-
-# Enable PCI-DSS Standard
-resource "aws_securityhub_standards_subscription" "pci_dss" {
-  count = var.enable_security_hub && var.enable_pci_standard ? 1 : 0
-
-  depends_on    = [aws_securityhub_account.main]
-  standards_arn = "arn:aws:securityhub:${var.region}::standards/pci-dss/v/3.2.1"
+  # The detector and the hub are owned by the guardduty and securityhub
+  # components (one component per service, the Cloud Posse model). This
+  # component only routes their findings, so a null ID turns the matching
+  # EventBridge rule and alarm off. Both are plain variables, so the counts
+  # below are known at plan time.
+  guardduty_enabled    = var.guardduty_detector_id != null
+  security_hub_enabled = var.securityhub_account_arn != null
 }
 
 # AWS Inspector V2
@@ -132,22 +66,25 @@ resource "aws_sns_topic_subscription" "security_email" {
 
 # EventBridge rule for GuardDuty findings
 resource "aws_cloudwatch_event_rule" "guardduty_findings" {
-  count = var.enable_guardduty ? 1 : 0
+  count = local.guardduty_enabled ? 1 : 0
 
   name        = "${local.name_prefix}-guardduty-findings"
-  description = "Capture GuardDuty HIGH and CRITICAL findings"
+  description = "Capture GuardDuty MEDIUM, HIGH and CRITICAL findings (severity 4.0 and above)"
 
+  # Numeric matching, not an enumerated list: GuardDuty severities are decimals
+  # and CRITICAL attack sequences score 9.0-10.0, which a list ending at 8.9
+  # silently dropped. LOW findings (1.0-3.9) stay in the console only.
   event_pattern = jsonencode({
     source      = ["aws.guardduty"]
     detail-type = ["GuardDuty Finding"]
     detail = {
-      severity = [4, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5, 5.0, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6, 6.0, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 7, 7.0, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 8, 8.0, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9]
+      severity = [{ numeric = [">=", 4] }]
     }
   })
 }
 
 resource "aws_cloudwatch_event_target" "guardduty_sns" {
-  count = var.enable_guardduty ? 1 : 0
+  count = local.guardduty_enabled ? 1 : 0
 
   rule      = aws_cloudwatch_event_rule.guardduty_findings[0].name
   target_id = "SendToSNS"
@@ -156,7 +93,7 @@ resource "aws_cloudwatch_event_target" "guardduty_sns" {
 
 # EventBridge rule for Security Hub findings
 resource "aws_cloudwatch_event_rule" "securityhub_findings" {
-  count = var.enable_security_hub ? 1 : 0
+  count = local.security_hub_enabled ? 1 : 0
 
   name        = "${local.name_prefix}-securityhub-findings"
   description = "Capture Security Hub HIGH and CRITICAL findings"
@@ -178,7 +115,7 @@ resource "aws_cloudwatch_event_rule" "securityhub_findings" {
 }
 
 resource "aws_cloudwatch_event_target" "securityhub_sns" {
-  count = var.enable_security_hub ? 1 : 0
+  count = local.security_hub_enabled ? 1 : 0
 
   rule      = aws_cloudwatch_event_rule.securityhub_findings[0].name
   target_id = "SendToSNS"
@@ -323,7 +260,7 @@ resource "aws_cloudwatch_log_group" "alert_enrichment" {
 
 # CloudWatch alarms for security events
 resource "aws_cloudwatch_metric_alarm" "guardduty_high_findings" {
-  count = var.enable_guardduty ? 1 : 0
+  count = local.guardduty_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-guardduty-high-findings"
   comparison_operator = "GreaterThanThreshold"
