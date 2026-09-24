@@ -14,6 +14,7 @@ set -euo pipefail
 source "$(dirname "$0")/../common/stack-context.sh"
 
 # --- enable-security-services ---
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
@@ -23,6 +24,7 @@ NC='\033[0m'
 log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
 log_skip() { echo -e "${YELLOW}[SKIP]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 echo -e "\n${WHITE}=== Security Hardening ===${NC}\n"
 
@@ -112,7 +114,8 @@ EBS_ENCRYPTION=$(aws ec2 get-ebs-encryption-by-default --region "$REGION" --quer
 if [[ "$EBS_ENCRYPTION" != "true" ]]; then
   if [[ "$AUTO_APPROVE" == "true" ]]; then
     log_info "Enabling default EBS encryption..."
-    aws ec2 enable-ebs-encryption-by-default --region "$REGION" 2>/dev/null
+    aws ec2 enable-ebs-encryption-by-default --region "$REGION" ||
+      { log_error "Enabling default EBS encryption in ${REGION} failed (see the aws error above)"; exit 1; }
     log_success "Default EBS encryption enabled"
   else
     log_info "EBS encryption not enabled. Confirm the workflow prompt to enable."
@@ -139,7 +142,8 @@ if [[ "$S3_BLOCK" == "none" ]]; then
         "IgnorePublicAcls": true,
         "BlockPublicPolicy": true,
         "RestrictPublicBuckets": true
-      }' 2>/dev/null
+      }' ||
+      { log_error "Setting the S3 account public access block on ${ACCOUNT_ID} failed (see the aws error above)"; exit 1; }
     log_success "S3 public access block enabled"
   else
     log_info "S3 public access block not configured. Confirm the workflow prompt to enable."

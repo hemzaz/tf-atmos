@@ -147,7 +147,7 @@ variable "allow_cloudwatch_logs" {
 
 variable "allow_eventbridge" {
   type        = bool
-  description = "Let EventBridge (events.amazonaws.com) use the key for event buses and archives of this account and region (scoped by kms:EncryptionContext:aws:events:event-bus:arn; DescribeKey by aws:SourceAccount) and for rules publishing to this account's SNS topics encrypted with it (aws:SourceAccount and kms:EncryptionContext:aws:sns:topicArn)"
+  description = "Let EventBridge (events.amazonaws.com) use the key for event buses and archives of this account and region (scoped by kms:EncryptionContext:aws:events:event-bus:arn; DescribeKey by aws:SourceAccount) and for rules publishing to this account's SNS topics encrypted with it (kms:EncryptionContext:aws:sns:topicArn only: SNS does not support aws:SourceAccount/aws:SourceArn in the KMS policy for EventBridge-to-encrypted topics)"
   default     = false
 }
 

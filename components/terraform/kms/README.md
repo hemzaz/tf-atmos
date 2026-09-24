@@ -49,9 +49,12 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   this key).
 - `allow_cloudwatch_alarms` adds `AllowCloudWatchAlarmsSNSTopics` for
   `cloudwatch.amazonaws.com`. Both SNS statements allow
-  `kms:GenerateDataKey*`/`kms:Decrypt` only with `aws:SourceAccount` equal to
-  this account and `kms:EncryptionContext:aws:sns:topicArn` matching this
-  account's topics in this region. security-monitoring encrypts its alert
+  `kms:GenerateDataKey*`/`kms:Decrypt` only with
+  `kms:EncryptionContext:aws:sns:topicArn` matching this account's topics in
+  this region. The CloudWatch one also requires `aws:SourceAccount`; the
+  EventBridge one cannot: SNS documents that `aws:SourceAccount`,
+  `aws:SourceArn` and `aws:SourceOrgID` in a KMS policy are not supported for
+  EventBridge-to-encrypted topics, and delivery fails with them. security-monitoring encrypts its alert
   topic with this key; without them its EventBridge rules and CloudWatch
   alarms cannot publish. Tested in `tests/service_access.tftest.hcl`.
 - `replica_regions` requires `is_multi_region = true` (validation).

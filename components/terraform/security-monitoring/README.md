@@ -60,7 +60,8 @@ vars:
   `AWS/GuardDuty` findings metric. The EventBridge rule is the GuardDuty route.
 - The Security Hub rule matches `RecordState: ACTIVE` and
   `Workflow.Status: NEW`, so archived and already-triaged findings do not
-  re-alert on every re-import.
+  alert. A finding left in NEW still re-alerts on each re-import until it is
+  triaged (set to NOTIFIED, SUPPRESSED or RESOLVED).
 - The four `CloudTrailMetrics` alarms (root account usage, unauthorized API
   calls, IAM policy and security group changes) have no metric filter feeding
   them yet; that needs a CloudTrail trail delivering to CloudWatch Logs.

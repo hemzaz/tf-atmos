@@ -129,7 +129,8 @@ resource "aws_cloudwatch_event_rule" "securityhub_findings" {
 
   # Security Hub re-imports a finding on every update. RecordState ACTIVE drops
   # archived findings and Workflow.Status NEW drops those already triaged
-  # (NOTIFIED, SUPPRESSED, RESOLVED), so an alert fires once per new finding.
+  # (NOTIFIED, SUPPRESSED, RESOLVED). A finding still in NEW matches again on
+  # each re-import, so it can alert more than once until someone triages it.
   event_pattern = jsonencode({
     source      = ["aws.securityhub"]
     detail-type = ["Security Hub Findings - Imported"]

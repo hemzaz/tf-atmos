@@ -210,10 +210,12 @@ data "aws_iam_policy_document" "default" {
   }
 
   # EventBridge rules publishing to an SNS topic encrypted with this key (for
-  # example security-monitoring's alert topic). The data key is generated for
-  # the publisher, and SNS binds it to the topic with the encryption context
-  # aws:sns:topicArn, so the statement is limited to this account's topics in
-  # this region and to calls made for this account.
+  # example security-monitoring's alert topic). SNS binds the data key to the
+  # topic with the encryption context aws:sns:topicArn, so the statement is
+  # limited to this account's topics in this region. No aws:SourceAccount /
+  # aws:SourceArn here: the SNS docs state those keys are "not supported for
+  # EventBridge-to-encrypted topics" in a KMS policy, and delivery fails with
+  # them. The topic policy carries the source conditions instead.
   dynamic "statement" {
     for_each = var.allow_eventbridge ? [1] : []
 
@@ -228,12 +230,6 @@ data "aws_iam_policy_document" "default" {
       }
 
       condition {
-        test     = "StringEquals"
-        variable = "aws:SourceAccount"
-        values   = [data.aws_caller_identity.current.account_id]
-      }
-
-      condition {
         test     = "ArnLike"
         variable = "kms:EncryptionContext:aws:sns:topicArn"
         values   = ["arn:${data.aws_partition.current.partition}:sns:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*"]
@@ -241,8 +237,10 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
-  # CloudWatch alarms publishing to an SNS topic encrypted with this key, on
-  # the same terms as EventBridge rules above.
+  # CloudWatch alarms publishing to an SNS topic encrypted with this key:
+  # scoped to this account's topics by the same encryption context, and to
+  # calls made for this account by aws:SourceAccount (supported for
+  # CloudWatch, unlike EventBridge above).
   dynamic "statement" {
     for_each = var.allow_cloudwatch_alarms ? [1] : []
 
