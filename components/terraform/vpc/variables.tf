@@ -203,6 +203,32 @@ variable "tags" {
   }
 }
 
+# Extra subnet tags, named as in Cloud Posse's aws-vpc component. EKS and the
+# AWS Load Balancer Controller find subnets by these tags
+# (kubernetes.io/role/elb, kubernetes.io/role/internal-elb,
+# kubernetes.io/cluster/<name>).
+variable "public_subnets_additional_tags" {
+  type        = map(string)
+  description = "Tags added to every public subnet"
+  default     = {}
+
+  validation {
+    condition     = !contains(keys(var.public_subnets_additional_tags), "Name")
+    error_message = "public_subnets_additional_tags must not set Name; the component names each subnet."
+  }
+}
+
+variable "private_subnets_additional_tags" {
+  type        = map(string)
+  description = "Tags added to every private subnet"
+  default     = {}
+
+  validation {
+    condition     = !contains(keys(var.private_subnets_additional_tags), "Name")
+    error_message = "private_subnets_additional_tags must not set Name; the component names each subnet."
+  }
+}
+
 # VPC Flow Logs Variables
 variable "enable_flow_logs" {
   type        = bool

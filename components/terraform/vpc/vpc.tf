@@ -19,7 +19,7 @@ resource "aws_subnet" "private" {
   cidr_block        = each.key
   availability_zone = each.value.az
 
-  tags = { Name = "${var.tags["Environment"]}-private-subnet-${each.value.index + 1}" }
+  tags = merge(var.private_subnets_additional_tags, { Name = "${var.tags["Environment"]}-private-subnet-${each.value.index + 1}" })
 }
 
 resource "aws_subnet" "public" {
@@ -28,7 +28,7 @@ resource "aws_subnet" "public" {
   cidr_block        = each.key
   availability_zone = each.value.az
 
-  tags = { Name = "${var.tags["Environment"]}-public-subnet-${each.value.index + 1}" }
+  tags = merge(var.public_subnets_additional_tags, { Name = "${var.tags["Environment"]}-public-subnet-${each.value.index + 1}" })
 }
 
 resource "aws_subnet" "database" {
