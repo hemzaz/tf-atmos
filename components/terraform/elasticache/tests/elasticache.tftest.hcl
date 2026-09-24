@@ -229,3 +229,15 @@ run "ingress_ipv6_open_to_everywhere_is_rejected" {
 
   expect_failures = [var.allowed_cidr_blocks]
 }
+
+run "ingress_slash_00_is_rejected" {
+  command = plan
+
+  # AWS parses "/00" the same as "/0"; the check compares the prefix length
+  # as a number, not as the literal string "0", so this must be caught too.
+  variables {
+    allowed_cidr_blocks = ["0.0.0.0/00"]
+  }
+
+  expect_failures = [var.allowed_cidr_blocks]
+}

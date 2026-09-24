@@ -62,6 +62,24 @@ run "custom_ingress_ipv6_open_to_everywhere_is_rejected" {
   expect_failures = [var.custom_ingress_rules]
 }
 
+run "custom_ingress_slash_00_is_rejected" {
+  command = plan
+
+  # AWS parses "/00" the same as "/0"; the check compares the prefix length
+  # as a number, not as the literal string "0", so this must be caught too.
+  variables {
+    custom_ingress_rules = [{
+      description = "example"
+      from_port   = 5432
+      to_port     = 5432
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/00"]
+    }]
+  }
+
+  expect_failures = [var.custom_ingress_rules]
+}
+
 run "custom_ingress_from_private_cidr_is_allowed" {
   command = plan
 

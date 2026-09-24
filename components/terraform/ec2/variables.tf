@@ -220,9 +220,12 @@ variable "allowed_ingress_rules" {
   default     = []
   nullable    = false
 
+  # The prefix length is compared as a number, not a string, so "/00" (which
+  # AWS parses the same as "/0") counts too. Malformed entries are left to the
+  # provider; try() keeps this validation from erroring on them.
   validation {
     condition = alltrue([for r in var.allowed_ingress_rules : alltrue([
-      for c in(r.cidr_blocks == null ? [] : r.cidr_blocks) : try(split("/", c)[1] != "0", true)
+      for c in(r.cidr_blocks == null ? [] : r.cidr_blocks) : try(tonumber(split("/", c)[1]) != 0, true)
     ])])
     error_message = "Ingress must not be open to everywhere (0.0.0.0/0 or any other /0)."
   }

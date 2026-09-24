@@ -229,10 +229,11 @@ variable "allowed_cidr_blocks" {
     error_message = "All entries must be valid IPv4 CIDR blocks."
   }
 
-  # Prefix-length check (not a literal-string check) so it also catches
-  # ::/0 and any other /0, per components/terraform/ec2/variables.tf.
+  # Prefix-length check (not a literal-string check), compared as a number so
+  # "/00" (which AWS parses the same as "/0") counts too -- also catches ::/0
+  # and any other /0, per components/terraform/eks/variables.tf.
   validation {
-    condition     = alltrue([for c in var.allowed_cidr_blocks : try(split("/", c)[1] != "0", true)])
+    condition     = alltrue([for c in var.allowed_cidr_blocks : try(tonumber(split("/", c)[1]) != 0, true)])
     error_message = "allowed_cidr_blocks must not be open to everywhere (0.0.0.0/0 or any other /0); grant access from explicit private ranges or source security groups."
   }
 }
