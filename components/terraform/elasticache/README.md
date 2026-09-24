@@ -24,8 +24,10 @@ root module. Stack rewiring is handled separately.
 | `auth_token` | sensitive, 16-128 chars, no `/ " @` or spaces; required when transit encryption is on; never exported |
 | `num_cache_nodes` (2) | maps to `num_cache_clusters`; `automatic_failover_enabled` requires >= 2, `multi_az_enabled` requires failover |
 | `allowed_security_group_ids`, `allowed_cidr_blocks` | ingress on `port` (6379); `0.0.0.0/0` is rejected by validation |
-| `kms_key_id` (null), `snapshot_retention_limit` (7), `parameter_group_name` (null) | null KMS key falls back to the AWS-owned key; backups cannot be turned off |
-| out: `primary_endpoint_address`, `reader_endpoint_address`, `replication_group_id`/`_arn`, `port`, `security_group_id`, `subnet_group_name` | — |
+| `kms_key_id` (null), `snapshot_retention_limit` (7) | null KMS key falls back to the AWS-owned key; backups cannot be turned off |
+| `cluster_mode_enabled` (false), `cluster_mode_num_node_groups` (1), `cluster_mode_replicas_per_node_group` (1) | Cloud Posse's names. On: shards replace `num_cache_nodes`, failover is required, and failover needs at least one replica per shard |
+| `family` (null), `parameters` ([]), `parameter_group_name` (null) | with `parameters` or cluster mode, a group `<Environment>-<cluster_id>` is created in `family` (required then) and attached; cluster mode forces `cluster-enabled=yes`. `parameter_group_name` attaches an existing group instead and excludes `parameters` |
+| out: `primary_endpoint_address` (null in cluster mode), `configuration_endpoint_address` (cluster mode), `reader_endpoint_address`, `replication_group_id`/`_arn`, `member_clusters`, `parameter_group_name`, `port`, `security_group_id`, `subnet_group_name` | `member_clusters` are the node IDs, the `CacheClusterId` dimension of per-node CloudWatch metrics |
 
 ## Dependencies / gotchas
 
@@ -36,6 +38,11 @@ root module. Stack rewiring is handled separately.
 - One `#checkov:skip=CKV2_AWS_5`: checkov's graph does not follow
   `aws_security_group.main[0].id` through the `count` index. The identical
   config passes with `count` removed.
+
+## Tests
+
+`tests/elasticache.tftest.hcl`, run against a mock provider:
+`terraform init -backend=false && terraform test`.
 
 ## Usage
 

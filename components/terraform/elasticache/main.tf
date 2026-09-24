@@ -7,6 +7,36 @@
 locals {
   enabled = var.enabled
   name    = "${var.tags["Environment"]}-${var.cluster_id}"
+
+  # A parameter group is created when there is something to put in it, or in
+  # cluster mode (which needs cluster-enabled=yes), unless one is named.
+  create_parameter_group = local.enabled && var.parameter_group_name == null && (length(var.parameters) > 0 || var.cluster_mode_enabled)
+  parameters = concat(
+    [for p in var.parameters : p if p.name != "cluster-enabled"],
+    var.cluster_mode_enabled ? [{ name = "cluster-enabled", value = "yes" }] : [],
+  )
+}
+
+resource "aws_elasticache_parameter_group" "main" {
+  count = local.create_parameter_group ? 1 : 0
+
+  name        = local.name
+  family      = var.family
+  description = "Parameters for the ${var.cluster_id} cache"
+
+  dynamic "parameter" {
+    for_each = local.parameters
+    content {
+      name  = parameter.value.name
+      value = parameter.value.value
+    }
+  }
+
+  tags = { Name = local.name }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_elasticache_subnet_group" "main" {
@@ -85,8 +115,12 @@ resource "aws_elasticache_replication_group" "main" {
   engine_version       = var.engine_version
   node_type            = var.node_type
   port                 = var.port
-  parameter_group_name = var.parameter_group_name
-  num_cache_clusters   = var.num_cache_nodes
+  parameter_group_name = local.create_parameter_group ? aws_elasticache_parameter_group.main[0].name : var.parameter_group_name
+
+  # Cluster mode shards the keyspace; otherwise one primary plus replicas.
+  num_cache_clusters      = var.cluster_mode_enabled ? null : var.num_cache_nodes
+  num_node_groups         = var.cluster_mode_enabled ? var.cluster_mode_num_node_groups : null
+  replicas_per_node_group = var.cluster_mode_enabled ? var.cluster_mode_replicas_per_node_group : null
 
   # Encryption. auth_token is required whenever transit encryption is on
   # (validated on the variable), so the cache is never reachable unauthenticated.

@@ -10,7 +10,22 @@ output "replication_group_arn" {
 
 output "primary_endpoint_address" {
   value       = local.enabled ? aws_elasticache_replication_group.main[0].primary_endpoint_address : null
-  description = "Endpoint clients write to"
+  description = "Endpoint clients write to (null in cluster mode; use configuration_endpoint_address)"
+}
+
+output "configuration_endpoint_address" {
+  value       = local.enabled ? aws_elasticache_replication_group.main[0].configuration_endpoint_address : null
+  description = "Endpoint cluster-mode clients connect to (null when cluster mode is off)"
+}
+
+output "member_clusters" {
+  value       = local.enabled ? sort(aws_elasticache_replication_group.main[0].member_clusters) : []
+  description = "Cache cluster (node) IDs in the group: the CacheClusterId dimension of per-node CloudWatch metrics"
+}
+
+output "parameter_group_name" {
+  value       = local.enabled ? aws_elasticache_replication_group.main[0].parameter_group_name : null
+  description = "Parameter group attached to the cache"
 }
 
 output "reader_endpoint_address" {
