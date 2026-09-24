@@ -608,7 +608,10 @@ resource "aws_iam_role_policy_attachment" "synthetics_execution" {
 resource "aws_xray_sampling_rule" "backend_services" {
   count = var.enable_tracing ? 1 : 0
 
-  rule_name      = "${local.name_prefix}-backend-services"
+  # X-Ray caps rule names at 32 characters. "<name_prefix>-backend-services"
+  # exceeded it for every stack ("production-monitoring-backend-services" is
+  # 38), so any stack enabling tracing failed at plan.
+  rule_name      = substr("${var.tags["Environment"]}-backend-services", 0, 32)
   priority       = 9000
   version        = 1
   reservoir_size = 1

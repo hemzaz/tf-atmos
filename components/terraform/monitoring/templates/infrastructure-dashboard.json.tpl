@@ -29,8 +29,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for instance in rds_instances ~}
-          ["AWS/RDS", "CPUUtilization", {"stat": "Average", "label": "${instance}"}],
+          %{ for i, instance in rds_instances ~}
+          ${i > 0 ? "," : ""}["AWS/RDS", "CPUUtilization", {"stat": "Average", "label": "${instance}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -50,8 +50,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for instance in rds_instances ~}
-          ["AWS/RDS", "DatabaseConnections", {"stat": "Average", "label": "${instance}"}],
+          %{ for i, instance in rds_instances ~}
+          ${i > 0 ? "," : ""}["AWS/RDS", "DatabaseConnections", {"stat": "Average", "label": "${instance}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -65,8 +65,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for instance in rds_instances ~}
-          ["AWS/RDS", "FreeStorageSpace", {"stat": "Average", "label": "${instance}"}],
+          %{ for i, instance in rds_instances ~}
+          ${i > 0 ? "," : ""}["AWS/RDS", "FreeStorageSpace", {"stat": "Average", "label": "${instance}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -86,8 +86,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for lb in load_balancers ~}
-          ["AWS/ApplicationELB", "TargetResponseTime", {"stat": "Average", "label": "${lb}"}],
+          %{ for i, lb in load_balancers ~}
+          ${i > 0 ? "," : ""}["AWS/ApplicationELB", "TargetResponseTime", {"stat": "Average", "label": "${lb}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -107,8 +107,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for lb in load_balancers ~}
-          ["AWS/ApplicationELB", "RequestCount", {"stat": "Sum", "label": "${lb}"}],
+          %{ for i, lb in load_balancers ~}
+          ${i > 0 ? "," : ""}["AWS/ApplicationELB", "RequestCount", {"stat": "Sum", "label": "${lb}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -122,8 +122,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for func in lambda_functions ~}
-          ["AWS/Lambda", "Invocations", {"stat": "Sum", "label": "${func}"}],
+          %{ for i, func in lambda_functions ~}
+          ${i > 0 ? "," : ""}["AWS/Lambda", "Invocations", {"stat": "Sum", "label": "${func}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -137,8 +137,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for func in lambda_functions ~}
-          ["AWS/Lambda", "Errors", {"stat": "Sum", "label": "${func}"}],
+          %{ for i, func in lambda_functions ~}
+          ${i > 0 ? "," : ""}["AWS/Lambda", "Errors", {"stat": "Sum", "label": "${func}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -152,8 +152,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for func in lambda_functions ~}
-          ["AWS/Lambda", "Duration", {"stat": "Average", "label": "${func}"}],
+          %{ for i, func in lambda_functions ~}
+          ${i > 0 ? "," : ""}["AWS/Lambda", "Duration", {"stat": "Average", "label": "${func}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -173,8 +173,8 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for cache in elasticache_clusters ~}
-          ["AWS/ElastiCache", "CPUUtilization", {"stat": "Average", "label": "${cache}"}],
+          %{ for i, cache in elasticache_clusters ~}
+          ${i > 0 ? "," : ""}["AWS/ElastiCache", "CPUUtilization", {"stat": "Average", "label": "${cache}"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",
@@ -194,9 +194,9 @@
       "type": "metric",
       "properties": {
         "metrics": [
-          %{ for cache in elasticache_clusters ~}
-          ["AWS/ElastiCache", "CacheHits", {"stat": "Sum", "label": "${cache} Hits"}],
-          [".", "CacheMisses", {"stat": "Sum", "label": "${cache} Misses"}],
+          %{ for i, cache in elasticache_clusters ~}
+          ${i > 0 ? "," : ""}["AWS/ElastiCache", "CacheHits", {"stat": "Sum", "label": "${cache} Hits"}],
+          [".", "CacheMisses", {"stat": "Sum", "label": "${cache} Misses"}]
           %{ endfor ~}
         ],
         "view": "timeSeries",

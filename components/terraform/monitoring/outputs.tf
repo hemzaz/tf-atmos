@@ -37,3 +37,13 @@ output "lambda_error_alarm_names" {
   value       = { for k, v in aws_cloudwatch_metric_alarm.lambda_errors : k => v.alarm_name }
   description = "Map of Lambda error alarm names"
 }
+
+output "metric_alarm_names" {
+  value       = { for k, v in aws_cloudwatch_metric_alarm.metric : k => v.alarm_name }
+  description = "Map of metric_alarms keys to alarm names"
+}
+
+output "metric_dashboard_names" {
+  value       = { for k, v in aws_cloudwatch_dashboard.metric : k => v.dashboard_name }
+  description = "Map of metric_dashboards keys to dashboard names"
+}
