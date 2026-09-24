@@ -1,3 +1,8 @@
+# One instance per component instance, as in
+# cloudposse-terraform-components/aws-ec2-instance. Variable names follow
+# cloudposse/terraform-aws-ec2-instance where it has the setting; the rest keep
+# this repo's names.
+
 variable "region" {
   type        = string
   description = "AWS region"
@@ -8,261 +13,399 @@ variable "region" {
   }
 }
 
+# Cloud Posse: context `enabled`. false plans nothing (count = 0).
+variable "enabled" {
+  type        = bool
+  description = "Set to false to create no resources"
+  default     = true
+}
+
+# Cloud Posse: context `name`. Every resource is named
+# "<tags.Environment>-<name>" (the repo's name_prefix convention), so `name`
+# must not repeat the Environment: prod sets `bastion`, not `production-bastion`.
+variable "name" {
+  type        = string
+  description = "Instance name without the Environment prefix. The instance is named <tags.Environment>-<name>."
+
+  validation {
+    condition     = can(regex("^[0-9A-Za-z][0-9A-Za-z_-]*$", var.name))
+    error_message = "name may only contain letters, digits, '-' and '_'."
+  }
+
+  validation {
+    condition = (
+      lower(var.name) != lower(lookup(var.tags, "Environment", "")) &&
+      !startswith(lower(var.name), "${lower(lookup(var.tags, "Environment", ""))}-")
+    )
+    error_message = "name must not start with tags.Environment: the component already prefixes it, and repeating it doubles the Environment in every name."
+  }
+
+  # The longest IAM name built from the prefix is the role
+  # "<Environment>-<name>-role"; IAM allows 64 characters.
+  validation {
+    condition     = length("${lookup(var.tags, "Environment", "")}-${var.name}-role") <= 64
+    error_message = "<tags.Environment>-<name>-role must fit IAM's 64-character role name limit: shorten name."
+  }
+}
+
 variable "vpc_id" {
   type        = string
-  description = "VPC ID where the instances will be created"
+  description = "VPC ID where the instance and its security group are created"
+
+  validation {
+    condition     = can(regex("^vpc-[a-z0-9]+$", var.vpc_id))
+    error_message = "vpc_id must be a VPC ID (e.g., vpc-0123abcd)."
+  }
 }
 
 variable "subnet_ids" {
   type        = list(string)
-  description = "List of subnet IDs to launch the instances in"
+  description = "Candidate subnet IDs; the first is used when `subnet` is not set"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for id in var.subnet_ids : can(regex("^subnet-[a-z0-9]+$", id))])
+    error_message = "All subnet IDs must be in a valid format (e.g., subnet-abc123)."
+  }
 }
 
-variable "default_ami_id" {
+variable "subnet" {
   type        = string
-  description = "Default AMI ID to use for instances if not specified"
+  description = "Subnet ID to launch the instance in. null: the first of subnet_ids."
+  default     = null
+
+  validation {
+    condition     = var.subnet == null || can(regex("^subnet-[a-z0-9]+$", var.subnet))
+    error_message = "subnet must be a subnet ID (e.g., subnet-abc123)."
+  }
+}
+
+variable "instance_type" {
+  type        = string
+  description = "The type of the instance (e.g., t3.small)"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]*\\.[a-z0-9]+$", var.instance_type))
+    error_message = "instance_type must look like <family>.<size>, e.g. t3.small."
+  }
+}
+
+variable "ami" {
+  type        = string
+  description = "AMI ID. Empty resolves the latest Amazon Linux 2023 image."
   default     = ""
-}
-
-variable "default_key_name" {
-  type        = string
-  description = "Default key pair name to use for SSH access if not specified"
-  default     = null
-}
-
-variable "global_key_name" {
-  type        = string
-  description = "Name for a global SSH key that will be created for all instances not specifying their own key"
-  default     = null
+  nullable    = false
 
   validation {
-    condition     = var.global_key_name == null || length(var.global_key_name) > 0
-    error_message = "global_key_name must be null or a non-empty string."
-  }
-
-  validation {
-    condition     = var.global_key_name == null || can(regex("^[a-zA-Z0-9-_]+$", var.global_key_name))
-    error_message = "global_key_name must contain only alphanumeric characters, hyphens, and underscores."
+    condition     = var.ami == "" || can(regex("^ami-[a-f0-9]+$", var.ami))
+    error_message = "ami must be empty or an AMI ID (e.g., ami-0123abcd)."
   }
 }
 
+variable "ssh_key_pair" {
+  type        = string
+  description = "Name of an existing key pair to launch with. null or empty: generate one when create_ssh_keys is true, otherwise launch without a key (SSM access only)."
+  default     = null
+}
+
+variable "associate_public_ip_address" {
+  type        = bool
+  description = "Associate a public IP address with the instance"
+  default     = false
+}
+
+variable "user_data" {
+  type        = string
+  description = "User data, as plain text (the component base64-encodes it where AWS needs that)"
+  default     = null
+}
+
+variable "monitoring" {
+  type        = bool
+  description = "Enable detailed CloudWatch monitoring"
+  default     = true
+}
+
+variable "ebs_optimized" {
+  type        = bool
+  description = "Launch an EBS-optimized instance"
+  default     = true
+}
+
+variable "disable_api_termination" {
+  type        = bool
+  description = "Enable EC2 termination protection"
+  default     = false
+
+  validation {
+    condition     = var.environment != "prod" || var.disable_api_termination
+    error_message = "API termination protection must be enabled for production environments."
+  }
+}
+
+# Divergence from Cloud Posse (gp2, 10 GB): gp3 is cheaper and faster, and 20
+# GB leaves room above the Amazon Linux 2023 image.
+variable "root_volume_type" {
+  type        = string
+  description = "Root volume type"
+  default     = "gp3"
+
+  validation {
+    condition     = contains(["gp2", "gp3", "io1", "io2", "st1", "sc1", "standard"], var.root_volume_type)
+    error_message = "root_volume_type must be an EBS volume type."
+  }
+}
+
+variable "root_volume_size" {
+  type        = number
+  description = "Root volume size in GiB"
+  default     = 20
+
+  validation {
+    condition     = var.root_volume_size >= 8
+    error_message = "root_volume_size must be at least 8 GiB."
+  }
+}
+
+variable "delete_on_termination" {
+  type        = bool
+  description = "Delete the root volume when the instance terminates"
+  default     = true
+}
+
+variable "root_block_device_encrypted" {
+  type        = bool
+  description = "Encrypt the root volume"
+  default     = true
+}
+
+variable "root_block_device_kms_key_id" {
+  type        = string
+  description = "KMS key ARN for the root and additional volumes. null: the AWS-managed EBS key."
+  default     = null
+}
+
+variable "ebs_block_devices" {
+  type = list(object({
+    device_name           = string
+    volume_type           = optional(string, "gp3")
+    volume_size           = number
+    iops                  = optional(number)
+    throughput            = optional(number)
+    delete_on_termination = optional(bool, true)
+    encrypted             = optional(bool, true)
+    kms_key_id            = optional(string)
+    snapshot_id           = optional(string)
+  }))
+  description = "Additional EBS volumes. kms_key_id falls back to root_block_device_kms_key_id."
+  default     = []
+  nullable    = false
+}
+
+# The instance's own security group, with inline rules. Cloud Posse builds
+# the group from `security_group_rules` instead; README.md ("Security group")
+# says why this keeps inline rules. Only inbound traffic is restricted:
+# ingress may not be open to everywhere, egress is unrestricted by policy.
+variable "allowed_ingress_rules" {
+  type = list(object({
+    from_port       = number
+    to_port         = number
+    protocol        = string
+    cidr_blocks     = optional(list(string))
+    security_groups = optional(list(string))
+    description     = optional(string)
+  }))
+  description = "Ingress rules of the instance's own security group"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([for r in var.allowed_ingress_rules : alltrue([
+      for c in(r.cidr_blocks == null ? [] : r.cidr_blocks) : try(split("/", c)[1] != "0", true)
+    ])])
+    error_message = "Ingress must not be open to everywhere (0.0.0.0/0 or any other /0)."
+  }
+}
+
+variable "allowed_egress_rules" {
+  type = list(object({
+    from_port       = number
+    to_port         = number
+    protocol        = string
+    cidr_blocks     = optional(list(string))
+    security_groups = optional(list(string))
+    description     = optional(string)
+  }))
+  description = "Egress rules of the instance's own security group. null: all outbound traffic (Cloud Posse's default; egress is unrestricted by policy)."
+  default     = null
+}
+
+variable "security_groups" {
+  type        = list(string)
+  description = "Additional security group IDs to attach besides the instance's own"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for sg in var.security_groups : can(regex("^sg-[a-z0-9]+$", sg))])
+    error_message = "All security group IDs must be in a valid format (e.g., sg-abc123)."
+  }
+}
+
+variable "enable_ssm" {
+  type        = bool
+  description = "Attach AmazonSSMManagedInstanceCore to the instance role"
+  default     = true
+}
+
+variable "custom_iam_policy" {
+  type        = string
+  description = "JSON of an extra inline policy for the instance role. Empty: none."
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition     = var.custom_iam_policy == "" || can(jsondecode(var.custom_iam_policy))
+    error_message = "custom_iam_policy must be empty or a JSON policy document."
+  }
+}
+
+# SSH key generation, used only when ssh_key_pair is not set.
 variable "create_ssh_keys" {
   type        = bool
-  description = "Whether to create SSH key pairs for instances that don't specify an existing key_name"
+  description = "Generate a key pair for the instance when ssh_key_pair is not set"
   default     = false
 }
 
 variable "store_ssh_keys_in_secrets_manager" {
   type        = bool
-  description = "Whether to store created SSH private keys in AWS Secrets Manager"
+  description = "Store a generated private key in Secrets Manager"
   default     = true
 }
 
+# ED25519: shorter keys, faster, and accepted by EC2 for Linux instances.
+# RSA stays available for Windows, which EC2 key pairs require it for.
 variable "ssh_key_algorithm" {
   type        = string
-  description = "The algorithm to use when creating SSH key pairs"
-  default     = "RSA"
+  description = "Algorithm of a generated key: ED25519 (default) or RSA"
+  default     = "ED25519"
+
+  validation {
+    condition     = contains(["RSA", "ED25519"], var.ssh_key_algorithm)
+    error_message = "Only RSA and ED25519 are supported for SSH key generation."
+  }
+}
+
+variable "ssh_key_secret_kms_key_id" {
+  type        = string
+  description = "KMS key (ARN, key ID or alias) encrypting the Secrets Manager secret that holds a generated private key. null: the AWS-managed aws/secretsmanager key."
+  default     = null
+
+  validation {
+    condition = var.ssh_key_secret_kms_key_id == null ? true : can(regex(
+      "^(arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:(key|alias)/.+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|mrk-[0-9a-f]{32}|alias/.+)$",
+      var.ssh_key_secret_kms_key_id
+    ))
+    error_message = "ssh_key_secret_kms_key_id must be a KMS key ARN, alias ARN, key ID, multi-Region key ID or alias/<name>."
+  }
+}
+
+variable "ssh_key_secret_recovery_window_in_days" {
+  type        = number
+  description = "Days a deleted private-key secret stays recoverable: 0 (delete at once) or 7-30, as Cloud Posse's secrets-manager recovery_window_in_days"
+  default     = 30
+
+  validation {
+    condition     = var.ssh_key_secret_recovery_window_in_days == 0 || (var.ssh_key_secret_recovery_window_in_days >= 7 && var.ssh_key_secret_recovery_window_in_days <= 30)
+    error_message = "ssh_key_secret_recovery_window_in_days must be 0 or between 7 and 30."
+  }
 }
 
 variable "ssh_key_rsa_bits" {
   type        = number
-  description = "The size of the generated RSA key in bits"
+  description = "Size of a generated RSA key in bits"
   default     = 4096
-}
-
-variable "instances" {
-  type = map(object({
-    instance_type                     = string
-    ami_id                            = optional(string)
-    key_name                          = optional(string)
-    subnet_id                         = optional(string)
-    user_data                         = optional(string)
-    detailed_monitoring               = optional(bool)
-    ebs_optimized                     = optional(bool, true)
-    enabled                           = optional(bool, true)
-    root_volume_type                  = optional(string, "gp3")
-    root_volume_size                  = optional(number, 20)
-    root_volume_delete_on_termination = optional(bool, true)
-    root_volume_encrypted             = optional(bool, true)
-    root_volume_kms_key_id            = optional(string)
-    ebs_block_devices = optional(list(object({
-      device_name           = string
-      volume_type           = optional(string, "gp3")
-      volume_size           = number
-      iops                  = optional(number)
-      throughput            = optional(number)
-      delete_on_termination = optional(bool, true)
-      encrypted             = optional(bool, true)
-      kms_key_id            = optional(string)
-    })), [])
-    allowed_ingress_rules = optional(list(object({
-      from_port       = number
-      to_port         = number
-      protocol        = string
-      cidr_blocks     = optional(list(string))
-      security_groups = optional(list(string))
-      description     = optional(string)
-    })), []),
-    allowed_egress_rules = optional(list(object({
-      from_port       = number
-      to_port         = number
-      protocol        = string
-      cidr_blocks     = optional(list(string))
-      security_groups = optional(list(string))
-      description     = optional(string)
-    })))
-    additional_security_group_ids = optional(list(string), [])
-    tags                          = optional(map(string), {})
-    enable_ssm                    = optional(bool, true)
-    custom_iam_policy             = optional(string, "")
-  }))
-  description = "Map of instance configurations"
-  default     = {}
 
   validation {
-    condition = alltrue([
-      for k, v in var.instances : contains(keys(v), "instance_type")
-    ])
-    error_message = "Each instance configuration must specify an instance_type."
+    condition     = var.ssh_key_rsa_bits >= 2048 && var.ssh_key_rsa_bits <= 8192
+    error_message = "ssh_key_rsa_bits must be between 2048 and 8192."
   }
 }
 
-variable "tags" {
-  type        = map(string)
-  description = "Common tags to apply to all resources"
-  default     = {}
+# Instance metadata (IMDS), Cloud Posse names, applied to the instance and the
+# launch template alike.
+variable "metadata_http_tokens_required" {
+  type        = bool
+  description = "Require IMDSv2 session tokens"
+  default     = true
+}
+
+# Divergence from Cloud Posse (2): 1 keeps IMDS on the instance itself.
+variable "metadata_http_put_response_hop_limit" {
+  type        = number
+  description = "IMDS PUT response hop limit"
+  default     = 1
 
   validation {
-    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
-    error_message = "tags must include a non-empty Environment value."
+    condition     = var.metadata_http_put_response_hop_limit >= 1 && var.metadata_http_put_response_hop_limit <= 64
+    error_message = "metadata_http_put_response_hop_limit must be between 1 and 64."
   }
 }
 
-# Network Security Variables
-variable "vpc_endpoint_prefix_list_ids" {
-  type        = list(string)
-  description = "VPC endpoint prefix list IDs for the default egress rule (replaces 0.0.0.0/0). Empty resolves the region's S3 gateway prefix list automatically."
-  default     = []
-
-  # Deliberately no length validation. It used to require a non-empty list that
-  # no stack ever set, so `ec2` could not plan in ANY stack -- the component's
-  # own default was unusable. The egress rule still cannot be empty: an empty
-  # list now falls back to data.aws_prefix_list.s3 in main.tf, which is exactly
-  # what that validation's error message told callers to do by hand.
+variable "metadata_tags_enabled" {
+  type        = bool
+  description = "Expose the instance tags through IMDS"
+  default     = false
 }
 
-# Launch Template Variables
+# Launch template. Cloud Posse's ec2-instance has none, hence off by default.
 variable "enable_launch_templates" {
   type        = bool
-  description = "Enable creation of EC2 launch templates for advanced configuration"
-  default     = true
+  description = "Create a launch template for the instance"
+  default     = false
 }
 
 variable "create_instances_from_templates" {
   type        = bool
-  description = "Create EC2 instances from launch templates (vs standalone instances)"
+  description = "Launch the instance from the launch template instead of standalone. Requires enable_launch_templates."
   default     = false
-}
-
-variable "enforce_imdsv2" {
-  type        = bool
-  description = "Enforce IMDSv2 (Instance Metadata Service v2) for security"
-  default     = true
-}
-
-variable "imds_hop_limit" {
-  type        = number
-  description = "The desired HTTP PUT response hop limit for instance metadata requests"
-  default     = 1
 
   validation {
-    condition     = var.imds_hop_limit >= 1 && var.imds_hop_limit <= 64
-    error_message = "IMDS hop limit must be between 1 and 64."
+    condition     = !var.create_instances_from_templates || var.enable_launch_templates
+    error_message = "create_instances_from_templates requires enable_launch_templates = true."
   }
-}
-
-variable "enable_instance_metadata_tags" {
-  type        = bool
-  description = "Enable access to instance tags via instance metadata"
-  default     = false
 }
 
 variable "enable_network_interface_config" {
   type        = bool
-  description = "Configure network interfaces in launch template (vs instance level)"
+  description = "Configure the network interface (subnet, security groups) in the launch template rather than on the instance"
   default     = true
-}
-
-variable "default_ebs_optimized" {
-  type        = bool
-  description = "Default EBS optimization setting for instances"
-  default     = true
-}
-
-variable "default_block_devices" {
-  type = list(object({
-    device_name           = string
-    volume_size           = optional(number, 20)
-    volume_type           = optional(string, "gp3")
-    iops                  = optional(number)
-    throughput            = optional(number)
-    encrypted             = optional(bool, true)
-    kms_key_id            = optional(string)
-    delete_on_termination = optional(bool, true)
-    snapshot_id           = optional(string)
-  }))
-  description = "Default block device mappings for launch templates"
-  default     = []
-}
-
-variable "default_iam_instance_profile" {
-  type        = string
-  description = "Default IAM instance profile for instances"
-  default     = null
-}
-
-variable "default_kms_key_id" {
-  type        = string
-  description = "Default KMS key ID for EBS volume encryption"
-  default     = null
-}
-
-variable "enable_detailed_monitoring" {
-  type        = bool
-  description = "Enable detailed CloudWatch monitoring by default"
-  default     = true
-}
-
-variable "default_disable_api_termination" {
-  type        = bool
-  description = "Default setting to prevent accidental instance termination"
-  default     = false
-
-  validation {
-    condition     = var.environment != "prod" || var.default_disable_api_termination == true
-    error_message = "API termination protection should be enabled for production environments."
-  }
 }
 
 variable "enable_resource_name_dns" {
   type        = bool
-  description = "Enable resource-based DNS naming"
+  description = "Launch template: resource-name based private DNS (hostname_type = ip-name, A record)"
   default     = true
-}
-
-variable "create_launch_template_dashboard" {
-  type        = bool
-  description = "Create CloudWatch dashboard for launch template metrics"
-  default     = false
 }
 
 variable "environment" {
   type        = string
-  description = "Environment name (dev, staging, prod) for validation rules"
+  description = "Lifecycle tier (dev, staging, prod) for validation rules; not part of any name"
   default     = "dev"
 
   validation {
     condition     = contains(["dev", "staging", "prod"], var.environment)
     error_message = "Environment must be one of: dev, staging, prod."
+  }
+}
+
+variable "tags" {
+  type        = map(string)
+  description = "Common tags to apply to all resources. Environment is required: it prefixes every name."
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
   }
 }
