@@ -19,6 +19,7 @@ inherit abstract `vpc/defaults`; a plain abstract `vpc` catalog entry is not a r
 | `vpc_cidr`, `azs`, `private_subnets`, `public_subnets` | required |
 | `tags` / `nat_gateway_strategy` | tags must include a non-empty `Environment`; strategy is `single` or `one_per_az` |
 | `manage_default_security_group` | default true: strips every rule from the VPC's AWS-created default SG (one way) |
+| `public_subnets_additional_tags`, `private_subnets_additional_tags` | extra tags on every public / private subnet (Cloud Posse's names), e.g. the `kubernetes.io/role/elb` and `kubernetes.io/cluster/<name>` tags EKS load balancers discover subnets by; `Name` is refused |
 
 Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 `dns`, `ec2`, `eks`, `monitoring`, `rds`, `securitygroup` and `services` catalog defaults.
@@ -37,3 +38,8 @@ Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 atmos terraform plan vpc/main -s fnx-dev-testenv-01
 atmos terraform plan vpc/services -s fnx-prod-production
 ```
+
+## Tests
+
+`tests/subnet_tags.tftest.hcl` runs against a mock provider:
+`terraform init -backend=false && terraform test`.
