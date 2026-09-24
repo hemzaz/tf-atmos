@@ -36,7 +36,7 @@ atmos terraform deploy <component> -s <stack>
 atmos workflow plan -f plan-environment -s <stack>       # every component, no apply
 atmos workflow apply -f apply-environment -s <stack>     # every component, one confirmation
 atmos workflow deploy-app -f deploy-application -s <stack>   # application layer on an existing foundation
-atmos workflow hot-deploy -f deploy-application -s <stack>   # Lambda and API Gateway only
+atmos workflow hot-deploy -f deploy-application -s <stack>   # Cognito, Lambda and API Gateway only
 ```
 
 ## Moving resources in state

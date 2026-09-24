@@ -71,38 +71,65 @@ instance in the other stacks will otherwise conflict with it.
 ## Deploy the stack
 
 `workflows/deploy-full-stack.yaml` deploys in layers. Each layer selects instances by root module
-(`metadata.component`), plans them, shows the plans, asks for confirmation, then applies exactly
+(`metadata.component`) and, where one instance of a type reads another, by instance name
+(`atmos_component`). It plans them, shows the plans, asks for confirmation, then applies exactly
 those planfiles (`terraform deploy --from-plan`).
 
-| Layer | Workflow | Root modules |
-|-------|----------|--------------|
-| foundation | `deploy-foundation` | `backend`, `iam` |
+| Layer | Workflow | Selects |
+|-------|----------|---------|
+| backend | `deploy-backend` | `backend` |
+| iam | `deploy-iam` | `iam` (`iam/ci` reads `backend/main`) |
 | kms | `deploy-kms` | `kms` |
-| networking | `deploy-networking` | `vpc`, `dns`, `securitygroup` |
-| security | `deploy-security` | `acm`, `secretsmanager`, `security-monitoring` |
-| compute | `deploy-compute` | `eks`, `ec2`, `ecs` |
+| networking | `deploy-networking` | `vpc` |
+| connectivity | `deploy-connectivity` | `securitygroup`, `network` (VPC peering), `ec2/bastion` |
+| security | `deploy-security` | `acm`, `secretsmanager`, `guardduty`, `securityhub`, `cognito` |
+| security-monitoring | `deploy-security-monitoring` | `security-monitoring` (reads GuardDuty and Security Hub) |
+| compute | `deploy-compute` | `eks`, `ecs`, `lambda`, `ec2` other than `ec2/bastion` |
 | platform | `deploy-platform` | `eks-addons`, `external-secrets` |
-| data | `deploy-data` | `rds`, `backup` |
-| services | `deploy-services` | `apigateway`, `lambda`, `eks-backend-services` |
+| data | `deploy-data` | `rds`, `elasticache`, `backup` |
+| dns | `deploy-dns` | `dns` (after data: records point at RDS endpoints) |
+| services | `deploy-services` | `apigateway` (reads `lambda` and `cognito`), `eks-backend-services` |
 | monitoring | `deploy-monitoring` | `monitoring`, `cost-optimization` |
+
+A layer plans all of its instances before it applies any of them. On a first deploy, an instance
+that reads another's state (`!terraform.state` / `!terraform.output`) would find none, so it must
+be in a **later** layer than the instance it reads. A dependency that is only declared in
+`dependencies.components` may share a layer, because Atmos applies a layer in dependency order.
+Every enabled, non-abstract instance must be in exactly one layer. `validate-all` enforces all of
+this (`workflows/scripts/common/check-deploy-layers.py`), and applies the same read rule to
+`deploy-app` in `deploy-application.yaml` and `full` in `bootstrap.yaml`. A new root module, or a
+new read of an instance in the same or a later layer, needs a layer change here. A layer whose
+root modules no stack uses yet plans nothing ("No components matched").
 
 ```bash
 atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01                 # all layers
 atmos workflow deploy-networking -f deploy-full-stack -s fnx-dev-testenv-01      # one layer
 ```
 
-The `kms` layer only has work in stacks with an enabled `kms` component (today
-`fnx-prod-production`, whose EKS/EC2/RDS read the key via `!terraform.state`); elsewhere it plans
-nothing and the prompt just asks to continue.
+The `kms` layer applies `kms/main`, which is enabled in dev, staging, prod and the local sandbox
+(secretsmanager, EC2, EKS, RDS and others read its key via `!terraform.state`). A stack without an
+enabled `kms` component (`fnx-local-localemu`) plans nothing there, and the prompt just asks to
+continue.
 
-Other ways to deploy:
+Other ways to deploy (`apply-environment` plans every instance before applying any, so it only
+works once every instance it reads has state; use `deploy-full-stack` for a stack's first deploy):
 
 ```bash
-atmos workflow apply -f apply-environment -s <stack>      # whole stack: plan, one confirmation, deploy
+atmos workflow apply -f apply-environment -s <stack>      # whole stack: plan, one confirmation, deploy (not a first deploy)
 atmos terraform plan <component> -s <stack>               # one instance
 atmos terraform deploy <component> -s <stack>              # one instance: plan + apply
 atmos workflow component -f deploy-application -s <stack> # one instance, name entered at a prompt
+atmos workflow deploy-app -f deploy-application -s <stack> # secrets, Cognito, Lambda, ECS, then API Gateway and monitoring
+atmos workflow hot-deploy -f deploy-application -s <stack> # Cognito, Lambda, API Gateway: no plan review
 ```
+
+`deploy-app` and `hot-deploy` assume the instances they read are already applied: `kms/main`,
+`vpc/*`, `eks/*` (where present), `acm/*` and the dns zones `network/main` and `network/services`
+(deploy-full-stack layers backend through dns).
+
+`hot-deploy` is the one deliberate exception to reviewing a saved plan before applying it. It is
+a fast path that runs `terraform deploy` (plan and auto-approve per instance, in dependency order)
+without a confirmation. Use `deploy-app` when the change should be reviewed.
 
 Disabled instances (`metadata.enabled: false`) are skipped: `iam/ci`, `iam/eks-node`,
 `iam/eks-cluster`, `infrastructure/*`, `vpc-flow-logs-bucket`, and in prod

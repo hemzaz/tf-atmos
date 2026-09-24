@@ -1,6 +1,10 @@
 # Plan, review and apply every component of a stack. Atmos resolves the
 # dependency order (dependencies.components) for multi-component runs.
 #
+# The whole stack is planned before anything is applied, so an instance that
+# reads another's state (!terraform.state) plans against no state on a stack's
+# first deploy: use `atmos workflow deploy -f deploy-full-stack` for that.
+#
 # Usage: atmos workflow apply -f apply-environment -s <stack>
 # CI:    atmos terraform deploy -s <stack>   (no interactive confirmation)
 workflows:

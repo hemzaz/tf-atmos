@@ -33,6 +33,21 @@ workflows:
           stacks_json="$(mktemp)"
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-dependencies.py components/terraform < "$stacks_json"
+      # deploy-full-stack, deploy-application (deploy-app) and bootstrap (full)
+      # plan a whole phase before applying it: every deployable instance must be
+      # in exactly one deploy-full-stack layer, and an instance must be planned
+      # only after every instance whose state it reads is applied (a new
+      # component type, or a new read inside a layer, fails here).
+      - name: check-deploy-layers
+        type: shell
+        command: |
+          set -eu
+          stacks_json="$(mktemp)"
+          workflows_json="$(mktemp)"
+          trap 'rm -f "$stacks_json" "$workflows_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          atmos describe workflows --output all --format json > "$workflows_json"
+          python3 workflows/scripts/common/check-deploy-layers.py "$stacks_json" "$workflows_json"
       - name: list-stacks
         type: shell
         command: atmos list stacks

@@ -1,5 +1,12 @@
-# Application-layer deployments on top of an existing foundation
-# (vpc/main and, where present, eks/main must already be deployed).
+# Application-layer deployments on top of an existing foundation. What these
+# workflows select reads state they do not deploy, so these must already be
+# applied (deploy-full-stack, layers backend through dns): kms/main, vpc/*,
+# eks/* (where present), acm/* and the dns zones (network/main, network/services).
+#
+# hot-deploy is the one exception to "review a saved plan, then apply exactly
+# that plan": it is a fast path for redeploying Cognito, Lambda and API Gateway,
+# and runs `terraform deploy` (plan + auto-approve per instance, in dependency
+# order) with no confirmation. Use deploy-app to review before applying.
 #
 # Usage:
 #   atmos workflow deploy-app -f deploy-application -s <stack>
@@ -7,31 +14,47 @@
 #   atmos workflow component -f deploy-application -s <stack>
 workflows:
   deploy-app:
-    description: Deploy application layer components (secrets, Lambda, API Gateway, ECS, monitoring)
+    description: Deploy application layer components (secrets, Cognito, Lambda, ECS, then API Gateway and monitoring)
     steps:
       - name: check-foundation
         type: atmos
         command: terraform output vpc/main vpc_id
-      - name: plan
+      # Two plan/confirm/apply phases. A phase plans every instance before it
+      # applies any, and apigateway reads cognito/main .user_pool_arn and
+      # lambda/data-processor through !terraform.state, so Cognito and Lambda are
+      # applied in the first phase and API Gateway is planned only after that.
+      - name: plan-prerequisites
         type: atmos
         command: >-
           terraform plan --log-order grouped --query '.metadata.component == "secretsmanager"
-          or .metadata.component == "external-secrets" or .metadata.component == "lambda"
-          or .metadata.component == "apigateway" or .metadata.component == "ecs"
-          or .metadata.component == "monitoring"'
-      - name: confirm
+          or .metadata.component == "external-secrets" or .metadata.component == "cognito"
+          or .metadata.component == "lambda" or .metadata.component == "ecs"'
+      - name: confirm_prerequisites
         type: confirm
-        prompt: Deploy the application layer?
+        prompt: Apply the secrets, Cognito, Lambda and ECS plans above?
         default: false
-      - name: guard
+      - name: guard-prerequisites
         type: shell
-        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+        command: test "{{ .steps.confirm_prerequisites.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy-secrets
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "secretsmanager" or .metadata.component == "external-secrets"'
+      - name: deploy-identity
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "cognito"'
       - name: deploy-compute
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
+      - name: plan-api
+        type: atmos
+        command: terraform plan --log-order grouped --query '.metadata.component == "apigateway" or .metadata.component == "monitoring"'
+      - name: confirm_api
+        type: confirm
+        prompt: Apply the API Gateway and monitoring plans above?
+        default: false
+      - name: guard-api
+        type: shell
+        command: test "{{ .steps.confirm_api.value }}" = "true" || { echo "Deployment cancelled after the first phase."; exit 1; }
       - name: deploy-api
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "apigateway"'
@@ -43,8 +66,15 @@ workflows:
         content: Application layer deployed
 
   hot-deploy:
-    description: Quick application deployment (Lambda and API Gateway only)
+    description: Quick application deployment (Cognito, Lambda and API Gateway only)
     steps:
+      # Unreviewed by design (see the header): no saved plans and no confirm. Each
+      # instance is planned just before it is applied, in dependency order, so
+      # apigateway sees cognito's and lambda's state.
+      # Cognito first: apigateway/main reads cognito/main .user_pool_arn.
+      - name: deploy-identity
+        type: atmos
+        command: terraform deploy --query '.metadata.component == "cognito"'
       - name: deploy
         type: atmos
         command: terraform deploy --query '.metadata.component == "lambda" or .metadata.component == "apigateway"'

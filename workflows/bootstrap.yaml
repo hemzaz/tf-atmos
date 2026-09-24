@@ -19,21 +19,31 @@ workflows:
       - name: create-backend
         type: atmos
         command: terraform backend create backend/main
-      - name: plan
+      # backend/main is applied before IAM is planned: iam/ci reads its bucket
+      # and key through !terraform.state, which has no state until it is applied.
+      - name: plan-backend
         type: atmos
-        command: >-
-          terraform plan --log-order grouped --query '.metadata.component == "backend"
-          or .metadata.component == "iam" or .metadata.component == "vpc"'
-      - name: confirm
+        command: terraform plan --log-order grouped --query '.metadata.component == "backend"'
+      - name: confirm_backend
         type: confirm
-        prompt: Apply the bootstrap plans (backend, IAM, VPC)?
+        prompt: Apply the backend plan above?
         default: false
-      - name: guard
+      - name: guard-backend
         type: shell
-        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Bootstrap cancelled after backend creation."; exit 1; }
+        command: test "{{ .steps.confirm_backend.value }}" = "true" || { echo "Bootstrap cancelled after backend creation."; exit 1; }
       - name: deploy-backend
         type: atmos
-        command: terraform deploy backend/main --from-plan
+        command: terraform deploy --from-plan --query '.metadata.component == "backend"'
+      - name: plan-foundation
+        type: atmos
+        command: terraform plan --log-order grouped --query '.metadata.component == "iam" or .metadata.component == "vpc"'
+      - name: confirm_foundation
+        type: confirm
+        prompt: Apply the IAM and VPC plans above?
+        default: false
+      - name: guard-foundation
+        type: shell
+        command: test "{{ .steps.confirm_foundation.value }}" = "true" || { echo "Bootstrap cancelled after the backend."; exit 1; }
       - name: deploy-iam
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "iam"'
