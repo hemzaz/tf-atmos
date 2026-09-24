@@ -7,6 +7,49 @@
 locals {
   enabled = var.enabled
   name    = "${var.tags["Environment"]}-${var.cluster_id}"
+
+  # A parameter group is created when there is something to put in it, or in
+  # cluster mode (which needs cluster-enabled=yes), unless one is named.
+  create_parameter_group = local.enabled && var.parameter_group_name == null && (length(var.parameters) > 0 || var.cluster_mode_enabled)
+
+  # cluster-enabled is rejected in var.parameters by validation, so this only
+  # ever appends it; it never overrides a user-supplied value silently.
+  parameters = var.cluster_mode_enabled ? concat(var.parameters, [{ name = "cluster-enabled", value = "yes" }]) : var.parameters
+
+  # The family is part of the name so that changing it (e.g. an engine
+  # upgrade from redis7 to valkey8, or redis6.x to redis7) creates a new
+  # group instead of trying to reuse the old name: family forces replacement
+  # of the parameter group, and with a fixed name create_before_destroy would
+  # fail with CacheParameterGroupAlreadyExists while the old group still
+  # exists under that name.
+  parameter_group_name = local.create_parameter_group ? "${local.name}-${replace(var.family, ".", "-")}" : null
+}
+
+resource "aws_elasticache_parameter_group" "main" {
+  count = local.create_parameter_group ? 1 : 0
+
+  name        = local.parameter_group_name
+  family      = var.family
+  description = "Parameters for the ${var.cluster_id} cache"
+
+  dynamic "parameter" {
+    for_each = local.parameters
+    content {
+      name  = parameter.value.name
+      value = parameter.value.value
+    }
+  }
+
+  tags = { Name = local.parameter_group_name }
+
+  lifecycle {
+    create_before_destroy = true
+
+    precondition {
+      condition     = length(local.parameter_group_name) <= 255
+      error_message = "The generated parameter group name \"${local.parameter_group_name}\" exceeds AWS's 255-character limit; shorten tags.Environment, cluster_id or family."
+    }
+  }
 }
 
 resource "aws_elasticache_subnet_group" "main" {
@@ -85,8 +128,18 @@ resource "aws_elasticache_replication_group" "main" {
   engine_version       = var.engine_version
   node_type            = var.node_type
   port                 = var.port
-  parameter_group_name = var.parameter_group_name
-  num_cache_clusters   = var.num_cache_nodes
+  parameter_group_name = local.create_parameter_group ? aws_elasticache_parameter_group.main[0].name : var.parameter_group_name
+
+  # Cluster mode shards the keyspace; otherwise one primary plus replicas.
+  # WARNING: toggling cluster_mode_enabled on an existing replication group is
+  # not an in-place change. AWS has no online migration from a non-cluster
+  # (num_cache_clusters) to a cluster-mode (num_node_groups) topology through
+  # this provider, and the parameter group's cluster-enabled value can't be
+  # flipped on an attached, in-use group either. Treat a change to
+  # cluster_mode_enabled as requiring the cache to be replaced.
+  num_cache_clusters      = var.cluster_mode_enabled ? null : var.num_cache_nodes
+  num_node_groups         = var.cluster_mode_enabled ? var.cluster_mode_num_node_groups : null
+  replicas_per_node_group = var.cluster_mode_enabled ? var.cluster_mode_replicas_per_node_group : null
 
   # Encryption. auth_token is required whenever transit encryption is on
   # (validated on the variable), so the cache is never reachable unauthenticated.

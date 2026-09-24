@@ -97,8 +97,42 @@ variable "automatic_failover_enabled" {
   default     = true
 
   validation {
-    condition     = !var.automatic_failover_enabled || var.num_cache_nodes >= 2
+    condition     = !var.automatic_failover_enabled || var.cluster_mode_enabled || var.num_cache_nodes >= 2
     error_message = "automatic_failover_enabled requires num_cache_nodes >= 2 (a primary plus at least one replica)."
+  }
+
+  validation {
+    condition     = !var.cluster_mode_enabled || var.automatic_failover_enabled
+    error_message = "Cluster mode requires automatic_failover_enabled."
+  }
+}
+
+# Cluster mode, named as in Cloud Posse's aws-elasticache-redis component.
+variable "cluster_mode_enabled" {
+  type        = bool
+  description = "Shard the keyspace across node groups (Redis cluster mode). Off: one primary plus num_cache_nodes - 1 replicas. WARNING: changing this value on an existing cache is not an in-place migration in this component (AWS's num_cache_clusters <-> num_node_groups topologies don't convert live through this provider); treat it as a replacement of the cache"
+  default     = false
+}
+
+variable "cluster_mode_num_node_groups" {
+  type        = number
+  description = "Number of shards (node groups) in cluster mode"
+  default     = 1
+
+  validation {
+    condition     = var.cluster_mode_num_node_groups >= 1 && var.cluster_mode_num_node_groups <= 500 && floor(var.cluster_mode_num_node_groups) == var.cluster_mode_num_node_groups
+    error_message = "cluster_mode_num_node_groups must be a whole number between 1 and 500."
+  }
+}
+
+variable "cluster_mode_replicas_per_node_group" {
+  type        = number
+  description = "Replicas in each shard in cluster mode; 0 is allowed, as AWS does, for cheaper dev/test shards with no failover target"
+  default     = 1
+
+  validation {
+    condition     = var.cluster_mode_replicas_per_node_group >= 0 && var.cluster_mode_replicas_per_node_group <= 5 && floor(var.cluster_mode_replicas_per_node_group) == var.cluster_mode_replicas_per_node_group
+    error_message = "cluster_mode_replicas_per_node_group must be a whole number between 0 and 5."
   }
 }
 
@@ -203,8 +237,49 @@ variable "allowed_cidr_blocks" {
 
 variable "parameter_group_name" {
   type        = string
-  description = "Existing cache parameter group to attach; the engine default is used when null"
+  description = "Existing cache parameter group to attach. When null, this component creates one if parameters are set or cluster mode is enabled (family is then required), else the engine default is used. WARNING: when cluster_mode_enabled is true, a name given here must itself be a cluster-enabled group (e.g. AWS's default.<family>.cluster.on, or a custom group with cluster-enabled=yes); this is not validated, only documented, because plan-time validation cannot inspect an existing group's parameters"
   default     = null
+
+  validation {
+    condition     = var.parameter_group_name == null || length(var.parameters) == 0
+    error_message = "Set parameters or an existing parameter_group_name, not both."
+  }
+}
+
+# family/parameters as in Cloud Posse's aws-elasticache-redis component.
+variable "family" {
+  type        = string
+  description = "Parameter group family (e.g. redis7, valkey8) for the group this component creates. Required with parameters or cluster mode unless parameter_group_name is set"
+  default     = null
+
+  validation {
+    condition     = var.family == null || can(regex("^(redis|valkey)[0-9]+(\\.[0-9x]+)?$", var.family))
+    error_message = "family must be a redis or valkey parameter group family, e.g. redis6.x, redis7, redis5.0 or valkey8."
+  }
+
+  validation {
+    condition     = var.family != null || var.parameter_group_name != null || (length(var.parameters) == 0 && !var.cluster_mode_enabled)
+    error_message = "family is required when parameters are set or cluster mode is on (unless parameter_group_name names an existing group)."
+  }
+
+  validation {
+    condition     = var.family == null || startswith(var.family, var.engine)
+    error_message = "family must match engine: family must start with the engine name, e.g. engine = \"redis\" needs a family like redis6.x/redis7, engine = \"valkey\" needs a family like valkey8."
+  }
+}
+
+variable "parameters" {
+  type = list(object({
+    name  = string
+    value = string
+  }))
+  description = "Engine parameters for the group this component creates"
+  default     = []
+
+  validation {
+    condition     = !anytrue([for p in var.parameters : p.name == "cluster-enabled"])
+    error_message = "Do not set cluster-enabled in parameters; use cluster_mode_enabled instead. It is not merged or overridden silently."
+  }
 }
 
 variable "snapshot_retention_limit" {
