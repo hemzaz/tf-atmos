@@ -22,203 +22,188 @@ components:
         inherits:
           - eks/defaults
       vars:
+        name: main
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
-
-        # Endpoint access - private only for staging
         tags:
           Cluster: main
           Purpose: "application-workloads"
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        # Endpoint access - private only for staging
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+        node_groups:
+          workers:
+            instance_types: ["t3.medium"]
+            desired_group_size: 3
+            min_group_size: 2
+            max_group_size: 6
+            kubernetes_labels:
+              role: worker
+              environment: staging
+            tags:
+              NodeGroup: workers
+          monitoring:
+            instance_types: ["t3.large"]
+            desired_group_size: 1
+            min_group_size: 1
+            max_group_size: 2
+            kubernetes_labels:
+              role: monitoring
+            kubernetes_taints:
+              - key: dedicated
+                value: monitoring
+                effect: "NO_SCHEDULE"
+      dependencies:
+        components:
+          - component: vpc/main
 
     # ==========================================================================
     # EKS Cluster - Data Processing Workloads
     # ==========================================================================
-        clusters:
-          main:
-            kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
-            endpoint_private_access: true
-            endpoint_public_access: false
-            enabled_cluster_log_types:
-              - "api"
-              - "audit"
-              - "authenticator"
-              - "controllerManager"
-              - "scheduler"
-
-        # Node groups
-            node_groups:
-              workers:
-                enabled: true
-                instance_types: ["t3.medium"]
-                desired_size: 3
-                min_size: 2
-                max_size: 6
-                labels:
-                  role: worker
-                  environment: staging
-                tags:
-                  NodeGroup: workers
-              monitoring:
-                enabled: true
-                instance_types: ["t3.large"]
-                desired_size: 1
-                min_size: 1
-                max_size: 2
-                labels:
-                  role: monitoring
-                taints:
-                  - key: dedicated
-                    value: monitoring
-                    effect: "NO_SCHEDULE"
-
-        # OIDC provider for IAM roles for service accounts
-      dependencies:
-        components:
-          - component: vpc/main
     eks/data:
       metadata:
         component: eks
         inherits:
           - eks/defaults
       vars:
+        name: data
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
-
         tags:
           Cluster: data
           Purpose: "data-processing"
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+        node_groups:
+          data-workers:
+            instance_types: ["m5.large"]
+            desired_group_size: 2
+            min_group_size: 2
+            max_group_size: 4
+            kubernetes_labels:
+              role: data-processing
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+      dependencies:
+        components:
+          - component: vpc/services
 
     # ==========================================================================
     # EC2 Bastion Host
     # ==========================================================================
-        clusters:
-          data:
-            kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
-            endpoint_private_access: true
-            endpoint_public_access: false
-            enabled_cluster_log_types:
-              - "api"
-              - "audit"
-
-            node_groups:
-              data-workers:
-                enabled: true
-                instance_types: ["m5.large"]
-                desired_size: 2
-                min_size: 2
-                max_size: 4
-                labels:
-                  role: data-processing
-                block_device_map:
-                  "/dev/xvda":
-                    ebs:
-                      volume_size: 100
-
-      dependencies:
-        components:
-          - component: vpc/services
     ec2/bastion:
       metadata:
         component: ec2
         inherits:
           - ec2
       vars:
+        name: bastion
         vpc_id: !terraform.state vpc/main .vpc_id
-        create_ssh_keys: true
-        store_ssh_keys_in_secrets_manager: true
-        ssh_key_algorithm: "RSA"
-        ssh_key_rsa_bits: 4096
+        # No ssh_key_pair: the component generates the bastion's key (catalog
+        # defaults) and stores the private key in Secrets Manager, encrypted
+        # with kms/main. app-server launches with it.
+        ssh_key_secret_kms_key_id: !terraform.state kms/main .key_arn
         tags:
           Role: bastion
           Access: restricted
+        instance_type: "t3.small"
+        subnet: !terraform.state vpc/main .public_subnet_ids[0]
+        ebs_optimized: true
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal networks"
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH to internal hosts"
+        monitoring: true
+        root_volume_type: "gp3"
+        root_volume_size: 20
+        root_block_device_encrypted: true
+        delete_on_termination: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
 
     # ==========================================================================
     # EC2 Application Server
     # ==========================================================================
-        instances:
-          bastion:
-            instance_type: "t3.small"
-            key_name: "staging-bastion-key"
-            subnet_id: !terraform.state vpc/main .public_subnet_ids[0]
-            ebs_optimized: true
-            allowed_ingress_rules:
-              - from_port: 22
-                to_port: 22
-                protocol: "tcp"
-                cidr_blocks: ["10.0.0.0/8"]
-                description: "SSH from internal networks"
-
-            allowed_egress_rules:
-              - from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-                description: "HTTPS outbound"
-              - from_port: 22
-                to_port: 22
-                protocol: "tcp"
-                cidr_blocks: ["10.0.0.0/8"]
-                description: "SSH to internal hosts"
-
-        # Monitoring
-            detailed_monitoring: true
-            root_volume_type: "gp3"
-            root_volume_size: 20
-            root_volume_encrypted: true
-            root_volume_delete_on_termination: true
-      dependencies:
-        components:
-          - component: vpc/main
     ec2/app-server:
       metadata:
         component: ec2
         inherits:
           - ec2
       vars:
+        name: app-server
         vpc_id: !terraform.state vpc/main .vpc_id
         tags:
           Role: app-server
           Tier: application
-
-    # ==========================================================================
-    # External Secrets Operator for EKS
-    # ==========================================================================
-        instances:
-          app-server:
-            instance_type: "t3.medium"
-            key_name: !terraform.state ec2/bastion .ssh_key_name
-            subnet_id: !terraform.state vpc/main .private_subnet_ids[0]
-            root_volume_type: "gp3"
-            root_volume_size: 50
-            root_volume_encrypted: true
-            allowed_ingress_rules:
-              - from_port: 8080
-                to_port: 8080
-                protocol: "tcp"
-                cidr_blocks: ["10.10.0.0/16"]
-                description: "Application port"
-              - from_port: 22
-                to_port: 22
-                protocol: "tcp"
-                description: "SSH from bastion"
-
-                security_groups:
-                  - !terraform.state ec2/bastion .security_group_id
-            allowed_egress_rules:
-              - from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-                description: "HTTPS outbound"
-              - from_port: 5432
-                to_port: 5432
-                protocol: "tcp"
-                cidr_blocks: ["10.10.201.0/24", "10.10.202.0/24", "10.10.203.0/24"]
-                description: "PostgreSQL to database subnets"
-
-            detailed_monitoring: true
+        instance_type: "t3.medium"
+        ssh_key_pair: !terraform.state ec2/bastion .ssh_key_pair
+        # Launch with the bastion's key, never a key of its own: if the
+        # reference above resolved to null, the instance would be keyless
+        # (SSM only) instead of silently generating its own key under the
+        # aws/secretsmanager key rather than kms/main.
+        create_ssh_keys: false
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
+        root_volume_type: "gp3"
+        root_volume_size: 50
+        root_block_device_encrypted: true
+        allowed_ingress_rules:
+          - from_port: 8080
+            to_port: 8080
+            protocol: "tcp"
+            cidr_blocks: ["10.10.0.0/16"]
+            description: "Application port"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            description: "SSH from bastion"
+            security_groups:
+              - !terraform.state ec2/bastion .security_group_id
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 5432
+            to_port: 5432
+            protocol: "tcp"
+            cidr_blocks: ["10.10.201.0/24", "10.10.202.0/24", "10.10.203.0/24"]
+            description: "PostgreSQL to database subnets"
+        monitoring: true
       dependencies:
         components:
           - component: vpc/main
           - component: ec2/bastion
+
+    # ==========================================================================
+    # External Secrets Operator for EKS
+    # ==========================================================================
     external-secrets/main:
       metadata:
         component: external-secrets
@@ -226,11 +211,11 @@ components:
           - external-secrets/defaults
       vars:
         enabled: true
-        cluster_name: !terraform.state eks/main .cluster_name
-        host: !terraform.state eks/main .cluster_endpoint
-        cluster_ca_certificate: !terraform.state eks/main .cluster_ca_certificate
-        oidc_provider_arn: !terraform.state eks/main .oidc_provider_arn
-        oidc_provider_url: !terraform.state eks/main .oidc_provider_url
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
 
         namespace: "external-secrets"
         service_account_name: "external-secrets"
@@ -247,11 +232,11 @@ components:
           - external-secrets/defaults
       vars:
         enabled: true
-        cluster_name: !terraform.state eks/data .cluster_name
-        host: !terraform.state eks/data .cluster_endpoint
-        cluster_ca_certificate: !terraform.state eks/data .cluster_ca_certificate
-        oidc_provider_arn: !terraform.state eks/data .oidc_provider_arn
-        oidc_provider_url: !terraform.state eks/data .oidc_provider_url
+        cluster_name: !terraform.state eks/data .eks_cluster_id
+        host: !terraform.state eks/data .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
 
         namespace: "external-secrets"
         service_account_name: "external-secrets"
