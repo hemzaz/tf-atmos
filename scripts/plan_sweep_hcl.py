@@ -317,6 +317,10 @@ NUMBER_FNS = {'tonumber', 'length', 'abs', 'max', 'min', 'floor', 'ceil'}
 NUMBER_ATTRS = {'port'}
 BOOL_ATTRS = {'enabled'}
 AWS_RESOURCE = re.compile(r'^(?:data\.)?aws_')
+# random_password / random_string: every attribute is a plain value, never a
+# block, so a `for` over their instances reads through the allowlists too
+# (secretsmanager's generated_passwords is `v.result` over random_password).
+RANDOM_RESOURCE = re.compile(r'^random_(?:password|string)\.')
 
 
 def attr_shape(attr, indexed=False, aws=False):
@@ -446,15 +450,15 @@ def for_parts(body):
 
 
 def resource_collection(coll, comp, depth=0):
-    """True when a `for` collection is instances of aws_* resources only: a
-    resource, a local holding one, or a merge()/concat() of them (dns's
-    managed_zones). False when it is a resource that is not aws_*, None when
-    it is not a resource at all."""
+    """True when a `for` collection is instances of aws_* (or random_password /
+    random_string) resources only: a resource, a local holding one, or a
+    merge()/concat() of them (dns's managed_zones). False when it is any other
+    resource, None when it is not a resource at all."""
     c = coll.strip()
     if depth > 6:
         return None
     if RESOURCE_REF.match(c) and not c.startswith(NOT_RESOURCE):
-        return bool(AWS_RESOURCE.match(c))
+        return bool(AWS_RESOURCE.match(c) or RANDOM_RESOURCE.match(c))
     m = re.match(r'^local\.(' + IDENT + r')$', c)
     if m and m.group(1) in comp.locals:
         return resource_collection(comp.locals[m.group(1)], comp, depth + 1)
