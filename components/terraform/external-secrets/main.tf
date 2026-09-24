@@ -1,6 +1,11 @@
 locals {
-  enabled     = var.enabled
-  name_prefix = "${var.tags["Environment"]}-${var.cluster_name}"
+  enabled = var.enabled
+  # The eks cluster name is already "<Environment>-<name>", so prefixing the
+  # Environment again doubled it ("production-production-main-..."). Prefix it
+  # only for a cluster name that lacks it, compared case-insensitively as the
+  # eks name validation does. Keep in sync with the length validation on
+  # var.cluster_name.
+  name_prefix = startswith(lower(var.cluster_name), "${lower(var.tags["Environment"])}-") ? var.cluster_name : "${var.tags["Environment"]}-${var.cluster_name}"
 }
 
 # Create IAM role for external-secrets to access AWS Secrets Manager
