@@ -5,27 +5,51 @@
 # Complete microservices infrastructure with container orchestration
 #
 # Architecture:
-#   - VPC with isolated subnets for services
-#   - EKS cluster with managed node groups
-#   - Service mesh (AWS App Mesh or Istio-ready)
-#   - API Gateway for external access
-#   - EventBridge for async communication
-#   - DynamoDB for state management
-#   - ElastiCache for distributed caching
-#   - CloudWatch Container Insights
-#   - X-Ray for distributed tracing
-#   - External Secrets Operator for secret sync
+#   - VPC with private subnets for pods, public subnets for load balancers and
+#     database subnets, tagged for EKS load balancer discovery
+#   - EKS cluster with managed node groups (system, application, spot)
+#   - EKS add-on intent (load balancer controller, autoscaler, metrics server,
+#     external-dns, cert-manager, External Secrets, CloudWatch agent/Fluent Bit)
+#   - HTTP API Gateway with a JWT authorizer and a VPC link into the VPC
+#   - EventBridge bus (archived) with audit and domain-event rules
+#   - DynamoDB tables for service state, distributed locks and saga state
+#   - ElastiCache Redis in cluster mode for distributed caching
+#   - CloudWatch dashboards, alarms and Logs Insights queries, X-Ray sampling
+#   - Secrets Manager secrets for the platform (the Redis AUTH token among them)
+#
+# Every encrypted resource uses the stack's customer managed key, kms/main.
 #
 # Cost Estimates (Monthly):
 #   Development:  ~$200-400/month
 #   Staging:      ~$500-1,000/month
 #   Production:   ~$1,500-5,000/month (depending on scale)
 #
-# Deployment Time: 30-45 minutes
+# Usage (instances are microservices/<part>):
+#   atmos terraform plan microservices/eks -s <tenant>-<stage>-<environment>
+#   atmos workflow deploy -f deploy-full-stack -s <tenant>-<stage>-<environment>
 #
-# Usage:
-#   atmos terraform plan microservices-platform -s <tenant>-<account>-<environment>
-#   atmos terraform apply microservices-platform -s <tenant>-<account>-<environment>
+# =============================================================================
+# REQUIREMENTS FOR THE IMPORTING STACK
+# =============================================================================
+# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
+#    from catalog/kms/defaults). This template does not define it: doing so would
+#    deep-merge over that stack's own alias_name/description. CloudWatch Logs
+#    (the EventBridge and API Gateway log groups) and EventBridge (the bus and
+#    archive) use the key as service principals, so the stack's kms/main must
+#    list them:
+#      key_service_users:
+#        - events.amazonaws.com
+#        - logs.<region>.amazonaws.com
+# 2. settings.microservices, read by eks-addons and apigateway:
+#      settings:
+#        microservices:
+#          app_domain_name: example.com          # external-dns filter, CORS origins
+#          letsencrypt_email: ops@example.com    # cert-manager ACME account
+#          cognito_user_pool_id: eu-west-2_xxxx  # JWT issuer
+#          cognito_client_id: xxxxxxxx           # JWT audience
+#    A missing key fails the stack at load time (gomplate `required`).
+# 3. On-call addresses, if any, in microservices/monitoring's
+#    alarm_email_subscriptions.
 # =============================================================================
 
 import:
@@ -34,11 +58,8 @@ import:
   - catalog/eks/defaults
   - catalog/eks-addons/defaults
   - catalog/monitoring/defaults
-  # REQUIREMENT: secretsmanager/defaults reads `!terraform.state kms/main .key_arn`
-  # and declares `kms/main` in dependencies.components. This template does not
-  # define kms/main; the stack that imports it must (every fnx org stack does,
-  # in its components/security.yaml, from catalog/kms/defaults). Defining it
-  # here too would deep-merge over that stack's own alias_name/description.
+  - catalog/dynamodb/defaults
+  - catalog/eventbridge/defaults
   - catalog/secretsmanager/defaults
 
 # =============================================================================
@@ -58,12 +79,9 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        name: "microservices"
-
         # Larger CIDR for microservices (many pods need IPs)
         vpc_cidr: "10.20.0.0/16"
 
-        # Availability zones
         azs:
           - "{{ .vars.region }}a"
           - "{{ .vars.region }}b"
@@ -87,21 +105,17 @@ components:
         enable_nat_gateway: true
         nat_gateway_strategy: "one_per_az"
 
-        # VPC Flow Logs
-        vpc_flow_logs_enabled: true
-        vpc_flow_logs_traffic_type: "ALL"
+        # Flow logs capture ALL traffic; DNS hostnames and support are always
+        # on in the vpc component (EKS needs both).
+        enable_flow_logs: true
 
-        # Enable DNS hostnames (required for EKS)
-        enable_dns_hostnames: true
-        enable_dns_support: true
-
-        # Subnet tags for EKS auto-discovery. The key names the cluster, which
-        # the eks component names "<Environment>-<name>": microservices/eks
-        # below sets name: microservices.
-        public_subnet_tags:
+        # Subnet tags for EKS load balancer discovery. The cluster tag names
+        # the cluster, which the eks component names "<Environment>-<name>":
+        # microservices/eks below sets name: microservices.
+        public_subnets_additional_tags:
           "kubernetes.io/role/elb": "1"
           "kubernetes.io/cluster/{{ .settings.context.environment }}-microservices": "shared"
-        private_subnet_tags:
+        private_subnets_additional_tags:
           "kubernetes.io/role/internal-elb": "1"
           "kubernetes.io/cluster/{{ .settings.context.environment }}-microservices": "shared"
 
@@ -125,12 +139,14 @@ components:
         # dropped from this template: vpc_id (derived from subnet_ids), the
         # extra cluster/node security group rules, cluster_addons (installed by
         # eks-addons), authentication_mode and access_entries. IRSA (the OIDC
-        # provider) and secrets encryption are always on; the component creates
-        # its own KMS key unless cluster_encryption_config_kms_key_id is set.
+        # provider) is always on.
         name: microservices
         cluster_kubernetes_version: "1.36"
 
         subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
+
+        # Secrets encryption with the stack's customer managed key.
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
 
         # Cluster endpoint access. A public endpoint must name its CIDRs in
         # public_access_cidrs; 0.0.0.0/0 is rejected.
@@ -144,7 +160,7 @@ components:
           - "authenticator"
           - "controllerManager"
           - "scheduler"
-        cluster_log_retention_period: "{{ .vars.log_retention_days | default 30 }}"
+        cluster_log_retention_period: 30
 
         # Managed node groups
         node_groups:
@@ -222,113 +238,92 @@ components:
         tags:
           Layer: "compute"
           Platform: "microservices"
+      dependencies:
+        components:
+          - component: microservices/vpc
+          - component: kms/main
 
     # =========================================================================
     # EKS ADDONS (Kubernetes-level)
     # =========================================================================
+    # The kubernetes/helm providers connect with the top-level cluster_name,
+    # host and cluster_ca_certificate; everything the component installs is
+    # keyed under clusters.<cluster name> (main.tf looks the cluster up by that
+    # key, so it must be the real name, "<Environment>-microservices").
+    #
+    # NOTE: eks-addons declares the enable_* flags below but its main.tf does
+    # not act on them yet: it installs only what clusters.<key>.addons,
+    # helm_releases and kubernetes_manifests list. They record the intended
+    # add-on set in the component's own interface. See the eks-addons README.
 
-      dependencies:
-        components:
-          - component: microservices/vpc
     microservices/eks-addons:
       metadata:
         component: eks-addons
         type: real
         inherits:
-          - eks-addons/defaults
+          - eks-addons
       vars:
         cluster_name: !terraform.state microservices/eks .eks_cluster_id
-        cluster_endpoint: !terraform.state microservices/eks .eks_cluster_endpoint
-        cluster_certificate_authority_data: !terraform.state microservices/eks .eks_cluster_certificate_authority_data
+        host: !terraform.state microservices/eks .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state microservices/eks .eks_cluster_certificate_authority_data
         oidc_provider_arn: !terraform.state microservices/eks .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state microservices/eks .eks_cluster_identity_oidc_issuer
 
-        # AWS Load Balancer Controller
-        enable_aws_load_balancer_controller: true
-        aws_load_balancer_controller:
-          namespace: "kube-system"
-          service_account_name: "aws-load-balancer-controller"
+        clusters:
+          "{{ .settings.context.environment }}-microservices":
+            cluster_name: !terraform.state microservices/eks .eks_cluster_id
+            kubernetes_host: !terraform.state microservices/eks .eks_cluster_endpoint
+            cluster_ca_certificate: !terraform.state microservices/eks .eks_cluster_certificate_authority_data
+            oidc_provider_arn: !terraform.state microservices/eks .eks_cluster_identity_oidc_issuer_arn
+            oidc_provider_url: !terraform.state microservices/eks .eks_cluster_identity_oidc_issuer
 
-        # Cluster Autoscaler
-        enable_cluster_autoscaler: true
-        cluster_autoscaler:
-          namespace: "kube-system"
-          service_account_name: "cluster-autoscaler"
-          extra_args:
-            - "--balance-similar-node-groups"
-            - "--skip-nodes-with-system-pods=false"
-            - "--expander=least-waste"
-            - "--scale-down-delay-after-add=5m"
-            - "--scale-down-unneeded-time=5m"
+            # Ingress, scaling and metrics
+            enable_aws_load_balancer_controller: true
+            enable_cluster_autoscaler: true
+            enable_metrics_server: true
+            enable_karpenter: false
 
-        # Metrics Server
-        enable_metrics_server: true
-        metrics_server:
-          namespace: "kube-system"
+            # DNS and certificates
+            enable_external_dns: true
+            external_dns_domain_filters:
+              - '{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
+            enable_cert_manager: true
+            cert_manager_letsencrypt_email: '{{ required "settings.microservices.letsencrypt_email is required" .settings.microservices.letsencrypt_email }}'
 
-        # External DNS
-        enable_external_dns: true
-        external_dns:
-          namespace: "kube-system"
-          service_account_name: "external-dns"
-          domain_filters:
-            - "{{ .vars.app_domain_name }}"
-          zone_id_filters:
-            - "{{ .vars.route53_zone_id }}"
+            # Secret sync from Secrets Manager
+            enable_external_secrets: true
 
-        # Cert Manager
-        enable_cert_manager: true
-        cert_manager:
-          namespace: "cert-manager"
-          service_account_name: "cert-manager"
-
-        # External Secrets Operator
-        enable_external_secrets: true
-        external_secrets:
-          namespace: "external-secrets"
-          service_account_name: "external-secrets"
-
-        # Karpenter for advanced autoscaling (optional)
-        enable_karpenter: false
-        karpenter:
-          namespace: "karpenter"
-          service_account_name: "karpenter"
-
-        # AWS X-Ray for distributed tracing
-        enable_aws_xray: true
-        aws_xray:
-          namespace: "aws-otel"
-          service_account_name: "aws-otel-collector"
-
-        # CloudWatch Container Insights
-        enable_cloudwatch_container_insights: true
-        cloudwatch_container_insights:
-          namespace: "amazon-cloudwatch"
+            # CloudWatch Container Insights (agent) and container logs (Fluent Bit)
+            enable_aws_cloudwatch_metrics: true
+            enable_aws_for_fluentbit: true
+            log_retention_days: 30
 
         tags:
           Layer: "addons"
           Platform: "microservices"
-
-    # =========================================================================
-    # API GATEWAY
-    # =========================================================================
-
       dependencies:
         components:
           - component: microservices/eks
+
+    # =========================================================================
+    # API GATEWAY (HTTP API)
+    # =========================================================================
+
     microservices/apigateway:
       metadata:
         component: apigateway
         type: real
       vars:
-        api_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-microservices-api"
+        enabled: true
+        # Resources are "<Environment>-microservices-api".
+        api_name: "microservices-api"
         description: "API Gateway for microservices platform"
         api_type: "HTTP"
 
-        # HTTP API specific configurations
         cors_configuration:
           allow_origins:
-            - "https://{{ .vars.app_domain_name }}"
-            - "https://*.{{ .vars.app_domain_name }}"
+            - 'https://{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
+            - 'https://*.{{ .settings.microservices.app_domain_name }}'
           allow_methods:
             - "GET"
             - "POST"
@@ -347,218 +342,201 @@ components:
           max_age: 300
           allow_credentials: true
 
-        # VPC Link for private integration with EKS
-        enable_vpc_link: true
-        vpc_link:
-          name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eks-vpc-link"
-          subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
-          security_group_ids:
-            - !terraform.state microservices/vpc .default_security_group_id
+        # VPC link for private integrations with services in the cluster.
+        # Routes are not declared here: an HTTP API route to the cluster
+        # targets the listener of the ALB that the in-cluster load balancer
+        # controller creates from an Ingress, which no Terraform state holds.
+        vpc_link_subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
+        vpc_link_security_group_ids: !terraform.state microservices/vpc '.default_security_group_id | [.]'
 
-        # JWT authorization via Cognito or custom authorizer
+        # JWT authorization via Cognito
         authorizer_type: "JWT"
-        jwt_configuration:
-          audience:
-            - "{{ .vars.cognito_client_id }}"
-          issuer: "https://cognito-idp.{{ .vars.region }}.amazonaws.com/{{ .vars.cognito_user_pool_id }}"
+        authorizer_identity_source: "$request.header.Authorization"
+        jwt_audience:
+          - '{{ required "settings.microservices.cognito_client_id is required" .settings.microservices.cognito_client_id }}'
+        jwt_issuer: 'https://cognito-idp.{{ .vars.region }}.amazonaws.com/{{ required "settings.microservices.cognito_user_pool_id is required" .settings.microservices.cognito_user_pool_id }}'
 
-        # Logging
+        # Access logging, encrypted with the stack's key. responseLatency feeds
+        # the slow-requests Logs Insights query in microservices/monitoring.
         enable_logging: true
-        log_format: '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod", "routeKey":"$context.routeKey", "status":"$context.status", "protocol":"$context.protocol", "responseLength":"$context.responseLength", "integrationError":"$context.integrationErrorMessage", "correlationId":"$context.requestContext.requestId" }'
+        log_format: '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "requestTime":"$context.requestTime", "httpMethod":"$context.httpMethod", "routeKey":"$context.routeKey", "status":"$context.status", "protocol":"$context.protocol", "responseLength":"$context.responseLength", "responseLatency":"$context.responseLatency", "integrationError":"$context.integrationErrorMessage", "correlationId":"$context.requestId" }'
         log_retention_days: 30
+        kms_key_id: !terraform.state kms/main .key_arn
 
-        # Stage configurations
         stage_name: "{{ .settings.context.environment }}"
         auto_deploy: true
 
-        # Routes - integrate with ALB Ingress in EKS
-        routes:
-          # Health check route
-          - route_key: "GET /health"
-            integration_type: "HTTP_PROXY"
-            integration_uri: "http://{{ .vars.eks_alb_dns }}/health"
-            integration_method: "GET"
+        # Stage-wide throttling
+        throttling_burst_limit: 5000
+        throttling_rate_limit: 10000
 
-          # Service routes (proxy to EKS ALB)
-          - route_key: "$default"
-            integration_type: "HTTP_PROXY"
-            integration_uri: "http://{{ .vars.eks_alb_dns }}/{proxy}"
-            integration_method: "ANY"
-
-        # Throttling
-        throttling:
-          burst_limit: 5000
-          rate_limit: 10000
-
-        # Monitoring
         create_dashboard: true
-        tracing_enabled: true
+        # HTTP APIs have no X-Ray tracing (a REST API stage setting).
+        tracing_enabled: false
 
         tags:
           Layer: "api-gateway"
           Platform: "microservices"
+      dependencies:
+        components:
+          - component: microservices/vpc
+          - component: kms/main
 
     # =========================================================================
     # EVENT BUS (EventBridge)
     # =========================================================================
+    # One bus, archived for replay, with one rule per instance; each rule logs
+    # what it matches to its own CloudWatch log group (the Cloud Posse
+    # aws-eventbridge model).
 
-      dependencies:
-        components:
-          - component: microservices/eks
     microservices/eventbridge:
       metadata:
         component: eventbridge
         type: real
+        inherits:
+          - eventbridge/defaults
       vars:
-        bus_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-microservices-bus"
-        description: "Event bus for microservices async communication"
-
-        # Event bus configuration
-        event_bus:
-          name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-microservices-bus"
-          archive_enabled: true
-          archive_retention_days: 30
-
-        # Event rules for service-to-service communication
-        rules:
-          # Order events
-          order_created:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-order-created"
-            description: "Route order created events"
-            event_pattern:
-              source:
-                - "microservices.orders"
-              detail-type:
-                - "OrderCreated"
-            targets:
-              - id: "inventory-service"
-                arn: "{{ .vars.inventory_service_queue_arn }}"
-              - id: "notification-service"
-                arn: "{{ .vars.notification_service_queue_arn }}"
-
-          # User events
-          user_registered:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-user-registered"
-            description: "Route user registration events"
-            event_pattern:
-              source:
-                - "microservices.users"
-              detail-type:
-                - "UserRegistered"
-            targets:
-              - id: "welcome-email"
-                arn: "{{ .vars.email_service_lambda_arn }}"
-
-          # Catch-all for auditing
-          all_events:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-all-events-audit"
-            description: "Archive all events for auditing"
-            event_pattern:
-              source:
-                - prefix: "microservices."
-            targets:
-              - id: "s3-archive"
-                arn: "{{ .vars.event_archive_bucket_arn }}"
-                input_transformer:
-                  input_paths:
-                    source: "$.source"
-                    detail-type: "$.detail-type"
-                    time: "$.time"
-                    detail: "$.detail"
-                  input_template: '{"source": <source>, "detail-type": <detail-type>, "time": <time>, "detail": <detail>}'
-
-        # Schema discovery
-        enable_schema_discovery: true
-
-        # Cross-account event sharing (optional)
-        enable_cross_account: false
-        cross_account_principals: []
-
+        # The bus is "<Environment>-microservices".
+        name: microservices
+        create_event_bus: true
+        archive_enabled: true
+        archive_retention_days: 30
+        # Catch-all for auditing
+        cloudwatch_event_rule_description: "Archive all microservices events for auditing"
+        cloudwatch_event_rule_pattern:
+          source:
+            - prefix: "microservices."
+        event_log_retention_in_days: 30
         tags:
           Layer: "messaging"
           Platform: "microservices"
 
+    # Domain events on that bus. Their consumers (inventory and notification
+    # queues, the welcome-email function) are not part of this template; add
+    # them as targets when they exist.
+    microservices/eventbridge/order-created:
+      metadata:
+        component: eventbridge
+        type: real
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: order-created
+        event_bus_name: !terraform.state microservices/eventbridge .event_bus_name
+        cloudwatch_event_rule_description: "Route order created events"
+        cloudwatch_event_rule_pattern:
+          source:
+            - "microservices.orders"
+          detail-type:
+            - "OrderCreated"
+        event_log_retention_in_days: 30
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: microservices/eventbridge
+
+    microservices/eventbridge/user-registered:
+      metadata:
+        component: eventbridge
+        type: real
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: user-registered
+        event_bus_name: !terraform.state microservices/eventbridge .event_bus_name
+        cloudwatch_event_rule_description: "Route user registration events"
+        cloudwatch_event_rule_pattern:
+          source:
+            - "microservices.users"
+          detail-type:
+            - "UserRegistered"
+        event_log_retention_in_days: 30
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: microservices/eventbridge
+
     # =========================================================================
-    # STATE MANAGEMENT (DynamoDB)
+    # STATE MANAGEMENT (DynamoDB) - one table per instance
     # =========================================================================
 
-    microservices/dynamodb:
+    # Service state table
+    microservices/dynamodb/service-state:
       metadata:
         component: dynamodb
         type: real
+        inherits:
+          - dynamodb/defaults
       vars:
-        tables:
-          # Service state table
-          service_state:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-service-state"
-            billing_mode: "PAY_PER_REQUEST"
-            hash_key: "pk"
-            range_key: "sk"
-            attributes:
-              - name: "pk"
-                type: "S"
-              - name: "sk"
-                type: "S"
-              - name: "gsi1pk"
-                type: "S"
-              - name: "gsi1sk"
-                type: "S"
-            global_secondary_indexes:
-              - name: "gsi1"
-                hash_key: "gsi1pk"
-                range_key: "gsi1sk"
-                projection_type: "ALL"
-            ttl:
-              enabled: true
-              attribute_name: "ttl"
-            point_in_time_recovery: true
-            server_side_encryption:
-              enabled: true
-              kms_key_arn: "{{ .vars.dynamodb_kms_key_arn }}"
-            stream_enabled: true
-            stream_view_type: "NEW_AND_OLD_IMAGES"
+        name: service-state
+        hash_key: "pk"
+        range_key: "sk"
+        dynamodb_attributes:
+          - name: "gsi1pk"
+            type: "S"
+          - name: "gsi1sk"
+            type: "S"
+        global_secondary_index_map:
+          - name: "gsi1"
+            hash_key: "gsi1pk"
+            range_key: "gsi1sk"
+            projection_type: "ALL"
+        ttl_enabled: true
+        ttl_attribute: "ttl"
+        point_in_time_recovery_enabled: true
+        streams_enabled: true
+        stream_view_type: "NEW_AND_OLD_IMAGES"
+        tags:
+          Layer: "data"
+          Platform: "microservices"
 
-          # Distributed locks table
-          distributed_locks:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-distributed-locks"
-            billing_mode: "PAY_PER_REQUEST"
-            hash_key: "lock_key"
-            attributes:
-              - name: "lock_key"
-                type: "S"
-            ttl:
-              enabled: true
-              attribute_name: "expires_at"
-            point_in_time_recovery: false
-            server_side_encryption:
-              enabled: true
+    # Distributed locks table
+    microservices/dynamodb/distributed-locks:
+      metadata:
+        component: dynamodb
+        type: real
+        inherits:
+          - dynamodb/defaults
+      vars:
+        name: distributed-locks
+        hash_key: "lock_key"
+        ttl_enabled: true
+        ttl_attribute: "expires_at"
+        # Locks are short-lived and rebuilt on restart
+        point_in_time_recovery_enabled: false
+        tags:
+          Layer: "data"
+          Platform: "microservices"
 
-          # Saga state table (for distributed transactions)
-          saga_state:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-saga-state"
-            billing_mode: "PAY_PER_REQUEST"
-            hash_key: "saga_id"
-            range_key: "step_id"
-            attributes:
-              - name: "saga_id"
-                type: "S"
-              - name: "step_id"
-                type: "S"
-              - name: "status"
-                type: "S"
-            global_secondary_indexes:
-              - name: "status-index"
-                hash_key: "status"
-                projection_type: "ALL"
-            ttl:
-              enabled: true
-              attribute_name: "ttl"
-            point_in_time_recovery: true
-            server_side_encryption:
-              enabled: true
-            stream_enabled: true
-            stream_view_type: "NEW_AND_OLD_IMAGES"
-
+    # Saga state table (for distributed transactions)
+    microservices/dynamodb/saga-state:
+      metadata:
+        component: dynamodb
+        type: real
+        inherits:
+          - dynamodb/defaults
+      vars:
+        name: saga-state
+        hash_key: "saga_id"
+        range_key: "step_id"
+        dynamodb_attributes:
+          - name: "status"
+            type: "S"
+        global_secondary_index_map:
+          - name: "status-index"
+            hash_key: "status"
+            projection_type: "ALL"
+        ttl_enabled: true
+        ttl_attribute: "ttl"
+        point_in_time_recovery_enabled: true
+        streams_enabled: true
+        stream_view_type: "NEW_AND_OLD_IMAGES"
         tags:
           Layer: "data"
           Platform: "microservices"
@@ -572,67 +550,66 @@ components:
         component: elasticache
         type: real
       vars:
-        cluster_id: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-microservices-cache"
+        enabled: true
+        # The replication group is "<Environment>-microservices-cache".
+        cluster_id: "microservices-cache"
 
-        # Redis for distributed caching
         engine: "redis"
         engine_version: "7.0"
 
         # Cluster mode for scalability
         cluster_mode_enabled: true
-
-        # Node configuration
+        cluster_mode_num_node_groups: 2
+        cluster_mode_replicas_per_node_group: 1
         node_type: "cache.r6g.large"
-        num_node_groups: 2
-        replicas_per_node_group: 1
 
-        # Network configuration
-        subnet_group_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-microservices-cache-subnet"
+        # Network: private subnets, reachable from the EKS cluster security
+        # group (managed node groups attach it to every node).
+        vpc_id: !terraform.state microservices/vpc .vpc_id
         subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
-        security_group_ids: []  # Will be created
+        allowed_security_group_ids: !terraform.state microservices/eks '.eks_cluster_managed_security_group_id | [.]'
 
-        # Security
+        # Security: encryption at rest (stack key) and in transit, AUTH token
+        # generated by microservices/secrets.
         at_rest_encryption_enabled: true
         transit_encryption_enabled: true
-        auth_token_enabled: true
-        kms_key_id: "{{ .vars.cache_kms_key_id }}"
+        auth_token: !terraform.state microservices/secrets .generated_passwords.redis
+        kms_key_id: !terraform.state kms/main .key_arn
 
         # High availability
         automatic_failover_enabled: true
         multi_az_enabled: true
 
-        # Maintenance
+        # Maintenance and backups (non-overlapping windows)
         maintenance_window: "sun:05:00-sun:06:00"
         snapshot_retention_limit: 7
-        snapshot_window: "04:00-05:00"
+        snapshot_window: "03:00-04:00"
 
-        # Parameter group
-        parameter_group_family: "redis7"
+        # Parameter group (the component adds cluster-enabled=yes)
+        family: "redis7"
         parameters:
           - name: "maxmemory-policy"
             value: "volatile-lru"
-          - name: "cluster-enabled"
-            value: "yes"
           - name: "notify-keyspace-events"
             value: "Ex"  # Expiry events for cache invalidation
 
-        # CloudWatch alarms
-        create_cloudwatch_alarms: true
-        alarm_cpu_threshold: 75
-        alarm_memory_threshold: 80
-        alarm_connections_threshold: 5000
+        # CPU and memory alarms per node: microservices/monitoring
+        # (elasticache_clusters).
 
         tags:
           Layer: "caching"
           Platform: "microservices"
+      dependencies:
+        components:
+          - component: microservices/vpc
+          - component: microservices/eks
+          - component: microservices/secrets
+          - component: kms/main
 
     # =========================================================================
     # OBSERVABILITY
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: microservices/vpc
     microservices/monitoring:
       metadata:
         component: monitoring
@@ -640,199 +617,170 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        dashboard_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-microservices-dashboard"
+        # No certificates in this template
+        enable_certificate_monitoring: false
 
-        # Enable all monitoring features
-        enable_resource_monitoring: true
-        enable_container_insights: true
+        # Infrastructure dashboard, and CPU/memory alarms on every cache node
+        create_dashboard: true
+        vpc_id: !terraform.state microservices/vpc .vpc_id
+        elasticache_clusters: !terraform.state microservices/elasticache .member_clusters
 
-        # Container Insights metrics
-        container_insights:
-          cluster_name: !terraform.state microservices/eks .eks_cluster_id
-          namespace_filter:
-            - "*"
+        # EKS backend dashboard and node/pod alarms (Container Insights)
+        eks_cluster_name: !terraform.state microservices/eks .eks_cluster_id
 
-        # X-Ray tracing configuration
-        xray_tracing:
-          enable: true
-          sampling_rate: 0.05                                     # 5% sampling
-          service_graph_enabled: true
+        # X-Ray sampling rule (the component samples 10% of requests)
+        enable_tracing: true
 
         # Custom dashboards
-        dashboards:
-          # EKS cluster overview
-          eks_overview:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eks-overview"
+        metric_dashboards:
+          eks-overview:
             widgets:
-              - type: "metric"
-                properties:
-                  metrics:
-                    - namespace: "ContainerInsights"
-                      metric: "node_cpu_utilization"
-                      dimensions:
-                        ClusterName: !terraform.state microservices/eks .eks_cluster_id
-                    - namespace: "ContainerInsights"
-                      metric: "node_memory_utilization"
-                      dimensions:
-                        ClusterName: !terraform.state microservices/eks .eks_cluster_id
-                  title: "Node Resource Utilization"
-                  period: 300
-
-          # API Gateway metrics
-          api_metrics:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api-metrics"
+              - title: "Node Resource Utilization"
+                period: 300
+                metrics:
+                  - namespace: "ContainerInsights"
+                    metric: "node_cpu_utilization"
+                    dimensions:
+                      ClusterName: !terraform.state microservices/eks .eks_cluster_id
+                  - namespace: "ContainerInsights"
+                    metric: "node_memory_utilization"
+                    dimensions:
+                      ClusterName: !terraform.state microservices/eks .eks_cluster_id
+          api-metrics:
             widgets:
-              - type: "metric"
-                properties:
-                  metrics:
-                    - namespace: "AWS/ApiGateway"
-                      metric: "Count"
-                      dimensions:
-                        ApiId: !terraform.state microservices/apigateway .api_id
-                    - namespace: "AWS/ApiGateway"
-                      metric: "Latency"
-                      dimensions:
-                        ApiId: !terraform.state microservices/apigateway .api_id
-                  title: "API Gateway Metrics"
-                  period: 60
-
-          # Event bus metrics
-          eventbridge_metrics:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eventbridge-metrics"
+              - title: "API Gateway Metrics"
+                period: 60
+                metrics:
+                  - namespace: "AWS/ApiGateway"
+                    metric: "Count"
+                    dimensions:
+                      ApiId: !terraform.state microservices/apigateway .http_api_id
+                  - namespace: "AWS/ApiGateway"
+                    metric: "Latency"
+                    dimensions:
+                      ApiId: !terraform.state microservices/apigateway .http_api_id
+          eventbridge-metrics:
             widgets:
-              - type: "metric"
-                properties:
-                  metrics:
-                    - namespace: "AWS/Events"
-                      metric: "Invocations"
-                      dimensions:
-                        EventBusName: !terraform.state microservices/eventbridge .bus_name
-                    - namespace: "AWS/Events"
-                      metric: "FailedInvocations"
-                      dimensions:
-                        EventBusName: !terraform.state microservices/eventbridge .bus_name
-                  title: "EventBridge Metrics"
-                  period: 60
+              - title: "EventBridge Metrics"
+                period: 60
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/Events"
+                    metric: "Invocations"
+                    dimensions:
+                      EventBusName: !terraform.state microservices/eventbridge .event_bus_name
+                  - namespace: "AWS/Events"
+                    metric: "FailedInvocations"
+                    dimensions:
+                      EventBusName: !terraform.state microservices/eventbridge .event_bus_name
 
-        # Alarms
-        alarms:
-          # EKS alarms
-          eks_node_not_ready:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eks-node-not-ready"
-            metric_name: "cluster_failed_node_count"
+        # Alarms on metrics the fixed-purpose inputs cannot express. HTTP APIs
+        # publish 5xx/Latency by ApiId (REST uses ApiName and 5XXError).
+        metric_alarms:
+          eks-failed-nodes:
             namespace: "ContainerInsights"
+            metric_name: "cluster_failed_node_count"
+            dimensions:
+              ClusterName: !terraform.state microservices/eks .eks_cluster_id
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 2
             period: 300
             statistic: "Maximum"
-            dimensions:
-              ClusterName: !terraform.state microservices/eks .eks_cluster_id
-
-          # API Gateway alarms
-          api_5xx_errors:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api-5xx-errors"
-            metric_name: "5XXError"
+          api-5xx-errors:
             namespace: "AWS/ApiGateway"
+            metric_name: "5xx"
+            dimensions:
+              ApiId: !terraform.state microservices/apigateway .http_api_id
             comparison_operator: "GreaterThanThreshold"
             threshold: 10
             evaluation_periods: 2
             period: 300
             statistic: "Sum"
-            dimensions:
-              ApiId: !terraform.state microservices/apigateway .api_id
-
-          api_latency_high:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api-latency-high"
-            metric_name: "Latency"
+          api-latency-high:
             namespace: "AWS/ApiGateway"
+            metric_name: "Latency"
+            dimensions:
+              ApiId: !terraform.state microservices/apigateway .http_api_id
             comparison_operator: "GreaterThanThreshold"
             threshold: 3000  # 3 seconds
             evaluation_periods: 3
             period: 300
-            statistic: "p99"
-            dimensions:
-              ApiId: !terraform.state microservices/apigateway .api_id
-
-          # EventBridge alarms
-          eventbridge_failed_invocations:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-eventbridge-failures"
-            metric_name: "FailedInvocations"
+            extended_statistic: "p99"
+          eventbridge-failures:
             namespace: "AWS/Events"
+            metric_name: "FailedInvocations"
+            dimensions:
+              EventBusName: !terraform.state microservices/eventbridge .event_bus_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 5
             evaluation_periods: 2
             period: 300
             statistic: "Sum"
-            dimensions:
-              EventBusName: !terraform.state microservices/eventbridge .bus_name
-
-          # DynamoDB alarms
-          dynamodb_throttled:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-dynamodb-throttled"
-            metric_name: "ThrottledRequests"
+          # Per-table throttling is published as Read/WriteThrottleEvents by
+          # TableName (ThrottledRequests also needs an Operation dimension).
+          dynamodb-read-throttled:
             namespace: "AWS/DynamoDB"
+            metric_name: "ReadThrottleEvents"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/service-state .table_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 1
             period: 60
             statistic: "Sum"
+          dynamodb-write-throttled:
+            namespace: "AWS/DynamoDB"
+            metric_name: "WriteThrottleEvents"
             dimensions:
-              TableName: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-service-state"
-
-          # ElastiCache alarms
-          cache_cpu_high:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-cache-cpu-high"
-            metric_name: "CPUUtilization"
-            namespace: "AWS/ElastiCache"
+              TableName: !terraform.state microservices/dynamodb/service-state .table_name
             comparison_operator: "GreaterThanThreshold"
-            threshold: 75
-            evaluation_periods: 2
-            period: 300
-            statistic: "Average"
-            dimensions:
-              CacheClusterId: !terraform.state microservices/elasticache .cluster_id
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
 
-        # SNS notifications
-        alarm_notifications_enabled: true
-        alarm_email_addresses: []
-        sns_topic_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-microservices-alarms"
+        # SNS notifications (topic "<Environment>-alarms")
+        create_sns_topic: true
+        # The importing stack lists its on-call addresses here.
+        alarm_email_subscriptions: []
 
         # Log insights queries
         log_insights_queries:
-          error_analysis:
-            name: "Error Analysis"
-            log_group_name: !terraform.state microservices/eks .cloudwatch_log_group_name
+          error-analysis:
+            log_group_names: !terraform.state microservices/eks '.cloudwatch_log_group_name | [.]'
             query: |
               fields @timestamp, @message
               | filter @message like /error|Error|ERROR/
               | sort @timestamp desc
               | limit 100
-
-          slow_requests:
-            name: "Slow Requests"
-            log_group_name: !terraform.state microservices/apigateway .api_id | "/aws/apigateway/" + .
+          slow-requests:
+            log_group_names: !terraform.state microservices/apigateway '.log_group_name | [.]'
             query: |
-              fields @timestamp, @message
-              | filter responseTime > 1000
-              | sort responseTime desc
+              fields @timestamp, routeKey, status, responseLatency
+              | filter responseLatency > 1000
+              | sort responseLatency desc
               | limit 100
 
         tags:
           Layer: "observability"
           Platform: "microservices"
+      dependencies:
+        components:
+          - component: microservices/vpc
+          - component: microservices/eks
+          - component: microservices/apigateway
+          - component: microservices/eventbridge
+          - component: microservices/dynamodb/service-state
+          - component: microservices/elasticache
 
     # =========================================================================
     # SECRETS MANAGEMENT
     # =========================================================================
+    # Secrets are "microservices/<stage>/<path>/<name>", encrypted with kms/main
+    # (default_kms_key_id, from secretsmanager/defaults). Rotation is off
+    # (default_rotation_automatically: false): no rotation function exists.
 
-      dependencies:
-        components:
-          - component: microservices/eks
-          - component: microservices/apigateway
-          - component: microservices/eventbridge
-          - component: microservices/dynamodb
-          - component: microservices/elasticache
     microservices/secrets:
       metadata:
         component: secretsmanager
@@ -840,53 +788,40 @@ components:
         inherits:
           - secretsmanager/defaults
       vars:
+        context_name: "microservices"
         secrets:
           # Database credentials
           database:
-            name: "{{ .settings.context.tenant }}/{{ .settings.context.environment }}/microservices/database"
+            name: "credentials"
             description: "Database credentials for microservices"
+            path: "database"
             recovery_window_in_days: 7
-            generate_secret_string:
-              secret_string_template: '{"username": "microservices_admin"}'
-              generate_string_key: "password"
-              password_length: 32
-              exclude_characters: "\"@/\\"
+            generate_random_password: true
 
-          # Redis auth token
+          # Redis AUTH token, read by microservices/elasticache
+          # (generated_passwords.redis). The generator's special characters
+          # exclude the / " @ and space that ElastiCache rejects.
           redis:
-            name: "{{ .settings.context.tenant }}/{{ .settings.context.environment }}/microservices/redis"
+            name: "auth-token"
             description: "Redis auth token for microservices"
+            path: "cache"
             recovery_window_in_days: 7
-            generate_secret_string:
-              generate_string_key: "auth_token"
-              password_length: 64
-              exclude_characters: "\"@/\\"
+            generate_random_password: true
 
-          # API keys
+          # API keys, filled in by operators after apply
           api_keys:
-            name: "{{ .settings.context.tenant }}/{{ .settings.context.environment }}/microservices/api-keys"
+            name: "api-keys"
             description: "API keys for microservices"
+            path: "api"
             recovery_window_in_days: 7
-            secret_string: "{{ .vars.api_keys_json }}"
 
           # JWT signing key
           jwt_signing:
-            name: "{{ .settings.context.tenant }}/{{ .settings.context.environment }}/microservices/jwt-signing"
+            name: "jwt-signing"
             description: "JWT signing key for microservices"
+            path: "auth"
             recovery_window_in_days: 30
-            generate_secret_string:
-              generate_string_key: "signing_key"
-              password_length: 64
-              exclude_characters: ""
-
-        # KMS encryption
-        kms_key_id: "{{ .vars.secrets_kms_key_id }}"
-
-        # Secret rotation (optional)
-        enable_rotation: false
-        rotation_lambda_arn: "{{ .vars.secret_rotation_lambda_arn }}"
-        rotation_rules:
-          automatically_after_days: 30
+            generate_random_password: true
 
         tags:
           Layer: "security"
@@ -895,71 +830,17 @@ components:
 # =============================================================================
 # ENVIRONMENT-SPECIFIC OVERRIDES
 # =============================================================================
+# Override the instances above per stack, e.g.:
 #
 # Development:
-#   vars:
-#     nat_gateway_strategy: "single"
-#     kubernetes_version: "1.36"
-#     system_node_min: 1
-#     system_node_max: 2
-#     app_node_min: 1
-#     app_node_max: 5
-#     app_capacity_type: "SPOT"
-#     cache_cluster_mode: false
-#     cache_node_type: "cache.t3.micro"
-#     dynamodb_billing_mode: "PAY_PER_REQUEST"
-#     enable_karpenter: false
-#     xray_sampling_rate: 0.1
-#
-# Staging:
-#   vars:
-#     nat_gateway_strategy: "single"
-#     kubernetes_version: "1.36"
-#     system_node_min: 2
-#     system_node_max: 3
-#     app_node_min: 2
-#     app_node_max: 10
-#     app_capacity_type: "ON_DEMAND"
-#     cache_cluster_mode: true
-#     cache_node_type: "cache.r6g.large"
-#     cache_num_node_groups: 1
-#     cache_replicas: 1
-#     enable_karpenter: true
-#     xray_sampling_rate: 0.05
+#   microservices/vpc:         nat_gateway_strategy: "single"
+#   microservices/eks:         node_groups.system.min_group_size: 1,
+#                              node_groups.application.capacity_type: "SPOT"
+#   microservices/elasticache: cluster_mode_enabled: false, node_type: "cache.t4g.micro"
 #
 # Production:
-#   vars:
-#     nat_gateway_strategy: "one_per_az"
-#     kubernetes_version: "1.36"
-#     eks_public_access: false
-#     system_node_min: 3
-#     system_node_max: 6
-#     app_node_min: 5
-#     app_node_max: 50
-#     spot_node_min: 2
-#     spot_node_max: 20
-#     app_capacity_type: "ON_DEMAND"
-#     cache_cluster_mode: true
-#     cache_node_type: "cache.r6g.xlarge"
-#     cache_num_node_groups: 3
-#     cache_replicas: 2
-#     enable_karpenter: true
-#     xray_sampling_rate: 0.01
-#     log_retention_days: 90
-#     event_archive_retention: 90
-#     enable_secret_rotation: true
-
-# =============================================================================
-# REQUIRED VARIABLES
-# =============================================================================
-# eks_kms_key_arn: "arn:aws:kms:..."
-# eks_admin_role_arn: "arn:aws:iam::..."
-# ebs_csi_role_arn: "arn:aws:iam::..."
-# cognito_user_pool_id: "us-east-1_xxxxx"
-# cognito_client_id: "xxxxxxxx"
-# app_domain_name: "example.com"
-# route53_zone_id: "Z1234567890ABC"
-# dynamodb_kms_key_arn: "arn:aws:kms:..."
-# cache_kms_key_id: "arn:aws:kms:..."
-# secrets_kms_key_id: "arn:aws:kms:..."
-# alarm_email_addresses: ["ops@example.com"]
+#   microservices/eks:         cluster_log_retention_period: 90,
+#                              node_groups.application.max_group_size: 50
+#   microservices/elasticache: node_type: "cache.r6g.xlarge", cluster_mode_num_node_groups: 3,
+#                              cluster_mode_replicas_per_node_group: 2
+#   microservices/eventbridge: archive_retention_days: 90

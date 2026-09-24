@@ -10,31 +10,23 @@ components:
           description: "EKS cluster addons and Kubernetes resources"
           category: "container-orchestration"
           namespace: "k8s"
+      # Only variables the component declares. The add-on switches
+      # (enable_aws_load_balancer_controller, enable_cluster_autoscaler, ...)
+      # and the rest of each cluster's settings live under clusters.<cluster
+      # name>, set per instance; top-level copies of them were undeclared and
+      # reached nothing.
       vars:
-        enabled: true
+        # Connection for the kubernetes/helm providers; instances read these
+        # from their eks instance's outputs.
         cluster_name: ""
         host: ""
         cluster_ca_certificate: ""
         oidc_provider_arn: ""
         oidc_provider_url: ""
 
-        # Enable specific addons based on variables with defaults for flexibility
-        enable_metrics_server: true
-        enable_cluster_autoscaler: true
-        enable_aws_load_balancer_controller: true
-        enable_external_dns: true
-        enable_cert_manager: true
-        enable_external_secrets: true
-
         # Map of clusters with addons, Helm releases, and Kubernetes manifests
         clusters: {}
 
-        # Service account configuration
-        create_service_accounts: true
-        service_account_namespace: "kube-system"
-
         tags:
           Component: "EKS-Addons"
-      dependencies:
-        components:
-          - component: eks/main
+      # Instances declare the eks instance they read (e.g. eks/main).
