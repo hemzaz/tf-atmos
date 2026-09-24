@@ -115,6 +115,9 @@ SYNTH = [
     # dns records[].records: a CNAME target, so it must be a hostname rather
     # than one of the id shapes above.
     (r'^records$',                    ['synthetic.example.com']),
+    # security-monitoring consumes guardduty's detector and securityhub's hub.
+    (r'^detector_id$',                '12abc34d567e8fa901bc2d34e56789f0'),
+    (r'^account_arn$',                'arn:aws:securityhub:eu-west-2:123456789012:hub/default'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry

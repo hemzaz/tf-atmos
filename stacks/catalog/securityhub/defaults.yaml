@@ -1,0 +1,25 @@
+---
+##################################################
+# Catalog Configuration for AWS Security Hub
+##################################################
+# Security Hub for one account/region, owned by this component (the Cloud
+# Posse aws-security-hub model: one component per service). security-monitoring
+# reads `account_arn` from here with !terraform.state and never enables a hub.
+#
+# The default standards (AWS Foundational Security Best Practices v1.0.0 and
+# CIS AWS Foundations Benchmark v1.2.0) are the baseline everywhere, since the
+# compliance-check workflow reports on them. Security Hub bills per control
+# check, so extra standards such as PCI DSS are added per stack (prod only).
+
+components:
+  terraform:
+    securityhub/defaults:
+      metadata:
+        component: securityhub
+        type: abstract
+      vars:
+        enable: true
+        enable_default_standards: true
+        standards: []
+        tags:
+          Component: "SecurityHub"

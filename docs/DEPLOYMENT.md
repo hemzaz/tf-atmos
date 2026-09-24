@@ -105,8 +105,8 @@ atmos workflow component -f deploy-application -s <stack> # one instance, name e
 ```
 
 Disabled instances (`metadata.enabled: false`) are skipped: `iam/ci`, `iam/eks-node`,
-`iam/eks-cluster`, `infrastructure/*`, `vpc-flow-logs-bucket`, and in prod `guardduty/main`,
-`securityhub/main` and `network/vpc-peering`. No stack deploys `idp-platform`.
+`iam/eks-cluster`, `infrastructure/*`, `vpc-flow-logs-bucket`, and in prod
+`network/vpc-peering`. No stack deploys `idp-platform`.
 
 ## Deploying a stack template
 

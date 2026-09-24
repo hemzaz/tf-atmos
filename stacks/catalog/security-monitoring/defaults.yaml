@@ -1,0 +1,33 @@
+---
+##################################################
+# Catalog Configuration for security-monitoring
+##################################################
+# Routes security findings to an SNS topic. It does NOT own the GuardDuty
+# detector or the Security Hub hub: the guardduty and securityhub components
+# do, and this component consumes their outputs. Both are declared in
+# dependencies.components so they deploy first;
+# workflows/scripts/common/check-dependencies.py enforces that.
+#
+# Every stack runs guardduty/main and securityhub/main, so the references
+# resolve in all of them.
+
+components:
+  terraform:
+    security-monitoring/defaults:
+      metadata:
+        component: security-monitoring
+        type: abstract
+      dependencies:
+        components:
+          - component: guardduty/main
+          - component: securityhub/main
+      vars:
+        guardduty_detector_id: !terraform.state guardduty/main .detector_id
+        securityhub_account_arn: !terraform.state securityhub/main .account_arn
+        # Inspector V2 bills per EC2 instance, container image and Lambda
+        # function scanned. Off by default so no stack pays for it silently.
+        enable_inspector: false
+        enable_alert_enrichment: false
+        security_email_subscriptions: []
+        tags:
+          Component: "SecurityMonitoring"

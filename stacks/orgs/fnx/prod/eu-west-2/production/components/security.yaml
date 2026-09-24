@@ -13,6 +13,9 @@ import:
   - catalog/kms/defaults
   - catalog/secretsmanager/defaults
   - catalog/acm/defaults
+  - catalog/guardduty/defaults
+  - catalog/securityhub/defaults
+  - catalog/security-monitoring/defaults
 
 components:
   terraform:
@@ -191,17 +194,17 @@ components:
         default_recovery_window_in_days: 30
 
     # ==========================================================================
-    # GuardDuty Configuration
+    # GuardDuty - owns the detector (security-monitoring only consumes it)
     # ==========================================================================
     guardduty/main:
       metadata:
         component: guardduty
+        inherits:
+          - guardduty/defaults
       vars:
-        enable: true
-        enable_s3_protection: true
+        # Prod turns on the protection plans the catalog leaves opt-in.
         enable_kubernetes_protection: true
         enable_malware_protection: true
-        finding_publishing_frequency: "FIFTEEN_MINUTES"
 
         # Auto-archive low severity findings
         auto_archive_filter:
@@ -211,16 +214,25 @@ components:
                 - "Recon:EC2/Portscan"
 
     # ==========================================================================
-    # Security Hub Configuration
+    # Security Hub - owns the hub (security-monitoring only consumes it)
     # ==========================================================================
     securityhub/main:
       metadata:
         component: securityhub
+        inherits:
+          - securityhub/defaults
       vars:
-        enable: true
-        # AWS auto-subscribes AWS-FSBP and CIS under this flag. Listing them
-        # here as well collides at apply, so `standards` carries only what AWS
-        # does not enable for us.
-        enable_default_standards: true
+        # AWS auto-subscribes AWS-FSBP and CIS under enable_default_standards
+        # (catalog default). Listing them here as well collides at apply, so
+        # `standards` carries only what AWS does not enable for us.
         standards:
           - "pci-dss/v/3.2.1"
+
+    # ==========================================================================
+    # Security finding routing (GuardDuty + Security Hub -> SNS)
+    # ==========================================================================
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+        inherits:
+          - security-monitoring/defaults
