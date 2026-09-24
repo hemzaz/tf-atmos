@@ -2,6 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "ReadScopedSecrets",
       "Effect": "Allow",
       "Action": [
         "secretsmanager:GetResourcePolicy",
@@ -9,12 +10,10 @@
         "secretsmanager:DescribeSecret",
         "secretsmanager:ListSecretVersionIds"
       ],
-      "Resource": [
-        "arn:aws:secretsmanager:*:*:secret:certificates/*",
-        "arn:aws:secretsmanager:*:*:secret:*/certificates/*"
-      ]
+      "Resource": ${jsonencode(secretsmanager_resource_arns)}
     },
     {
+      "Sid": "ListSecrets",
       "Effect": "Allow",
       "Action": [
         "secretsmanager:ListSecrets"
@@ -22,21 +21,28 @@
       "Resource": "*"
     },
     {
+      "Sid": "ReadScopedParameters",
       "Effect": "Allow",
       "Action": [
         "ssm:GetParameter*"
       ],
-      "Resource": [
-        "arn:aws:ssm:*:*:parameter/*/certificates/*",
-        "arn:aws:ssm:*:*:parameter/certificates/*"
-      ]
+      "Resource": ${jsonencode(ssm_resource_arns)}
     },
     {
+      "Sid": "DecryptViaSecretsManagerOrSsm",
       "Effect": "Allow",
       "Action": [
         "kms:Decrypt"
       ],
-      "Resource": "arn:aws:kms:*:*:key/*"
+      "Resource": "${kms_key_arn}",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": [
+            "secretsmanager.${region}.amazonaws.com",
+            "ssm.${region}.amazonaws.com"
+          ]
+        }
+      }
     }
   ]
 }

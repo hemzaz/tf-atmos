@@ -11,6 +11,12 @@ components:
       metadata:
         component: external-secrets
         type: abstract
+      # kms_key_arn below reads kms/main, so the key must be applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
       vars:
         enabled: true
 
@@ -20,6 +26,11 @@ components:
         chart_version: "0.9.9"
         create_default_cluster_secret_store: true
         create_certificate_secret_store: true
+
+        # The same per-stack customer-managed key secretsmanager/defaults uses
+        # as default_kms_key_id: every environment runs a kms/main instance
+        # (catalog/kms/defaults), so this resolves in all stacks.
+        kms_key_arn: !terraform.state kms/main .key_arn
 
         tags:
           Component: "external-secrets"
