@@ -286,12 +286,12 @@ resource "aws_lb_target_group" "default" {
 
   health_check {
     enabled             = true
-    path                = "/"
-    matcher             = "200-499"
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
-    timeout             = 5
-    interval            = 30
+    path                = var.health_check_path
+    matcher             = var.health_check_matcher
+    healthy_threshold   = var.health_check_healthy_threshold
+    unhealthy_threshold = var.health_check_unhealthy_threshold
+    timeout             = var.health_check_timeout
+    interval            = var.health_check_interval
   }
 
   tags = { Name = "${local.name}-default" }

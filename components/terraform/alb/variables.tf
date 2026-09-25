@@ -72,7 +72,7 @@ variable "additional_ingress_prefix_list_ids" {
 
 variable "additional_ingress_security_group_ids" {
   type        = list(string)
-  description = "Extra security group ids allowed to reach the HTTPS listener (e.g. a VPN or bastion security group), alongside the CloudFront origin-facing prefix list this component always resolves"
+  description = "Extra security group ids allowed to reach the HTTPS listener (e.g. a VPN or bastion security group), alongside the CloudFront origin-facing prefix list this component always resolves. Each entry adds one rule (a security-group reference counts as 1 against the 'Rules per security group' quota, unlike a prefix list) on top of the CloudFront prefix list's ~55 of the default 60 -- see additional_ingress_prefix_list_ids for the quota this shares."
   default     = []
   nullable    = false
 }
@@ -167,6 +167,67 @@ variable "default_target_group_deregistration_delay" {
   type        = number
   description = "Deregistration delay, in seconds, for the default target group"
   default     = 30
+}
+
+variable "health_check_path" {
+  type        = string
+  description = "Health check path for the default target group"
+  default     = "/"
+
+  validation {
+    condition     = can(regex("^/", var.health_check_path))
+    error_message = "health_check_path must start with /."
+  }
+}
+
+variable "health_check_matcher" {
+  type        = string
+  description = "HTTP status code(s) the default target group's health check treats as healthy (e.g. \"200\", \"200-399\"), Cloud Posse terraform-aws-alb default"
+  default     = "200-399"
+}
+
+variable "health_check_interval" {
+  type        = number
+  description = "Approximate time, in seconds, between health checks of an individual target"
+  default     = 30
+
+  validation {
+    condition     = var.health_check_interval >= 5 && var.health_check_interval <= 300
+    error_message = "health_check_interval must be between 5 and 300 seconds."
+  }
+}
+
+variable "health_check_timeout" {
+  type        = number
+  description = "Time, in seconds, during which no response from a target means a failed health check"
+  default     = 5
+
+  validation {
+    condition     = var.health_check_timeout >= 2 && var.health_check_timeout <= 120
+    error_message = "health_check_timeout must be between 2 and 120 seconds."
+  }
+}
+
+variable "health_check_healthy_threshold" {
+  type        = number
+  description = "Number of consecutive successful health checks before an unhealthy target is considered healthy"
+  default     = 3
+
+  validation {
+    condition     = var.health_check_healthy_threshold >= 2 && var.health_check_healthy_threshold <= 10
+    error_message = "health_check_healthy_threshold must be between 2 and 10."
+  }
+}
+
+variable "health_check_unhealthy_threshold" {
+  type        = number
+  description = "Number of consecutive failed health checks before a healthy target is considered unhealthy"
+  default     = 3
+
+  validation {
+    condition     = var.health_check_unhealthy_threshold >= 2 && var.health_check_unhealthy_threshold <= 10
+    error_message = "health_check_unhealthy_threshold must be between 2 and 10."
+  }
 }
 
 # ---------------------------------------------------------------------------

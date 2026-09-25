@@ -78,6 +78,19 @@ variable "association_resource_arns" {
     condition     = var.scope == "REGIONAL" || length(var.association_resource_arns) == 0
     error_message = "association_resource_arns is only valid for scope = REGIONAL. A CLOUDFRONT web ACL is attached by setting the distribution's web_acl_id to this component's arn output, not via association."
   }
+
+  # A null entry here almost always means an upstream !terraform.state read
+  # resolved to null -- e.g. apigateway's rest_api_stage_arn is null when
+  # api_type = "HTTP" (HTTP APIs have no association-eligible stage ARN; WAF
+  # can only associate with a REST API stage, an ALB or a CloudFront
+  # distribution). Without this check, a null element reaches
+  # aws_wafv2_web_acl_association's for_each (via toset()) and fails with an
+  # opaque "set includes a null element" provider/core error instead of
+  # naming the actual cause.
+  validation {
+    condition     = alltrue([for arn in var.association_resource_arns : arn != null])
+    error_message = "association_resource_arns must not contain a null entry. This usually means an upstream output was null -- e.g. apigateway's rest_api_stage_arn is null when api_type = \"HTTP\" (an HTTP API has no stage ARN WAF can associate with). Fix the upstream api_type, or remove that entry from association_resource_arns."
+  }
 }
 
 # ---------------------------------------------------------------------------

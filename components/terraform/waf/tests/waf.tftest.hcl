@@ -56,6 +56,25 @@ run "association_arns_are_rejected_for_cloudfront_scope" {
   expect_failures = [var.association_resource_arns]
 }
 
+run "a_null_association_arn_is_rejected_with_a_clear_message" {
+  command = plan
+
+  # Regression for a null entry reaching this variable -- e.g. from an
+  # upstream apigateway rest_api_stage_arn output that is null when
+  # api_type = "HTTP". Without the validation this would instead fail deep
+  # inside aws_wafv2_web_acl_association's for_each (toset() of a list
+  # containing null) with an opaque core error.
+  variables {
+    scope = "REGIONAL"
+    association_resource_arns = [
+      "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/test-webapp-alb/abc123",
+      null,
+    ]
+  }
+
+  expect_failures = [var.association_resource_arns]
+}
+
 run "regional_scope_associates_every_arn" {
   command = plan
 

@@ -230,6 +230,13 @@ components:
         subnets: !terraform.state web-application/vpc .public_subnet_ids
         certificate_arn: !terraform.state web-application/acm .certificate_arns.main
 
+        # The default target group is what web-application/ecs-service
+        # registers its tasks into (see the load_balancer.target_group_arn
+        # reference below); the webapp container (see its portMappings /
+        # healthCheck below) serves /health on 8080, not the target group's
+        # default "/".
+        health_check_path: "/health"
+
         access_logs_prefix: "webapp"
 
         tags:
@@ -286,19 +293,19 @@ components:
           Layer: "security"
           Application: "web-application"
 
+      dependencies:
+        components:
+          - component: web-application/alb
+          - component: kms/main
+
     # =========================================================================
     # WAF PROTECTION (CLOUDFRONT SCOPE)
     # =========================================================================
     # No association: a CLOUDFRONT-scope web ACL is attached by setting the
     # distribution's web_acl_id to this instance's `arn` output, which the
-    # later web-application/cloudfront task (see :659 below) reads. region is
-    # pinned to us-east-1 -- an AWS requirement for CLOUDFRONT-scope web ACLs
-    # -- independent of this stack's own region.
-
-      dependencies:
-        components:
-          - component: web-application/alb
-          - component: kms/main
+    # later web-application/cloudfront task reads (see the cloudfront section
+    # below). region is pinned to us-east-1 -- an AWS requirement for
+    # CLOUDFRONT-scope web ACLs -- independent of this stack's own region.
     web-application/waf-cloudfront:
       metadata:
         component: waf
@@ -426,7 +433,7 @@ components:
 
         # Load balancer configuration
         load_balancer:
-          target_group_arn: !terraform.state web-application/alb .target_group_arns.app
+          target_group_arn: !terraform.state web-application/alb .default_target_group_arn
           container_name: "webapp"
           container_port: 8080
 
@@ -617,7 +624,7 @@ components:
         # Origin configuration
         origins:
           alb:
-            domain_name: !terraform.state web-application/alb .dns_name
+            domain_name: !terraform.state web-application/alb .alb_dns_name
             origin_id: "alb-origin"
             custom_origin_config:
               http_port: 80

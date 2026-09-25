@@ -112,6 +112,12 @@ web-application/alb:
 | `default_target_group_port` | Catch-all target group port | `80` |
 | `default_target_group_protocol` | Catch-all target group protocol | `HTTP` |
 | `default_target_group_deregistration_delay` | Deregistration delay (seconds) | `30` |
+| `health_check_path` | Health check path for the default target group | `/` |
+| `health_check_matcher` | HTTP status code(s) treated as healthy, Cloud Posse `terraform-aws-alb` default | `200-399` |
+| `health_check_interval` | Seconds between health checks | `30` |
+| `health_check_timeout` | Health check response timeout (seconds) | `5` |
+| `health_check_healthy_threshold` | Consecutive successes before a target is healthy | `3` |
+| `health_check_unhealthy_threshold` | Consecutive failures before a target is unhealthy | `3` |
 | `access_logs_enabled` | Create the access-logs bucket and enable logging | `true` |
 | `access_logs_prefix` | Key prefix for delivered log objects | `""` |
 | `access_logs_force_destroy` | Allow destroying the access-logs bucket with objects in it | `false` |
@@ -139,6 +145,11 @@ web-application/alb:
   origin-facing prefix list on 443, plus any explicitly added prefix
   lists/security groups;
 - there is no listener on port 80;
-- the default action forwards to the default target group.
+- the default action forwards to the default target group;
+- the default target group's health check defaults to path `/`, matcher
+  `200-399` (Cloud Posse's `terraform-aws-alb` default), and that
+  `health_check_path`/`health_check_matcher`/`health_check_interval`/
+  `health_check_timeout`/`health_check_healthy_threshold`/
+  `health_check_unhealthy_threshold` all override it.
 
 Run with `workflows/scripts/common/terraform-test.sh alb`.

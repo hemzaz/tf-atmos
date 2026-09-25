@@ -1171,7 +1171,15 @@ components:
 #
 # Development:
 #   vars:
-#     api_type: "HTTP"  # Cheaper than REST
+#     api_type: "HTTP"  # Cheaper than REST, but see the WAF note below.
+#     # NOTE: serverless-api/waf's association_resource_arns (below, ~:893)
+#     # reads apigateway's rest_api_stage_arn output, which is null for
+#     # api_type = "HTTP" (WAF cannot associate with an HTTP API -- only a
+#     # REST API stage or an ALB/CloudFront distribution). The waf component
+#     # fails the plan with a clear error in that case (see
+#     # components/terraform/waf/variables.tf); switch api_type back to
+#     # "REST", or drop this entry from association_resource_arns, if you
+#     # actually want api_type = "HTTP" here.
 #     lambda_runtime: "python3.13"
 #     lambda_architecture: "arm64"
 #     api_lambda_memory: 256

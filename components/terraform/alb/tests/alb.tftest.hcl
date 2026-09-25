@@ -152,6 +152,53 @@ run "https_default_action_forwards_to_the_default_target_group" {
   }
 }
 
+run "default_target_group_health_check_uses_cloud_posse_defaults" {
+  command = plan
+
+  assert {
+    condition     = one(aws_lb_target_group.default[0].health_check).path == "/"
+    error_message = "The default target group health check path defaults to /."
+  }
+
+  assert {
+    condition     = one(aws_lb_target_group.default[0].health_check).matcher == "200-399"
+    error_message = "The default target group health check matcher defaults to 200-399, the Cloud Posse terraform-aws-alb default."
+  }
+}
+
+run "default_target_group_health_check_is_overridable" {
+  command = plan
+
+  variables {
+    health_check_path                = "/health"
+    health_check_matcher             = "200"
+    health_check_interval            = 15
+    health_check_timeout             = 3
+    health_check_healthy_threshold   = 2
+    health_check_unhealthy_threshold = 2
+  }
+
+  assert {
+    condition     = one(aws_lb_target_group.default[0].health_check).path == "/health"
+    error_message = "health_check_path overrides the default target group's health check path."
+  }
+
+  assert {
+    condition     = one(aws_lb_target_group.default[0].health_check).matcher == "200"
+    error_message = "health_check_matcher overrides the default target group's health check matcher."
+  }
+
+  assert {
+    condition = (
+      one(aws_lb_target_group.default[0].health_check).interval == 15 &&
+      one(aws_lb_target_group.default[0].health_check).timeout == 3 &&
+      one(aws_lb_target_group.default[0].health_check).healthy_threshold == 2 &&
+      one(aws_lb_target_group.default[0].health_check).unhealthy_threshold == 2
+    )
+    error_message = "health_check_interval/timeout/healthy_threshold/unhealthy_threshold override the default target group's health check."
+  }
+}
+
 run "access_logs_bucket_denies_non_tls_and_grants_only_the_elb_account" {
   command = plan
 
