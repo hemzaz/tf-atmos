@@ -144,8 +144,11 @@ resource "aws_eks_addon" "container_insights" {
 
   tags = merge(var.tags, each.value.tags, { Name = "${local.cluster_name_prefixes[each.key]}-container-insights" })
 
+  # The add-on creates Services, which the load balancer controller's webhook
+  # (failurePolicy Fail) must admit: install it after that release (addons.tf).
   depends_on = [
     time_sleep.wait_for_cluster,
+    helm_release.aws_load_balancer_controller,
     aws_cloudwatch_log_group.container_insights,
     aws_iam_role_policy_attachment.container_insights_agent,
     aws_iam_role_policy_attachment.container_insights_logs,

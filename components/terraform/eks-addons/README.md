@@ -59,6 +59,8 @@ dataplane logs), both running as `amazon-cloudwatch:cloudwatch-agent`.
 - Agent and Fluent Bit requests/limits are set in `configuration_values`.
 - `container_insights_addon_version` pins the add-on; unset, it is EKS's
   default version for the cluster's Kubernetes version.
+- The add-on installs after the load balancer controller, whose webhook must
+  admit the Services it creates.
 
 Cloud Posse's `eks/cloudwatch` installs the same software from the
 `amazon-cloudwatch-observability` Helm chart and attaches
