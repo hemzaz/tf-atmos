@@ -39,7 +39,8 @@ matching what the controller already enforces.
 | `admit_security_group_ids` | Required, non-empty. Security groups admitted on the ALB's listener ports — never a CIDR block. Typically the API Gateway VPC link's security group (`microservices/securitygroup/vpc-link`) |
 | `certificate_arn` (null) | Set to add an HTTPS (443) listener alongside HTTP (80); null creates HTTP-only |
 | `ssl_policy` | TLS policy for the HTTPS listener; ignored unless `certificate_arn` is set |
-| `kubernetes_namespace` (`"default"`) | Namespace the IngressGroup scaffold's Ingress is created in |
+| `kubernetes_namespace` (`"alb-ingress-group"`) | Namespace the IngressGroup scaffold's Ingress is created in. Never `"default"` (validated, `CKV_K8S_21`) |
+| `create_namespace` (`true`) | Whether this component creates `kubernetes_namespace`; `false` when it already exists |
 | Outputs | `group_name`, `ingress_name`, `security_group_id`, `load_balancer_arn`, `load_balancer_dns_name`, `load_balancer_zone_id`, `http_listener_arn`, `https_listener_arn` (null unless `certificate_arn` is set) |
 
 ## Dependencies / gotchas
@@ -62,9 +63,11 @@ matching what the controller already enforces.
 
 `tests/alb-controller-ingress-group.tftest.hcl` runs against mock `aws`/`kubernetes` providers:
 `terraform init -backend=false && terraform test`. Covers the group name and internal scheme
-annotations, `manage-backend-security-group-rules`, HTTP-only vs. HTTP+HTTPS listen-ports, that every
-ingress rule references a security group and never a CIDR, the `admit_security_group_ids`/`group_name`
-validations, that the load balancer/listener lookups are wired up, and `enabled = false`.
+annotations, `manage-backend-security-group-rules`, the non-default namespace (created by default,
+skipped with `create_namespace = false`, rejected when set to `"default"`), HTTP-only vs. HTTP+HTTPS
+listen-ports, that every ingress rule references a security group and never a CIDR, the
+`admit_security_group_ids`/`group_name` validations, that the load balancer/listener lookups are wired
+up, and `enabled = false`.
 
 ## Usage
 

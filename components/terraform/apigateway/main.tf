@@ -210,6 +210,7 @@ resource "aws_apigatewayv2_integration" "http_route" {
 }
 
 resource "aws_apigatewayv2_route" "http_route" {
+  #checkov:skip=CKV_AWS_309:authorization_type is per-route (var.http_routes[*].authorization_type, validated to JWT or NONE above); Checkov cannot see the per-entry value through for_each. NONE is a deliberate choice for a route that is meant to be unauthenticated -- every JWT route is still enforced (the validation above requires authorizer_type = "JWT" on this component whenever a route asks for it).
   for_each = local.http_routes
 
   api_id             = aws_apigatewayv2_api.http_api[0].id

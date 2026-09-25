@@ -51,8 +51,19 @@ variable "vpc_id" {
 
 variable "kubernetes_namespace" {
   type        = string
-  description = "Namespace the IngressGroup scaffold's Ingress is created in"
-  default     = "default"
+  description = "Namespace the IngressGroup scaffold's Ingress is created in. Never \"default\" (CKV_K8S_21): create_namespace (below) creates it unless it already exists"
+  default     = "alb-ingress-group"
+
+  validation {
+    condition     = var.kubernetes_namespace != "default"
+    error_message = "kubernetes_namespace must not be \"default\" (CKV_K8S_21: workloads belong in a purpose-named namespace, not the cluster's default one)."
+  }
+}
+
+variable "create_namespace" {
+  type        = bool
+  description = "Whether to create kubernetes_namespace. Set false when it already exists (created by another component or manually)"
+  default     = true
 }
 
 variable "group_name" {

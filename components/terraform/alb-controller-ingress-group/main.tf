@@ -41,6 +41,8 @@ locals {
   environment = try(var.tags["Environment"], "default")
   name_prefix = "${local.environment}-${var.group_name}"
 
+  create_namespace = local.enabled && var.create_namespace
+
   tls_enabled = local.enabled && var.certificate_arn != null
 
   listen_ports = local.tls_enabled ? [{ HTTP = 80 }, { HTTPS = 443 }] : [{ HTTP = 80 }]
@@ -109,6 +111,17 @@ resource "aws_vpc_security_group_egress_rule" "all" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
+# Never "default" (CKV_K8S_21, validated on var.kubernetes_namespace too):
+# created here unless create_namespace = false says it already exists.
+resource "kubernetes_namespace_v1" "this" {
+  count = local.create_namespace ? 1 : 0
+
+  metadata {
+    name   = var.kubernetes_namespace
+    labels = { "app.kubernetes.io/managed-by" = "terraform" }
+  }
+}
+
 # ---------------------------------------------------------------------------
 # IngressGroup scaffold: no rules of its own, only the group's shared
 # settings and a fixed 404 default backend, so the controller provisions the
@@ -164,6 +177,7 @@ resource "kubernetes_ingress_v1" "this" {
   depends_on = [
     aws_vpc_security_group_ingress_rule.admitted,
     aws_vpc_security_group_egress_rule.all,
+    kubernetes_namespace_v1.this,
   ]
 }
 

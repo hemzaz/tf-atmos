@@ -75,6 +75,43 @@ run "annotations_carry_the_group_name_and_internal_scheme" {
   }
 }
 
+run "creates_a_non_default_namespace_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(kubernetes_namespace_v1.this) == 1 && kubernetes_namespace_v1.this[0].metadata[0].name == "alb-ingress-group"
+    error_message = "kubernetes_namespace defaults to a purpose-named namespace, never \"default\" (CKV_K8S_21), and is created unless create_namespace = false."
+  }
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].namespace == "alb-ingress-group"
+    error_message = "The Ingress is created in var.kubernetes_namespace."
+  }
+}
+
+run "create_namespace_false_skips_it" {
+  command = plan
+
+  variables {
+    create_namespace = false
+  }
+
+  assert {
+    condition     = length(kubernetes_namespace_v1.this) == 0
+    error_message = "create_namespace = false creates no kubernetes_namespace resource (it already exists)."
+  }
+}
+
+run "rejects_the_default_namespace" {
+  command = plan
+
+  variables {
+    kubernetes_namespace = "default"
+  }
+
+  expect_failures = [var.kubernetes_namespace]
+}
+
 run "listen_ports_default_to_http_only" {
   command = plan
 
@@ -212,8 +249,8 @@ run "disabled_creates_nothing" {
   }
 
   assert {
-    condition     = length(kubernetes_ingress_v1.this) == 0 && length(aws_security_group.alb) == 0 && length(aws_vpc_security_group_ingress_rule.admitted) == 0
-    error_message = "enabled = false creates no Ingress, security group or ingress rules."
+    condition     = length(kubernetes_ingress_v1.this) == 0 && length(aws_security_group.alb) == 0 && length(aws_vpc_security_group_ingress_rule.admitted) == 0 && length(kubernetes_namespace_v1.this) == 0
+    error_message = "enabled = false creates no Ingress, security group, ingress rules or namespace."
   }
 
   assert {
