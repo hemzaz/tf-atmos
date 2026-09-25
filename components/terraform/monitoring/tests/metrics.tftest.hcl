@@ -41,8 +41,8 @@ run "alarm_on_any_metric_and_dimension" {
   }
 
   assert {
-    condition     = aws_cloudwatch_metric_alarm.metric["api-5xx"].alarm_name == "test-api-5xx"
-    error_message = "Alarms are named <Environment>-<key>."
+    condition     = aws_cloudwatch_metric_alarm.metric["api-5xx"].alarm_name == "test-monitoring-api-5xx"
+    error_message = "Alarms are named <Environment>-<name>-<key> (name defaults to \"monitoring\")."
   }
 
   assert {
@@ -95,8 +95,8 @@ run "dashboard_body_is_cloudwatch_json" {
   }
 
   assert {
-    condition     = aws_cloudwatch_dashboard.metric["eventbridge"].dashboard_name == "test-eventbridge"
-    error_message = "Dashboards are named <Environment>-<key>."
+    condition     = aws_cloudwatch_dashboard.metric["eventbridge"].dashboard_name == "test-monitoring-eventbridge"
+    error_message = "Dashboards are named <Environment>-<name>-<key> (name defaults to \"monitoring\")."
   }
 
   assert {
@@ -138,8 +138,8 @@ run "saved_logs_insights_query" {
   }
 
   assert {
-    condition     = aws_cloudwatch_query_definition.this["error-analysis"].name == "test/error-analysis"
-    error_message = "Queries are named <Environment>/<key>."
+    condition     = aws_cloudwatch_query_definition.this["error-analysis"].name == "test-monitoring/error-analysis"
+    error_message = "Queries are named <Environment>-<name>/<key> (name defaults to \"monitoring\")."
   }
 
   assert {
@@ -194,7 +194,7 @@ run "dashboards_render_valid_json_with_several_resources" {
   }
 
   assert {
-    condition     = length(jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets) > 0
+    condition     = length(jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets) > 0
     error_message = "The infrastructure overview dashboard body is valid JSON."
   }
 
@@ -250,6 +250,37 @@ run "rejects_a_widget_without_metrics" {
   variables {
     metric_dashboards = {
       empty = { widgets = [{ title = "nothing", metrics = [] }] }
+    }
+  }
+
+  expect_failures = [var.metric_dashboards]
+}
+
+run "rejects_a_custom_dashboard_key_reserved_by_a_built_in_dashboard" {
+  command = plan
+
+  # A custom_dashboards key equal to a built-in dashboard's fixed name suffix
+  # (e.g. "backend-services") would build the exact same
+  # "<name_prefix>-backend-services" CloudWatch dashboard name as
+  # aws_cloudwatch_dashboard.backend_services, and both Terraform resources
+  # would then manage the same AWS object.
+  variables {
+    custom_dashboards = {
+      backend-services = { body = jsonencode({ widgets = [] }) }
+    }
+  }
+
+  expect_failures = [var.custom_dashboards]
+}
+
+run "rejects_a_metric_dashboard_key_reserved_by_a_built_in_dashboard" {
+  command = plan
+
+  variables {
+    metric_dashboards = {
+      infrastructure-overview = {
+        widgets = [{ title = "x", metrics = [{ namespace = "AWS/Events", metric = "Invocations" }] }]
+      }
     }
   }
 

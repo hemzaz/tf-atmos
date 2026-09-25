@@ -3,6 +3,11 @@ output "instance_id" {
   description = "ID of the RDS instance"
 }
 
+output "instance_identifier" {
+  value       = aws_db_instance.main.identifier
+  description = "DB instance identifier (<Environment>-<identifier>) — the DBInstanceIdentifier CloudWatch dimension. Since AWS provider v5, instance_id is the DBI resource ID (db-XXXX...), not this identifier; use this output wherever the CloudWatch dimension is needed"
+}
+
 output "instance_address" {
   value       = aws_db_instance.main.address
   description = "Address of the RDS instance"

@@ -60,12 +60,30 @@ variable "metric_dashboards" {
       }))
     }))
   }))
-  description = "Dashboards of metric widgets, named <Environment>-<key>; each widget plots its metrics on one time series graph"
+  description = "Dashboards of metric widgets, named <name_prefix>-<key>; each widget plots its metrics on one time series graph. key must not collide with a built-in dashboard's fixed name suffix (see validation)"
   default     = {}
 
   validation {
     condition     = alltrue(flatten([for d in values(var.metric_dashboards) : [for w in d.widgets : length(w.metrics) > 0]]))
     error_message = "Every metric_dashboards widget needs at least one metric."
+  }
+
+  # See the matching validation on custom_dashboards (variables.tf) for why:
+  # metric_dashboards builds the exact same "<name_prefix>-<key>" dashboard
+  # name as custom_dashboards and the built-in dashboards.
+  validation {
+    condition = alltrue([
+      for k in keys(var.metric_dashboards) : !contains([
+        "infrastructure-overview",
+        "security-monitoring",
+        "cost-optimization",
+        "performance-metrics",
+        "application-metrics",
+        "certificates",
+        "backend-services",
+      ], k)
+    ])
+    error_message = "metric_dashboards keys must not collide with a built-in dashboard's fixed name suffix: infrastructure-overview, security-monitoring, cost-optimization, performance-metrics, application-metrics, certificates, backend-services."
   }
 }
 

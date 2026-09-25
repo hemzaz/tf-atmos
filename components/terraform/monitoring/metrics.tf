@@ -7,7 +7,7 @@
 resource "aws_cloudwatch_metric_alarm" "metric" {
   for_each = var.metric_alarms
 
-  alarm_name          = "${var.tags["Environment"]}-${each.key}"
+  alarm_name          = "${local.name_prefix}-${each.key}"
   alarm_description   = coalesce(each.value.description, "${each.value.namespace} ${each.value.metric_name} ${each.value.comparison_operator} ${each.value.threshold}")
   namespace           = each.value.namespace
   metric_name         = each.value.metric_name
@@ -22,14 +22,14 @@ resource "aws_cloudwatch_metric_alarm" "metric" {
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
   ok_actions          = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
 
-  tags = { Name = "${var.tags["Environment"]}-${each.key}" }
+  tags = { Name = "${local.name_prefix}-${each.key}" }
 }
 
 # Each widget is 12 wide and 6 high, two per row, in the order given.
 resource "aws_cloudwatch_dashboard" "metric" {
   for_each = var.metric_dashboards
 
-  dashboard_name = "${var.tags["Environment"]}-${each.key}"
+  dashboard_name = "${local.name_prefix}-${each.key}"
   dashboard_body = jsonencode({
     widgets = [
       for i, w in each.value.widgets : {
@@ -59,7 +59,7 @@ resource "aws_cloudwatch_dashboard" "metric" {
 resource "aws_cloudwatch_query_definition" "this" {
   for_each = var.log_insights_queries
 
-  name            = "${var.tags["Environment"]}/${each.key}"
+  name            = "${local.name_prefix}/${each.key}"
   log_group_names = each.value.log_group_names
   query_string    = each.value.query
 }

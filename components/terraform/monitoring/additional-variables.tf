@@ -54,7 +54,7 @@ variable "ec2_instance_ids" {
 # EKS Monitoring Variables
 variable "eks_min_node_count" {
   type        = number
-  description = "Minimum healthy EKS node count"
+  description = "Cluster-wide minimum node count for the eks_node_count_low alarm (alarms.tf); should be set to the sum of every node group's min_group_size for this cluster, so the alarm only fires below the cluster's own guaranteed floor"
   default     = 2
 }
 

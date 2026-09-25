@@ -101,20 +101,54 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
   }
 }
 
-# EKS Node Not Ready
+# EKS Node Not Ready. cluster_failed_node_count is the Container Insights
+# cluster-level metric for nodes in a failed/NotReady state (see
+# https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Container-Insights-metrics-EKS.html);
+# firing on GreaterThanThreshold 0 alarms whenever any node is not ready,
+# independent of how many nodes the cluster is sized for. This used to
+# compare cluster_node_count (the cluster's *total* node count) against
+# eks_min_node_count's default of 2, which permanently alarmed on every
+# cluster sized above 2 nodes (see eks_node_count_low below for that check,
+# done correctly).
 resource "aws_cloudwatch_metric_alarm" "eks_node_not_ready" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-eks-node-not-ready"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "2"
+  metric_name         = "cluster_failed_node_count"
+  namespace           = "ContainerInsights"
+  period              = "300"
+  statistic           = "Maximum"
+  threshold           = "0"
+  alarm_description   = "EKS cluster ${var.eks_cluster_name} has nodes in NotReady state"
+  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    ClusterName = var.eks_cluster_name
+  }
+}
+
+# EKS Cluster Node Count Low. cluster_node_count (the cluster's total node
+# count, Container Insights) below eks_min_node_count - the cluster's own
+# guaranteed floor (the sum of each node group's min_group_size; see that
+# variable's description) - for 3 consecutive 5-minute periods, long enough
+# to ride out a normal rolling node replacement without flapping.
+resource "aws_cloudwatch_metric_alarm" "eks_node_count_low" {
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
+
+  alarm_name          = "${local.name_prefix}-eks-node-count-low"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "3"
   metric_name         = "cluster_node_count"
   namespace           = "ContainerInsights"
   period              = "300"
   statistic           = "Average"
   threshold           = var.eks_min_node_count
-  alarm_description   = "EKS cluster ${var.eks_cluster_name} has nodes in NotReady state"
+  alarm_description   = "EKS cluster ${var.eks_cluster_name} has fewer than ${var.eks_min_node_count} nodes (below its configured minimum capacity)"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  treat_missing_data  = "notBreaching"
 
   dimensions = {
     ClusterName = var.eks_cluster_name
@@ -123,7 +157,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_node_not_ready" {
 
 # API Gateway 4XX Errors
 resource "aws_cloudwatch_metric_alarm" "api_gateway_4xx_errors" {
-  for_each = var.enable_backend_monitoring && length(var.api_gateway_stages) > 0 ? toset(var.api_gateway_stages) : []
+  for_each = var.enable_backend_monitoring && var.api_gateway_name != "" && length(local.api_gateway_stages) > 0 ? toset(local.api_gateway_stages) : []
 
   alarm_name          = "${local.name_prefix}-api-gateway-${each.value}-4xx-errors"
   comparison_operator = "GreaterThanThreshold"
@@ -179,11 +213,13 @@ resource "aws_cloudwatch_metric_alarm" "flow_logs_delivery_failure" {
   treat_missing_data  = "notBreaching"
 }
 
-# Application ELB Target Response Time
+# Application ELB Target Response Time. Iterates local.load_balancer_ids
+# (dashboards.tf), not var.load_balancers directly - see the comment on
+# alb_response_time/alb_unhealthy_hosts in main.tf for why.
 resource "aws_cloudwatch_metric_alarm" "alb_target_response_time_p99" {
-  for_each = var.enable_backend_monitoring && var.enable_percentile_alarms ? toset(var.load_balancers) : []
+  for_each = var.enable_backend_monitoring && var.enable_percentile_alarms ? toset(local.load_balancer_ids) : []
 
-  alarm_name          = "${local.name_prefix}-alb-${each.value}-p99-response-time"
+  alarm_name          = "${local.name_prefix}-alb-${replace(each.value, "/", "-")}-p99-response-time"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "3"
   threshold           = var.alb_p99_response_time_threshold

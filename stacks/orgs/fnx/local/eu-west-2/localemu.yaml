@@ -212,9 +212,11 @@ components:
     #
     # This instance is what found that api_gateway_name defaulted to null while
     # enable_backend_monitoring defaulted true, so every monitoring instance in
-    # dev, staging AND prod failed at PLAN time inside templatefile(). No stack
-    # sets either variable. See the comment on the variable in
-    # components/terraform/monitoring/variables.tf.
+    # dev, staging AND prod failed at PLAN time inside templatefile(). All 6
+    # real monitoring instances now set api_gateway_name from apigateway's
+    # api_name output via !terraform.state; this localemu instance keeps the
+    # "" default, which drops the API Gateway widgets and alarms here. See the
+    # comment on the variable in components/terraform/monitoring/variables.tf.
     monitoring/main:
       metadata:
         component: monitoring
