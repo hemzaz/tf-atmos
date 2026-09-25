@@ -2,9 +2,10 @@
 # workflows select reads state they do not deploy, so these must already be
 # applied (deploy-full-stack, layers backend through dns): kms/main, vpc/*,
 # eks/* (where present), acm/* and the dns zones (network/main, network/services).
-# monitoring also reads rds/*, elasticache/main (backend layer) and lambda/*
-# for dashboard/alarm dimensions; lambda and ecs are applied by this workflow,
-# but rds and elasticache come only from the backend layer, not from deploy-app.
+# monitoring also reads rds/*, elasticache/main (deploy-full-stack data layer) and
+# lambda/* for dashboard/alarm dimensions; lambda and ecs are applied by this
+# workflow, but rds and elasticache come only from deploy-full-stack's data
+# layer, not from deploy-app.
 #
 # hot-deploy is the one exception to "review a saved plan, then apply exactly
 # that plan": it is a fast path for redeploying Cognito, Lambda and API Gateway,

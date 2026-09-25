@@ -168,8 +168,13 @@ mock provider with `terraform init -backend=false && terraform test`.
 
 ## Dependencies & gotchas
 
-- Depends on `vpc/main` + `acm/main` + `kms/main` (main instance), `vpc/main`
-  + `acm/services` + `kms/main` (data instance).
+- Every instance depends on `vpc/main` + `kms/main`, plus `acm/main` (main
+  instance) or `acm/services` (data instance), plus whatever it watches for
+  dashboard/alarm dimensions — `eks/*`, `rds/*`, `apigateway/*`, and
+  per-instance/per-stack extras (`ecs/main` and, in prod, `elasticache/main`
+  for `monitoring/main`; `lambda/*` for `monitoring/data`). See the Deployed
+  table above for the exact `dependencies.components` list per stack and
+  instance.
 - `tags` must have a non-empty `Environment` value (validated) — also used to
   build the `BusinessMetrics/<Environment>` namespace.
 - `kms_key_id` (a KMS key ARN, validated) encrypts `aws_cloudwatch_log_group.main`
