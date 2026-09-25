@@ -1,0 +1,37 @@
+---
+##################################################
+# Catalog Configuration for AWS Step Functions
+##################################################
+# One state machine per instance (the Cloud Posse aws-step-functions model).
+# Instances inherit this base and set `name`, `definition` and, as needed,
+# `logging_configuration`, `tracing_enabled`, `iam_policies` and
+# `events_role_enabled`.
+
+components:
+  terraform:
+    stepfunctions/defaults:
+      metadata:
+        component: stepfunctions
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults), with
+        # allow_cloudwatch_logs on (unscoped to a log group name pattern), so
+        # this resolves everywhere, including for the
+        # /aws/vendedlogs/states/ log group prefix.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        type: STANDARD
+        logging_configuration:
+          level: ERROR
+          include_execution_data: false
+        tracing_enabled: false
+        iam_policies: []
+        events_role_enabled: false
+        tags:
+          Component: "StepFunctions"
