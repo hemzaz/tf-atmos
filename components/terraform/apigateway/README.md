@@ -7,6 +7,11 @@ geo-block + AWS managed rules), caching/throttling, a dashboard, and 4xx/5xx/lat
 
 Real instances `apigateway/main` and `apigateway/data` in all 3 stacks; the catalog's
 `apigateway_domain`/`apigateway_http`/`apigateway_rest` entries are abstract.
+`stacks/catalog/templates/serverless-api.yaml`'s `serverless-api/apigateway` sets
+`domain_name`/`certificate_arn`/`base_path`/`zone_id` directly on this component too,
+the same way `apigateway/main` does in the 3 real stacks: no separate domain component
+(mirrors `cloudposse-terraform-components/aws-api-gateway-rest-api`, which configures
+its custom domain the same way).
 
 ## Inputs / Outputs
 
@@ -17,6 +22,7 @@ Real instances `apigateway/main` and `apigateway/data` in all 3 stacks; the cata
 | `api_methods` | addressed by `resource_path` (`/` is the API root), never by resource id |
 | `api_integrations` | exactly one per method, same `resource_path` + `http_method`; `uri` required unless `type` is `MOCK` |
 | `domain_name`, `certificate_arn` | both required together for the custom domain |
+| `base_path` | default `null` (root mapping, same as `""`); the mapping is the custom domain's only path when unset |
 | `zone_id` | required for the Route53 alias record |
 | `enable_waf` / `tracing_enabled` | both default false; prod opts in per instance. X-Ray bills per trace, so dev/staging stay off |
 | `waf_common_rule_set_action`, `waf_known_bad_inputs_action` | `block` (default) or `count`, one per AWS managed rule group, so either can be soaked without relaxing the other |
@@ -30,6 +36,12 @@ Real instances `apigateway/main` and `apigateway/data` in all 3 stacks; the cata
   `acm/services`, `network/services`.
 - Custom-domain resources are silently skipped if only one of `domain_name` /
   `certificate_arn` is set; `zone_id` must be non-null or the alias record is skipped too.
+- The REST custom domain always uses `regional_certificate_arn` and `security_policy =
+  "TLS_1_2"`, so it requires `endpoint_type = ["REGIONAL"]`; a `lifecycle.precondition`
+  blocks `EDGE`/`PRIVATE` + a domain at plan time (EDGE needs a us-east-1
+  `certificate_arn`, not `regional_certificate_arn`, and PRIVATE has no regional custom
+  domain). Both real instances (`apigateway/main`, `apigateway/data`) use the REGIONAL
+  default, so this never applies to them.
 - `api_resources` hangs every resource off the API root, so declarable paths are one level deep. An
   entry with an explicit external `parent_id` is still keyed `/<path_part>`, not its real URL.
 - The deployment redeploys whenever `api_resources`/`api_methods`/`api_integrations` change. The
@@ -42,8 +54,10 @@ Real instances `apigateway/main` and `apigateway/data` in all 3 stacks; the cata
 
 ## Tests
 
-`tests/http_api.tftest.hcl` (CORS, stage throttling, VPC link) runs against a
-mock provider: `terraform init -backend=false && terraform test`.
+`tests/http_api.tftest.hcl` (CORS, stage throttling, VPC link) and
+`tests/custom_domain.tftest.hcl` (REST custom domain: TLS_1_2/REGIONAL, root
+base path, Route53 alias, and the two "one input without the other" skip
+cases) run against a mock provider: `terraform init -backend=false && terraform test`.
 
 ## Usage
 
