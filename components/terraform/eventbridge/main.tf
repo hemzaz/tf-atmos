@@ -123,6 +123,42 @@ resource "aws_cloudwatch_event_target" "this" {
     }
   }
 
+  dynamic "ecs_target" {
+    for_each = each.value.ecs_target != null ? [each.value.ecs_target] : []
+
+    content {
+      task_definition_arn     = ecs_target.value.task_definition_arn
+      task_count              = ecs_target.value.task_count
+      launch_type             = ecs_target.value.launch_type
+      platform_version        = ecs_target.value.platform_version
+      group                   = ecs_target.value.group
+      enable_ecs_managed_tags = ecs_target.value.enable_ecs_managed_tags
+      enable_execute_command  = ecs_target.value.enable_execute_command
+      propagate_tags          = ecs_target.value.propagate_tags
+
+      dynamic "network_configuration" {
+        for_each = ecs_target.value.network_configuration != null ? [ecs_target.value.network_configuration] : []
+
+        content {
+          subnets          = network_configuration.value.subnets
+          security_groups  = network_configuration.value.security_groups
+          assign_public_ip = network_configuration.value.assign_public_ip
+        }
+      }
+    }
+  }
+
+  dynamic "batch_target" {
+    for_each = each.value.batch_target != null ? [each.value.batch_target] : []
+
+    content {
+      job_definition = batch_target.value.job_definition
+      job_name       = batch_target.value.job_name
+      array_size     = batch_target.value.array_size
+      job_attempts   = batch_target.value.job_attempts
+    }
+  }
+
   dynamic "sqs_target" {
     for_each = each.value.sqs_message_group_id != null ? [each.value.sqs_message_group_id] : []
 

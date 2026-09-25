@@ -386,6 +386,143 @@ run "role_targets_take_a_role" {
   }
 }
 
+run "ecs_and_batch_targets_carry_what_to_run" {
+  command = plan
+
+  variables {
+    targets = {
+      task = {
+        arn      = "arn:aws:ecs:eu-west-2:123456789012:cluster/test-cluster"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-ecs"
+        ecs_target = {
+          task_definition_arn = "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3"
+          launch_type         = "FARGATE"
+          network_configuration = {
+            subnets         = ["subnet-0123456789abcdef0"]
+            security_groups = ["sg-0123456789abcdef0"]
+          }
+        }
+      }
+      job = {
+        arn      = "arn:aws:batch:eu-west-2:123456789012:job-queue/test-queue"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-batch"
+        batch_target = {
+          job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/test-job:1"
+          job_name       = "test-job"
+          job_attempts   = 3
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.this["task"].ecs_target[0].task_definition_arn == "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3"
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].task_count == 1
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].launch_type == "FARGATE"
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].network_configuration[0].subnets == toset(["subnet-0123456789abcdef0"])
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].network_configuration[0].assign_public_ip == false
+    )
+    error_message = "ecs_target becomes the target's ecs_target block, one task, no public IP by default."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.this["job"].batch_target[0].job_name == "test-job"
+      && aws_cloudwatch_event_target.this["job"].batch_target[0].job_attempts == 3
+      && length(aws_cloudwatch_event_target.this["job"].ecs_target) == 0
+    )
+    error_message = "batch_target becomes the target's batch_target block."
+  }
+}
+
+run "rejects_an_ecs_target_without_a_task" {
+  command = plan
+
+  variables {
+    targets = {
+      task = {
+        arn      = "arn:aws:ecs:eu-west-2:123456789012:cluster/test-cluster"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-ecs"
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_fargate_task_without_a_network" {
+  command = plan
+
+  variables {
+    targets = {
+      task = {
+        arn      = "arn:aws:ecs:eu-west-2:123456789012:cluster/test-cluster"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-ecs"
+        ecs_target = {
+          task_definition_arn = "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3"
+          launch_type         = "FARGATE"
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_an_ecs_task_on_a_queue_target" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn        = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        ecs_target = { task_definition_arn = "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3" }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_fifo_target_dead_letter_queue" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn                = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        dead_letter_config = { arn = "arn:aws:sqs:eu-west-2:123456789012:test-dlq.fifo" }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_fifo_bus_dead_letter_queue" {
+  command = plan
+
+  variables {
+    create_event_bus  = true
+    event_bus_dlq_arn = "arn:aws:sqs:eu-west-2:123456789012:test-dlq.fifo"
+  }
+
+  expect_failures = [var.event_bus_dlq_arn]
+}
+
+run "rejects_a_fifo_queue_target_without_a_message_group" {
+  command = plan
+
+  variables {
+    targets = {
+      orders = { arn = "arn:aws:sqs:eu-west-2:123456789012:test-orders.fifo" }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
 run "disabled_creates_no_targets" {
   command = plan
 

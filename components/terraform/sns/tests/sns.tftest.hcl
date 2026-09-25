@@ -388,6 +388,86 @@ run "rejects_a_public_allow_pinned_to_a_wildcard" {
   expect_failures = [var.sns_topic_policy_json]
 }
 
+run "rejects_a_public_allow_pinned_by_for_all_values" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        # ForAllValues: is true when the key is absent.
+        Condition = { "ForAllValues:StringEquals" = { "aws:PrincipalOrgID" = ["o-example"] } }
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_a_public_allow_pinned_to_wildcards_only" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Condition = { StringLike = { "aws:SourceAccount" = "?*" } }
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_an_unpinned_service_allow_in_policy_json" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { Service = "s3.amazonaws.com" }
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "pinned_service_allow_in_policy_json_is_accepted" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid       = "AllowBucketEvents"
+        Effect    = "Allow"
+        Principal = { Service = "s3.amazonaws.com" }
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Condition = { ArnLike = { "aws:SourceArn" = "arn:aws:s3:::test-bucket" } }
+      }]
+    })
+  }
+
+  assert {
+    condition     = contains([for s in jsondecode(data.aws_iam_policy_document.topic[0].json).Statement : s.Sid], "AllowBucketEvents")
+    error_message = "A Service Allow pinned by aws:SourceArn is accepted and merged."
+  }
+}
+
 run "rejects_not_principal_with_odd_cased_keys" {
   command = plan
 

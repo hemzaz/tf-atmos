@@ -262,7 +262,8 @@ variable "iam_policy" {
   # a condition on aws:SourceAccount, aws:SourceArn, aws:SourceOwner,
   # aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or
   # aws:PrincipalArn (any case), under an operator that is not negated,
-  # ...IfExists or Null, with no value that is "*". The account limit only
+  # ...IfExists, Null or ForAllValues:... (each lets a caller without the key
+  # through), with no value made only of wildcards. The account limit only
   # counts for a statement it is added to: one without its own
   # aws:SourceAccount condition (see main.tf).
   validation {
@@ -273,10 +274,11 @@ variable "iam_policy" {
       || anytrue([for c in s.conditions :
         contains(["aws:sourceaccount", "aws:sourcearn", "aws:sourceowner", "aws:sourceorgid", "aws:principalorgid", "aws:principalaccount", "aws:principalarn"], lower(c.variable))
         && !strcontains(lower(c.test), "not") && !endswith(lower(c.test), "ifexists") && lower(c.test) != "null"
-        && length(c.values) > 0 && !contains(c.values, "*")
+        && !startswith(lower(c.test), "forallvalues:")
+        && length(c.values) > 0 && !anytrue([for x in c.values : replace(replace(x, "*", ""), "?", "") == ""])
       ])
     ]]))
-    error_message = "An iam_policy Allow for a Service principal must pin the caller: through iam_policy_limit_to_current_account, or with a condition on aws:SourceAccount, aws:SourceArn, aws:SourceOwner, aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or aws:PrincipalArn, under a positive operator (not ...Not..., ...IfExists or Null) and not \"*\"."
+    error_message = "An iam_policy Allow for a Service principal must pin the caller: through iam_policy_limit_to_current_account, or with a condition on aws:SourceAccount, aws:SourceArn, aws:SourceOwner, aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or aws:PrincipalArn, under a positive operator (not ...Not..., ...IfExists, Null or ForAllValues:...) and with a value that is not only wildcards."
   }
 
   validation {

@@ -468,6 +468,41 @@ run "rejects_a_service_allow_pinned_only_if_the_key_exists" {
   expect_failures = [var.iam_policy]
 }
 
+run "rejects_a_service_allow_pinned_by_for_all_values" {
+  command = plan
+
+  variables {
+    iam_policy_limit_to_current_account = false
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+        # ForAllValues: is true when the key is absent.
+        conditions = [{ test = "ForAllValues:ArnEquals", variable = "aws:SourceArn", values = ["arn:aws:sns:eu-west-2:123456789012:test-topic"] }]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
+}
+
+run "rejects_a_service_allow_pinned_to_wildcards_only" {
+  command = plan
+
+  variables {
+    iam_policy_limit_to_current_account = false
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+        conditions = [{ test = "ArnLike", variable = "aws:SourceArn", values = ["?*"] }]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
+}
+
 run "rejects_a_service_allow_pinned_to_a_wildcard" {
   command = plan
 
