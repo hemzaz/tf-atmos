@@ -44,6 +44,15 @@ on:
       - .trivyignore.yaml
       - .checkov.baseline
       - .github/workflows/terraform-ci.yml
+  # master only ever moves by a squash-merged, already-PR-gated commit, so a
+  # push here re-running the full static-analysis/plan-sweep/security-scan
+  # sweep is pure redundant cost -- those jobs opt back out with
+  # `if: github.event_name != 'push'` below. terraform-test does NOT opt out:
+  # it is the one gate that must also run post-merge (see its own `needs`-free
+  # `if`), since a component's tests/ must stay green on master, not just on
+  # the PR that touched it.
+  push:
+    branches: [master]
   merge_group:
 
 permissions: {}
@@ -51,6 +60,7 @@ permissions: {}
 jobs:
   lint:
     name: Lint & validate
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
@@ -88,6 +98,7 @@ jobs:
     # gate in the file, and a lint failure should not hide a sweep failure or
     # the other way round.
     name: Plan sweep
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     # ~9 minutes on a clean run. A hung plan otherwise holds a runner for the
     # 6-hour default before anyone hears about it.
@@ -118,6 +129,7 @@ jobs:
 
   security-scan:
     name: Security scan
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
@@ -142,8 +154,157 @@ jobs:
         with:
           sarif_file: reports
 
+  terraform-test:
+    # Runs `terraform test` (tests/*.tftest.hcl) for every component that has
+    # a tests/ directory. Unlike lint/plan-sweep/security-scan/affected above,
+    # this job does NOT opt out of `push`: a component's unit tests must stay
+    # green on master too, not only on the PR that last touched it.
+    name: Terraform tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+    permissions:
+      contents: read
+    env:
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tf-plugin-cache
+      # Some tests (components/terraform/kms) exercise the real aws provider
+      # with dummy credentials -- see the comment in that test file -- never
+      # real ones. Setting them here means every step in this job, including
+      # ones that don't go through the atmos-installed terraform, agrees.
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: eu-west-2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # fetch-depth: 0 -- the component-selection step below diffs against
+          # the PR's base SHA, which needs history beyond the merge commit.
+          fetch-depth: 0
+          persist-credentials: false
+      # Same "dubious ownership" cause as the other jobs above: the workspace
+      # is owned by the runner's user and the container runs as root.
+      - name: Allow git operations in the container's workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # `dependencies.tools` (the repo's usual toolchain pattern) only injects
+      # terraform into the PATH of the `atmos workflow`/`atmos terraform`
+      # subprocess that declares it. The steps below run terraform directly
+      # (providers lock, then the test script) so they can sit around
+      # actions/cache, which is a GitHub Action, not something an atmos
+      # workflow step can invoke -- so terraform needs to be on $GITHUB_PATH
+      # for the rest of this job instead.
+      - name: Install Terraform from the toolchain
+        run: |
+          atmos toolchain install terraform@1.16.3
+          atmos toolchain env --format=github
+      # Component-directory-level selection, deliberately separate from the
+      # `affected` job's stack/component matrix above: that job diffs stack
+      # instances for planning, but a component with no stack instance (or a
+      # `_library` submodule with none of its own) would never show up there.
+      # This selects by component *directory*, and independently walks each
+      # candidate's own .tf files for `source = "../..."` references so a
+      # change to a shared module (e.g. kms sourcing ../_library/kms-key)
+      # re-runs the tests of every component that sources it.
+      - id: components
+        name: Determine which components to test
+        shell: python3 {0}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          import os, re, subprocess
+
+          TERRAFORM_DIR = "components/terraform"
+          event_name = os.environ["EVENT_NAME"]
+          base_sha = os.environ.get("BASE_SHA") or ""
+
+          def has_tests(component):
+              return os.path.isdir(os.path.join(TERRAFORM_DIR, component, "tests"))
+
+          all_components = sorted(
+              c for c in os.listdir(TERRAFORM_DIR)
+              if c != "_library"
+              and os.path.isdir(os.path.join(TERRAFORM_DIR, c))
+              and has_tests(c)
+          )
+
+          SOURCE_RE = re.compile(r'source\s*=\s*"(\.\./[^"]+)"')
+
+          def sourced_dirs(component):
+              comp_dir = os.path.join(TERRAFORM_DIR, component)
+              dirs = set()
+              for name in os.listdir(comp_dir):
+                  if not name.endswith(".tf"):
+                      continue
+                  with open(os.path.join(comp_dir, name), encoding="utf-8") as fh:
+                      text = fh.read()
+                  for m in SOURCE_RE.finditer(text):
+                      target = os.path.normpath(os.path.join(comp_dir, m.group(1)))
+                      if target.startswith(TERRAFORM_DIR + os.sep):
+                          dirs.add(target)
+              return dirs
+
+          if event_name == "pull_request" and base_sha:
+              diff = subprocess.run(
+                  ["git", "diff", "--name-only", f"{base_sha}...HEAD"],
+                  check=True, capture_output=True, text=True,
+              ).stdout.splitlines()
+              changed = [p for p in diff if p]
+              selected = []
+              for component in all_components:
+                  watch = {os.path.join(TERRAFORM_DIR, component)} | sourced_dirs(component)
+                  prefixes = tuple(w.rstrip("/") + "/" for w in watch)
+                  if any(f.startswith(prefixes) for f in changed):
+                      selected.append(component)
+          else:
+              # push (to master) and merge_group: no base to diff against that
+              # means anything -- test every component that has tests.
+              selected = list(all_components)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"all={' '.join(all_components)}\n")
+              out.write(f"list={' '.join(selected)}\n")
+
+          print(f"testable components: {all_components}")
+          print(f"selected for this run ({event_name}): {selected}")
+      # Lock files are gitignored in this repo (never committed), so they
+      # don't exist at checkout -- generate them for every testable component
+      # (not just the ones selected above) so the cache key below is stable
+      # and shared across runs regardless of which subset a given PR touches.
+      # `providers lock` only fetches registry metadata/checksums, not the
+      # provider binaries, so this is cheap even though it runs unconditionally.
+      - name: Generate lock files for the plugin cache key
+        env:
+          ALL_COMPONENTS: ${{ steps.components.outputs.all }}
+        run: |
+          set -eu
+          for component in $ALL_COMPONENTS; do
+            terraform -chdir="components/terraform/$component" providers lock -platform=linux_amd64
+          done
+      - name: Restore/save the Terraform provider plugin cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tfplugins-${{ runner.os }}-${{ hashFiles('components/terraform/*/.terraform.lock.hcl') }}
+          restore-keys: |
+            tfplugins-${{ runner.os }}-
+      - name: Run terraform test
+        if: steps.components.outputs.list != ''
+        env:
+          COMPONENTS: ${{ steps.components.outputs.list }}
+        # $COMPONENTS is deliberately unquoted: it is a space-separated list of
+        # component directory names (never contains spaces or glob metachars)
+        # and terraform-test.sh takes each one as its own positional argument.
+        run: |
+          # shellcheck disable=SC2086
+          workflows/scripts/common/terraform-test.sh $COMPONENTS
+      - name: No affected component tests
+        if: steps.components.outputs.list == ''
+        run: echo "No component under components/terraform/ with a tests/ directory was affected by this change."
+
   affected:
     name: Affected components
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
