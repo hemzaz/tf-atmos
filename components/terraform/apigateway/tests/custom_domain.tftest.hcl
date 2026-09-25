@@ -140,3 +140,20 @@ run "no_route53_record_without_zone_id" {
     error_message = "The custom domain itself does not need zone_id, only its alias record does."
   }
 }
+
+run "non_regional_endpoint_with_domain_fails_precondition" {
+  # regional_certificate_arn (used unconditionally above) only works with a
+  # REGIONAL endpoint; EDGE/PRIVATE would plan fine and fail at apply. The
+  # precondition on aws_api_gateway_domain_name.rest_domain catches this at
+  # plan time instead.
+  command = plan
+
+  variables {
+    domain_name     = "api.example.com"
+    certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/11111111-1111-1111-1111-111111111111"
+    base_path       = ""
+    endpoint_type   = ["EDGE"]
+  }
+
+  expect_failures = [aws_api_gateway_domain_name.rest_domain]
+}

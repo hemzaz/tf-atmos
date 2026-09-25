@@ -36,6 +36,12 @@ its custom domain the same way).
   `acm/services`, `network/services`.
 - Custom-domain resources are silently skipped if only one of `domain_name` /
   `certificate_arn` is set; `zone_id` must be non-null or the alias record is skipped too.
+- The REST custom domain always uses `regional_certificate_arn` and `security_policy =
+  "TLS_1_2"`, so it requires `endpoint_type = ["REGIONAL"]`; a `lifecycle.precondition`
+  blocks `EDGE`/`PRIVATE` + a domain at plan time (EDGE needs a us-east-1
+  `certificate_arn`, not `regional_certificate_arn`, and PRIVATE has no regional custom
+  domain). Both real instances (`apigateway/main`, `apigateway/data`) use the REGIONAL
+  default, so this never applies to them.
 - `api_resources` hangs every resource off the API root, so declarable paths are one level deep. An
   entry with an explicit external `parent_id` is still keyed `/<path_part>`, not its real URL.
 - The deployment redeploys whenever `api_resources`/`api_methods`/`api_integrations` change. The

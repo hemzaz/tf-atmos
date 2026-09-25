@@ -331,8 +331,9 @@ components:
         # cloudposse-terraform-components/aws-api-gateway-rest-api, which
         # configures its custom domain the same way, directly on the API
         # Gateway component (domain_name/certificate_arn), with no separate
-        # domain component. security_policy is always "TLS_1_2" and the
-        # endpoint is always REGIONAL (main.tf), matching endpoint_type above.
+        # domain component. security_policy is always "TLS_1_2"; REGIONAL
+        # comes from endpoint_type above (main.tf enforces this pairing when
+        # a domain is set — a REST domain requires endpoint_type == REGIONAL).
         domain_name: "api.{{ .vars.app_domain_name }}"
         certificate_arn: !terraform.state serverless-api/acm .certificate_arns.api
         base_path: ""
