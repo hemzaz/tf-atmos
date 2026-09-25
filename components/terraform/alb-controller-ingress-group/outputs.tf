@@ -37,3 +37,8 @@ output "https_listener_arn" {
   description = "ARN of the ALB's HTTPS (443) listener; null unless certificate_arn is set"
   value       = local.tls_enabled ? data.aws_lb_listener.https[0].arn : null
 }
+
+output "member_listen_ports_annotation" {
+  description = "The exact alb.ingress.kubernetes.io/listen-ports value this component's Ingress sets (jsonencode([{HTTPS=443}]) when certificate_arn is set, jsonencode([{HTTP=80}]) otherwise). listen-ports is merged (unioned) across every Ingress in the IngressGroup, not required to match -- a member Ingress that omits it defaults to [{\"HTTP\":80}], which opens an extra plaintext :80 listener on the shared ALB. Per-microservice Ingresses that join group_name must set alb.ingress.kubernetes.io/listen-ports to this exact value (or omit it only when it is already [{\"HTTP\":80}]) so their rules land on the listener apigateway's http_routes actually reach"
+  value       = local.enabled ? jsonencode(local.listen_ports) : null
+}

@@ -41,11 +41,11 @@ here, belt-and-braces in case `ingressClassParams` is ever loosened.
 | `group_name` | The IngressGroup name; also the `ingress.k8s.aws/stack` tag `data aws_lb` filters on. Validated: lowercase alphanumeric + hyphens, 1-63 characters (a valid IngressGroup name) |
 | `admit_security_group_ids` | Required, non-empty. Security groups admitted on the ALB's listener ports — never a CIDR block. Typically the API Gateway VPC link's security group (`microservices/securitygroup/vpc-link`) |
 | `ingress_class_name` (`"alb"`) | The IngressClass this Ingress's `spec.ingress_class_name` references — eks-addons's default IngressClass name |
-| `certificate_arn` (null) | Set to open an HTTPS (443) listener *instead of* HTTP (80) — never both, so no plaintext listener stays reachable once TLS is on. `microservices-platform` sets this from a `microservices/acm` instance, so `apigateway`'s `http_routes` hop to this ALB is TLS end to end (see `apigateway/README.md`) |
+| `certificate_arn` (null) | ACM certificate ARN; when set the ALB listens on HTTPS (443) only, *replacing* HTTP (80) — never both, so no plaintext listener stays reachable once TLS is on. Null (default) creates an HTTP-only (80) ALB. `microservices-platform` sets this from a `microservices/acm` instance, so `apigateway`'s `http_routes` hop to this ALB is TLS end to end (see `apigateway/README.md`) |
 | `ssl_policy` | TLS policy for the HTTPS listener; ignored unless `certificate_arn` is set |
 | `kubernetes_namespace` (`"alb-ingress-group"`) | Namespace the IngressGroup scaffold's Ingress is created in. Never `"default"` (validated, `CKV_K8S_21`) |
 | `create_namespace` (`true`) | Whether this component creates `kubernetes_namespace`; `false` when it already exists |
-| Outputs | `group_name`, `ingress_name`, `security_group_id`, `load_balancer_arn`, `load_balancer_dns_name`, `load_balancer_zone_id`, `http_listener_arn`, `https_listener_arn` (null unless `certificate_arn` is set) |
+| Outputs | `group_name`, `ingress_name`, `security_group_id`, `load_balancer_arn`, `load_balancer_dns_name`, `load_balancer_zone_id`, `http_listener_arn`, `https_listener_arn` (null unless `certificate_arn` is set), `member_listen_ports_annotation` (the exact `alb.ingress.kubernetes.io/listen-ports` value a member Ingress joining `group_name` must set — see the gotcha below) |
 
 ## Dependencies / gotchas
 
@@ -67,10 +67,26 @@ here, belt-and-braces in case `ingressClassParams` is ever loosened.
   in place — it does not replace the group. `listen_ports` itself switches wholesale between
   `[{ HTTP = 80 }]` and `[{ HTTPS = 443 }]` on `certificate_arn`, so setting or clearing it also adds
   or removes that port's ingress rule and the corresponding `data aws_lb_listener` lookup.
-- The controller merges group-wide annotations (`security-groups`, `listen-ports`, `scheme`,
-  `certificate-arn`, `ssl-policy`, `tags`) across every Ingress in an IngressGroup and rejects the group
-  if two members disagree. Per-microservice Ingresses that join `group.name` must omit these annotations
-  entirely, or set them to the exact same values this component does — never a conflicting value.
+- **Group-wide annotations fall into two categories, and mixing them up breaks routing.** `scheme`,
+  `security-groups` and `ssl-policy` are exclusive LoadBalancer-level settings: the controller requires
+  every Ingress in the group to either omit them or set the exact same value, and rejects the group on
+  a conflict. `listen-ports`, `certificate-arn` and `tags` are **merged (unioned)** across the group
+  instead — the controller does not require them to match, it combines them. This matters because this
+  component makes the group HTTPS-only once `certificate_arn` is set (`listen_ports` above switches
+  wholesale to `[{"HTTPS":443}]`, never `[{"HTTP":80}]`): a member Ingress that joins `group.name` and
+  omits `listen-ports` still defaults to `[{"HTTP":80}]` (the AWS Load Balancer Controller's own
+  default), and because the annotation is merged rather than validated, the controller adds that HTTP:80
+  listener to the shared ALB alongside HTTPS:443 rather than rejecting the group — the member's rules
+  land on the new plaintext :80 listener, which `apigateway`'s route (wired to `https_listener_arn`,
+  443) never reaches, so every request through that member's rules 404s. The frontend security group
+  here does not admit :80 either, so that listener also exists but is unreachable from outside the
+  cluster — silent breakage, not a hard failure. **Every member Ingress must therefore set**
+  `alb.ingress.kubernetes.io/listen-ports` **explicitly to this component's `member_listen_ports_annotation`
+  output** (`'[{"HTTPS":443}]'` when `certificate_arn` is set, `'[{"HTTP":80}]'` otherwise) rather than
+  omitting it or hand-copying the value. `certificate-arn` and `tags` are safe to omit on member
+  Ingresses (the union already includes this component's values); `scheme`/`security-groups`/`ssl-policy`
+  must be omitted entirely on members — setting a different value here conflicts and the exact same
+  value is redundant, since those are exclusive to the group-owning Ingress.
 
 ## Tests
 
@@ -80,9 +96,11 @@ annotations, `manage-backend-security-group-rules`, `spec.ingress_class_name` (v
 DNS-1123 label, and the absence of the deprecated `kubernetes.io/ingress.class` annotation), the
 non-default namespace (created by default, skipped with `create_namespace = false`, rejected when
 set to `"default"`), HTTP-only vs. HTTPS-only `listen-ports` (never both -- `certificate_arn` set
-means port 80 is never admitted and the HTTP listener is never looked up), that every ingress rule
-references a security group and never a CIDR, the `admit_security_group_ids`/`group_name`
-validations, that the load balancer/listener lookups are wired up, and `enabled = false`.
+means port 80 is never admitted and the HTTP listener is never looked up), that
+`member_listen_ports_annotation` matches the Ingress's own `listen-ports` annotation in both the
+HTTP-only and HTTPS-only cases, that every ingress rule references a security group and never a
+CIDR, the `admit_security_group_ids`/`group_name` validations, that the load balancer/listener
+lookups are wired up, and `enabled = false`.
 
 ## Usage
 

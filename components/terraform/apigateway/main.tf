@@ -208,10 +208,13 @@ resource "aws_apigatewayv2_integration" "http_route" {
   timeout_milliseconds   = each.value.timeout_milliseconds
   payload_format_version = "1.0"
 
-  # Only meaningful for a VPC_LINK integration into an HTTPS listener (e.g.
-  # alb-controller-ingress-group's https_listener_arn): tls_server_name_to_verify
-  # left null keeps the hop as HTTP_PROXY plaintext, matching the plaintext
-  # http_listener_arn most callers still wire up.
+  # tls_server_name_to_verify set switches this integration's wire protocol to
+  # HTTPS; left null it stays plain HTTP. Only set it when integration_uri
+  # points at an HTTPS listener (e.g. alb-controller-ingress-group's
+  # https_listener_arn) -- null is correct only for an HTTP listener (e.g.
+  # http_listener_arn when the ingress group has no certificate_arn); pointing
+  # a null tls_config at an HTTPS listener sends plaintext HTTP to a TLS
+  # listener and the integration fails.
   dynamic "tls_config" {
     for_each = each.value.tls_server_name_to_verify != null ? [each.value.tls_server_name_to_verify] : []
 

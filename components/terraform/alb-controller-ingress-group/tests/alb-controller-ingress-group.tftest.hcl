@@ -139,6 +139,11 @@ run "listen_ports_default_to_http_only" {
     condition     = length(data.aws_lb_listener.http) == 1
     error_message = "Without certificate_arn, the HTTP listener lookup exists (it is the only listener)."
   }
+
+  assert {
+    condition     = output.member_listen_ports_annotation == jsonencode([{ HTTP = 80 }])
+    error_message = "member_listen_ports_annotation must equal this component's own listen-ports annotation, so a member Ingress can copy it exactly."
+  }
 }
 
 run "https_listener_when_certificate_arn_is_set" {
@@ -166,6 +171,11 @@ run "https_listener_when_certificate_arn_is_set" {
   assert {
     condition     = length(data.aws_lb_listener.http) == 0 && output.http_listener_arn == null
     error_message = "certificate_arn removes the HTTP listener lookup: no plaintext listener stays reachable once TLS is on."
+  }
+
+  assert {
+    condition     = output.member_listen_ports_annotation == jsonencode([{ HTTPS = 443 }])
+    error_message = "member_listen_ports_annotation must equal this component's own HTTPS-only listen-ports annotation once certificate_arn is set, so a member Ingress that copies it never falls back to the merged default HTTP:80 listener."
   }
 }
 

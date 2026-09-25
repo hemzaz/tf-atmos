@@ -471,6 +471,23 @@ components:
         # Ingresses join that ALB's IngressGroup and route by path/host inside
         # the cluster; this component only needs one route to reach it. JWT
         # authorization uses the authorizer_type below.
+        #
+        # IMPORTANT for per-microservice Ingresses joining that IngressGroup:
+        # the AWS Load Balancer Controller merges (unions) the listen-ports
+        # annotation across every Ingress in the group rather than requiring
+        # it to match. microservices/alb-ingress-group is HTTPS-only
+        # ([{"HTTPS":443}], certificate_arn is set), but a member Ingress
+        # that omits listen-ports still defaults to [{"HTTP":80}] and the
+        # controller adds that plaintext :80 listener to the shared ALB
+        # instead of rejecting the group. This route above only ever reaches
+        # https_listener_arn (443), so any microservice rules that land on
+        # the merged-in :80 listener never receive traffic through this API.
+        # Every member Ingress must set alb.ingress.kubernetes.io/listen-ports
+        # explicitly to microservices/alb-ingress-group's
+        # member_listen_ports_annotation output -- see that component's
+        # README "Dependencies / gotchas" for the full annotation-merge
+        # rules (scheme/security-groups/ssl-policy are exclusive instead;
+        # members must omit those, never set a different value).
         http_routes:
           "ANY /{proxy+}":
             integration_type: "HTTP_PROXY"
