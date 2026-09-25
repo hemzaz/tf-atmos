@@ -121,8 +121,19 @@ variable "rate_based_statement_rules" {
   }
 
   validation {
-    condition     = alltrue([for r in var.rate_based_statement_rules : r.limit >= 100 && r.limit <= 2000000000])
-    error_message = "limit must be between 100 and 2,000,000,000."
+    # AWS's rate_based_statement also allows FORWARDED_IP and CUSTOM_KEYS, but
+    # those require a forwarded_ip_config or custom_key block respectively,
+    # which this component's rate_based_statement rendering (main.tf) never
+    # emits. Either value would pass plan and fail at apply, so restrict to
+    # the two aggregate key types this component actually supports until
+    # forwarded_ip_config/custom_key inputs are added.
+    condition     = alltrue([for r in var.rate_based_statement_rules : contains(["IP", "CONSTANT"], r.aggregate_key_type)])
+    error_message = "aggregate_key_type must be IP or CONSTANT: FORWARDED_IP and CUSTOM_KEYS require forwarded_ip_config/custom_key blocks this component does not render."
+  }
+
+  validation {
+    condition     = alltrue([for r in var.rate_based_statement_rules : r.limit >= 10 && r.limit <= 2000000000])
+    error_message = "limit must be between 10 and 2,000,000,000."
   }
 }
 

@@ -49,6 +49,19 @@ listener rule without recreating the listener.
 - **`monitoring`**: `alb_arn_suffix` for `AWS/ApplicationELB` CloudWatch alarm
   dimensions.
 
+### Pitfall: security group rule quota when adding prefix lists
+
+A security group ingress rule that references a managed prefix list counts
+against the account's "Rules per security group" quota (default 60 inbound)
+as that prefix list's **max-entries** weight, not as a single rule. The
+CloudFront origin-facing prefix list (`com.amazonaws.global.cloudfront.origin-facing`)
+alone weighs roughly 55 of that default 60, so even one entry in
+`additional_ingress_prefix_list_ids` can push the security group over the
+limit at apply time. If you need to add another prefix list, either request
+a quota increase for "Inbound or outbound rules per security group" first,
+or prefer `additional_ingress_security_group_ids` (a plain security-group
+reference, which counts as 1 rule) where it fits the use case.
+
 ### Pitfall for the CloudFront work: the origin certificate
 
 An HTTPS-only CloudFront origin validates the origin's certificate against the
@@ -87,7 +100,7 @@ web-application/alb:
 | `vpc_id` | VPC id | - |
 | `subnets` | Subnet ids (public subnets for an internet-facing ALB) | - |
 | `internal` | Internal (no public IP) vs internet-facing | `false` |
-| `additional_ingress_prefix_list_ids` | Extra managed prefix lists allowed on 443 | `[]` |
+| `additional_ingress_prefix_list_ids` | Extra managed prefix lists allowed on 443 (see the security-group rule-quota pitfall above) | `[]` |
 | `additional_ingress_security_group_ids` | Extra security groups allowed on 443 | `[]` |
 | `certificate_arn` | ACM certificate ARN for the HTTPS listener | - |
 | `ssl_policy` | HTTPS listener SSL policy | `ELBSecurityPolicy-TLS13-1-2-2021-06` |

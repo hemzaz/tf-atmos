@@ -65,7 +65,7 @@ variable "internal" {
 
 variable "additional_ingress_prefix_list_ids" {
   type        = list(string)
-  description = "Extra managed prefix list ids allowed to reach the HTTPS listener, alongside the CloudFront origin-facing prefix list this component always resolves"
+  description = "Extra managed prefix list ids allowed to reach the HTTPS listener, alongside the CloudFront origin-facing prefix list this component always resolves. Quota note: a security group rule referencing a managed prefix list counts against the 'Rules per security group' quota as that list's max-entries weight, not as 1 -- the CloudFront origin-facing list alone is already ~55-60 of the default 60, so adding an entry here can require an AWS quota increase for that security group."
   default     = []
   nullable    = false
 }

@@ -72,6 +72,10 @@ Rules are Cloud Posse-style typed lists, one per statement type:
 - `managed_rule_group_statement_rules` -- AWS (or Marketplace) managed rule
   groups, e.g. `AWSManagedRulesCommonRuleSet`.
 - `rate_based_statement_rules` -- requests-per-5-minutes rate limiting.
+  `aggregate_key_type` is restricted to `IP` or `CONSTANT`: AWS's `FORWARDED_IP`
+  and `CUSTOM_KEYS` values need a `forwarded_ip_config`/`custom_key` block this
+  component does not render, so they would pass `plan` and fail at `apply`.
+  `limit` must be at least 10 (AWS's current minimum).
 - `byte_match_statement_rules` -- a literal match against a request header
   (set `header_name`) or the URI path (leave it unset).
 
@@ -121,7 +125,7 @@ web-application/waf-cloudfront:
 | `default_action` | `allow` or `block` for unmatched requests | `allow` |
 | `association_resource_arns` | ARNs to associate (REGIONAL only) | `[]` |
 | `managed_rule_group_statement_rules` | Managed rule groups | `[]` |
-| `rate_based_statement_rules` | Rate-limiting rules | `[]` |
+| `rate_based_statement_rules` | Rate-limiting rules; `aggregate_key_type` is `IP` or `CONSTANT` only, `limit` >= 10 (see [Rules](#rules)) | `[]` |
 | `byte_match_statement_rules` | Header/URI byte-match rules | `[]` |
 | `cloudwatch_metrics_enabled` | CloudWatch metrics for the ACL and every rule | `true` |
 | `sampled_requests_enabled` | Sample matching requests | `true` |
