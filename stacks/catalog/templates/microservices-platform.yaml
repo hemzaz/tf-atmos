@@ -11,7 +11,9 @@
 #   - EKS add-on intent (load balancer controller, autoscaler, metrics server,
 #     external-dns, cert-manager, External Secrets, CloudWatch agent/Fluent Bit)
 #   - HTTP API Gateway with a JWT authorizer and a VPC link into the VPC
-#   - EventBridge bus (archived) with audit and domain-event rules
+#   - EventBridge bus (archived) with audit and domain-event rules, delivering
+#     to SQS queues (inventory, notifications) and a welcome-email Lambda, with
+#     an SQS dead-letter queue for the bus and its targets
 #   - DynamoDB tables for service state, distributed locks and saga state
 #   - ElastiCache Redis in cluster mode for distributed caching
 #   - CloudWatch dashboards, alarms and Logs Insights queries, X-Ray sampling
@@ -19,7 +21,8 @@
 #
 # Encryption: the stack's customer managed key, kms/main, encrypts the EKS
 # secrets, DynamoDB tables, the EventBridge bus, archive and log groups, the
-# API Gateway log group, ElastiCache and the Secrets Manager secrets. Not yet:
+# SQS queues, the Lambda's environment and log group, the API Gateway log
+# group, ElastiCache and the Secrets Manager secrets. Not yet:
 # EKS node EBS volumes use the AWS managed aws/ebs key, the eks and vpc log
 # groups use those components' own keys, and the monitoring SNS topic is
 # unencrypted.
@@ -39,18 +42,21 @@
 # 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
 #    from catalog/kms/defaults). This template does not define it: doing so would
 #    deep-merge over that stack's own alias_name/description. CloudWatch Logs
-#    (the EventBridge and API Gateway log groups) and EventBridge (the bus and
-#    archive) use the key as service principals, so the stack's kms/main must
-#    keep the two scoped grants that catalog/kms/defaults turns on:
+#    (the EventBridge, Lambda and API Gateway log groups) and EventBridge (the
+#    bus and archive, and delivery to the encrypted queues) use the key as
+#    service principals, so the stack's kms/main must keep the two scoped
+#    grants that catalog/kms/defaults turns on:
 #      allow_cloudwatch_logs: true
 #      allow_eventbridge: true
-# 2. settings.microservices, read by eks-addons and apigateway:
+# 2. settings.microservices, read by eks-addons, apigateway and the
+#    welcome-email Lambda:
 #      settings:
 #        microservices:
-#          app_domain_name: example.com          # external-dns filter, CORS origins
+#          app_domain_name: example.com          # external-dns filter, CORS origins, SES sender
 #          letsencrypt_email: ops@example.com    # cert-manager ACME account
 #          cognito_user_pool_id: eu-west-2_xxxx  # JWT issuer
 #          cognito_client_id: xxxxxxxx           # JWT audience
+#          lambda_artifacts_bucket: my-artifacts # holds welcome-email/latest.zip
 #    A missing key fails every describe/plan of the stack with its name
 #    (gomplate `required`); `atmos validate stacks` does not render templates.
 # 3. On-call addresses, if any, in microservices/monitoring's
@@ -65,6 +71,7 @@ import:
   - catalog/monitoring/defaults
   - catalog/dynamodb/defaults
   - catalog/eventbridge/defaults
+  - catalog/sqs/defaults
   - catalog/secretsmanager/defaults
 
 # =============================================================================
@@ -436,9 +443,9 @@ components:
         create_event_bus: true
         archive_enabled: true
         archive_retention_days: 30
-        # event_bus_dlq_arn stays unset: AWS recommends a dead-letter queue on
-        # a CMK-encrypted bus, but this repo has no SQS queue component yet.
-        # Set it to that queue's ARN once one exists.
+        # AWS recommends a dead-letter queue on a CMK-encrypted bus, so events
+        # that fail to encrypt or decrypt are kept, not dropped.
+        event_bus_dlq_arn: !terraform.state microservices/sqs/event-bus-dlq .queue_arn
         # Catch-all for auditing
         cloudwatch_event_rule_description: "Archive all microservices events for auditing"
         cloudwatch_event_rule_pattern:
@@ -448,10 +455,14 @@ components:
         tags:
           Layer: "messaging"
           Platform: "microservices"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: microservices/sqs/event-bus-dlq
 
-    # Domain events on that bus. Their consumers (inventory and notification
-    # queues, the welcome-email function) are not part of this template; add
-    # them as targets when they exist.
+    # Domain events on that bus, each rule delivering to its consumers as well
+    # as to its log group. A delivery that still fails after the retry policy
+    # goes to the bus's dead-letter queue.
     microservices/eventbridge/order-created:
       metadata:
         component: eventbridge
@@ -468,6 +479,15 @@ components:
           detail-type:
             - "OrderCreated"
         event_log_retention_in_days: 30
+        targets:
+          # The queue's policy lets this rule send (microservices/sqs/order-inventory).
+          inventory:
+            arn: !terraform.state microservices/sqs/order-inventory .queue_arn
+            dead_letter_config:
+              arn: !terraform.state microservices/sqs/event-bus-dlq .queue_arn
+            retry_policy:
+              maximum_event_age_in_seconds: 3600
+              maximum_retry_attempts: 10
         tags:
           Layer: "messaging"
           Platform: "microservices"
@@ -475,6 +495,8 @@ components:
         components:
           - component: kms/main
           - component: microservices/eventbridge
+          - component: microservices/sqs/order-inventory
+          - component: microservices/sqs/event-bus-dlq
 
     microservices/eventbridge/user-registered:
       metadata:
@@ -492,6 +514,24 @@ components:
           detail-type:
             - "UserRegistered"
         event_log_retention_in_days: 30
+        targets:
+          # The queue's policy lets this rule send (microservices/sqs/user-notifications).
+          notifications:
+            arn: !terraform.state microservices/sqs/user-notifications .queue_arn
+            dead_letter_config:
+              arn: !terraform.state microservices/sqs/event-bus-dlq .queue_arn
+            retry_policy:
+              maximum_event_age_in_seconds: 3600
+              maximum_retry_attempts: 10
+          # The component grants this rule lambda:InvokeFunction on the function.
+          welcome-email:
+            arn: !terraform.state microservices/lambda/welcome-email .function_arn
+            input_path: "$.detail"
+            dead_letter_config:
+              arn: !terraform.state microservices/sqs/event-bus-dlq .queue_arn
+            retry_policy:
+              maximum_event_age_in_seconds: 3600
+              maximum_retry_attempts: 10
         tags:
           Layer: "messaging"
           Platform: "microservices"
@@ -499,6 +539,146 @@ components:
         components:
           - component: kms/main
           - component: microservices/eventbridge
+          - component: microservices/sqs/user-notifications
+          - component: microservices/sqs/event-bus-dlq
+          - component: microservices/lambda/welcome-email
+
+    # =========================================================================
+    # EVENT CONSUMERS (SQS, Lambda)
+    # =========================================================================
+    # The queues are applied before the rules that target them, and their
+    # policies name those rules by ARN, built from names rather than read from
+    # state: arn:aws:events:<region>:<account>:rule/<bus>/<rule>, where the bus
+    # is "<Environment>-microservices" and each rule "<Environment>-<name>"
+    # (the eventbridge instances above). The account segment is "*" because
+    # the sqs component adds aws:SourceAccount = <this account> to every Allow
+    # (iam_policy_limit_to_current_account, on in sqs/defaults), which pins it.
+    # So nothing here reads eventbridge state and there is no dependency cycle.
+    # kms/main's AllowEventBridgeSQSQueues lets EventBridge use the key.
+
+    # Consumed by the inventory service; its own DLQ takes messages the
+    # service fails to process 5 times.
+    microservices/sqs/order-inventory:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: order-inventory
+        dlq_enabled: true
+        iam_policy:
+          - statements:
+              - sid: AllowOrderCreatedRule
+                actions:
+                  - "sqs:SendMessage"
+                principals:
+                  - type: Service
+                    identifiers:
+                      - "events.amazonaws.com"
+                conditions:
+                  - test: ArnLike
+                    variable: "aws:SourceArn"
+                    values:
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-order-created"
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+
+    # Consumed by the notification service; its own DLQ as above.
+    microservices/sqs/user-notifications:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: user-notifications
+        dlq_enabled: true
+        iam_policy:
+          - statements:
+              - sid: AllowUserRegisteredRule
+                actions:
+                  - "sqs:SendMessage"
+                principals:
+                  - type: Service
+                    identifiers:
+                      - "events.amazonaws.com"
+                conditions:
+                  - test: ArnLike
+                    variable: "aws:SourceArn"
+                    values:
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-user-registered"
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+
+    # The bus's dead-letter queue (event_bus_dlq_arn), also the dead-letter
+    # queue of every rule target above, so EventBridge may send to it from the
+    # bus and from both rules. Nothing consumes it: failed events wait here,
+    # 14 days (the sqs maximum), for an operator to inspect and replay.
+    microservices/sqs/event-bus-dlq:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: event-bus-dlq
+        message_retention_seconds: 1209600
+        iam_policy:
+          - statements:
+              - sid: AllowEventBusAndRules
+                actions:
+                  - "sqs:SendMessage"
+                principals:
+                  - type: Service
+                    identifiers:
+                      - "events.amazonaws.com"
+                conditions:
+                  - test: ArnLike
+                    variable: "aws:SourceArn"
+                    values:
+                      - "arn:aws:events:{{ .vars.region }}:*:event-bus/{{ .settings.context.environment }}-microservices"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-order-created"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-user-registered"
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+
+    # Sends the welcome email for a UserRegistered event (the rule passes the
+    # event's detail). The package is built and uploaded by the service's CI;
+    # it must be in settings.microservices.lambda_artifacts_bucket before the
+    # first apply. It sends through SES from the app domain's identity.
+    microservices/lambda/welcome-email:
+      metadata:
+        component: lambda
+        type: real
+      vars:
+        function_name: welcome-email
+        handler: "index.handler"
+        runtime: "nodejs22.x"
+        s3_bucket: '{{ required "settings.microservices.lambda_artifacts_bucket is required" .settings.microservices.lambda_artifacts_bucket }}'
+        s3_key: "welcome-email/latest.zip"
+        memory_size: 256
+        timeout: 30
+        log_retention_days: 30
+        # Environment variables and the function's log group, with the stack key.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        kms_key_id: !terraform.state kms/main .key_arn
+        environment_variables:
+          SENDER_ADDRESS: 'no-reply@{{ .settings.microservices.app_domain_name }}'
+        custom_policy: >-
+          {"Version": "2012-10-17", "Statement": [{"Sid": "SendWelcomeEmail",
+          "Effect": "Allow", "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+          "Resource": "arn:aws:ses:{{ .vars.region }}:*:identity/{{ .settings.microservices.app_domain_name }}",
+          "Condition": {"StringEquals": {"ses:FromAddress": "no-reply@{{ .settings.microservices.app_domain_name }}"}}}]}
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+      dependencies:
+        components:
+          - component: kms/main
 
     # =========================================================================
     # STATE MANAGEMENT (DynamoDB) - one table per instance

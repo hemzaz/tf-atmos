@@ -37,6 +37,7 @@ import:
   - catalog/vpc/defaults
   - catalog/iam/defaults
   - catalog/monitoring/defaults
+  - catalog/sqs/defaults
 
 # =============================================================================
 # COMPONENT DEFINITIONS
@@ -203,7 +204,7 @@ components:
         # Event notifications
         event_notifications:
           sqs:
-            - queue_arn: !terraform.state batch-processing/sqs .queue_arns.job_trigger
+            - queue_arn: !terraform.state batch-processing/sqs/trigger .queue_arn
               events:
                 - "s3:ObjectCreated:*"
               filter_prefix: "incoming/"
@@ -291,78 +292,94 @@ components:
     # MESSAGE QUEUES (SQS)
     # =========================================================================
 
-    batch-processing/sqs:
+    # One queue per instance (the sqs component, Cloud Posse aws-sqs-queue
+    # model), each "<Environment>-<name>" and encrypted with kms/main
+    # (sqs/defaults). The two job queues each get their own dead-letter queue
+    # (dlq_enabled) in place of the old shared one.
+
+    # Job submission queue (high priority)
+    batch-processing/sqs/jobs-high:
       metadata:
         component: sqs
         type: real
+        inherits:
+          - sqs/defaults
       vars:
-        queues:
-          # Job submission queue (high priority)
-          job_submission_high:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-high"
-            visibility_timeout_seconds: 43200  # 12 hours max job time
-            message_retention_seconds: 1209600  # 14 days
-            max_message_size: 262144  # 256 KB
-            delay_seconds: 0
-            receive_wait_time_seconds: 20
-            fifo_queue: false
-            kms_master_key_id: "{{ .vars.sqs_kms_key_id }}"
-            redrive_policy:
-              dead_letter_target_arn: "dlq"
-              max_receive_count: 3
+        name: batch-jobs-high
+        visibility_timeout_seconds: 43200  # 12 hours max job time
+        message_retention_seconds: 1209600  # 14 days
+        max_message_size: 262144  # 256 KB
+        delay_seconds: 0
+        receive_wait_time_seconds: 20
+        dlq_enabled: true
+        dlq_max_receive_count: 3
+        tags:
+          Layer: "messaging"
+          Platform: "batch-processing"
 
-          # Job submission queue (low priority)
-          job_submission_low:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-low"
-            visibility_timeout_seconds: 43200
-            message_retention_seconds: 1209600
-            max_message_size: 262144
-            delay_seconds: 0
-            receive_wait_time_seconds: 20
-            fifo_queue: false
-            kms_master_key_id: "{{ .vars.sqs_kms_key_id }}"
-            redrive_policy:
-              dead_letter_target_arn: "dlq"
-              max_receive_count: 3
+    # Job submission queue (low priority)
+    batch-processing/sqs/jobs-low:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: batch-jobs-low
+        visibility_timeout_seconds: 43200
+        message_retention_seconds: 1209600
+        max_message_size: 262144
+        delay_seconds: 0
+        receive_wait_time_seconds: 20
+        dlq_enabled: true
+        dlq_max_receive_count: 3
+        tags:
+          Layer: "messaging"
+          Platform: "batch-processing"
 
-          # S3 event trigger queue
-          job_trigger:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-trigger"
-            visibility_timeout_seconds: 300
-            message_retention_seconds: 86400
-            fifo_queue: false
-            kms_master_key_id: "{{ .vars.sqs_kms_key_id }}"
-            policy: |
-              {
-                "Version": "2012-10-17",
-                "Statement": [{
-                  "Effect": "Allow",
-                  "Principal": {"Service": "s3.amazonaws.com"},
-                  "Action": "sqs:SendMessage",
-                  "Resource": "*",
-                  "Condition": {
-                    "ArnLike": {
-                      "aws:SourceArn": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
-                    }
-                  }
-                }]
-              }
+    # S3 event trigger queue. The input bucket's event notifications send here;
+    # the policy is scoped to that bucket, and the sqs component adds
+    # aws:SourceAccount = <this account>. S3 must also be allowed to use the
+    # queue's key, which kms/main does not grant yet.
+    batch-processing/sqs/trigger:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: batch-trigger
+        visibility_timeout_seconds: 300
+        message_retention_seconds: 86400
+        iam_policy:
+          - statements:
+              - sid: AllowInputBucketEvents
+                actions:
+                  - "sqs:SendMessage"
+                principals:
+                  - type: Service
+                    identifiers:
+                      - "s3.amazonaws.com"
+                conditions:
+                  - test: ArnLike
+                    variable: "aws:SourceArn"
+                    values:
+                      - "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
+        tags:
+          Layer: "messaging"
+          Platform: "batch-processing"
 
-          # Job completion notifications
-          job_notifications:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-notifications"
-            visibility_timeout_seconds: 60
-            message_retention_seconds: 86400
-            fifo_queue: false
-            kms_master_key_id: "{{ .vars.sqs_kms_key_id }}"
-
-          # Dead letter queue
-          dlq:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-dlq"
-            visibility_timeout_seconds: 60
-            message_retention_seconds: 1209600
-            kms_master_key_id: "{{ .vars.sqs_kms_key_id }}"
-
+    # Job completion notifications
+    batch-processing/sqs/notifications:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: batch-notifications
+        visibility_timeout_seconds: 60
+        message_retention_seconds: 86400
         tags:
           Layer: "messaging"
           Platform: "batch-processing"
@@ -896,7 +913,7 @@ components:
       dependencies:
         components:
           - component: batch-processing/batch-job-definitions
-          - component: batch-processing/sqs
+          - component: batch-processing/sqs/notifications
     batch-processing/eventbridge:
       metadata:
         component: eventbridge
@@ -978,7 +995,7 @@ components:
                   - prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
             targets:
               - id: "notification-queue"
-                arn: !terraform.state batch-processing/sqs .queue_arns.job_notifications
+                arn: !terraform.state batch-processing/sqs/notifications .queue_arn
 
         tags:
           Layer: "scheduling"
@@ -1020,11 +1037,11 @@ components:
         # SQS event source mapping
         event_source_mappings:
           sqs_high:
-            event_source_arn: !terraform.state batch-processing/sqs .queue_arns.job_submission_high
+            event_source_arn: !terraform.state batch-processing/sqs/jobs-high .queue_arn
             batch_size: 10
             maximum_batching_window_in_seconds: 0
           sqs_low:
-            event_source_arn: !terraform.state batch-processing/sqs .queue_arns.job_submission_low
+            event_source_arn: !terraform.state batch-processing/sqs/jobs-low .queue_arn
             batch_size: 10
             maximum_batching_window_in_seconds: 60
 
@@ -1044,8 +1061,8 @@ components:
               - "sqs:DeleteMessage"
               - "sqs:GetQueueAttributes"
             resources:
-              - !terraform.state batch-processing/sqs .queue_arns.job_submission_high
-              - !terraform.state batch-processing/sqs .queue_arns.job_submission_low
+              - !terraform.state batch-processing/sqs/jobs-high .queue_arn
+              - !terraform.state batch-processing/sqs/jobs-low .queue_arn
 
         # CloudWatch logs
 
@@ -1059,7 +1076,8 @@ components:
 
       dependencies:
         components:
-          - component: batch-processing/sqs
+          - component: batch-processing/sqs/jobs-high
+          - component: batch-processing/sqs/jobs-low
           - component: batch-processing/batch-job-queues
     batch-processing/monitoring:
       metadata:
@@ -1152,19 +1170,25 @@ components:
                     - namespace: "AWS/SQS"
                       metric: "ApproximateNumberOfMessagesVisible"
                       dimensions:
-                        QueueName: !terraform.state batch-processing/sqs .queue_names.job_submission_high
+                        QueueName: !terraform.state batch-processing/sqs/jobs-high .queue_name
                       stat: "Average"
                       period: 60
                     - namespace: "AWS/SQS"
                       metric: "ApproximateNumberOfMessagesVisible"
                       dimensions:
-                        QueueName: !terraform.state batch-processing/sqs .queue_names.job_submission_low
+                        QueueName: !terraform.state batch-processing/sqs/jobs-low .queue_name
                       stat: "Average"
                       period: 60
                     - namespace: "AWS/SQS"
                       metric: "ApproximateNumberOfMessagesVisible"
                       dimensions:
-                        QueueName: !terraform.state batch-processing/sqs .queue_names.dlq
+                        QueueName: !terraform.state batch-processing/sqs/jobs-high .dead_letter_queue_name
+                      stat: "Sum"
+                      period: 60
+                    - namespace: "AWS/SQS"
+                      metric: "ApproximateNumberOfMessagesVisible"
+                      dimensions:
+                        QueueName: !terraform.state batch-processing/sqs/jobs-low .dead_letter_queue_name
                       stat: "Sum"
                       period: 60
 
@@ -1209,9 +1233,9 @@ components:
             dimensions:
               StateMachineArn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
 
-          # DLQ messages
-          dlq_messages:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-dlq"
+          # DLQ messages, one alarm per job queue's dead-letter queue
+          dlq_high_messages:
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-high-dlq"
             metric_name: "ApproximateNumberOfMessagesVisible"
             namespace: "AWS/SQS"
             comparison_operator: "GreaterThanThreshold"
@@ -1220,7 +1244,18 @@ components:
             period: 300
             statistic: "Sum"
             dimensions:
-              QueueName: !terraform.state batch-processing/sqs .queue_names.dlq
+              QueueName: !terraform.state batch-processing/sqs/jobs-high .dead_letter_queue_name
+          dlq_low_messages:
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-low-dlq"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            namespace: "AWS/SQS"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              QueueName: !terraform.state batch-processing/sqs/jobs-low .dead_letter_queue_name
 
           # Compute environment not scaling
           compute_not_scaling:
@@ -1301,7 +1336,6 @@ components:
 # REQUIRED VARIABLES
 # =============================================================================
 # batch_kms_key_id: "arn:aws:kms:..."
-# sqs_kms_key_id: "alias/aws/sqs"
 # batch_service_role_arn: "arn:aws:iam::..."
 # batch_instance_role_arn: "arn:aws:iam::..." (for EC2)
 # batch_job_role_arn: "arn:aws:iam::..."
@@ -1321,4 +1355,5 @@ components:
         components:
           - component: batch-processing/batch-job-queues
           - component: batch-processing/step-functions
-          - component: batch-processing/sqs
+          - component: batch-processing/sqs/jobs-high
+          - component: batch-processing/sqs/jobs-low
