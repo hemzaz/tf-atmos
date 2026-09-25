@@ -53,6 +53,15 @@ on:
   # the PR that touched it.
   push:
     branches: [master]
+    paths:
+      - atmos.yaml
+      - components/**
+      - stacks/**
+      - workflows/**
+      - scripts/**
+      - .trivyignore.yaml
+      - .checkov.baseline
+      - .github/workflows/terraform-ci.yml
   merge_group:
 
 permissions: {}
@@ -230,32 +239,74 @@ jobs:
 
           SOURCE_RE = re.compile(r'source\s*=\s*"(\.\./[^"]+)"')
 
-          def sourced_dirs(component):
-              comp_dir = os.path.join(TERRAFORM_DIR, component)
-              dirs = set()
-              for name in os.listdir(comp_dir):
-                  if not name.endswith(".tf"):
-                      continue
-                  with open(os.path.join(comp_dir, name), encoding="utf-8") as fh:
-                      text = fh.read()
-                  for m in SOURCE_RE.finditer(text):
-                      target = os.path.normpath(os.path.join(comp_dir, m.group(1)))
-                      if target.startswith(TERRAFORM_DIR + os.sep):
-                          dirs.add(target)
-              return dirs
+          def is_examples_path(path):
+              return "examples" in os.path.relpath(path, TERRAFORM_DIR).split(os.sep)
 
-          if event_name == "pull_request" and base_sha:
-              diff = subprocess.run(
-                  ["git", "diff", "--name-only", f"{base_sha}...HEAD"],
-                  check=True, capture_output=True, text=True,
-              ).stdout.splitlines()
-              changed = [p for p in diff if p]
-              selected = []
-              for component in all_components:
-                  watch = {os.path.join(TERRAFORM_DIR, component)} | sourced_dirs(component)
-                  prefixes = tuple(w.rstrip("/") + "/" for w in watch)
-                  if any(f.startswith(prefixes) for f in changed):
-                      selected.append(component)
+          def sourced_dirs(component):
+              """Resolve `source = "../..."` references transitively to a
+              fixed point: a sourced module may itself source another module,
+              so a change anywhere in that chain must still select the
+              top-level component's tests. Skips any target under an
+              `examples/` directory -- usage scaffolding, not a real runtime
+              dependency (_library/security/kms-multi-region/examples/basic
+              sources its own parent module right back; walking into it would
+              just be a no-op hop at best, and at worst a false dependency)."""
+              start = os.path.join(TERRAFORM_DIR, component)
+              seen = set()
+              frontier = {start}
+              while frontier:
+                  discovered = set()
+                  for comp_dir in frontier:
+                      if not os.path.isdir(comp_dir):
+                          continue
+                      for name in os.listdir(comp_dir):
+                          if not name.endswith(".tf"):
+                              continue
+                          with open(os.path.join(comp_dir, name), encoding="utf-8") as fh:
+                              text = fh.read()
+                          for m in SOURCE_RE.finditer(text):
+                              target = os.path.normpath(os.path.join(comp_dir, m.group(1)))
+                              if not target.startswith(TERRAFORM_DIR + os.sep):
+                                  continue
+                              if is_examples_path(target):
+                                  continue
+                              if target != start and target not in seen:
+                                  discovered.add(target)
+                  seen |= discovered
+                  frontier = discovered
+              return seen
+
+          # Self-check: kms sources ../_library/security/kms-multi-region
+          # directly, so a change anywhere under that library must still
+          # select kms's tests. If this ever stops resolving -- a rename, a
+          # regex change, a refactor that breaks the fixed point -- fail this
+          # job loudly instead of silently under-selecting forever.
+          if "kms" in all_components:
+              expected = os.path.join(TERRAFORM_DIR, "_library", "security", "kms-multi-region")
+              actual = sourced_dirs("kms")
+              assert expected in actual, (
+                  f"sourced_dirs('kms') self-check failed: expected {expected!r} "
+                  f"in {sorted(actual)}"
+              )
+
+          if event_name == "pull_request":
+              if not base_sha:
+                  print("::warning::pull_request event with no "
+                        "github.event.pull_request.base.sha; falling back to "
+                        "testing every component with a tests/ directory.")
+                  selected = list(all_components)
+              else:
+                  diff = subprocess.run(
+                      ["git", "diff", "--name-only", f"{base_sha}...HEAD"],
+                      check=True, capture_output=True, text=True,
+                  ).stdout.splitlines()
+                  changed = [p for p in diff if p]
+                  selected = []
+                  for component in all_components:
+                      watch = {os.path.join(TERRAFORM_DIR, component)} | sourced_dirs(component)
+                      prefixes = tuple(w.rstrip("/") + "/" for w in watch)
+                      if any(f.startswith(prefixes) for f in changed):
+                          selected.append(component)
           else:
               # push (to master) and merge_group: no base to diff against that
               # means anything -- test every component that has tests.
@@ -387,7 +438,12 @@ jobs:
   plan:
     name: Plan ${{ matrix.component }} (${{ matrix.stack }})
     needs: affected
-    if: ${{ vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
+    # github.event_name != 'push' is explicit here, not just inherited from
+    # `affected` skipping on push (which would skip this job too by GitHub's
+    # default "needs a skipped job" propagation): that propagation is
+    # implicit and would silently stop protecting this job the moment
+    # `affected` ever adds its own `if: always()` or similar. Spell it out.
+    if: ${{ github.event_name != 'push' && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
