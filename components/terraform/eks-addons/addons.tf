@@ -215,9 +215,12 @@ resource "aws_iam_role_policy_attachment" "addon" {
 # registers a mutating webhook (mservice.elbv2.k8s.aws, failurePolicy Fail) on
 # every Service CREATE in the cluster, so a Service created before the
 # controller pods serve is rejected. wait = true holds this release until the
-# controller is ready, and every release that creates Services depends on it
-# (helm_release.addon below, helm_release.releases in main.tf and whatever
-# follows those). This is the EKS Blueprints / Cloud Posse ordering.
+# controller is ready, and everything that can create Services depends on it:
+# helm_release.addon below; in main.tf the non-core managed add-ons
+# (aws_eks_addon.addons), helm_release.releases, kubernetes_manifest.manifests
+# and the Istio gateway. The controller itself waits for the core managed
+# add-ons (aws_eks_addon.core: CNI, DNS, ...) its pods need. This is the EKS
+# Blueprints / Cloud Posse ordering.
 resource "helm_release" "aws_load_balancer_controller" {
   for_each = { for k, v in local.addon_releases : k => v if v.name == "aws-load-balancer-controller" }
 
@@ -244,6 +247,7 @@ resource "helm_release" "aws_load_balancer_controller" {
   depends_on = [
     time_sleep.wait_for_cluster,
     aws_iam_role_policy_attachment.addon,
+    aws_eks_addon.core,
   ]
 }
 

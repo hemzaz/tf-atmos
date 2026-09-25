@@ -38,9 +38,17 @@ The load balancer controller installs first, in its own release
 (`helm_release.aws_load_balancer_controller`). Its chart registers a mutating
 webhook with `failurePolicy: Fail` on every Service creation, so a Service
 created before the controller is ready is rejected. The other add-ons
-(`helm_release.addon`), the `helm_releases` entries, and everything ordered
-after them wait for it, as in EKS Blueprints and Cloud Posse's components.
+(`helm_release.addon`), the `helm_releases` and `kubernetes_manifests`
+entries, the Istio gateway, and the managed `addons` outside the core set wait
+for it, as in EKS Blueprints and Cloud Posse's components.
 `addon_release_statuses` reports both releases.
+
+Managed `addons` split in two by addon name. The core set (`vpc-cni`,
+`kube-proxy`, `coredns`, `eks-pod-identity-agent`, `aws-ebs-csi-driver`,
+`aws_eks_addon.core`) installs before the controller, whose pods need it.
+Every other addon (`aws_eks_addon.addons`, e.g. `adot`,
+`amazon-cloudwatch-observability`) installs after the controller.
+`addon_arns` reports both groups.
 
 `dns_zone_ids` lists **public** hosted zone IDs only (instances pick them from
 the dns component's `zone_ids`, e.g. `.zone_ids.main`). Private zones stay out
