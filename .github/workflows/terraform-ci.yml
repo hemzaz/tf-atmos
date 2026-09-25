@@ -273,13 +273,25 @@ jobs:
       # and shared across runs regardless of which subset a given PR touches.
       # `providers lock` only fetches registry metadata/checksums, not the
       # provider binaries, so this is cheap even though it runs unconditionally.
+      #
+      # `terraform get` first: a component that sources a local module (e.g.
+      # kms sourcing ../_library/...) makes `providers lock` fail outright
+      # with "Module not installed" otherwise -- it needs the module tree on
+      # disk to see every required_providers block, not just the root's.
+      #
+      # mkdir the plugin cache dir here too: `providers lock` only warns (and
+      # keeps going) when TF_PLUGIN_CACHE_DIR doesn't exist, but the actual
+      # `terraform init` in the test script below would hard-fail on it.
       - name: Generate lock files for the plugin cache key
         env:
           ALL_COMPONENTS: ${{ steps.components.outputs.all }}
         run: |
           set -eu
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           for component in $ALL_COMPONENTS; do
-            terraform -chdir="components/terraform/$component" providers lock -platform=linux_amd64
+            dir="components/terraform/$component"
+            terraform -chdir="$dir" get >/dev/null
+            terraform -chdir="$dir" providers lock -platform=linux_amd64
           done
       - name: Restore/save the Terraform provider plugin cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
