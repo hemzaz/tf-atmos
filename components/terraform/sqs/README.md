@@ -20,7 +20,7 @@ inherit it and set `name` and, as needed, `dlq_enabled` and `iam_policy`.
 | `visibility_timeout_seconds` (30), `message_retention_seconds` (345600), `max_message_size` (262144), `delay_seconds` (0), `receive_wait_time_seconds` (0), `kms_data_key_reuse_period_seconds` (300) | Cloud Posse's defaults, validated to the ranges SQS accepts |
 | `fifo_queue` (false), `content_based_deduplication` (false), `deduplication_scope`, `fifo_throughput_limit` (null) | FIFO settings; the last three require `fifo_queue` |
 | `dlq_enabled` (false), `dlq_name_suffix` (`dlq`), `dlq_max_receive_count` (5), `dlq_message_retention_seconds` (1209600) | a DLQ `<Environment>-<name>-<suffix>`, same key, with a redrive policy on the queue and a redrive-allow policy on the DLQ that accepts only this queue |
-| `iam_policy` ([]), `iam_policy_limit_to_current_account` (true) | Cloud Posse's queue policy: `aws_iam_policy_document` statements, each scoped to the queue ARN (`resources`/`not_resources` must be unset); the flag adds `aws:SourceAccount = <this account>` to every Allow statement (Deny statements are left unnarrowed). Allow statements may not use wildcard actions (`*`, `sqs:*`), a `*` principal, `not_principals` or `not_actions` (no public queue) |
+| `iam_policy` ([]), `iam_policy_limit_to_current_account` (true) | Cloud Posse's queue policy: `aws_iam_policy_document` statements, each scoped to the queue ARN (`resources`/`not_resources` must be unset); the flag adds `aws:SourceAccount = <this account>` to every Allow statement that does not set it already (Deny statements are left unnarrowed). Allow statements must name principals and may not use wildcard actions (`*`, `sqs:*`), a `*` principal, `not_principals` or `not_actions` (no public queue); Deny statements take `actions` or `not_actions` |
 | `enabled` (true) | false creates nothing |
 | out: `queue_id`, `queue_arn`, `queue_name`, `queue_url` | the queue (`queue_id` is the URL, as in SQS) |
 | out: `dead_letter_queue_id`, `dead_letter_queue_arn`, `dead_letter_queue_name`, `dead_letter_queue_url` | null unless `dlq_enabled` |
@@ -29,9 +29,9 @@ inherit it and set `name` and, as needed, `dlq_enabled` and `iam_policy`.
 
 - **Key policy.** AWS services that send to the queue encrypt with the key as
   service principals, which kms/main's root-account statement does not reach.
-  kms/main covers two producers in every stack: EventBridge rules through
-  `allow_eventbridge`'s `AllowEventBridgeSQSQueues` statement (this account's
-  `rule/*`), and SNS topics through `allow_sns`'s `AllowSNS` (this account's
+  kms/main covers two producers in every stack: EventBridge rules and bus
+  dead-letter queues through `allow_eventbridge`'s `AllowEventBridgeSQSQueues`
+  statement (this account's `rule/*` and `event-bus/*`), and SNS topics through `allow_sns`'s `AllowSNS` (this account's
   topics). Both are limited to this account and region by
   `aws:SourceAccount`/`aws:SourceArn`. Other producers (for example S3 event
   notifications) need their own statement.

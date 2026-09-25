@@ -47,9 +47,10 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   (`aws:SourceAccount` only; DescribeKey has no encryption context),
   `AllowEventBridgeSNSTopics` (rules publishing to an SNS topic encrypted with
   this key) and `AllowEventBridgeSQSQueues` (rules delivering to an SQS queue
-  encrypted with this key: `kms:GenerateDataKey`/`kms:Decrypt`, scoped by
-  `aws:SourceAccount` and `aws:SourceArn` = this account's `rule/*` in this
-  region; confirm those keys are sent on the first real apply).
+  encrypted with this key, and buses using one as their dead-letter queue:
+  `kms:GenerateDataKey`/`kms:Decrypt`, scoped by `aws:SourceAccount` and
+  `aws:SourceArn` = this account's `rule/*` or `event-bus/*` in this region;
+  confirm those keys are sent on the first real apply).
 - `allow_sns` adds `AllowSNS`: `sns.amazonaws.com` may use
   `kms:Decrypt`/`kms:GenerateDataKey*` to deliver to SQS queues encrypted with
   this key (an sns subscription to an sqs queue), scoped by

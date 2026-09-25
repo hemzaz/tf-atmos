@@ -231,9 +231,15 @@ variable "iam_policy" {
     error_message = "iam_policy takes at most one policy document; put every statement in it."
   }
 
+  # A Deny may use actions or not_actions; an Allow needs explicit,
+  # non-wildcard actions.
   validation {
-    condition     = alltrue(flatten([for p in var.iam_policy : [for s in p.statements : length(coalesce(s.actions, [])) > 0 && (coalesce(s.effect, "Allow") != "Allow" || alltrue([for a in coalesce(s.actions, []) : a != "*" && lower(a) != "sqs:*"]))]]))
-    error_message = "Every iam_policy statement needs actions; Allow statements may not use \"*\" or \"sqs:*\"."
+    condition = alltrue(flatten([for p in var.iam_policy : [
+      for s in p.statements : coalesce(s.effect, "Allow") == "Allow"
+      ? length(coalesce(s.actions, [])) > 0 && alltrue([for a in coalesce(s.actions, []) : a != "*" && lower(a) != "sqs:*"])
+      : length(coalesce(s.actions, [])) > 0 || length(coalesce(s.not_actions, [])) > 0
+    ]]))
+    error_message = "Allow statements in iam_policy need actions, and may not use \"*\" or \"sqs:*\"; Deny statements need actions or not_actions."
   }
 
   # No public queue: an Allow must name its principals.
@@ -242,10 +248,11 @@ variable "iam_policy" {
       for s in p.statements : coalesce(s.effect, "Allow") != "Allow" || (
         s.not_actions == null
         && length(s.not_principals) == 0
+        && length(s.principals) > 0
         && alltrue([for pr in s.principals : !contains(pr.identifiers, "*")])
       )
     ]]))
-    error_message = "Allow statements in iam_policy must not use a \"*\" principal, not_principals or not_actions (no public queue policy)."
+    error_message = "Allow statements in iam_policy must name principals, and must not use a \"*\" principal, not_principals or not_actions (no public queue policy)."
   }
 
   validation {

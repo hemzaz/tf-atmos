@@ -125,12 +125,15 @@ data "aws_iam_policy_document" "queue" {
         }
       }
 
-      # The account limit narrows Allow statements only: added to a Deny it
-      # would make the Deny apply to fewer requests.
+      # The account limit narrows Allow statements only (added to a Deny it
+      # would make the Deny apply to fewer requests), and only those that do
+      # not already set aws:SourceAccount themselves.
       dynamic "condition" {
         for_each = concat(
           statement.value.conditions,
-          var.iam_policy_limit_to_current_account && coalesce(statement.value.effect, "Allow") == "Allow" ? [{
+          var.iam_policy_limit_to_current_account
+          && coalesce(statement.value.effect, "Allow") == "Allow"
+          && !contains([for c in statement.value.conditions : lower(c.variable)], "aws:sourceaccount") ? [{
             test     = "StringEquals"
             variable = "aws:SourceAccount"
             values   = [local.account_id]

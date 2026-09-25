@@ -238,9 +238,10 @@ data "aws_iam_policy_document" "default" {
   }
 
   # EventBridge rules delivering to an SQS queue encrypted with this key (the
-  # sqs component), which the bus/archive and SNS statements above do not
+  # sqs component), and buses sending failed events to such a queue as their
+  # dead-letter queue, which the bus/archive and SNS statements above do not
   # cover: SQS sends no bus or topic encryption context. Limited to this
-  # account's rules in this region. The SQS/EventBridge docs place
+  # account's rules and buses in this region. The SQS/EventBridge docs place
   # aws:SourceAccount and aws:SourceArn in this key policy; confirm they are
   # sent on the first real apply (delivery fails closed, to the rule's DLQ or
   # FailedInvocations, if not).
@@ -263,10 +264,15 @@ data "aws_iam_policy_document" "default" {
         values   = [data.aws_caller_identity.current.account_id]
       }
 
+      # rule/* for rule targets; event-bus/* for a bus dead-letter queue
+      # (eventbridge event_bus_dlq_arn), whose sends carry the bus ARN.
       condition {
         test     = "ArnLike"
         variable = "aws:SourceArn"
-        values   = ["arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:rule/*"]
+        values = [
+          "arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:rule/*",
+          "arn:${data.aws_partition.current.partition}:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:event-bus/*",
+        ]
       }
     }
   }

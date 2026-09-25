@@ -134,13 +134,11 @@ run "queue_policy_lets_eventbridge_send_from_one_rule" {
   }
 
   assert {
-    condition     = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Condition.ArnEquals["aws:SourceArn"] == "arn:aws:events:eu-west-2:123456789012:rule/test-bus/test-orders"
-    error_message = "The caller's aws:SourceArn condition is kept."
-  }
-
-  assert {
-    condition     = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Condition.StringEquals["aws:SourceAccount"] == "123456789012"
-    error_message = "iam_policy_limit_to_current_account (default true) adds aws:SourceAccount."
+    condition = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Condition == {
+      ArnEquals    = { "aws:SourceArn" = "arn:aws:events:eu-west-2:123456789012:rule/test-bus/test-orders" }
+      StringEquals = { "aws:SourceAccount" = "123456789012" }
+    }
+    error_message = "The caller's aws:SourceArn condition is kept, iam_policy_limit_to_current_account (default true) adds aws:SourceAccount, and nothing else is added."
   }
 
   assert {
@@ -243,6 +241,59 @@ run "account_limit_leaves_deny_statements_alone" {
     condition     = one([for s in jsondecode(data.aws_iam_policy_document.queue[0].json).Statement : s if s.Sid == "DenyInsecureTransport"]).Condition == { Bool = { "aws:SecureTransport" = "false" } }
     error_message = "Deny statements are not narrowed by aws:SourceAccount."
   }
+}
+
+run "existing_source_account_condition_is_not_duplicated" {
+  command = plan
+
+  variables {
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+        conditions = [{ test = "StringEquals", variable = "aws:SourceAccount", values = ["210987654321"] }]
+      }]
+    }]
+  }
+
+  assert {
+    condition     = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Condition == { StringEquals = { "aws:SourceAccount" = "210987654321" } }
+    error_message = "A statement that sets aws:SourceAccount itself keeps its own value and gets no second one."
+  }
+}
+
+run "deny_with_only_not_actions_is_allowed" {
+  command = plan
+
+  variables {
+    iam_policy = [{
+      statements = [{
+        sid         = "DenyAllButSend"
+        effect      = "Deny"
+        not_actions = ["sqs:SendMessage"]
+        principals  = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+      }]
+    }]
+  }
+
+  assert {
+    condition     = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).NotAction == "sqs:SendMessage" && !can(one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Condition)
+    error_message = "A Deny may use not_actions alone, and is not narrowed by aws:SourceAccount."
+  }
+}
+
+run "rejects_an_allow_without_principals" {
+  command = plan
+
+  variables {
+    iam_policy = [{
+      statements = [{
+        actions = ["sqs:SendMessage"]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
 }
 
 run "rejects_a_public_allow" {
