@@ -85,9 +85,10 @@ those planfiles (`terraform deploy --from-plan`).
 | security | `deploy-security` | `acm`, `secretsmanager`, `guardduty`, `securityhub`, `cognito` |
 | security-monitoring | `deploy-security-monitoring` | `security-monitoring` (reads GuardDuty and Security Hub) |
 | compute | `deploy-compute` | `eks`, `ecs`, `lambda`, `ec2` other than `ec2/bastion` |
-| platform | `deploy-platform` | `eks-addons`, `external-secrets` |
+| platform | `deploy-platform` | `external-secrets` |
 | data | `deploy-data` | `rds`, `elasticache`, `backup` |
 | dns | `deploy-dns` | `dns` (after data: records point at RDS endpoints) |
+| addons | `deploy-addons` | `eks-addons` (after dns: reads its `zone_ids`) |
 | services | `deploy-services` | `apigateway` (reads `lambda` and `cognito`), `eks-backend-services` |
 | monitoring | `deploy-monitoring` | `monitoring`, `cost-optimization` |
 

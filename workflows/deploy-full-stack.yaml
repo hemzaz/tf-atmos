@@ -8,7 +8,7 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: backend, iam, kms, networking, connectivity, security, security-monitoring, compute, platform, data, dns, services, monitoring
+#   layers: backend, iam, kms, networking, connectivity, security, security-monitoring, compute, platform, data, dns, addons, services, monitoring
 #
 # A layer plans all its instances before it applies any of them, so an instance
 # that reads another's state (!terraform.state / !terraform.output) must be in a
@@ -20,8 +20,10 @@
 # shares the security layer with securityhub, which only lists it in
 # dependencies.components), lambda (compute) precedes apigateway (services), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
-# A layer whose root modules no stack uses yet (eks-addons, backup,
-# eks-backend-services, cost-optimization) plans nothing: "No components matched".
+# eks-addons reads its dns instance's zone_ids, so it has its own addons layer
+# after dns (and after compute, for the cluster it installs into).
+# A layer whose root modules no stack uses yet (backup, eks-backend-services,
+# cost-optimization) plans nothing: "No components matched".
 #
 # Every enabled, non-abstract instance of every stack must be selected by exactly
 # one layer, in that order. validate-all enforces it with
@@ -166,7 +168,7 @@ workflows:
       - name: plan-platform
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "external-secrets"'
+          terraform plan --query '.metadata.component == "external-secrets"'
       - name: confirm_platform
         type: confirm
         prompt: Apply the platform layer plan above?
@@ -177,8 +179,7 @@ workflows:
       - name: deploy-platform
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "eks-addons"
-          or .metadata.component == "external-secrets"'
+          terraform deploy --from-plan --query '.metadata.component == "external-secrets"'
       - name: plan-data
         type: atmos
         command: >-
@@ -212,6 +213,21 @@ workflows:
       - name: deploy-dns
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "dns"'
+      # eks-addons reads the dns instances' zone_ids (external-dns and
+      # cert-manager are scoped to those zones), so it follows dns.
+      - name: plan-addons
+        type: atmos
+        command: terraform plan --query '.metadata.component == "eks-addons"'
+      - name: confirm_addons
+        type: confirm
+        prompt: Apply the addons layer plan above?
+        default: false
+      - name: guard-addons
+        type: shell
+        command: test "{{ .steps.confirm_addons.value }}" = "true" || { echo "Deployment cancelled before the addons layer."; exit 1; }
+      - name: deploy-addons
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons"'
       - name: plan-services
         type: atmos
         command: >-
@@ -407,12 +423,12 @@ workflows:
           or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
 
   deploy-platform:
-    description: "Deploy the platform layer: EKS add-ons and External Secrets"
+    description: "Deploy the platform layer: External Secrets"
     steps:
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "external-secrets"'
+          terraform plan --query '.metadata.component == "external-secrets"'
       - name: confirm
         type: confirm
         prompt: Deploy the platform layer?
@@ -423,8 +439,7 @@ workflows:
       - name: deploy
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "eks-addons"
-          or .metadata.component == "external-secrets"'
+          terraform deploy --from-plan --query '.metadata.component == "external-secrets"'
 
   deploy-data:
     description: "Deploy the data layer: databases, caches and backups"
@@ -463,6 +478,23 @@ workflows:
       - name: deploy
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "dns"'
+
+  deploy-addons:
+    description: "Deploy the addons layer: EKS add-ons (after the dns layer, whose zones they read)"
+    steps:
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.metadata.component == "eks-addons"'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the addons layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons"'
 
   deploy-services:
     description: "Deploy the services layer: API Gateway and backend services"
