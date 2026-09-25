@@ -50,6 +50,32 @@ Every other addon (`aws_eks_addon.addons`, e.g. `adot`,
 `amazon-cloudwatch-observability`) installs after the controller.
 `addon_arns` reports both groups.
 
+### Container Insights (`enable_container_insights`, `container-insights.tf`)
+
+Installs the `amazon-cloudwatch-observability` **EKS add-on**: the CloudWatch
+agent (Container Insights metrics) and Fluent Bit (application, host and
+dataplane logs), both running as `amazon-cloudwatch:cloudwatch-agent`.
+
+- IRSA role trusted only by that service account, with the AWS-managed
+  `CloudWatchAgentServerPolicy` (what the add-on documents) plus
+  `policies/container-insights-policy.json`: log-stream writes on this
+  cluster's four log groups only.
+- The log groups `/aws/containerinsights/<cluster>/{application,dataplane,host,performance}`
+  are created up front, encrypted with `container_insights_kms_key_arn`
+  (`kms/main`, whose policy admits CloudWatch Logs through
+  `allow_cloudwatch_logs`) and kept `container_insights_log_retention_days`.
+- Agent and Fluent Bit requests/limits are set in `configuration_values`.
+- `container_insights_addon_version` pins the add-on; unset, it is EKS's
+  default version for the cluster's Kubernetes version.
+- The add-on installs after the load balancer controller, whose webhook must
+  admit the Services it creates.
+
+Cloud Posse's `eks/cloudwatch` installs the same software from the
+`amazon-cloudwatch-observability` Helm chart and attaches
+`CloudWatchAgentServerPolicy` to the node roles. The EKS add-on is used here
+because it takes an IRSA role directly (`service_account_role_arn`), so only
+the agent's service account, not every pod on the node, holds the policy.
+
 `dns_zone_ids` lists **public** hosted zone IDs only (instances pick them from
 the dns component's `zone_ids`, e.g. `.zone_ids.main`). Private zones stay out
 of both IAM policies.
@@ -86,8 +112,9 @@ which has its own instances in every stack.
 
 `eks-addons/main` (cluster `eks/main`) and `eks-addons/data` (cluster
 `eks/data`) in all 3 real stacks (dev, staging, prod). Both enable the load
-balancer controller, cluster-autoscaler, metrics-server, external-dns and
-cert-manager. `main` uses the public `network/main` zone (`main`) and `vpc/main`; `data`
+balancer controller, cluster-autoscaler, metrics-server, external-dns,
+cert-manager and Container Insights (log retention 7 days in dev and
+staging, 90 in prod, on `kms/main`). `main` uses the public `network/main` zone (`main`) and `vpc/main`; `data`
 uses the public `network/services` zones (`services`, `data`) and `vpc/services`. Dev
 uses the Let's Encrypt staging directory.
 
@@ -98,7 +125,7 @@ after `dns`, because they read the dns instances' `zone_ids`.
 
 | Required inputs | Behavior-changing | Outputs |
 |---|---|---|
-| `cluster_name`, `host`, `cluster_ca_certificate`, `oidc_provider_arn`, `oidc_provider_url` (the eks instance's outputs); `clusters` map | `clusters.<key>.enable_*`, `vpc_id`, `dns_zone_ids`, `cert_manager_letsencrypt_email`, `cert_manager_acme_server`, `addon_chart_values`; `istio_enabled`/`domain_name`, `use_external_secrets` | `addon_role_arns`, `addon_release_statuses`, `addon_arns`, `helm_release_statuses`, `service_account_role_arns` (maps) |
+| `cluster_name`, `host`, `cluster_ca_certificate`, `oidc_provider_arn`, `oidc_provider_url` (the eks instance's outputs); `clusters` map | `clusters.<key>.enable_*`, `vpc_id`, `dns_zone_ids`, `cert_manager_letsencrypt_email`, `cert_manager_acme_server`, `addon_chart_values`, `enable_container_insights`, `container_insights_kms_key_arn`, `container_insights_log_retention_days`, `container_insights_addon_version`; `istio_enabled`/`domain_name`, `use_external_secrets` | `addon_role_arns`, `addon_release_statuses`, `container_insights_role_arns`, `container_insights_log_group_names`, `addon_arns`, `helm_release_statuses`, `service_account_role_arns` (maps) |
 
 ## Dependencies & gotchas
 

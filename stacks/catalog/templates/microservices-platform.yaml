@@ -278,8 +278,9 @@ components:
     # Each enable_* switch installs its chart and an IRSA role (see the
     # eks-addons README). external-dns and cert-manager may change records
     # only in settings.microservices.hosted_zone_id. External Secrets is the
-    # external-secrets component; CloudWatch agent, Fluent Bit and Karpenter
-    # have no switch (install them through clusters.<key>.helm_releases).
+    # external-secrets component. The CloudWatch agent and Fluent Bit come
+    # with enable_container_insights; Karpenter has no switch (install it
+    # through clusters.<key>.helm_releases).
 
     microservices/eks-addons:
       metadata:
@@ -308,6 +309,12 @@ components:
             enable_cluster_autoscaler: true
             enable_metrics_server: true
 
+            # CloudWatch Container Insights: agent metrics and Fluent Bit
+            # container logs, log groups on the stack's kms/main
+            enable_container_insights: true
+            container_insights_kms_key_arn: !terraform.state kms/main .key_arn
+            container_insights_log_retention_days: 30
+
             # DNS and certificates
             enable_external_dns: true
             dns_zone_ids:
@@ -324,6 +331,7 @@ components:
         components:
           - component: microservices/eks
           - component: microservices/vpc
+          - component: kms/main
 
     # =========================================================================
     # API GATEWAY (HTTP API)

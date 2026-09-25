@@ -251,8 +251,8 @@ components:
           - component: kms/main
 
     # EKS add-ons, one instance per cluster: the load balancer controller,
-    # cluster-autoscaler, metrics-server, external-dns and cert-manager, each
-    # with its own IRSA role. external-dns and cert-manager may change records
+    # cluster-autoscaler, metrics-server, external-dns, cert-manager and
+    # Container Insights, each with its own IRSA role. external-dns and cert-manager may change records
     # only in the dns instance's public zones. The cluster endpoints are private, so
     # plan/apply these from inside the VPC (see the eks-addons README).
     eks-addons/main:
@@ -273,6 +273,10 @@ components:
             enable_metrics_server: true
             enable_external_dns: true
             enable_cert_manager: true
+            # CloudWatch agent + Fluent Bit; log groups on kms/main
+            enable_container_insights: true
+            container_insights_kms_key_arn: !terraform.state kms/main .key_arn
+            container_insights_log_retention_days: 7
             vpc_id: !terraform.state vpc/main .vpc_id
             # Public zones only; internal.* is private and stays out.
             dns_zone_ids: !terraform.state network/main '.zone_ids.main | [.]'
@@ -282,6 +286,7 @@ components:
           - component: eks/main
           - component: vpc/main
           - component: network/main
+          - component: kms/main
     eks-addons/data:
       metadata:
         component: eks-addons
@@ -300,6 +305,10 @@ components:
             enable_metrics_server: true
             enable_external_dns: true
             enable_cert_manager: true
+            # CloudWatch agent + Fluent Bit; log groups on kms/main
+            enable_container_insights: true
+            container_insights_kms_key_arn: !terraform.state kms/main .key_arn
+            container_insights_log_retention_days: 7
             vpc_id: !terraform.state vpc/services .vpc_id
             dns_zone_ids: !terraform.state network/services '.zone_ids | [.services, .data]'
             cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
@@ -308,3 +317,4 @@ components:
           - component: eks/data
           - component: vpc/services
           - component: network/services
+          - component: kms/main

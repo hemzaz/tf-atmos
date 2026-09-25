@@ -18,6 +18,16 @@ output "addon_release_statuses" {
   description = "Helm release statuses of the enable_* add-ons, keyed <cluster key>.<add-on>"
 }
 
+output "container_insights_role_arns" {
+  value       = { for k, v in aws_iam_role.container_insights : k => v.arn }
+  description = "IRSA role ARNs of the Container Insights add-on, keyed by cluster key"
+}
+
+output "container_insights_log_group_names" {
+  value       = { for k, v in aws_cloudwatch_log_group.container_insights : k => v.name }
+  description = "Container Insights log groups, keyed <cluster key>.<application|dataplane|host|performance>"
+}
+
 output "service_account_role_arns" {
   value       = { for k, v in aws_iam_role.service_account : k => v.arn }
   description = "Map of service account names to role ARNs"
