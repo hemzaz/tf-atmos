@@ -32,6 +32,9 @@ import:
   - catalog/iam/defaults
   - catalog/monitoring/defaults
   - catalog/kinesis/defaults
+  - catalog/s3/defaults
+  - catalog/glue/defaults
+  - catalog/athena/defaults
 
 # =============================================================================
 # COMPONENT DEFINITIONS
@@ -43,57 +46,49 @@ components:
     # DATA LAKE STORAGE (S3)
     # =========================================================================
 
+    # The three buckets below inherit s3/defaults (imported above), which
+    # supplies kms_key_arn (from kms/main) and versioning_enabled: true; the
+    # legacy `server_side_encryption`/`block_public_access*`/
+    # `replication_configuration`/`inventory_configuration` inputs below no
+    # longer exist on the s3 component (it always encrypts with SSE-KMS,
+    # always blocks public access, and does not implement replication or
+    # inventory - see components/terraform/s3/README.md) and have been
+    # dropped rather than silently ignored. `logging` keeps pointing at the
+    # `log_bucket_name` placeholder (documented at the bottom of this file):
+    # the s3 component requires that target to be a separate SSE-S3 bucket
+    # (S3 cannot deliver access logs to an SSE-KMS bucket), and no such
+    # bucket exists in this template yet, so it stays a deployer-supplied
+    # input rather than this task standing up a fourth bucket out of scope.
     data-pipeline/s3-raw:
       metadata:
         component: s3
         type: real
+        inherits:
+          - s3/defaults
       vars:
         bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-raw"
-        description: "Raw data landing zone"
 
-        # Versioning
-        versioning_enabled: true
-
-        # Encryption
-        server_side_encryption:
-          sse_algorithm: "aws:kms"
-          kms_master_key_id: "{{ .vars.data_lake_kms_key_id }}"
-
-        # Lifecycle rules
-        lifecycle_rules:
+        lifecycle_configuration_rules:
           - id: "transition-to-ia"
             enabled: true
-            prefix: ""
-            transitions:
+            filter_and:
+              prefix: ""
+            transition:
               - days: 30
                 storage_class: "STANDARD_IA"
               - days: 90
                 storage_class: "GLACIER"
             expiration:
               days: 365
-            noncurrent_version_transitions:
+            noncurrent_version_transition:
               - days: 30
                 storage_class: "GLACIER"
             noncurrent_version_expiration:
-              days: 90
+              noncurrent_days: 90
 
-        # Access control
-        block_public_access: true
-        block_public_acls: true
-        block_public_policy: true
-        ignore_public_acls: true
-        restrict_public_buckets: true
-
-        # Logging
         logging:
-          target_bucket: "{{ .vars.log_bucket_name }}"
-          target_prefix: "s3-access-logs/raw/"
-
-        # Replication (for DR)
-        replication_configuration:
-          enabled: false
-          destination_bucket: "{{ .vars.dr_bucket_arn }}"
-          destination_region: "{{ .vars.dr_region }}"
+          bucket_name: "{{ .vars.log_bucket_name }}"
+          prefix: "s3-access-logs/raw/"
 
         tags:
           DataClassification: "raw"
@@ -103,38 +98,28 @@ components:
       metadata:
         component: s3
         type: real
+        inherits:
+          - s3/defaults
       vars:
         bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-processed"
-        description: "Processed and transformed data"
 
-        # Versioning
-        versioning_enabled: true
-
-        # Encryption
-        server_side_encryption:
-          sse_algorithm: "aws:kms"
-          kms_master_key_id: "{{ .vars.data_lake_kms_key_id }}"
-
-        # Lifecycle rules (keep processed data longer)
-        lifecycle_rules:
+        # Lifecycle rules keep processed data longer than raw.
+        lifecycle_configuration_rules:
           - id: "transition-to-ia"
             enabled: true
-            prefix: ""
-            transitions:
+            filter_and:
+              prefix: ""
+            transition:
               - days: 90
                 storage_class: "STANDARD_IA"
               - days: 365
                 storage_class: "GLACIER"
             noncurrent_version_expiration:
-              days: 180
+              noncurrent_days: 180
 
-        # Access control
-        block_public_access: true
-
-        # Logging
         logging:
-          target_bucket: "{{ .vars.log_bucket_name }}"
-          target_prefix: "s3-access-logs/processed/"
+          bucket_name: "{{ .vars.log_bucket_name }}"
+          prefix: "s3-access-logs/processed/"
 
         tags:
           DataClassification: "processed"
@@ -144,53 +129,56 @@ components:
       metadata:
         component: s3
         type: real
+        inherits:
+          - s3/defaults
       vars:
         bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-curated"
-        description: "Curated data ready for analytics"
 
-        # Versioning
-        versioning_enabled: true
-
-        # Encryption
-        server_side_encryption:
-          sse_algorithm: "aws:kms"
-          kms_master_key_id: "{{ .vars.data_lake_kms_key_id }}"
-
-        # Lifecycle rules (analytics data retained longer)
-        lifecycle_rules:
+        # Lifecycle rules: analytics data is retained longest of the three.
+        lifecycle_configuration_rules:
           - id: "transition-to-ia"
             enabled: true
-            prefix: ""
-            transitions:
+            filter_and:
+              prefix: ""
+            transition:
               - days: 180
                 storage_class: "STANDARD_IA"
             noncurrent_version_expiration:
-              days: 365
+              noncurrent_days: 365
 
-        # Access control
-        block_public_access: true
-
-        # Logging
         logging:
-          target_bucket: "{{ .vars.log_bucket_name }}"
-          target_prefix: "s3-access-logs/curated/"
-
-        # S3 Inventory for data catalog
-        inventory_configuration:
-          enabled: true
-          destination_bucket: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-inventory"
-          format: "Parquet"
-          frequency: "Weekly"
-          included_object_versions: "Current"
-          optional_fields:
-            - "Size"
-            - "LastModifiedDate"
-            - "StorageClass"
-            - "ETag"
+          bucket_name: "{{ .vars.log_bucket_name }}"
+          prefix: "s3-access-logs/curated/"
 
         tags:
           DataClassification: "curated"
           DataPipeline: "analytics"
+
+    # Athena query result bucket, read by data-pipeline/athena's
+    # output_location below. Separate from s3-curated (which Glue crawls) so
+    # Athena's own scratch/result objects never land in a crawled prefix.
+    data-pipeline/s3-athena-results:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-athena-results"
+        # Query results are reproducible from the source data; a short
+        # expiration keeps result storage from growing unbounded.
+        versioning_enabled: false
+        lifecycle_configuration_rules:
+          - id: "expire-old-results"
+            enabled: true
+            filter_and:
+              prefix: ""
+            expiration:
+              days: 30
+
+        tags:
+          DataPipeline: "analytics"
+          QueryEngine: "athena"
 
     # =========================================================================
     # DATA INGESTION (Kinesis)
@@ -557,13 +545,24 @@ components:
         components:
           - component: data-pipeline/kinesis-enriched
           - component: data-pipeline/s3-processed
+    # The instance name (glue-database) predates folding the crawlers in -
+    # kept as-is so every existing `!terraform.state data-pipeline/glue-database
+    # ...` read below (and in firehose/athena above) stays valid. The
+    # former data-pipeline/glue-crawlers instance's three crawlers are now
+    # entries in this instance's own `crawlers` map (component glue is one
+    # database plus its crawlers - see components/terraform/glue/README.md);
+    # their `role`/`database_name` are no longer placeholders/repeated
+    # !terraform.state calls, since every crawler always shares this
+    # instance's own component-created role and database.
     data-pipeline/glue-database:
       metadata:
         component: glue
         type: real
+        inherits:
+          - glue/defaults
       vars:
-        database_name: "{{ .settings.context.tenant }}_{{ .settings.context.environment }}_data_lake"
-        description: "Data lake catalog database"
+        name: "data-lake"
+        database_description: "Data lake catalog database"
 
         # Location
         location_uri: !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
@@ -575,22 +574,10 @@ components:
             permissions:
               - "ALL"
 
-        tags:
-          DataPipeline: "catalog"
-          CatalogType: "database"
-
-    data-pipeline/glue-crawlers:
-      metadata:
-        component: glue-crawler
-        type: real
-      vars:
         crawlers:
           # Raw data crawler
           raw_data:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-raw-data-crawler"
             description: "Crawls raw data in S3"
-            database_name: !terraform.state data-pipeline/glue-database .database_name
-            role: "{{ .vars.glue_crawler_role_arn }}"
             schedule: "cron(0 */6 * * ? *)"  # Every 6 hours
             s3_targets:
               - path: !terraform.state data-pipeline/s3-raw .bucket_name | "s3://" + . + "/data/"
@@ -610,10 +597,7 @@ components:
 
           # Processed data crawler
           processed_data:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-processed-data-crawler"
             description: "Crawls processed data in S3"
-            database_name: !terraform.state data-pipeline/glue-database .database_name
-            role: "{{ .vars.glue_crawler_role_arn }}"
             schedule: "cron(0 */6 * * ? *)"  # Every 6 hours
             s3_targets:
               - path: !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
@@ -626,10 +610,7 @@ components:
 
           # Curated data crawler
           curated_data:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-curated-data-crawler"
             description: "Crawls curated data in S3"
-            database_name: !terraform.state data-pipeline/glue-database .database_name
-            role: "{{ .vars.glue_crawler_role_arn }}"
             schedule: "cron(0 0 * * ? *)"  # Daily
             s3_targets:
               - path: !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
@@ -640,38 +621,42 @@ components:
 
         tags:
           DataPipeline: "catalog"
-          CatalogType: "crawler"
+          CatalogType: "database"
+
+      # list_merge_strategy is `replace` (atmos.yaml), so this instance-level
+      # dependencies.components REPLACES glue/defaults' own ([kms/main])
+      # rather than adding to it - both, plus every bucket a crawler or
+      # location_uri reads, must be listed here.
+      dependencies:
+        components:
+          - component: kms/main
+          - component: data-pipeline/s3-raw
+          - component: data-pipeline/s3-processed
+          - component: data-pipeline/s3-curated
 
     # =========================================================================
     # QUERY ENGINE (Athena)
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: data-pipeline/glue-database
-          - component: data-pipeline/s3-raw
-          - component: data-pipeline/s3-processed
-          - component: data-pipeline/s3-curated
     data-pipeline/athena:
       metadata:
         component: athena
         type: real
+        inherits:
+          - athena/defaults
       vars:
-        workgroup_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline"
+        name: "data-pipeline"
         description: "Athena workgroup for data pipeline queries"
 
-        # Output configuration
-        output_location: "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-athena-results/"
+        # Output configuration - the s3-athena-results instance's own bucket,
+        # not a bare bucket name: that instance carries this repo's standard
+        # bucket hardening (TLS-only policy, public access block, SSE-KMS).
+        output_location: !terraform.state data-pipeline/s3-athena-results .bucket_name | "s3://" + . + "/"
 
         # Configuration
         enforce_workgroup_configuration: true
         publish_cloudwatch_metrics_enabled: true
         bytes_scanned_cutoff_per_query: 10737418240                                     # 10 GB
-
-        # Encryption
-        encryption_configuration:
-          encryption_option: "SSE_KMS"
-          kms_key_arn: "{{ .vars.athena_kms_key_arn }}"
 
         # Engine version
         engine_version: "Athena engine version 3"
@@ -679,10 +664,13 @@ components:
         # Requester pays (for cross-account queries)
         requester_pays_enabled: false
 
-        # Named queries (saved queries)
+        # Named queries (saved queries). Athena's own Name field only
+        # allows alphanumerics/./_/- (no spaces), so the component computes
+        # it from the map key rather than a free-text `name` field - the
+        # descriptive titles the original placeholders carried as `name`
+        # (e.g. "Daily Summary") now live in `description` instead.
         named_queries:
           daily_summary:
-            name: "Daily Summary"
             description: "Daily event summary by source"
             database: !terraform.state data-pipeline/glue-database .database_name
             query: |
@@ -698,7 +686,6 @@ components:
               ORDER BY event_date DESC, event_count DESC
 
           error_analysis:
-            name: "Error Analysis"
             description: "Analyze error patterns"
             database: !terraform.state data-pipeline/glue-database .database_name
             query: |
@@ -716,7 +703,6 @@ components:
               LIMIT 100
 
           data_quality_check:
-            name: "Data Quality Check"
             description: "Check for data quality issues"
             database: !terraform.state data-pipeline/glue-database .database_name
             query: |
@@ -742,13 +728,17 @@ components:
           DataPipeline: "analytics"
           QueryEngine: "athena"
 
+      # Same list_merge_strategy: replace note as glue-database above.
+      dependencies:
+        components:
+          - component: kms/main
+          - component: data-pipeline/glue-database
+          - component: data-pipeline/s3-athena-results
+
     # =========================================================================
     # WORKFLOW ORCHESTRATION (Step Functions)
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: data-pipeline/glue-database
     data-pipeline/step-functions:
       metadata:
         component: step-functions

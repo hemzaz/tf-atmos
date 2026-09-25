@@ -1,0 +1,31 @@
+---
+##################################################
+# Catalog Configuration for Amazon Athena
+##################################################
+# One workgroup per instance (the Cloud Posse aws-athena model, minus its
+# own bucket/key creation - see the athena component's README). Instances
+# inherit this base and set `name`, `output_location` and `named_queries`.
+
+components:
+  terraform:
+    athena/defaults:
+      metadata:
+        component: athena
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults). No
+        # role/key-policy grant is needed here (unlike the glue crawler
+        # role): Athena queries run under the caller's own IAM identity,
+        # which kms/main's account-root delegation already covers - see the
+        # athena component's README.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        named_queries: {}
+        tags:
+          Component: "Athena"

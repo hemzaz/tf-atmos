@@ -1,0 +1,33 @@
+---
+##################################################
+# Catalog Configuration for AWS Glue
+##################################################
+# One catalog database plus its crawlers per instance (this repo's own
+# model, folding Cloud Posse's separate aws-glue-catalog-database,
+# aws-glue-crawler and aws-glue-iam components into one - see the glue
+# component's README). Instances inherit this base and set `name`,
+# `location_uri`, `create_table_default_permissions` and `crawlers`.
+
+components:
+  terraform:
+    glue/defaults:
+      metadata:
+        component: glue
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults), whose
+        # policy delegates to the account root (enable_default_policy), so
+        # the crawler role's own IAM identity policy is sufficient to use
+        # the key - see the glue component's README.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        create_table_default_permissions: []
+        crawlers: {}
+        tags:
+          Component: "Glue"
