@@ -1,0 +1,21 @@
+---
+##################################################
+# Catalog Configuration for Amazon SES
+##################################################
+# One domain identity per instance, verified with Easy DKIM (the Cloud Posse
+# aws-ses model). Instances inherit this base and set `domain` and `zone_id`
+# (the domain's public zone, from the stack's dns instance), and declare that
+# dns instance in dependencies.components.
+
+components:
+  terraform:
+    ses/defaults:
+      metadata:
+        component: ses
+        type: abstract
+      vars:
+        enabled: true
+        ses_verify_dkim: true
+        dkim_signing_key_length: RSA_2048_BIT
+        tags:
+          Component: "SES"

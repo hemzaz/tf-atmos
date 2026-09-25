@@ -414,4 +414,33 @@ data "aws_iam_policy_document" "default" {
       }
     }
   }
+  # S3 event notifications to SQS queues / SNS topics encrypted with this key,
+  # limited to this account's buckets (bucket ARNs carry no account, so
+  # aws:SourceAccount does the pinning; aws:SourceArn keeps it to buckets).
+  dynamic "statement" {
+    for_each = var.allow_s3 ? [1] : []
+
+    content {
+      sid       = "AllowS3"
+      actions   = ["kms:Decrypt", "kms:GenerateDataKey*"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["s3.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:s3:::*"]
+      }
+    }
+  }
 }

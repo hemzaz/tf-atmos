@@ -56,11 +56,21 @@
 #          letsencrypt_email: ops@example.com    # cert-manager ACME account
 #          cognito_user_pool_id: eu-west-2_xxxx  # JWT issuer
 #          cognito_client_id: xxxxxxxx           # JWT audience
-#          lambda_artifacts_bucket: my-artifacts # holds welcome-email/latest.zip
+#          lambda_artifacts_bucket: my-artifacts # holds welcome-email/<version>.zip
+#          welcome_email_version: "1.4.2"        # package key; bump to deploy new code
+#          dns_component: network/main           # dns instance holding the domain's public zone
+#          dns_zone_key: main                    # that zone's key in its zone_ids output
 #    A missing key fails every describe/plan of the stack with its name
 #    (gomplate `required`); `atmos validate stacks` does not render templates.
 # 3. On-call addresses, if any, in microservices/monitoring's
 #    alarm_email_subscriptions.
+# 4. That dns instance (settings.microservices.dns_component) manages
+#    app_domain_name's PUBLIC, delegated zone: microservices/ses writes the
+#    domain's DKIM records there, and SES verifies the domain through them.
+# 5. Manual, once per account and region: SES starts in the sandbox (sends
+#    only to verified addresses, 200 a day). Request production access (SES
+#    console, or `aws sesv2 put-account-details`) before the welcome email
+#    can reach real users. Terraform cannot do this.
 # =============================================================================
 
 import:
@@ -72,6 +82,7 @@ import:
   - catalog/dynamodb/defaults
   - catalog/eventbridge/defaults
   - catalog/sqs/defaults
+  - catalog/ses/defaults
   - catalog/secretsmanager/defaults
 
 # =============================================================================
@@ -647,9 +658,13 @@ components:
           Platform: "microservices"
 
     # Sends the welcome email for a UserRegistered event (the rule passes the
-    # event's detail). The package is built and uploaded by the service's CI;
-    # it must be in settings.microservices.lambda_artifacts_bucket before the
-    # first apply. It sends through SES from the app domain's identity.
+    # event's detail). The service's CI builds the package and uploads it as
+    # welcome-email/<version>.zip to settings.microservices.lambda_artifacts_bucket;
+    # bumping settings.microservices.welcome_email_version changes s3_key, which
+    # is what makes Terraform deploy the new code. It sends through SES from
+    # the app domain's identity (microservices/ses). An invocation that still
+    # fails after the retries goes to microservices/sqs/welcome-email-failures
+    # (the rule target's dead-letter queue only catches failed deliveries).
     microservices/lambda/welcome-email:
       metadata:
         component: lambda
@@ -659,13 +674,21 @@ components:
         handler: "index.handler"
         runtime: "nodejs22.x"
         s3_bucket: '{{ required "settings.microservices.lambda_artifacts_bucket is required" .settings.microservices.lambda_artifacts_bucket }}'
-        s3_key: "welcome-email/latest.zip"
+        s3_key: 'welcome-email/{{ required "settings.microservices.welcome_email_version is required" .settings.microservices.welcome_email_version }}.zip'
         memory_size: 256
         timeout: 30
         log_retention_days: 30
         # Environment variables and the function's log group, with the stack key.
         kms_key_arn: !terraform.state kms/main .key_arn
         kms_key_id: !terraform.state kms/main .key_arn
+        # Asynchronous invocations (EventBridge's): 2 retries within an hour,
+        # then the event goes to the failure queue. The component lets the
+        # role send there and use the queue's key.
+        configure_event_invoke: true
+        maximum_retry_attempts: 2
+        maximum_event_age_in_seconds: 3600
+        on_failure_destination: !terraform.state microservices/sqs/welcome-email-failures .queue_arn
+        delivery_kms_key_arn: !terraform.state kms/main .key_arn
         environment_variables:
           SENDER_ADDRESS: 'no-reply@{{ .settings.microservices.app_domain_name }}'
         custom_policy: >-
@@ -679,6 +702,43 @@ components:
       dependencies:
         components:
           - component: kms/main
+          - component: microservices/ses
+          - component: microservices/sqs/welcome-email-failures
+
+    # Failed asynchronous invocations of the welcome-email function (its
+    # on_failure destination). The function's role sends here; nothing else
+    # does, so the queue needs no policy.
+    microservices/sqs/welcome-email-failures:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: welcome-email-failures
+        message_retention_seconds: 1209600
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+
+    # The app domain as an SES identity, verified with Easy DKIM: the three
+    # DKIM records go into the domain's public zone, from the stack's dns
+    # instance (settings.microservices.dns_component / dns_zone_key).
+    microservices/ses:
+      metadata:
+        component: ses
+        type: real
+        inherits:
+          - ses/defaults
+      vars:
+        domain: '{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
+        zone_id: !terraform.state '{{ required "settings.microservices.dns_component is required" .settings.microservices.dns_component }} .zone_ids.{{ required "settings.microservices.dns_zone_key is required" .settings.microservices.dns_zone_key }}'
+        tags:
+          Layer: "messaging"
+          Platform: "microservices"
+      dependencies:
+        components:
+          - component: '{{ .settings.microservices.dns_component }}'
 
     # =========================================================================
     # STATE MANAGEMENT (DynamoDB) - one table per instance
@@ -957,6 +1017,48 @@ components:
             evaluation_periods: 1
             period: 60
             statistic: "Sum"
+          # Anything in a dead-letter or failure queue is an event that was
+          # never handled.
+          event-bus-dlq-messages:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            dimensions:
+              QueueName: !terraform.state microservices/sqs/event-bus-dlq .queue_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Maximum"
+          order-inventory-dlq-messages:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            dimensions:
+              QueueName: !terraform.state microservices/sqs/order-inventory .dead_letter_queue_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Maximum"
+          user-notifications-dlq-messages:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            dimensions:
+              QueueName: !terraform.state microservices/sqs/user-notifications .dead_letter_queue_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Maximum"
+          welcome-email-failures-messages:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            dimensions:
+              QueueName: !terraform.state microservices/sqs/welcome-email-failures .queue_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Maximum"
 
         # SNS notifications (topic "<Environment>-alarms")
         create_sns_topic: true
@@ -991,6 +1093,10 @@ components:
           - component: microservices/eventbridge
           - component: microservices/dynamodb/service-state
           - component: microservices/elasticache
+          - component: microservices/sqs/event-bus-dlq
+          - component: microservices/sqs/order-inventory
+          - component: microservices/sqs/user-notifications
+          - component: microservices/sqs/welcome-email-failures
 
     # =========================================================================
     # SECRETS MANAGEMENT

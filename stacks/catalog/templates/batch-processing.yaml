@@ -339,8 +339,8 @@ components:
 
     # S3 event trigger queue. The input bucket's event notifications send here;
     # the policy is scoped to that bucket, and the sqs component adds
-    # aws:SourceAccount = <this account>. S3 must also be allowed to use the
-    # queue's key, which kms/main does not grant yet.
+    # aws:SourceAccount = <this account>. S3 uses the queue's key under
+    # kms/main's AllowS3 statement (allow_s3, on in catalog/kms/defaults).
     batch-processing/sqs/trigger:
       metadata:
         component: sqs
