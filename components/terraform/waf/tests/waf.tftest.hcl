@@ -48,9 +48,9 @@ run "association_arns_are_rejected_for_cloudfront_scope" {
   command = plan
 
   variables {
-    region                     = "us-east-1"
-    scope                      = "CLOUDFRONT"
-    association_resource_arns  = ["arn:aws:cloudfront::123456789012:distribution/EDFDVBD6EXAMPLE"]
+    region                    = "us-east-1"
+    scope                     = "CLOUDFRONT"
+    association_resource_arns = ["arn:aws:cloudfront::123456789012:distribution/EDFDVBD6EXAMPLE"]
   }
 
   expect_failures = [var.association_resource_arns]
@@ -131,11 +131,11 @@ run "unique_priorities_across_rule_lists_are_accepted" {
     ]
     byte_match_statement_rules = [
       {
-        name                   = "BlockBadUserAgents"
-        priority               = 5
-        search_string          = "curl/"
-        positional_constraint  = "STARTS_WITH"
-        header_name            = "user-agent"
+        name                  = "BlockBadUserAgents"
+        priority              = 5
+        search_string         = "curl/"
+        positional_constraint = "STARTS_WITH"
+        header_name           = "user-agent"
       },
     ]
   }

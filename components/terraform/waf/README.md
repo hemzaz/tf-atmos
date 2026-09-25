@@ -31,16 +31,28 @@ the stack as usual.
 group lives in `us-east-1`; this stack's own customer-managed key (e.g.
 `kms/main`) lives in the stack's usual region and cannot encrypt a `us-east-1`
 resource. Leave `kms_key_arn` unset for a CLOUDFRONT instance -- the log group
-then uses CloudWatch Logs' default encryption.
+then uses CloudWatch Logs' default encryption. Every `REGIONAL` instance sets
+`kms_key_arn` from `kms/main` directly (not via `waf/defaults`: Atmos's deep
+merge does not let a `null` override win over a non-null default, which a
+CLOUDFRONT instance needs to do).
 
 ## Logging
 
 `enable_logging` (default `true`) creates a CloudWatch log group and a
 `aws_wafv2_web_acl_logging_configuration`. The log group is always named
-`aws-waf-logs-<Environment>-<name>`: WAFv2 requires this exact prefix, and
-that requirement is also how AWS grants the WAF logging service permission to
-write to the group, with no explicit resource policy needed from this
-component.
+`aws-waf-logs-<Environment>-<name>`: WAFv2 requires this exact prefix.
+
+That prefix alone does **not** grant AWS WAF permission to write to the log
+group. `PutLoggingConfiguration` (which the `aws_wafv2_web_acl_logging_configuration`
+resource calls) auto-manages this by creating or extending an account-wide,
+unmanaged CloudWatch Logs resource policy named `AWSWAF-LOGS`, shared by
+every WAF logging configuration in the account and region. That policy
+counts toward CloudWatch Logs' 10-resource-policy-per-region quota and can
+hit its own size limit as more web ACLs are added. This component avoids
+both by managing its own `aws_cloudwatch_log_resource_policy`, scoped to
+just its log group, granting `delivery.logs.amazonaws.com`
+`logs:CreateLogStream` and `logs:PutLogEvents` with `aws:SourceAccount` and
+`aws:SourceArn` conditions.
 
 ## Rules
 
@@ -104,7 +116,7 @@ web-application/waf-cloudfront:
 | `sampled_requests_enabled` | Sample matching requests | `true` |
 | `metric_name` | Web ACL's own metric name | `<Environment>-<name>` |
 | `enable_logging` | Create the log group and logging configuration | `true` |
-| `log_group_retention_days` | Log group retention | `90` |
+| `log_group_retention_days` | Log group retention | `365` |
 | `kms_key_arn` | KMS key to encrypt the log group | `null` |
 
 ## Outputs

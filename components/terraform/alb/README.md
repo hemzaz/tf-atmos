@@ -21,11 +21,14 @@ Written as plain resources, like the other root components in this repo (see
   ALB access log delivery only supports SSE-S3, and the `s3` component always
   encrypts with a customer-managed KMS key. This component's `access_logs`
   bucket is therefore separate: SSE-S3, fully public-access-blocked, TLS-only,
-  and its policy grants only the region's ELB log-delivery service account
-  (`data.aws_elb_service_account`) `s3:PutObject` under its own prefix. That
-  covers every standard AWS region, including this repo's `eu-west-2`; an
-  opt-in region would additionally need the `delivery.logs.amazonaws.com`
-  service principal, which is out of scope here.
+  and its policy grants only the `logdelivery.elasticloadbalancing.amazonaws.com`
+  service principal `s3:PutObject` under its own prefix, scoped with an
+  `aws:SourceAccount` condition -- AWS's current recommendation for every
+  region, superseding the legacy per-region `aws_elb_service_account`
+  principal (which cannot take that condition). The bucket is named
+  `<Environment>-<name>-access-logs-<account-id>`: S3 bucket names are global
+  across every AWS account, so the account id keeps it unique, the way the
+  repo's other component-created buckets do (`awsconfig`, `cloudtrail`).
 
 ## HTTPS listener default action
 
@@ -115,7 +118,9 @@ web-application/alb:
 
 ## Tests
 
-`tests/alb.tftest.hcl` asserts (mock provider, no AWS calls):
+`tests/alb.tftest.hcl` asserts (real provider with dummy credentials and
+`override_data` for every data source that would otherwise call AWS, as in
+`kms/tests` and `s3/tests` -- every run is a plan, so nothing reaches AWS):
 
 - the security group has no CIDR ingress and admits only the CloudFront
   origin-facing prefix list on 443, plus any explicitly added prefix

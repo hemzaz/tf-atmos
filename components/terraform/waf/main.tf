@@ -15,13 +15,19 @@ locals {
   name        = "${var.tags["Environment"]}-${var.name}"
   metric_name = var.metric_name != "" ? var.metric_name : local.name
 
-  # WAFv2 requires this exact prefix on the log group name -- it is how AWS
-  # grants WAF's logging service permission to write to it, with no explicit
-  # resource policy needed from this component.
+  # WAFv2 requires this exact prefix on the log group name; it does not by
+  # itself grant WAF's logging service permission to write to it. Delivery
+  # depends on the account-wide AWSWAF-LOGS CloudWatch Logs resource policy
+  # that aws_wafv2_web_acl_logging_configuration.this's PutLoggingConfiguration
+  # call implicitly creates or extends -- see the explicit
+  # aws_cloudwatch_log_resource_policy below, which manages that grant rather
+  # than leaving it to the implicit account-wide policy.
   log_group_name = "aws-waf-logs-${local.name}"
 }
 
 resource "aws_wafv2_web_acl" "this" {
+  #checkov:skip=CKV_AWS_192:No rule list is hardcoded here (rules are a per-instance input); every instance of this component configures AWSManagedRulesKnownBadInputsRuleSet, which covers CVE-2021-44228 (Log4Shell) -- see stacks/catalog/templates/web-application.yaml and serverless-api.yaml
+  #checkov:skip=CKV2_AWS_31:aws_wafv2_web_acl_logging_configuration.this covers this ACL via count (gated on var.enable_logging, default true); checkov's graph does not follow the count-indexed association
   count = local.enabled ? 1 : 0
 
   name        = local.name
@@ -188,7 +194,7 @@ resource "aws_wafv2_web_acl_association" "this" {
 }
 
 resource "aws_cloudwatch_log_group" "this" {
-  #checkov:skip=CKV_AWS_158:kms_key_arn is an input; unset only when the ACL's region has no matching regional key (e.g. a CLOUDFRONT/us-east-1 ACL alongside a stack-region key)
+  #checkov:skip=CKV_AWS_158:kms_key_arn is an input; unset only for a CLOUDFRONT-scope (us-east-1) instance, whose region has no matching key in this stack's usual (regional) kms/main -- REGIONAL instances set it
   count = local.enabled && var.enable_logging ? 1 : 0
 
   name              = local.log_group_name
@@ -198,9 +204,62 @@ resource "aws_cloudwatch_log_group" "this" {
   tags = { Name = local.log_group_name }
 }
 
+# aws_wafv2_web_acl_logging_configuration's PutLoggingConfiguration call can
+# manage CloudWatch Logs permissions for the aws-waf-logs- prefixed log group
+# on its own, but it does so by creating or extending an account-wide,
+# unmanaged "AWSWAF-LOGS" resource policy shared by every WAF logging
+# configuration in the account/region -- which counts toward the 10
+# resource-policy-per-region CloudWatch Logs quota and can hit that policy's
+# size limit as more web ACLs are added. Managing a policy scoped to this log
+# group explicitly avoids both.
+data "aws_caller_identity" "current" {
+  count = local.enabled && var.enable_logging ? 1 : 0
+}
+
+data "aws_partition" "current" {
+  count = local.enabled && var.enable_logging ? 1 : 0
+}
+
+data "aws_iam_policy_document" "log_delivery" {
+  count = local.enabled && var.enable_logging ? 1 : 0
+
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.this[0].arn}:*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current[0].account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:${data.aws_partition.current[0].partition}:logs:${var.region}:${data.aws_caller_identity.current[0].account_id}:*"]
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_resource_policy" "waf_logging" {
+  count = local.enabled && var.enable_logging ? 1 : 0
+
+  policy_name     = "${local.log_group_name}-logging"
+  policy_document = data.aws_iam_policy_document.log_delivery[0].json
+}
+
 resource "aws_wafv2_web_acl_logging_configuration" "this" {
   count = local.enabled && var.enable_logging ? 1 : 0
 
   resource_arn            = aws_wafv2_web_acl.this[0].arn
   log_destination_configs = [aws_cloudwatch_log_group.this[0].arn]
+
+  depends_on = [aws_cloudwatch_log_resource_policy.waf_logging]
 }

@@ -254,6 +254,11 @@ components:
         name: "webapp-waf"
         scope: "REGIONAL"
 
+        # Every stack runs a kms/main instance (catalog/kms/defaults), so this
+        # resolves everywhere; see stacks/catalog/waf/defaults.yaml for why
+        # this is set per REGIONAL instance rather than defaulted.
+        kms_key_arn: !terraform.state kms/main .key_arn
+
         # Associate with the ALB
         association_resource_arns:
           - !terraform.state web-application/alb .alb_arn
@@ -293,6 +298,7 @@ components:
       dependencies:
         components:
           - component: web-application/alb
+          - component: kms/main
     web-application/waf-cloudfront:
       metadata:
         component: waf

@@ -905,6 +905,11 @@ components:
         name: "api-waf"
         scope: "REGIONAL"
 
+        # Every stack runs a kms/main instance (catalog/kms/defaults), so this
+        # resolves everywhere; see stacks/catalog/waf/defaults.yaml for why
+        # this is set per REGIONAL instance rather than defaulted.
+        kms_key_arn: !terraform.state kms/main .key_arn
+
         # Associate with the API Gateway stage. apigateway's own enable_waf is
         # off (see serverless-api/apigateway above) so the stage has exactly
         # one associated ACL, not two.
@@ -954,6 +959,7 @@ components:
       dependencies:
         components:
           - component: serverless-api/apigateway
+          - component: kms/main
     serverless-api/dns:
       metadata:
         component: dns

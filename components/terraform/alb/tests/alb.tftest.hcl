@@ -28,14 +28,6 @@ override_data {
 }
 
 override_data {
-  target = data.aws_elb_service_account.this
-  values = {
-    id  = "652711504416"
-    arn = "arn:aws:iam::652711504416:root"
-  }
-}
-
-override_data {
   target = data.aws_ec2_managed_prefix_list.cloudfront
   values = {
     id  = "pl-00a54069"
@@ -84,12 +76,27 @@ run "no_cidr_ingress_exists_anywhere_in_the_security_group" {
   command = plan
 
   # There is no resource type in this component that could add a CIDR-based
-  # ingress rule; this asserts on the two ingress rule resources that do
-  # exist, so the invariant fails loudly if a future edit adds a cidr_blocks
-  # argument to either of them.
+  # ingress rule; this asserts across every ingress rule resource that
+  # exists (with at least one populated element in each), so the invariant
+  # fails loudly if a future edit adds a cidr_blocks argument to any of them.
+  variables {
+    additional_ingress_prefix_list_ids    = ["pl-fake11111111111"]
+    additional_ingress_security_group_ids = ["sg-fake222222222222"]
+  }
+
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.cloudfront[0].cidr_ipv4 == null && aws_vpc_security_group_ingress_rule.cloudfront[0].cidr_ipv6 == null
+    error_message = "The CloudFront ingress rule must never carry a CIDR block."
+  }
+
   assert {
     condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.additional_prefix_lists : r.cidr_ipv4 == null && r.cidr_ipv6 == null])
     error_message = "Additional prefix list ingress rules must never carry a CIDR block."
+  }
+
+  assert {
+    condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.additional_security_groups : r.cidr_ipv4 == null && r.cidr_ipv6 == null])
+    error_message = "Additional security group ingress rules must never carry a CIDR block."
   }
 }
 
@@ -149,8 +156,8 @@ run "access_logs_bucket_denies_non_tls_and_grants_only_the_elb_account" {
   command = plan
 
   assert {
-    condition     = aws_s3_bucket.access_logs[0].bucket == "test-webapp-alb-access-logs"
-    error_message = "The access-logs bucket is named <Environment>-<name>-access-logs."
+    condition     = aws_s3_bucket.access_logs[0].bucket == "test-webapp-alb-access-logs-123456789012"
+    error_message = "The access-logs bucket is named <Environment>-<name>-access-logs-<account-id>."
   }
 
   assert {
@@ -169,9 +176,12 @@ run "access_logs_bucket_denies_non_tls_and_grants_only_the_elb_account" {
   assert {
     condition = alltrue([
       for s in jsondecode(data.aws_iam_policy_document.access_logs[0].json).Statement :
-      s.Sid != "AllowELBLogDelivery" || s.Principal.AWS == "arn:aws:iam::652711504416:root"
+      s.Sid != "AllowELBLogDelivery" || (
+        s.Principal.Service == "logdelivery.elasticloadbalancing.amazonaws.com" &&
+        s.Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+      )
     ])
-    error_message = "Only the region's ELB log-delivery account may write access logs."
+    error_message = "Only the logdelivery.elasticloadbalancing.amazonaws.com service principal, scoped to this account, may write access logs."
   }
 }
 

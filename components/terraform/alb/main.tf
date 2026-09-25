@@ -31,6 +31,7 @@ data "aws_ec2_managed_prefix_list" "cloudfront" {
 }
 
 resource "aws_security_group" "this" {
+  #checkov:skip=CKV2_AWS_5:Attached to the load balancer (aws_lb.this[0]); checkov's graph does not follow the count index in aws_security_group.this[0].id
   count = local.enabled ? 1 : 0
 
   name_prefix = "${local.name}-"
@@ -77,6 +78,7 @@ resource "aws_vpc_security_group_ingress_rule" "additional_security_groups" {
   referenced_security_group_id = each.value
 }
 
+#trivy:ignore:AVD-AWS-0104 Egress is unrestricted by policy (owner decision): the CloudFront-prefix-list-only ingress rules above cover inbound traffic; egress may be open.
 resource "aws_vpc_security_group_egress_rule" "all" {
   count = local.enabled ? 1 : 0
 
@@ -90,23 +92,22 @@ resource "aws_vpc_security_group_egress_rule" "all" {
 # Access-logs bucket. ALB access logs only support SSE-S3, so this is a
 # dedicated bucket (not the repo's SSE-KMS s3 component), following Cloud
 # Posse's lb-s3-bucket: TLS-only, fully public-access-blocked, and a policy
-# granting the region's ELB log-delivery account write access under its own
-# prefix. `aws_elb_service_account` covers every standard AWS region
-# (including this repo's eu-west-2); an opt-in region would additionally need
-# the delivery.logs.amazonaws.com service principal, which is out of scope
-# here.
+# granting only the logdelivery.elasticloadbalancing.amazonaws.com service
+# principal write access under its own prefix, scoped with an
+# aws:SourceAccount condition (AWS's current recommendation for every
+# region, superseding the legacy per-region aws_elb_service_account
+# principal, which cannot take that condition).
 # ---------------------------------------------------------------------------
 
 data "aws_caller_identity" "current" {
   count = local.access_logs_enabled ? 1 : 0
 }
 
-data "aws_elb_service_account" "this" {
-  count = local.access_logs_enabled ? 1 : 0
-}
-
 locals {
-  access_logs_bucket_name = "${local.name}-access-logs"
+  # S3 bucket names are global across all AWS accounts; the account id keeps
+  # this bucket's name unique the way the repo's other component-created
+  # buckets do (awsconfig/main.tf, cloudtrail/main.tf).
+  access_logs_bucket_name = local.access_logs_enabled ? "${local.name}-access-logs-${data.aws_caller_identity.current[0].account_id}" : ""
   access_logs_bucket_arn  = "arn:${data.aws_partition.current.partition}:s3:::${local.access_logs_bucket_name}"
   access_logs_key_prefix  = var.access_logs_prefix != "" ? "${trim(var.access_logs_prefix, "/")}/" : ""
 }
@@ -118,6 +119,7 @@ resource "aws_s3_bucket" "access_logs" {
   #checkov:skip=CKV_AWS_18:This bucket IS the access-log destination; access logs of a log bucket are out of scope
   #checkov:skip=CKV2_AWS_61:A short-lived lifecycle rule is unnecessary for access logs sized for this repo's stacks
   #checkov:skip=CKV2_AWS_62:Event notifications are out of scope for this component
+  #checkov:skip=CKV_AWS_144:Access-log bucket; cross-region replication is out of scope for this component (mirrors s3/main.tf and cloudtrail/main.tf)
   count = local.access_logs_enabled ? 1 : 0
 
   bucket        = local.access_logs_bucket_name
@@ -147,6 +149,7 @@ resource "aws_s3_bucket_ownership_controls" "access_logs" {
   }
 }
 
+#trivy:ignore:AVD-AWS-0132 ALB access log delivery only supports SSE-S3, not a customer-managed KMS key (see s3-backend.tf's equivalent skip)
 resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
   count = local.access_logs_enabled ? 1 : 0
 
@@ -177,12 +180,18 @@ data "aws_iam_policy_document" "access_logs" {
     effect = "Allow"
 
     principals {
-      type        = "AWS"
-      identifiers = [data.aws_elb_service_account.this[0].arn]
+      type        = "Service"
+      identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
     }
 
     actions   = ["s3:PutObject"]
     resources = ["${local.access_logs_bucket_arn}/${local.access_logs_key_prefix}AWSLogs/${data.aws_caller_identity.current[0].account_id}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current[0].account_id]
+    }
   }
 
   statement {
@@ -217,8 +226,10 @@ resource "aws_s3_bucket_policy" "access_logs" {
 # Load balancer, default target group and HTTPS listener.
 # ---------------------------------------------------------------------------
 
+#trivy:ignore:AVD-AWS-0053 Internet-facing by design (owner decision): the security group above admits only the CloudFront origin-facing prefix list on 443, never 0.0.0.0/0.
 resource "aws_lb" "this" {
   #checkov:skip=CKV_AWS_150:deletion_protection is an input; stacks that want it set var.deletion_protection = true
+  #checkov:skip=CKV2_AWS_28:False positive; the waf component associates a REGIONAL web ACL with this ALB's alb_arn output (see stacks/catalog/templates/web-application.yaml web-application/waf) -- checkov's graph does not follow that cross-component association
   count = local.enabled ? 1 : 0
 
   name               = local.name
@@ -238,7 +249,7 @@ resource "aws_lb" "this" {
     for_each = local.access_logs_enabled ? [1] : []
     content {
       bucket  = aws_s3_bucket.access_logs[0].id
-      prefix  = var.access_logs_prefix
+      prefix  = trim(var.access_logs_prefix, "/")
       enabled = true
     }
   }
@@ -256,6 +267,7 @@ resource "aws_lb" "this" {
 }
 
 resource "aws_lb_target_group" "default" {
+  #checkov:skip=CKV_AWS_378:TLS terminates at the ALB's HTTPS listener (443); targets are reached over plain HTTP inside the VPC, the default_target_group_protocol default
   count = local.enabled ? 1 : 0
 
   name        = "${local.name}-default"
