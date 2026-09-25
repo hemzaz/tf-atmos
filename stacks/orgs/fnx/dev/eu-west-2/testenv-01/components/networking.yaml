@@ -29,6 +29,16 @@ components:
 
         vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
 
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/main, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
     vpc/services:
       metadata:
         component: vpc
@@ -45,6 +55,17 @@ components:
           - "10.1.102.0/24"
           - "10.1.103.0/24"
         vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
+
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/data, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
 
     # Network resources for main VPC
     network/main:
