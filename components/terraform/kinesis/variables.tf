@@ -69,11 +69,11 @@ variable "retention_period" {
 
 variable "kms_key_id" {
   type        = string
-  description = "KMS key (alias, key ID or ARN) that encrypts the stream. Encryption is always KMS; there is no unencrypted option"
+  description = "KMS key ARN that encrypts the stream. Must be a full key ARN, not an alias or bare key ID: it is used verbatim as an IAM policy Resource element in the reader_policy/writer_policy outputs, and IAM Resource elements only match ARNs. Encryption is always KMS; there is no unencrypted option"
 
   validation {
-    condition     = trimspace(var.kms_key_id) != ""
-    error_message = "kms_key_id must not be empty."
+    condition     = can(regex("^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[a-zA-Z0-9-]+$", var.kms_key_id))
+    error_message = "kms_key_id must be a full KMS key ARN (arn:aws:kms:<region>:<account-id>:key/<key-id>), not an alias or bare key ID: it is used directly as an IAM policy Resource element in reader_policy/writer_policy, which only match ARNs."
   }
 }
 
@@ -103,6 +103,13 @@ variable "enforce_consumer_deletion" {
   type        = bool
   description = "Allow the stream to be destroyed even if it still has registered enhanced fan-out consumers"
   default     = false
+}
+
+variable "additional_policy_json" {
+  type        = string
+  description = "An additional IAM policy document (JSON, {Version, Statement}) whose Statement entries are merged into this stream's writer_policy output - typically another kinesis instance's own reader_policy or writer_policy output, wired in via !terraform.state. Lets one consumer that both reads one stream and writes another (e.g. a Lambda function whose custom_policy input accepts only one policy document) get a single combined grant, without Atmos ever having to read two components' live state into one YAML value (which !terraform.state alone cannot do, and an Atmos Go template - atmos.Component - can, but only by requiring live state at describe/validate time too, breaking `atmos describe stacks`/`atmos validate stacks` for the whole stack before first apply). Null (the default) adds nothing"
+  default     = null
+  nullable    = true
 }
 
 variable "consumers" {

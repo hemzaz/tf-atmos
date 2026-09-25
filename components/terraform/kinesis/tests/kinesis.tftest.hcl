@@ -232,25 +232,139 @@ run "a_disabled_consumer_entry_creates_no_consumer" {
   }
 }
 
-run "reader_kms_policy_grants_scoped_kms_decrypt" {
+run "reader_policy_grants_kinesis_read_actions_and_scoped_kms_decrypt" {
   command = apply
 
   assert {
     condition = (
-      jsondecode(output.reader_kms_policy).Statement[0].Sid == "AllowKinesisStreamKMSRead"
-      && jsondecode(output.reader_kms_policy).Statement[0].Effect == "Allow"
-      && jsondecode(output.reader_kms_policy).Statement[0].Action == ["kms:Decrypt"]
-      && jsondecode(output.reader_kms_policy).Statement[0].Resource == var.kms_key_id
+      jsondecode(output.reader_policy).Statement[0].Sid == "AllowKinesisStreamRead"
+      && jsondecode(output.reader_policy).Statement[0].Effect == "Allow"
+      && jsondecode(output.reader_policy).Statement[0].Action == [
+        "kinesis:GetRecords",
+        "kinesis:GetShardIterator",
+        "kinesis:DescribeStream",
+        "kinesis:DescribeStreamSummary",
+        "kinesis:ListShards",
+        "kinesis:ListStreams",
+      ]
+      && jsondecode(output.reader_policy).Statement[0].Resource == aws_kinesis_stream.this[0].arn
     )
-    error_message = "reader_kms_policy grants exactly kms:Decrypt on kms_key_id."
+    error_message = "reader_policy's first statement grants the Kinesis read actions a stream reader needs, scoped to the stream."
   }
 
   assert {
     condition = (
-      jsondecode(output.reader_kms_policy).Statement[0].Condition.StringEquals["kms:ViaService"] == "kinesis.${var.region}.amazonaws.com"
-      && jsondecode(output.reader_kms_policy).Statement[0].Condition.StringEquals["kms:EncryptionContext:aws:kinesis:arn"] == aws_kinesis_stream.this[0].arn
+      # With no consumers, the enhanced fan-out statement is omitted, so the
+      # KMS statement is the last (second) one in the list.
+      jsondecode(output.reader_policy).Statement[length(jsondecode(output.reader_policy).Statement) - 1].Sid == "AllowKinesisStreamKMSRead"
+      && jsondecode(output.reader_policy).Statement[length(jsondecode(output.reader_policy).Statement) - 1].Action == ["kms:Decrypt"]
+      && jsondecode(output.reader_policy).Statement[length(jsondecode(output.reader_policy).Statement) - 1].Resource == var.kms_key_id
     )
-    error_message = "reader_kms_policy is scoped to calls made via Kinesis for this stream's own encryption context."
+    error_message = "reader_policy grants exactly kms:Decrypt on kms_key_id."
+  }
+
+  assert {
+    condition = (
+      jsondecode(output.reader_policy).Statement[length(jsondecode(output.reader_policy).Statement) - 1].Condition.StringEquals["kms:ViaService"] == "kinesis.${var.region}.amazonaws.com"
+      && jsondecode(output.reader_policy).Statement[length(jsondecode(output.reader_policy).Statement) - 1].Condition.StringEquals["kms:EncryptionContext:aws:kinesis:arn"] == aws_kinesis_stream.this[0].arn
+    )
+    error_message = "reader_policy's KMS statement is scoped to calls made via Kinesis for this stream's own encryption context."
+  }
+
+  assert {
+    condition     = length(jsondecode(output.reader_policy).Statement) == 2
+    error_message = "With no consumers, reader_policy has exactly the read and KMS statements (no enhanced fan-out statement)."
+  }
+}
+
+run "reader_policy_grants_enhanced_fanout_actions_when_consumers_exist" {
+  command = apply
+
+  variables {
+    consumers = {
+      lambda-processor = {}
+    }
+  }
+
+  assert {
+    condition = (
+      jsondecode(output.reader_policy).Statement[1].Sid == "AllowKinesisEnhancedFanOutRead"
+      && jsondecode(output.reader_policy).Statement[1].Action == ["kinesis:SubscribeToShard", "kinesis:DescribeStreamConsumer"]
+      && jsondecode(output.reader_policy).Statement[1].Resource == [aws_kinesis_stream_consumer.this["lambda-processor"].arn]
+    )
+    error_message = "With consumers registered, reader_policy grants enhanced fan-out actions scoped to their consumer ARNs."
+  }
+}
+
+run "writer_policy_grants_kinesis_write_actions_and_scoped_kms_generate_data_key" {
+  command = apply
+
+  assert {
+    condition = (
+      jsondecode(output.writer_policy).Statement[0].Sid == "AllowKinesisStreamWrite"
+      && jsondecode(output.writer_policy).Statement[0].Effect == "Allow"
+      && jsondecode(output.writer_policy).Statement[0].Action == ["kinesis:PutRecord", "kinesis:PutRecords", "kinesis:DescribeStreamSummary"]
+      && jsondecode(output.writer_policy).Statement[0].Resource == aws_kinesis_stream.this[0].arn
+    )
+    error_message = "writer_policy's first statement grants the Kinesis write actions a stream writer needs, scoped to the stream."
+  }
+
+  assert {
+    condition = (
+      jsondecode(output.writer_policy).Statement[1].Sid == "AllowKinesisStreamKMSWrite"
+      && jsondecode(output.writer_policy).Statement[1].Action == ["kms:GenerateDataKey"]
+      && jsondecode(output.writer_policy).Statement[1].Resource == var.kms_key_id
+    )
+    error_message = "writer_policy grants exactly kms:GenerateDataKey on kms_key_id."
+  }
+
+  assert {
+    condition = (
+      jsondecode(output.writer_policy).Statement[1].Condition.StringEquals["kms:ViaService"] == "kinesis.${var.region}.amazonaws.com"
+      && jsondecode(output.writer_policy).Statement[1].Condition.StringEquals["kms:EncryptionContext:aws:kinesis:arn"] == aws_kinesis_stream.this[0].arn
+    )
+    error_message = "writer_policy's KMS statement is scoped to calls made via Kinesis for this stream's own encryption context."
+  }
+}
+
+run "additional_policy_json_is_folded_into_writer_policy" {
+  command = apply
+
+  variables {
+    additional_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid      = "AllowKinesisStreamRead"
+          Effect   = "Allow"
+          Action   = ["kinesis:GetRecords"]
+          Resource = "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+        }
+      ]
+    })
+  }
+
+  assert {
+    condition     = length(jsondecode(output.writer_policy).Statement) == 3
+    error_message = "writer_policy has its own two statements plus every Statement entry from additional_policy_json."
+  }
+
+  assert {
+    condition = (
+      jsondecode(output.writer_policy).Statement[2].Sid == "AllowKinesisStreamRead"
+      && jsondecode(output.writer_policy).Statement[2].Action == ["kinesis:GetRecords"]
+      && jsondecode(output.writer_policy).Statement[2].Resource == "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+    )
+    error_message = "The additional_policy_json statement is passed through verbatim, appended after this stream's own statements."
+  }
+}
+
+run "additional_policy_json_defaults_to_nothing_extra" {
+  command = apply
+
+  assert {
+    condition     = length(jsondecode(output.writer_policy).Statement) == 2
+    error_message = "With additional_policy_json unset (the default, null), writer_policy has only its own two statements."
   }
 }
 
@@ -275,7 +389,7 @@ run "disabled_creates_nothing" {
   }
 
   assert {
-    condition     = output.reader_kms_policy == null
-    error_message = "reader_kms_policy is null when disabled."
+    condition     = output.reader_policy == null && output.writer_policy == null
+    error_message = "reader_policy and writer_policy are null when disabled."
   }
 }

@@ -254,9 +254,26 @@ components:
           - "OutgoingRecords"
           - "IteratorAgeMilliseconds"
 
+        # lambda-transformer both reads kinesis-ingest and writes this
+        # stream, but the lambda component's custom_policy accepts only one
+        # policy document. Folding kinesis-ingest's reader_policy into this
+        # stream's own writer_policy (rather than the other way around, or
+        # in a Go template at the YAML layer - see the kinesis component's
+        # README) gives lambda-transformer one combined document to read via
+        # a single, ordinary !terraform.state call below.
+        additional_policy_json: !terraform.state data-pipeline/kinesis-ingest .reader_policy
+
         tags:
           DataPipeline: "transformation"
           StreamType: "enriched"
+
+      # list_merge_strategy is `replace` (atmos.yaml), so this instance-level
+      # dependencies.components REPLACES kinesis/defaults' own
+      # ([kms/main]) rather than adding to it - both must be listed here.
+      dependencies:
+        components:
+          - component: kms/main
+          - component: data-pipeline/kinesis-ingest
 
     # =========================================================================
     # DATA TRANSFORMATION (Lambda)
@@ -311,11 +328,17 @@ components:
         # CloudWatch logs
         kms_key_id: "{{ .vars.lambda_logs_kms_key_id }}"
 
-        # kms:Decrypt on the ingest stream's key, scoped to that stream alone
-        # (kinesis's reader_kms_policy output): this function's event source
-        # mapping polls kinesis-ingest with its own execution role, which
-        # needs that grant to read an encrypted stream.
-        custom_policy: !terraform.state data-pipeline/kinesis-ingest .reader_kms_policy
+        # This function is both a consumer and a producer: its event source
+        # mapping polls kinesis-ingest (a reader), and its handler calls
+        # PutRecord[s] against kinesis-enriched via OUTPUT_STREAM above (a
+        # writer). The `lambda` component's custom_policy accepts exactly one
+        # IAM policy document, so kinesis-ingest's reader_policy is folded
+        # into kinesis-enriched's writer_policy (via that instance's own
+        # additional_policy_json, above) rather than merged here - see the
+        # kinesis component's README ("Combining grants across two
+        # streams") for why. This reads that single, already-combined
+        # output.
+        custom_policy: !terraform.state data-pipeline/kinesis-enriched .writer_policy
 
         # Performance alarms
         create_performance_alarms: true
@@ -372,11 +395,14 @@ components:
         # X-Ray tracing
         tracing_mode: "Active"
 
-        # kms:Decrypt on the enriched stream's key, scoped to that stream
-        # alone (kinesis's reader_kms_policy output): this function's event
-        # source mapping polls kinesis-enriched with its own execution role,
-        # which needs that grant to read an encrypted stream.
-        custom_policy: !terraform.state data-pipeline/kinesis-enriched .reader_kms_policy
+        # Kinesis read actions plus kms:Decrypt on the enriched stream,
+        # scoped to that stream alone (kinesis's reader_policy output): this
+        # function's intended event source would poll kinesis-enriched with
+        # its own execution role, which needs this grant to read an
+        # encrypted stream. (The `lambda` component does not yet implement
+        # event_source_mappings - see "Out of scope" in the PR - so this
+        # grant is forward-looking, wired ahead of that gap being closed.)
+        custom_policy: !terraform.state data-pipeline/kinesis-enriched .reader_policy
 
         tags:
           DataPipeline: "validation"
