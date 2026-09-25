@@ -9,9 +9,28 @@ locals {
   # -------------------------------------------------------------
   # Step 1: Filter enabled clusters
   # -------------------------------------------------------------
-  # Only process clusters where enabled=true (or not specified)
+  # Only process clusters where enabled=true (or not specified). An entry's
+  # cluster_name and OIDC provider default to the top-level connection
+  # variables, which the kubernetes/helm providers use.
   clusters = {
-    for k, v in var.clusters : k => v if v.enabled
+    for k, v in var.clusters : k => merge(v, {
+      cluster_name      = coalesce(v.cluster_name, var.cluster_name)
+      oidc_provider_arn = coalesce(v.oidc_provider_arn, var.oidc_provider_arn)
+      oidc_provider_url = coalesce(v.oidc_provider_url, var.oidc_provider_url)
+    }) if v.enabled
+  }
+
+  # The eks cluster name is already "<Environment>-<name>"; prefix the
+  # Environment only to a name that lacks it, as external-secrets does.
+  cluster_name_prefixes = {
+    for k, c in local.clusters : k => (
+      startswith(lower(c.cluster_name), "${lower(var.tags["Environment"])}-") ? c.cluster_name : "${var.tags["Environment"]}-${c.cluster_name}"
+    )
+  }
+
+  # The IRSA condition keys: the issuer URL without its scheme.
+  oidc_issuer_hosts = {
+    for k, c in local.clusters : k => replace(c.oidc_provider_url, "https://", "")
   }
 
   # -------------------------------------------------------------
@@ -31,7 +50,11 @@ locals {
   addons = merge([
     for cluster_key, cluster in local.clusters : {
       for addon_key, addon in lookup(cluster, "addons", {}) :
-      "${cluster_key}.${addon_key}" => merge(addon, { cluster_name = cluster_key })
+      "${cluster_key}.${addon_key}" => merge(
+        { oidc_provider_arn = cluster.oidc_provider_arn, oidc_provider_url = cluster.oidc_provider_url },
+        addon,
+        { cluster_key = cluster_key, cluster_name = cluster.cluster_name },
+      )
       if lookup(addon, "enabled", true)
     }
   ]...)
@@ -41,7 +64,7 @@ locals {
   helm_releases = merge([
     for cluster_key, cluster in local.clusters : {
       for release_key, release in lookup(cluster, "helm_releases", {}) :
-      "${cluster_key}.${release_key}" => merge(release, { cluster_name = cluster_key })
+      "${cluster_key}.${release_key}" => merge(release, { cluster_name = cluster.cluster_name })
       if lookup(release, "enabled", true)
     }
   ]...)
@@ -51,7 +74,7 @@ locals {
   kubernetes_manifests = merge([
     for cluster_key, cluster in local.clusters : {
       for manifest_key, manifest in lookup(cluster, "kubernetes_manifests", {}) :
-      "${cluster_key}.${manifest_key}" => merge(manifest, { cluster_name = cluster_key })
+      "${cluster_key}.${manifest_key}" => merge(manifest, { cluster_name = cluster.cluster_name })
       if lookup(manifest, "enabled", true)
     }
   ]...)
@@ -66,7 +89,7 @@ locals {
 # Get cluster info to validate it's accessible before proceeding
 data "aws_eks_cluster" "this" {
   for_each = local.clusters
-  name     = each.key
+  name     = each.value.cluster_name
 }
 
 # Wait for EKS cluster to be fully ready with health check
@@ -81,7 +104,7 @@ resource "time_sleep" "wait_for_cluster" {
 
   # Ensure this always runs by using triggers
   triggers = {
-    cluster_name     = each.key
+    cluster_name     = each.value.cluster_name
     cluster_endpoint = data.aws_eks_cluster.this[each.key].endpoint
     # Add hash of cluster status to detect changes
     cluster_status = data.aws_eks_cluster.this[each.key].status
@@ -94,7 +117,7 @@ resource "time_sleep" "wait_for_cluster" {
   lifecycle {
     postcondition {
       condition     = data.aws_eks_cluster.this[each.key].status == "ACTIVE"
-      error_message = "EKS cluster ${each.key} is not in ACTIVE state after waiting. Current status: ${data.aws_eks_cluster.this[each.key].status}"
+      error_message = "EKS cluster ${each.value.cluster_name} is not in ACTIVE state after waiting. Current status: ${data.aws_eks_cluster.this[each.key].status}"
     }
   }
 }
@@ -106,7 +129,7 @@ resource "aws_iam_role" "service_account" {
     if lookup(v, "create_service_account_role", false)
   }
 
-  name = "${var.tags["Environment"]}-${each.value.cluster_name}-${each.value.name}-sa-role"
+  name = "${local.cluster_name_prefixes[each.value.cluster_key]}-${each.value.name}-sa-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -115,11 +138,12 @@ resource "aws_iam_role" "service_account" {
         Action = "sts:AssumeRoleWithWebIdentity"
         Effect = "Allow"
         Principal = {
-          Federated = lookup(each.value, "oidc_provider_arn", var.oidc_provider_arn)
+          Federated = each.value.oidc_provider_arn
         }
         Condition = {
           StringEquals = {
-            "${replace(lookup(each.value, "oidc_provider_url", var.oidc_provider_url), "https://", "")}:sub" = "system:serviceaccount:${lookup(each.value, "namespace", "kube-system")}:${lookup(each.value, "service_account_name", each.value.name)}"
+            "${replace(each.value.oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:${lookup(each.value, "namespace", "kube-system")}:${lookup(each.value, "service_account_name", each.value.name)}"
+            "${replace(each.value.oidc_provider_url, "https://", "")}:aud" = "sts.amazonaws.com"
           }
         }
       }
@@ -130,7 +154,7 @@ resource "aws_iam_role" "service_account" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.value.cluster_name}-${each.value.name}-sa-role"
+      Name = "${local.cluster_name_prefixes[each.value.cluster_key]}-${each.value.name}-sa-role"
     }
   )
 }
@@ -141,7 +165,7 @@ resource "aws_iam_policy" "service_account" {
     if lookup(v, "create_service_account_role", false) && lookup(v, "service_account_policy", null) != null
   }
 
-  name        = "${var.tags["Environment"]}-${each.value.cluster_name}-${each.value.name}-sa-policy"
+  name        = "${local.cluster_name_prefixes[each.value.cluster_key]}-${each.value.name}-sa-policy"
   description = "Policy for ${each.value.name} service account in ${each.value.cluster_name} cluster"
   policy      = each.value.service_account_policy
 
@@ -149,7 +173,7 @@ resource "aws_iam_policy" "service_account" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.value.cluster_name}-${each.value.name}-sa-policy"
+      Name = "${local.cluster_name_prefixes[each.value.cluster_key]}-${each.value.name}-sa-policy"
     }
   )
 }
@@ -179,9 +203,9 @@ resource "aws_eks_addon" "addons" {
   resolve_conflicts_on_create = lookup(each.value, "resolve_conflicts_on_create", replace(lookup(each.value, "resolve_conflicts", "OVERWRITE"), "PRESERVE", "NONE"))
   resolve_conflicts_on_update = lookup(each.value, "resolve_conflicts_on_update", lookup(each.value, "resolve_conflicts", "OVERWRITE"))
 
-  # Fix circular dependency by directly using service_account_role_arn if provided,
-  # otherwise set to null and establish depends_on relationship
-  service_account_role_arn = lookup(each.value, "service_account_role_arn", null)
+  # An explicit service_account_role_arn wins; otherwise the IRSA role this
+  # component creates for the addon (create_service_account_role).
+  service_account_role_arn = lookup(each.value, "service_account_role_arn", try(aws_iam_role.service_account[each.key].arn, null))
 
   preserve = lookup(each.value, "preserve", true)
 
@@ -189,7 +213,7 @@ resource "aws_eks_addon" "addons" {
     var.tags,
     lookup(each.value, "tags", {}),
     {
-      Name = "${var.tags["Environment"]}-${each.value.cluster_name}-${each.value.name}"
+      Name = "${local.cluster_name_prefixes[each.value.cluster_key]}-${each.value.name}"
     }
   )
 
@@ -213,9 +237,9 @@ resource "time_sleep" "wait_for_addons" {
   # Generate a hash of all addon attributes to detect changes
   triggers = {
     addon_hash = sha256(jsonencode([
+      # aws_eks_addon exports no status attribute.
       for k, v in aws_eks_addon.addons : {
         id            = v.id
-        status        = v.status
         addon_version = v.addon_version
       }
     ]))
@@ -291,7 +315,7 @@ resource "time_sleep" "wait_for_helm_releases" {
         name        = v.name
         version     = v.version
         namespace   = v.namespace
-        values_hash = v.metadata.values_hash
+        values_hash = sha256(v.metadata.values == null ? "" : v.metadata.values)
         status      = v.status
       }
     ]))

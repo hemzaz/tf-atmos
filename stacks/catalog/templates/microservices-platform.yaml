@@ -48,6 +48,7 @@
 #      settings:
 #        microservices:
 #          app_domain_name: example.com          # external-dns filter, CORS origins
+#          hosted_zone_id: Z0123456789ABCDEFGHIJ # app_domain_name's Route 53 zone
 #          letsencrypt_email: ops@example.com    # cert-manager ACME account
 #          cognito_user_pool_id: eu-west-2_xxxx  # JWT issuer
 #          cognito_client_id: xxxxxxxx           # JWT audience
@@ -253,13 +254,14 @@ components:
     # =========================================================================
     # The kubernetes/helm providers connect with the top-level cluster_name,
     # host and cluster_ca_certificate; everything the component installs is
-    # keyed under clusters.<cluster name> (main.tf looks the cluster up by that
-    # key, so it must be the real name, "<Environment>-microservices").
+    # keyed under clusters.<key>, whose cluster name and OIDC provider default
+    # to those top-level values.
     #
-    # NOTE: eks-addons declares the enable_* flags below but its main.tf does
-    # not act on them yet: it installs only what clusters.<key>.addons,
-    # helm_releases and kubernetes_manifests list. They record the intended
-    # add-on set in the component's own interface. See the eks-addons README.
+    # Each enable_* switch installs its chart and an IRSA role (see the
+    # eks-addons README). external-dns and cert-manager may change records
+    # only in settings.microservices.hosted_zone_id. External Secrets is the
+    # external-secrets component; CloudWatch agent, Fluent Bit and Karpenter
+    # have no switch (install them through clusters.<key>.helm_releases).
 
     microservices/eks-addons:
       metadata:
@@ -284,24 +286,18 @@ components:
 
             # Ingress, scaling and metrics
             enable_aws_load_balancer_controller: true
+            vpc_id: !terraform.state microservices/vpc .vpc_id
             enable_cluster_autoscaler: true
             enable_metrics_server: true
-            enable_karpenter: false
 
             # DNS and certificates
             enable_external_dns: true
+            dns_zone_ids:
+              app: '{{ required "settings.microservices.hosted_zone_id is required" .settings.microservices.hosted_zone_id }}'
             external_dns_domain_filters:
               - '{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
             enable_cert_manager: true
             cert_manager_letsencrypt_email: '{{ required "settings.microservices.letsencrypt_email is required" .settings.microservices.letsencrypt_email }}'
-
-            # Secret sync from Secrets Manager
-            enable_external_secrets: true
-
-            # CloudWatch Container Insights (agent) and container logs (Fluent Bit)
-            enable_aws_cloudwatch_metrics: true
-            enable_aws_for_fluentbit: true
-            log_retention_days: 30
 
         tags:
           Layer: "addons"
@@ -309,6 +305,7 @@ components:
       dependencies:
         components:
           - component: microservices/eks
+          - component: microservices/vpc
 
     # =========================================================================
     # API GATEWAY (HTTP API)

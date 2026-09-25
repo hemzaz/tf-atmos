@@ -31,12 +31,16 @@ variable "default_tags" {
 
 variable "clusters" {
   type = map(object({
-    # Required fields
-    cluster_name           = string
-    kubernetes_host        = string
-    cluster_ca_certificate = string
-    oidc_provider_arn      = string
-    oidc_provider_url      = string
+    # The cluster's name and OIDC provider default to the top-level
+    # cluster_name / oidc_provider_arn / oidc_provider_url: the connection the
+    # kubernetes and helm providers use.
+    cluster_name      = optional(string)
+    oidc_provider_arn = optional(string)
+    oidc_provider_url = optional(string)
+    # Not read: the providers connect through the top-level host and
+    # cluster_ca_certificate.
+    kubernetes_host        = optional(string)
+    cluster_ca_certificate = optional(string)
 
     # Optional fields
     service_account_token_path = optional(string)
@@ -46,25 +50,33 @@ variable "clusters" {
     enabled                   = optional(bool, true)
     wait_for_cluster_duration = optional(string, "45s")
 
-    # Feature flags
-    enable_aws_load_balancer_controller = optional(bool, true)
-    enable_cluster_autoscaler           = optional(bool, true)
-    enable_external_dns                 = optional(bool, true)
-    enable_cert_manager                 = optional(bool, true)
-    enable_metrics_server               = optional(bool, true)
-    enable_aws_for_fluentbit            = optional(bool, false)
-    enable_aws_cloudwatch_metrics       = optional(bool, false)
-    enable_karpenter                    = optional(bool, false)
-    enable_keda                         = optional(bool, false)
-    enable_istio                        = optional(bool, false)
-    enable_external_secrets             = optional(bool, false)
+    # Add-on switches (addons.tf). Each installs a pinned Helm chart and, if
+    # the add-on calls AWS, an IRSA role scoped to its own service account.
+    enable_aws_load_balancer_controller = optional(bool, false)
+    enable_cluster_autoscaler           = optional(bool, false)
+    enable_external_dns                 = optional(bool, false)
+    enable_cert_manager                 = optional(bool, false)
+    enable_metrics_server               = optional(bool, false)
+    # enable_aws_for_fluentbit, enable_aws_cloudwatch_metrics,
+    # enable_karpenter, enable_keda and enable_istio (with
+    # fluentbit_log_group_name and log_retention_days) used to sit here, read
+    # by nothing. Install those through helm_releases below. External Secrets
+    # (enable_external_secrets) is its own component: external-secrets.
 
-    # Configuration options
-    cert_manager_letsencrypt_email = optional(string)
+    # Add-on settings
+    # The VPC the load balancer controller manages (the vpc output vpc_id).
+    vpc_id = optional(string)
+    # The hosted zones external-dns and cert-manager may change, as the dns
+    # component's zone_ids output (zone key => zone ID). Their IAM policies
+    # allow record changes on exactly these zones.
+    dns_zone_ids                   = optional(map(string), {})
     external_dns_domain_filters    = optional(list(string), [])
-    fluentbit_log_group_name       = optional(string)
-    log_retention_days             = optional(number, 90)
-    additional_namespaces          = optional(list(string), [])
+    cert_manager_letsencrypt_email = optional(string)
+    # Extra Helm values per add-on, keyed by add-on name
+    # (aws-load-balancer-controller, cluster-autoscaler, metrics-server,
+    # external-dns, cert-manager), applied after the component's own.
+    addon_chart_values    = optional(any, {})
+    additional_namespaces = optional(list(string), [])
 
     # karpenter_provisioner_config and istio_config used to sit here as
     # map(any). Nothing in this component or any stack ever read either one, so
@@ -82,54 +94,82 @@ variable "clusters" {
     # Tags
     tags = optional(map(string), {})
   }))
-  description = "Map of cluster configurations with addons, Helm releases, and Kubernetes manifests"
+  description = "Map of cluster configurations: add-on switches, EKS addons, Helm releases, and Kubernetes manifests"
   default     = {}
 
   validation {
     condition = alltrue([
-      for k, v in var.clusters :
-      v.cluster_name != null &&
-      v.kubernetes_host != null &&
-      v.cluster_ca_certificate != null &&
-      v.oidc_provider_arn != null &&
-      v.oidc_provider_url != null
+      for k, v in var.clusters : !v.enabled || (
+        trimspace(coalesce(v.cluster_name, var.cluster_name, " ")) != "" &&
+        trimspace(coalesce(v.oidc_provider_arn, var.oidc_provider_arn, " ")) != "" &&
+        trimspace(coalesce(v.oidc_provider_url, var.oidc_provider_url, " ")) != ""
+      )
     ])
-    error_message = "All clusters must specify cluster_name, kubernetes_host, cluster_ca_certificate, oidc_provider_arn, and oidc_provider_url."
+    error_message = "Every enabled cluster needs cluster_name, oidc_provider_arn and oidc_provider_url, on the entry or at the top level."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : !v.enabled || !(
+        v.enable_aws_load_balancer_controller || v.enable_cluster_autoscaler || v.enable_external_dns ||
+        v.enable_cert_manager || v.enable_metrics_server
+      ) || coalesce(v.cluster_name, var.cluster_name, " ") == var.cluster_name
+    ])
+    error_message = "The enable_* add-ons install into var.cluster_name, the cluster the kubernetes/helm providers connect to; a clusters entry that switches one on must be that cluster."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : !v.enabled || !v.enable_aws_load_balancer_controller || can(regex("^vpc-[0-9a-f]+$", v.vpc_id))
+    ])
+    error_message = "enable_aws_load_balancer_controller needs vpc_id (vpc-...)."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : !v.enabled || !(v.enable_external_dns || v.enable_cert_manager) || length(v.dns_zone_ids) > 0
+    ])
+    error_message = "enable_external_dns and enable_cert_manager need dns_zone_ids: their IAM policies are scoped to those hosted zones."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.clusters : [for id in values(v.dns_zone_ids) : can(regex("^Z[0-9A-Z]{1,31}$", id))]
+    ]))
+    error_message = "dns_zone_ids values must be Route 53 hosted zone IDs (Z..., without /hostedzone/)."
   }
 
   validation {
     condition = alltrue([
       for k, v in var.clusters :
-      v.enable_cert_manager == false ||
-      (v.enable_cert_manager == true && v.cert_manager_letsencrypt_email != null &&
-      can(regex("^[^@]+@[^@]+\\.[^@]+$", v.cert_manager_letsencrypt_email)))
+      !v.enabled || !v.enable_cert_manager || can(regex("^[^@]+@[^@]+\\.[^@]+$", v.cert_manager_letsencrypt_email))
     ])
     error_message = "When cert_manager is enabled, cert_manager_letsencrypt_email must be a valid email address."
   }
 }
 
-# Deprecated variables (for backward compatibility)
+# Connection to the cluster the kubernetes and helm providers use
 variable "cluster_name" {
   type        = string
-  description = "Default EKS cluster name - DEPRECATED, use clusters map instead"
+  description = "EKS cluster the kubernetes and helm providers connect to (eks output eks_cluster_id); the default cluster_name of clusters entries"
   default     = ""
 }
 
 variable "host" {
   type        = string
-  description = "Default Kubernetes host - DEPRECATED, use clusters map instead"
+  description = "API endpoint of var.cluster_name (eks output eks_cluster_endpoint), used by the kubernetes and helm providers"
   default     = ""
 }
 
 variable "cluster_ca_certificate" {
   type        = string
-  description = "Default Kubernetes cluster CA certificate - DEPRECATED, use clusters map instead"
+  description = "Base64 CA certificate of var.cluster_name (eks output eks_cluster_certificate_authority_data)"
   default     = ""
 }
 
 variable "oidc_provider_arn" {
   type        = string
-  description = "Default OIDC provider ARN for the EKS cluster - DEPRECATED, use clusters map instead"
+  description = "IRSA OIDC provider ARN of var.cluster_name (eks output eks_cluster_identity_oidc_issuer_arn); the default of clusters entries"
   default     = ""
 
   validation {
@@ -140,7 +180,7 @@ variable "oidc_provider_arn" {
 
 variable "oidc_provider_url" {
   type        = string
-  description = "Default OIDC provider URL for the EKS cluster - DEPRECATED, use clusters map instead"
+  description = "OIDC issuer URL of var.cluster_name (eks output eks_cluster_identity_oidc_issuer); the default of clusters entries"
   default     = ""
 
   validation {

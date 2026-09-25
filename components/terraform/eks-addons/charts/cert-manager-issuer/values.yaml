@@ -1,0 +1,4 @@
+# ACME account email and Route 53 region. Terraform always sets both (the
+# email is validated on var.clusters).
+email: ""
+region: ""
