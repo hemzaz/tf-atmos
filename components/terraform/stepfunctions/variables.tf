@@ -116,8 +116,17 @@ variable "iam_policies" {
     effect    = optional(string, "Allow")
     actions   = list(string)
     resources = list(string)
+    # Optional IAM condition block(s), for statements that need to be scoped
+    # tighter than actions+resources alone can express (for example a KMS
+    # grant limited to one key's use by a specific service via an
+    # EncryptionContext condition, rather than the whole key).
+    conditions = optional(list(object({
+      test     = string
+      variable = string
+      values   = list(string)
+    })), [])
   }))
-  description = "Extra statements merged into one inline policy on the execution role, for whatever the definition's Tasks call directly (for example lambda:InvokeFunction on a function it invokes, sns:Publish on a topic it publishes to). A Task calling another service through a resource policy instead (an SQS queue, another state machine invoked by EventBridge, ...) does not need a statement here"
+  description = "Extra statements merged into one inline policy on the execution role, for whatever the definition's Tasks call directly (for example lambda:InvokeFunction on a function it invokes, sns:Publish on a topic it publishes to). A Task calling another service through a resource policy instead (an SQS queue, another state machine invoked by EventBridge, ...) does not need a statement here. conditions is optional per statement, for grants that need scoping beyond actions/resources (for example an EncryptionContext condition on a KMS grant)"
   default     = []
   nullable    = false
 
@@ -134,6 +143,15 @@ variable "iam_policies" {
   validation {
     condition     = alltrue([for s in var.iam_policies : coalesce(s.effect, "Allow") != "Allow" || alltrue([for a in s.actions : a != "*"])])
     error_message = "An Allow statement in iam_policies may not use the \"*\" action."
+  }
+
+  validation {
+    condition = alltrue([
+      for s in var.iam_policies : alltrue([
+        for c in coalesce(s.conditions, []) : trimspace(c.test) != "" && trimspace(c.variable) != "" && length(c.values) > 0
+      ])
+    ])
+    error_message = "Each iam_policies condition needs a non-empty test, variable and at least one value."
   }
 }
 

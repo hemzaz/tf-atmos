@@ -361,6 +361,39 @@ run "iam_policies_become_one_custom_inline_policy" {
     )
     error_message = "The second iam_policies entry becomes its own statement with matching Sid, Effect, Action and Resource."
   }
+
+  assert {
+    condition     = !contains(keys(jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1]), "Condition")
+    error_message = "A statement with no conditions must render no Condition key at all (not an empty one)."
+  }
+}
+
+run "iam_policies_conditions_render_as_the_statements_condition" {
+  command = plan
+
+  variables {
+    iam_policies = [
+      {
+        sid       = "PublishNotificationsKMS"
+        actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+        resources = ["arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"]
+        conditions = [
+          {
+            test     = "StringEquals"
+            variable = "kms:EncryptionContext:aws:sns:topicArn"
+            values   = ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+          }
+        ]
+      }
+    ]
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Condition.StringEquals["kms:EncryptionContext:aws:sns:topicArn"] == ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+    )
+    error_message = "A statement's conditions render as its Condition, grouped by test operator then by variable."
+  }
 }
 
 run "events_role_is_created_only_when_enabled_and_scoped_to_the_machine" {

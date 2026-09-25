@@ -32,7 +32,7 @@ Task payloads may carry sensitive data).
 | `logging_configuration` (`{}` → `level = "ALL"`, `include_execution_data = true`) | `level`: `ALL`, `ERROR`, `FATAL` or `OFF`. The log group is always created (`log_group_name` is never null); a non-`OFF` level attaches the execution role's log-delivery permissions and points the state machine at it. Defaults to full execution history logging (`ALL`, with Task input/output payloads included); `OFF` stops the state machine writing to it. Set `include_execution_data` to `false` for workflows whose Task input/output may carry sensitive data |
 | `tracing_enabled` (`true`) | Enables AWS X-Ray tracing and attaches the execution role's X-Ray write permissions this requires. Defaults to `true` |
 | `log_retention_days` (`90`) | CloudWatch Logs retention on the state machine's log group; any value CloudWatch Logs supports |
-| `iam_policies` (`[]`) | list of `{sid, effect ("Allow"), actions, resources}`, merged into one inline policy on the execution role. CP-style statements, but identity-based: no `principals` (the role is fixed). Only for what a Task calls directly (`lambda:InvokeFunction` on a function it invokes, `sns:Publish` on a topic it publishes to, ...); a Task reaching another service through *that service's* resource policy (an SQS queue, another state machine started by EventBridge, ...) needs no statement here |
+| `iam_policies` (`[]`) | list of `{sid, effect ("Allow"), actions, resources, conditions ([])}`, merged into one inline policy on the execution role. CP-style statements, but identity-based: no `principals` (the role is fixed). Only for what a Task calls directly (`lambda:InvokeFunction` on a function it invokes, `sns:Publish` on a topic it publishes to, ...); a Task reaching another service through *that service's* resource policy (an SQS queue, another state machine started by EventBridge, ...) needs no statement here. `conditions` (each `{test, variable, values}`) is optional per statement, for a grant that needs to be scoped tighter than actions/resources alone can express — for example limiting a KMS grant on a shared key to one resource's encryption context, rather than the whole key; rendered as the statement's `Condition` only when non-empty |
 | `events_role_enabled` (`false`) | Creates an IAM role trusted by `events.amazonaws.com`, allowed `states:StartExecution` on this state machine only, output as `events_role_arn`, for use as an `eventbridge` instance's `targets.<id>.role_arn` |
 | `enabled` (`true`) | `false` creates nothing |
 | out: `state_machine_arn`, `state_machine_name`, `role_arn`, `log_group_name` | Always set when enabled |
@@ -61,7 +61,9 @@ Task payloads may carry sensitive data).
   A Task calling another CMK-encrypted resource directly (for example
   `sns:Publish` to a CMK-encrypted SNS topic) needs its own `iam_policies`
   KMS grant too, since that call's encryption context differs from the
-  state machine's own; see `templates/stacks/serverless-stack.yaml`'s
+  state machine's own; use `iam_policies`' `conditions` to scope it to that
+  resource's own encryption context rather than the whole (likely shared)
+  key — see `templates/stacks/serverless-stack.yaml`'s
   `PublishNotificationsKMS` statement.
 - **Execution role trust.** Scoped by `aws:SourceAccount` and `aws:SourceArn`
   to this state machine's own ARN, which is deterministic from
@@ -145,13 +147,20 @@ components:
             resources:
               - !terraform.state sns/notifications .sns_topic_arn
           # NotifyCustomer's target topic is encrypted with the same kms/main
-          # key; the component's own kms_policy only covers the state
-          # machine's own KMS usage, so the SNS Publish path needs this
-          # separate, key-scoped grant.
+          # key (which also encrypts DynamoDB, SQS, the log groups and the
+          # state machine itself); the component's own kms_policy only
+          # covers the state machine's own KMS usage, so the SNS Publish
+          # path needs this separate grant, scoped to this one topic's
+          # encryption context rather than the whole key.
           - sid: PublishNotificationsKMS
             actions: ["kms:GenerateDataKey*", "kms:Decrypt"]
             resources:
               - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:EncryptionContext:aws:sns:topicArn"
+                values:
+                  - !terraform.state sns/notifications .sns_topic_arn
       dependencies:
         components:
           - component: kms/main

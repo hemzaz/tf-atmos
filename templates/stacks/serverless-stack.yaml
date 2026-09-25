@@ -338,16 +338,23 @@ components:
             resources:
               - !terraform.state sns/notifications .sns_topic_arn
           # NotifyCustomer publishes to sns/notifications, which is encrypted
-          # with this same kms/main key (catalog/sns/defaults). The
-          # component's own kms_policy statement only covers the state
-          # machine's own KMS usage (scoped by the stateMachineArn encryption
-          # context); SNS Publish to an SSE-KMS topic carries a different
-          # context (aws:sns:topicArn), so the execution role needs this
-          # separate, key-scoped grant to actually publish.
+          # with this same kms/main key (catalog/sns/defaults) — a key that
+          # also encrypts DynamoDB, SQS, the log groups and the state machine
+          # itself. The component's own kms_policy statement only covers the
+          # state machine's own KMS usage (scoped by the stateMachineArn
+          # encryption context); SNS Publish to an SSE-KMS topic carries a
+          # different context (aws:sns:topicArn), so the execution role needs
+          # this separate grant — scoped down to this one topic's encryption
+          # context, not the whole key, for least privilege.
           - sid: PublishNotificationsKMS
             actions: ["kms:GenerateDataKey*", "kms:Decrypt"]
             resources:
               - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:EncryptionContext:aws:sns:topicArn"
+                values:
+                  - !terraform.state sns/notifications .sns_topic_arn
       dependencies:
         components:
           - component: kms/main

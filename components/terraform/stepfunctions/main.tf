@@ -90,14 +90,19 @@ locals {
     ]
   })
 
-  # AWS requires kms:Decrypt/kms:GenerateDataKey on the CMK to start or update
-  # this state machine when it uses a customer managed key
-  # (encryption_configuration below); kms/main's key policy only delegates to
-  # the account root, which an IAM role does not inherit implicitly. Scoped to
-  # this state machine's own ARN via the encryption context Step Functions
-  # sets on every KMS call it makes for the definition/execution history
-  # (step 2 of docs.aws.amazon.com/step-functions/latest/dg/encryption-at-rest.html),
-  # so this role can only use the key for this state machine, never another
+  # AWS requires kms:Decrypt/kms:GenerateDataKey on the CMK for the execution
+  # role itself to run executions of this state machine (decrypt the
+  # definition, encrypt/decrypt execution history) when it uses a customer
+  # managed key (encryption_configuration below); kms/main's key policy only
+  # delegates to the account root, which this role does not inherit
+  # implicitly. (CreateStateMachine/UpdateStateMachine instead need
+  # kms:DescribeKey/kms:GenerateDataKey on the *deployer's* caller role — the
+  # one running `atmos terraform apply` — which the root-account delegation
+  # already covers.) Scoped to this state machine's own ARN via the
+  # encryption context Step Functions sets on every KMS call it makes for the
+  # definition/execution history (step 2 of
+  # docs.aws.amazon.com/step-functions/latest/dg/encryption-at-rest.html), so
+  # this role can only use the key for this state machine, never another
   # resource sharing the same CMK.
   kms_policy = jsonencode({
     Version = "2012-10-17"
@@ -134,12 +139,24 @@ locals {
 
   custom_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [for s in var.iam_policies : {
-      Sid      = s.sid
-      Effect   = coalesce(s.effect, "Allow")
-      Action   = s.actions
-      Resource = s.resources
-    }]
+    # Condition is only rendered when a statement sets conditions: groups
+    # each statement's conditions by test operator (StringEquals, ArnLike,
+    # ...), and within a test operator, by condition key, so a statement can
+    # carry conditions of different operators or keys at once.
+    Statement = [for s in var.iam_policies : merge(
+      {
+        Sid      = s.sid
+        Effect   = coalesce(s.effect, "Allow")
+        Action   = s.actions
+        Resource = s.resources
+      },
+      length(coalesce(s.conditions, [])) > 0 ? {
+        Condition = {
+          for test in distinct([for c in s.conditions : c.test]) :
+          test => { for c in s.conditions : c.variable => c.values if c.test == test }
+        }
+      } : {}
+    )]
   })
 
   events_assume_role_policy = jsonencode({
