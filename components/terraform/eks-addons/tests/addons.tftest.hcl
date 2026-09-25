@@ -436,18 +436,46 @@ run "eks_addon_role_is_attached" {
   }
 
   assert {
-    condition     = aws_eks_addon.addons["main.ebs"].service_account_role_arn == aws_iam_role.service_account["main.ebs"].arn
+    condition     = aws_eks_addon.core["main.ebs"].service_account_role_arn == aws_iam_role.service_account["main.ebs"].arn
     error_message = "The addon must run with the IRSA role created for it."
   }
 
   assert {
-    condition     = aws_eks_addon.addons["main.ebs"].cluster_name == "testenv-01-main"
+    condition     = aws_eks_addon.core["main.ebs"].cluster_name == "testenv-01-main"
     error_message = "The addon must target the real cluster name, not the clusters key."
   }
 
   assert {
     condition     = aws_iam_role.service_account["main.ebs"].name == "testenv-01-main-aws-ebs-csi-driver-sa-role"
     error_message = "The addon role name carries the Environment once."
+  }
+}
+
+# Core managed add-ons (CNI, DNS, ...) install before the load balancer
+# controller; any other managed add-on after it (its webhook admits Services).
+run "managed_addons_split_around_the_load_balancer_controller" {
+  command = plan
+
+  variables {
+    clusters = {
+      main = {
+        addons = {
+          vpc-cni = { name = "vpc-cni" }
+          coredns = { name = "coredns" }
+          adot    = { name = "adot" }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = toset(keys(aws_eks_addon.core)) == toset(["main.vpc-cni", "main.coredns"]) && keys(aws_eks_addon.addons) == ["main.adot"]
+    error_message = "vpc-cni and coredns must be core add-ons; adot must install after the load balancer controller."
+  }
+
+  assert {
+    condition     = toset(keys(output.addon_arns)) == toset(["main.vpc-cni", "main.coredns", "main.adot"])
+    error_message = "addon_arns must report both groups."
   }
 }
 

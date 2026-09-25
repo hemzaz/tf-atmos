@@ -190,9 +190,18 @@ resource "aws_iam_role_policy_attachment" "service_account" {
   policy_arn = each.value.policy_arn
 }
 
-# AWS EKS Addons
-resource "aws_eks_addon" "addons" {
-  for_each = local.addons
+# AWS EKS Addons, in two groups (the EKS Blueprints / Cloud Posse ordering):
+# - core: the node networking, DNS, identity and storage add-ons the load
+#   balancer controller's own pods need. They install before the controller.
+# - addons: every other managed add-on. They may create Services (adot,
+#   amazon-cloudwatch-observability), which the controller's webhook
+#   (failurePolicy Fail) must admit, so they install after it (addons.tf).
+locals {
+  core_addon_names = ["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver"]
+}
+
+resource "aws_eks_addon" "core" {
+  for_each = { for k, v in local.addons : k => v if contains(local.core_addon_names, v.name) }
 
   cluster_name  = each.value.cluster_name
   addon_name    = each.value.name
@@ -224,12 +233,48 @@ resource "aws_eks_addon" "addons" {
   ]
 }
 
+resource "aws_eks_addon" "addons" {
+  for_each = { for k, v in local.addons : k => v if !contains(local.core_addon_names, v.name) }
+
+  cluster_name  = each.value.cluster_name
+  addon_name    = each.value.name
+  addon_version = lookup(each.value, "version", null)
+
+  # AWS provider v6 removed resolve_conflicts; a legacy per-addon value still seeds both settings
+  # resolve_conflicts_on_create only accepts NONE or OVERWRITE, so a legacy PRESERVE maps to NONE
+  resolve_conflicts_on_create = lookup(each.value, "resolve_conflicts_on_create", replace(lookup(each.value, "resolve_conflicts", "OVERWRITE"), "PRESERVE", "NONE"))
+  resolve_conflicts_on_update = lookup(each.value, "resolve_conflicts_on_update", lookup(each.value, "resolve_conflicts", "OVERWRITE"))
+
+  # An explicit service_account_role_arn wins; otherwise the IRSA role this
+  # component creates for the addon (create_service_account_role).
+  service_account_role_arn = lookup(each.value, "service_account_role_arn", try(aws_iam_role.service_account[each.key].arn, null))
+
+  preserve = lookup(each.value, "preserve", true)
+
+  tags = merge(
+    var.tags,
+    lookup(each.value, "tags", {}),
+    {
+      Name = "${local.cluster_name_prefixes[each.value.cluster_key]}-${each.value.name}"
+    }
+  )
+
+  # depends_on must be static; depend on the whole set of service account
+  # attachments, and on the load balancer controller (see above).
+  depends_on = [
+    time_sleep.wait_for_cluster,
+    aws_iam_role_policy_attachment.service_account,
+    helm_release.aws_load_balancer_controller,
+  ]
+}
+
 # Wait for addons to be ready before proceeding with helm releases
 # Replace complex null_resource with proper Terraform time_sleep resource
 resource "time_sleep" "wait_for_addons" {
   count = length(local.addons) > 0 ? 1 : 0
 
   depends_on = [
+    aws_eks_addon.core,
     aws_eks_addon.addons,
     aws_iam_role_policy_attachment.service_account
   ]
@@ -238,7 +283,7 @@ resource "time_sleep" "wait_for_addons" {
   triggers = {
     addon_hash = sha256(jsonencode([
       # aws_eks_addon exports no status attribute.
-      for k, v in aws_eks_addon.addons : {
+      for k, v in merge(aws_eks_addon.core, aws_eks_addon.addons) : {
         id            = v.id
         addon_version = v.addon_version
       }
@@ -251,7 +296,7 @@ resource "time_sleep" "wait_for_addons" {
   # Add validation to catch addon creation issues
   lifecycle {
     postcondition {
-      condition     = length(aws_eks_addon.addons) > 0
+      condition     = length(aws_eks_addon.core) + length(aws_eks_addon.addons) > 0
       error_message = "No EKS addons were created. Check that the addons configuration is correct."
     }
   }
@@ -349,9 +394,12 @@ resource "kubernetes_manifest" "manifests" {
     force_conflicts = lookup(each.value, "force_conflicts", true)
   }
 
+  # A manifest may be a Service, which the load balancer controller's webhook
+  # must admit (addons.tf).
   depends_on = [
     time_sleep.wait_for_cluster,
-    time_sleep.wait_for_helm_releases
+    time_sleep.wait_for_helm_releases,
+    helm_release.aws_load_balancer_controller,
   ]
 }
 
@@ -376,7 +424,8 @@ resource "helm_release" "istio_gateway" {
 
   depends_on = [
     helm_release.releases,
-    time_sleep.wait_for_helm_releases
+    time_sleep.wait_for_helm_releases,
+    helm_release.aws_load_balancer_controller,
   ]
 }
 
