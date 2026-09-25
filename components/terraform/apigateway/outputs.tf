@@ -154,6 +154,6 @@ output "dashboard_arn" {
 }
 
 output "api_name" {
-  description = "Name of the API Gateway (the ApiName dimension monitoring's AWS/ApiGateway CloudWatch widgets and alarms are keyed on for a REST API)"
-  value       = var.api_name
+  description = "Real name of the REST API (the ApiName dimension monitoring's AWS/ApiGateway CloudWatch widgets and alarms are keyed on); null for an HTTP API (api_type = \"HTTP\"), which is dimensioned by ApiId instead"
+  value       = local.create_rest_api ? aws_api_gateway_rest_api.rest_api[0].name : null
 }

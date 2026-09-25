@@ -123,7 +123,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_node_not_ready" {
 
 # API Gateway 4XX Errors
 resource "aws_cloudwatch_metric_alarm" "api_gateway_4xx_errors" {
-  for_each = var.enable_backend_monitoring && length(var.api_gateway_stages) > 0 ? toset(var.api_gateway_stages) : []
+  for_each = var.enable_backend_monitoring && var.api_gateway_name != "" && length(local.api_gateway_stages) > 0 ? toset(local.api_gateway_stages) : []
 
   alarm_name          = "${local.name_prefix}-api-gateway-${each.value}-4xx-errors"
   comparison_operator = "GreaterThanThreshold"
@@ -179,11 +179,13 @@ resource "aws_cloudwatch_metric_alarm" "flow_logs_delivery_failure" {
   treat_missing_data  = "notBreaching"
 }
 
-# Application ELB Target Response Time
+# Application ELB Target Response Time. Iterates local.load_balancer_ids
+# (dashboards.tf), not var.load_balancers directly - see the comment on
+# alb_response_time/alb_unhealthy_hosts in main.tf for why.
 resource "aws_cloudwatch_metric_alarm" "alb_target_response_time_p99" {
-  for_each = var.enable_backend_monitoring && var.enable_percentile_alarms ? toset(var.load_balancers) : []
+  for_each = var.enable_backend_monitoring && var.enable_percentile_alarms ? toset(local.load_balancer_ids) : []
 
-  alarm_name          = "${local.name_prefix}-alb-${each.value}-p99-response-time"
+  alarm_name          = "${local.name_prefix}-alb-${replace(each.value, "/", "-")}-p99-response-time"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "3"
   threshold           = var.alb_p99_response_time_threshold

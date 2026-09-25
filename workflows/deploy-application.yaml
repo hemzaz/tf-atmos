@@ -19,10 +19,15 @@ workflows:
       - name: check-foundation
         type: atmos
         command: terraform output vpc/main vpc_id
-      # Two plan/confirm/apply phases. A phase plans every instance before it
+      # Three plan/confirm/apply phases. A phase plans every instance before it
       # applies any, and apigateway reads cognito/main .user_pool_arn and
       # lambda/data-processor through !terraform.state, so Cognito and Lambda are
       # applied in the first phase and API Gateway is planned only after that.
+      # monitoring/main and monitoring/data in turn read apigateway/main and
+      # apigateway/data (.api_name, .rest_api_stage_name), so monitoring is its
+      # own phase, planned only after API Gateway is applied - the same
+      # layering as deploy-full-stack.yaml's services (apigateway) then
+      # monitoring layers.
       - name: plan-prerequisites
         type: atmos
         command: >-
@@ -47,17 +52,27 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
       - name: plan-api
         type: atmos
-        command: terraform plan --log-order grouped --query '.metadata.component == "apigateway" or .metadata.component == "monitoring"'
+        command: terraform plan --log-order grouped --query '.metadata.component == "apigateway"'
       - name: confirm_api
         type: confirm
-        prompt: Apply the API Gateway and monitoring plans above?
+        prompt: Apply the API Gateway plan above?
         default: false
       - name: guard-api
         type: shell
-        command: test "{{ .steps.confirm_api.value }}" = "true" || { echo "Deployment cancelled after the first phase."; exit 1; }
+        command: test "{{ .steps.confirm_api.value }}" = "true" || { echo "Deployment cancelled after the second phase."; exit 1; }
       - name: deploy-api
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "apigateway"'
+      - name: plan-monitoring
+        type: atmos
+        command: terraform plan --log-order grouped --query '.metadata.component == "monitoring"'
+      - name: confirm_monitoring
+        type: confirm
+        prompt: Apply the monitoring plan above?
+        default: false
+      - name: guard-monitoring
+        type: shell
+        command: test "{{ .steps.confirm_monitoring.value }}" = "true" || { echo "Deployment cancelled after the third phase."; exit 1; }
       - name: deploy-monitoring
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "monitoring"'

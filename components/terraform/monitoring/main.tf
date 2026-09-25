@@ -371,7 +371,7 @@ resource "aws_cloudwatch_dashboard" "backend_services" {
 
 # API Gateway Performance Alarms
 resource "aws_cloudwatch_metric_alarm" "api_gateway_latency" {
-  for_each = var.enable_backend_monitoring && length(var.api_gateway_stages) > 0 ? toset(var.api_gateway_stages) : []
+  for_each = var.enable_backend_monitoring && var.api_gateway_name != "" && length(local.api_gateway_stages) > 0 ? toset(local.api_gateway_stages) : []
 
   alarm_name          = "${local.name_prefix}-api-gateway-${each.value}-latency"
   comparison_operator = "GreaterThanThreshold"
@@ -391,7 +391,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_latency" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
-  for_each = var.enable_backend_monitoring && length(var.api_gateway_stages) > 0 ? toset(var.api_gateway_stages) : []
+  for_each = var.enable_backend_monitoring && var.api_gateway_name != "" && length(local.api_gateway_stages) > 0 ? toset(local.api_gateway_stages) : []
 
   alarm_name          = "${local.name_prefix}-api-gateway-${each.value}-error-rate"
   comparison_operator = "GreaterThanThreshold"

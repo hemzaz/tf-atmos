@@ -16,6 +16,14 @@ locals {
     length(split("loadbalancer/", lb)) > 1 ? element(split("loadbalancer/", lb), 1) : lb
   ]
 
+  # apigateway's api_name/rest_api_stage_name outputs are null for an HTTP
+  # API (api_type = "HTTP"); a stack that reads one of those into
+  # api_gateway_stages via `!terraform.state ... | [.]` would otherwise pass
+  # a literal [null] here. compact() drops it so `toset(...)` in the
+  # for_each alarms (main.tf, alarms.tf) never sees a null - "for_each" sets
+  # must not contain null values.
+  api_gateway_stages = compact(var.api_gateway_stages)
+
   dashboard_specs = {
     infrastructure = {
       heading = "infrastructure overview"
@@ -47,7 +55,7 @@ locals {
         {
           title = "API Gateway Requests"
           metrics = var.api_gateway_name != "" ? [
-            for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]
+            for stage in local.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]
           ] : []
         },
       ]
@@ -90,7 +98,7 @@ locals {
         {
           title = "API Gateway Latency"
           metrics = var.api_gateway_name != "" ? [
-            for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Latency", "ApiName", var.api_gateway_name, "Stage", stage]
+            for stage in local.api_gateway_stages : ["AWS/ApiGateway", "Latency", "ApiName", var.api_gateway_name, "Stage", stage]
           ] : []
         },
       ]
@@ -102,8 +110,8 @@ locals {
         {
           title = "API Gateway Requests & 5XX Errors"
           metrics = var.api_gateway_name != "" ? concat(
-            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]],
-            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "5XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in local.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in local.api_gateway_stages : ["AWS/ApiGateway", "5XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
           ) : []
         },
         {
@@ -142,10 +150,10 @@ locals {
         {
           title = "API Gateway Requests, Latency & Errors"
           metrics = var.api_gateway_name != "" ? concat(
-            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]],
-            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Latency", "ApiName", var.api_gateway_name, "Stage", stage]],
-            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "4XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
-            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "5XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in local.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in local.api_gateway_stages : ["AWS/ApiGateway", "Latency", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in local.api_gateway_stages : ["AWS/ApiGateway", "4XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in local.api_gateway_stages : ["AWS/ApiGateway", "5XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
           ) : []
         },
         {

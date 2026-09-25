@@ -310,7 +310,7 @@ components:
         # deploys, so the infrastructure and backend dashboards plot real
         # data instead of empty widgets (they default to [] / "").
         eks_cluster_name: !terraform.state eks/main .eks_cluster_id
-        rds_instances: !terraform.state rds/main .instance_id | [.]
+        rds_instances: !terraform.state rds/main .instance_identifier | [.]
         ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
         api_gateway_name: !terraform.state apigateway/main .api_name
         api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
@@ -363,7 +363,7 @@ components:
         # deploys, so the infrastructure and backend dashboards plot real
         # data instead of empty widgets (they default to [] / "").
         eks_cluster_name: !terraform.state eks/data .eks_cluster_id
-        rds_instances: !terraform.state rds/data .instance_id | [.]
+        rds_instances: !terraform.state rds/data .instance_identifier | [.]
         api_gateway_name: !terraform.state apigateway/data .api_name
         api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
         lambda_functions:
