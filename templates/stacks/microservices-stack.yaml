@@ -38,6 +38,8 @@ settings:
     eks_kubernetes_version: "1.36"
     eks_public_access: false
     ops_email: "ops@example.com"
+    # Route 53 zone external-dns and cert-manager may write to
+    hosted_zone_id: "Z0123456789ABCDEFGHIJ"
     # Cognito user pool that issues the API's JWTs
     jwt_issuer: "https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_EXAMPLE"
 
@@ -50,7 +52,7 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "{{ .settings.environment.vpc_cidr }}"
+        ipv4_primary_cidr_block: "{{ .settings.environment.vpc_cidr }}"
         public_subnets:
           - "10.40.1.0/24"
           - "10.40.2.0/24"
@@ -60,7 +62,7 @@ components:
           - "10.40.32.0/19"
           - "10.40.64.0/19"
           - "10.40.96.0/19"
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
     # Additional security group for the worker nodes
@@ -130,29 +132,28 @@ components:
         inherits:
           - eks-addons
       vars:
-        istio_enabled: true
-        istio_enable_tracing: true
-        jaeger_enabled: true
-        kiali_enabled: true
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
         clusters:
           main:
-            cluster_name: !terraform.state eks/main .eks_cluster_id
-            kubernetes_host: !terraform.state eks/main .eks_cluster_endpoint
-            cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
-            oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
-            oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
             enable_aws_load_balancer_controller: true
-            enable_cluster_autoscaler: false
-            enable_karpenter: true
-            enable_istio: true
+            vpc_id: !terraform.state vpc/main .vpc_id
+            # Karpenter has no switch; install it through helm_releases to
+            # replace the cluster autoscaler.
+            enable_cluster_autoscaler: true
             enable_external_dns: true
+            dns_zone_ids:
+              - "{{ .settings.environment.hosted_zone_id }}"
             enable_cert_manager: true
             cert_manager_letsencrypt_email: "{{ .settings.environment.ops_email }}"
             enable_metrics_server: true
-            enable_external_secrets: true
       dependencies:
         components:
           - component: eks/main
+          - component: vpc/main
 
     # HTTP API with JWT authorization and CORS (catalog: apigateway_http).
     # Routes to in-cluster services need a VPC link to the internal ingress

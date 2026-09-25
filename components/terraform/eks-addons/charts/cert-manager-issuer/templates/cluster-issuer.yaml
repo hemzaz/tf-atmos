@@ -1,0 +1,17 @@
+---
+# DNS-01 through Route 53 with cert-manager's own IRSA role (ambient
+# credentials), which may change records only in the stack's hosted zones.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: {{ .Values.server | quote }}
+    email: {{ .Values.email | quote }}
+    privateKeySecretRef:
+      name: letsencrypt-account-key
+    solvers:
+      - dns01:
+          route53:
+            region: {{ .Values.region | quote }}

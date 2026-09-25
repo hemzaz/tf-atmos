@@ -18,7 +18,7 @@ resource "aws_route_table" "private" {
 
 resource "aws_route" "private_nat_gateway" {
   # Only create routes if NAT gateway is enabled and we have at least one NAT gateway
-  for_each = (var.enable_nat_gateway && local.nat_gateway_count > 0) ? local.private_subnets : {}
+  for_each = (var.nat_gateway_enabled && local.nat_gateway_count > 0) ? local.private_subnets : {}
 
   route_table_id         = aws_route_table.private[each.key].id
   destination_cidr_block = "0.0.0.0/0"
@@ -39,7 +39,7 @@ resource "aws_route" "private_nat_gateway" {
 
     # Ensure nat_gateway_count > 0 if NAT is enabled
     precondition {
-      condition     = !var.enable_nat_gateway || local.nat_gateway_count > 0
+      condition     = !var.nat_gateway_enabled || local.nat_gateway_count > 0
       error_message = "When NAT gateway is enabled, nat_gateway_count must be greater than 0."
     }
   }

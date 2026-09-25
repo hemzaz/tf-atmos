@@ -6,8 +6,8 @@ components:
         component: vpc
         type: abstract
       vars:
-        vpc_cidr: "10.0.0.0/16"
-        azs:
+        ipv4_primary_cidr_block: "10.0.0.0/16"
+        availability_zones:
           - '{{ .vars.region }}a'
           - '{{ .vars.region }}b'
           - '{{ .vars.region }}c'
@@ -19,12 +19,11 @@ components:
           - "10.0.101.0/24"
           - "10.0.102.0/24"
           - "10.0.103.0/24"
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         enable_vpn_gateway: false
         enable_transit_gateway: false
         transit_gateway_id: ""
         ram_resource_share_arn: ""
-        create_vpc_iam_role: true
 
         tags:
           Component: "Network"
