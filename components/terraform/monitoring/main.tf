@@ -1,38 +1,30 @@
 resource "aws_cloudwatch_log_group" "main" {
   for_each = var.log_groups
 
-  name              = "${var.tags["Environment"]}/${each.key}"
+  name              = "${local.name_prefix}/${each.key}"
   retention_in_days = each.value.retention_days
   kms_key_id        = var.kms_key_id
 
-  tags = { Name = "${var.tags["Environment"]}/${each.key}" }
+  tags = { Name = "${local.name_prefix}/${each.key}" }
 }
 
-resource "aws_cloudwatch_dashboard" "main" {
-  count = var.create_dashboard ? 1 : 0
-
-  dashboard_name = "${var.tags["Environment"]}-infrastructure-overview"
-  dashboard_body = templatefile(
-    "${path.module}/templates/dashboard.json.tpl",
-    {
-      region               = var.region
-      environment          = var.tags["Environment"]
-      vpc_id               = var.vpc_id
-      rds_instances        = var.rds_instances
-      ecs_clusters         = var.ecs_clusters
-      lambda_functions     = var.lambda_functions
-      load_balancers       = var.load_balancers
-      elasticache_clusters = var.elasticache_clusters
-    }
-  )
-}
-
+# The per-resource-dimensioned overview widget spec that used to live here
+# (aws_cloudwatch_dashboard.main, "-overview") now lives in dashboards.tf as
+# local.dashboard_specs.infrastructure, rendering
+# aws_cloudwatch_dashboard.infrastructure (create_dashboard ||
+# create_infrastructure_dashboard). Before that merge, the two flags each
+# drove a separate Terraform resource - and every real stack instance set
+# create_dashboard: true, with create_infrastructure_dashboard also true by
+# default - so every instance created two near-identical overview
+# dashboards under two different names. See variables.tf for why
+# create_dashboard is kept as a distinct variable rather than removed.
 resource "aws_sns_topic" "alarms" {
   count = var.create_sns_topic ? 1 : 0
 
-  name = "${var.tags["Environment"]}-alarms"
+  name              = "${local.name_prefix}-alarms"
+  kms_master_key_id = var.kms_key_id
 
-  tags = { Name = "${var.tags["Environment"]}-alarms" }
+  tags = { Name = "${local.name_prefix}-alarms" }
 }
 
 resource "aws_sns_topic_subscription" "alarms_email" {
@@ -46,7 +38,7 @@ resource "aws_sns_topic_subscription" "alarms_email" {
 resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   for_each = var.cpu_alarms
 
-  alarm_name          = "${var.tags["Environment"]}-${each.key}-high-cpu"
+  alarm_name          = "${local.name_prefix}-${each.key}-high-cpu"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = each.value.evaluation_periods
   metric_name         = "CPUUtilization"
@@ -59,13 +51,13 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
 
   dimensions = each.value.dimensions
 
-  tags = { Name = "${var.tags["Environment"]}-${each.key}-high-cpu" }
+  tags = { Name = "${local.name_prefix}-${each.key}-high-cpu" }
 }
 
 resource "aws_cloudwatch_metric_alarm" "memory_high" {
   for_each = var.memory_alarms
 
-  alarm_name          = "${var.tags["Environment"]}-${each.key}-high-memory"
+  alarm_name          = "${local.name_prefix}-${each.key}-high-memory"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = each.value.evaluation_periods
   metric_name         = "MemoryUtilization"
@@ -78,13 +70,13 @@ resource "aws_cloudwatch_metric_alarm" "memory_high" {
 
   dimensions = each.value.dimensions
 
-  tags = { Name = "${var.tags["Environment"]}-${each.key}-high-memory" }
+  tags = { Name = "${local.name_prefix}-${each.key}-high-memory" }
 }
 
 resource "aws_cloudwatch_metric_alarm" "db_connections_high" {
   for_each = var.db_connection_alarms
 
-  alarm_name          = "${var.tags["Environment"]}-${each.key}-high-connections"
+  alarm_name          = "${local.name_prefix}-${each.key}-high-connections"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = each.value.evaluation_periods
   metric_name         = "DatabaseConnections"
@@ -99,13 +91,13 @@ resource "aws_cloudwatch_metric_alarm" "db_connections_high" {
     DBInstanceIdentifier = each.key
   }
 
-  tags = { Name = "${var.tags["Environment"]}-${each.key}-high-connections" }
+  tags = { Name = "${local.name_prefix}-${each.key}-high-connections" }
 }
 
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   for_each = var.lambda_error_alarms
 
-  alarm_name          = "${var.tags["Environment"]}-${each.key}-errors"
+  alarm_name          = "${local.name_prefix}-${each.key}-errors"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = each.value.evaluation_periods
   metric_name         = "Errors"
@@ -120,20 +112,20 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
     FunctionName = each.key
   }
 
-  tags = { Name = "${var.tags["Environment"]}-${each.key}-errors" }
+  tags = { Name = "${local.name_prefix}-${each.key}-errors" }
 }
 
 # Create a CloudWatch Logs Metric Filter and Alarm for specific log patterns
 resource "aws_cloudwatch_log_metric_filter" "error_logs" {
   for_each = var.log_metric_filters
 
-  name           = "${var.tags["Environment"]}-${each.key}-errors"
+  name           = "${local.name_prefix}-${each.key}-errors"
   pattern        = each.value.pattern
   log_group_name = aws_cloudwatch_log_group.main[each.value.log_group_name].name
 
   metric_transformation {
-    name      = "${var.tags["Environment"]}_${each.key}_errors"
-    namespace = "CustomMetrics/${var.tags["Environment"]}"
+    name      = "${local.name_prefix}_${each.key}_errors"
+    namespace = "CustomMetrics/${local.name_prefix}"
     value     = "1"
   }
 }
@@ -141,23 +133,28 @@ resource "aws_cloudwatch_log_metric_filter" "error_logs" {
 resource "aws_cloudwatch_metric_alarm" "log_errors" {
   for_each = var.log_metric_filters
 
-  alarm_name          = "${var.tags["Environment"]}-${each.key}-log-errors"
+  alarm_name          = "${local.name_prefix}-${each.key}-log-errors"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = each.value.evaluation_periods
-  metric_name         = "${var.tags["Environment"]}_${each.key}_errors"
-  namespace           = "CustomMetrics/${var.tags["Environment"]}"
+  metric_name         = "${local.name_prefix}_${each.key}_errors"
+  namespace           = "CustomMetrics/${local.name_prefix}"
   period              = each.value.period
   statistic           = "Sum"
   threshold           = each.value.threshold
   alarm_description   = "Error logs detected for ${each.key}"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
 
-  tags = { Name = "${var.tags["Environment"]}-${each.key}-log-errors" }
+  tags = { Name = "${local.name_prefix}-${each.key}-log-errors" }
 }
 
 # Certificate Monitoring Resources
 locals {
-  name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "monitoring")}"
+  # Cloud Posse null-label style id (terraform-null-label: id = ...-name):
+  # every named resource in this component, not var.tags["Environment"]
+  # alone. var.name defaults to "monitoring", but every real stack sets
+  # distinct values ("main"/"data") on its two instances of this component so
+  # their AWS resources never collide.
+  name_prefix = "${var.tags["Environment"]}-${var.name}"
 
   # Process certificate ARNs for dashboard
   certificate_arns         = var.certificate_arns
@@ -311,9 +308,14 @@ locals {
   })
 }
 
-# Certificate monitoring dashboard (renamed from "certificates", which collided with dashboards.tf)
+# Certificate monitoring dashboard. Sole owner of the certificate dashboard:
+# dashboards.tf used to have a second resource, aws_cloudwatch_dashboard.certificates
+# (create_certificate_dashboard), rendering this same local.certificate_dashboard_body
+# under a different name ("<name_prefix>-certificate-monitoring") - the same
+# duplicate-resource pattern as the infrastructure and backend-services
+# dashboards. That resource has been removed; either flag now creates this one.
 resource "aws_cloudwatch_dashboard" "certificate_monitoring" {
-  count = var.enable_certificate_monitoring ? 1 : 0
+  count = var.enable_certificate_monitoring || var.create_certificate_dashboard ? 1 : 0
 
   dashboard_name = "${local.name_prefix}-certificates"
   dashboard_body = local.certificate_dashboard_body
@@ -348,29 +350,28 @@ resource "aws_cloudwatch_metric_alarm" "certificate_expiry" {
   tags = { Name = "${local.name_prefix}-cert-expiry-${each.key}" }
 }
 
-# Backend Services Monitoring Dashboard
+# Backend Services Monitoring Dashboard. Built the same jsonencode way as
+# infrastructure/performance/application (local.dashboard_bodies["backend"],
+# dashboards.tf): every widget plots real per-resource dimensions, and a
+# widget whose backing list is empty is dropped instead of rendering
+# "metrics": []. This used to be templates/backend-dashboard.json.tpl, whose
+# ApiName/ClusterName dimensions were hardcoded to "" and whose Lambda/RDS/
+# ALB/ElastiCache widgets rendered an empty metrics list on every real stack
+# (none of them wired lambda_functions/rds_instances/load_balancers/
+# elasticache_clusters into this component) - metrics-variables.tf:67 treats
+# that shape as invalid for metric_dashboards. The fake log/X-Ray widgets and
+# the Billing/TrustedAdvisor row (already covered by the cost dashboard) were
+# dropped rather than reproduced. The template file has been removed.
 resource "aws_cloudwatch_dashboard" "backend_services" {
   count = var.enable_backend_monitoring ? 1 : 0
 
   dashboard_name = "${local.name_prefix}-backend-services"
-  dashboard_body = templatefile(
-    "${path.module}/templates/backend-dashboard.json.tpl",
-    {
-      region               = var.region
-      environment          = var.tags["Environment"]
-      cluster_name         = var.eks_cluster_name
-      api_gateway_name     = var.api_gateway_name
-      lambda_functions     = var.lambda_functions
-      rds_instances        = var.rds_instances
-      elasticache_clusters = var.elasticache_clusters
-      load_balancers       = var.load_balancers
-    }
-  )
+  dashboard_body = local.dashboard_bodies["backend"]
 }
 
 # API Gateway Performance Alarms
 resource "aws_cloudwatch_metric_alarm" "api_gateway_latency" {
-  for_each = var.enable_backend_monitoring && length(var.api_gateway_stages) > 0 ? toset(var.api_gateway_stages) : []
+  for_each = var.enable_backend_monitoring && var.api_gateway_name != "" && length(local.api_gateway_stages) > 0 ? toset(local.api_gateway_stages) : []
 
   alarm_name          = "${local.name_prefix}-api-gateway-${each.value}-latency"
   comparison_operator = "GreaterThanThreshold"
@@ -390,7 +391,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_latency" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
-  for_each = var.enable_backend_monitoring && length(var.api_gateway_stages) > 0 ? toset(var.api_gateway_stages) : []
+  for_each = var.enable_backend_monitoring && var.api_gateway_name != "" && length(local.api_gateway_stages) > 0 ? toset(local.api_gateway_stages) : []
 
   alarm_name          = "${local.name_prefix}-api-gateway-${each.value}-error-rate"
   comparison_operator = "GreaterThanThreshold"
@@ -410,28 +411,26 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
 }
 
 # EKS Cluster Monitoring
-resource "aws_cloudwatch_metric_alarm" "eks_cluster_failed_requests" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
-
-  alarm_name          = "${local.name_prefix}-eks-cluster-failed-requests"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "cluster_failed_request_count"
-  namespace           = "ContainerInsights"
-  period              = "300"
-  statistic           = "Sum"
-  threshold           = var.eks_failed_requests_threshold
-  alarm_description   = "EKS cluster ${var.eks_cluster_name} has high failed request count"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
-
-  dimensions = {
-    ClusterName = var.eks_cluster_name
-  }
-}
+#
+# There used to be an eks_cluster_failed_requests alarm here on a
+# cluster_failed_request_count metric. That metric name does not exist in
+# either classic Container Insights (what eks-addons' amazon-cloudwatch-
+# observability add-on installs; see components/terraform/eks-addons/
+# container-insights.tf) or Container Insights with enhanced observability
+# (which this add-on does not enable) - see the documented metric list at
+# https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Container-Insights-metrics-EKS.html.
+# The alarm would never receive a datapoint and would never fire (a
+# permanently-green, dead alarm), so it has been removed rather than kept as
+# a stub. eks_node_not_ready (alarms.tf, cluster_failed_node_count) and
+# eks_node_count_low (alarms.tf, cluster_node_count) are the real cluster-
+# health signals this add-on actually publishes; the API server request rate
+# itself is only visible in the control plane's own CloudWatch logs
+# (enabled_cluster_log_types = ["api", ...], eks component), not as a
+# ContainerInsights metric, and isn't wired here.
 
 # Container Insights for EKS
 resource "aws_cloudwatch_metric_alarm" "eks_pod_cpu_utilization" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-eks-pod-cpu-high"
   comparison_operator = "GreaterThanThreshold"
@@ -451,7 +450,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_cpu_utilization" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "eks_pod_memory_utilization" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-eks-pod-memory-high"
   comparison_operator = "GreaterThanThreshold"
@@ -470,11 +469,17 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_memory_utilization" {
   }
 }
 
-# Application Load Balancer Monitoring
+# Application Load Balancer Monitoring. Iterates local.load_balancer_ids
+# (dashboards.tf), not var.load_balancers directly: that variable accepts
+# either the short "app/<name>/<id>" form or a full ELB ARN, and the
+# LoadBalancer dimension always wants the former - a full ARN would dimension
+# the alarm on a value CloudWatch never publishes. alarm_name sanitizes the
+# "/" characters the short form still contains, which CloudWatch alarm names
+# reject.
 resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
-  for_each = var.enable_backend_monitoring ? toset(var.load_balancers) : []
+  for_each = var.enable_backend_monitoring ? toset(local.load_balancer_ids) : []
 
-  alarm_name          = "${local.name_prefix}-alb-${each.value}-response-time"
+  alarm_name          = "${local.name_prefix}-alb-${replace(each.value, "/", "-")}-response-time"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "2"
   metric_name         = "TargetResponseTime"
@@ -491,9 +496,9 @@ resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
-  for_each = var.enable_backend_monitoring ? toset(var.load_balancers) : []
+  for_each = var.enable_backend_monitoring ? toset(local.load_balancer_ids) : []
 
-  alarm_name          = "${local.name_prefix}-alb-${each.value}-unhealthy-hosts"
+  alarm_name          = "${local.name_prefix}-alb-${replace(each.value, "/", "-")}-unhealthy-hosts"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
   metric_name         = "UnHealthyHostCount"
@@ -608,10 +613,11 @@ resource "aws_iam_role_policy_attachment" "synthetics_execution" {
 resource "aws_xray_sampling_rule" "backend_services" {
   count = var.enable_tracing ? 1 : 0
 
-  # X-Ray caps rule names at 32 characters. "<name_prefix>-backend-services"
-  # exceeded it for every stack ("production-monitoring-backend-services" is
-  # 38), so any stack enabling tracing failed at plan.
-  rule_name      = substr("${var.tags["Environment"]}-backend-services", 0, 32)
+  # X-Ray caps rule names at 32 characters, so this is always truncated. It is
+  # built from local.name_prefix (Environment-name), not Environment alone,
+  # so main and data still get distinct rule names post-truncation for every
+  # real stack's short environment names (testenv-01, staging, production).
+  rule_name      = substr("${local.name_prefix}-backend-services", 0, 32)
   priority       = 9000
   version        = 1
   reservoir_size = 1

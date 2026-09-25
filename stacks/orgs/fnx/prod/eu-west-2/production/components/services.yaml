@@ -387,6 +387,14 @@ components:
         inherits:
           - monitoring/defaults
       vars:
+        # Cloud Posse null-label style: every resource this component creates
+        # is named "<Environment>-<name>-<suffix>". monitoring/main and
+        # monitoring/data previously both named resources from Environment
+        # alone and collided (ResourceAlreadyExists) on the second apply.
+        name: main
+        # kms/main already allows CloudWatch alarms to publish to encrypted
+        # topics (catalog/kms/defaults.yaml allow_cloudwatch_alarms).
+        kms_key_id: !terraform.state kms/main .key_arn
         create_dashboard: true
         enable_certificate_monitoring: true
 
@@ -396,6 +404,22 @@ components:
         alarm_email_subscriptions:
           - "prod-critical@example.com"
           - "oncall@example.com"
+
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / ""), and
+        # enable_rds_monitoring's alarms below have RDS instances to watch.
+        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
+        # eks/main's node_groups (compute.yaml): workers (min_group_size 3) +
+        # monitoring (min_group_size 2) + memory-optimized (min_group_size 2)
+        # = 7 guaranteed nodes. The eks_node_count_low alarm (monitoring's
+        # alarms.tf) only fires below this floor.
+        eks_min_node_count: 7
+        rds_instances: !terraform.state rds/main .instance_identifier | [.]
+        ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
+        elasticache_clusters: !terraform.state elasticache/main .member_clusters
+        api_gateway_name: !terraform.state apigateway/main .api_name
+        api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
 
         # PagerDuty integration
         # Secret: export from SSM /production/pagerduty/endpoint before plan/apply
@@ -440,17 +464,42 @@ components:
         components:
           - component: vpc/main
           - component: acm/main
+          - component: kms/main
+          - component: eks/main
+          - component: rds/main
+          - component: ecs/main
+          - component: elasticache/main
+          - component: apigateway/main
     monitoring/data:
       metadata:
         component: monitoring
         inherits:
           - monitoring/defaults
       vars:
+        name: data
+        kms_key_id: !terraform.state kms/main .key_arn
         create_dashboard: true
         enable_certificate_monitoring: true
 
         certificate_arns: !terraform.state acm/services .certificate_arns // {} | [.[]]
         certificate_expiry_threshold: 30
+
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / "").
+        eks_cluster_name: !terraform.state eks/data .eks_cluster_id
+        # eks/data's node_groups (compute.yaml): data-workers
+        # (min_group_size 3) + batch-workers (min_group_size 0, spot) = 3
+        # guaranteed nodes. The eks_node_count_low alarm (monitoring's
+        # alarms.tf) only fires below this floor.
+        eks_min_node_count: 3
+        rds_instances: !terraform.state rds/data .instance_identifier | [.]
+        api_gateway_name: !terraform.state apigateway/data .api_name
+        api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
+        lambda_functions:
+          - !terraform.state lambda/data-processor .function_name
+          - !terraform.state lambda/data-transformer .function_name
+          - !terraform.state lambda/report-generator .function_name
 
         alarm_email_subscriptions:
           - "prod-critical@example.com"
@@ -467,3 +516,10 @@ components:
         components:
           - component: vpc/main
           - component: acm/services
+          - component: kms/main
+          - component: eks/data
+          - component: rds/data
+          - component: apigateway/data
+          - component: lambda/data-processor
+          - component: lambda/data-transformer
+          - component: lambda/report-generator

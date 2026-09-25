@@ -14,6 +14,25 @@ variable "environment" {
   default     = "dev"
 }
 
+# Cloud Posse null-label style (terraform-null-label: id = ...-name): every
+# named resource in this component is "<tags.Environment>-<name>-<suffix>"
+# rather than "<tags.Environment>-<suffix>" alone. Two instances of this
+# component run in every real stack (monitoring/main, monitoring/data); before
+# this variable existed they both named resources from Environment alone and
+# collided on the second apply (SNS topic, dashboards and alarms all
+# ResourceAlreadyExists). Set a distinct value per instance (e.g. "main",
+# "data").
+variable "name" {
+  type        = string
+  description = "Per-instance name, combined with tags.Environment to build every resource name (<Environment>-<name>-<suffix>). Co-located instances of this component must use distinct values."
+  default     = "monitoring"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.name))
+    error_message = "name must be non-empty, lowercase alphanumeric characters and hyphens, and must not start or end with a hyphen."
+  }
+}
+
 # Dashboard Configuration Variables
 variable "create_infrastructure_dashboard" {
   type        = bool
@@ -45,12 +64,6 @@ variable "create_application_dashboard" {
   default     = false
 }
 
-variable "create_backend_dashboard" {
-  type        = bool
-  description = "Create backend services dashboard"
-  default     = false
-}
-
 variable "create_certificate_dashboard" {
   type        = bool
   description = "Create certificate monitoring dashboard"
@@ -61,8 +74,33 @@ variable "custom_dashboards" {
   type = map(object({
     body = string
   }))
-  description = "Custom CloudWatch dashboards (name => dashboard JSON body)"
+  description = "Custom CloudWatch dashboards (name => dashboard JSON body), named <name_prefix>-<key>; key must not collide with a built-in dashboard's fixed name suffix (see validation)"
   default     = {}
+
+  # The built-in dashboards (dashboards.tf/main.tf) are named
+  # "<name_prefix>-<fixed suffix>": infrastructure-overview, security-
+  # monitoring, cost-optimization, performance-metrics, application-metrics,
+  # certificates, backend-services. A custom_dashboards key equal to one of
+  # these would build the exact same CloudWatch dashboard name as the
+  # built-in resource, and both Terraform resources would then manage the
+  # same AWS object, each apply overwriting the other's state - the same
+  # duplicate-resource collision the Dashboard dimensions section of the
+  # README documents for the dashboards this component used to duplicate
+  # internally.
+  validation {
+    condition = alltrue([
+      for k in keys(var.custom_dashboards) : !contains([
+        "infrastructure-overview",
+        "security-monitoring",
+        "cost-optimization",
+        "performance-metrics",
+        "application-metrics",
+        "certificates",
+        "backend-services",
+      ], k)
+    ])
+    error_message = "custom_dashboards keys must not collide with a built-in dashboard's fixed name suffix: infrastructure-overview, security-monitoring, cost-optimization, performance-metrics, application-metrics, certificates, backend-services."
+  }
 }
 
 variable "log_groups" {
@@ -75,13 +113,32 @@ variable "log_groups" {
 
 variable "kms_key_id" {
   type        = string
-  description = "KMS key ID for log encryption"
+  description = "KMS key ARN (kms/main's key_arn) encrypting CloudWatch log groups (aws_cloudwatch_log_group.main) and the alarm SNS topic (aws_sns_topic.alarms). Its key policy must let cloudwatch.amazonaws.com publish to encrypted topics (kms allow_cloudwatch_alarms). Null leaves both unencrypted."
   default     = null
+
+  validation {
+    condition     = var.kms_key_id == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.kms_key_id))
+    error_message = "kms_key_id must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>), or null."
+  }
 }
 
 variable "create_dashboard" {
-  type        = bool
-  description = "Whether to create CloudWatch dashboard"
+  type = bool
+  # Legacy alias of create_infrastructure_dashboard, not a second dashboard:
+  # it used to gate a separate Terraform resource
+  # (aws_cloudwatch_dashboard.main, "-overview") that duplicated
+  # aws_cloudwatch_dashboard.infrastructure (create_infrastructure_dashboard,
+  # true by default) - every real stack instance set create_dashboard: true,
+  # so each apply managed the same dashboard content twice, under two
+  # different CloudWatch names. There is now a single resource
+  # (aws_cloudwatch_dashboard.infrastructure); either this or
+  # create_infrastructure_dashboard being true creates it. Kept as a distinct
+  # variable (not merged into create_infrastructure_dashboard) because
+  # stacks/catalog/templates/*.yaml and every real-stack
+  # monitoring/main+monitoring/data instance still set it; removing it would
+  # turn those into undeclared-variable warnings for a file this change is
+  # not allowed to edit.
+  description = "Legacy alias of create_infrastructure_dashboard: either being true creates the infrastructure overview dashboard. Kept only so existing stack configs that set it remain valid."
   default     = false
 }
 
@@ -211,7 +268,12 @@ variable "enable_certificate_monitoring" {
 variable "eks_cluster_name" {
   type        = string
   description = "EKS cluster name for monitoring (certificate and backend services)"
-  default     = ""
+  # nullable = false: eks/main's eks_cluster_id output (one(aws_eks_cluster.default[*].name))
+  # is null when eks is disabled. Without this, an explicit null argument from
+  # !terraform.state stays null instead of falling back to "", and every
+  # `!= ""` gate below then evaluates true against a null dimension value.
+  nullable = false
+  default  = ""
 }
 
 variable "certificate_arns" {
@@ -267,17 +329,18 @@ variable "api_gateway_name" {
   type        = string
   description = "API Gateway name for monitoring"
 
-  # Empty string, not null. enable_backend_monitoring defaults true, so
-  # aws_cloudwatch_dashboard.backend_services renders backend-dashboard.json.tpl
-  # on every instance, and that template interpolates this value directly:
-  #   templates/backend-dashboard.json.tpl:11
-  #     ["AWS/ApiGateway", "Count", "ApiName", "${api_gateway_name}"]
-  # Terraform refuses to interpolate null - "Invalid template interpolation
-  # value; The expression result is null" - so a null default made every
-  # instance fail at PLAN time, and dev, staging and prod all leave it unset.
-  # The sibling eks_cluster_name already defaults to "" and feeds the same
-  # template; this now matches it.
-  default = ""
+  # Empty string, not null: local.dashboard_specs.backend and .infrastructure
+  # (dashboards.tf) both gate their API Gateway widget on
+  # `var.api_gateway_name != ""`, dropping the widget when it is unset. The
+  # sibling eks_cluster_name uses the same "" (not null) default for the same
+  # `!= ""` comparison in its own widgets and alarms.
+  #
+  # nullable = false: apigateway's api_name output is null for an HTTP API
+  # (api_type = "HTTP"). Without this, an explicit null argument from
+  # !terraform.state stays null instead of falling back to "", and the
+  # `!= ""` gates above then evaluate true against a null dimension value.
+  nullable = false
+  default  = ""
 }
 
 variable "api_gateway_stages" {
@@ -302,12 +365,6 @@ variable "backend_services_namespace" {
   type        = string
   description = "Kubernetes namespace for backend services"
   default     = "backend-services"
-}
-
-variable "eks_failed_requests_threshold" {
-  type        = number
-  description = "EKS cluster failed requests alarm threshold"
-  default     = 10
 }
 
 variable "eks_pod_cpu_threshold" {

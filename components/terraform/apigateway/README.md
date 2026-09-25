@@ -46,7 +46,11 @@ its custom domain the same way).
   entry with an explicit external `parent_id` is still keyed `/<path_part>`, not its real URL.
 - The deployment redeploys whenever `api_resources`/`api_methods`/`api_integrations` change. The
   first apply after this trigger was added replaces the deployment once, `create_before_destroy`.
-- No component reads these outputs via `!terraform.state apigateway...` — 0 matches in `stacks/`.
+- `monitoring/main` and `monitoring/data` read `api_name` and `rest_api_stage_name` via
+  `!terraform.state` in all 3 stacks (`api_gateway_name`/`api_gateway_stages`), for the
+  ApiName/Stage dashboard dimensions and alarms. `api_name` is `null` for an HTTP API
+  (`aws_api_gateway_rest_api.rest_api[0].name`, the real REST API name — not `var.api_name`,
+  which is only its `-<api_name>` suffix).
 
 ## Tests
 

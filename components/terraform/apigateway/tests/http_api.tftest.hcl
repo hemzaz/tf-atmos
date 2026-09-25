@@ -113,6 +113,36 @@ run "rest_api_creates_no_vpc_link" {
   }
 }
 
+run "api_name_output_is_the_real_rest_api_name" {
+  command = plan
+
+  variables {
+    api_type = "REST"
+  }
+
+  # The ApiName CloudWatch dimension is the REST API's real name
+  # (local.name_prefix = "<Environment>-<api_name>"), not var.api_name alone
+  # - monitoring/* reads this output for its api_gateway_name dimension.
+  assert {
+    condition     = output.api_name == aws_api_gateway_rest_api.rest_api[0].name
+    error_message = "api_name must be the REST API's real name, not var.api_name."
+  }
+
+  assert {
+    condition     = output.api_name == "test-microservices-api"
+    error_message = "api_name is <Environment>-<api_name>."
+  }
+}
+
+run "api_name_output_is_null_for_an_http_api" {
+  command = plan
+
+  assert {
+    condition     = output.api_name == null
+    error_message = "An HTTP API has no ApiName dimension; api_name must be null."
+  }
+}
+
 run "rejects_a_vpc_link_without_security_groups" {
   command = plan
 

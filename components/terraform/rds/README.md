@@ -24,6 +24,7 @@ cannot run it: no `CreateDBSubnetGroup`.
 | `tags` | required; must include a non-empty `Environment` (validated) |
 | `monitoring_interval` | one of 0/1/5/10/15/30/60 (validated) |
 | out: `instance_endpoint`, `password_secret_arn`, `security_group_id` | — |
+| out: `instance_identifier` | The DBInstanceIdentifier CloudWatch dimension (`<Environment>-<identifier>`). Since AWS provider v5, `instance_id` is the DBI resource ID (`db-XXXX...`), not this — `monitoring/*` reads `instance_identifier` for its `rds_instances` dimension input |
 
 ## Dependencies / gotchas
 
