@@ -52,6 +52,10 @@ locals {
   # Methods and integrations share one key so each method is paired with its integration.
   api_methods      = { for m in var.api_methods : "${m.http_method} ${m.resource_path}" => m }
   api_integrations = { for i in var.api_integrations : "${i.http_method} ${i.resource_path}" => i }
+
+  # HTTP API routes: REST ignores http_routes silently, the same way it
+  # ignores cors_configuration (see the enable_cors local above).
+  http_routes = local.create_http_api ? var.http_routes : {}
 }
 
 # REST API
@@ -167,8 +171,10 @@ resource "aws_apigatewayv2_stage" "http_stage" {
 }
 
 # VPC link: lets HTTP API routes reach private load balancers and services
-# in the VPC. Routes and integrations that use it are defined outside this
-# component (the target listener usually is not known to Terraform).
+# in the VPC. A route using it (var.http_routes, below) supplies the target
+# listener's ARN itself -- usually looked up by a component like
+# alb-controller-ingress-group, since the target is not otherwise known to
+# this component's own Terraform state.
 resource "aws_apigatewayv2_vpc_link" "http" {
   count = local.create_vpc_link ? 1 : 0
 
@@ -177,6 +183,57 @@ resource "aws_apigatewayv2_vpc_link" "http" {
   security_group_ids = var.vpc_link_security_group_ids
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-vpc-link" })
+}
+
+# HTTP API routes: one integration + one route per var.http_routes entry.
+# HTTP_PROXY (usually connection_type = VPC_LINK, into the cluster via the
+# VPC link above) or AWS_PROXY (a Lambda). A JWT route uses this component's
+# own authorizer (aws_apigatewayv2_authorizer.http_jwt, above); http_routes'
+# validation requires authorizer_type = "JWT" whenever a route asks for it.
+resource "aws_apigatewayv2_integration" "http_route" {
+  for_each = local.http_routes
+
+  api_id             = aws_apigatewayv2_api.http_api[0].id
+  integration_type   = each.value.integration_type
+  integration_method = each.value.integration_method
+  integration_uri    = each.value.integration_uri
+
+  connection_type = each.value.connection_type
+  # connection_id defaults to this component's own VPC link
+  # (aws_apigatewayv2_vpc_link.http, above) when the route leaves it null --
+  # the common case, and the only way to reach it without a circular
+  # !terraform.state reference from this same component's own stack config.
+  connection_id = each.value.connection_type == "VPC_LINK" ? coalesce(each.value.connection_id, one(aws_apigatewayv2_vpc_link.http[*].id)) : null
+
+  timeout_milliseconds   = each.value.timeout_milliseconds
+  payload_format_version = "1.0"
+}
+
+resource "aws_apigatewayv2_route" "http_route" {
+  for_each = local.http_routes
+
+  api_id             = aws_apigatewayv2_api.http_api[0].id
+  route_key          = each.key
+  target             = "integrations/${aws_apigatewayv2_integration.http_route[each.key].id}"
+  authorization_type = each.value.authorization_type
+  authorizer_id      = each.value.authorization_type == "JWT" ? one(aws_apigatewayv2_authorizer.http_jwt[*].id) : null
+}
+
+# Resource policy letting this API invoke the Lambda behind each AWS_PROXY
+# route. Mirrors aws_lambda_permission.api_gateway_invoke's reasoning above,
+# for HTTP API routes instead of REST API integrations.
+resource "aws_lambda_permission" "http_route_invoke" {
+  for_each = {
+    for k, r in local.http_routes : k => r
+    if r.integration_type == "AWS_PROXY"
+  }
+
+  statement_id  = "AllowHttpRouteInvoke-${replace(replace(each.key, " ", "-"), "/", "_")}"
+  action        = "lambda:InvokeFunction"
+  function_name = each.value.lambda_function_name
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_apigatewayv2_api.http_api[0].execution_arn}/*/*"
 }
 
 # Custom Domain Name for REST API

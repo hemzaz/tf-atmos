@@ -1,0 +1,223 @@
+# Mock-provider tests: no AWS credentials, no cluster access. Run from the
+# component directory with `terraform init -backend=false && terraform test`.
+
+mock_provider "aws" {
+  override_data {
+    target = data.aws_eks_cluster_auth.this
+    values = {
+      token = "mock-token"
+    }
+  }
+  override_data {
+    target          = data.aws_lb.this
+    override_during = plan
+    values = {
+      arn      = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/test-group/0123456789abcdef"
+      dns_name = "test-group-0123456789.eu-west-2.elb.amazonaws.com"
+      zone_id  = "Z215JYRZR1TBD5"
+    }
+  }
+  override_data {
+    target          = data.aws_lb_listener.http
+    override_during = plan
+    values = {
+      arn = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/test-group/0123456789abcdef/1111111111111111"
+    }
+  }
+  override_data {
+    target          = data.aws_lb_listener.https
+    override_during = plan
+    values = {
+      arn = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/test-group/0123456789abcdef/2222222222222222"
+    }
+  }
+  mock_resource "aws_security_group" {
+    override_during = plan
+    defaults = {
+      id = "sg-0000000000000000f"
+    }
+  }
+}
+
+mock_provider "kubernetes" {}
+
+variables {
+  region                   = "eu-west-2"
+  cluster_name             = "testenv-01-microservices"
+  host                     = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+  cluster_ca_certificate   = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
+  vpc_id                   = "vpc-0123456789abcdef0"
+  group_name               = "microservices-http"
+  admit_security_group_ids = ["sg-0123456789abcdef0"]
+  tags = {
+    Environment = "test"
+    Tenant      = "fnx"
+    ManagedBy   = "Terraform"
+  }
+}
+
+run "annotations_carry_the_group_name_and_internal_scheme" {
+  command = plan
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/group.name"] == "microservices-http"
+    error_message = "The Ingress must carry the IngressGroup name."
+  }
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/scheme"] == "internal"
+    error_message = "The Ingress must be explicitly internal, never internet-facing."
+  }
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/manage-backend-security-group-rules"] == "true"
+    error_message = "An explicit alb.ingress.kubernetes.io/security-groups annotation stops the controller managing backend (node/pod) SG rules on its own; this annotation must opt back in."
+  }
+}
+
+run "listen_ports_default_to_http_only" {
+  command = plan
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/listen-ports"] == jsonencode([{ HTTP = 80 }])
+    error_message = "Without certificate_arn, only an HTTP (80) listener is requested."
+  }
+
+  assert {
+    condition     = length(data.aws_lb_listener.https) == 0 && output.https_listener_arn == null
+    error_message = "No HTTPS listener lookup without certificate_arn."
+  }
+}
+
+run "https_listener_when_certificate_arn_is_set" {
+  command = plan
+
+  variables {
+    certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+  }
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/listen-ports"] == jsonencode([{ HTTP = 80 }, { HTTPS = 443 }])
+    error_message = "certificate_arn adds an HTTPS (443) listener alongside HTTP."
+  }
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/certificate-arn"] == var.certificate_arn
+    error_message = "certificate_arn reaches the certificate-arn annotation."
+  }
+
+  assert {
+    condition     = length(data.aws_lb_listener.https) == 1
+    error_message = "certificate_arn adds the HTTPS listener lookup."
+  }
+}
+
+run "security_group_admits_only_the_given_security_groups_never_a_cidr" {
+  command = plan
+
+  assert {
+    condition     = length(aws_vpc_security_group_ingress_rule.admitted) == 1
+    error_message = "One ingress rule per admit_security_group_ids x listen_ports pair; one SG, one port (HTTP only) here."
+  }
+
+  assert {
+    condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.admitted : r.referenced_security_group_id == "sg-0123456789abcdef0"])
+    error_message = "Every ingress rule must reference an admitted security group, not a CIDR."
+  }
+
+  assert {
+    condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.admitted : r.cidr_ipv4 == null && r.cidr_ipv6 == null])
+    error_message = "No ingress rule may carry a CIDR block; the repo forbids inbound 0.0.0.0/0 and ::/0."
+  }
+}
+
+run "two_admitted_security_groups_and_tls_creates_four_ingress_rules" {
+  command = plan
+
+  variables {
+    admit_security_group_ids = ["sg-0123456789abcdef0", "sg-0123456789abcdef1"]
+    certificate_arn          = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+  }
+
+  assert {
+    condition     = length(aws_vpc_security_group_ingress_rule.admitted) == 4
+    error_message = "2 security groups x 2 ports (HTTP+HTTPS) = 4 ingress rules."
+  }
+}
+
+run "rejects_empty_admit_security_group_ids" {
+  command = plan
+
+  variables {
+    admit_security_group_ids = []
+  }
+
+  expect_failures = [var.admit_security_group_ids]
+}
+
+run "rejects_a_cidr_block_instead_of_a_security_group" {
+  command = plan
+
+  variables {
+    admit_security_group_ids = ["0.0.0.0/0"]
+  }
+
+  expect_failures = [var.admit_security_group_ids]
+}
+
+run "rejects_an_invalid_group_name" {
+  command = plan
+
+  variables {
+    group_name = "Not Valid!"
+  }
+
+  expect_failures = [var.group_name]
+}
+
+run "outputs_are_wired_to_the_load_balancer_lookup" {
+  # data.aws_lb/data.aws_lb_listener depend_on the Ingress by design (the
+  # ALB does not exist until the controller creates it), so their values are
+  # unknown under `plan` -- assert the lookups and their outputs exist and
+  # are wired up, not their literal values (that needs `apply`, which the
+  # mock kubernetes/aws providers cannot carry through this component's
+  # cross-provider depends_on consistently).
+  command = plan
+
+  variables {
+    certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+  }
+
+  assert {
+    condition     = output.group_name == "microservices-http"
+    error_message = "group_name output echoes var.group_name."
+  }
+
+  assert {
+    condition     = length(data.aws_lb.this) == 1
+    error_message = "data.aws_lb.this looks up the controller-provisioned ALB."
+  }
+
+  assert {
+    condition     = length(data.aws_lb_listener.http) == 1 && length(data.aws_lb_listener.https) == 1
+    error_message = "Both listener lookups exist when certificate_arn is set."
+  }
+}
+
+run "disabled_creates_nothing" {
+  command = plan
+
+  variables {
+    enabled = false
+  }
+
+  assert {
+    condition     = length(kubernetes_ingress_v1.this) == 0 && length(aws_security_group.alb) == 0 && length(aws_vpc_security_group_ingress_rule.admitted) == 0
+    error_message = "enabled = false creates no Ingress, security group or ingress rules."
+  }
+
+  assert {
+    condition     = output.group_name == null && output.load_balancer_arn == null && output.http_listener_arn == null
+    error_message = "Outputs are null when disabled."
+  }
+}

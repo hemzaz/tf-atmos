@@ -136,6 +136,10 @@ SYNTH = [
     (r'^(dead_letter_)?queue_name$',  'example-queue'),
     # ...and the cloudtrail component's log group for its CIS metric filters.
     (r'^cloudtrail_logs_log_group_name$', '/aws/cloudtrail/example-cloudtrail'),
+    # ...and alb-ingress-group's ALB listener, apigateway's http_routes[*]'s
+    # integration_uri (an HTTP_PROXY/VPC_LINK route's target listener).
+    (r'^(http|https)_listener_arn$',
+     'arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/example-alb/1234567890123456/1234567890123456'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry
