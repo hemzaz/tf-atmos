@@ -245,7 +245,6 @@ run "reader_policy_grants_kinesis_read_actions_and_scoped_kms_decrypt" {
         "kinesis:DescribeStream",
         "kinesis:DescribeStreamSummary",
         "kinesis:ListShards",
-        "kinesis:ListStreams",
       ]
       && jsondecode(output.reader_policy).Statement[0].Resource == aws_kinesis_stream.this[0].arn
     )
@@ -327,7 +326,7 @@ run "writer_policy_grants_kinesis_write_actions_and_scoped_kms_generate_data_key
   }
 }
 
-run "additional_policy_json_is_folded_into_writer_policy" {
+run "writer_policy_is_unaffected_by_additional_policy_json" {
   command = apply
 
   variables {
@@ -345,17 +344,81 @@ run "additional_policy_json_is_folded_into_writer_policy" {
   }
 
   assert {
-    condition     = length(jsondecode(output.writer_policy).Statement) == 3
-    error_message = "writer_policy has its own two statements plus every Statement entry from additional_policy_json."
+    condition     = length(jsondecode(output.writer_policy).Statement) == 2
+    error_message = "writer_policy always stays exactly its own two statements, regardless of additional_policy_json - attaching it never silently grants more than write access to this stream."
+  }
+}
+
+run "additional_policy_json_is_folded_into_combined_policy_with_a_rewritten_sid" {
+  command = apply
+
+  variables {
+    additional_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid      = "AllowKinesisStreamRead"
+          Effect   = "Allow"
+          Action   = ["kinesis:GetRecords"]
+          Resource = "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+        }
+      ]
+    })
+  }
+
+  assert {
+    condition     = length(jsondecode(output.combined_policy).Statement) == 3
+    error_message = "combined_policy has writer_policy's own two statements plus every Statement entry from additional_policy_json."
   }
 
   assert {
     condition = (
-      jsondecode(output.writer_policy).Statement[2].Sid == "AllowKinesisStreamRead"
-      && jsondecode(output.writer_policy).Statement[2].Action == ["kinesis:GetRecords"]
-      && jsondecode(output.writer_policy).Statement[2].Resource == "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+      jsondecode(output.combined_policy).Statement[0].Sid == "AllowKinesisStreamWrite"
+      && jsondecode(output.combined_policy).Statement[1].Sid == "AllowKinesisStreamKMSWrite"
     )
-    error_message = "The additional_policy_json statement is passed through verbatim, appended after this stream's own statements."
+    error_message = "combined_policy's first two statements are this stream's own write and KMS statements, in the same order as writer_policy."
+  }
+
+  assert {
+    condition = (
+      jsondecode(output.combined_policy).Statement[2].Sid == "AdditionalAllowKinesisStreamRead0"
+      && jsondecode(output.combined_policy).Statement[2].Action == ["kinesis:GetRecords"]
+      && jsondecode(output.combined_policy).Statement[2].Resource == "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+    )
+    error_message = "The additional_policy_json statement is folded in with its Sid rewritten (prefixed 'Additional', suffixed its index), every other field passed through verbatim."
+  }
+}
+
+run "additional_policy_json_shaped_like_another_streams_writer_policy_never_collides_sids" {
+  command = apply
+
+  variables {
+    # Same Sids this stream's own writer_policy uses - the scenario the
+    # rewrite exists to guard against: passing another instance's
+    # writer_policy output (rather than its reader_policy) as
+    # additional_policy_json.
+    additional_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid      = "AllowKinesisStreamWrite"
+          Effect   = "Allow"
+          Action   = ["kinesis:PutRecord", "kinesis:PutRecords", "kinesis:DescribeStreamSummary"]
+          Resource = "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+        },
+        {
+          Sid      = "AllowKinesisStreamKMSWrite"
+          Effect   = "Allow"
+          Action   = ["kms:GenerateDataKey"]
+          Resource = "arn:aws:kms:eu-west-2:123456789012:key/11111111-1111-1111-1111-111111111111"
+        }
+      ]
+    })
+  }
+
+  assert {
+    condition     = length(distinct([for s in jsondecode(output.combined_policy).Statement : s.Sid])) == length(jsondecode(output.combined_policy).Statement)
+    error_message = "Every statement in combined_policy has a unique Sid, even when additional_policy_json repeats this stream's own Sids verbatim."
   }
 }
 
@@ -366,6 +429,31 @@ run "additional_policy_json_defaults_to_nothing_extra" {
     condition     = length(jsondecode(output.writer_policy).Statement) == 2
     error_message = "With additional_policy_json unset (the default, null), writer_policy has only its own two statements."
   }
+
+  assert {
+    condition     = length(jsondecode(output.combined_policy).Statement) == 2
+    error_message = "With additional_policy_json unset (the default, null), combined_policy has only writer_policy's own two statements."
+  }
+}
+
+run "rejects_an_additional_policy_json_without_a_statement_key" {
+  command = plan
+
+  variables {
+    additional_policy_json = jsonencode({ Version = "2012-10-17" })
+  }
+
+  expect_failures = [var.additional_policy_json]
+}
+
+run "rejects_a_non_json_additional_policy_json" {
+  command = plan
+
+  variables {
+    additional_policy_json = "not json"
+  }
+
+  expect_failures = [var.additional_policy_json]
 }
 
 run "disabled_creates_nothing" {
@@ -389,7 +477,7 @@ run "disabled_creates_nothing" {
   }
 
   assert {
-    condition     = output.reader_policy == null && output.writer_policy == null
-    error_message = "reader_policy and writer_policy are null when disabled."
+    condition     = output.reader_policy == null && output.writer_policy == null && output.combined_policy == null
+    error_message = "reader_policy, writer_policy and combined_policy are null when disabled."
   }
 }

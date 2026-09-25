@@ -257,10 +257,12 @@ components:
         # lambda-transformer both reads kinesis-ingest and writes this
         # stream, but the lambda component's custom_policy accepts only one
         # policy document. Folding kinesis-ingest's reader_policy into this
-        # stream's own writer_policy (rather than the other way around, or
+        # stream's own combined_policy (rather than the other way around, or
         # in a Go template at the YAML layer - see the kinesis component's
         # README) gives lambda-transformer one combined document to read via
-        # a single, ordinary !terraform.state call below.
+        # a single, ordinary !terraform.state call below. writer_policy
+        # itself is left untouched by this - it always stays exactly this
+        # stream's own write grant.
         additional_policy_json: !terraform.state data-pipeline/kinesis-ingest .reader_policy
 
         tags:
@@ -333,12 +335,14 @@ components:
         # PutRecord[s] against kinesis-enriched via OUTPUT_STREAM above (a
         # writer). The `lambda` component's custom_policy accepts exactly one
         # IAM policy document, so kinesis-ingest's reader_policy is folded
-        # into kinesis-enriched's writer_policy (via that instance's own
+        # into kinesis-enriched's combined_policy (via that instance's own
         # additional_policy_json, above) rather than merged here - see the
         # kinesis component's README ("Combining grants across two
         # streams") for why. This reads that single, already-combined
-        # output.
-        custom_policy: !terraform.state data-pipeline/kinesis-enriched .writer_policy
+        # output (kinesis-enriched's plain writer_policy output intentionally
+        # never carries kinesis-ingest's grants, so any other consumer that
+        # attaches it stays scoped to kinesis-enriched alone).
+        custom_policy: !terraform.state data-pipeline/kinesis-enriched .combined_policy
 
         # Performance alarms
         create_performance_alarms: true

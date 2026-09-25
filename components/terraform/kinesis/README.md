@@ -29,12 +29,13 @@ instances inherit it and set `name`, `stream_mode`, `retention_period`,
 | `shard_level_metrics` (`[]`) | Enhanced (shard-level) CloudWatch metrics to enable; any of `IncomingBytes`, `IncomingRecords`, `OutgoingBytes`, `OutgoingRecords`, `WriteProvisionedThroughputExceeded`, `ReadProvisionedThroughputExceeded`, `IteratorAgeMilliseconds` |
 | `enforce_consumer_deletion` (`false`) | Allow the stream to be destroyed even with registered enhanced fan-out consumers |
 | `consumers` (`{}`) | Map of `{enabled (true)}`, keyed by the AWS-registered consumer name (1-128 characters). Each enabled entry becomes its own `aws_kinesis_stream_consumer` (enhanced fan-out); `enabled = false` on an entry removes just that consumer without touching the stream |
-| `additional_policy_json` (`null`) | Another IAM policy document (JSON, `{Version, Statement}`) - typically another kinesis instance's own `reader_policy`/`writer_policy` output - whose `Statement` entries are folded into this stream's `writer_policy`. See "Combining grants across two streams" below |
+| `additional_policy_json` (`null`) | Another IAM policy document (JSON, `{Version, Statement}`) - typically another kinesis instance's own `reader_policy`/`writer_policy` output - whose `Statement` entries are folded into this stream's `combined_policy` output (never into `writer_policy`, which always stays exactly this stream's own two statements). Each entry's `Sid` is rewritten (prefixed `Additional`) so it can never collide with this stream's own Sids, even when the document passed in is itself a `writer_policy`-shaped output. Must be `null` or decode to an object with a `Statement` key (enforced by a variable validation). See "Combining grants across two streams" below |
 | `enabled` (`true`) | `false` creates nothing, including any consumers |
 | out: `stream_arn`, `stream_name`, `stream_id` | Always set when enabled |
 | out: `consumer_arns` | Map of consumer name to ARN, for enabled entries in `consumers`. Empty map when none are enabled |
-| out: `reader_policy` | A ready-to-use IAM identity policy document (JSON string) for a stream reader: the Kinesis read actions (`GetRecords`, `GetShardIterator`, `DescribeStream[Summary]`, `ListShards`, `ListStreams`) scoped to the stream, enhanced fan-out actions (`SubscribeToShard`, `DescribeStreamConsumer`) scoped to any registered consumer ARNs, and `kms:Decrypt` on `kms_key_id` scoped to this stream alone. Null when disabled |
-| out: `writer_policy` | A ready-to-use IAM identity policy document (JSON string) for a stream writer: `kinesis:PutRecord`/`PutRecords`/`DescribeStreamSummary` scoped to the stream, and `kms:GenerateDataKey` on `kms_key_id` scoped to this stream alone - plus, when `additional_policy_json` is set, that document's `Statement` entries too. Null when disabled |
+| out: `reader_policy` | A ready-to-use IAM identity policy document (JSON string) for a stream reader: the Kinesis read actions (`GetRecords`, `GetShardIterator`, `DescribeStream[Summary]`, `ListShards`) scoped to the stream, enhanced fan-out actions (`SubscribeToShard`, `DescribeStreamConsumer`) scoped to any registered consumer ARNs, and `kms:Decrypt` on `kms_key_id` scoped to this stream alone. `ListStreams` is deliberately not included - it supports no resource-level permissions, so scoping it to this stream's ARN would never actually grant it. Null when disabled |
+| out: `writer_policy` | A ready-to-use IAM identity policy document (JSON string) for a stream writer: `kinesis:PutRecord`/`PutRecords`/`DescribeStreamSummary` scoped to the stream, and `kms:GenerateDataKey` on `kms_key_id` scoped to this stream alone. Always exactly these two statements, regardless of `additional_policy_json` - attaching it to a role can never silently grant more than "write to this stream". Null when disabled |
+| out: `combined_policy` | `writer_policy`'s own two statements plus, when `additional_policy_json` is set, that document's (Sid-rewritten) `Statement` entries too. Use this - not `writer_policy` - for a consumer that needs another stream's grants folded in alongside this stream's write grant. Null when disabled |
 
 ## Dependencies / gotchas
 
@@ -89,12 +90,15 @@ instances inherit it and set `name`, `stream_mode`, `retention_period`,
   `!terraform.state data-pipeline/kinesis-ingest .reader_policy` (a single,
   ordinary, `--process-functions=false`-skippable call, `kinesis-ingest`
   added to `kinesis-enriched`'s own `dependencies.components`), and
-  `kinesis-enriched`'s `writer_policy` (already combining its own write
-  statements) folds that document's `Statement` entries in via
-  `jsondecode(var.additional_policy_json).Statement` inside Terraform.
-  `lambda-transformer`'s `custom_policy` then reads that one, already-combined
-  output: `!terraform.state data-pipeline/kinesis-enriched .writer_policy` —
-  a single `!terraform.state` call, same as every other consumer here.
+  `kinesis-enriched`'s `combined_policy` output (its own two write
+  statements, `writer_policy`'s contents) folds that document's `Statement`
+  entries in via `jsondecode(var.additional_policy_json).Statement` inside
+  Terraform - `writer_policy` itself is left untouched, so anything else
+  that attaches `kinesis-enriched`'s plain `writer_policy` stays scoped to
+  `kinesis-enriched` alone. `lambda-transformer`'s `custom_policy` then reads
+  that one, already-combined output: `!terraform.state
+  data-pipeline/kinesis-enriched .combined_policy` — a single
+  `!terraform.state` call, same as every other consumer here.
 - **Shard count and stream mode are cross-validated at plan time.**
   `shard_count` must be a positive number under `PROVISIONED` and `null`
   under `ON_DEMAND`; setting the wrong one fails the variable validation
@@ -115,11 +119,12 @@ instances inherit it and set `name`, `stream_mode`, `retention_period`,
   `eventbridge`'s `targets`), rather than Cloud Posse's `list(string)` of
   stream-consumer names; each entry can be individually disabled via
   `enabled` without removing it from the map.
-- Adds the `reader_policy` / `writer_policy` outputs (and the
-  `additional_policy_json` input that lets one of them absorb another
-  instance's), which Cloud Posse's component has no equivalent for: it
-  assumes the caller already knows how to grant its own reader/writer roles
-  the right Kinesis actions and `kms:Decrypt`/`kms:GenerateDataKey`, whereas
-  this component hands back the whole policy documents so a consumer never
-  has to reconstruct the encryption context condition (or the key ARN)
+- Adds the `reader_policy` / `writer_policy` / `combined_policy` outputs
+  (and the `additional_policy_json` input that lets `combined_policy` absorb
+  another instance's), which Cloud Posse's component has no equivalent for:
+  it assumes the caller already knows how to grant its own reader/writer
+  roles the right Kinesis actions and `kms:Decrypt`/`kms:GenerateDataKey`,
+  whereas this component hands back the whole policy documents so a
+  consumer never has to reconstruct the encryption context condition (or
+  the key ARN)
   itself.

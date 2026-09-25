@@ -107,9 +107,14 @@ variable "enforce_consumer_deletion" {
 
 variable "additional_policy_json" {
   type        = string
-  description = "An additional IAM policy document (JSON, {Version, Statement}) whose Statement entries are merged into this stream's writer_policy output - typically another kinesis instance's own reader_policy or writer_policy output, wired in via !terraform.state. Lets one consumer that both reads one stream and writes another (e.g. a Lambda function whose custom_policy input accepts only one policy document) get a single combined grant, without Atmos ever having to read two components' live state into one YAML value (which !terraform.state alone cannot do, and an Atmos Go template - atmos.Component - can, but only by requiring live state at describe/validate time too, breaking `atmos describe stacks`/`atmos validate stacks` for the whole stack before first apply). Null (the default) adds nothing"
+  description = "An additional IAM policy document (JSON, {Version, Statement}) whose Statement entries are folded into this stream's combined_policy output (never into writer_policy, which always stays exactly this stream's own two statements) - typically another kinesis instance's own reader_policy or writer_policy output, wired in via !terraform.state. Lets one consumer that both reads one stream and writes another (e.g. a Lambda function whose custom_policy input accepts only one policy document) get a single combined grant, without Atmos ever having to read two components' live state into one YAML value (which !terraform.state alone cannot do, and an Atmos Go template - atmos.Component - can, but only by requiring live state at describe/validate time too, breaking `atmos describe stacks`/`atmos validate stacks` for the whole stack before first apply). Each Statement entry's Sid is rewritten (prefixed) in combined_policy so it can never collide with this stream's own Sids, even when the document passed in is itself a writer_policy-shaped output. Null (the default) adds nothing"
   default     = null
   nullable    = true
+
+  validation {
+    condition     = var.additional_policy_json == null || can(jsondecode(var.additional_policy_json).Statement)
+    error_message = "additional_policy_json must be null or a JSON policy document with a Statement key (e.g. another kinesis instance's reader_policy or writer_policy output)."
+  }
 }
 
 variable "consumers" {
