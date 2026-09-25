@@ -16,7 +16,11 @@ machine alone.
 (a template, not a deployed stack). The abstract base `stepfunctions/defaults`
 (`stacks/catalog/stepfunctions/defaults.yaml`) wires the key from `kms/main`;
 instances inherit it and set `name`, `definition` and, as needed,
-`iam_policies`.
+`iam_policies`. `stepfunctions/defaults` does not pin `logging_configuration`
+or `tracing_enabled`, so the component's own secure defaults (full execution
+history logging, X-Ray on) apply; an instance overrides them only if it needs
+to (for example turning `include_execution_data` off for a workflow whose
+Task payloads may carry sensitive data).
 
 ## Inputs / outputs
 
@@ -36,11 +40,29 @@ instances inherit it and set `name`, `definition` and, as needed,
 
 ## Dependencies / gotchas
 
-- **Key policy.** The log group encrypts with the key as `logs.<region>.amazonaws.com`,
-  a service principal kms/main's root-account statement does not reach.
-  kms/main's `allow_cloudwatch_logs` (on in every stack) covers it; it is not
-  scoped to a log group name pattern, so no change was needed there for the
-  `/aws/vendedlogs/states/` prefix.
+- **Key policy.** A CMK-encrypted, logging state machine needs three separate
+  grants on `kms_key_arn` (AWS's "Encryption at rest" doc, step 3):
+  - The log group itself encrypts as `logs.<region>.amazonaws.com`, a service
+    principal kms/main's root-account statement does not reach. kms/main's
+    `allow_cloudwatch_logs` (on in every stack) covers it; it is not scoped to
+    a log group name pattern, so no change was needed there for the
+    `/aws/vendedlogs/states/` prefix.
+  - CloudWatch Logs' *delivery* service (`delivery.logs.amazonaws.com`, a
+    distinct principal from `logs.<region>.amazonaws.com`) needs
+    `kms:Decrypt` to actually ship execution history into the CMK-encrypted
+    log group. kms/main's `allow_log_delivery` (on in every stack) covers it.
+  - The execution role itself needs `kms:Decrypt`/`kms:GenerateDataKey` on
+    the same key: this component grants both, scoped by
+    `kms:EncryptionContext:aws:states:stateMachineArn` for the state
+    machine's own definition/execution-history encryption, and a second
+    `kms:GenerateDataKey` statement scoped by
+    `kms:EncryptionContext:SourceArn` (this account's log groups) for the log
+    delivery call.
+  A Task calling another CMK-encrypted resource directly (for example
+  `sns:Publish` to a CMK-encrypted SNS topic) needs its own `iam_policies`
+  KMS grant too, since that call's encryption context differs from the
+  state machine's own; see `templates/stacks/serverless-stack.yaml`'s
+  `PublishNotificationsKMS` statement.
 - **Execution role trust.** Scoped by `aws:SourceAccount` and `aws:SourceArn`
   to this state machine's own ARN, which is deterministic from
   `region`/account/`name` and so knowable before the state machine exists (no
@@ -62,9 +84,11 @@ instances inherit it and set `name`, `definition` and, as needed,
 - Plain resources instead of the `cloudposse/terraform-aws-step-functions`
   module; no `context.tf`/null-label, names come from `tags.Environment` and
   `default_tags` carries the tags.
-- Creates and owns the execution role (scoped trust policy, log-delivery and
-  X-Ray permissions, `iam_policies`) instead of taking an existing
-  `service_integrations`/role input.
+- Cloud Posse's module creates its own execution role by default too
+  (`existing_iam_role_arn` is an optional input, for callers who already have
+  a role); this component always creates its own (scoped trust policy, KMS,
+  log-delivery and X-Ray permissions, `iam_policies`) and has no equivalent
+  input for bringing an existing one.
 - Always creates the CloudWatch log group and always logs to it once a level
   is set; Cloud Posse's equivalent (`logging_configuration`) is closer to this
   but the trust/log-delivery wiring here is our own.
@@ -96,8 +120,6 @@ components:
         inherits: [stepfunctions/defaults]
       vars:
         name: order-fulfilment
-        logging_configuration:
-          level: ERROR
         definition:
           Comment: "Order fulfilment workflow"
           StartAt: ProcessOrder
@@ -122,6 +144,14 @@ components:
             actions: ["sns:Publish"]
             resources:
               - !terraform.state sns/notifications .sns_topic_arn
+          # NotifyCustomer's target topic is encrypted with the same kms/main
+          # key; the component's own kms_policy only covers the state
+          # machine's own KMS usage, so the SNS Publish path needs this
+          # separate, key-scoped grant.
+          - sid: PublishNotificationsKMS
+            actions: ["kms:GenerateDataKey*", "kms:Decrypt"]
+            resources:
+              - !terraform.state kms/main .key_arn
       dependencies:
         components:
           - component: kms/main

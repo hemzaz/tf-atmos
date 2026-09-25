@@ -50,7 +50,7 @@ variable "definition" {
   description = "Amazon States Language definition, as an object; the component jsonencodes it. ARNs referenced in it (Lambda functions, SNS topics, ...) should come from !terraform.state so they never go stale"
 
   validation {
-    condition     = can(jsonencode(var.definition)) && length(keys(var.definition)) > 0
+    condition     = can(keys(var.definition)) && length(keys(var.definition)) > 0
     error_message = "definition must be a non-empty object."
   }
 }

@@ -33,6 +33,12 @@ components:
         # groups (eventbridge, apigateway, ...) or event buses with this key
         # need these; each statement is limited to this account and region.
         allow_cloudwatch_logs: true
+        # CloudWatch Logs delivery (delivery.logs.amazonaws.com), a separate
+        # principal from logs.<region>.amazonaws.com above: needed for a
+        # resource whose logs ship via CloudWatch Logs delivery (Step
+        # Functions execution history) to write into its own CMK-encrypted
+        # log group. stepfunctions is the only consumer today.
+        allow_log_delivery: true
         allow_eventbridge: true
         # security-monitoring encrypts its alert SNS topic with this key, so the
         # CloudWatch alarms publishing to it need kms:GenerateDataKey*/Decrypt

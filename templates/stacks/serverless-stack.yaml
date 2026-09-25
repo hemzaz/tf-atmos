@@ -254,7 +254,9 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-order-created"
+                      # Tightened to this account (orgs/fnx/<stage>/_defaults'
+                      # settings.environment.account_id) rather than wildcarding it.
+                      - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/{{ .settings.context.environment }}-order-created"
 
     # Event bus and routing rules (eventbridge is one rule per instance: the
     # Cloud Posse aws-eventbridge model). Both rules sit on the default bus
@@ -335,6 +337,17 @@ components:
             actions: ["sns:Publish"]
             resources:
               - !terraform.state sns/notifications .sns_topic_arn
+          # NotifyCustomer publishes to sns/notifications, which is encrypted
+          # with this same kms/main key (catalog/sns/defaults). The
+          # component's own kms_policy statement only covers the state
+          # machine's own KMS usage (scoped by the stateMachineArn encryption
+          # context); SNS Publish to an SSE-KMS topic carries a different
+          # context (aws:sns:topicArn), so the execution role needs this
+          # separate, key-scoped grant to actually publish.
+          - sid: PublishNotificationsKMS
+            actions: ["kms:GenerateDataKey*", "kms:Decrypt"]
+            resources:
+              - !terraform.state kms/main .key_arn
       dependencies:
         components:
           - component: kms/main

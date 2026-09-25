@@ -1,12 +1,14 @@
 # One Step Functions state machine per instance, modelled on Cloud Posse's
 # aws-step-functions component (https://github.com/cloudposse-terraform-components/aws-step-functions,
 # which wraps cloudposse/terraform-aws-step-functions). Written as plain
-# resources, like the other root components. Cloud Posse's component takes an
-# existing execution role; this one creates it, scoped by trust-policy
-# condition to this state machine's own ARN, with iam_policies adding
-# whatever the definition's Tasks call directly. Logging always goes to a
-# /aws/vendedlogs/states/<Environment>-<name> log group (the prefix AWS
-# requires for Step Functions log delivery), encrypted with kms_key_arn.
+# resources, like the other root components. Cloud Posse's own module also
+# creates the execution role by default (its `existing_iam_role_arn` input is
+# optional, for callers who already have one); this component always creates
+# its own, scoped by trust-policy condition to this state machine's own ARN,
+# with iam_policies adding whatever the definition's Tasks call directly.
+# Logging always goes to a /aws/vendedlogs/states/<Environment>-<name> log
+# group (the prefix AWS requires for Step Functions log delivery), encrypted
+# with kms_key_arn.
 # events_role_enabled additionally creates an EventBridge invoke role, for use
 # as an eventbridge instance's target role_arn.
 #
@@ -47,24 +49,68 @@ locals {
 
   # The permissions AWS documents as required on a state machine's execution
   # role to deliver history events to CloudWatch Logs; the log delivery API
-  # takes no resource-level permissions, so this is unscoped (Resource "*"),
-  # as in AWS's own example policy for it.
+  # takes no resource-level permissions, so the logs:* statement is unscoped
+  # (Resource "*"), as in AWS's own example policy for it. The second
+  # statement is the execution role's own KMS grant for that delivery (step 3
+  # of docs.aws.amazon.com/step-functions/latest/dg/encryption-at-rest.html):
+  # the log-delivery data key is generated under encryption context
+  # kms:EncryptionContext:SourceArn = the destination log group's ARN, a
+  # different context than the state machine's own kms_policy statement
+  # below, so it needs its own statement, scoped to this account's log groups
+  # in this region.
   logging_policy = jsonencode({
     Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowStepFunctionsLogDelivery"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogDelivery",
+          "logs:GetLogDelivery",
+          "logs:UpdateLogDelivery",
+          "logs:DeleteLogDelivery",
+          "logs:ListLogDeliveries",
+          "logs:PutResourcePolicy",
+          "logs:DescribeResourcePolicies",
+          "logs:DescribeLogGroups",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid      = "AllowLogDeliveryKMSUsage"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey"]
+        Resource = var.kms_key_arn
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:SourceArn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:*"
+          }
+        }
+      },
+    ]
+  })
+
+  # AWS requires kms:Decrypt/kms:GenerateDataKey on the CMK to start or update
+  # this state machine when it uses a customer managed key
+  # (encryption_configuration below); kms/main's key policy only delegates to
+  # the account root, which an IAM role does not inherit implicitly. Scoped to
+  # this state machine's own ARN via the encryption context Step Functions
+  # sets on every KMS call it makes for the definition/execution history
+  # (step 2 of docs.aws.amazon.com/step-functions/latest/dg/encryption-at-rest.html),
+  # so this role can only use the key for this state machine, never another
+  # resource sharing the same CMK.
+  kms_policy = jsonencode({
+    Version = "2012-10-17"
     Statement = [{
-      Sid    = "AllowStepFunctionsLogDelivery"
-      Effect = "Allow"
-      Action = [
-        "logs:CreateLogDelivery",
-        "logs:GetLogDelivery",
-        "logs:UpdateLogDelivery",
-        "logs:DeleteLogDelivery",
-        "logs:ListLogDeliveries",
-        "logs:PutResourcePolicy",
-        "logs:DescribeResourcePolicies",
-        "logs:DescribeLogGroups",
-      ]
-      Resource = "*"
+      Sid      = "AllowStateMachineKMSUsage"
+      Effect   = "Allow"
+      Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
+      Resource = var.kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:EncryptionContext:aws:states:stateMachineArn" = local.state_machine_arn
+        }
+      }
     }]
   })
 
@@ -131,6 +177,16 @@ resource "aws_iam_role" "this" {
   tags = { Name = "${local.name}-role" }
 }
 
+resource "aws_iam_role_policy" "kms" {
+  # Always on (not conditioned on logging/tracing): encryption_configuration
+  # below is unconditional, so the state machine's own KMS grant is too.
+  count = local.enabled ? 1 : 0
+
+  name   = "${local.name}-kms"
+  role   = aws_iam_role.this[0].id
+  policy = local.kms_policy
+}
+
 resource "aws_iam_role_policy" "logging" {
   count = local.logging_enabled ? 1 : 0
 
@@ -183,9 +239,9 @@ resource "aws_sfn_state_machine" "this" {
 
   tags = { Name = local.name }
 
-  # AWS validates the role's log-delivery/tracing permissions when the state
-  # machine is created or updated.
-  depends_on = [aws_iam_role_policy.logging, aws_iam_role_policy.tracing, aws_iam_role_policy.custom]
+  # AWS validates the role's KMS/log-delivery/tracing permissions when the
+  # state machine is created or updated.
+  depends_on = [aws_iam_role_policy.kms, aws_iam_role_policy.logging, aws_iam_role_policy.tracing, aws_iam_role_policy.custom]
 
   lifecycle {
     precondition {
