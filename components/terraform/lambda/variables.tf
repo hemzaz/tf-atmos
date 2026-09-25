@@ -191,6 +191,17 @@ variable "on_failure_destination" {
   default     = null
 }
 
+variable "delivery_kms_key_arn" {
+  type        = string
+  description = "Customer managed KMS key ARN of the SQS queues / SNS topics in on_success_destination, on_failure_destination and dead_letter_target_arn; the execution role gets kms:GenerateDataKey and kms:Decrypt on it (the role always gets sqs:SendMessage / sns:Publish on those ARNs)"
+  default     = null
+
+  validation {
+    condition     = var.delivery_kms_key_arn == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.delivery_kms_key_arn))
+    error_message = "delivery_kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>)."
+  }
+}
+
 variable "create_alias" {
   type        = bool
   description = "Whether to create an alias for the Lambda function"

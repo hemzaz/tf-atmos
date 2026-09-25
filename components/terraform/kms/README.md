@@ -18,7 +18,7 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
@@ -56,6 +56,11 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   this key (an sns subscription to an sqs queue), scoped by
   `aws:SourceAccount` and `aws:SourceArn` = this account's topics in this
   region. `kms/defaults` turns it on.
+- `allow_s3` adds `AllowS3`: `s3.amazonaws.com` may use
+  `kms:Decrypt`/`kms:GenerateDataKey*` to send event notifications to SQS
+  queues or SNS topics encrypted with this key, scoped by `aws:SourceAccount`
+  = this account and `aws:SourceArn` = an S3 bucket (`arn:aws:s3:::*`; bucket
+  ARNs carry no account). `kms/defaults` turns it on.
 - `allow_cloudwatch_alarms` adds `AllowCloudWatchAlarmsSNSTopics` for
   `cloudwatch.amazonaws.com`. Both SNS statements allow
   `kms:GenerateDataKey*`/`kms:Decrypt` only with

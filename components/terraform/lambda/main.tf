@@ -34,6 +34,55 @@ resource "aws_iam_role_policy" "lambda_custom" {
   policy = var.custom_policy
 }
 
+# Lambda delivers to asynchronous-invocation destinations and to the dead
+# letter target as the function's execution role, so the role must be allowed
+# to send to each SQS queue / publish to each SNS topic named there (and, for
+# one encrypted with a customer managed key, to use that key).
+locals {
+  delivery_targets    = compact([var.on_success_destination, var.on_failure_destination, var.dead_letter_target_arn])
+  delivery_queue_arns = [for a in local.delivery_targets : a if try(split(":", a)[2], "") == "sqs"]
+  delivery_topic_arns = [for a in local.delivery_targets : a if try(split(":", a)[2], "") == "sns"]
+  delivery_policy     = length(local.delivery_queue_arns) + length(local.delivery_topic_arns) > 0
+}
+
+data "aws_iam_policy_document" "delivery" {
+  count = local.delivery_policy ? 1 : 0
+
+  dynamic "statement" {
+    for_each = length(local.delivery_queue_arns) > 0 ? [1] : []
+    content {
+      sid       = "SendToDeliveryQueues"
+      actions   = ["sqs:SendMessage"]
+      resources = local.delivery_queue_arns
+    }
+  }
+
+  dynamic "statement" {
+    for_each = length(local.delivery_topic_arns) > 0 ? [1] : []
+    content {
+      sid       = "PublishToDeliveryTopics"
+      actions   = ["sns:Publish"]
+      resources = local.delivery_topic_arns
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.delivery_kms_key_arn != null ? [1] : []
+    content {
+      sid       = "UseDeliveryKey"
+      actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
+      resources = [var.delivery_kms_key_arn]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "delivery" {
+  count  = local.delivery_policy ? 1 : 0
+  name   = "${var.tags["Environment"]}-${var.function_name}-delivery"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.delivery[0].json
+}
+
 # Create log group before the Lambda function to avoid circular dependencies
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${var.tags["Environment"]}-${var.function_name}"
@@ -270,6 +319,9 @@ resource "aws_lambda_function_event_invoke_config" "main" {
   function_name                = aws_lambda_function.main.function_name
   maximum_retry_attempts       = var.maximum_retry_attempts
   maximum_event_age_in_seconds = var.maximum_event_age_in_seconds
+
+  # AWS checks that the execution role may reach the destinations.
+  depends_on = [aws_iam_role_policy.delivery]
 
   dynamic "destination_config" {
     for_each = var.on_success_destination != null || var.on_failure_destination != null ? [1] : []

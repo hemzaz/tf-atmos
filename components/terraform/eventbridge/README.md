@@ -19,6 +19,7 @@ instances inherit it and set `name` and `cloudwatch_event_rule_pattern`.
 |---|---|
 | `region`, `tags`, `name`, `kms_key_arn` (required) | `tags` must include a non-empty `Environment`; the rule, log group (`/aws/events/<Environment>-<name>`) and bus/archive are named `<Environment>-<name>`. The key must be a KMS key ARN |
 | `cloudwatch_event_rule_pattern` (`{source = ["aws.ec2"]}`), `cloudwatch_event_rule_description` (""), `event_log_retention_in_days` (3) | Cloud Posse's inputs and defaults; the pattern is an object, JSON-encoded here; retention must be a CloudWatch Logs value |
+| `schedule_expression` (null) | `cron(...)` or `rate(...)`: the rule fires on this schedule instead of matching events, and `cloudwatch_event_rule_pattern` is ignored. EventBridge only runs schedules on the default bus, so it rejects `create_event_bus` or another `event_bus_name`. Its name is terraform-aws-modules/eventbridge's |
 | `create_event_bus` (false), `event_bus_name` (`default`) | create a bus `<Environment>-<name>` for the rule, or put the rule on an existing one (another instance's `event_bus_name` output) |
 | `archive_enabled` (false), `archive_retention_days` (30, 0 = forever) | archive every event on the created bus; requires `create_event_bus` |
 | `event_bus_dlq_arn` (null) | ARN of an SQS queue EventBridge uses as a dead-letter queue for the created bus; only used when `create_event_bus` is true |
@@ -96,7 +97,8 @@ deliver depends on the target:
 - Added: `kms_key_arn` (Cloud Posse leaves the log group unencrypted),
   `create_event_bus`/`event_bus_name` (Cloud Posse only uses the default
   bus), `archive_enabled`/`archive_retention_days`, `event_bus_dlq_arn`,
-  `enabled`, and the `event_bus_*`/`event_archive_arn` outputs.
+  `schedule_expression` (Cloud Posse's rule only matches events), `enabled`,
+  and the `event_bus_*`/`event_archive_arn` outputs.
 - `targets` replaces the single target of Cloud Posse's
   `cloudposse/cloudwatch-events` module (`cloudwatch_event_target_arn`,
   `cloudwatch_event_target_role_arn`, `cloudwatch_event_target_id`, which
@@ -111,7 +113,8 @@ deliver depends on the target:
   alone and consumes none of that quota. It also carries an
   `aws:SourceAccount` condition Cloud Posse's policy does not have.
 - Validations Cloud Posse does not have: the key ARN, the pattern is a
-  non-empty object, the retention is one CloudWatch accepts, an archive needs
+  non-empty object, a schedule is `cron(...)`/`rate(...)` on the default
+  bus, the retention is one CloudWatch accepts, an archive needs
   a created bus, the DLQ ARN, the targets (count, IDs, ARNs, role use, input,
   standard dead-letter queue, retry ranges, FIFO message group, ECS/Batch
   settings), and preconditions that the archive name

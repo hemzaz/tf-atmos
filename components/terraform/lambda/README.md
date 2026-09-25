@@ -22,6 +22,7 @@ fnx-staging-staging-01, fnx-prod-production) — zero instances. Add a
 | `vpc_endpoint_prefix_list_ids` | optional override; empty resolves the region's AWS-managed S3 prefix list |
 | `package_type` | `Zip` or `Image` only (validated) |
 | `architectures` | `x86_64`/`arm64` only (validated) |
+| `configure_event_invoke`, `on_success_destination`, `on_failure_destination`, `dead_letter_target_arn`, `delivery_kms_key_arn` | asynchronous-invocation destinations and the dead-letter target. For each SQS queue / SNS topic named there the execution role gets `sqs:SendMessage` / `sns:Publish` (policy `<Environment>-<function_name>-delivery`), and `kms:GenerateDataKey`/`kms:Decrypt` on `delivery_kms_key_arn` when the queue or topic is encrypted with a customer managed key. Other destination types (Lambda, EventBridge) still need `custom_policy` |
 | `tags` | required; must include a non-empty `Environment` (validated), used in every resource name |
 | out: `function_arn`, `function_invoke_arn`, `role_arn`, `alias_arn` | — |
 

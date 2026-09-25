@@ -69,8 +69,11 @@ resource "aws_cloudwatch_event_rule" "this" {
   name           = local.name
   description    = local.description
   event_bus_name = local.event_bus_name
-  event_pattern  = jsonencode(var.cloudwatch_event_rule_pattern)
-  state          = "ENABLED"
+  # A scheduled rule fires on its schedule alone: a pattern next to it would
+  # also fire it on every matching event.
+  event_pattern       = var.schedule_expression == null ? jsonencode(var.cloudwatch_event_rule_pattern) : null
+  schedule_expression = var.schedule_expression
+  state               = "ENABLED"
 
   tags = { Name = local.name }
 }

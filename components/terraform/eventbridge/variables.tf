@@ -57,6 +57,25 @@ variable "cloudwatch_event_rule_pattern" {
   }
 }
 
+# A schedule, as in terraform-aws-modules/eventbridge (Cloud Posse's
+# cloudwatch-events module only matches events).
+
+variable "schedule_expression" {
+  type        = string
+  description = "Schedule the rule fires on (cron(...) or rate(...)), in place of matching events: cloudwatch_event_rule_pattern is then ignored. EventBridge only runs schedules on the default bus"
+  default     = null
+
+  validation {
+    condition     = var.schedule_expression == null || can(regex("^(cron|rate)\\(.+\\)$", var.schedule_expression))
+    error_message = "schedule_expression must be null, cron(...) or rate(...)."
+  }
+
+  validation {
+    condition     = var.schedule_expression == null || (!var.create_event_bus && var.event_bus_name == "default")
+    error_message = "schedule_expression needs the rule on the default bus, where EventBridge runs schedules (create_event_bus false, event_bus_name default)."
+  }
+}
+
 variable "event_log_retention_in_days" {
   type        = number
   description = "Days to keep the matched events in the rule's CloudWatch log group"
