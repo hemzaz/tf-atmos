@@ -74,8 +74,33 @@ variable "custom_dashboards" {
   type = map(object({
     body = string
   }))
-  description = "Custom CloudWatch dashboards (name => dashboard JSON body)"
+  description = "Custom CloudWatch dashboards (name => dashboard JSON body), named <name_prefix>-<key>; key must not collide with a built-in dashboard's fixed name suffix (see validation)"
   default     = {}
+
+  # The built-in dashboards (dashboards.tf/main.tf) are named
+  # "<name_prefix>-<fixed suffix>": infrastructure-overview, security-
+  # monitoring, cost-optimization, performance-metrics, application-metrics,
+  # certificates, backend-services. A custom_dashboards key equal to one of
+  # these would build the exact same CloudWatch dashboard name as the
+  # built-in resource, and both Terraform resources would then manage the
+  # same AWS object, each apply overwriting the other's state - the same
+  # duplicate-resource collision the Dashboard dimensions section of the
+  # README documents for the dashboards this component used to duplicate
+  # internally.
+  validation {
+    condition = alltrue([
+      for k in keys(var.custom_dashboards) : !contains([
+        "infrastructure-overview",
+        "security-monitoring",
+        "cost-optimization",
+        "performance-metrics",
+        "application-metrics",
+        "certificates",
+        "backend-services",
+      ], k)
+    ])
+    error_message = "custom_dashboards keys must not collide with a built-in dashboard's fixed name suffix: infrastructure-overview, security-monitoring, cost-optimization, performance-metrics, application-metrics, certificates, backend-services."
+  }
 }
 
 variable "log_groups" {
@@ -340,12 +365,6 @@ variable "backend_services_namespace" {
   type        = string
   description = "Kubernetes namespace for backend services"
   default     = "backend-services"
-}
-
-variable "eks_failed_requests_threshold" {
-  type        = number
-  description = "EKS cluster failed requests alarm threshold"
-  default     = 10
 }
 
 variable "eks_pod_cpu_threshold" {

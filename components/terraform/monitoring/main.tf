@@ -411,24 +411,22 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
 }
 
 # EKS Cluster Monitoring
-resource "aws_cloudwatch_metric_alarm" "eks_cluster_failed_requests" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
-
-  alarm_name          = "${local.name_prefix}-eks-cluster-failed-requests"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "cluster_failed_request_count"
-  namespace           = "ContainerInsights"
-  period              = "300"
-  statistic           = "Sum"
-  threshold           = var.eks_failed_requests_threshold
-  alarm_description   = "EKS cluster ${var.eks_cluster_name} has high failed request count"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
-
-  dimensions = {
-    ClusterName = var.eks_cluster_name
-  }
-}
+#
+# There used to be an eks_cluster_failed_requests alarm here on a
+# cluster_failed_request_count metric. That metric name does not exist in
+# either classic Container Insights (what eks-addons' amazon-cloudwatch-
+# observability add-on installs; see components/terraform/eks-addons/
+# container-insights.tf) or Container Insights with enhanced observability
+# (which this add-on does not enable) - see the documented metric list at
+# https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Container-Insights-metrics-EKS.html.
+# The alarm would never receive a datapoint and would never fire (a
+# permanently-green, dead alarm), so it has been removed rather than kept as
+# a stub. eks_node_not_ready (alarms.tf, cluster_failed_node_count) and
+# eks_node_count_low (alarms.tf, cluster_node_count) are the real cluster-
+# health signals this add-on actually publishes; the API server request rate
+# itself is only visible in the control plane's own CloudWatch logs
+# (enabled_cluster_log_types = ["api", ...], eks component), not as a
+# ContainerInsights metric, and isn't wired here.
 
 # Container Insights for EKS
 resource "aws_cloudwatch_metric_alarm" "eks_pod_cpu_utilization" {

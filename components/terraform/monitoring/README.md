@@ -81,54 +81,27 @@ per-resource list in this component's inputs to dimension it by.
 | `api_gateway_name` + `api_gateway_stages` | API Gateway Requests | API Gateway Latency | API Gateway Requests & 5XX Errors | API Gateway Requests, Latency & Errors | `ApiName` + `Stage` |
 | `business_metric_filters` | — | — | — | Business Metrics | none (`BusinessMetrics/<Environment>`, `<name_prefix>_<key>`) |
 
-`aws_cloudwatch_dashboard.infrastructure` used to have a duplicate:
-`aws_cloudwatch_dashboard.main` (`create_dashboard`, renamed to
-`<name_prefix>-overview` at one point) built the same widgets under a second
-Terraform resource. `create_infrastructure_dashboard` defaults to `true` and
-every real stack instance also set `create_dashboard: true`, so each
-instance managed the same content twice, under two different CloudWatch
-dashboard names. `aws_cloudwatch_dashboard.main` has been removed —
-`aws_cloudwatch_dashboard.infrastructure` (`<name_prefix>-infrastructure-overview`)
-is the sole dashboard resource now, created when *either*
-`create_dashboard` or `create_infrastructure_dashboard` is `true`.
-`create_dashboard` is kept as a distinct variable (a legacy alias, not
-folded into `create_infrastructure_dashboard`) only because
-`stacks/catalog/templates/*.yaml` and every real-stack
-`monitoring/main`/`monitoring/data` instance still set it — removing it
-would turn those into undeclared-variable warnings for a file this fix is
-not allowed to edit.
+`aws_cloudwatch_dashboard.infrastructure`
+(`<name_prefix>-infrastructure-overview`) is the sole resource for the
+infrastructure dashboard, created when *either* `create_dashboard` or
+`create_infrastructure_dashboard` is `true`. `create_dashboard` is a legacy
+alias, kept as a distinct variable (not folded into
+`create_infrastructure_dashboard`) because `stacks/catalog/templates/*.yaml`
+and every real-stack `monitoring/main`/`monitoring/data` instance still set
+it — removing it would turn those into undeclared-variable warnings for
+files this component doesn't own.
 
-The backend services dashboard had the same duplicate-resource history, plus
-a second bug: `aws_cloudwatch_dashboard.backend_services`
-(`enable_backend_monitoring`, `main.tf`, on by default) and
-`aws_cloudwatch_dashboard.backend` (`create_backend_dashboard`,
-`dashboards.tf`, off by default) named the *exact same* dashboard
-(`<name_prefix>-backend-services`); turning on `create_backend_dashboard`
-would have made two Terraform resources manage one CloudWatch object, each
-apply overwriting the other's state. `aws_cloudwatch_dashboard.backend` and
-`create_backend_dashboard` have been removed; `enable_backend_monitoring` is
-the sole owner. Separately, its old `templates/backend-dashboard.json.tpl`
-hardcoded `ApiName`/`ClusterName` to `var.api_gateway_name`/
-`var.eks_cluster_name` with no `""` guard, and its Lambda/RDS/ALB/ElastiCache
-widgets rendered an empty metrics list on every real stack — none of them
-wired `lambda_functions`/`rds_instances`/`load_balancers`/
-`elasticache_clusters` into this component (see Deployed above, now fixed).
-`aws_cloudwatch_dashboard.backend_services` is now built from
-`local.dashboard_bodies["backend"]` the same jsonencode way as the other
-three dashboards, and the template file has been removed. Its fake Logs
-Insights and X-Ray widgets, and a Billing/TrustedAdvisor row duplicating the
-`cost` dashboard, were dropped rather than reproduced.
+`aws_cloudwatch_dashboard.backend_services` (`enable_backend_monitoring`,
+`main.tf`) is the sole resource for the backend services dashboard
+(`<name_prefix>-backend-services`), built from
+`local.dashboard_bodies["backend"]` the same jsonencode way as
+infrastructure/performance/application (see the table above for its
+widgets and dimensions).
 
-The certificate dashboard had the identical duplicate-resource pattern:
-`aws_cloudwatch_dashboard.certificate_monitoring` (`enable_certificate_monitoring`,
-`main.tf`) and `aws_cloudwatch_dashboard.certificates`
-(`create_certificate_dashboard`, `dashboards.tf`) rendered the same
-`local.certificate_dashboard_body` under two different names
-(`<name_prefix>-certificates` vs `<name_prefix>-certificate-monitoring`).
-`aws_cloudwatch_dashboard.certificates` has been removed;
 `aws_cloudwatch_dashboard.certificate_monitoring`
-(`<name_prefix>-certificates`) is created when *either*
-`enable_certificate_monitoring` or `create_certificate_dashboard` is `true`.
+(`enable_certificate_monitoring` or `create_certificate_dashboard`,
+`main.tf`) is the sole resource for the certificate dashboard
+(`<name_prefix>-certificates`), rendered from `local.certificate_dashboard_body`.
 
 ## Any metric: `metric_alarms`, `metric_dashboards`, `log_insights_queries`
 
@@ -190,15 +163,30 @@ mock provider with `terraform init -backend=false && terraform test`.
 - `certificate_arns`/`certificate_domains` come from acm outputs via a
   `// {}` fallback, so this still plans cleanly with empty maps if acm has
   no certs yet.
+- `eks_node_not_ready` and `eks_node_count_low` (`alarms.tf`,
+  `enable_backend_monitoring` + `eks_cluster_name`) read the Container
+  Insights cluster-level metrics the `eks-addons` component's
+  `amazon-cloudwatch-observability` add-on publishes:
+  `eks_node_not_ready` fires when `cluster_failed_node_count` (nodes in a
+  failed/NotReady state) is above zero; `eks_node_count_low` fires when
+  `cluster_node_count` (total node count) drops below `eks_min_node_count`,
+  which should be set to the sum of the cluster's node groups'
+  `min_group_size` values (see the real-stack `eks_min_node_count` settings
+  in `services.yaml` for worked examples) so it only alarms below the
+  cluster's own guaranteed floor.
+- `custom_dashboards` and `metric_dashboards` keys are validated against the
+  built-in dashboards' fixed name suffixes (`infrastructure-overview`,
+  `security-monitoring`, `cost-optimization`, `performance-metrics`,
+  `application-metrics`, `certificates`, `backend-services`): a colliding
+  key would build the same `<name_prefix>-<suffix>` CloudWatch dashboard
+  name as a built-in dashboard, and both Terraform resources would then
+  manage the same AWS object.
 - The remaining templated dashboards (`templates/{security,cost}-dashboard.json.tpl`)
-  used to leave a trailing comma after the last row of every non-empty list,
-  so listing any RDS instance, Lambda, load balancer, ECS or cache cluster
-  failed the plan with "dashboard_body contains an invalid JSON". Rows are
-  now comma-separated; `tests/metrics.tftest.hcl` renders every dashboard
-  with several of each. `infrastructure`/`performance`/`application`/`backend`
-  are no longer `templatefile`-based (see Dashboard dimensions above), so
-  they cannot hit this class of bug — `templates/backend-dashboard.json.tpl`
-  has been removed.
+  render valid JSON with several resources listed; `tests/metrics.tftest.hcl`
+  covers this. `infrastructure`/`performance`/`application`/`backend` are
+  built with `jsonencode` in HCL instead of `templatefile` (see Dashboard
+  dimensions above), so they can't produce malformed JSON regardless of how
+  many resources are listed.
 - `enable_tracing` creates an X-Ray sampling rule
   `<Environment>-<name>-backend-services` (10% fixed rate), cut to X-Ray's
   32-character limit (`substr`). It used to be built from `Environment` alone

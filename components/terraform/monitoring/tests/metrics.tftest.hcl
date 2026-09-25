@@ -255,3 +255,34 @@ run "rejects_a_widget_without_metrics" {
 
   expect_failures = [var.metric_dashboards]
 }
+
+run "rejects_a_custom_dashboard_key_reserved_by_a_built_in_dashboard" {
+  command = plan
+
+  # A custom_dashboards key equal to a built-in dashboard's fixed name suffix
+  # (e.g. "backend-services") would build the exact same
+  # "<name_prefix>-backend-services" CloudWatch dashboard name as
+  # aws_cloudwatch_dashboard.backend_services, and both Terraform resources
+  # would then manage the same AWS object.
+  variables {
+    custom_dashboards = {
+      backend-services = { body = jsonencode({ widgets = [] }) }
+    }
+  }
+
+  expect_failures = [var.custom_dashboards]
+}
+
+run "rejects_a_metric_dashboard_key_reserved_by_a_built_in_dashboard" {
+  command = plan
+
+  variables {
+    metric_dashboards = {
+      infrastructure-overview = {
+        widgets = [{ title = "x", metrics = [{ namespace = "AWS/Events", metric = "Invocations" }] }]
+      }
+    }
+  }
+
+  expect_failures = [var.metric_dashboards]
+}

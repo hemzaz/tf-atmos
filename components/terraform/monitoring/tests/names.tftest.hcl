@@ -475,8 +475,13 @@ run "null_eks_and_api_gateway_names_fall_back_to_empty_string" {
   }
 
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.eks_cluster_failed_requests) == 0
-    error_message = "A null eks_cluster_name must fall back to \"\" and drop the EKS failed-requests alarm, not plan with a null ClusterName dimension."
+    condition     = length(aws_cloudwatch_metric_alarm.eks_node_not_ready) == 0
+    error_message = "A null eks_cluster_name must fall back to \"\" and drop the EKS node-not-ready alarm, not plan with a null ClusterName dimension."
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.eks_node_count_low) == 0
+    error_message = "A null eks_cluster_name must fall back to \"\" and drop the EKS node-count-low alarm, not plan with a null ClusterName dimension."
   }
 
   assert {
@@ -491,4 +496,56 @@ run "null_eks_and_api_gateway_names_fall_back_to_empty_string" {
     ])
     error_message = "The backend dashboard must still plan (dropping the EKS and API Gateway widgets, not planning them with a null dimension value)."
   }
+}
+
+run "eks_alarms_use_real_container_insights_metrics" {
+  command = plan
+
+  # Review finding: eks_node_not_ready used to alarm on cluster_node_count
+  # (the cluster's total node count) GreaterThanThreshold eks_min_node_count's
+  # default of 2, which permanently pages any cluster sized above 2 nodes -
+  # every real stack. It must instead alarm on cluster_failed_node_count (the
+  # documented Container Insights not-ready-node metric) GreaterThanThreshold
+  # 0. eks_cluster_failed_requests used cluster_failed_request_count, which
+  # is not a Container Insights metric this component's eks-addons setup (or
+  # any Container Insights mode) publishes, so it has been removed outright -
+  # not kept as a dead/stub alarm - and eks_cluster_failed_requests must not
+  # exist as a resource any more.
+  variables {
+    name                      = "main"
+    enable_backend_monitoring = true
+    eks_cluster_name          = "eks-1"
+    eks_min_node_count        = 3
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.eks_node_not_ready[0].metric_name == "cluster_failed_node_count"
+    error_message = "eks_node_not_ready must alarm on cluster_failed_node_count, the Container Insights not-ready-node metric."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.eks_node_not_ready[0].namespace == "ContainerInsights"
+    error_message = "eks_node_not_ready must read from the ContainerInsights namespace."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.eks_node_not_ready[0].comparison_operator == "GreaterThanThreshold" && aws_cloudwatch_metric_alarm.eks_node_not_ready[0].threshold == 0
+    error_message = "eks_node_not_ready must fire when any node is not ready (> 0), not scale with cluster size."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.eks_node_count_low[0].metric_name == "cluster_node_count"
+    error_message = "eks_node_count_low must watch the cluster's total node count."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.eks_node_count_low[0].comparison_operator == "LessThanThreshold" && aws_cloudwatch_metric_alarm.eks_node_count_low[0].threshold == 3
+    error_message = "eks_node_count_low must alarm when the node count drops below the configured eks_min_node_count."
+  }
+
+  # eks_cluster_failed_requests (cluster_failed_request_count, not a real
+  # Container Insights metric) no longer exists as a resource in main.tf at
+  # all - asserting that here isn't expressible (an unknown resource
+  # reference is a configuration error, not a runtime `can()` failure); its
+  # absence is enforced by the component simply no longer declaring it.
 }

@@ -310,6 +310,11 @@ components:
         # deploys, so the infrastructure and backend dashboards plot real
         # data instead of empty widgets (they default to [] / "").
         eks_cluster_name: !terraform.state eks/main .eks_cluster_id
+        # eks/main's node_groups (compute.yaml): workers (min_group_size 2)
+        # + monitoring (min_group_size 1) = 3 guaranteed nodes. The
+        # eks_node_count_low alarm (monitoring's alarms.tf) only fires below
+        # this floor.
+        eks_min_node_count: 3
         rds_instances: !terraform.state rds/main .instance_identifier | [.]
         ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
         api_gateway_name: !terraform.state apigateway/main .api_name
