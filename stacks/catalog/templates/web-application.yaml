@@ -56,10 +56,10 @@ components:
 
         # VPC CIDR configuration
         # Development uses smaller CIDR, production uses larger
-        vpc_cidr: "10.10.0.0/16"
+        ipv4_primary_cidr_block: "10.10.0.0/16"
 
         # Availability zones for high availability
-        azs:
+        availability_zones:
           - "{{ .vars.region }}a"
           - "{{ .vars.region }}b"
           - "{{ .vars.region }}c"
@@ -81,7 +81,7 @@ components:
         # NAT Gateway strategy
         # single: cost-optimized for dev/staging
         # one_per_az: high availability for production
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "single"
 
         # VPC Flow Logs for security and troubleshooting

@@ -57,7 +57,7 @@ components:
     vpc/defaults:
       vars:
         nat_gateway_strategy: "single"
-        enable_flow_logs: false
+        vpc_flow_logs_enabled: false
 
     eks/defaults:
       vars:

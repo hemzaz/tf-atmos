@@ -1,12 +1,12 @@
 locals {
   # Subnets keyed by CIDR so adding or removing one does not renumber the others
-  private_subnets  = { for i, cidr in var.private_subnets : cidr => { index = i, az = var.azs[i] } }
-  public_subnets   = { for i, cidr in var.public_subnets : cidr => { index = i, az = var.azs[i] } }
-  database_subnets = { for i, cidr in var.database_subnets : cidr => { index = i, az = var.azs[i % length(var.azs)] } }
+  private_subnets  = { for i, cidr in var.private_subnets : cidr => { index = i, az = var.availability_zones[i] } }
+  public_subnets   = { for i, cidr in var.public_subnets : cidr => { index = i, az = var.availability_zones[i] } }
+  database_subnets = { for i, cidr in var.database_subnets : cidr => { index = i, az = var.availability_zones[i % length(var.availability_zones)] } }
 }
 
 resource "aws_vpc" "main" {
-  cidr_block           = var.vpc_cidr
+  cidr_block           = var.ipv4_primary_cidr_block
   enable_dns_hostnames = true
   enable_dns_support   = true
 
@@ -23,10 +23,11 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_subnet" "public" {
-  for_each          = local.public_subnets
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = each.key
-  availability_zone = each.value.az
+  for_each                = local.public_subnets
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = each.key
+  availability_zone       = each.value.az
+  map_public_ip_on_launch = var.map_public_ip_on_launch
 
   tags = merge(var.public_subnets_additional_tags, { Name = "${var.tags["Environment"]}-public-subnet-${each.value.index + 1}" })
 }

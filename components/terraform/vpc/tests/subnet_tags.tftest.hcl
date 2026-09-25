@@ -11,12 +11,12 @@ mock_provider "aws" {
 }
 
 variables {
-  region           = "eu-west-2"
-  vpc_cidr         = "10.20.0.0/16"
-  azs              = ["eu-west-2a", "eu-west-2b"]
-  private_subnets  = ["10.20.0.0/18", "10.20.64.0/18"]
-  public_subnets   = ["10.20.192.0/22", "10.20.196.0/22"]
-  enable_flow_logs = false
+  region                  = "eu-west-2"
+  ipv4_primary_cidr_block = "10.20.0.0/16"
+  availability_zones      = ["eu-west-2a", "eu-west-2b"]
+  private_subnets         = ["10.20.0.0/18", "10.20.64.0/18"]
+  public_subnets          = ["10.20.192.0/22", "10.20.196.0/22"]
+  vpc_flow_logs_enabled   = false
   tags = {
     Environment = "test"
     Tenant      = "fnx"

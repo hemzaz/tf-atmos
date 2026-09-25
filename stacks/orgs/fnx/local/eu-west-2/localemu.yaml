@@ -119,7 +119,7 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.91.0.0/16"
+        ipv4_primary_cidr_block: "10.91.0.0/16"
         private_subnets:
           - "10.91.1.0/24"
           - "10.91.2.0/24"
@@ -129,11 +129,10 @@ components:
         database_subnets:
           - "10.91.201.0/24"
           - "10.91.202.0/24"
-        enable_nat_gateway: false
-        enable_flow_logs: false
+        nat_gateway_enabled: false
+        vpc_flow_logs_enabled: false
         manage_network_acls: false
         manage_default_security_group: false
-        create_vpc_iam_role: false
         tags:
           Environment: localemu
           Tenant: fnx

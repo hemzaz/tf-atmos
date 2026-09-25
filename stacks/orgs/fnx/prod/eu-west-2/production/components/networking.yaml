@@ -22,8 +22,8 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.20.0.0/16"
-        azs:
+        ipv4_primary_cidr_block: "10.20.0.0/16"
+        availability_zones:
           - eu-west-2a
           - eu-west-2b
           - eu-west-2c
@@ -47,7 +47,7 @@ components:
           - "10.20.203.0/24"
 
         # Elasticache subnets
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
         # DNS settings
@@ -63,15 +63,15 @@ components:
     # ==========================================================================
     # Services VPC - Dedicated Backend Services (High Availability)
     # ==========================================================================
-        enable_flow_logs: true
+        vpc_flow_logs_enabled: true
     vpc/services:
       metadata:
         component: vpc
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.21.0.0/16"
-        azs:
+        ipv4_primary_cidr_block: "10.21.0.0/16"
+        availability_zones:
           - eu-west-2a
           - eu-west-2b
           - eu-west-2c
@@ -92,10 +92,10 @@ components:
           - "10.21.203.0/24"
 
         # One NAT per AZ for HA
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
-        enable_flow_logs: true
+        vpc_flow_logs_enabled: true
 
         tags:
           NetworkTier: "services"
