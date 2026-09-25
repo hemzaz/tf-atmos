@@ -184,8 +184,13 @@ run "trust_is_scoped_to_the_oidc_provider_and_service_account" {
 
   # The release runs as the role's service account, annotated with the role.
   assert {
-    condition     = yamldecode(helm_release.addon["main.external-dns"].values[1]).serviceAccount.name == "external-dns" && helm_release.addon["main.external-dns"].namespace == "external-dns"
+    condition     = yamldecode(helm_release.addon["main.external-dns"].values[2]).serviceAccount.name == "external-dns" && helm_release.addon["main.external-dns"].namespace == "external-dns"
     error_message = "The chart's service account must be the one the trust names."
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.addon["main.external-dns"].values[2]).serviceAccount.annotations["eks.amazonaws.com/role-arn"] == aws_iam_role.addon["main.external-dns"].arn
+    error_message = "The service account must be annotated with the add-on's role."
   }
 }
 

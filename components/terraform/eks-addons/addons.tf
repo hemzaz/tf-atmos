@@ -112,47 +112,44 @@ locals {
     }
   }
 
-  # Chart-specific values (YAML), from the Cloud Posse component of the same
-  # add-on. The shapes differ per chart, hence one YAML document each.
-  addon_values = {
-    for k, v in local.addon_releases : k => {
+  # Chart-specific values (YAML) per cluster and add-on, from the Cloud Posse
+  # component of the same add-on. The shapes differ per chart, hence one YAML
+  # document each. The service account is a separate document (helm_release).
+  chart_values = {
+    for ck, c in local.clusters : ck => {
       aws-load-balancer-controller = yamlencode({
-        clusterName    = local.clusters[v.cluster_key].cluster_name
-        region         = var.region
-        vpcId          = local.clusters[v.cluster_key].vpc_id
-        serviceAccount = local.service_account_values[k]
+        clusterName = c.cluster_name
+        region      = var.region
+        vpcId       = c.vpc_id
       })
       cluster-autoscaler = yamlencode({
         cloudProvider = "aws"
         awsRegion     = var.region
-        autoDiscovery = { clusterName = local.clusters[v.cluster_key].cluster_name }
+        autoDiscovery = { clusterName = c.cluster_name }
         image         = { tag = local.cluster_autoscaler_image_tag }
-        rbac          = { create = true, serviceAccount = local.service_account_values[k] }
+        rbac          = { create = true }
       })
       metrics-server = yamlencode({
-        serviceAccount      = local.service_account_values[k]
         rbac                = { create = true }
         apiService          = { create = true }
         podDisruptionBudget = { enabled = true, maxUnavailable = "75%" }
       })
       external-dns = yamlencode({
-        provider       = { name = "aws" }
-        policy         = "sync"
-        sources        = ["service", "ingress"]
-        txtOwnerId     = local.clusters[v.cluster_key].cluster_name
-        domainFilters  = local.clusters[v.cluster_key].external_dns_domain_filters
-        extraArgs      = [for id in sort(distinct(values(local.clusters[v.cluster_key].dns_zone_ids))) : "--zone-id-filter=${id}"]
-        serviceAccount = local.service_account_values[k]
+        provider      = { name = "aws" }
+        policy        = "sync"
+        sources       = ["service", "ingress"]
+        txtOwnerId    = c.cluster_name
+        domainFilters = c.external_dns_domain_filters
+        extraArgs     = [for id in sort(distinct(values(c.dns_zone_ids))) : "--zone-id-filter=${id}"]
       })
       cert-manager = yamlencode({
         crds            = { enabled = true, keep = true }
-        serviceAccount  = local.service_account_values[k]
         securityContext = { fsGroup = 1001, runAsUser = 1001 }
         webhook         = { resources = { requests = { cpu = "50m", memory = "64Mi" }, limits = { cpu = "100m", memory = "128Mi" } } }
         cainjector      = { enabled = true, resources = { requests = { cpu = "50m", memory = "128Mi" }, limits = { cpu = "100m", memory = "256Mi" } } }
         startupapicheck = { resources = { requests = { cpu = "10m", memory = "32Mi" }, limits = { cpu = "50m", memory = "64Mi" } } }
       })
-    }[v.name]
+    }
   }
 }
 
@@ -220,7 +217,9 @@ resource "helm_release" "addon" {
   # Base values, then the stack's clusters.<key>.addon_chart_values.<add-on>.
   values = [
     yamlencode({ fullnameOverride = each.value.name, resources = each.value.resources }),
-    local.addon_values[each.key],
+    local.chart_values[each.value.cluster_key][each.value.name],
+    # cluster-autoscaler nests its service account under rbac.
+    each.value.name == "cluster-autoscaler" ? yamlencode({ rbac = { serviceAccount = local.service_account_values[each.key] } }) : yamlencode({ serviceAccount = local.service_account_values[each.key] }),
     yamlencode(lookup(local.clusters[each.value.cluster_key].addon_chart_values, each.value.name, {})),
   ]
 

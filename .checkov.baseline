@@ -457,6 +457,20 @@
                     ]
                 },
                 {
+                    "resource": "aws_cloudwatch_log_group.flow_logs",
+                    "check_ids": [
+                        "CKV_AWS_338"
+                    ]
+                },
+                {
+                    "resource": "aws_s3_bucket.flow_logs",
+                    "check_ids": [
+                        "CKV2_AWS_62",
+                        "CKV_AWS_144",
+                        "CKV_AWS_18"
+                    ]
+                },
+                {
                     "resource": "aws_s3_bucket.flow_logs[0]",
                     "check_ids": [
                         "CKV2_AWS_62",
