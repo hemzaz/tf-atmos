@@ -112,11 +112,12 @@ locals {
 }
 
 resource "aws_cloudwatch_log_group" "this" {
-  # checkov:skip=CKV_AWS_338:Retention is a per-stack cost decision; this component does not expose one (nothing here reads it back either).
+  # checkov:skip=CKV_AWS_338:Retention mirrors the repo's other log groups (log_retention_days, default 90) and is a per-stack cost decision, not a module one.
   count = local.enabled ? 1 : 0
 
-  name       = "/aws/vendedlogs/states/${local.name}"
-  kms_key_id = var.kms_key_arn
+  name              = "/aws/vendedlogs/states/${local.name}"
+  kms_key_id        = var.kms_key_arn
+  retention_in_days = var.log_retention_days
 
   tags = { Name = "/aws/vendedlogs/states/${local.name}" }
 }

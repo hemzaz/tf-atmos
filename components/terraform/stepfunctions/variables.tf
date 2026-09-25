@@ -57,12 +57,20 @@ variable "definition" {
 
 variable "logging_configuration" {
   type = object({
-    level                  = optional(string, "OFF")
-    include_execution_data = optional(bool, false)
+    level                  = optional(string, "ALL")
+    include_execution_data = optional(bool, true)
   })
-  description = "CloudWatch Logs level (ALL, ERROR, FATAL or OFF) and whether execution data (Task input/output payloads) is included. The log group is always created; OFF only stops the state machine writing to it"
-  default     = {}
-  nullable    = false
+  description = "CloudWatch Logs level (ALL, ERROR, FATAL or OFF) and whether execution data (Task input/output payloads) is included. The log group is always created; defaults to full execution history logging (level ALL, include_execution_data true). OFF stops the state machine writing to it; set include_execution_data to false for workflows whose Task input/output may carry sensitive data"
+  # Spelled out rather than relying on the optional() defaults above: static
+  # scanners (Checkov) evaluate a variable's top-level default literally and
+  # do not walk the type constraint's optional() defaults, so an empty {}
+  # here reads as include_execution_data = null (fails CKV_AWS_285) even
+  # though Terraform itself would apply the optional() default correctly.
+  default = {
+    level                  = "ALL"
+    include_execution_data = true
+  }
+  nullable = false
 
   validation {
     condition     = contains(["ALL", "ERROR", "FATAL", "OFF"], coalesce(var.logging_configuration.level, "OFF"))
@@ -72,8 +80,19 @@ variable "logging_configuration" {
 
 variable "tracing_enabled" {
   type        = bool
-  description = "Enable AWS X-Ray tracing for the state machine (the execution role is granted the X-Ray write permissions this requires)"
-  default     = false
+  description = "Enable AWS X-Ray tracing for the state machine (the execution role is granted the X-Ray write permissions this requires). Defaults to true"
+  default     = true
+}
+
+variable "log_retention_days" {
+  type        = number
+  description = "Number of days to retain the state machine's CloudWatch log group"
+  default     = 90
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, ...)."
+  }
 }
 
 variable "kms_key_arn" {

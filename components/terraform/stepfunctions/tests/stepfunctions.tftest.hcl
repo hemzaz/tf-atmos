@@ -48,8 +48,11 @@ variables {
   }
 }
 
-run "defaults_create_a_standard_machine_with_no_logging" {
-  command = plan
+run "defaults_create_a_standard_machine_with_full_logging_and_tracing" {
+  # apply: log_destination compares against the log group's arn, which (like
+  # eventbridge's own log group tests) is unknown until apply even with the
+  # mock default above.
+  command = apply
 
   assert {
     condition     = aws_sfn_state_machine.this[0].type == "STANDARD"
@@ -67,13 +70,28 @@ run "defaults_create_a_standard_machine_with_no_logging" {
   }
 
   assert {
-    condition     = length(aws_iam_role_policy.logging) == 0
-    error_message = "Without a logging level (default OFF) no logging permissions are attached."
+    condition     = length(aws_iam_role_policy.logging) == 1
+    error_message = "The default logging level (ALL) attaches the log-delivery permissions the execution role needs."
   }
 
   assert {
-    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].log_destination == null
-    error_message = "With level OFF the state machine gets no log_destination."
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].level == "ALL" && aws_sfn_state_machine.this[0].logging_configuration[0].include_execution_data == true
+    error_message = "logging_configuration defaults to level ALL and include_execution_data true (full execution history logging)."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].log_destination == "${aws_cloudwatch_log_group.this[0].arn}:*"
+    error_message = "The default (non-OFF) level sets log_destination to the log group."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].tracing_configuration[0].enabled == true
+    error_message = "tracing_enabled defaults to true."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.tracing) == 1
+    error_message = "The default tracing_enabled (true) attaches the X-Ray write permissions the execution role needs."
   }
 
   assert {
@@ -84,6 +102,66 @@ run "defaults_create_a_standard_machine_with_no_logging" {
   assert {
     condition     = output.events_role_arn == null
     error_message = "events_role_arn is null unless events_role_enabled."
+  }
+}
+
+run "logging_can_be_turned_off" {
+  command = plan
+
+  variables {
+    logging_configuration = {
+      level = "OFF"
+    }
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.logging) == 0
+    error_message = "level OFF attaches no logging permissions."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].log_destination == null
+    error_message = "With level OFF the state machine gets no log_destination."
+  }
+}
+
+run "tracing_can_be_disabled" {
+  command = plan
+
+  variables {
+    tracing_enabled = false
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].tracing_configuration[0].enabled == false
+    error_message = "tracing_enabled = false disables tracing_configuration."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.tracing) == 0
+    error_message = "tracing_enabled = false attaches no X-Ray permissions."
+  }
+}
+
+run "log_group_retention_defaults_to_90_days" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_log_group.this[0].retention_in_days == 90
+    error_message = "log_retention_days defaults to 90."
+  }
+}
+
+run "log_group_retention_is_overridable" {
+  command = plan
+
+  variables {
+    log_retention_days = 365
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_group.this[0].retention_in_days == 365
+    error_message = "log_retention_days is overridable."
   }
 }
 
@@ -110,7 +188,7 @@ run "the_execution_role_trust_is_scoped_to_this_machine" {
   command = plan
 
   assert {
-    condition = jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Principal.Service == "states.amazonaws.com"
+    condition     = jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Principal.Service == "states.amazonaws.com"
     error_message = "The role trusts states.amazonaws.com."
   }
 
@@ -204,7 +282,7 @@ run "events_role_is_created_only_when_enabled_and_scoped_to_the_machine" {
   }
 
   assert {
-    condition = jsondecode(aws_iam_role.events[0].assume_role_policy).Statement[0].Principal.Service == "events.amazonaws.com"
+    condition     = jsondecode(aws_iam_role.events[0].assume_role_policy).Statement[0].Principal.Service == "events.amazonaws.com"
     error_message = "The events role trusts events.amazonaws.com."
   }
 
@@ -285,8 +363,8 @@ run "disabled_creates_nothing" {
   command = plan
 
   variables {
-    enabled              = false
-    events_role_enabled  = true
+    enabled             = false
+    events_role_enabled = true
     logging_configuration = {
       level = "ALL"
     }
