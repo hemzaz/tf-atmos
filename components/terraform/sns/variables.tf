@@ -106,13 +106,22 @@ variable "allowed_iam_arns_for_sns_publish" {
 
 variable "sns_topic_policy_json" {
   type        = string
-  description = "A fully formed topic policy (JSON) that replaces the generated one. Empty uses the generated policy"
+  description = "A topic policy (JSON) merged into the generated one (as a source document: the generated DenyInsecureTransport and publish statements always win on a Sid clash). An Allow with principal \"*\" must carry a Condition"
   default     = ""
   nullable    = false
 
   validation {
     condition     = var.sns_topic_policy_json == "" || can(jsondecode(var.sns_topic_policy_json))
     error_message = "sns_topic_policy_json must be empty or a JSON document."
+  }
+
+  # No public topic: an Allow for any principal must be conditioned.
+  validation {
+    condition = var.sns_topic_policy_json == "" || alltrue([
+      for s in flatten([try(jsondecode(var.sns_topic_policy_json).Statement, [])]) :
+      !(try(s.Effect, "") == "Allow" && try(s.Condition, null) == null && contains(try(s.Principal == "*" ? ["*"] : flatten([for v in values(s.Principal) : v]), []), "*"))
+    ])
+    error_message = "sns_topic_policy_json must not Allow principal \"*\" without a Condition (no public topic)."
   }
 }
 

@@ -144,17 +144,74 @@ run "fifo_topic" {
   }
 }
 
-run "policy_json_replaces_the_generated_policy" {
+run "policy_json_is_merged_and_the_tls_deny_survives" {
   command = plan
 
   variables {
-    sns_topic_policy_json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid       = "AllowOrgPublish"
+          Effect    = "Allow"
+          Principal = { AWS = "*" }
+          Action    = "sns:Publish"
+          Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+          Condition = { StringEquals = { "aws:PrincipalOrgID" = "o-example" } }
+        },
+        {
+          # Tries to replace the TLS deny with a no-op; the generated one wins.
+          Sid       = "DenyInsecureTransport"
+          Effect    = "Deny"
+          Principal = { AWS = "*" }
+          Action    = "sns:Publish"
+          Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+          Condition = { Bool = { "aws:SecureTransport" = "true" } }
+        },
+      ]
+    })
   }
 
   assert {
-    condition     = jsondecode(aws_sns_topic_policy.this[0].policy) == jsondecode(var.sns_topic_policy_json)
-    error_message = "sns_topic_policy_json is used as is."
+    condition     = toset([for s in jsondecode(data.aws_iam_policy_document.topic[0].json).Statement : s.Sid]) == toset(["AllowOrgPublish", "DenyInsecureTransport"])
+    error_message = "The caller's statements are merged into the generated policy."
   }
+
+  assert {
+    condition     = one([for s in jsondecode(data.aws_iam_policy_document.topic[0].json).Statement : s if s.Sid == "DenyInsecureTransport"]).Condition.Bool["aws:SecureTransport"] == "false"
+    error_message = "The generated TLS deny wins over a caller statement with the same Sid."
+  }
+}
+
+run "rejects_an_unconditioned_public_allow_in_policy_json" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "sns:Publish"
+        Resource  = "*"
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_an_unconditioned_aws_star_allow_in_policy_json" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version   = "2012-10-17"
+      Statement = { Effect = "Allow", Principal = { AWS = ["*"] }, Action = "sns:Subscribe", Resource = "*" }
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
 }
 
 run "disabled_creates_nothing" {

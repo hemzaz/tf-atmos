@@ -54,6 +54,11 @@ data "aws_iam_policy_document" "topic" {
 
   policy_id = "SNSTopicsPub"
 
+  # A caller's policy is merged in, never used instead: statements defined
+  # here win over a source statement with the same Sid, so the TLS deny
+  # always survives.
+  source_policy_documents = var.sns_topic_policy_json != "" ? [var.sns_topic_policy_json] : []
+
   statement {
     sid       = "DenyInsecureTransport"
     effect    = "Deny"
@@ -115,5 +120,5 @@ resource "aws_sns_topic_policy" "this" {
   count = local.enabled ? 1 : 0
 
   arn    = aws_sns_topic.this[0].arn
-  policy = var.sns_topic_policy_json != "" ? var.sns_topic_policy_json : data.aws_iam_policy_document.topic[0].json
+  policy = data.aws_iam_policy_document.topic[0].json
 }
