@@ -211,8 +211,44 @@ resource "aws_iam_role_policy_attachment" "addon" {
   policy_arn = aws_iam_policy.addon[each.key].arn
 }
 
+# The load balancer controller installs first, in its own release. Its chart
+# registers a mutating webhook (mservice.elbv2.k8s.aws, failurePolicy Fail) on
+# every Service CREATE in the cluster, so a Service created before the
+# controller pods serve is rejected. wait = true holds this release until the
+# controller is ready, and every release that creates Services depends on it
+# (helm_release.addon below, helm_release.releases in main.tf and whatever
+# follows those). This is the EKS Blueprints / Cloud Posse ordering.
+resource "helm_release" "aws_load_balancer_controller" {
+  for_each = { for k, v in local.addon_releases : k => v if v.name == "aws-load-balancer-controller" }
+
+  name             = each.value.name
+  repository       = each.value.repository
+  chart            = each.value.chart
+  version          = each.value.version
+  namespace        = each.value.namespace
+  create_namespace = true
+
+  # Base values, then the stack's clusters.<key>.addon_chart_values.<add-on>.
+  values = [
+    yamlencode({ fullnameOverride = each.value.name, resources = each.value.resources }),
+    local.chart_values[each.value.cluster_key][each.value.name],
+    yamlencode({ serviceAccount = local.service_account_values[each.key] }),
+    yamlencode(lookup(local.clusters[each.value.cluster_key].addon_chart_values, each.value.name, {})),
+  ]
+
+  wait            = true
+  atomic          = true
+  cleanup_on_fail = true
+  timeout         = 600
+
+  depends_on = [
+    time_sleep.wait_for_cluster,
+    aws_iam_role_policy_attachment.addon,
+  ]
+}
+
 resource "helm_release" "addon" {
-  for_each = local.addon_releases
+  for_each = { for k, v in local.addon_releases : k => v if v.name != "aws-load-balancer-controller" }
 
   name             = each.value.name
   repository       = each.value.repository
@@ -230,8 +266,11 @@ resource "helm_release" "addon" {
     yamlencode(lookup(local.clusters[each.value.cluster_key].addon_chart_values, each.value.name, {})),
   ]
 
-  # wait: the load balancer controller's webhooks and cert-manager's CRDs must
-  # be serving before anything that uses them is applied.
+  # These charts create Services, which the load balancer controller's webhook
+  # must admit, so depends_on orders them after that release (wait alone does
+  # not: releases in one for_each install in parallel). wait holds each release
+  # until its pods are ready, so cert-manager's webhook serves before the
+  # ClusterIssuer below is applied.
   wait            = true
   atomic          = true
   cleanup_on_fail = true
@@ -240,6 +279,7 @@ resource "helm_release" "addon" {
   depends_on = [
     time_sleep.wait_for_cluster,
     aws_iam_role_policy_attachment.addon,
+    helm_release.aws_load_balancer_controller,
   ]
 
   lifecycle {
@@ -273,5 +313,5 @@ resource "helm_release" "cert_manager_issuer" {
   atomic  = true
   timeout = 300
 
-  depends_on = [helm_release.addon]
+  depends_on = [helm_release.aws_load_balancer_controller, helm_release.addon]
 }

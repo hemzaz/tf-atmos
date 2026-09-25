@@ -34,6 +34,14 @@ against the live cluster, so a Kubernetes upgrade fails the plan until
 `clusters.<key>.addon_chart_values.<add-on>` adds Helm values after the
 component's own. Every switch defaults to `false`.
 
+The load balancer controller installs first, in its own release
+(`helm_release.aws_load_balancer_controller`). Its chart registers a mutating
+webhook with `failurePolicy: Fail` on every Service creation, so a Service
+created before the controller is ready is rejected. The other add-ons
+(`helm_release.addon`), the `helm_releases` entries, and everything ordered
+after them wait for it, as in EKS Blueprints and Cloud Posse's components.
+`addon_release_statuses` reports both releases.
+
 `dns_zone_ids` lists **public** hosted zone IDs only (instances pick them from
 the dns component's `zone_ids`, e.g. `.zone_ids.main`). Private zones stay out
 of both IAM policies.

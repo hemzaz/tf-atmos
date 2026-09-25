@@ -64,7 +64,7 @@ run "no_switch_installs_nothing" {
   }
 
   assert {
-    condition     = length(helm_release.addon) == 0 && length(aws_iam_role.addon) == 0 && length(helm_release.cert_manager_issuer) == 0
+    condition     = length(helm_release.aws_load_balancer_controller) == 0 && length(helm_release.addon) == 0 && length(aws_iam_role.addon) == 0 && length(helm_release.cert_manager_issuer) == 0
     error_message = "With every enable_* off, no add-on release or role may be planned."
   }
 }
@@ -88,11 +88,18 @@ run "each_switch_installs_its_release_and_role" {
   }
 
   assert {
-    condition = toset(keys(helm_release.addon)) == toset([
+    condition = toset(keys(merge(helm_release.aws_load_balancer_controller, helm_release.addon))) == toset([
       "main.aws-load-balancer-controller", "main.cluster-autoscaler", "main.metrics-server",
       "main.external-dns", "main.cert-manager",
     ])
     error_message = "Each switch must plan exactly its own Helm release."
+  }
+
+  # The load balancer controller installs in its own release, ahead of the
+  # charts that create Services (its webhook must admit them).
+  assert {
+    condition     = keys(helm_release.aws_load_balancer_controller) == ["main.aws-load-balancer-controller"] && !contains(keys(helm_release.addon), "main.aws-load-balancer-controller")
+    error_message = "The load balancer controller must be planned in helm_release.aws_load_balancer_controller only."
   }
 
   # metrics-server calls no AWS API: no role.
@@ -109,13 +116,13 @@ run "each_switch_installs_its_release_and_role" {
   }
 
   assert {
-    condition     = alltrue([for k, r in helm_release.addon : r.version != null && r.version != ""])
+    condition     = alltrue([for k, r in merge(helm_release.aws_load_balancer_controller, helm_release.addon) : r.version != null && r.version != ""])
     error_message = "Every chart version must be pinned."
   }
 
   assert {
     condition = alltrue([
-      for k, r in helm_release.addon : can(yamldecode(r.values[0]).resources.requests.cpu) && can(yamldecode(r.values[0]).resources.limits.memory)
+      for k, r in merge(helm_release.aws_load_balancer_controller, helm_release.addon) : can(yamldecode(r.values[0]).resources.requests.cpu) && can(yamldecode(r.values[0]).resources.limits.memory)
     ])
     error_message = "Every release must set resource requests and limits."
   }
@@ -137,7 +144,7 @@ run "each_switch_installs_its_release_and_role" {
   }
 
   assert {
-    condition     = yamldecode(helm_release.addon["main.aws-load-balancer-controller"].values[1]).vpcId == "vpc-0123456789abcdef0"
+    condition     = yamldecode(helm_release.aws_load_balancer_controller["main.aws-load-balancer-controller"].values[1]).vpcId == "vpc-0123456789abcdef0"
     error_message = "The load balancer controller must be given the VPC."
   }
 
@@ -145,15 +152,15 @@ run "each_switch_installs_its_release_and_role" {
   # pinned in its IngressClassParams so an Ingress cannot override it.
   assert {
     condition = (
-      yamldecode(helm_release.addon["main.aws-load-balancer-controller"].values[1]).createIngressClassResource == true &&
-      yamldecode(helm_release.addon["main.aws-load-balancer-controller"].values[1]).ingressClassParams.create == true &&
-      yamldecode(helm_release.addon["main.aws-load-balancer-controller"].values[1]).ingressClassParams.spec.scheme == "internal"
+      yamldecode(helm_release.aws_load_balancer_controller["main.aws-load-balancer-controller"].values[1]).createIngressClassResource == true &&
+      yamldecode(helm_release.aws_load_balancer_controller["main.aws-load-balancer-controller"].values[1]).ingressClassParams.create == true &&
+      yamldecode(helm_release.aws_load_balancer_controller["main.aws-load-balancer-controller"].values[1]).ingressClassParams.spec.scheme == "internal"
     )
     error_message = "The default IngressClass must create internal load balancers."
   }
 
   assert {
-    condition     = !strcontains(join("\n", helm_release.addon["main.aws-load-balancer-controller"].values), "internet-facing")
+    condition     = !strcontains(join("\n", helm_release.aws_load_balancer_controller["main.aws-load-balancer-controller"].values), "internet-facing")
     error_message = "Nothing in the load balancer controller's values may ask for internet-facing."
   }
 
