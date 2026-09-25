@@ -1,0 +1,35 @@
+---
+##################################################
+# Catalog Configuration for AWS Kinesis Data Streams
+##################################################
+# One stream per instance (the Cloud Posse aws-kinesis-stream model).
+# Instances inherit this base and set `name`, `stream_mode`,
+# `retention_period`, `shard_level_metrics` and, as needed, `consumers`.
+
+components:
+  terraform:
+    kinesis/defaults:
+      metadata:
+        component: kinesis
+        type: abstract
+      # kms_key_id reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults), whose
+        # policy delegates to the account root (enable_default_policy), so
+        # any reader's own IAM identity policy is sufficient to use the key -
+        # unlike CloudWatch Logs delivery, Kinesis needs no key-policy
+        # service-principal grant here.
+        kms_key_id: !terraform.state kms/main .key_arn
+        stream_mode: ON_DEMAND
+        retention_period: 24
+        shard_level_metrics: []
+        enforce_consumer_deletion: false
+        consumers: {}
+        tags:
+          Component: "Kinesis"
