@@ -17,6 +17,13 @@ mock_provider "aws" {
       arn = "arn:aws:logs:eu-west-2:123456789012:log-group:/aws/events/mock"
     }
   }
+
+  # Likewise for aws_lambda_permission.source_arn in the targets apply run.
+  mock_resource "aws_cloudwatch_event_rule" {
+    defaults = {
+      arn = "arn:aws:events:eu-west-2:123456789012:rule/test-microservices/test-user-registered"
+    }
+  }
 }
 
 variables {
@@ -250,4 +257,412 @@ run "rejects_an_archive_name_over_48_characters" {
   }
 
   expect_failures = [aws_cloudwatch_event_archive.this[0]]
+}
+
+# --- targets ---------------------------------------------------------------
+
+run "targets_deliver_to_a_queue_and_a_function" {
+  command = plan
+
+  variables {
+    name           = "user-registered"
+    event_bus_name = "test-microservices"
+    targets = {
+      notifications = {
+        arn                = "arn:aws:sqs:eu-west-2:123456789012:test-user-notifications"
+        input_path         = "$.detail"
+        dead_letter_config = { arn = "arn:aws:sqs:eu-west-2:123456789012:test-event-bus-dlq" }
+        retry_policy       = { maximum_event_age_in_seconds = 3600, maximum_retry_attempts = 10 }
+      }
+      welcome-email = {
+        arn = "arn:aws:lambda:eu-west-2:123456789012:function:test-welcome-email"
+        input_transformer = {
+          input_paths    = { user = "$.detail.userId" }
+          input_template = "{\"userId\": <user>}"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_event_target.this) == 2 && length(aws_cloudwatch_event_target.logs) == 1
+    error_message = "Each target gets its own aws_cloudwatch_event_target, next to the log group's."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.this["notifications"].target_id == "notifications"
+      && aws_cloudwatch_event_target.this["notifications"].arn == "arn:aws:sqs:eu-west-2:123456789012:test-user-notifications"
+      && aws_cloudwatch_event_target.this["notifications"].event_bus_name == "test-microservices"
+      && aws_cloudwatch_event_target.this["notifications"].input_path == "$.detail"
+    )
+    error_message = "The target ID is the map key, and the target sits on the rule's bus with its arn and input_path."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.this["notifications"].dead_letter_config[0].arn == "arn:aws:sqs:eu-west-2:123456789012:test-event-bus-dlq"
+      && aws_cloudwatch_event_target.this["notifications"].retry_policy[0].maximum_event_age_in_seconds == 3600
+      && aws_cloudwatch_event_target.this["notifications"].retry_policy[0].maximum_retry_attempts == 10
+    )
+    error_message = "dead_letter_config and retry_policy are passed through."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.this["welcome-email"].input_transformer[0].input_paths["user"] == "$.detail.userId"
+      && aws_cloudwatch_event_target.this["welcome-email"].input_transformer[0].input_template == "{\"userId\": <user>}"
+      && length(aws_cloudwatch_event_target.this["welcome-email"].dead_letter_config) == 0
+    )
+    error_message = "input_transformer is passed through, and unset blocks stay absent."
+  }
+
+  assert {
+    condition     = keys(aws_lambda_permission.this) == ["welcome-email"]
+    error_message = "Only the Lambda target gets a Lambda permission; the queue relies on its own policy."
+  }
+
+  assert {
+    condition = (
+      aws_lambda_permission.this["welcome-email"].principal == "events.amazonaws.com"
+      && aws_lambda_permission.this["welcome-email"].action == "lambda:InvokeFunction"
+      && aws_lambda_permission.this["welcome-email"].function_name == "arn:aws:lambda:eu-west-2:123456789012:function:test-welcome-email"
+      && aws_lambda_permission.this["welcome-email"].statement_id == "AllowEventBridge-test-user-registered-welcome-email"
+    )
+    error_message = "EventBridge may invoke the function, under a statement named after the rule and target."
+  }
+}
+
+run "lambda_permission_is_scoped_to_the_rule" {
+  command = apply
+
+  variables {
+    name           = "user-registered"
+    event_bus_name = "test-microservices"
+    targets = {
+      welcome-email = { arn = "arn:aws:lambda:eu-west-2:123456789012:function:test-welcome-email" }
+    }
+  }
+
+  assert {
+    condition     = aws_lambda_permission.this["welcome-email"].source_arn == aws_cloudwatch_event_rule.this[0].arn
+    error_message = "The function may be invoked by this rule only (source_arn is the rule ARN)."
+  }
+}
+
+run "fifo_queue_target_gets_a_message_group" {
+  command = plan
+
+  variables {
+    targets = {
+      orders = {
+        arn                  = "arn:aws:sqs:eu-west-2:123456789012:test-orders.fifo"
+        sqs_message_group_id = "orders"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_target.this["orders"].sqs_target[0].message_group_id == "orders"
+    error_message = "sqs_message_group_id becomes the target's sqs_target.message_group_id."
+  }
+}
+
+run "role_targets_take_a_role" {
+  command = plan
+
+  variables {
+    targets = {
+      workflow = {
+        arn      = "arn:aws:states:eu-west-2:123456789012:stateMachine:test-workflow"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-states"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_target.this["workflow"].role_arn == "arn:aws:iam::123456789012:role/test-eventbridge-states" && length(aws_lambda_permission.this) == 0
+    error_message = "role_arn is passed through, and a non-Lambda target gets no Lambda permission."
+  }
+}
+
+run "ecs_and_batch_targets_carry_what_to_run" {
+  command = plan
+
+  variables {
+    targets = {
+      task = {
+        arn      = "arn:aws:ecs:eu-west-2:123456789012:cluster/test-cluster"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-ecs"
+        ecs_target = {
+          task_definition_arn = "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3"
+          launch_type         = "FARGATE"
+          network_configuration = {
+            subnets         = ["subnet-0123456789abcdef0"]
+            security_groups = ["sg-0123456789abcdef0"]
+          }
+        }
+      }
+      job = {
+        arn      = "arn:aws:batch:eu-west-2:123456789012:job-queue/test-queue"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-batch"
+        batch_target = {
+          job_definition = "arn:aws:batch:eu-west-2:123456789012:job-definition/test-job:1"
+          job_name       = "test-job"
+          job_attempts   = 3
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.this["task"].ecs_target[0].task_definition_arn == "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3"
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].task_count == 1
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].launch_type == "FARGATE"
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].network_configuration[0].subnets == toset(["subnet-0123456789abcdef0"])
+      && aws_cloudwatch_event_target.this["task"].ecs_target[0].network_configuration[0].assign_public_ip == false
+    )
+    error_message = "ecs_target becomes the target's ecs_target block, one task, no public IP by default."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_target.this["job"].batch_target[0].job_name == "test-job"
+      && aws_cloudwatch_event_target.this["job"].batch_target[0].job_attempts == 3
+      && length(aws_cloudwatch_event_target.this["job"].ecs_target) == 0
+    )
+    error_message = "batch_target becomes the target's batch_target block."
+  }
+}
+
+run "rejects_an_ecs_target_without_a_task" {
+  command = plan
+
+  variables {
+    targets = {
+      task = {
+        arn      = "arn:aws:ecs:eu-west-2:123456789012:cluster/test-cluster"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-ecs"
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_fargate_task_without_a_network" {
+  command = plan
+
+  variables {
+    targets = {
+      task = {
+        arn      = "arn:aws:ecs:eu-west-2:123456789012:cluster/test-cluster"
+        role_arn = "arn:aws:iam::123456789012:role/test-eventbridge-ecs"
+        ecs_target = {
+          task_definition_arn = "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3"
+          launch_type         = "FARGATE"
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_an_ecs_task_on_a_queue_target" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn        = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        ecs_target = { task_definition_arn = "arn:aws:ecs:eu-west-2:123456789012:task-definition/test-task:3" }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_fifo_target_dead_letter_queue" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn                = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        dead_letter_config = { arn = "arn:aws:sqs:eu-west-2:123456789012:test-dlq.fifo" }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_fifo_bus_dead_letter_queue" {
+  command = plan
+
+  variables {
+    create_event_bus  = true
+    event_bus_dlq_arn = "arn:aws:sqs:eu-west-2:123456789012:test-dlq.fifo"
+  }
+
+  expect_failures = [var.event_bus_dlq_arn]
+}
+
+run "rejects_a_fifo_queue_target_without_a_message_group" {
+  command = plan
+
+  variables {
+    targets = {
+      orders = { arn = "arn:aws:sqs:eu-west-2:123456789012:test-orders.fifo" }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "disabled_creates_no_targets" {
+  command = plan
+
+  variables {
+    enabled = false
+    targets = {
+      welcome-email = { arn = "arn:aws:lambda:eu-west-2:123456789012:function:test-welcome-email" }
+    }
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_event_target.this) == 0 && length(aws_lambda_permission.this) == 0
+    error_message = "enabled = false creates no targets and no permissions."
+  }
+}
+
+run "rejects_a_role_on_a_queue_target" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn      = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        role_arn = "arn:aws:iam::123456789012:role/test-role"
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_state_machine_target_without_a_role" {
+  command = plan
+
+  variables {
+    targets = {
+      workflow = { arn = "arn:aws:states:eu-west-2:123456789012:stateMachine:test-workflow" }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_more_than_four_targets" {
+  command = plan
+
+  variables {
+    targets = {
+      a = { arn = "arn:aws:sqs:eu-west-2:123456789012:a" }
+      b = { arn = "arn:aws:sqs:eu-west-2:123456789012:b" }
+      c = { arn = "arn:aws:sqs:eu-west-2:123456789012:c" }
+      d = { arn = "arn:aws:sqs:eu-west-2:123456789012:d" }
+      e = { arn = "arn:aws:sqs:eu-west-2:123456789012:e" }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_the_log_group_target_id" {
+  command = plan
+
+  variables {
+    targets = {
+      cloudwatch-logs = { arn = "arn:aws:sqs:eu-west-2:123456789012:test-orders" }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_input_path_with_input_transformer" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn               = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        input_path        = "$.detail"
+        input_transformer = { input_template = "\"x\"" }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_non_sqs_target_dead_letter_queue" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn                = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        dead_letter_config = { arn = "arn:aws:sns:eu-west-2:123456789012:test-topic" }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_an_out_of_range_retry_policy" {
+  command = plan
+
+  variables {
+    targets = {
+      q = {
+        arn          = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        retry_policy = { maximum_retry_attempts = 186 }
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_message_group_on_a_non_queue_target" {
+  command = plan
+
+  variables {
+    targets = {
+      f = {
+        arn                  = "arn:aws:lambda:eu-west-2:123456789012:function:test-fn"
+        sqs_message_group_id = "g"
+      }
+    }
+  }
+
+  expect_failures = [var.targets]
+}
+
+run "rejects_a_target_that_is_not_an_arn" {
+  command = plan
+
+  variables {
+    targets = {
+      q = { arn = "test-orders" }
+    }
+  }
+
+  expect_failures = [var.targets]
 }

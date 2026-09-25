@@ -106,7 +106,7 @@ variable "allowed_iam_arns_for_sns_publish" {
 
 variable "sns_topic_policy_json" {
   type        = string
-  description = "A topic policy (JSON) merged into the generated one (as a source document: the generated DenyInsecureTransport and publish statements always win on a Sid clash). Its statements are used as written, not rescoped to this topic: set Resource to the topic ARN yourself. Allow statements may not use NotPrincipal or a principal ARN with a wildcard, and an Allow for principal \"*\" needs a non-empty Condition"
+  description = "A topic policy (JSON) merged into the generated one (as a source document: the generated DenyInsecureTransport and publish statements always win on a Sid clash). Its statements are used as written, not rescoped to this topic: set Resource to the topic ARN yourself. Allow statements may not use NotPrincipal or a principal ARN with a wildcard, and an Allow for principal \"*\" needs a Condition that pins the caller (aws:SourceAccount, aws:SourceArn, aws:SourceOwner, aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or aws:PrincipalArn)"
   default     = ""
   nullable    = false
 
@@ -116,20 +116,44 @@ variable "sns_topic_policy_json" {
   }
 
   # No public topic. For every Allow: no NotPrincipal; no principal with a
-  # wildcard inside it (arn:aws:iam::*:root); and principal "*" only with a
-  # non-empty Condition. Principal may be "*", or a map of string or list.
+  # wildcard inside it (arn:aws:iam::*:root); and principal "*" or a Service
+  # principal (which acts for whoever calls it: the confused deputy) only with
+  # a condition that pins the caller: a key from the list below, under an
+  # operator that is not negated (StringNotEquals, ...), ...IfExists, Null or
+  # ForAllValues:... (each lets a caller without the key through), with no
+  # value made only of wildcards ("*", "?*"). Element names (Statement,
+  # Effect, Principal, ...) and the Effect value are read case-insensitively,
+  # as the policy parser matches them. Principal may be "*", or a map of
+  # string or list. Anything unreadable fails the check.
   validation {
-    condition = var.sns_topic_policy_json == "" || alltrue([
-      for s in flatten([try(jsondecode(var.sns_topic_policy_json).Statement, [])]) :
-      try(s.Effect, "") != "Allow" || (
-        try(s.NotPrincipal, null) == null
+    condition = var.sns_topic_policy_json == "" || try(alltrue([
+      for s in [
+        for raw in flatten([lookup({ for k, v in jsondecode(var.sns_topic_policy_json) : lower(k) => v }, "statement", [])]) :
+        { for k, v in raw : lower(k) => v }
+      ] :
+      lower(lookup(s, "effect", "")) != "allow" || (
+        lookup(s, "notprincipal", null) == null
         && alltrue([
-          for p in try(s.Principal == "*" ? ["*"] : flatten([for v in values(s.Principal) : v]), []) :
-          p == "*" ? length(try(s.Condition, {})) > 0 : !strcontains(p, "*")
+          for p in(lookup(s, "principal", null) == null ? [] : (s.principal == "*" ? ["*"] : flatten([for v in values(s.principal) : v]))) :
+          p == "*" || !strcontains(p, "*")
         ])
+        && (
+          !(
+            try(s.principal == "*", false)
+            || anytrue([for k in try(keys(s.principal), []) : lower(k) == "service" || contains(flatten([s.principal[k]]), "*")])
+          )
+          || anytrue(flatten([
+            for op, kv in lookup(s, "condition", {}) : [
+              for k, v in kv : contains(
+                ["aws:sourceaccount", "aws:sourcearn", "aws:sourceowner", "aws:sourceorgid", "aws:principalorgid", "aws:principalaccount", "aws:principalarn"],
+                lower(k)
+              ) && length(flatten([v])) > 0 && !anytrue([for x in flatten([v]) : replace(replace(tostring(x), "*", ""), "?", "") == ""])
+            ] if !strcontains(lower(op), "not") && !endswith(lower(op), "ifexists") && lower(op) != "null" && !startswith(lower(op), "forallvalues:")
+          ]))
+        )
       )
-    ])
-    error_message = "sns_topic_policy_json Allow statements must not use NotPrincipal or a principal containing a wildcard, and may Allow principal \"*\" only with a non-empty Condition (no public topic)."
+    ]), false)
+    error_message = "sns_topic_policy_json Allow statements must not use NotPrincipal or a principal containing a wildcard, and may Allow principal \"*\" or a Service principal only with a Condition that pins the caller: aws:SourceAccount, aws:SourceArn, aws:SourceOwner, aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or aws:PrincipalArn, under a positive operator (not ...Not..., ...IfExists, Null or ForAllValues:...) and with a value that is not only wildcards (no public topic)."
   }
 }
 
