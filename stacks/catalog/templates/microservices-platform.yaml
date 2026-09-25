@@ -293,7 +293,7 @@ components:
             # DNS and certificates
             enable_external_dns: true
             dns_zone_ids:
-              app: '{{ required "settings.microservices.hosted_zone_id is required" .settings.microservices.hosted_zone_id }}'
+              - '{{ required "settings.microservices.hosted_zone_id is required" .settings.microservices.hosted_zone_id }}'
             external_dns_domain_filters:
               - '{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
             enable_cert_manager: true

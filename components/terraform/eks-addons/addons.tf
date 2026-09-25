@@ -53,7 +53,7 @@ locals {
     external-dns = {
       repository = "https://kubernetes-sigs.github.io/external-dns/"
       chart      = "external-dns"
-      version    = "1.18.0"
+      version    = "1.22.0"
       namespace  = "external-dns"
       policy     = "external-dns-policy.json"
       resources  = { requests = { cpu = "100m", memory = "128Mi" }, limits = { cpu = "200m", memory = "256Mi" } }
@@ -61,7 +61,7 @@ locals {
     cert-manager = {
       repository = "https://charts.jetstack.io"
       chart      = "cert-manager"
-      version    = "v1.21.1"
+      version    = "v1.21.2"
       namespace  = "cert-manager"
       policy     = "cert-manager-policy.json"
       resources  = { requests = { cpu = "100m", memory = "128Mi" }, limits = { cpu = "200m", memory = "256Mi" } }
@@ -100,7 +100,7 @@ locals {
       region           = var.region
       account_id       = data.aws_caller_identity.current.account_id
       cluster_name     = c.cluster_name
-      hosted_zone_arns = [for id in sort(distinct(values(c.dns_zone_ids))) : "arn:${data.aws_partition.current.partition}:route53:::hostedzone/${id}"]
+      hosted_zone_arns = [for id in sort(distinct(c.dns_zone_ids)) : "arn:${data.aws_partition.current.partition}:route53:::hostedzone/${id}"]
     }
   }
 
@@ -117,10 +117,16 @@ locals {
   # document each. The service account is a separate document (helm_release).
   chart_values = {
     for ck, c in local.clusters : ck => {
+      # The default IngressClass (alb) is internal, and its params pin the
+      # scheme: an Ingress cannot switch itself to internet-facing. A public
+      # ALB needs its own IngressClass and security group (see the README).
       aws-load-balancer-controller = yamlencode({
-        clusterName = c.cluster_name
-        region      = var.region
-        vpcId       = c.vpc_id
+        clusterName                = c.cluster_name
+        region                     = var.region
+        vpcId                      = c.vpc_id
+        createIngressClassResource = true
+        ingressClassConfig         = { default = true }
+        ingressClassParams         = { create = true, spec = { scheme = "internal" } }
       })
       cluster-autoscaler = yamlencode({
         cloudProvider = "aws"
@@ -139,8 +145,9 @@ locals {
         policy        = "sync"
         sources       = ["service", "ingress"]
         txtOwnerId    = c.cluster_name
+        txtPrefix     = "${c.cluster_name}-"
         domainFilters = c.external_dns_domain_filters
-        extraArgs     = [for id in sort(distinct(values(c.dns_zone_ids))) : "--zone-id-filter=${id}"]
+        extraArgs     = [for id in sort(distinct(c.dns_zone_ids)) : "--zone-id-filter=${id}"]
       })
       cert-manager = yamlencode({
         crds            = { enabled = true, keep = true }
@@ -257,6 +264,7 @@ resource "helm_release" "cert_manager_issuer" {
   values = [
     yamlencode({
       email  = local.clusters[each.key].cert_manager_letsencrypt_email
+      server = local.clusters[each.key].cert_manager_acme_server
       region = var.region
     }),
   ]

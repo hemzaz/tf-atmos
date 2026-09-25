@@ -17,11 +17,11 @@ policy is rendered with `templatefile()` from `policies/<add-on>-policy.json`.
 
 | Switch | Chart (version) | Namespace / service account | IAM policy |
 |---|---|---|---|
-| `enable_aws_load_balancer_controller` | `aws-load-balancer-controller` (1.13.4, controller v2.13.4) | `alb-controller` / `aws-load-balancer-controller` | The AWS-published v2.13.4 policy, unchanged. Needs `vpc_id`. |
+| `enable_aws_load_balancer_controller` | `aws-load-balancer-controller` (1.13.4, controller v2.13.4) | `alb-controller` / `aws-load-balancer-controller` | The AWS-published v2.13.4 policy, unchanged. Needs `vpc_id`. The default `alb` IngressClass is internal (see below). |
 | `enable_cluster_autoscaler` | `cluster-autoscaler` (9.59.0, image v1.36.1) | `kube-system` / `cluster-autoscaler` | Describe calls, `eks:DescribeNodegroup` on this cluster's node groups, and scaling only of groups tagged `k8s.io/cluster-autoscaler/<cluster>=owned`. EKS managed node groups carry that tag. |
 | `enable_metrics_server` | `metrics-server` (3.11.0) | `metrics-server` / `metrics-server` | None (no AWS calls). |
-| `enable_external_dns` | `external-dns` (1.18.0) | `external-dns` / `external-dns` | Record changes on the `dns_zone_ids` zones only, with `--zone-id-filter` set to the same zones. |
-| `enable_cert_manager` | `cert-manager` (v1.21.1) plus the local `charts/cert-manager-issuer` | `cert-manager` / `cert-manager` | `route53:GetChange`, `ListHostedZonesByName`, and record changes on the `dns_zone_ids` zones only. Installs a `letsencrypt` ClusterIssuer (ACME DNS-01) for `cert_manager_letsencrypt_email`. |
+| `enable_external_dns` | `external-dns` (1.22.0) | `external-dns` / `external-dns` | Record changes on the `dns_zone_ids` zones only, with `--zone-id-filter` set to the same zones. `policy: sync` (required since chart 1.22), TXT records owned by and prefixed with the cluster name. |
+| `enable_cert_manager` | `cert-manager` (v1.21.2) plus the local `charts/cert-manager-issuer` | `cert-manager` / `cert-manager` | `route53:GetChange`, `ListHostedZonesByName`, and record changes on the `dns_zone_ids` zones only. Installs a `letsencrypt` ClusterIssuer (ACME DNS-01) for `cert_manager_letsencrypt_email`, against `cert_manager_acme_server` (Let's Encrypt production by default, staging in dev). |
 
 Chart versions, values and IAM statements follow the Cloud Posse components
 `eks/alb-controller`, `eks/metrics-server`, `eks/external-dns` and
@@ -34,6 +34,35 @@ against the live cluster, so a Kubernetes upgrade fails the plan until
 `clusters.<key>.addon_chart_values.<add-on>` adds Helm values after the
 component's own. Every switch defaults to `false`.
 
+`dns_zone_ids` lists **public** hosted zone IDs only (instances pick them from
+the dns component's `zone_ids`, e.g. `.zone_ids.main`). Private zones stay out
+of both IAM policies.
+
+### Internet-facing load balancers
+
+The controller's default IngressClass (`alb`) creates **internal** ALBs only:
+its IngressClassParams set `scheme: internal`, which an Ingress annotation
+cannot override. That keeps the repo rule of no inbound `0.0.0.0/0`. Public
+entry points sit behind CloudFront. An internet-facing ALB therefore needs:
+
+1. its own IngressClass and IngressClassParams with
+   `scheme: internet-facing` (through `addon_chart_values` or a
+   `kubernetes_manifests` entry), and
+2. on every Ingress of that class, an explicit inbound restriction:
+   `alb.ingress.kubernetes.io/security-groups` naming a security group that
+   admits only the CloudFront origin-facing prefix list
+   (`com.amazonaws.global.cloudfront.origin-facing`), with
+   `alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"`.
+   Never use `alb.ingress.kubernetes.io/inbound-cidrs: 0.0.0.0/0`.
+
+### Version follow-ups
+
+- aws-load-balancer-controller v3 (chart 3.x) is out. Moving to it means
+  re-vendoring its IAM policy and reviewing the v3 changes, so it is left for
+  a separate change.
+- metrics-server 0.8/0.9 (chart 3.12+) are newer than Cloud Posse's 3.11.0
+  default; bump together with a values review.
+
 External Secrets is not a switch. It is the `external-secrets` component,
 which has its own instances in every stack.
 
@@ -42,8 +71,9 @@ which has its own instances in every stack.
 `eks-addons/main` (cluster `eks/main`) and `eks-addons/data` (cluster
 `eks/data`) in all 3 real stacks (dev, staging, prod). Both enable the load
 balancer controller, cluster-autoscaler, metrics-server, external-dns and
-cert-manager. `main` uses the `network/main` zones and `vpc/main`; `data`
-uses the `network/services` zones and `vpc/services`.
+cert-manager. `main` uses the public `network/main` zone (`main`) and `vpc/main`; `data`
+uses the public `network/services` zones (`services`, `data`) and `vpc/services`. Dev
+uses the Let's Encrypt staging directory.
 
 They deploy in the `addons` layer of `workflows/deploy-full-stack.yaml`,
 after `dns`, because they read the dns instances' `zone_ids`.
@@ -52,7 +82,7 @@ after `dns`, because they read the dns instances' `zone_ids`.
 
 | Required inputs | Behavior-changing | Outputs |
 |---|---|---|
-| `cluster_name`, `host`, `cluster_ca_certificate`, `oidc_provider_arn`, `oidc_provider_url` (the eks instance's outputs); `clusters` map | `clusters.<key>.enable_*`, `vpc_id`, `dns_zone_ids`, `cert_manager_letsencrypt_email`, `addon_chart_values`; `istio_enabled`/`domain_name`, `use_external_secrets` | `addon_role_arns`, `addon_release_statuses`, `addon_arns`, `helm_release_statuses`, `service_account_role_arns` (maps) |
+| `cluster_name`, `host`, `cluster_ca_certificate`, `oidc_provider_arn`, `oidc_provider_url` (the eks instance's outputs); `clusters` map | `clusters.<key>.enable_*`, `vpc_id`, `dns_zone_ids`, `cert_manager_letsencrypt_email`, `cert_manager_acme_server`, `addon_chart_values`; `istio_enabled`/`domain_name`, `use_external_secrets` | `addon_role_arns`, `addon_release_statuses`, `addon_arns`, `helm_release_statuses`, `service_account_role_arns` (maps) |
 
 ## Dependencies & gotchas
 

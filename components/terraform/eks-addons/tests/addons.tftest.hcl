@@ -81,11 +81,8 @@ run "each_switch_installs_its_release_and_role" {
         enable_external_dns                 = true
         enable_cert_manager                 = true
         vpc_id                              = "vpc-0123456789abcdef0"
-        dns_zone_ids = {
-          main     = "Z0123456789ABCDEFGHIJ"
-          internal = "Z9876543210ZYXWVUTSRQ"
-        }
-        cert_manager_letsencrypt_email = "ops@example.com"
+        dns_zone_ids                        = ["Z0123456789ABCDEFGHIJ", "Z9876543210ZYXWVUTSRQ"]
+        cert_manager_letsencrypt_email      = "ops@example.com"
       }
     }
   }
@@ -124,7 +121,7 @@ run "each_switch_installs_its_release_and_role" {
   }
 
   assert {
-    condition     = helm_release.addon["main.cluster-autoscaler"].version == "9.59.0" && helm_release.addon["main.cert-manager"].version == "v1.21.1"
+    condition     = helm_release.addon["main.cluster-autoscaler"].version == "9.59.0" && helm_release.addon["main.cert-manager"].version == "v1.21.2" && helm_release.addon["main.external-dns"].version == "1.22.0"
     error_message = "Chart pins changed unexpectedly."
   }
 
@@ -144,6 +141,32 @@ run "each_switch_installs_its_release_and_role" {
     error_message = "The load balancer controller must be given the VPC."
   }
 
+  # No inbound 0.0.0.0/0: the default IngressClass makes internal ALBs only,
+  # pinned in its IngressClassParams so an Ingress cannot override it.
+  assert {
+    condition = (
+      yamldecode(helm_release.addon["main.aws-load-balancer-controller"].values[1]).createIngressClassResource == true &&
+      yamldecode(helm_release.addon["main.aws-load-balancer-controller"].values[1]).ingressClassParams.create == true &&
+      yamldecode(helm_release.addon["main.aws-load-balancer-controller"].values[1]).ingressClassParams.spec.scheme == "internal"
+    )
+    error_message = "The default IngressClass must create internal load balancers."
+  }
+
+  assert {
+    condition     = !strcontains(join("\n", helm_release.addon["main.aws-load-balancer-controller"].values), "internet-facing")
+    error_message = "Nothing in the load balancer controller's values may ask for internet-facing."
+  }
+
+  assert {
+    condition     = yamldecode(helm_release.addon["main.external-dns"].values[1]).txtPrefix == "testenv-01-main-" && yamldecode(helm_release.addon["main.external-dns"].values[1]).policy == "sync"
+    error_message = "external-dns must prefix its TXT ownership records with the cluster name and set policy (required from chart 1.22)."
+  }
+
+  assert {
+    condition     = strcontains(helm_release.cert_manager_issuer["main"].values[0], "https://acme-v02.api.letsencrypt.org/directory")
+    error_message = "The issuer must default to the Let's Encrypt production directory."
+  }
+
   assert {
     condition     = yamldecode(helm_release.addon["main.cluster-autoscaler"].values[1]).autoDiscovery.clusterName == "testenv-01-main"
     error_message = "cluster-autoscaler must auto-discover this cluster's groups."
@@ -159,7 +182,7 @@ run "trust_is_scoped_to_the_oidc_provider_and_service_account" {
         enable_aws_load_balancer_controller = true
         enable_external_dns                 = true
         vpc_id                              = "vpc-0123456789abcdef0"
-        dns_zone_ids                        = { main = "Z0123456789ABCDEFGHIJ" }
+        dns_zone_ids                        = ["Z0123456789ABCDEFGHIJ"]
       }
     }
   }
@@ -203,7 +226,7 @@ run "policies_are_scoped" {
         enable_cluster_autoscaler      = true
         enable_external_dns            = true
         enable_cert_manager            = true
-        dns_zone_ids                   = { main = "Z0123456789ABCDEFGHIJ", internal = "Z9876543210ZYXWVUTSRQ" }
+        dns_zone_ids                   = ["Z9876543210ZYXWVUTSRQ", "Z0123456789ABCDEFGHIJ"]
         cert_manager_letsencrypt_email = "ops@example.com"
       }
     }
@@ -330,7 +353,7 @@ run "hosted_zone_path_is_rejected" {
     clusters = {
       main = {
         enable_external_dns = true
-        dns_zone_ids        = { main = "/hostedzone/Z0123456789ABCDEFGHIJ" }
+        dns_zone_ids        = ["/hostedzone/Z0123456789ABCDEFGHIJ"]
       }
     }
   }
@@ -419,4 +442,38 @@ run "eks_addon_role_is_attached" {
     condition     = aws_iam_role.service_account["main.ebs"].name == "testenv-01-main-aws-ebs-csi-driver-sa-role"
     error_message = "The addon role name carries the Environment once."
   }
+}
+
+run "acme_staging_directory_for_non_production" {
+  command = plan
+
+  variables {
+    clusters = {
+      main = {
+        enable_cert_manager            = true
+        dns_zone_ids                   = ["Z0123456789ABCDEFGHIJ"]
+        cert_manager_letsencrypt_email = "ops@example.com"
+        cert_manager_acme_server       = "https://acme-staging-v02.api.letsencrypt.org/directory"
+      }
+    }
+  }
+
+  assert {
+    condition     = strcontains(helm_release.cert_manager_issuer["main"].values[0], "https://acme-staging-v02.api.letsencrypt.org/directory")
+    error_message = "cert_manager_acme_server must reach the issuer."
+  }
+}
+
+run "other_acme_directory_is_rejected" {
+  command = plan
+
+  variables {
+    clusters = {
+      main = {
+        cert_manager_acme_server = "https://acme.example.com/directory"
+      }
+    }
+  }
+
+  expect_failures = [var.clusters]
 }

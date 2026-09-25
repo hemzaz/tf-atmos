@@ -66,12 +66,15 @@ variable "clusters" {
     # Add-on settings
     # The VPC the load balancer controller manages (the vpc output vpc_id).
     vpc_id = optional(string)
-    # The hosted zones external-dns and cert-manager may change, as the dns
-    # component's zone_ids output (zone key => zone ID). Their IAM policies
-    # allow record changes on exactly these zones.
-    dns_zone_ids                   = optional(map(string), {})
+    # The PUBLIC hosted zone IDs external-dns and cert-manager may change,
+    # picked from the dns component's zone_ids output. Their IAM policies
+    # allow record changes on exactly these zones; leave private zones out.
+    dns_zone_ids                   = optional(list(string), [])
     external_dns_domain_filters    = optional(list(string), [])
     cert_manager_letsencrypt_email = optional(string)
+    # ACME directory of the letsencrypt ClusterIssuer: Let's Encrypt
+    # production by default, its staging directory for non-production.
+    cert_manager_acme_server = optional(string, "https://acme-v02.api.letsencrypt.org/directory")
     # Extra Helm values per add-on, keyed by add-on name
     # (aws-load-balancer-controller, cluster-autoscaler, metrics-server,
     # external-dns, cert-manager), applied after the component's own.
@@ -134,7 +137,7 @@ variable "clusters" {
 
   validation {
     condition = alltrue(flatten([
-      for k, v in var.clusters : [for id in values(v.dns_zone_ids) : can(regex("^Z[0-9A-Z]{1,31}$", id))]
+      for k, v in var.clusters : [for id in v.dns_zone_ids : can(regex("^Z[0-9A-Z]{1,31}$", id))]
     ]))
     error_message = "dns_zone_ids values must be Route 53 hosted zone IDs (Z..., without /hostedzone/)."
   }
@@ -145,6 +148,16 @@ variable "clusters" {
       !v.enabled || !v.enable_cert_manager || can(regex("^[^@]+@[^@]+\\.[^@]+$", v.cert_manager_letsencrypt_email))
     ])
     error_message = "When cert_manager is enabled, cert_manager_letsencrypt_email must be a valid email address."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.clusters : contains([
+        "https://acme-v02.api.letsencrypt.org/directory",
+        "https://acme-staging-v02.api.letsencrypt.org/directory",
+      ], v.cert_manager_acme_server)
+    ])
+    error_message = "cert_manager_acme_server must be the Let's Encrypt production or staging directory."
   }
 }
 
@@ -201,36 +214,24 @@ variable "tags" {
 }
 
 # -------------------------------------------------------------------------
-# Service Mesh Configuration Variables (DEPRECATED)
+# Istio gateway configuration
 # -------------------------------------------------------------------------
-# MIGRATION GUIDE:
-# 1. Replace 'istio_enabled' with 'clusters["your-cluster"].enable_istio_service_mesh'
-# 2. Replace 'istio_enable_tracing' with 'clusters["your-cluster"].enable_distributed_tracing'
-# 3. Replace 'kiali_enabled' with 'clusters["your-cluster"].enable_service_mesh_visualization'
-# 4. Replace 'jaeger_enabled' with 'clusters["your-cluster"].enable_jaeger_tracing_storage'
-#
-# Example of new configuration:
-# clusters = {
-#   main = {
-#     ...
-#     enable_istio_service_mesh = true
-#     enable_distributed_tracing = true
-#     enable_service_mesh_visualization = true
-#     ...
-#   }
-# }
+# istio_enabled installs the default gateway chart (charts/istio-gateway-config)
+# for domain_name and its TLS secret. Istio itself is installed through
+# clusters.<key>.helm_releases; there is no per-cluster Istio switch.
+# istio_enable_tracing, kiali_enabled and jaeger_enabled are not variables.
 # -------------------------------------------------------------------------
 
 variable "istio_enabled" {
   type        = bool
-  description = "Whether to enable Istio service mesh - DEPRECATED, use clusters[*].enable_istio_service_mesh instead"
+  description = "Install the default Istio gateway configuration (and its TLS secret) for domain_name; Istio itself comes from helm_releases"
   default     = false
 }
 
 # Certificate management variables
 variable "domain_name" {
   type        = string
-  description = "Domain name for certificates and DNS records - DEPRECATED, use clusters[*].cert_manager_config instead"
+  description = "Domain served by the default Istio gateway (istio_enabled)"
   default     = "example.com"
 
   validation {
