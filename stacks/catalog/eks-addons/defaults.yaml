@@ -11,22 +11,25 @@ components:
           category: "container-orchestration"
           namespace: "k8s"
       # Only variables the component declares. The add-on switches
-      # (enable_aws_load_balancer_controller, enable_cluster_autoscaler, ...)
-      # and the rest of each cluster's settings live under clusters.<cluster
-      # name>, set per instance; top-level copies of them were undeclared and
-      # reached nothing.
+      # (enable_aws_load_balancer_controller, enable_cluster_autoscaler,
+      # enable_metrics_server, enable_external_dns, enable_cert_manager) and
+      # their settings (vpc_id, dns_zone_ids, cert_manager_letsencrypt_email)
+      # live under clusters.<key>, set per instance. Each switch installs its
+      # chart and IRSA role (see the component README).
       vars:
-        # Connection for the kubernetes/helm providers; instances read these
-        # from their eks instance's outputs.
+        # Connection for the kubernetes/helm providers, and the default
+        # cluster name and OIDC provider of each clusters entry; instances
+        # read these from their eks instance's outputs.
         cluster_name: ""
         host: ""
         cluster_ca_certificate: ""
         oidc_provider_arn: ""
         oidc_provider_url: ""
 
-        # Map of clusters with addons, Helm releases, and Kubernetes manifests
+        # Map of clusters with add-on switches, addons, Helm releases, and
+        # Kubernetes manifests
         clusters: {}
 
         tags:
           Component: "EKS-Addons"
-      # Instances declare the eks instance they read (e.g. eks/main).
+      # Instances declare the eks, vpc and dns instances they read.

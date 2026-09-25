@@ -2,6 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "DescribeScalingResources",
       "Effect": "Allow",
       "Action": [
         "autoscaling:DescribeAutoScalingGroups",
@@ -9,12 +10,23 @@
         "autoscaling:DescribeLaunchConfigurations",
         "autoscaling:DescribeScalingActivities",
         "autoscaling:DescribeTags",
+        "ec2:DescribeImages",
         "ec2:DescribeInstanceTypes",
-        "ec2:DescribeLaunchTemplateVersions"
+        "ec2:DescribeLaunchTemplateVersions",
+        "ec2:GetInstanceTypesFromInstanceRequirements"
       ],
       "Resource": "*"
     },
     {
+      "Sid": "DescribeThisClustersNodegroups",
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeNodegroup"
+      ],
+      "Resource": "arn:${partition}:eks:${region}:${account_id}:nodegroup/${cluster_name}/*/*"
+    },
+    {
+      "Sid": "ScaleThisClustersGroups",
       "Effect": "Allow",
       "Action": [
         "autoscaling:SetDesiredCapacity",
@@ -23,7 +35,7 @@
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "aws:ResourceTag/k8s.io/cluster-autoscaler/enabled": "true"
+          "aws:ResourceTag/k8s.io/cluster-autoscaler/${cluster_name}": "owned"
         }
       }
     }
