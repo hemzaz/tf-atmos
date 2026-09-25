@@ -24,6 +24,14 @@ Two differences from the Cloud Posse component, both owner decisions for this re
    its default 404 backend. Per-microservice routing Ingresses join the same `group.name` and are out
    of this component's scope.
 
+Because the controller — not this component — creates the ALB, it does not inherit the hardening the
+repo's own `alb` component always applies (`stacks/catalog/alb/defaults.yaml`:
+`drop_invalid_header_fields = true`, `access_logs_enabled = true`) unless this component sets it itself
+via `alb.ingress.kubernetes.io/load-balancer-attributes`. It always sets
+`routing.http.drop_invalid_header_fields.enabled=true`; access logs are opt-in
+(`enable_access_logs`/`access_logs_s3_bucket`/`access_logs_s3_prefix` below) because this component has
+no bucket of its own to point at — see "Inputs / Outputs".
+
 The scheme stays internal because of two independent enforcements: `spec.ingress_class_name` (below,
 `var.ingress_class_name`, default `"alb"`) names eks-addons's default IngressClass explicitly, whose
 `ingressClassParams.spec.scheme = internal` an Ingress cannot override (`eks-addons/addons.tf`, README
@@ -43,6 +51,9 @@ here, belt-and-braces in case `ingressClassParams` is ever loosened.
 | `ingress_class_name` (`"alb"`) | The IngressClass this Ingress's `spec.ingress_class_name` references — eks-addons's default IngressClass name |
 | `certificate_arn` (null) | ACM certificate ARN; when set the ALB listens on HTTPS (443) only, *replacing* HTTP (80) — never both, so no plaintext listener stays reachable once TLS is on. Null (default) creates an HTTP-only (80) ALB. `microservices-platform` sets this from a `microservices/acm` instance, so `apigateway`'s `http_routes` hop to this ALB is TLS end to end (see `apigateway/README.md`) |
 | `ssl_policy` | TLS policy for the HTTPS listener; ignored unless `certificate_arn` is set |
+| `enable_access_logs` (`false`) | Enable ALB access logs via `alb.ingress.kubernetes.io/load-balancer-attributes`'s `access_logs.s3.*` keys. Off by default: unlike the `alb` component, this component does not own or create the ALB (the controller does), so it has no bucket of its own to point at — the caller must provide one |
+| `access_logs_s3_bucket` | S3 bucket access logs are delivered to. Required (validated) when `enable_access_logs` is true; the bucket's policy must already allow `elasticloadbalancing`'s log delivery service to write to it (see the `alb` component's own access-logs bucket policy for the required shape) |
+| `access_logs_s3_prefix` (`""`) | Key prefix for delivered access log objects; ignored unless `enable_access_logs` is true |
 | `kubernetes_namespace` (`"alb-ingress-group"`) | Namespace the IngressGroup scaffold's Ingress is created in. Never `"default"` (validated, `CKV_K8S_21`) |
 | `create_namespace` (`true`) | Whether this component creates `kubernetes_namespace`; `false` when it already exists |
 | Outputs | `group_name`, `ingress_name`, `security_group_id`, `load_balancer_arn`, `load_balancer_dns_name`, `load_balancer_zone_id`, `http_listener_arn`, `https_listener_arn` (null unless `certificate_arn` is set), `member_listen_ports_annotation` (the exact `alb.ingress.kubernetes.io/listen-ports` value a member Ingress joining `group_name` must set — see the gotcha below) |
@@ -86,7 +97,20 @@ here, belt-and-braces in case `ingressClassParams` is ever loosened.
   omitting it or hand-copying the value. `certificate-arn` and `tags` are safe to omit on member
   Ingresses (the union already includes this component's values); `scheme`/`security-groups`/`ssl-policy`
   must be omitted entirely on members — setting a different value here conflicts and the exact same
-  value is redundant, since those are exclusive to the group-owning Ingress.
+  value is redundant, since those are exclusive to the group-owning Ingress. `load-balancer-attributes`
+  (below) is a StringMap annotation the controller merges the same way as `listen-ports`/`certificate-arn`/
+  `tags`: member Ingresses may add their own `key=value` pairs, but must not set a different value for a
+  key this component already sets (`routing.http.drop_invalid_header_fields.enabled`, and
+  `access_logs.s3.*` when `enable_access_logs` is set) or the group build conflicts.
+- **Hardening the controller-created ALB does not inherit by default.** Unlike `alb/main.tf`, no
+  Terraform resource here sets `aws_lb`'s `drop_invalid_header_fields` or `access_logs` — the controller
+  creates the ALB from the Ingress, so this component reaches the same settings only via
+  `alb.ingress.kubernetes.io/load-balancer-attributes`. It always sets
+  `routing.http.drop_invalid_header_fields.enabled=true` (matching `stacks/catalog/alb/defaults.yaml`'s
+  `drop_invalid_header_fields = true`); access logs are opt-in via `enable_access_logs` +
+  `access_logs_s3_bucket` (validated: required together) + `access_logs_s3_prefix`, appended to the same
+  comma-separated annotation value as `access_logs.s3.enabled=true,access_logs.s3.bucket=...,access_logs.s3.prefix=...`
+  — off by default because, unlike `alb`, this component does not create a bucket of its own.
 
 ## Tests
 
@@ -100,7 +124,11 @@ means port 80 is never admitted and the HTTP listener is never looked up), that
 `member_listen_ports_annotation` matches the Ingress's own `listen-ports` annotation in both the
 HTTP-only and HTTPS-only cases, that every ingress rule references a security group and never a
 CIDR, the `admit_security_group_ids`/`group_name` validations, that the load balancer/listener
-lookups are wired up, and `enabled = false`.
+lookups are wired up, `enabled = false`, that `load-balancer-attributes` always carries
+`routing.http.drop_invalid_header_fields.enabled=true` (with `enable_access_logs` left at its
+default `false`, so `access_logs.s3.*` keys are never present), that they do appear -- and only
+then -- once `enable_access_logs = true` with `access_logs_s3_bucket` set, and that
+`access_logs_s3_bucket` is required when `enable_access_logs` is true.
 
 ## Usage
 

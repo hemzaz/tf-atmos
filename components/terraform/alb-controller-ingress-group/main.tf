@@ -66,6 +66,29 @@ locals {
   # ALB create/update (mirrors the Cloud Posse component's kube_tags local).
   alb_tags_annotation = join(",", [for k, v in var.tags : "${k}=${v}" if k != "Name"])
 
+  # Comma-separated k=v pairs for alb.ingress.kubernetes.io/load-balancer-attributes,
+  # mirroring the hardening the repo's own alb component always applies
+  # (stacks/catalog/alb/defaults.yaml: drop_invalid_header_fields = true,
+  # access_logs_enabled = true) -- the controller-created ALB has no such
+  # default. drop_invalid_header_fields is unconditional; access logs are
+  # opt-in (var.enable_access_logs) because, unlike the alb component, this
+  # component does not own or create a bucket for them.
+  #
+  # load-balancer-attributes is a StringMap annotation the controller merges
+  # (unions) across every Ingress in the IngressGroup, the same as
+  # alb.ingress.kubernetes.io/tags and /listen-ports above (see README
+  # "Group-wide annotations fall into two categories"): a member Ingress may
+  # add its own keys, but must not set a different value for a key this
+  # component already sets here, or the group build conflicts.
+  load_balancer_attributes_annotation = join(",", concat(
+    ["routing.http.drop_invalid_header_fields.enabled=true"],
+    var.enable_access_logs ? [
+      "access_logs.s3.enabled=true",
+      "access_logs.s3.bucket=${var.access_logs_s3_bucket}",
+      "access_logs.s3.prefix=${var.access_logs_s3_prefix}",
+    ] : []
+  ))
+
   default_backend_action_name = "default-404"
 
   # sg_id x port, one ingress rule each. listen_ports entries are single-key
@@ -156,6 +179,7 @@ resource "kubernetes_ingress_v1" "this" {
         "alb.ingress.kubernetes.io/security-groups"                     = aws_security_group.alb[0].id
         "alb.ingress.kubernetes.io/manage-backend-security-group-rules" = "true"
         "alb.ingress.kubernetes.io/tags"                                = local.alb_tags_annotation
+        "alb.ingress.kubernetes.io/load-balancer-attributes"            = local.load_balancer_attributes_annotation
         "alb.ingress.kubernetes.io/actions.${local.default_backend_action_name}" = jsonencode({
           type = "fixed-response"
           fixedResponseConfig = {

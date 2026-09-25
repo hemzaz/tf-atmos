@@ -83,6 +83,16 @@ run "annotations_carry_the_group_name_and_internal_scheme" {
     condition     = !contains(keys(kubernetes_ingress_v1.this[0].metadata[0].annotations), "kubernetes.io/ingress.class")
     error_message = "The deprecated kubernetes.io/ingress.class annotation must not be set alongside spec.ingress_class_name."
   }
+
+  assert {
+    condition     = contains(split(",", kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/load-balancer-attributes"]), "routing.http.drop_invalid_header_fields.enabled=true")
+    error_message = "The controller-created ALB must always drop invalid HTTP header fields, the same hardening stacks/catalog/alb/defaults.yaml applies to the alb component's own ALB."
+  }
+
+  assert {
+    condition     = !strcontains(kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/load-balancer-attributes"], "access_logs.s3")
+    error_message = "access_logs.s3.* attributes must not appear unless enable_access_logs is true."
+  }
 }
 
 run "creates_a_non_default_namespace_by_default" {
@@ -278,6 +288,46 @@ run "rejects_an_invalid_ingress_class_name" {
   }
 
   expect_failures = [var.ingress_class_name]
+}
+
+run "access_logs_attributes_appear_only_when_enabled" {
+  command = plan
+
+  variables {
+    enable_access_logs    = true
+    access_logs_s3_bucket = "microservices-alb-access-logs-123456789012"
+    access_logs_s3_prefix = "microservices-http"
+  }
+
+  assert {
+    condition     = contains(split(",", kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/load-balancer-attributes"]), "routing.http.drop_invalid_header_fields.enabled=true")
+    error_message = "Enabling access logs must not drop the always-on drop-invalid-header-fields attribute."
+  }
+
+  assert {
+    condition     = contains(split(",", kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/load-balancer-attributes"]), "access_logs.s3.enabled=true")
+    error_message = "enable_access_logs = true must set access_logs.s3.enabled=true."
+  }
+
+  assert {
+    condition     = contains(split(",", kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/load-balancer-attributes"]), "access_logs.s3.bucket=microservices-alb-access-logs-123456789012")
+    error_message = "enable_access_logs = true must carry access_logs_s3_bucket through as access_logs.s3.bucket."
+  }
+
+  assert {
+    condition     = contains(split(",", kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/load-balancer-attributes"]), "access_logs.s3.prefix=microservices-http")
+    error_message = "enable_access_logs = true must carry access_logs_s3_prefix through as access_logs.s3.prefix."
+  }
+}
+
+run "rejects_enable_access_logs_without_a_bucket" {
+  command = plan
+
+  variables {
+    enable_access_logs = true
+  }
+
+  expect_failures = [var.access_logs_s3_bucket]
 }
 
 run "outputs_are_wired_to_the_load_balancer_lookup" {

@@ -105,7 +105,7 @@ variable "admit_security_group_ids" {
 
 variable "certificate_arn" {
   type        = string
-  description = "ACM certificate ARN for an HTTPS (443) listener. Null (default) creates an HTTP-only (80) ALB"
+  description = "ACM certificate ARN; when set the ALB listens on HTTPS (443) only, replacing HTTP (80). Null (default) creates an HTTP-only (80) ALB"
   default     = null
 
   validation {
@@ -124,6 +124,29 @@ variable "wait_for_load_balancer" {
   type        = bool
   description = "Whether kubernetes_ingress_v1 waits for the controller to provision the ALB before `apply` returns. The data aws_lb / aws_lb_listener lookups below depend on the Ingress either way; this only controls how long `apply` blocks for it"
   default     = true
+}
+
+variable "enable_access_logs" {
+  type        = bool
+  description = "Enable ALB access logs to access_logs_s3_bucket, via the alb.ingress.kubernetes.io/load-balancer-attributes annotation's access_logs.s3.* keys. Off by default: unlike the alb component, this component does not own or create the ALB (the controller does), so it has no bucket of its own to point at -- the caller must provide one"
+  default     = false
+}
+
+variable "access_logs_s3_bucket" {
+  type        = string
+  description = "S3 bucket access logs are delivered to. Required when enable_access_logs is true; the bucket's policy must already allow the elasticloadbalancing log delivery service to write to it (see the alb component's main.tf, aws_s3_bucket_policy.access_logs, for the required bucket policy shape)"
+  default     = null
+
+  validation {
+    condition     = !var.enable_access_logs || (var.access_logs_s3_bucket != null && trimspace(var.access_logs_s3_bucket) != "")
+    error_message = "access_logs_s3_bucket must be set when enable_access_logs is true."
+  }
+}
+
+variable "access_logs_s3_prefix" {
+  type        = string
+  description = "Key prefix for delivered access log objects; ignored unless enable_access_logs is true"
+  default     = ""
 }
 
 variable "tags" {
