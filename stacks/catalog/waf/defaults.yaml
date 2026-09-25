@@ -1,0 +1,38 @@
+---
+##################################################
+# Catalog Configuration for the WAF component
+##################################################
+# One AWS WAFv2 web ACL per instance, modelled on Cloud Posse's aws-waf (see
+# components/terraform/waf/README.md). Instances inherit this base and set
+# `name`, `scope`, `association_resource_arns` (REGIONAL only) and their
+# rule lists.
+#
+# scope = CLOUDFRONT requires the instance itself to set `region: us-east-1`
+# (an AWS requirement for CloudFront web ACLs) and to leave `kms_key_arn`
+# unset, since a KMS key in this stack's usual region cannot encrypt a
+# us-east-1 log group.
+#
+# kms_key_arn is set per REGIONAL instance (reading kms/main), not defaulted
+# here: Atmos's deep merge does not let an instance override a non-null
+# default back to `null` with a plain `kms_key_arn: null` (mergo does not
+# overwrite with an empty/nil value by default), which is exactly what the
+# CLOUDFRONT (us-east-1) instance needs to do. See
+# stacks/catalog/templates/web-application.yaml (web-application/waf) and
+# serverless-api.yaml (serverless-api/waf) for the REGIONAL instances that
+# set it, each with `kms/main` added to dependencies.components.
+
+components:
+  terraform:
+    waf/defaults:
+      metadata:
+        component: waf
+        type: abstract
+      vars:
+        enabled: true
+        default_action: "allow"
+        cloudwatch_metrics_enabled: true
+        sampled_requests_enabled: true
+        enable_logging: true
+        log_group_retention_days: 365
+        tags:
+          Component: "WAF"

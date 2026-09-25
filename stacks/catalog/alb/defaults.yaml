@@ -1,0 +1,31 @@
+---
+##################################################
+# Catalog Configuration for the ALB component
+##################################################
+# One internet-facing (or internal) Application Load Balancer per instance,
+# modelled on Cloud Posse's aws-alb (see components/terraform/alb/README.md).
+# Instances inherit this base and set `name`, `vpc_id`, `subnets` and
+# `certificate_arn`.
+#
+# The ALB's security group always admits only the CloudFront origin-facing
+# managed prefix list on 443 -- fixed in the component, not an input here.
+# There is no port 80 listener.
+
+components:
+  terraform:
+    alb/defaults:
+      metadata:
+        component: alb
+        type: abstract
+      vars:
+        enabled: true
+        internal: false
+        ssl_policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+        idle_timeout: 60
+        deletion_protection: false
+        drop_invalid_header_fields: true
+        desync_mitigation_mode: "defensive"
+        enable_http2: true
+        access_logs_enabled: true
+        tags:
+          Component: "ALB"

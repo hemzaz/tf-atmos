@@ -33,6 +33,8 @@ import:
   - catalog/vpc/defaults
   - catalog/securitygroup/defaults
   - catalog/acm/defaults
+  - catalog/alb/defaults
+  - catalog/waf/defaults
   - catalog/monitoring/defaults
 
 # =============================================================================
@@ -107,56 +109,14 @@ components:
       vars:
         vpc_id: !terraform.state web-application/vpc .vpc_id
 
-        # source_security_group_id below names a sibling key in this map,
-        # not an sg- id: the component resolves it to that group's id once
-        # the group exists. An unknown key fails var.security_groups
-        # validation at plan.
+        # source_security_group_id below is either a sibling key in this map
+        # (resolved to that group's id once the group exists) or, for
+        # "http-from-alb", a literal sg- id read from the alb component (the
+        # ALB owns its own security group; there is no sibling "alb" group in
+        # this map any more). An unknown key or malformed id fails
+        # var.security_groups validation at plan.
         security_groups:
-          # ALB Security Group - allows inbound HTTP/HTTPS from anywhere
-          alb:
-            # Every consumer of these groups is another component (it reads the
-            # id through !terraform.state), so a replaced group would leave them
-            # on an emptied old one until they are re-applied. Keep the id; only
-            # a changed rule is briefly absent while it is replaced. See the
-            # component README.
-            # Every rule carries an explicit `key`: without one a rule is keyed
-            # by its position, and removing an earlier rule would replace the
-            # ones after it. Adding or renaming a key on a live rule takes two
-            # applies (see the README).
-            preserve_security_group_id: true
-            # The component's own default for allow_all_egress is now `true`
-            # (matches Cloudposse). This group already has its own explicit
-            # all-outbound egress rule below, so leaving the default in place
-            # would add the reserved `_allow_all_egress_` rule on top of it —
-            # same permission, authorized twice — and apply would fail with
-            # InvalidPermission.Duplicate. Set explicitly to false instead.
-            allow_all_egress: false
-            description: "Security group for web application ALB"
-            ingress_rules:
-              - key: "https"
-                description: "HTTPS from CloudFront"
-                from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks:
-                  - "0.0.0.0/0"
-              - key: "http"
-                description: "HTTP redirect"
-                from_port: 80
-                to_port: 80
-                protocol: "tcp"
-                cidr_blocks:
-                  - "0.0.0.0/0"
-            egress_rules:
-              - key: "all-outbound"
-                description: "Allow all outbound"
-                from_port: 0
-                to_port: 0
-                protocol: "-1"
-                cidr_blocks:
-                  - "0.0.0.0/0"
-
-          # Application Security Group - allows traffic from ALB only
+          # Application Security Group - allows traffic from the ALB only
           application:
             preserve_security_group_id: true
             description: "Security group for web application containers"
@@ -166,7 +126,7 @@ components:
                 from_port: 8080
                 to_port: 8080
                 protocol: "tcp"
-                source_security_group_id: "alb"
+                source_security_group_id: !terraform.state web-application/alb .security_group_id
             egress_rules:
               - key: "https-aws"
                 description: "HTTPS to AWS services"
@@ -224,6 +184,10 @@ components:
       dependencies:
         components:
           - component: web-application/vpc
+          # For the application group's "http-from-alb" rule, which reads the
+          # ALB's own security group id. The ALB does not depend on this
+          # component (it owns its security group), so this is not a cycle.
+          - component: web-application/alb
     web-application/acm:
       metadata:
         component: acm
@@ -251,66 +215,29 @@ components:
       metadata:
         component: alb
         type: real
+        inherits:
+          - alb/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-alb"
-        internal: false
-        load_balancer_type: "application"
+        # Short name: the component prefixes it with Environment (see
+        # components/terraform/alb/README.md). ecs-service, cloudfront and
+        # monitoring (later tasks / below) read this instance's outputs --
+        # alb_arn, alb_arn_suffix, alb_dns_name, alb_zone_id,
+        # https_listener_arn, default_target_group_arn, security_group_id,
+        # access_logs_bucket_id.
+        name: "webapp-alb"
 
         vpc_id: !terraform.state web-application/vpc .vpc_id
         subnets: !terraform.state web-application/vpc .public_subnet_ids
-        security_groups:
-          - !terraform.state web-application/securitygroups .security_group_ids.alb
+        certificate_arn: !terraform.state web-application/acm .certificate_arns.main
 
-        # Access logging
-        enable_access_logs: true
-        access_logs_bucket: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-alb-logs"
+        # The default target group is what web-application/ecs-service
+        # registers its tasks into (see the load_balancer.target_group_arn
+        # reference below); the webapp container (see its portMappings /
+        # healthCheck below) serves /health on 8080, not the target group's
+        # default "/".
+        health_check_path: "/health"
+
         access_logs_prefix: "webapp"
-
-        # Idle timeout configuration
-        idle_timeout: 60
-
-        # HTTPS listener
-        listeners:
-          https:
-            port: 443
-            protocol: "HTTPS"
-            ssl_policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
-            certificate_arn: !terraform.state web-application/acm .certificate_arns.main
-            default_action:
-              type: "forward"
-              target_group_arn: !terraform.state web-application/target-group .arn
-          http_redirect:
-            port: 80
-            protocol: "HTTP"
-            default_action:
-              type: "redirect"
-              redirect:
-                port: "443"
-                protocol: "HTTPS"
-                status_code: "HTTP_301"
-
-        # Target groups
-        target_groups:
-          app:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-tg"
-            port: 8080
-            protocol: "HTTP"
-            target_type: "ip"  # For Fargate
-            health_check:
-              enabled: true
-              path: "/health"
-              port: "traffic-port"
-              protocol: "HTTP"
-              healthy_threshold: 3
-              unhealthy_threshold: 3
-              timeout: 5
-              interval: 30
-              matcher: "200-299"
-            deregistration_delay: 30
-            stickiness:
-              enabled: false
-              type: "lb_cookie"
-              cookie_duration: 86400
 
         tags:
           Layer: "load-balancer"
@@ -323,54 +250,88 @@ components:
       dependencies:
         components:
           - component: web-application/vpc
-          - component: web-application/securitygroups
           - component: web-application/acm
     web-application/waf:
       metadata:
         component: waf
         type: real
+        inherits:
+          - waf/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-waf"
+        name: "webapp-waf"
         scope: "REGIONAL"
 
-        # Associate with ALB
-        resource_arn: !terraform.state web-application/alb .arn
+        # Every stack runs a kms/main instance (catalog/kms/defaults), so this
+        # resolves everywhere; see stacks/catalog/waf/defaults.yaml for why
+        # this is set per REGIONAL instance rather than defaulted.
+        kms_key_arn: !terraform.state kms/main .key_arn
+
+        # Associate with the ALB
+        association_resource_arns:
+          - !terraform.state web-application/alb .alb_arn
 
         # WAF rules
-        managed_rule_groups:
+        managed_rule_group_statement_rules:
           - name: "AWSManagedRulesCommonRuleSet"
             priority: 10
-            override_action: "none"
-            vendor_name: "AWS"
           - name: "AWSManagedRulesKnownBadInputsRuleSet"
             priority: 20
-            override_action: "none"
-            vendor_name: "AWS"
           - name: "AWSManagedRulesSQLiRuleSet"
             priority: 30
-            override_action: "none"
-            vendor_name: "AWS"
           - name: "AWSManagedRulesLinuxRuleSet"
             priority: 40
-            override_action: "none"
-            vendor_name: "AWS"
 
         # Rate limiting
-        rate_based_rules:
+        rate_based_statement_rules:
           - name: "RateLimitRule"
             priority: 1
             limit: 2000
             aggregate_key_type: "IP"
             action: "block"
 
-        # Logging
-        enable_logging: true
-        log_destination_arn: "{{ .vars.waf_log_destination_arn }}"
+        tags:
+          Layer: "security"
+          Application: "web-application"
 
-        # CloudWatch metrics
-        cloudwatch_metrics_enabled: true
-        metric_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-waf"
-        sampled_requests_enabled: true
+      dependencies:
+        components:
+          - component: web-application/alb
+          - component: kms/main
+
+    # =========================================================================
+    # WAF PROTECTION (CLOUDFRONT SCOPE)
+    # =========================================================================
+    # No association: a CLOUDFRONT-scope web ACL is attached by setting the
+    # distribution's web_acl_id to this instance's `arn` output, which the
+    # later web-application/cloudfront task reads (see the cloudfront section
+    # below). region is pinned to us-east-1 -- an AWS requirement for
+    # CLOUDFRONT-scope web ACLs -- independent of this stack's own region.
+    web-application/waf-cloudfront:
+      metadata:
+        component: waf
+        type: real
+        inherits:
+          - waf/defaults
+      vars:
+        region: "us-east-1"
+        name: "webapp-waf-cf"
+        scope: "CLOUDFRONT"
+        # kms/main lives in this stack's own region (eu-west-2) and cannot
+        # encrypt a us-east-1 log group; see components/terraform/waf/README.md.
+        kms_key_arn: null
+
+        managed_rule_group_statement_rules:
+          - name: "AWSManagedRulesCommonRuleSet"
+            priority: 10
+          - name: "AWSManagedRulesKnownBadInputsRuleSet"
+            priority: 20
+
+        rate_based_statement_rules:
+          - name: "RateLimitRule"
+            priority: 1
+            limit: 2000
+            aggregate_key_type: "IP"
+            action: "block"
 
         tags:
           Layer: "security"
@@ -380,9 +341,6 @@ components:
     # COMPUTE LAYER - ECS FARGATE
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: web-application/alb
     web-application/ecs-cluster:
       metadata:
         component: ecs
@@ -475,7 +433,7 @@ components:
 
         # Load balancer configuration
         load_balancer:
-          target_group_arn: !terraform.state web-application/alb .target_group_arns.app
+          target_group_arn: !terraform.state web-application/alb .default_target_group_arn
           container_name: "webapp"
           container_port: 8080
 
@@ -666,7 +624,7 @@ components:
         # Origin configuration
         origins:
           alb:
-            domain_name: !terraform.state web-application/alb .dns_name
+            domain_name: !terraform.state web-application/alb .alb_dns_name
             origin_id: "alb-origin"
             custom_origin_config:
               http_port: 80
@@ -838,7 +796,7 @@ components:
             period: 300
             statistic: "Sum"
             dimensions:
-              LoadBalancer: !terraform.state web-application/alb .arn_suffix
+              LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
           - name: "alb-4xx-errors"
             metric_name: "HTTPCode_ELB_4XX_Count"
             namespace: "AWS/ApplicationELB"
@@ -848,7 +806,7 @@ components:
             period: 300
             statistic: "Sum"
             dimensions:
-              LoadBalancer: !terraform.state web-application/alb .arn_suffix
+              LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
           - name: "alb-target-response-time"
             metric_name: "TargetResponseTime"
             namespace: "AWS/ApplicationELB"
@@ -858,7 +816,7 @@ components:
             period: 300
             statistic: "Average"
             dimensions:
-              LoadBalancer: !terraform.state web-application/alb .arn_suffix
+              LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
 
         # ECS alarms
         ecs_alarms:
@@ -1009,8 +967,12 @@ components:
 #
 # Optional:
 # alarm_email_addresses: ["ops@example.com"]
-# waf_log_destination_arn: "arn:aws:s3:::..."
-# cloudfront_waf_acl_id: "..."
+# cloudfront_waf_acl_id: "" (a later task wires this to
+#   !terraform.state web-application/waf-cloudfront .arn and adds
+#   web-application/waf-cloudfront to web-application/cloudfront's
+#   dependencies.components; until then it is unset)
+# (WAF logging goes to a component-created CloudWatch log group -- see
+# components/terraform/waf/README.md -- not an external log_destination_arn.)
       dependencies:
         components:
           - component: web-application/ecs-service
