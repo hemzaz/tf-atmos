@@ -36,6 +36,7 @@ import:
   - catalog/_base/defaults
   - catalog/iam/defaults
   - catalog/acm/defaults
+  - catalog/waf/defaults
   - catalog/monitoring/defaults
 
 # =============================================================================
@@ -309,6 +310,11 @@ components:
 
         # X-Ray tracing
         tracing_enabled: true
+
+        # The serverless-api/waf component below associates its own ACL with
+        # this stage's ARN. A stage can only ever have one associated ACL, so
+        # this component's own optional WAF (main.tf:445-581) stays off.
+        enable_waf: false
 
         # Request validation
         request_validators:
@@ -870,69 +876,54 @@ components:
       metadata:
         component: waf
         type: real
+        inherits:
+          - waf/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api-waf"
+        name: "api-waf"
         scope: "REGIONAL"
 
-        # Associate with API Gateway
-        resource_arn: !terraform.state serverless-api/apigateway .stage_arn
+        # Every stack runs a kms/main instance (catalog/kms/defaults), so this
+        # resolves everywhere; see stacks/catalog/waf/defaults.yaml for why
+        # this is set per REGIONAL instance rather than defaulted.
+        kms_key_arn: !terraform.state kms/main .key_arn
+
+        # Associate with the API Gateway stage. apigateway's own enable_waf is
+        # off (see serverless-api/apigateway above) so the stage has exactly
+        # one associated ACL, not two.
+        association_resource_arns:
+          - !terraform.state serverless-api/apigateway .rest_api_stage_arn
 
         # WAF rules
-        managed_rule_groups:
+        managed_rule_group_statement_rules:
           - name: "AWSManagedRulesCommonRuleSet"
             priority: 10
-            override_action: "none"
-            vendor_name: "AWS"
-            excluded_rules: []
           - name: "AWSManagedRulesKnownBadInputsRuleSet"
             priority: 20
-            override_action: "none"
-            vendor_name: "AWS"
           - name: "AWSManagedRulesAmazonIpReputationList"
             priority: 30
-            override_action: "none"
-            vendor_name: "AWS"
           - name: "AWSManagedRulesSQLiRuleSet"
             priority: 40
-            override_action: "none"
-            vendor_name: "AWS"
           - name: "AWSManagedRulesAnonymousIpList"
             priority: 50
-            override_action: "none"
-            vendor_name: "AWS"
 
         # Rate limiting
-        rate_based_rules:
+        rate_based_statement_rules:
           - name: "RateLimitPerIP"
             priority: 1
             limit: 2000
             aggregate_key_type: "IP"
             action: "block"
 
-        # Custom rules
-        custom_rules:
+        # Custom rule, ported from this component's earlier (never-built)
+        # custom_rules shape onto the waf component's byte_match_statement_rules.
+        byte_match_statement_rules:
           - name: "BlockBadUserAgents"
             priority: 5
             action: "block"
-            statement:
-              byte_match_statement:
-                search_string: "curl/"
-                field_to_match:
-                  single_header:
-                    name: "user-agent"
-                positional_constraint: "STARTS_WITH"
-                text_transformations:
-                  - priority: 0
-                    type: "LOWERCASE"
-
-        # Logging
-        enable_logging: true
-        log_destination_arn: "{{ .vars.waf_log_destination_arn }}"
-
-        # CloudWatch metrics
-        cloudwatch_metrics_enabled: true
-        metric_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api-waf"
-        sampled_requests_enabled: true
+            search_string: "curl/"
+            positional_constraint: "STARTS_WITH"
+            header_name: "user-agent"
+            text_transformation_type: "LOWERCASE"
 
         tags:
           Layer: "security"
@@ -945,6 +936,7 @@ components:
       dependencies:
         components:
           - component: serverless-api/apigateway
+          - component: kms/main
     serverless-api/dns:
       metadata:
         component: dns
@@ -1179,7 +1171,15 @@ components:
 #
 # Development:
 #   vars:
-#     api_type: "HTTP"  # Cheaper than REST
+#     api_type: "HTTP"  # Cheaper than REST, but see the WAF note below.
+#     # NOTE: serverless-api/waf's association_resource_arns (below, ~:893)
+#     # reads apigateway's rest_api_stage_arn output, which is null for
+#     # api_type = "HTTP" (WAF cannot associate with an HTTP API -- only a
+#     # REST API stage or an ALB/CloudFront distribution). The waf component
+#     # fails the plan with a clear error in that case (see
+#     # components/terraform/waf/variables.tf); switch api_type back to
+#     # "REST", or drop this entry from association_resource_arns, if you
+#     # actually want api_type = "HTTP" here.
 #     lambda_runtime: "python3.13"
 #     lambda_architecture: "arm64"
 #     api_lambda_memory: 256
@@ -1235,8 +1235,9 @@ components:
 # lambda_logs_kms_key_id: "arn:aws:kms:..."
 # lambda_powertools_layer_arn: "arn:aws:lambda:..."
 # log_bucket_name: "my-log-bucket"
-# waf_log_destination_arn: "arn:aws:s3:::..."
 # alarm_email_addresses: ["ops@example.com"]
+# (WAF logging goes to a component-created CloudWatch log group -- see
+# components/terraform/waf/README.md -- not an external log_destination_arn.)
 #
 # Optional:
 # vpc_id: "vpc-xxx" (for VPC-connected Lambda)

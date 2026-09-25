@@ -138,10 +138,12 @@ variable "security_groups" {
     error_message = "A rule must not name its own group as a source; use `self: true`. Offending groups: ${join(", ", [for k, v in var.security_groups : k if anytrue([for r in concat(v.ingress_rules, v.egress_rules) : contains(concat(r.security_groups, r.source_security_group_id == null ? [] : [r.source_security_group_id]), k)])])}."
   }
 
-  # source_security_group_id and security_groups both name a source. Either the
-  # source is a sibling key in this map -- which is how
-  # stacks/catalog/templates/web-application.yaml uses it -- or it is a literal
-  # id. Anything else is a typo that AWS would only reject at apply, with a
+  # source_security_group_id and security_groups both name a source. The
+  # source is either a sibling key in this map, or a literal sg-<hex> id read
+  # from another component via !terraform.state -- see
+  # stacks/catalog/templates/web-application.yaml's "http-from-alb" rule,
+  # which reads web-application/alb's security_group_id output this way.
+  # Anything else is a typo that AWS would only reject at apply, with a
   # message that names neither the group nor the stack file.
   validation {
     condition = alltrue(flatten([
