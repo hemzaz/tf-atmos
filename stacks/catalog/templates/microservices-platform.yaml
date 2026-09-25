@@ -10,11 +10,16 @@
 #   - EKS cluster with managed node groups (system, application, spot)
 #   - EKS add-on intent (load balancer controller, autoscaler, metrics server,
 #     external-dns, cert-manager, External Secrets, CloudWatch agent/Fluent Bit)
+#   - An ACM certificate for the internal ALB below, DNS-validated through the
+#     account's public delegated zone (settings.microservices.hosted_zone_id) --
+#     validation only needs a public DNS record, not a reachable endpoint, so an
+#     internal-scheme ALB can still carry a publicly-issued certificate
 #   - An internal ALB the load balancer controller provisions from a shared
 #     IngressGroup (alb-controller-ingress-group), looked up in Terraform so
-#     HTTP API Gateway can route to it
+#     HTTP API Gateway can route to it over TLS
 #   - HTTP API Gateway with a JWT authorizer, a VPC link into the VPC, and a
-#     catch-all route (HTTP_PROXY over the VPC link) to that ALB's listener
+#     catch-all TLS route (HTTP_PROXY over the VPC link) to that ALB's HTTPS
+#     listener
 #   - EventBridge bus (archived) with audit and domain-event rules, delivering
 #     to SQS queues (inventory, notifications) and a welcome-email Lambda, with
 #     an SQS dead-letter queue for the bus and its targets
@@ -83,6 +88,7 @@ import:
   - catalog/vpc/defaults
   - catalog/eks/defaults
   - catalog/eks-addons/defaults
+  - catalog/acm/defaults
   - catalog/alb-controller-ingress-group/defaults
   - catalog/monitoring/defaults
   - catalog/dynamodb/defaults
@@ -339,6 +345,35 @@ components:
           - component: kms/main
 
     # =========================================================================
+    # ACM (internal ALB certificate)
+    # =========================================================================
+    # A certificate for microservices/alb-ingress-group's HTTPS listener, so
+    # the apigateway -> ALB hop below is TLS, not plaintext HTTP. DNS
+    # validation only requires a public record in the account's delegated
+    # zone (settings.microservices.hosted_zone_id / app_domain_name, already
+    # required by this template's header and by eks-addons's external-dns);
+    # it does not require the certificate's own resource to be reachable, so
+    # an internal-scheme ALB can carry a publicly-issued certificate. Same
+    # dns_domains/zone_id shape as serverless-api/acm and web-application/acm.
+
+    microservices/acm:
+      metadata:
+        component: acm
+        type: real
+        inherits:
+          - acm/defaults
+      vars:
+        dns_domains:
+          ingress:
+            domain_name: 'ingress.{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
+            validation_method: "DNS"
+        zone_id: '{{ required "settings.microservices.hosted_zone_id is required" .settings.microservices.hosted_zone_id }}'
+
+        tags:
+          Layer: "api-gateway"
+          Platform: "microservices"
+
+    # =========================================================================
     # ALB CONTROLLER INGRESS GROUP
     # =========================================================================
     # The shared ALB the in-cluster AWS Load Balancer Controller (enabled
@@ -348,7 +383,8 @@ components:
     # below. Always internal (the controller's default IngressClass pins
     # scheme: internal regardless) and admits only the API Gateway VPC
     # link's security group (microservices/securitygroup/vpc-link) -- never
-    # a CIDR.
+    # a CIDR. certificate_arn comes from microservices/acm above, so the
+    # controller opens only an HTTPS (443) listener -- no plaintext HTTP.
 
     microservices/alb-ingress-group:
       metadata:
@@ -365,6 +401,7 @@ components:
         # Resources are "<Environment>-<group_name>".
         group_name: "microservices-http"
         admit_security_group_ids: !terraform.state microservices/securitygroup/vpc-link '.security_group_ids.vpc_link | [.]'
+        certificate_arn: !terraform.state microservices/acm .certificate_arns.ingress
 
         tags:
           Layer: "api-gateway"
@@ -375,6 +412,7 @@ components:
           - component: microservices/eks-addons
           - component: microservices/vpc
           - component: microservices/securitygroup/vpc-link
+          - component: microservices/acm
 
     # =========================================================================
     # API GATEWAY (HTTP API)
@@ -426,13 +464,10 @@ components:
 
         # A single catch-all route to the shared ALB microservices/alb-ingress-group
         # provisions: HTTP_PROXY over the VPC link above, targeting the ALB's
-        # HTTP listener. This hop is plaintext HTTP -- a known gap (see
-        # apigateway/README.md's "Dependencies / gotchas") --
-        # microservices/alb-ingress-group sets no certificate_arn here, so it
-        # has no HTTPS listener. Closing it needs: certificate_arn on
-        # microservices/alb-ingress-group (an ACM cert for the internal ALB),
-        # switching integration_uri below to .https_listener_arn, and setting
-        # tls_server_name_to_verify to that cert's SAN. Per-microservice
+        # HTTPS listener (microservices/alb-ingress-group carries
+        # certificate_arn from microservices/acm, so it has one).
+        # tls_server_name_to_verify names that same certificate's domain, so
+        # this hop is TLS end to end, not plaintext HTTP. Per-microservice
         # Ingresses join that ALB's IngressGroup and route by path/host inside
         # the cluster; this component only needs one route to reach it. JWT
         # authorization uses the authorizer_type below.
@@ -445,7 +480,8 @@ components:
             # above) -- a self-reference via !terraform.state is not
             # possible here, this route is defined on the same instance
             # that creates the link.
-            integration_uri: !terraform.state microservices/alb-ingress-group .http_listener_arn
+            integration_uri: !terraform.state microservices/alb-ingress-group .https_listener_arn
+            tls_server_name_to_verify: 'ingress.{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
             authorization_type: "JWT"
 
         # JWT authorization via Cognito

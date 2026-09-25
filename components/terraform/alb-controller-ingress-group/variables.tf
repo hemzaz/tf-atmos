@@ -70,6 +70,11 @@ variable "ingress_class_name" {
   type        = string
   description = "Name of the IngressClass this Ingress references via spec.ingress_class_name (never the deprecated kubernetes.io/ingress.class annotation, which the controller's IngressClassParams lookup does not resolve). Defaults to \"alb\", the name eks-addons creates its default IngressClass under (aws-load-balancer-controller's ingressClassConfig, createIngressClassResource = true)"
   default     = "alb"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", var.ingress_class_name)) && length(var.ingress_class_name) <= 63
+    error_message = "ingress_class_name must be a valid Kubernetes object name (DNS-1123 label: lowercase alphanumeric and hyphens, 1-63 characters) -- an empty or invalid name would only fail at apply time in the cluster, silently dropping the internal-scheme ingressClassParams pin this component relies on."
+  }
 }
 
 variable "group_name" {

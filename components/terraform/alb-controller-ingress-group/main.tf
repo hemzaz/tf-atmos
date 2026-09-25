@@ -54,7 +54,10 @@ locals {
 
   tls_enabled = local.enabled && var.certificate_arn != null
 
-  listen_ports = local.tls_enabled ? [{ HTTP = 80 }, { HTTPS = 443 }] : [{ HTTP = 80 }]
+  # HTTPS *instead of* HTTP once certificate_arn is set, never both: a
+  # plaintext HTTP:80 listener has no reason to stay reachable next to TLS,
+  # and this component has no redirect action to make it safe to leave open.
+  listen_ports = local.tls_enabled ? [{ HTTPS = 443 }] : [{ HTTP = 80 }]
 
   # Comma-separated k=v pairs for alb.ingress.kubernetes.io/tags: the AWS
   # tags the controller applies to the ALB (and to any target group or
@@ -210,7 +213,7 @@ data "aws_lb" "this" {
 }
 
 data "aws_lb_listener" "http" {
-  count = local.enabled ? 1 : 0
+  count = local.enabled && !local.tls_enabled ? 1 : 0
 
   load_balancer_arn = data.aws_lb.this[0].arn
   port              = 80

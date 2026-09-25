@@ -52,15 +52,13 @@ its custom domain the same way).
   ApiName/Stage dashboard dimensions and alarms. `api_name` is `null` for an HTTP API
   (`aws_api_gateway_rest_api.rest_api[0].name`, the real REST API name — not `var.api_name`,
   which is only its `-<api_name>` suffix).
-- **Known gap: `microservices-platform`'s `http_routes` hop is plaintext HTTP.** It targets
-  `alb-controller-ingress-group`'s `http_listener_arn` (no `certificate_arn` set there), not
-  `https_listener_arn` + `tls_server_name_to_verify`. `tls_config` support exists on this
-  component (above) precisely so a caller can close this gap: issue a cert for the internal ALB
-  (e.g. an internal-only `acm` instance, or a private CA), set it as `alb-ingress-group`'s
-  `certificate_arn`, point the route at `https_listener_arn`, and set
-  `tls_server_name_to_verify` to the cert's SAN. This was left open rather than done here because
-  it needs a domain and a validation path for a fully internal ALB the repo does not yet have
-  wired anywhere.
+- **`microservices-platform`'s `http_routes` hop is TLS, not plaintext.** It targets
+  `alb-controller-ingress-group`'s `https_listener_arn`, not `http_listener_arn`:
+  `microservices/alb-ingress-group` carries `certificate_arn` from a `microservices/acm`
+  instance (DNS-validated through `settings.microservices.hosted_zone_id`, the account's public
+  delegated zone -- validation only needs a public DNS record, not a reachable endpoint, so the
+  internal-scheme ALB still carries a publicly-issued certificate), and the route's
+  `tls_server_name_to_verify` names that same certificate's domain.
 
 ## Tests
 

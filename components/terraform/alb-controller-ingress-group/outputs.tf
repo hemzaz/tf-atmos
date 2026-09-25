@@ -29,8 +29,8 @@ output "load_balancer_zone_id" {
 }
 
 output "http_listener_arn" {
-  description = "ARN of the ALB's HTTP (80) listener"
-  value       = local.enabled ? data.aws_lb_listener.http[0].arn : null
+  description = "ARN of the ALB's HTTP (80) listener; null when certificate_arn is set (HTTPS replaces it, it is never opened alongside TLS)"
+  value       = local.enabled && !local.tls_enabled ? data.aws_lb_listener.http[0].arn : null
 }
 
 output "https_listener_arn" {

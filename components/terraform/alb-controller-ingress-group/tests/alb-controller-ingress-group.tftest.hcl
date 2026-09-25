@@ -134,6 +134,11 @@ run "listen_ports_default_to_http_only" {
     condition     = length(data.aws_lb_listener.https) == 0 && output.https_listener_arn == null
     error_message = "No HTTPS listener lookup without certificate_arn."
   }
+
+  assert {
+    condition     = length(data.aws_lb_listener.http) == 1
+    error_message = "Without certificate_arn, the HTTP listener lookup exists (it is the only listener)."
+  }
 }
 
 run "https_listener_when_certificate_arn_is_set" {
@@ -144,8 +149,8 @@ run "https_listener_when_certificate_arn_is_set" {
   }
 
   assert {
-    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/listen-ports"] == jsonencode([{ HTTP = 80 }, { HTTPS = 443 }])
-    error_message = "certificate_arn adds an HTTPS (443) listener alongside HTTP."
+    condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/listen-ports"] == jsonencode([{ HTTPS = 443 }])
+    error_message = "certificate_arn replaces the HTTP (80) listener with HTTPS (443); it never opens both."
   }
 
   assert {
@@ -156,6 +161,29 @@ run "https_listener_when_certificate_arn_is_set" {
   assert {
     condition     = length(data.aws_lb_listener.https) == 1
     error_message = "certificate_arn adds the HTTPS listener lookup."
+  }
+
+  assert {
+    condition     = length(data.aws_lb_listener.http) == 0 && output.http_listener_arn == null
+    error_message = "certificate_arn removes the HTTP listener lookup: no plaintext listener stays reachable once TLS is on."
+  }
+}
+
+run "certificate_arn_admits_no_port_80_ingress_rule" {
+  command = plan
+
+  variables {
+    certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+  }
+
+  assert {
+    condition     = length([for r in aws_vpc_security_group_ingress_rule.admitted : r if r.from_port == 80]) == 0
+    error_message = "Port 80 must not be admitted on the frontend security group once certificate_arn is set: there is no HTTP listener left for it to reach."
+  }
+
+  assert {
+    condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.admitted : r.from_port == 443])
+    error_message = "With certificate_arn set, every admitted ingress rule is on port 443 (HTTPS only)."
   }
 }
 
@@ -178,7 +206,7 @@ run "security_group_admits_only_the_given_security_groups_never_a_cidr" {
   }
 }
 
-run "two_admitted_security_groups_and_tls_creates_four_ingress_rules" {
+run "two_admitted_security_groups_and_tls_creates_two_ingress_rules" {
   command = plan
 
   variables {
@@ -187,8 +215,8 @@ run "two_admitted_security_groups_and_tls_creates_four_ingress_rules" {
   }
 
   assert {
-    condition     = length(aws_vpc_security_group_ingress_rule.admitted) == 4
-    error_message = "2 security groups x 2 ports (HTTP+HTTPS) = 4 ingress rules."
+    condition     = length(aws_vpc_security_group_ingress_rule.admitted) == 2
+    error_message = "2 security groups x 1 port (HTTPS only, certificate_arn replaces HTTP rather than adding to it) = 2 ingress rules."
   }
 }
 
@@ -222,6 +250,26 @@ run "rejects_an_invalid_group_name" {
   expect_failures = [var.group_name]
 }
 
+run "rejects_an_empty_ingress_class_name" {
+  command = plan
+
+  variables {
+    ingress_class_name = ""
+  }
+
+  expect_failures = [var.ingress_class_name]
+}
+
+run "rejects_an_invalid_ingress_class_name" {
+  command = plan
+
+  variables {
+    ingress_class_name = "Not Valid!"
+  }
+
+  expect_failures = [var.ingress_class_name]
+}
+
 run "outputs_are_wired_to_the_load_balancer_lookup" {
   # data.aws_lb/data.aws_lb_listener depend_on the Ingress by design (the
   # ALB does not exist until the controller creates it), so their values are
@@ -246,8 +294,8 @@ run "outputs_are_wired_to_the_load_balancer_lookup" {
   }
 
   assert {
-    condition     = length(data.aws_lb_listener.http) == 1 && length(data.aws_lb_listener.https) == 1
-    error_message = "Both listener lookups exist when certificate_arn is set."
+    condition     = length(data.aws_lb_listener.http) == 0 && length(data.aws_lb_listener.https) == 1
+    error_message = "Only the HTTPS listener lookup exists when certificate_arn is set; the HTTP one is not (no plaintext listener to look up)."
   }
 }
 
