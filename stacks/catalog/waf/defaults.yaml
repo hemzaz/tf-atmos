@@ -1,0 +1,29 @@
+---
+##################################################
+# Catalog Configuration for the WAF component
+##################################################
+# One AWS WAFv2 web ACL per instance, modelled on Cloud Posse's aws-waf (see
+# components/terraform/waf/README.md). Instances inherit this base and set
+# `name`, `scope`, `association_resource_arns` (REGIONAL only) and their
+# rule lists.
+#
+# scope = CLOUDFRONT requires the instance itself to set `region: us-east-1`
+# (an AWS requirement for CloudFront web ACLs) and to leave `kms_key_arn`
+# unset, since a KMS key in this stack's usual region cannot encrypt a
+# us-east-1 log group.
+
+components:
+  terraform:
+    waf/defaults:
+      metadata:
+        component: waf
+        type: abstract
+      vars:
+        enabled: true
+        default_action: "allow"
+        cloudwatch_metrics_enabled: true
+        sampled_requests_enabled: true
+        enable_logging: true
+        log_group_retention_days: 90
+        tags:
+          Component: "WAF"
