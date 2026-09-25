@@ -14,6 +14,25 @@ variable "environment" {
   default     = "dev"
 }
 
+# Cloud Posse null-label style (terraform-null-label: id = ...-name): every
+# named resource in this component is "<tags.Environment>-<name>-<suffix>"
+# rather than "<tags.Environment>-<suffix>" alone. Two instances of this
+# component run in every real stack (monitoring/main, monitoring/data); before
+# this variable existed they both named resources from Environment alone and
+# collided on the second apply (SNS topic, dashboards and alarms all
+# ResourceAlreadyExists). Set a distinct value per instance (e.g. "main",
+# "data").
+variable "name" {
+  type        = string
+  description = "Per-instance name, combined with tags.Environment to build every resource name (<Environment>-<name>-<suffix>). Co-located instances of this component must use distinct values."
+  default     = "monitoring"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.name))
+    error_message = "name must be non-empty, lowercase alphanumeric characters and hyphens, and must not start or end with a hyphen."
+  }
+}
+
 # Dashboard Configuration Variables
 variable "create_infrastructure_dashboard" {
   type        = bool
@@ -75,8 +94,13 @@ variable "log_groups" {
 
 variable "kms_key_id" {
   type        = string
-  description = "KMS key ID for log encryption"
+  description = "KMS key ARN (kms/main's key_arn) encrypting CloudWatch log groups (aws_cloudwatch_log_group.main) and the alarm SNS topic (aws_sns_topic.alarms). Its key policy must let cloudwatch.amazonaws.com publish to encrypted topics (kms allow_cloudwatch_alarms). Null leaves both unencrypted."
   default     = null
+
+  validation {
+    condition     = var.kms_key_id == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.kms_key_id))
+    error_message = "kms_key_id must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>), or null."
+  }
 }
 
 variable "create_dashboard" {

@@ -24,7 +24,7 @@ data "aws_caller_identity" "current" {}
 resource "aws_cloudwatch_dashboard" "infrastructure" {
   count = var.create_infrastructure_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-infrastructure-overview"
+  dashboard_name = "${local.name_prefix}-infrastructure-overview"
 
   dashboard_body = templatefile(
     "${path.module}/templates/infrastructure-dashboard.json.tpl",
@@ -36,7 +36,7 @@ resource "aws_cloudwatch_dashboard" "infrastructure" {
 resource "aws_cloudwatch_dashboard" "security" {
   count = var.create_security_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-security-monitoring"
+  dashboard_name = "${local.name_prefix}-security-monitoring"
 
   dashboard_body = templatefile(
     "${path.module}/templates/security-dashboard.json.tpl",
@@ -48,7 +48,7 @@ resource "aws_cloudwatch_dashboard" "security" {
 resource "aws_cloudwatch_dashboard" "cost" {
   count = var.create_cost_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-cost-optimization"
+  dashboard_name = "${local.name_prefix}-cost-optimization"
 
   dashboard_body = templatefile(
     "${path.module}/templates/cost-dashboard.json.tpl",
@@ -60,7 +60,7 @@ resource "aws_cloudwatch_dashboard" "cost" {
 resource "aws_cloudwatch_dashboard" "performance" {
   count = var.create_performance_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-performance-metrics"
+  dashboard_name = "${local.name_prefix}-performance-metrics"
 
   dashboard_body = templatefile(
     "${path.module}/templates/performance-dashboard.json.tpl",
@@ -72,7 +72,7 @@ resource "aws_cloudwatch_dashboard" "performance" {
 resource "aws_cloudwatch_dashboard" "application" {
   count = var.create_application_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-application-metrics"
+  dashboard_name = "${local.name_prefix}-application-metrics"
 
   dashboard_body = templatefile(
     "${path.module}/templates/application-dashboard.json.tpl",
@@ -84,7 +84,7 @@ resource "aws_cloudwatch_dashboard" "application" {
 resource "aws_cloudwatch_dashboard" "backend" {
   count = var.create_backend_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-backend-services"
+  dashboard_name = "${local.name_prefix}-backend-services"
 
   dashboard_body = templatefile(
     "${path.module}/templates/backend-dashboard.json.tpl",
@@ -96,7 +96,7 @@ resource "aws_cloudwatch_dashboard" "backend" {
 resource "aws_cloudwatch_dashboard" "certificates" {
   count = var.create_certificate_dashboard ? 1 : 0
 
-  dashboard_name = "${var.environment}-certificate-monitoring"
+  dashboard_name = "${local.name_prefix}-certificate-monitoring"
 
   dashboard_body = local.certificate_dashboard_body
 }
@@ -105,7 +105,7 @@ resource "aws_cloudwatch_dashboard" "certificates" {
 resource "aws_cloudwatch_dashboard" "custom" {
   for_each = var.custom_dashboards
 
-  dashboard_name = "${var.environment}-${each.key}"
+  dashboard_name = "${local.name_prefix}-${each.key}"
   dashboard_body = each.value.body
 }
 

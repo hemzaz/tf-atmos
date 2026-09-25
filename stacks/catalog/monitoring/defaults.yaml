@@ -36,3 +36,12 @@ components:
       dependencies:
         components:
           - component: vpc/main
+
+# kms_key_id (encrypting aws_sns_topic.alarms with kms/main; kms/main already
+# allows CloudWatch alarms to publish to encrypted topics via
+# allow_cloudwatch_alarms in catalog/kms/defaults.yaml) is set per real-stack
+# instance below, not here: this abstract is also inherited by 5
+# stacks/catalog/templates/*.yaml (off limits for this change) whose
+# monitoring instances declare their own dependencies.components without
+# kms/main, so a shared kms_key_id here would reference an undeclared
+# dependency for them.
