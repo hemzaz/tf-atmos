@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -93,6 +93,24 @@ run "logs_and_events_are_scoped_to_this_account_and_region" {
     error_message = "EventBridge may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region, conditioned on the SNS encryption context alone (no aws:Source* keys, which break EventBridge delivery)."
   }
 
+  # Rules and bus DLQs delivering to SSE-KMS SQS queues carry no bus or topic
+  # encryption context, so the source keys scope the grant: a rule target's
+  # aws:SourceArn is the rule, a bus DLQ's is the bus.
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Principal.Service == "events.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Action) == toset(["kms:GenerateDataKey", "kms:Decrypt"])
+      && toset(keys(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Condition)) == toset(["StringEquals", "ArnLike"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Condition.StringEquals == { "aws:SourceAccount" = "123456789012" }
+      && toset(keys(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Condition.ArnLike)) == toset(["aws:SourceArn"])
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Condition.ArnLike["aws:SourceArn"]) == toset([
+        "arn:aws:events:eu-west-2:123456789012:rule/*",
+        "arn:aws:events:eu-west-2:123456789012:event-bus/*",
+      ])
+    )
+    error_message = "EventBridge may use kms:GenerateDataKey/kms:Decrypt for SQS queues only from this account's rules (targets) and buses (bus DLQs) in this region (aws:SourceAccount and aws:SourceArn), and under no other condition."
+  }
+
   assert {
     condition = (
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Principal.Service == "cloudwatch.amazonaws.com"
@@ -121,6 +139,31 @@ run "cloudwatch_alarms_flag_is_independent" {
   assert {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]) == 1
     error_message = "allow_cloudwatch_alarms adds the CloudWatch alarms SNS statement."
+  }
+}
+
+run "sns_delivers_to_queues_only_for_this_accounts_topics" {
+  command = plan
+
+  variables {
+    allow_sns = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowSNS"]).Principal.Service == "sns.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowSNS"]).Action) == toset(["kms:Decrypt", "kms:GenerateDataKey*"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowSNS"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "aws:SourceArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+      }
+    )
+    error_message = "SNS may use kms:Decrypt/kms:GenerateDataKey* only for this account's topics in this region (aws:SourceAccount and aws:SourceArn)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if startswith(try(s.Sid, ""), "AllowEventBridge") || startswith(try(s.Sid, ""), "AllowCloudWatch")]) == 0
+    error_message = "allow_sns must not grant other services anything."
   }
 }
 

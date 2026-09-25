@@ -21,6 +21,7 @@ module "kms" {
   allow_eventbridge               = var.allow_eventbridge
   allow_cloudwatch_alarms         = var.allow_cloudwatch_alarms
   allow_cloudtrail                = var.allow_cloudtrail
+  allow_sns                       = var.allow_sns
   alias_name                      = var.alias_name
   create_alias                    = var.create_alias
   replica_regions                 = var.replica_regions

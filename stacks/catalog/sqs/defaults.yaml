@@ -1,0 +1,32 @@
+---
+##################################################
+# Catalog Configuration for Amazon SQS
+##################################################
+# One queue per instance, with an optional dead-letter queue (the Cloud Posse
+# aws-sqs-queue model). Instances inherit this base and set `name` and, as
+# needed, `dlq_enabled` and `iam_policy` (for example to let an EventBridge
+# rule or an SNS topic send to the queue).
+
+components:
+  terraform:
+    sqs/defaults:
+      metadata:
+        component: sqs
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults) whose key
+        # policy lets EventBridge rules (AllowEventBridgeSQSQueues, under
+        # allow_eventbridge) and SNS topics (AllowSNS, under allow_sns) of this
+        # account deliver to queues encrypted with it.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        dlq_enabled: false
+        iam_policy_limit_to_current_account: true
+        tags:
+          Component: "SQS"
