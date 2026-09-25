@@ -1,7 +1,20 @@
 ---
+# Stage defaults for every vpc instance in the stage. They go on the abstract
+# vpc/defaults, never on a bare `vpc` key: a bare key is a real, enabled
+# component instance in any stack that does not also declare `vpc` abstract,
+# so it would plan a stray VPC. The metadata makes vpc/defaults abstract even
+# in a stack that never imports catalog/vpc/defaults.
+#
+# Precedence, lowest first: this mixin, then catalog/vpc/defaults (imported
+# later, through mixins/region/*, so it overrides keys it also sets), then the
+# instance's own vars. An instance's explicit value - its CIDR in particular -
+# always wins; these only fill keys nothing later sets.
 components:
   terraform:
-    vpc:
+    vpc/defaults:
+      metadata:
+        component: vpc
+        type: abstract
       vars:
         ipv4_primary_cidr_block: 10.9.0.0/18
         vpc_flow_logs_enabled: false

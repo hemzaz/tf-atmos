@@ -41,6 +41,9 @@ Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 - The network ACLs allow inbound from `0.0.0.0/0` on the ephemeral ports (stateless
   return traffic) and, on public subnets, 80/443 for internet-facing load balancers.
   This is the documented exception to the "no inbound /0" rule; see `network-acls.tf`.
+- `stacks/mixins/stage/*` set stage defaults on the abstract `vpc/defaults`, never on a
+  bare `vpc` key (which would create a real, stray instance). An instance's own values
+  win over the stage defaults.
 
 ## Usage
 
