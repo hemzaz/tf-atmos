@@ -185,6 +185,11 @@ variable "access_logs_prefix" {
   type        = string
   description = "Key prefix for delivered access log objects"
   default     = ""
+
+  validation {
+    condition     = !strcontains(var.access_logs_prefix, "AWSLogs") && can(regex("^[A-Za-z0-9/_.-]*$", var.access_logs_prefix))
+    error_message = "access_logs_prefix must not contain \"AWSLogs\" (AWS reserves that path segment for the delivered log objects and rejects a prefix containing it) and may only contain letters, digits, and /_.- ."
+  }
 }
 
 variable "access_logs_force_destroy" {
