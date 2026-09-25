@@ -289,11 +289,14 @@ resource "helm_release" "releases" {
   atomic  = lookup(each.value, "atomic", true)
   wait    = lookup(each.value, "wait", true)
 
-  # Wait for addons and service accounts to be created
+  # Wait for addons and service accounts to be created, and for the load
+  # balancer controller, whose webhook must admit any Service these charts
+  # create (see addons.tf).
   depends_on = [
     time_sleep.wait_for_addons,
     aws_iam_role_policy_attachment.service_account,
-    time_sleep.wait_for_cluster
+    time_sleep.wait_for_cluster,
+    helm_release.aws_load_balancer_controller,
   ]
 }
 

@@ -14,7 +14,7 @@ output "addon_role_arns" {
 }
 
 output "addon_release_statuses" {
-  value       = { for k, v in helm_release.addon : k => v.status }
+  value       = { for k, v in merge(helm_release.aws_load_balancer_controller, helm_release.addon) : k => v.status }
   description = "Helm release statuses of the enable_* add-ons, keyed <cluster key>.<add-on>"
 }
 
