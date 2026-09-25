@@ -64,12 +64,6 @@ variable "create_application_dashboard" {
   default     = false
 }
 
-variable "create_backend_dashboard" {
-  type        = bool
-  description = "Create backend services dashboard"
-  default     = false
-}
-
 variable "create_certificate_dashboard" {
   type        = bool
   description = "Create certificate monitoring dashboard"
@@ -104,8 +98,22 @@ variable "kms_key_id" {
 }
 
 variable "create_dashboard" {
-  type        = bool
-  description = "Whether to create CloudWatch dashboard"
+  type = bool
+  # Legacy alias of create_infrastructure_dashboard, not a second dashboard:
+  # it used to gate a separate Terraform resource
+  # (aws_cloudwatch_dashboard.main, "-overview") that duplicated
+  # aws_cloudwatch_dashboard.infrastructure (create_infrastructure_dashboard,
+  # true by default) - every real stack instance set create_dashboard: true,
+  # so each apply managed the same dashboard content twice, under two
+  # different CloudWatch names. There is now a single resource
+  # (aws_cloudwatch_dashboard.infrastructure); either this or
+  # create_infrastructure_dashboard being true creates it. Kept as a distinct
+  # variable (not merged into create_infrastructure_dashboard) because
+  # stacks/catalog/templates/*.yaml and every real-stack
+  # monitoring/main+monitoring/data instance still set it; removing it would
+  # turn those into undeclared-variable warnings for a file this change is
+  # not allowed to edit.
+  description = "Legacy alias of create_infrastructure_dashboard: either being true creates the infrastructure overview dashboard. Kept only so existing stack configs that set it remain valid."
   default     = false
 }
 

@@ -15,7 +15,7 @@ variables {
     ManagedBy   = "Terraform"
   }
   enable_backend_monitoring = false
-  create_dashboard          = true
+  create_infrastructure_dashboard = true
   create_sns_topic          = true
   rds_instances             = ["db-1"]
   ecs_clusters              = ["ecs-1"]
@@ -50,8 +50,8 @@ run "main_instance_names" {
   }
 
   assert {
-    condition     = aws_cloudwatch_dashboard.main[0].dashboard_name == "test-main-overview"
-    error_message = "The overview dashboard is named <Environment>-<name>-overview."
+    condition     = aws_cloudwatch_dashboard.infrastructure[0].dashboard_name == "test-main-infrastructure-overview"
+    error_message = "The infrastructure dashboard is named <Environment>-<name>-infrastructure-overview."
   }
 
   assert {
@@ -78,12 +78,12 @@ run "data_instance_names_are_disjoint_from_main" {
   }
 
   assert {
-    condition     = aws_cloudwatch_dashboard.main[0].dashboard_name == "test-data-overview"
-    error_message = "The overview dashboard is named <Environment>-<name>-overview."
+    condition     = aws_cloudwatch_dashboard.infrastructure[0].dashboard_name == "test-data-infrastructure-overview"
+    error_message = "The infrastructure dashboard is named <Environment>-<name>-infrastructure-overview."
   }
 
   assert {
-    condition     = aws_cloudwatch_dashboard.main[0].dashboard_name != "test-main-overview"
+    condition     = aws_cloudwatch_dashboard.infrastructure[0].dashboard_name != "test-main-infrastructure-overview"
     error_message = "monitoring/main and monitoring/data must not name the dashboard the same."
   }
 
@@ -93,7 +93,7 @@ run "data_instance_names_are_disjoint_from_main" {
   }
 }
 
-run "overview_dashboard_has_real_dimensions" {
+run "infrastructure_dashboard_has_real_dimensions" {
   command = plan
 
   variables {
@@ -105,7 +105,7 @@ run "overview_dashboard_has_real_dimensions" {
   # depending on widget order.
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "db-1"],
     )
     error_message = "The RDS widget must plot CPUUtilization by DBInstanceIdentifier for each configured instance."
@@ -113,7 +113,7 @@ run "overview_dashboard_has_real_dimensions" {
 
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["AWS/ECS", "CPUUtilization", "ClusterName", "ecs-1"],
     )
     error_message = "The ECS widget must plot CPUUtilization by ClusterName."
@@ -121,7 +121,7 @@ run "overview_dashboard_has_real_dimensions" {
 
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["AWS/Lambda", "Invocations", "FunctionName", "fn-1"],
     )
     error_message = "The Lambda widget must plot Invocations by FunctionName."
@@ -129,7 +129,7 @@ run "overview_dashboard_has_real_dimensions" {
 
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "app/lb-1/0123456789abcdef"],
     )
     error_message = "The Load Balancer widget must plot RequestCount by the LoadBalancer dimension; a value already in the short app/<name>/<id> form passes through unchanged."
@@ -137,7 +137,7 @@ run "overview_dashboard_has_real_dimensions" {
 
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "app/lb-2/fedcba9876543210"],
     )
     error_message = "The LoadBalancer dimension strips a full ELB ARN down to its app/<name>/<id> suffix."
@@ -145,7 +145,7 @@ run "overview_dashboard_has_real_dimensions" {
 
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["AWS/ElastiCache", "CPUUtilization", "CacheClusterId", "cache-1"],
     )
     error_message = "The ElastiCache widget must plot CPUUtilization by CacheClusterId."
@@ -153,7 +153,7 @@ run "overview_dashboard_has_real_dimensions" {
 
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["ContainerInsights", "node_cpu_utilization", "ClusterName", "eks-1"],
     )
     error_message = "The EKS widget must plot node_cpu_utilization by ClusterName."
@@ -161,19 +161,19 @@ run "overview_dashboard_has_real_dimensions" {
 
   assert {
     condition = contains(
-      concat([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
       ["AWS/ApiGateway", "Count", "ApiName", "api-1", "Stage", "prod"],
     )
     error_message = "The API Gateway widget must plot Count by ApiName + Stage."
   }
 
   assert {
-    condition     = alltrue([for w in jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets : try(length(w.properties.metrics), 1) > 0])
+    condition     = alltrue([for w in jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets : try(length(w.properties.metrics), 1) > 0])
     error_message = "No metric widget renders with an empty metrics list; a widget backed by an empty resource list is dropped entirely."
   }
 }
 
-run "overview_dashboard_drops_widgets_with_no_resources" {
+run "infrastructure_dashboard_drops_widgets_with_no_resources" {
   command = plan
 
   variables {
@@ -187,8 +187,51 @@ run "overview_dashboard_drops_widgets_with_no_resources" {
   # Only elasticache/eks/api-gateway widgets plus the header text widget
   # should remain: 4 widgets, not 8.
   assert {
-    condition     = length(jsondecode(aws_cloudwatch_dashboard.main[0].dashboard_body).widgets) == 4
+    condition     = length(jsondecode(aws_cloudwatch_dashboard.infrastructure[0].dashboard_body).widgets) == 4
     error_message = "Widgets whose backing list is empty (rds/ecs/lambda/load balancers here) are dropped, not rendered empty."
+  }
+}
+
+run "performance_and_application_dashboards_have_real_dimensions" {
+  command = plan
+
+  variables {
+    name                          = "main"
+    create_performance_dashboard  = true
+    create_application_dashboard  = true
+    api_gateway_stages            = ["prod"]
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.performance[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/RDS", "ReadLatency", "DBInstanceIdentifier", "db-1"],
+    )
+    error_message = "The performance dashboard's RDS latency widget must plot ReadLatency by DBInstanceIdentifier, not one metric averaged over the account."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.performance[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/lb-1/0123456789abcdef"],
+    )
+    error_message = "The performance dashboard's ALB widget must plot TargetResponseTime by LoadBalancer."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.application[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/Lambda", "Errors", "FunctionName", "fn-1"],
+    )
+    error_message = "The application dashboard's Lambda widget must plot Errors by FunctionName."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.application[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/ApiGateway", "5XXError", "ApiName", "api-1", "Stage", "prod"],
+    )
+    error_message = "The application dashboard's API Gateway widget must plot 5XXError by ApiName + Stage."
   }
 }
 
@@ -202,5 +245,126 @@ run "sns_topic_is_kms_encrypted" {
   assert {
     condition     = aws_sns_topic.alarms[0].kms_master_key_id == "arn:aws:kms:eu-west-2:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
     error_message = "The alarm SNS topic must be encrypted with kms_key_id."
+  }
+}
+
+run "metrics_tf_names_use_name_prefix_and_are_disjoint" {
+  command = plan
+
+  variables {
+    name = "main"
+    metric_alarms = {
+      queue-depth = {
+        namespace           = "AWS/SQS"
+        metric_name         = "ApproximateNumberOfMessagesVisible"
+        dimensions          = { QueueName = "q1" }
+        comparison_operator = "GreaterThanThreshold"
+        threshold           = 100
+        statistic           = "Average"
+      }
+    }
+    metric_dashboards = {
+      queue = {
+        widgets = [
+          { title = "Queue depth", metrics = [{ namespace = "AWS/SQS", metric = "ApproximateNumberOfMessagesVisible", dimensions = { QueueName = "q1" } }] },
+        ]
+      }
+    }
+    log_insights_queries = {
+      slow-requests = {
+        log_group_names = ["/aws/lambda/test"]
+        query           = "fields @timestamp | limit 10"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.metric["queue-depth"].alarm_name == "test-main-queue-depth"
+    error_message = "metric_alarms are named <Environment>-<name>-<key>, not <Environment>-<key> alone (metrics.tf must use local.name_prefix, or monitoring/main and monitoring/data would collide on the same metric_alarms key)."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_dashboard.metric["queue"].dashboard_name == "test-main-queue"
+    error_message = "metric_dashboards are named <Environment>-<name>-<key>."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_query_definition.this["slow-requests"].name == "test-main/slow-requests"
+    error_message = "log_insights_queries are named <Environment>-<name>/<key>."
+  }
+}
+
+run "metrics_tf_names_disjoint_between_main_and_data" {
+  command = plan
+
+  variables {
+    name = "data"
+    metric_alarms = {
+      queue-depth = {
+        namespace           = "AWS/SQS"
+        metric_name         = "ApproximateNumberOfMessagesVisible"
+        dimensions          = { QueueName = "q1" }
+        comparison_operator = "GreaterThanThreshold"
+        threshold           = 100
+        statistic           = "Average"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.metric["queue-depth"].alarm_name != "test-main-queue-depth"
+    error_message = "monitoring/main and monitoring/data must not name a metric_alarms entry the same, or the second apply fails with ResourceAlreadyExists."
+  }
+}
+
+run "every_dashboard_name_is_unique_with_all_flags_on" {
+  command = plan
+
+  variables {
+    name                             = "main"
+    create_infrastructure_dashboard  = true
+    create_security_dashboard        = true
+    create_cost_dashboard            = true
+    create_performance_dashboard     = true
+    create_application_dashboard     = true
+    create_certificate_dashboard     = true
+    enable_backend_monitoring        = true
+    enable_certificate_monitoring    = true
+    certificate_arns                 = ["arn:aws:acm:eu-west-2:123456789012:certificate/abc"]
+    certificate_names                = ["example"]
+  }
+
+  # dashboards.tf's aws_cloudwatch_dashboard.backend was removed as a
+  # duplicate of main.tf's aws_cloudwatch_dashboard.backend_services (both
+  # named "${local.name_prefix}-backend-services"); only the latter address
+  # exists now, so referencing it here also guards against the duplicate
+  # resource being reintroduced (a re-added "backend" resource would not be
+  # part of this list and the collision would show up as a duplicate name).
+  assert {
+    condition = length(distinct(concat(
+      [aws_cloudwatch_dashboard.infrastructure[0].dashboard_name],
+      [aws_cloudwatch_dashboard.security[0].dashboard_name],
+      [aws_cloudwatch_dashboard.cost[0].dashboard_name],
+      [aws_cloudwatch_dashboard.performance[0].dashboard_name],
+      [aws_cloudwatch_dashboard.application[0].dashboard_name],
+      [aws_cloudwatch_dashboard.certificate_monitoring[0].dashboard_name],
+      [aws_cloudwatch_dashboard.certificates[0].dashboard_name],
+      [aws_cloudwatch_dashboard.backend_services[0].dashboard_name],
+    ))) == 8
+    error_message = "Every dashboard this instance creates must have a unique name; a duplicate means two Terraform resources manage the same CloudWatch dashboard."
+  }
+
+  assert {
+    condition = alltrue([
+      for n in [
+        aws_cloudwatch_dashboard.infrastructure[0].dashboard_name,
+        aws_cloudwatch_dashboard.security[0].dashboard_name,
+        aws_cloudwatch_dashboard.cost[0].dashboard_name,
+        aws_cloudwatch_dashboard.performance[0].dashboard_name,
+        aws_cloudwatch_dashboard.application[0].dashboard_name,
+        aws_cloudwatch_dashboard.backend_services[0].dashboard_name,
+      ] : startswith(n, "test-main-")
+    ])
+    error_message = "Every dashboard name must start with <Environment>-<name>."
   }
 }

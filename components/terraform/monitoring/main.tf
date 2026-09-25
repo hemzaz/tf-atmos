@@ -8,102 +8,16 @@ resource "aws_cloudwatch_log_group" "main" {
   tags = { Name = "${local.name_prefix}/${each.key}" }
 }
 
-locals {
-  # Real per-resource dimensions instead of one metric averaged over the
-  # whole account, built the same way local.certificate_dashboard_body is
-  # below: a widget is emitted only when its backing list is non-empty, so
-  # the JSON never renders an always-empty "metrics": [] panel (#166).
-  #
-  # load_balancers accepts either the short "app/<name>/<id>" dimension value
-  # or a full ELB ARN; the LoadBalancer dimension always wants the former.
-  overview_widget_specs = [
-    {
-      title   = "RDS CPU Utilization"
-      metrics = [for db in var.rds_instances : ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", db]]
-    },
-    {
-      title   = "ECS CPU Utilization"
-      metrics = [for c in var.ecs_clusters : ["AWS/ECS", "CPUUtilization", "ClusterName", c]]
-    },
-    {
-      title   = "Lambda Invocations"
-      metrics = [for fn in var.lambda_functions : ["AWS/Lambda", "Invocations", "FunctionName", fn]]
-    },
-    {
-      title = "Load Balancer Requests"
-      metrics = [
-        for lb in var.load_balancers : ["AWS/ApplicationELB", "RequestCount", "LoadBalancer",
-          # The LoadBalancer dimension wants "app/<name>/<id>", not a full ARN
-          # ("arn:...:loadbalancer/app/<name>/<id>"). Strip everything up to
-          # and including "loadbalancer/" when a full ARN is given; a value
-          # already in the short form passes through unchanged.
-          length(split("loadbalancer/", lb)) > 1 ? element(split("loadbalancer/", lb), 1) : lb
-        ]
-      ]
-    },
-    {
-      title   = "ElastiCache CPU Utilization"
-      metrics = [for c in var.elasticache_clusters : ["AWS/ElastiCache", "CPUUtilization", "CacheClusterId", c]]
-    },
-    {
-      title   = "EKS Node CPU Utilization"
-      metrics = var.eks_cluster_name != "" ? [["ContainerInsights", "node_cpu_utilization", "ClusterName", var.eks_cluster_name]] : []
-    },
-    {
-      title = "API Gateway Requests"
-      metrics = var.api_gateway_name != "" ? [
-        for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]
-      ] : []
-    },
-  ]
-
-  # Widgets whose resource list is empty are dropped rather than rendered.
-  overview_active_widgets = [for w in local.overview_widget_specs : w if length(w.metrics) > 0]
-
-  overview_dashboard_body = jsonencode({
-    widgets = concat([
-      {
-        type   = "text"
-        x      = 0
-        y      = 0
-        width  = 24
-        height = 1
-        properties = {
-          markdown = "# ${var.tags["Environment"]} ${var.name} overview"
-        }
-      }
-      ], [
-      for idx, w in local.overview_active_widgets : {
-        type   = "metric"
-        x      = (idx % 2) * 12
-        y      = 1 + floor(idx / 2) * 6
-        width  = 12
-        height = 6
-        properties = {
-          metrics = w.metrics
-          view    = "timeSeries"
-          stacked = false
-          region  = var.region
-          title   = w.title
-          period  = 300
-        }
-      }
-    ])
-  })
-}
-
-# Named "-overview" (not "-infrastructure-overview") so it never collides
-# with dashboards.tf's aws_cloudwatch_dashboard.infrastructure
-# (create_infrastructure_dashboard), which owns that name; both default on,
-# so before this rename enabling both flags produced two Terraform resources
-# managing the exact same CloudWatch dashboard name.
-resource "aws_cloudwatch_dashboard" "main" {
-  count = var.create_dashboard ? 1 : 0
-
-  dashboard_name = "${local.name_prefix}-overview"
-  dashboard_body = local.overview_dashboard_body
-}
-
+# The per-resource-dimensioned overview widget spec that used to live here
+# (aws_cloudwatch_dashboard.main, "-overview") now lives in dashboards.tf as
+# local.dashboard_specs.infrastructure, rendering
+# aws_cloudwatch_dashboard.infrastructure (create_dashboard ||
+# create_infrastructure_dashboard). Before that merge, the two flags each
+# drove a separate Terraform resource - and every real stack instance set
+# create_dashboard: true, with create_infrastructure_dashboard also true by
+# default - so every instance created two near-identical overview
+# dashboards under two different names. See variables.tf for why
+# create_dashboard is kept as a distinct variable rather than removed.
 resource "aws_sns_topic" "alarms" {
   count = var.create_sns_topic ? 1 : 0
 

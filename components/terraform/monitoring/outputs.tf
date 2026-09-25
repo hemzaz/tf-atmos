@@ -9,8 +9,8 @@ output "log_group_arns" {
 }
 
 output "dashboard_name" {
-  value       = var.create_dashboard ? aws_cloudwatch_dashboard.main[0].dashboard_name : null
-  description = "Name of the CloudWatch dashboard"
+  value       = var.create_dashboard || var.create_infrastructure_dashboard ? aws_cloudwatch_dashboard.infrastructure[0].dashboard_name : null
+  description = "Name of the infrastructure overview CloudWatch dashboard (see also dashboard_names/dashboard_urls in dashboards.tf for the other dashboards)"
 }
 
 output "sns_topic_arn" {
