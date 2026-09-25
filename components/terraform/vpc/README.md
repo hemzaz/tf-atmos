@@ -1,10 +1,14 @@
 # vpc
 
 Creates an `aws_vpc` with private/public/database subnets (keyed by CIDR, one per AZ
-from `var.azs`), an internet gateway, NAT gateway(s) (`single` or `one_per_az`), route
-tables, network ACLs, default security group rules, optional VPN/Transit Gateway
-attachment and RAM sharing, an optional IAM role for VPC management, and optional VPC
-Flow Logs to CloudWatch (own KMS key) with security alarms.
+from `var.availability_zones`), an internet gateway, NAT gateway(s) (`single` or
+`one_per_az`), route tables, network ACLs, default security group rules, optional
+VPN/Transit Gateway attachment and RAM sharing, and optional VPC Flow Logs to CloudWatch
+(own KMS key) with security alarms. Like Cloud Posse's `aws-vpc` it creates no IAM role.
+
+Input names follow `cloudposse-terraform-components/aws-vpc` wherever an input maps one
+to one. Inputs with no Cloud Posse counterpart (`nat_gateway_strategy`,
+`enable_vpn_gateway`, `flow_logs_retention_days`, the flow-logs alarms, ...) keep their names.
 
 ## Deployed as
 
@@ -16,7 +20,10 @@ inherit abstract `vpc/defaults`; a plain abstract `vpc` catalog entry is not a r
 
 | Input | Notes |
 |---|---|
-| `vpc_cidr`, `azs`, `private_subnets`, `public_subnets` | required |
+| `ipv4_primary_cidr_block`, `availability_zones`, `private_subnets`, `public_subnets` | required |
+| `nat_gateway_enabled` | default true (Cloud Posse name) |
+| `map_public_ip_on_launch` | default **false**, unlike Cloud Posse's true: instances in public subnets get a public IP only when a stack opts in |
+| `vpc_flow_logs_enabled`, `vpc_flow_logs_traffic_type`, `vpc_flow_logs_max_aggregation_interval`, `vpc_flow_logs_format` | Cloud Posse names; logs go to CloudWatch, not Cloud Posse's S3 bucket component |
 | `tags` / `nat_gateway_strategy` | tags must include a non-empty `Environment`; strategy is `single` or `one_per_az` |
 | `manage_default_security_group` | default true: strips every rule from the VPC's AWS-created default SG (one way) |
 | `public_subnets_additional_tags`, `private_subnets_additional_tags` | extra tags on every public / private subnet (Cloud Posse's names), e.g. the `kubernetes.io/role/elb` and `kubernetes.io/cluster/<name>` tags EKS load balancers discover subnets by; `Name` is refused |
@@ -31,6 +38,12 @@ Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 - `database_subnet_ids` is exported; there is no elasticache subnet tier (no
   variable, no resource), so cache components use `private_subnet_ids`.
 - `tags` without a non-empty `Environment` value fails validation before any plan.
+- The network ACLs allow inbound from `0.0.0.0/0` on the ephemeral ports (stateless
+  return traffic) and, on public subnets, 80/443 for internet-facing load balancers.
+  This is the documented exception to the "no inbound /0" rule; see `network-acls.tf`.
+- `stacks/mixins/stage/*` set stage defaults on the abstract `vpc/defaults`, never on a
+  bare `vpc` key (which would create a real, stray instance). An instance's own values
+  win over the stage defaults.
 
 ## Usage
 
@@ -41,5 +54,5 @@ atmos terraform plan vpc/services -s fnx-prod-production
 
 ## Tests
 
-`tests/subnet_tags.tftest.hcl` runs against a mock provider:
+`tests/*.tftest.hcl` run against a mock provider:
 `terraform init -backend=false && terraform test`.

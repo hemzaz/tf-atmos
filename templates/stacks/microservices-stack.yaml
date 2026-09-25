@@ -52,7 +52,7 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "{{ .settings.environment.vpc_cidr }}"
+        ipv4_primary_cidr_block: "{{ .settings.environment.vpc_cidr }}"
         public_subnets:
           - "10.40.1.0/24"
           - "10.40.2.0/24"
@@ -62,7 +62,7 @@ components:
           - "10.40.32.0/19"
           - "10.40.64.0/19"
           - "10.40.96.0/19"
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
     # Additional security group for the worker nodes

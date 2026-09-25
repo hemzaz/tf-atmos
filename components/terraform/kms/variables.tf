@@ -170,6 +170,12 @@ variable "allow_sns" {
   default     = false
 }
 
+variable "allow_s3" {
+  type        = bool
+  description = "Let S3 (s3.amazonaws.com) send event notifications to SQS queues and SNS topics encrypted with the key (kms:Decrypt, kms:GenerateDataKey*), scoped by aws:SourceAccount to this account and aws:SourceArn to S3 buckets"
+  default     = false
+}
+
 variable "allow_cloudwatch_alarms" {
   type        = bool
   description = "Let CloudWatch alarms (cloudwatch.amazonaws.com) publish to this account's SNS topics encrypted with the key (kms:GenerateDataKey*, kms:Decrypt), scoped by aws:SourceAccount and kms:EncryptionContext:aws:sns:topicArn"

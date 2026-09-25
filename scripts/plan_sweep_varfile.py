@@ -129,6 +129,11 @@ SYNTH = [
     (r'^(cloudwatch_)?log_group_name$', '/aws/example/log-group'),
     (r'^eks_cluster_managed_security_group_id$', 'sg-0123456789abcdef1'),
     (r'^member_clusters$',            ['example-cache-0001-001', 'example-cache-0002-001']),
+    # ...its EventBridge targets: the sqs queues and the welcome-email Lambda.
+    (r'^queue_arn$',                  'arn:aws:sqs:eu-west-2:123456789012:example-queue'),
+    (r'^function_arn$',               'arn:aws:lambda:eu-west-2:123456789012:function:example-function'),
+    # ...and the DLQ alarms' queue names.
+    (r'^(dead_letter_)?queue_name$',  'example-queue'),
     # ...and the cloudtrail component's log group for its CIS metric filters.
     (r'^cloudtrail_logs_log_group_name$', '/aws/cloudtrail/example-cloudtrail'),
 ]

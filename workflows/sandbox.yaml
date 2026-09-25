@@ -3,7 +3,7 @@
 # This is the only gate in the repo that actually executes Terraform. Everything
 # else - fmt, validate, tflint, checkov, trivy - is static analysis, and static
 # analysis has already been shown to miss real defects here (a NAT gateway that
-# was created despite enable_nat_gateway = false, and an IAM coalesce() that
+# was created despite nat_gateway_enabled = false, and an IAM coalesce() that
 # would have failed every plan).
 #
 # Requires a container runtime (Docker or Podman). No AWS account, no

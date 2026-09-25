@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -164,6 +164,31 @@ run "sns_delivers_to_queues_only_for_this_accounts_topics" {
   assert {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if startswith(try(s.Sid, ""), "AllowEventBridge") || startswith(try(s.Sid, ""), "AllowCloudWatch")]) == 0
     error_message = "allow_sns must not grant other services anything."
+  }
+}
+
+run "s3_notifies_encrypted_queues_only_for_this_accounts_buckets" {
+  command = plan
+
+  variables {
+    allow_s3 = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowS3"]).Principal.Service == "s3.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowS3"]).Action) == toset(["kms:Decrypt", "kms:GenerateDataKey*"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowS3"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "aws:SourceArn" = "arn:aws:s3:::*" }
+      }
+    )
+    error_message = "S3 may use kms:Decrypt/kms:GenerateDataKey* only for this account's buckets (aws:SourceAccount and aws:SourceArn)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowSNS", "AllowCloudWatchLogs", "AllowCloudTrailEncryptLogs"], try(s.Sid, "")) || startswith(try(s.Sid, ""), "AllowEventBridge")]) == 0
+    error_message = "allow_s3 must not grant other services anything."
   }
 }
 

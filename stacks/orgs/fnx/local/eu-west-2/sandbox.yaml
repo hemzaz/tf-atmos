@@ -17,7 +17,6 @@
 # assumed. They are limits of the emulator, not defects in the components:
 #   - CreateNetworkAcl is unimplemented          -> manage_network_acls: false
 #   - no VPC default SG to adopt                 -> manage_default_security_group: false
-#   - TagInstanceProfile is unimplemented        -> create_vpc_iam_role: false
 #   - CreateDBSubnetGroup is unimplemented, so the rds component cannot be
 #     exercised here. It IS exercised against LocalEmu - see localemu.yaml -
 #     and that lane is what caught the overlapping backup and maintenance
@@ -89,7 +88,7 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.90.0.0/16"
+        ipv4_primary_cidr_block: "10.90.0.0/16"
         private_subnets:
           - "10.90.1.0/24"
           - "10.90.2.0/24"
@@ -103,17 +102,14 @@ components:
           - "10.90.202.0/24"
         # NAT gateways and flow logs are off: they cost time to converge and add
         # nothing to what the sandbox is proving.
-        enable_nat_gateway: false
-        enable_flow_logs: false
+        nat_gateway_enabled: false
+        vpc_flow_logs_enabled: false
         # Floci does not implement CreateNetworkAcl, and does not pre-create a
         # VPC default security group for aws_default_security_group to adopt.
         # These two are emulator gaps, not defects in the component - both stay
         # true everywhere else.
         manage_network_acls: false
         manage_default_security_group: false
-        # Floci implements IAM roles and instance profiles but not
-        # TagInstanceProfile, so the profile is created and then fails on tagging.
-        create_vpc_iam_role: false
 
     kms/main:
       metadata:
