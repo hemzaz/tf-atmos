@@ -325,42 +325,18 @@ components:
           Layer: "api"
           Service: "api-gateway"
 
-    # =========================================================================
-    # API CUSTOM DOMAIN
-    # =========================================================================
-
-      dependencies:
-        components:
-          - component: serverless-api/cognito
-    serverless-api/api-domain:
-      metadata:
-        component: apigateway-domain
-        type: real
-      vars:
+        # Custom domain: apigateway's built-in domain support (regional
+        # domain name + base path mapping + Route53 alias), not a separate
+        # component. Mirrors
+        # cloudposse-terraform-components/aws-api-gateway-rest-api, which
+        # configures its custom domain the same way, directly on the API
+        # Gateway component (domain_name/certificate_arn), with no separate
+        # domain component. security_policy is always "TLS_1_2" and the
+        # endpoint is always REGIONAL (main.tf), matching endpoint_type above.
         domain_name: "api.{{ .vars.app_domain_name }}"
         certificate_arn: !terraform.state serverless-api/acm .certificate_arns.api
-
-        # Base path mapping
-        base_path_mappings:
-          - api_id: !terraform.state serverless-api/apigateway .api_id
-            stage_name: "{{ .settings.context.environment }}"
-            base_path: ""
-
-        # Security policy
-        security_policy: "TLS_1_2"
-
-        # Endpoint configuration
-        endpoint_configuration:
-          types:
-            - "REGIONAL"
-
-        # Route53 record
-        create_route53_record: true
+        base_path: ""
         zone_id: "{{ .vars.route53_zone_id }}"
-
-        tags:
-          Layer: "api"
-          Service: "custom-domain"
 
     # =========================================================================
     # SSL/TLS CERTIFICATES
@@ -368,7 +344,7 @@ components:
 
       dependencies:
         components:
-          - component: serverless-api/apigateway
+          - component: serverless-api/cognito
           - component: serverless-api/acm
     serverless-api/acm:
       metadata:
@@ -996,7 +972,6 @@ components:
       dependencies:
         components:
           - component: serverless-api/cloudfront
-          - component: serverless-api/api-domain
     serverless-api/monitoring:
       metadata:
         component: monitoring

@@ -7,6 +7,11 @@ geo-block + AWS managed rules), caching/throttling, a dashboard, and 4xx/5xx/lat
 
 Real instances `apigateway/main` and `apigateway/data` in all 3 stacks; the catalog's
 `apigateway_domain`/`apigateway_http`/`apigateway_rest` entries are abstract.
+`stacks/catalog/templates/serverless-api.yaml`'s `serverless-api/apigateway` sets
+`domain_name`/`certificate_arn`/`base_path`/`zone_id` directly on this component too,
+the same way `apigateway/main` does in the 3 real stacks: no separate domain component
+(mirrors `cloudposse-terraform-components/aws-api-gateway-rest-api`, which configures
+its custom domain the same way).
 
 ## Inputs / Outputs
 
@@ -17,6 +22,7 @@ Real instances `apigateway/main` and `apigateway/data` in all 3 stacks; the cata
 | `api_methods` | addressed by `resource_path` (`/` is the API root), never by resource id |
 | `api_integrations` | exactly one per method, same `resource_path` + `http_method`; `uri` required unless `type` is `MOCK` |
 | `domain_name`, `certificate_arn` | both required together for the custom domain |
+| `base_path` | default `null` (root mapping, same as `""`); the mapping is the custom domain's only path when unset |
 | `zone_id` | required for the Route53 alias record |
 | `enable_waf` / `tracing_enabled` | both default false; prod opts in per instance. X-Ray bills per trace, so dev/staging stay off |
 | `waf_common_rule_set_action`, `waf_known_bad_inputs_action` | `block` (default) or `count`, one per AWS managed rule group, so either can be soaked without relaxing the other |
@@ -38,8 +44,10 @@ Real instances `apigateway/main` and `apigateway/data` in all 3 stacks; the cata
 
 ## Tests
 
-`tests/http_api.tftest.hcl` (CORS, stage throttling, VPC link) runs against a
-mock provider: `terraform init -backend=false && terraform test`.
+`tests/http_api.tftest.hcl` (CORS, stage throttling, VPC link) and
+`tests/custom_domain.tftest.hcl` (REST custom domain: TLS_1_2/REGIONAL, root
+base path, Route53 alias, and the two "one input without the other" skip
+cases) run against a mock provider: `terraform init -backend=false && terraform test`.
 
 ## Usage
 
