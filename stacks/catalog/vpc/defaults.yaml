@@ -14,10 +14,10 @@ components:
           description: "Manages VPC with subnets, NAT gateways, and routing"
           category: "networking"
       vars:
-        vpc_cidr: "10.0.0.0/16"
+        ipv4_primary_cidr_block: "10.0.0.0/16"
 
         # Availability zones - will be overridden per region
-        azs:
+        availability_zones:
           - "{{ .vars.region }}a"
           - "{{ .vars.region }}b"
           - "{{ .vars.region }}c"
@@ -34,7 +34,7 @@ components:
         database_subnets: []
 
         # NAT Gateway configuration
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "single"  # "single" or "one_per_az"
 
         # VPN/Transit Gateway (disabled by default)
@@ -44,10 +44,7 @@ components:
         ram_resource_share_arn: ""
 
         # VPC Flow Logs
-        enable_flow_logs: true
-
-        # Security settings
-        create_vpc_iam_role: true
+        vpc_flow_logs_enabled: true
 
         # Default security group configuration
         default_sg_ingress_self_only: true

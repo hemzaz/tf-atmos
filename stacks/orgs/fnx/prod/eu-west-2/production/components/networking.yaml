@@ -22,8 +22,8 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.20.0.0/16"
-        azs:
+        ipv4_primary_cidr_block: "10.20.0.0/16"
+        availability_zones:
           - eu-west-2a
           - eu-west-2b
           - eu-west-2c
@@ -47,13 +47,24 @@ components:
           - "10.20.203.0/24"
 
         # Elasticache subnets
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
         # DNS settings
         default_sg_ingress_self_only: true
         default_sg_egress_self_only: false
         default_sg_allow_all_outbound: true
+
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/main, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
 
         tags:
           NetworkTier: "primary"
@@ -63,15 +74,15 @@ components:
     # ==========================================================================
     # Services VPC - Dedicated Backend Services (High Availability)
     # ==========================================================================
-        enable_flow_logs: true
+        vpc_flow_logs_enabled: true
     vpc/services:
       metadata:
         component: vpc
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.21.0.0/16"
-        azs:
+        ipv4_primary_cidr_block: "10.21.0.0/16"
+        availability_zones:
           - eu-west-2a
           - eu-west-2b
           - eu-west-2c
@@ -92,10 +103,21 @@ components:
           - "10.21.203.0/24"
 
         # One NAT per AZ for HA
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
-        enable_flow_logs: true
+        vpc_flow_logs_enabled: true
+
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/data, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
 
         tags:
           NetworkTier: "services"

@@ -130,7 +130,7 @@ atmos emulator down aws -s fnx-local-sandbox
 ```
 
 This is the only gate that **executes** Terraform rather than analyzing it, and it has caught
-bugs every static check missed — a NAT gateway created despite `enable_nat_gateway = false`, a
+bugs every static check missed — a NAT gateway created despite `nat_gateway_enabled = false`, a
 `coalesce()` that would have failed every `iam` plan, and a missing `database_subnet_ids` output
 that would have broken all three `rds` instances at plan time.
 
@@ -138,9 +138,9 @@ Two things to know:
 
 - The `local-aws` identity is deliberately **not** `default: true`, so no real environment can be
   pointed at the emulator by accident. Pass `--identity local-aws` explicitly.
-- The emulator does not implement everything. `CreateNetworkAcl` and `TagInstanceProfile` are
-  missing, which is why the sandbox stack sets `manage_network_acls: false` and
-  `create_vpc_iam_role: false`. `CreateDBSubnetGroup` is missing too, so `rds` cannot run against
+- The emulator does not implement everything. `CreateNetworkAcl` is missing, and there is
+  no VPC default security group to adopt, which is why the sandbox stack sets
+  `manage_network_acls: false` and `manage_default_security_group: false`. `CreateDBSubnetGroup` is missing too, so `rds` cannot run against
   Floci — it is exercised against LocalEmu instead, in the `fnx-local-localemu` lane, which is
   what caught the overlapping backup and maintenance windows that would have failed
   `CreateDBInstance` in staging and prod. Components with an instance in neither lane are covered

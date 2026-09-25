@@ -17,7 +17,7 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.0.0.0/16"
+        ipv4_primary_cidr_block: "10.0.0.0/16"
         private_subnets:
           - "10.0.1.0/24"
           - "10.0.2.0/24"
@@ -27,14 +27,25 @@ components:
           - "10.0.102.0/24"
           - "10.0.103.0/24"
 
-        enable_flow_logs: "{{ .settings.environment.enable_vpc_flow_logs }}"
+        vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
+
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/main, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
     vpc/services:
       metadata:
         component: vpc
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.1.0.0/16"
+        ipv4_primary_cidr_block: "10.1.0.0/16"
         private_subnets:
           - "10.1.1.0/24"
           - "10.1.2.0/24"
@@ -43,9 +54,20 @@ components:
           - "10.1.101.0/24"
           - "10.1.102.0/24"
           - "10.1.103.0/24"
+        vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
+
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/data, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
 
     # Network resources for main VPC
-        enable_flow_logs: "{{ .settings.environment.enable_vpc_flow_logs }}"
     network/main:
       metadata:
         component: dns

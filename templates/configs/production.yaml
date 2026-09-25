@@ -60,7 +60,7 @@ components:
     vpc/defaults:
       vars:
         nat_gateway_strategy: "one_per_az"
-        enable_flow_logs: true
+        vpc_flow_logs_enabled: true
         flow_logs_retention_days: 90
         enable_flow_logs_alarms: true
 

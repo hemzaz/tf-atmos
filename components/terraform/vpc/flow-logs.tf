@@ -3,7 +3,7 @@
 
 # KMS key for CloudWatch Logs encryption
 resource "aws_kms_key" "flow_logs" {
-  count = var.enable_flow_logs ? 1 : 0
+  count = var.vpc_flow_logs_enabled ? 1 : 0
 
   description             = "KMS key for VPC Flow Logs encryption"
   deletion_window_in_days = 30
@@ -52,7 +52,7 @@ resource "aws_kms_key" "flow_logs" {
 }
 
 resource "aws_kms_alias" "flow_logs" {
-  count = var.enable_flow_logs ? 1 : 0
+  count = var.vpc_flow_logs_enabled ? 1 : 0
 
   name          = "alias/${var.tags["Environment"]}-vpc-flow-logs"
   target_key_id = aws_kms_key.flow_logs[0].key_id
@@ -60,7 +60,7 @@ resource "aws_kms_alias" "flow_logs" {
 
 # CloudWatch Log Group for Flow Logs
 resource "aws_cloudwatch_log_group" "flow_logs" {
-  count = var.enable_flow_logs ? 1 : 0
+  count = var.vpc_flow_logs_enabled ? 1 : 0
 
   name              = "/aws/vpc/flowlogs/${aws_vpc.main.id}"
   retention_in_days = var.flow_logs_retention_days
@@ -78,7 +78,7 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 
 # IAM Role for Flow Logs
 resource "aws_iam_role" "flow_logs" {
-  count = var.enable_flow_logs ? 1 : 0
+  count = var.vpc_flow_logs_enabled ? 1 : 0
 
   name = "${var.tags["Environment"]}-vpc-flow-logs-role"
 
@@ -106,7 +106,7 @@ resource "aws_iam_role" "flow_logs" {
 
 # IAM Policy for Flow Logs to write to CloudWatch
 resource "aws_iam_role_policy" "flow_logs" {
-  count = var.enable_flow_logs ? 1 : 0
+  count = var.vpc_flow_logs_enabled ? 1 : 0
 
   name = "${var.tags["Environment"]}-vpc-flow-logs-policy"
   role = aws_iam_role.flow_logs[0].id
@@ -131,17 +131,17 @@ resource "aws_iam_role_policy" "flow_logs" {
 
 # VPC Flow Log resource
 resource "aws_flow_log" "main" {
-  count = var.enable_flow_logs ? 1 : 0
+  count = var.vpc_flow_logs_enabled ? 1 : 0
 
   vpc_id                   = aws_vpc.main.id
-  traffic_type             = "ALL"
+  traffic_type             = var.vpc_flow_logs_traffic_type
   iam_role_arn             = aws_iam_role.flow_logs[0].arn
   log_destination_type     = "cloud-watch-logs"
   log_destination          = aws_cloudwatch_log_group.flow_logs[0].arn
-  max_aggregation_interval = var.flow_logs_aggregation_interval
+  max_aggregation_interval = var.vpc_flow_logs_max_aggregation_interval
 
   # Custom log format for detailed analysis
-  log_format = var.flow_logs_custom_format != null ? var.flow_logs_custom_format : "$${version} $${account-id} $${interface-id} $${srcaddr} $${dstaddr} $${srcport} $${dstport} $${protocol} $${packets} $${bytes} $${start} $${end} $${action} $${log-status}"
+  log_format = var.vpc_flow_logs_format != null ? var.vpc_flow_logs_format : "$${version} $${account-id} $${interface-id} $${srcaddr} $${dstaddr} $${srcport} $${dstport} $${protocol} $${packets} $${bytes} $${start} $${end} $${action} $${log-status}"
 
   tags = merge(
     var.tags,
@@ -157,7 +157,7 @@ resource "aws_flow_log" "main" {
 
 # 1. SSH access attempts
 resource "aws_cloudwatch_log_metric_filter" "ssh_access" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   name           = "${var.tags["Environment"]}-ssh-access-attempts"
   log_group_name = aws_cloudwatch_log_group.flow_logs[0].name
@@ -173,7 +173,7 @@ resource "aws_cloudwatch_log_metric_filter" "ssh_access" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "ssh_access" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   alarm_name          = "${var.tags["Environment"]}-high-ssh-access-attempts"
   comparison_operator = "GreaterThanThreshold"
@@ -190,7 +190,7 @@ resource "aws_cloudwatch_metric_alarm" "ssh_access" {
 
 # 2. RDP access attempts
 resource "aws_cloudwatch_log_metric_filter" "rdp_access" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   name           = "${var.tags["Environment"]}-rdp-access-attempts"
   log_group_name = aws_cloudwatch_log_group.flow_logs[0].name
@@ -206,7 +206,7 @@ resource "aws_cloudwatch_log_metric_filter" "rdp_access" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "rdp_access" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   alarm_name          = "${var.tags["Environment"]}-high-rdp-access-attempts"
   comparison_operator = "GreaterThanThreshold"
@@ -223,7 +223,7 @@ resource "aws_cloudwatch_metric_alarm" "rdp_access" {
 
 # 3. Rejected connection attempts
 resource "aws_cloudwatch_log_metric_filter" "rejected_connections" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   name           = "${var.tags["Environment"]}-rejected-connections"
   log_group_name = aws_cloudwatch_log_group.flow_logs[0].name
@@ -239,7 +239,7 @@ resource "aws_cloudwatch_log_metric_filter" "rejected_connections" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "rejected_connections" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   alarm_name          = "${var.tags["Environment"]}-high-rejected-connections"
   comparison_operator = "GreaterThanThreshold"
@@ -256,7 +256,7 @@ resource "aws_cloudwatch_metric_alarm" "rejected_connections" {
 
 # 4. Large data transfers (potential data exfiltration)
 resource "aws_cloudwatch_log_metric_filter" "large_data_transfer" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   name           = "${var.tags["Environment"]}-large-data-transfers"
   log_group_name = aws_cloudwatch_log_group.flow_logs[0].name
@@ -272,7 +272,7 @@ resource "aws_cloudwatch_log_metric_filter" "large_data_transfer" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "large_data_transfer" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   alarm_name          = "${var.tags["Environment"]}-large-data-transfers"
   comparison_operator = "GreaterThanThreshold"
@@ -289,7 +289,7 @@ resource "aws_cloudwatch_metric_alarm" "large_data_transfer" {
 
 # 5. Port scanning detection (many different ports from same source)
 resource "aws_cloudwatch_log_metric_filter" "port_scan" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   name           = "${var.tags["Environment"]}-port-scan-activity"
   log_group_name = aws_cloudwatch_log_group.flow_logs[0].name
@@ -306,7 +306,7 @@ resource "aws_cloudwatch_log_metric_filter" "port_scan" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "port_scan" {
-  count = var.enable_flow_logs && var.enable_flow_logs_alarms ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
   alarm_name          = "${var.tags["Environment"]}-port-scan-detected"
   comparison_operator = "GreaterThanThreshold"
@@ -327,7 +327,7 @@ resource "aws_s3_bucket" "flow_logs" {
   #checkov:skip=CKV2_AWS_61:False positive, aws_s3_bucket_lifecycle_configuration.flow_logs covers this bucket
   #checkov:skip=CKV_AWS_21:False positive, aws_s3_bucket_versioning.flow_logs covers this bucket
   #checkov:skip=CKV_AWS_145:False positive, aws_s3_bucket_server_side_encryption_configuration.flow_logs uses the flow logs CMK
-  count = var.enable_flow_logs && var.flow_logs_s3_backup ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
   bucket = "${var.tags["Environment"]}-vpc-flow-logs-${data.aws_caller_identity.current.account_id}"
 
@@ -341,7 +341,7 @@ resource "aws_s3_bucket" "flow_logs" {
 }
 
 resource "aws_s3_bucket_versioning" "flow_logs" {
-  count = var.enable_flow_logs && var.flow_logs_s3_backup ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
   bucket = aws_s3_bucket.flow_logs[0].id
 
@@ -351,7 +351,7 @@ resource "aws_s3_bucket_versioning" "flow_logs" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
-  count = var.enable_flow_logs && var.flow_logs_s3_backup ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
   bucket = aws_s3_bucket.flow_logs[0].id
 
@@ -364,7 +364,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
 }
 
 resource "aws_s3_bucket_public_access_block" "flow_logs" {
-  count = var.enable_flow_logs && var.flow_logs_s3_backup ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
   bucket = aws_s3_bucket.flow_logs[0].id
 
@@ -375,7 +375,7 @@ resource "aws_s3_bucket_public_access_block" "flow_logs" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "flow_logs" {
-  count = var.enable_flow_logs && var.flow_logs_s3_backup ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
   bucket = aws_s3_bucket.flow_logs[0].id
 
