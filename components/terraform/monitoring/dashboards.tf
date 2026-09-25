@@ -128,6 +128,81 @@ locals {
         },
       ]
     }
+
+    # aws_cloudwatch_dashboard.backend_services (main.tf, enable_backend_monitoring).
+    # Replaces templates/backend-dashboard.json.tpl (removed): that template
+    # hardcoded ApiName/ClusterName to var.api_gateway_name/var.eks_cluster_name
+    # with no "" guard, and its Lambda/RDS/ALB/ElastiCache widgets rendered an
+    # empty metrics list on every real stack because none of them wired
+    # lambda_functions/rds_instances/load_balancers/elasticache_clusters into
+    # this component.
+    backend = {
+      heading = "backend services"
+      widgets = [
+        {
+          title = "API Gateway Requests, Latency & Errors"
+          metrics = var.api_gateway_name != "" ? concat(
+            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Count", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "Latency", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "4XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
+            [for stage in var.api_gateway_stages : ["AWS/ApiGateway", "5XXError", "ApiName", var.api_gateway_name, "Stage", stage]],
+          ) : []
+        },
+        {
+          title = "Lambda Duration, Errors & Throttles"
+          metrics = concat(
+            [for fn in var.lambda_functions : ["AWS/Lambda", "Duration", "FunctionName", fn]],
+            [for fn in var.lambda_functions : ["AWS/Lambda", "Errors", "FunctionName", fn]],
+            [for fn in var.lambda_functions : ["AWS/Lambda", "Throttles", "FunctionName", fn]],
+          )
+        },
+        {
+          title = "RDS CPU, Connections & Latency"
+          metrics = concat(
+            [for db in var.rds_instances : ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", db]],
+            [for db in var.rds_instances : ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", db]],
+            [for db in var.rds_instances : ["AWS/RDS", "ReadLatency", "DBInstanceIdentifier", db]],
+            [for db in var.rds_instances : ["AWS/RDS", "WriteLatency", "DBInstanceIdentifier", db]],
+          )
+        },
+        {
+          title = "EKS Backend Services (Container Insights)"
+          metrics = var.eks_cluster_name != "" ? [
+            ["ContainerInsights", "pod_cpu_utilization", "ClusterName", var.eks_cluster_name, "Namespace", var.backend_services_namespace],
+            ["ContainerInsights", "pod_memory_utilization", "ClusterName", var.eks_cluster_name, "Namespace", var.backend_services_namespace],
+            ["ContainerInsights", "pod_network_rx_bytes", "ClusterName", var.eks_cluster_name, "Namespace", var.backend_services_namespace],
+            ["ContainerInsights", "pod_network_tx_bytes", "ClusterName", var.eks_cluster_name, "Namespace", var.backend_services_namespace],
+          ] : []
+        },
+        {
+          title = "Application Load Balancers"
+          metrics = concat(
+            [for lb in local.load_balancer_ids : ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", lb]],
+            [for lb in local.load_balancer_ids : ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", lb]],
+            [for lb in local.load_balancer_ids : ["AWS/ApplicationELB", "HTTPCode_Target_4XX_Count", "LoadBalancer", lb]],
+            [for lb in local.load_balancer_ids : ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", lb]],
+          )
+        },
+        {
+          title = "ElastiCache Performance"
+          metrics = concat(
+            [for c in var.elasticache_clusters : ["AWS/ElastiCache", "CPUUtilization", "CacheClusterId", c]],
+            [for c in var.elasticache_clusters : ["AWS/ElastiCache", "FreeableMemory", "CacheClusterId", c]],
+            [for c in var.elasticache_clusters : ["AWS/ElastiCache", "CurrConnections", "CacheClusterId", c]],
+            [for c in var.elasticache_clusters : ["AWS/ElastiCache", "Evictions", "CacheClusterId", c]],
+          )
+        },
+        {
+          # BusinessMetrics/<Environment> namespace and <name_prefix>_<key>
+          # metric name match what aws_cloudwatch_log_metric_filter.business_metrics
+          # (main.tf) actually emits - not the fixed user_registrations/
+          # api_calls_per_minute/active_users/error_rate names the removed
+          # template hardcoded, which never matched any real metric.
+          title   = "Business Metrics"
+          metrics = [for k in keys(var.business_metric_filters) : ["BusinessMetrics/${var.tags["Environment"]}", "${local.name_prefix}_${k}"]]
+        },
+      ]
+    }
   }
 
   # Widgets whose resource list is empty are dropped rather than rendered;
@@ -232,14 +307,13 @@ resource "aws_cloudwatch_dashboard" "application" {
   dashboard_body = local.dashboard_bodies["application"]
 }
 
-# Certificate Monitoring Dashboard
-resource "aws_cloudwatch_dashboard" "certificates" {
-  count = var.create_certificate_dashboard ? 1 : 0
-
-  dashboard_name = "${local.name_prefix}-certificate-monitoring"
-
-  dashboard_body = local.certificate_dashboard_body
-}
+# Certificate Monitoring Dashboard: owned solely by
+# aws_cloudwatch_dashboard.certificate_monitoring in main.tf
+# (enable_certificate_monitoring || create_certificate_dashboard). This used
+# to be a second Terraform resource naming a different dashboard
+# ("${local.name_prefix}-certificate-monitoring") from the exact same
+# local.certificate_dashboard_body; create_certificate_dashboard now creates
+# the one certificate_monitoring resource instead. See variables.tf/main.tf.
 
 # Custom Dashboard (user-provided JSON)
 resource "aws_cloudwatch_dashboard" "custom" {
@@ -266,7 +340,7 @@ output "dashboard_urls" {
     performance    = var.create_performance_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.performance[0].dashboard_name}" : null
     application    = var.create_application_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.application[0].dashboard_name}" : null
     backend        = var.enable_backend_monitoring ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.backend_services[0].dashboard_name}" : null
-    certificates   = var.create_certificate_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.certificates[0].dashboard_name}" : null
+    certificates   = var.enable_certificate_monitoring || var.create_certificate_dashboard ? "https://console.aws.amazon.com/cloudwatch/home?region=${var.region}#dashboards:name=${aws_cloudwatch_dashboard.certificate_monitoring[0].dashboard_name}" : null
   }
 }
 
@@ -280,7 +354,7 @@ output "dashboard_names" {
     performance    = var.create_performance_dashboard ? aws_cloudwatch_dashboard.performance[0].dashboard_name : null
     application    = var.create_application_dashboard ? aws_cloudwatch_dashboard.application[0].dashboard_name : null
     backend        = var.enable_backend_monitoring ? aws_cloudwatch_dashboard.backend_services[0].dashboard_name : null
-    certificates   = var.create_certificate_dashboard ? aws_cloudwatch_dashboard.certificates[0].dashboard_name : null
+    certificates   = var.enable_certificate_monitoring || var.create_certificate_dashboard ? aws_cloudwatch_dashboard.certificate_monitoring[0].dashboard_name : null
     custom         = { for k, v in aws_cloudwatch_dashboard.custom : k => v.dashboard_name }
   }
 }

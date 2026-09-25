@@ -14,18 +14,18 @@ variables {
     Tenant      = "fnx"
     ManagedBy   = "Terraform"
   }
-  enable_backend_monitoring = false
+  enable_backend_monitoring       = false
   create_infrastructure_dashboard = true
-  create_sns_topic          = true
-  rds_instances             = ["db-1"]
-  ecs_clusters              = ["ecs-1"]
-  lambda_functions          = ["fn-1"]
-  load_balancers            = ["app/lb-1/0123456789abcdef", "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/lb-2/fedcba9876543210"]
-  elasticache_clusters      = ["cache-1"]
-  eks_cluster_name          = "eks-1"
-  api_gateway_name          = "api-1"
-  api_gateway_stages        = ["prod"]
-  kms_key_id                = "arn:aws:kms:eu-west-2:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
+  create_sns_topic                = true
+  rds_instances                   = ["db-1"]
+  ecs_clusters                    = ["ecs-1"]
+  lambda_functions                = ["fn-1"]
+  load_balancers                  = ["app/lb-1/0123456789abcdef", "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/lb-2/fedcba9876543210"]
+  elasticache_clusters            = ["cache-1"]
+  eks_cluster_name                = "eks-1"
+  api_gateway_name                = "api-1"
+  api_gateway_stages              = ["prod"]
+  kms_key_id                      = "arn:aws:kms:eu-west-2:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
   cpu_alarms = {
     high_cpu = {
       namespace          = "AWS/EC2"
@@ -196,10 +196,10 @@ run "performance_and_application_dashboards_have_real_dimensions" {
   command = plan
 
   variables {
-    name                          = "main"
-    create_performance_dashboard  = true
-    create_application_dashboard  = true
-    api_gateway_stages            = ["prod"]
+    name                         = "main"
+    create_performance_dashboard = true
+    create_application_dashboard = true
+    api_gateway_stages           = ["prod"]
   }
 
   assert {
@@ -245,6 +245,95 @@ run "sns_topic_is_kms_encrypted" {
   assert {
     condition     = aws_sns_topic.alarms[0].kms_master_key_id == "arn:aws:kms:eu-west-2:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
     error_message = "The alarm SNS topic must be encrypted with kms_key_id."
+  }
+}
+
+run "backend_dashboard_has_real_dimensions_and_no_empty_widgets" {
+  command = plan
+
+  variables {
+    name                      = "main"
+    enable_backend_monitoring = true
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "db-1"],
+    )
+    error_message = "The backend dashboard's RDS widget must plot CPUUtilization by DBInstanceIdentifier."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/Lambda", "Duration", "FunctionName", "fn-1"],
+    )
+    error_message = "The backend dashboard's Lambda widget must plot Duration by FunctionName."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/ApiGateway", "Count", "ApiName", "api-1", "Stage", "prod"],
+    )
+    error_message = "The backend dashboard's API Gateway widget must plot Count by ApiName + Stage."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["ContainerInsights", "pod_cpu_utilization", "ClusterName", "eks-1", "Namespace", "backend-services"],
+    )
+    error_message = "The backend dashboard's EKS widget must plot pod_cpu_utilization by ClusterName + Namespace."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "app/lb-1/0123456789abcdef"],
+    )
+    error_message = "The backend dashboard's ALB widget must plot TargetResponseTime by LoadBalancer, stripped down to app/<name>/<id>."
+  }
+
+  assert {
+    condition = contains(
+      concat([for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets : try(w.properties.metrics, [])]...),
+      ["AWS/ElastiCache", "CPUUtilization", "CacheClusterId", "cache-1"],
+    )
+    error_message = "The backend dashboard's ElastiCache widget must plot CPUUtilization by CacheClusterId."
+  }
+
+  assert {
+    condition     = alltrue([for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets : try(length(w.properties.metrics), 1) > 0])
+    error_message = "No backend dashboard widget renders with an empty metrics list; a widget backed by an empty resource list is dropped entirely."
+  }
+}
+
+run "backend_alb_alarm_names_and_dimensions_use_load_balancer_ids" {
+  command = plan
+
+  variables {
+    name                      = "main"
+    enable_backend_monitoring = true
+  }
+
+  # load_balancers includes both the short "app/<name>/<id>" form and a full
+  # ELB ARN; both alarms must dimension on the short form and sanitize "/" out
+  # of the alarm name.
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.alb_response_time["app/lb-2/fedcba9876543210"].dimensions["LoadBalancer"] == "app/lb-2/fedcba9876543210"
+    error_message = "alb_response_time must dimension on the app/<name>/<id> suffix, even when load_balancers is given a full ARN."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.alb_response_time["app/lb-2/fedcba9876543210"].alarm_name == "test-main-alb-app-lb-2-fedcba9876543210-response-time"
+    error_message = "alb_response_time's alarm_name must sanitize the \"/\" characters CloudWatch alarm names reject."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.alb_unhealthy_hosts["app/lb-1/0123456789abcdef"].alarm_name == "test-main-alb-app-lb-1-0123456789abcdef-unhealthy-hosts"
+    error_message = "alb_unhealthy_hosts's alarm_name must sanitize the \"/\" characters CloudWatch alarm names reject."
   }
 }
 
@@ -321,24 +410,25 @@ run "every_dashboard_name_is_unique_with_all_flags_on" {
   command = plan
 
   variables {
-    name                             = "main"
-    create_infrastructure_dashboard  = true
-    create_security_dashboard        = true
-    create_cost_dashboard            = true
-    create_performance_dashboard     = true
-    create_application_dashboard     = true
-    create_certificate_dashboard     = true
-    enable_backend_monitoring        = true
-    enable_certificate_monitoring    = true
-    certificate_arns                 = ["arn:aws:acm:eu-west-2:123456789012:certificate/abc"]
-    certificate_names                = ["example"]
+    name                            = "main"
+    create_infrastructure_dashboard = true
+    create_security_dashboard       = true
+    create_cost_dashboard           = true
+    create_performance_dashboard    = true
+    create_application_dashboard    = true
+    create_certificate_dashboard    = true
+    enable_backend_monitoring       = true
+    enable_certificate_monitoring   = true
+    certificate_arns                = ["arn:aws:acm:eu-west-2:123456789012:certificate/abc"]
+    certificate_names               = ["example"]
   }
 
-  # dashboards.tf's aws_cloudwatch_dashboard.backend was removed as a
-  # duplicate of main.tf's aws_cloudwatch_dashboard.backend_services (both
-  # named "${local.name_prefix}-backend-services"); only the latter address
-  # exists now, so referencing it here also guards against the duplicate
-  # resource being reintroduced (a re-added "backend" resource would not be
+  # dashboards.tf's aws_cloudwatch_dashboard.backend and .certificates were
+  # both removed as duplicates of main.tf's aws_cloudwatch_dashboard.backend_services
+  # and .certificate_monitoring (each pair used to name the exact same
+  # dashboard); only the latter address of each pair exists now, so
+  # referencing it here also guards against a duplicate resource being
+  # reintroduced (a re-added "backend"/"certificates" resource would not be
   # part of this list and the collision would show up as a duplicate name).
   assert {
     condition = length(distinct(concat(
@@ -348,9 +438,8 @@ run "every_dashboard_name_is_unique_with_all_flags_on" {
       [aws_cloudwatch_dashboard.performance[0].dashboard_name],
       [aws_cloudwatch_dashboard.application[0].dashboard_name],
       [aws_cloudwatch_dashboard.certificate_monitoring[0].dashboard_name],
-      [aws_cloudwatch_dashboard.certificates[0].dashboard_name],
       [aws_cloudwatch_dashboard.backend_services[0].dashboard_name],
-    ))) == 8
+    ))) == 7
     error_message = "Every dashboard this instance creates must have a unique name; a duplicate means two Terraform resources manage the same CloudWatch dashboard."
   }
 

@@ -152,3 +152,8 @@ output "dashboard_arn" {
   description = "ARN of the CloudWatch dashboard for the API Gateway"
   value       = var.create_dashboard ? aws_cloudwatch_dashboard.api_dashboard[0].dashboard_arn : null
 }
+
+output "api_name" {
+  description = "Name of the API Gateway (the ApiName dimension monitoring's AWS/ApiGateway CloudWatch widgets and alarms are keyed on for a REST API)"
+  value       = var.api_name
+}

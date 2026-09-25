@@ -308,9 +308,14 @@ locals {
   })
 }
 
-# Certificate monitoring dashboard (renamed from "certificates", which collided with dashboards.tf)
+# Certificate monitoring dashboard. Sole owner of the certificate dashboard:
+# dashboards.tf used to have a second resource, aws_cloudwatch_dashboard.certificates
+# (create_certificate_dashboard), rendering this same local.certificate_dashboard_body
+# under a different name ("<name_prefix>-certificate-monitoring") - the same
+# duplicate-resource pattern as the infrastructure and backend-services
+# dashboards. That resource has been removed; either flag now creates this one.
 resource "aws_cloudwatch_dashboard" "certificate_monitoring" {
-  count = var.enable_certificate_monitoring ? 1 : 0
+  count = var.enable_certificate_monitoring || var.create_certificate_dashboard ? 1 : 0
 
   dashboard_name = "${local.name_prefix}-certificates"
   dashboard_body = local.certificate_dashboard_body
@@ -345,24 +350,23 @@ resource "aws_cloudwatch_metric_alarm" "certificate_expiry" {
   tags = { Name = "${local.name_prefix}-cert-expiry-${each.key}" }
 }
 
-# Backend Services Monitoring Dashboard
+# Backend Services Monitoring Dashboard. Built the same jsonencode way as
+# infrastructure/performance/application (local.dashboard_bodies["backend"],
+# dashboards.tf): every widget plots real per-resource dimensions, and a
+# widget whose backing list is empty is dropped instead of rendering
+# "metrics": []. This used to be templates/backend-dashboard.json.tpl, whose
+# ApiName/ClusterName dimensions were hardcoded to "" and whose Lambda/RDS/
+# ALB/ElastiCache widgets rendered an empty metrics list on every real stack
+# (none of them wired lambda_functions/rds_instances/load_balancers/
+# elasticache_clusters into this component) - metrics-variables.tf:67 treats
+# that shape as invalid for metric_dashboards. The fake log/X-Ray widgets and
+# the Billing/TrustedAdvisor row (already covered by the cost dashboard) were
+# dropped rather than reproduced. The template file has been removed.
 resource "aws_cloudwatch_dashboard" "backend_services" {
   count = var.enable_backend_monitoring ? 1 : 0
 
   dashboard_name = "${local.name_prefix}-backend-services"
-  dashboard_body = templatefile(
-    "${path.module}/templates/backend-dashboard.json.tpl",
-    {
-      region               = var.region
-      environment          = var.tags["Environment"]
-      cluster_name         = var.eks_cluster_name
-      api_gateway_name     = var.api_gateway_name
-      lambda_functions     = var.lambda_functions
-      rds_instances        = var.rds_instances
-      elasticache_clusters = var.elasticache_clusters
-      load_balancers       = var.load_balancers
-    }
-  )
+  dashboard_body = local.dashboard_bodies["backend"]
 }
 
 # API Gateway Performance Alarms
@@ -408,7 +412,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
 
 # EKS Cluster Monitoring
 resource "aws_cloudwatch_metric_alarm" "eks_cluster_failed_requests" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-eks-cluster-failed-requests"
   comparison_operator = "GreaterThanThreshold"
@@ -428,7 +432,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_cluster_failed_requests" {
 
 # Container Insights for EKS
 resource "aws_cloudwatch_metric_alarm" "eks_pod_cpu_utilization" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-eks-pod-cpu-high"
   comparison_operator = "GreaterThanThreshold"
@@ -448,7 +452,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_cpu_utilization" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "eks_pod_memory_utilization" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-eks-pod-memory-high"
   comparison_operator = "GreaterThanThreshold"
@@ -467,11 +471,17 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_memory_utilization" {
   }
 }
 
-# Application Load Balancer Monitoring
+# Application Load Balancer Monitoring. Iterates local.load_balancer_ids
+# (dashboards.tf), not var.load_balancers directly: that variable accepts
+# either the short "app/<name>/<id>" form or a full ELB ARN, and the
+# LoadBalancer dimension always wants the former - a full ARN would dimension
+# the alarm on a value CloudWatch never publishes. alarm_name sanitizes the
+# "/" characters the short form still contains, which CloudWatch alarm names
+# reject.
 resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
-  for_each = var.enable_backend_monitoring ? toset(var.load_balancers) : []
+  for_each = var.enable_backend_monitoring ? toset(local.load_balancer_ids) : []
 
-  alarm_name          = "${local.name_prefix}-alb-${each.value}-response-time"
+  alarm_name          = "${local.name_prefix}-alb-${replace(each.value, "/", "-")}-response-time"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "2"
   metric_name         = "TargetResponseTime"
@@ -488,9 +498,9 @@ resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
-  for_each = var.enable_backend_monitoring ? toset(var.load_balancers) : []
+  for_each = var.enable_backend_monitoring ? toset(local.load_balancer_ids) : []
 
-  alarm_name          = "${local.name_prefix}-alb-${each.value}-unhealthy-hosts"
+  alarm_name          = "${local.name_prefix}-alb-${replace(each.value, "/", "-")}-unhealthy-hosts"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
   metric_name         = "UnHealthyHostCount"

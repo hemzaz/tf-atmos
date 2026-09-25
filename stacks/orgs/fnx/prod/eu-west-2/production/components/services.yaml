@@ -405,6 +405,17 @@ components:
           - "prod-critical@example.com"
           - "oncall@example.com"
 
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / ""), and
+        # enable_rds_monitoring's alarms below have RDS instances to watch.
+        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
+        rds_instances: !terraform.state rds/main .instance_id | [.]
+        ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
+        elasticache_clusters: !terraform.state elasticache/main .member_clusters
+        api_gateway_name: !terraform.state apigateway/main .api_name
+        api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
+
         # PagerDuty integration
         # Secret: export from SSM /production/pagerduty/endpoint before plan/apply
         create_sns_topic: true
@@ -449,6 +460,11 @@ components:
           - component: vpc/main
           - component: acm/main
           - component: kms/main
+          - component: eks/main
+          - component: rds/main
+          - component: ecs/main
+          - component: elasticache/main
+          - component: apigateway/main
     monitoring/data:
       metadata:
         component: monitoring
@@ -462,6 +478,18 @@ components:
 
         certificate_arns: !terraform.state acm/services .certificate_arns // {} | [.[]]
         certificate_expiry_threshold: 30
+
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / "").
+        eks_cluster_name: !terraform.state eks/data .eks_cluster_id
+        rds_instances: !terraform.state rds/data .instance_id | [.]
+        api_gateway_name: !terraform.state apigateway/data .api_name
+        api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
+        lambda_functions:
+          - !terraform.state lambda/data-processor .function_name
+          - !terraform.state lambda/data-transformer .function_name
+          - !terraform.state lambda/report-generator .function_name
 
         alarm_email_subscriptions:
           - "prod-critical@example.com"
@@ -479,3 +507,9 @@ components:
           - component: vpc/main
           - component: acm/services
           - component: kms/main
+          - component: eks/data
+          - component: rds/data
+          - component: apigateway/data
+          - component: lambda/data-processor
+          - component: lambda/data-transformer
+          - component: lambda/report-generator

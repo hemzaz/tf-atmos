@@ -103,7 +103,7 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
 
 # EKS Node Not Ready
 resource "aws_cloudwatch_metric_alarm" "eks_node_not_ready" {
-  count = var.enable_backend_monitoring && var.eks_cluster_name != null ? 1 : 0
+  count = var.enable_backend_monitoring && var.eks_cluster_name != "" ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-eks-node-not-ready"
   comparison_operator = "GreaterThanThreshold"
