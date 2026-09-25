@@ -192,6 +192,12 @@ data "aws_iam_policy_document" "access_logs" {
       variable = "aws:SourceAccount"
       values   = [data.aws_caller_identity.current[0].account_id]
     }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:${data.aws_partition.current.partition}:elasticloadbalancing:${var.region}:${data.aws_caller_identity.current[0].account_id}:loadbalancer/*"]
+    }
   }
 
   statement {

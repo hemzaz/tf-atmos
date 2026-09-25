@@ -48,11 +48,22 @@ resource calls) auto-manages this by creating or extending an account-wide,
 unmanaged CloudWatch Logs resource policy named `AWSWAF-LOGS`, shared by
 every WAF logging configuration in the account and region. That policy
 counts toward CloudWatch Logs' 10-resource-policy-per-region quota and can
-hit its own size limit as more web ACLs are added. This component avoids
-both by managing its own `aws_cloudwatch_log_resource_policy`, scoped to
-just its log group, granting `delivery.logs.amazonaws.com`
-`logs:CreateLogStream` and `logs:PutLogEvents` with `aws:SourceAccount` and
-`aws:SourceArn` conditions.
+hit its own size limit as more web ACLs are added. Instead of relying on
+that implicit policy, this component manages its own
+`aws_cloudwatch_log_resource_policy`, scoped to just its log group, granting
+`delivery.logs.amazonaws.com` `logs:CreateLogStream` and `logs:PutLogEvents`
+with `aws:SourceAccount` and `aws:SourceArn` conditions.
+
+This trades one quota concern for another: it does **not** avoid the
+10-resource-policy-per-region quota (a self-managed, named policy counts
+against it exactly like the implicit `AWSWAF-LOGS` one would) -- what it
+buys is a policy scoped to this log group's ARN instead of the broader
+implicit grant, managed by Terraform so it can be tracked and updated.
+Every instance of this component that logs (with `manage_log_resource_policy`
+left at its default) creates its own named policy, so N instances in one
+region consume N of that region's 10 slots. Set `manage_log_resource_policy
+= false` on an additional instance in a region approaching the quota to
+fall back to the implicit `AWSWAF-LOGS` policy for that instance instead.
 
 ## Rules
 
@@ -116,6 +127,7 @@ web-application/waf-cloudfront:
 | `sampled_requests_enabled` | Sample matching requests | `true` |
 | `metric_name` | Web ACL's own metric name | `<Environment>-<name>` |
 | `enable_logging` | Create the log group and logging configuration | `true` |
+| `manage_log_resource_policy` | Manage the scoped CloudWatch Logs resource policy (see [Logging](#logging)); `false` falls back to the implicit `AWSWAF-LOGS` policy | `true` |
 | `log_group_retention_days` | Log group retention | `365` |
 | `kms_key_arn` | KMS key to encrypt the log group | `null` |
 

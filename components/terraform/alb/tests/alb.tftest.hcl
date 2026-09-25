@@ -178,10 +178,11 @@ run "access_logs_bucket_denies_non_tls_and_grants_only_the_elb_account" {
       for s in jsondecode(data.aws_iam_policy_document.access_logs[0].json).Statement :
       s.Sid != "AllowELBLogDelivery" || (
         s.Principal.Service == "logdelivery.elasticloadbalancing.amazonaws.com" &&
-        s.Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+        s.Condition.StringEquals["aws:SourceAccount"] == "123456789012" &&
+        s.Condition.ArnLike["aws:SourceArn"] == "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/*"
       )
     ])
-    error_message = "Only the logdelivery.elasticloadbalancing.amazonaws.com service principal, scoped to this account, may write access logs."
+    error_message = "Only the logdelivery.elasticloadbalancing.amazonaws.com service principal, scoped to this account and this region's load balancers, may write access logs."
   }
 }
 

@@ -104,6 +104,24 @@ run "logging_can_be_disabled" {
   }
 }
 
+run "log_resource_policy_can_be_skipped_to_stay_under_the_quota" {
+  command = plan
+
+  variables {
+    manage_log_resource_policy = false
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_log_resource_policy.waf_logging) == 0
+    error_message = "No CloudWatch Logs resource policy is created when manage_log_resource_policy is false, so this instance falls back to the implicit AWSWAF-LOGS policy instead of consuming another quota slot."
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_log_group.this) == 1 && length(aws_wafv2_web_acl_logging_configuration.this) == 1
+    error_message = "The log group and logging configuration are still created; only the explicit resource policy is skipped."
+  }
+}
+
 run "rule_priorities_must_be_unique_across_all_rule_lists" {
   command = plan
 

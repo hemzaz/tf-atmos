@@ -21,8 +21,11 @@ locals {
   # that aws_wafv2_web_acl_logging_configuration.this's PutLoggingConfiguration
   # call implicitly creates or extends -- see the explicit
   # aws_cloudwatch_log_resource_policy below, which manages that grant rather
-  # than leaving it to the implicit account-wide policy.
+  # than leaving it to the implicit account-wide policy. See that resource's
+  # comment for the CloudWatch Logs resource-policy quota this trades off.
   log_group_name = "aws-waf-logs-${local.name}"
+
+  manage_log_resource_policy = local.enabled && var.enable_logging && var.manage_log_resource_policy
 }
 
 resource "aws_wafv2_web_acl" "this" {
@@ -31,7 +34,7 @@ resource "aws_wafv2_web_acl" "this" {
   count = local.enabled ? 1 : 0
 
   name        = local.name
-  description = "Managed by Terraform (waf component)"
+  description = "Managed by Terraform - waf component"
   scope       = var.scope
 
   default_action {
@@ -206,22 +209,33 @@ resource "aws_cloudwatch_log_group" "this" {
 
 # aws_wafv2_web_acl_logging_configuration's PutLoggingConfiguration call can
 # manage CloudWatch Logs permissions for the aws-waf-logs- prefixed log group
-# on its own, but it does so by creating or extending an account-wide,
-# unmanaged "AWSWAF-LOGS" resource policy shared by every WAF logging
-# configuration in the account/region -- which counts toward the 10
-# resource-policy-per-region CloudWatch Logs quota and can hit that policy's
-# size limit as more web ACLs are added. Managing a policy scoped to this log
-# group explicitly avoids both.
+# on its own, by creating or extending an account-wide, unmanaged
+# "AWSWAF-LOGS" resource policy shared by every WAF logging configuration in
+# the account/region. The explicit aws_cloudwatch_log_resource_policy below
+# does NOT avoid that shared quota -- CloudWatch Logs still allows only 10
+# resource policies per account/region, and this named policy counts against
+# it exactly like the implicit one would. What it buys instead is a policy
+# scoped to this account (ArnLike on aws:SourceArn) instead of the broader
+# implicit grant, and a name Terraform can track and update in place.
+#
+# Because every instance of this component that logs creates its own named
+# policy, N waf instances in a region consume N of that region's 10
+# resource-policy slots (there are already 2 in eu-west-2 -- web-application/
+# waf and serverless-api/waf -- and 1 in us-east-1: web-application/
+# waf-cloudfront). var.manage_log_resource_policy is the escape hatch: set it
+# to false on an additional instance in a region that is approaching the
+# quota, so it relies on the implicit AWSWAF-LOGS policy instead of adding
+# its own.
 data "aws_caller_identity" "current" {
-  count = local.enabled && var.enable_logging ? 1 : 0
+  count = local.manage_log_resource_policy ? 1 : 0
 }
 
 data "aws_partition" "current" {
-  count = local.enabled && var.enable_logging ? 1 : 0
+  count = local.manage_log_resource_policy ? 1 : 0
 }
 
 data "aws_iam_policy_document" "log_delivery" {
-  count = local.enabled && var.enable_logging ? 1 : 0
+  count = local.manage_log_resource_policy ? 1 : 0
 
   statement {
     effect = "Allow"
@@ -249,7 +263,7 @@ data "aws_iam_policy_document" "log_delivery" {
 }
 
 resource "aws_cloudwatch_log_resource_policy" "waf_logging" {
-  count = local.enabled && var.enable_logging ? 1 : 0
+  count = local.manage_log_resource_policy ? 1 : 0
 
   policy_name     = "${local.log_group_name}-logging"
   policy_document = data.aws_iam_policy_document.log_delivery[0].json

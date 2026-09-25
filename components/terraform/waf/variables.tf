@@ -194,6 +194,12 @@ variable "enable_logging" {
   default     = true
 }
 
+variable "manage_log_resource_policy" {
+  type        = bool
+  description = "Create an explicit, account-scoped CloudWatch Logs resource policy granting WAF log delivery to this log group. Each instance that sets this true consumes one of the account/region's 10 CloudWatch Logs resource-policy slots (see main.tf's aws_cloudwatch_log_resource_policy comment). Set to false on an additional instance in a region approaching that quota to fall back to the implicit AWSWAF-LOGS policy PutLoggingConfiguration manages on its own. Ignored when enable_logging is false"
+  default     = true
+}
+
 variable "log_group_retention_days" {
   type        = number
   description = "CloudWatch log group retention, in days"

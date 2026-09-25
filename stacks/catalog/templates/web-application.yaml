@@ -960,6 +960,10 @@ components:
 #
 # Optional:
 # alarm_email_addresses: ["ops@example.com"]
+# cloudfront_waf_acl_id: "" (a later task wires this to
+#   !terraform.state web-application/waf-cloudfront .arn and adds
+#   web-application/waf-cloudfront to web-application/cloudfront's
+#   dependencies.components; until then it is unset)
 # (WAF logging goes to a component-created CloudWatch log group -- see
 # components/terraform/waf/README.md -- not an external log_destination_arn.)
       dependencies:
