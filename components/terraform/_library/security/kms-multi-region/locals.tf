@@ -157,6 +157,33 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # The CloudWatch Logs delivery service (used for cross-account/cross-service
+  # log shipping, e.g. a Step Functions state machine's execution history into
+  # its own CMK-encrypted log group) authenticates as delivery.logs.amazonaws.com,
+  # a distinct principal from logs.<region>.amazonaws.com above, and needs its
+  # own kms:Decrypt statement, limited to this account (Step Functions docs,
+  # "Encryption at rest", step 3).
+  dynamic "statement" {
+    for_each = var.allow_log_delivery ? [1] : []
+
+    content {
+      sid       = "AllowLogDelivery"
+      actions   = ["kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["delivery.logs.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+    }
+  }
+
   # EventBridge event buses and archives in this account and region. KMS calls
   # for a bus or an archive carry the encryption context
   # aws:events:event-bus:arn, which is always present; aws:SourceArn is not

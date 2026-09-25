@@ -36,9 +36,31 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
+  }
+}
+
+run "log_delivery_is_scoped_to_this_account" {
+  command = plan
+
+  variables {
+    allow_log_delivery = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDelivery"]).Principal.Service == "delivery.logs.amazonaws.com"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDelivery"]).Action == "kms:Decrypt"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDelivery"]).Condition == { StringEquals = { "aws:SourceAccount" = "123456789012" } }
+    )
+    error_message = "delivery.logs.amazonaws.com may kms:Decrypt only for this account (aws:SourceAccount); it is a distinct principal from logs.<region>.amazonaws.com (allow_cloudwatch_logs)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]) == 0
+    error_message = "allow_log_delivery must not grant AllowCloudWatchLogs; the two flags are independent."
   }
 }
 

@@ -11,11 +11,13 @@
 # To target another account or region, change the `orgs/fnx/<stage>/_defaults`
 # (org and account defaults) and `mixins/region/<region>` imports.
 #
-# Components without a root module in components/terraform (dynamodb,
-# eventbridge, stepfunctions, sns, sqs) are declared with
-# `metadata.enabled: false` so the stack shape is complete; enable each one
-# once its root module exists. Enabled components never read their state.
-# Resource names follow <tenant>-<account>-<environment>-<name>.
+# dynamodb, eventbridge, stepfunctions, sns and sqs all have root modules now
+# (one table/rule/machine/topic/queue per instance, the Cloud Posse model for
+# each), so every component below is enabled.
+# Resource names follow <tenant>-<account>-<environment>-<name> for the
+# older, full-name components (apigateway, lambda) and <Environment>-<name>
+# (settings.context.environment alone) for the newer short-name ones
+# (dynamodb, sns, sqs, eventbridge, stepfunctions).
 
 import:
   - orgs/fnx/dev/_defaults
@@ -23,6 +25,12 @@ import:
   - catalog/_base/defaults
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
+  - catalog/kms/defaults
+  - catalog/dynamodb/defaults
+  - catalog/sns/defaults
+  - catalog/sqs/defaults
+  - catalog/eventbridge/defaults
+  - catalog/stepfunctions/defaults
   # Optional environment profile from templates/configs (import it last):
   # - mixins/profiles/development
 
@@ -45,6 +53,22 @@ settings:
 
 components:
   terraform:
+    # Customer managed key for the serverless components below (dynamodb, sns,
+    # sqs, eventbridge, stepfunctions) and their log groups. This is a
+    # top-level stack of its own (not nested under an existing environment's
+    # components/), so unlike a component that only inherits catalog/kms/defaults,
+    # it needs its own concrete kms/main instance, as every full environment
+    # stack in this repo (testenv-01, staging-01, production) does.
+    kms/main:
+      metadata:
+        component: kms
+        inherits:
+          - kms/defaults
+      vars:
+        description: "{{ .settings.context.environment }} serverless components key (DynamoDB, SNS, SQS, EventBridge, Step Functions)"
+        alias_name: "{{ .settings.context.environment }}-main" # without the alias/ prefix
+        deletion_window_in_days: 7
+
     # Shared Lambda settings; each function below inherits them
     lambda/defaults:
       metadata:
@@ -60,8 +84,10 @@ components:
         log_retention_days: "{{ .settings.environment.log_retention_days }}"
         environment_variables:
           STAGE: "{{ .settings.context.environment }}"
-          USERS_TABLE: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-users"
-          ORDERS_TABLE: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-orders"
+          # dynamodb names its tables <Environment>-<name> (settings.context.environment
+          # alone); this must match dynamodb/users and dynamodb/orders below.
+          USERS_TABLE: "{{ .settings.context.environment }}-users"
+          ORDERS_TABLE: "{{ .settings.context.environment }}-orders"
         # Read/write access to the application tables
         custom_policy: |
           {
@@ -77,10 +103,10 @@ components:
                   "dynamodb:Query"
                 ],
                 "Resource": [
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-users",
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-users/index/*",
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-orders",
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-orders/index/*"
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-users",
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-users/index/*",
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-orders",
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-orders/index/*"
                 ]
               }
             ]
@@ -151,101 +177,142 @@ components:
         schedule_expression: "cron(0 6 * * ? *)"
         schedule_enabled: true
 
-    # Application tables
-    dynamodb/main:
+    # Application tables (dynamodb is one table per instance: the Cloud Posse
+    # aws-dynamodb model). Named <Environment>-users / <Environment>-orders,
+    # matching lambda/defaults' USERS_TABLE/ORDERS_TABLE and custom_policy above.
+    dynamodb/users:
       metadata:
         component: dynamodb
-        enabled: false # no components/terraform/dynamodb root module yet
+        inherits:
+          - dynamodb/defaults
       vars:
-        tables:
-          users:
-            name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-users"
-            billing_mode: "PAY_PER_REQUEST"
-            hash_key: "user_id"
-            attributes:
-              user_id: "S"
-              email: "S"
-            global_secondary_indexes:
-              email-index:
-                hash_key: "email"
-                projection_type: "ALL"
-            point_in_time_recovery_enabled: true
-          orders:
-            name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-orders"
-            billing_mode: "PAY_PER_REQUEST"
-            hash_key: "order_id"
-            range_key: "created_at"
-            attributes:
-              order_id: "S"
-              user_id: "S"
-              created_at: "S"
-            global_secondary_indexes:
-              user-orders-index:
-                hash_key: "user_id"
-                range_key: "created_at"
-                projection_type: "ALL"
-            stream_view_type: "NEW_AND_OLD_IMAGES"
-            point_in_time_recovery_enabled: true
+        name: "users"
+        hash_key: "user_id"
+        dynamodb_attributes:
+          - name: "email"
+            type: "S"
+        global_secondary_index_map:
+          - name: "email-index"
+            hash_key: "email"
+            projection_type: "ALL"
 
-    # Notifications topic and dead-letter queue
+    dynamodb/orders:
+      metadata:
+        component: dynamodb
+        inherits:
+          - dynamodb/defaults
+      vars:
+        name: "orders"
+        hash_key: "order_id"
+        range_key: "created_at"
+        dynamodb_attributes:
+          - name: "user_id"
+            type: "S"
+        global_secondary_index_map:
+          - name: "user-orders-index"
+            hash_key: "user_id"
+            range_key: "created_at"
+            projection_type: "ALL"
+        streams_enabled: true
+        stream_view_type: "NEW_AND_OLD_IMAGES"
+
+    # Notifications topic. allowed_aws_services_for_sns_published lets the
+    # eventbridge/user-registered rule below publish to it.
     sns/notifications:
       metadata:
         component: sns
-        enabled: false # no components/terraform/sns root module yet
+        inherits:
+          - sns/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-notifications"
-        subscriptions:
+        name: "notifications"
+        subscribers:
           ops:
             protocol: "email"
             endpoint: "{{ .settings.environment.ops_email }}"
+        allowed_aws_services_for_sns_published: ["events.amazonaws.com"]
 
+    # Dead-letter queue for the order-created rule's order-processor target.
+    # Its policy lets that rule (and only that rule) send here.
     sqs/dlq:
       metadata:
         component: sqs
-        enabled: false # no components/terraform/sqs root module yet
+        inherits:
+          - sqs/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-dlq"
+        name: "dlq"
         message_retention_seconds: 1209600
+        iam_policy:
+          - statements:
+              - sid: AllowOrderCreatedRule
+                actions:
+                  - "sqs:SendMessage"
+                principals:
+                  - type: Service
+                    identifiers:
+                      - "events.amazonaws.com"
+                conditions:
+                  - test: ArnLike
+                    variable: "aws:SourceArn"
+                    values:
+                      # Tightened to this account (orgs/fnx/<stage>/_defaults'
+                      # settings.environment.account_id) rather than wildcarding it.
+                      - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/{{ .settings.context.environment }}-order-created"
 
-    # Event bus and routing rules
-    eventbridge/main:
+    # Event bus and routing rules (eventbridge is one rule per instance: the
+    # Cloud Posse aws-eventbridge model). Both rules sit on the default bus
+    # (no create_event_bus): this stack does not need a custom bus or archive.
+    eventbridge/order-created:
       metadata:
         component: eventbridge
-        enabled: false # no components/terraform/eventbridge root module yet
+        inherits:
+          - eventbridge/defaults
       vars:
-        event_bus_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-bus"
-        rules:
-          order-created:
-            description: "Route order creation events"
-            event_pattern:
-              source: ["myapp.orders"]
-              detail-type: ["Order Created"]
-            targets:
-              order-processor:
-                arn: !terraform.state lambda/order-processor .function_arn
-                dead_letter_arn: !terraform.state sqs/dlq .queue_arn
-          user-registered:
-            description: "Route user registration events"
-            event_pattern:
-              source: ["myapp.users"]
-              detail-type: ["User Registered"]
-            targets:
-              notifications:
-                arn: !terraform.state sns/notifications .topic_arn
+        name: "order-created"
+        cloudwatch_event_rule_description: "Route order creation events"
+        cloudwatch_event_rule_pattern:
+          source: ["myapp.orders"]
+          detail-type: ["Order Created"]
+        targets:
+          order-processor:
+            arn: !terraform.state lambda/order-processor .function_arn
+            dead_letter_config:
+              arn: !terraform.state sqs/dlq .queue_arn
       dependencies:
         components:
+          - component: kms/main
           - component: lambda/order-processor
-          - component: sns/notifications
           - component: sqs/dlq
 
+    eventbridge/user-registered:
+      metadata:
+        component: eventbridge
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: "user-registered"
+        cloudwatch_event_rule_description: "Route user registration events"
+        cloudwatch_event_rule_pattern:
+          source: ["myapp.users"]
+          detail-type: ["User Registered"]
+        targets:
+          # The topic's policy lets this rule publish (allowed_aws_services_for_sns_published above).
+          notifications:
+            arn: !terraform.state sns/notifications .sns_topic_arn
+      dependencies:
+        components:
+          - component: kms/main
+          - component: sns/notifications
+
     # Order fulfilment workflow; the state machine definition is a map the
-    # component should jsonencode, so function ARNs come straight from state.
+    # component jsonencodes, so function/topic ARNs come straight from state.
+    # iam_policies grants the execution role exactly what its Tasks call.
     stepfunctions/order-fulfilment:
       metadata:
         component: stepfunctions
-        enabled: false # no components/terraform/stepfunctions root module yet
+        inherits:
+          - stepfunctions/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-order-fulfilment"
+        name: "order-fulfilment"
         definition:
           Comment: "Order fulfilment workflow"
           StartAt: "ProcessOrder"
@@ -258,11 +325,39 @@ components:
               Type: "Task"
               Resource: "arn:aws:states:::sns:publish"
               Parameters:
-                TopicArn: !terraform.state sns/notifications .topic_arn
+                TopicArn: !terraform.state sns/notifications .sns_topic_arn
                 Message.$: "$.confirmation"
               End: true
+        iam_policies:
+          - sid: InvokeOrderProcessor
+            actions: ["lambda:InvokeFunction"]
+            resources:
+              - !terraform.state lambda/order-processor .function_arn
+          - sid: PublishNotifications
+            actions: ["sns:Publish"]
+            resources:
+              - !terraform.state sns/notifications .sns_topic_arn
+          # NotifyCustomer publishes to sns/notifications, which is encrypted
+          # with this same kms/main key (catalog/sns/defaults) — a key that
+          # also encrypts DynamoDB, SQS, the log groups and the state machine
+          # itself. The component's own kms_policy statement only covers the
+          # state machine's own KMS usage (scoped by the stateMachineArn
+          # encryption context); SNS Publish to an SSE-KMS topic carries a
+          # different context (aws:sns:topicArn), so the execution role needs
+          # this separate grant — scoped down to this one topic's encryption
+          # context, not the whole key, for least privilege.
+          - sid: PublishNotificationsKMS
+            actions: ["kms:GenerateDataKey*", "kms:Decrypt"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:EncryptionContext:aws:sns:topicArn"
+                values:
+                  - !terraform.state sns/notifications .sns_topic_arn
       dependencies:
         components:
+          - component: kms/main
           - component: lambda/order-processor
           - component: sns/notifications
 
@@ -284,9 +379,10 @@ components:
         api_gateway_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-api"
         api_gateway_latency_threshold: 2000
         enable_dynamodb_monitoring: true
+        # Matches dynamodb/users and dynamodb/orders above (<Environment>-<name>).
         dynamodb_tables:
-          - "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-users"
-          - "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-orders"
+          - "{{ .settings.context.environment }}-users"
+          - "{{ .settings.context.environment }}-orders"
         alarm_email_subscriptions:
           - "{{ .settings.environment.ops_email }}"
       dependencies:

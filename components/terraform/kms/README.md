@@ -18,7 +18,7 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
@@ -37,6 +37,15 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   events, both limited to this account and region) — `kms/defaults` turns both on for every stack. Prefer these
   over the generic `key_service_users`, which grants the same actions to a
   service principal with no condition at all.
+- **The CloudWatch Logs delivery service is a separate principal from
+  `logs.<region>.amazonaws.com`.** `allow_log_delivery` adds `AllowLogDelivery`
+  for `delivery.logs.amazonaws.com` (`kms:Decrypt`, scoped by
+  `aws:SourceAccount`). This is step 3 of Step Functions' "Encryption at rest"
+  doc: without it, a state machine that CMK-encrypts both itself and its
+  execution-history log group cannot actually ship logs (`AccessDenied`) even
+  though `allow_cloudwatch_logs` already lets the log group itself be
+  encrypted. `kms/defaults` turns it on for every stack; stepfunctions is the
+  only consumer today.
 - Prod's `key_administrators`/`key_users` are hardcoded ARNs
   (`.../role/Admin`, `.../role/production-eks-node-role`) that must already
   exist before apply — the stack comment notes the iam ci/eks-node instances

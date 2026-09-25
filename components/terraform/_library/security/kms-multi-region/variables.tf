@@ -145,6 +145,12 @@ variable "allow_cloudwatch_logs" {
   default     = false
 }
 
+variable "allow_log_delivery" {
+  type        = bool
+  description = "Let the CloudWatch Logs delivery service (delivery.logs.amazonaws.com) decrypt with the key (kms:Decrypt), scoped by aws:SourceAccount. delivery.logs.amazonaws.com is a distinct principal from logs.<region>.amazonaws.com (allow_cloudwatch_logs): it is needed when a resource whose logs/execution history are shipped via CloudWatch Logs delivery (for example a Step Functions state machine's log group) is itself encrypted with this key"
+  default     = false
+}
+
 variable "allow_eventbridge" {
   type        = bool
   description = "Let EventBridge (events.amazonaws.com) use the key for event buses and archives of this account and region (scoped by kms:EncryptionContext:aws:events:event-bus:arn; DescribeKey by aws:SourceAccount) and for rules publishing to this account's SNS topics encrypted with it (kms:EncryptionContext:aws:sns:topicArn only: SNS does not support aws:SourceAccount/aws:SourceArn in the KMS policy for EventBridge-to-encrypted topics), and for rules and bus dead-letter queues delivering to this account's SQS queues encrypted with it (scoped by aws:SourceAccount and aws:SourceArn rule/* or event-bus/*)"

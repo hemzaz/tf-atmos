@@ -1,0 +1,510 @@
+# Mock-provider tests: no AWS credentials, no network. Run from the component
+# directory with `terraform init -backend=false && terraform test`.
+
+mock_provider "aws" {
+  # arn is Computed-only, so it is unknown-until-apply on the real resource;
+  # mocking it lets plan-only runs assert on log_destination and (for
+  # aws_sfn_state_machine) the events role's scoped policy.
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:eu-west-2:123456789012:log-group:/aws/vendedlogs/states/test-order-fulfilment"
+    }
+  }
+
+  # role_arn's schema validates ARN format, which a mock apply run's random
+  # default id would fail.
+  mock_resource "aws_iam_role" {
+    defaults = {
+      arn = "arn:aws:iam::123456789012:role/mock"
+    }
+  }
+
+  mock_resource "aws_sfn_state_machine" {
+    defaults = {
+      arn = "arn:aws:states:eu-west-2:123456789012:stateMachine:test-order-fulfilment"
+    }
+  }
+}
+
+variables {
+  region = "eu-west-2"
+  name   = "order-fulfilment"
+  definition = {
+    Comment = "Order fulfilment workflow"
+    StartAt = "ProcessOrder"
+    States = {
+      ProcessOrder = {
+        Type     = "Task"
+        Resource = "arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"
+        End      = true
+      }
+    }
+  }
+  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  tags = {
+    Environment = "test"
+    Tenant      = "fnx"
+    ManagedBy   = "Terraform"
+  }
+}
+
+run "defaults_create_a_standard_machine_with_full_logging_and_tracing" {
+  # apply: log_destination compares against the log group's arn, which (like
+  # eventbridge's own log group tests) is unknown until apply even with the
+  # mock default above.
+  command = apply
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].type == "STANDARD"
+    error_message = "type defaults to STANDARD."
+  }
+
+  assert {
+    condition     = jsondecode(aws_sfn_state_machine.this[0].definition) == var.definition
+    error_message = "The definition must be jsonencoded as given."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].name == "test-order-fulfilment"
+    error_message = "The state machine is named <Environment>-<name>."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.logging) == 1
+    error_message = "The default logging level (ALL) attaches the log-delivery permissions the execution role needs."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].level == "ALL" && aws_sfn_state_machine.this[0].logging_configuration[0].include_execution_data == true
+    error_message = "logging_configuration defaults to level ALL and include_execution_data true (full execution history logging)."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].log_destination == "${aws_cloudwatch_log_group.this[0].arn}:*"
+    error_message = "The default (non-OFF) level sets log_destination to the log group."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].tracing_configuration[0].enabled == true
+    error_message = "tracing_enabled defaults to true."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.tracing) == 1
+    error_message = "The default tracing_enabled (true) attaches the X-Ray write permissions the execution role needs."
+  }
+
+  assert {
+    condition = (
+      aws_sfn_state_machine.this[0].encryption_configuration[0].type == "CUSTOMER_MANAGED_KMS_KEY"
+      && aws_sfn_state_machine.this[0].encryption_configuration[0].kms_key_id == var.kms_key_arn
+      && aws_sfn_state_machine.this[0].encryption_configuration[0].kms_data_key_reuse_period_seconds == 60
+    )
+    error_message = "The state machine's definition/execution history are encrypted with kms_key_arn (CUSTOMER_MANAGED_KMS_KEY, 60s data-key reuse)."
+  }
+
+  assert {
+    condition     = length(aws_iam_role.events) == 0
+    error_message = "No events role unless events_role_enabled."
+  }
+
+  assert {
+    condition     = output.events_role_arn == null
+    error_message = "events_role_arn is null unless events_role_enabled."
+  }
+}
+
+run "logging_can_be_turned_off" {
+  command = plan
+
+  variables {
+    logging_configuration = {
+      level = "OFF"
+    }
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.logging) == 0
+    error_message = "level OFF attaches no logging permissions."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].log_destination == null
+    error_message = "With level OFF the state machine gets no log_destination."
+  }
+}
+
+run "tracing_can_be_disabled" {
+  command = plan
+
+  variables {
+    tracing_enabled = false
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].tracing_configuration[0].enabled == false
+    error_message = "tracing_enabled = false disables tracing_configuration."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.tracing) == 0
+    error_message = "tracing_enabled = false attaches no X-Ray permissions."
+  }
+}
+
+run "log_group_retention_defaults_to_90_days" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_log_group.this[0].retention_in_days == 90
+    error_message = "log_retention_days defaults to 90."
+  }
+}
+
+run "log_group_retention_is_overridable" {
+  command = plan
+
+  variables {
+    log_retention_days = 365
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_group.this[0].retention_in_days == 365
+    error_message = "log_retention_days is overridable."
+  }
+}
+
+run "the_execution_role_has_a_scoped_kms_grant_for_its_own_encryption" {
+  command = plan
+
+  assert {
+    condition     = length(aws_iam_role_policy.kms) == 1
+    error_message = "The state machine's own KMS grant is always attached (unconditional on logging/tracing), since encryption_configuration is unconditional."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.kms[0].policy).Statement[0].Sid == "AllowStateMachineKMSUsage"
+      && jsondecode(aws_iam_role_policy.kms[0].policy).Statement[0].Action == ["kms:Decrypt", "kms:GenerateDataKey"]
+      && jsondecode(aws_iam_role_policy.kms[0].policy).Statement[0].Resource == var.kms_key_arn
+      && jsondecode(aws_iam_role_policy.kms[0].policy).Statement[0].Condition.StringEquals["kms:EncryptionContext:aws:states:stateMachineArn"] == "arn:aws:states:${var.region}:${data.aws_caller_identity.current.account_id}:stateMachine:test-order-fulfilment"
+    )
+    error_message = "The execution role's KMS grant is scoped to kms_key_arn only for this state machine's own encryption context (aws:states:stateMachineArn)."
+  }
+}
+
+run "the_logging_policy_grants_log_delivery_and_its_own_kms_usage" {
+  command = plan
+
+  assert {
+    condition = (
+      one([for s in jsondecode(aws_iam_role_policy.logging[0].policy).Statement : s if s.Sid == "AllowStepFunctionsLogDelivery"]).Action == [
+        "logs:CreateLogDelivery",
+        "logs:GetLogDelivery",
+        "logs:UpdateLogDelivery",
+        "logs:DeleteLogDelivery",
+        "logs:ListLogDeliveries",
+        "logs:PutResourcePolicy",
+        "logs:DescribeResourcePolicies",
+        "logs:DescribeLogGroups",
+      ]
+      && one([for s in jsondecode(aws_iam_role_policy.logging[0].policy).Statement : s if s.Sid == "AllowStepFunctionsLogDelivery"]).Resource == "*"
+    )
+    error_message = "The log-delivery statement grants exactly the actions AWS documents, unscoped (the CreateLogDelivery API takes no resource-level permissions)."
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(aws_iam_role_policy.logging[0].policy).Statement : s if s.Sid == "AllowLogDeliveryKMSUsage"]).Action == ["kms:GenerateDataKey"]
+      && one([for s in jsondecode(aws_iam_role_policy.logging[0].policy).Statement : s if s.Sid == "AllowLogDeliveryKMSUsage"]).Resource == var.kms_key_arn
+      && one([for s in jsondecode(aws_iam_role_policy.logging[0].policy).Statement : s if s.Sid == "AllowLogDeliveryKMSUsage"]).Condition.ArnLike["kms:EncryptionContext:SourceArn"] == "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:*"
+    )
+    error_message = "The log-delivery KMS statement is scoped to kms_key_arn, limited to this account's log groups via kms:EncryptionContext:SourceArn (a different context than the state machine's own KMS grant)."
+  }
+}
+
+run "the_log_group_is_always_created_on_the_given_key" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_log_group.this[0].name == "/aws/vendedlogs/states/test-order-fulfilment"
+    error_message = "The log group sits under /aws/vendedlogs/states/, the prefix Step Functions requires."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_group.this[0].kms_key_id == var.kms_key_arn
+    error_message = "The log group is encrypted with the given key."
+  }
+
+  assert {
+    condition     = output.log_group_name == "/aws/vendedlogs/states/test-order-fulfilment"
+    error_message = "log_group_name reports the created log group, regardless of the logging level."
+  }
+}
+
+run "the_execution_role_trust_is_scoped_to_this_machine" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Principal.Service == "states.amazonaws.com"
+    error_message = "The role trusts states.amazonaws.com."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == data.aws_caller_identity.current.account_id
+    error_message = "The trust policy conditions on aws:SourceAccount."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceArn"] == "arn:aws:states:${var.region}:${data.aws_caller_identity.current.account_id}:stateMachine:test-order-fulfilment"
+    error_message = "The trust policy conditions on aws:SourceArn, scoped to this state machine."
+  }
+}
+
+run "logging_level_wires_the_log_delivery_permissions_and_destination" {
+  # apply: log_destination compares against the log group's arn, which (like
+  # eventbridge's own log group tests) is unknown until apply even with the
+  # mock default above.
+  command = apply
+
+  variables {
+    logging_configuration = {
+      level                  = "ERROR"
+      include_execution_data = true
+    }
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.logging) == 1
+    error_message = "A non-OFF level attaches the log-delivery permissions the execution role needs."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].level == "ERROR" && aws_sfn_state_machine.this[0].logging_configuration[0].include_execution_data == true
+    error_message = "level and include_execution_data are passed through."
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].logging_configuration[0].log_destination == "${aws_cloudwatch_log_group.this[0].arn}:*"
+    error_message = "A non-OFF level sets log_destination to the log group."
+  }
+}
+
+run "tracing_enabled_wires_the_xray_permissions" {
+  command = plan
+
+  variables {
+    tracing_enabled = true
+  }
+
+  assert {
+    condition     = aws_sfn_state_machine.this[0].tracing_configuration[0].enabled == true
+    error_message = "tracing_configuration.enabled is passed through."
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.tracing) == 1
+    error_message = "tracing_enabled attaches the X-Ray write permissions the execution role needs."
+  }
+
+  assert {
+    condition = jsondecode(aws_iam_role_policy.tracing[0].policy).Statement[0].Action == [
+      "xray:PutTraceSegments",
+      "xray:PutTelemetryRecords",
+      "xray:GetSamplingRules",
+      "xray:GetSamplingTargets",
+      "xray:GetSamplingStatisticSummaries",
+    ]
+    error_message = "The tracing policy grants exactly the AWSXRayDaemonWriteAccess actions, unscoped (X-Ray takes no resource-level permissions)."
+  }
+}
+
+run "iam_policies_become_one_custom_inline_policy" {
+  command = plan
+
+  variables {
+    iam_policies = [
+      {
+        sid       = "InvokeOrderProcessor"
+        actions   = ["lambda:InvokeFunction"]
+        resources = ["arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"]
+      },
+      {
+        sid       = "PublishNotifications"
+        actions   = ["sns:Publish"]
+        resources = ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+      }
+    ]
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.custom) == 1
+    error_message = "iam_policies attaches exactly one custom inline policy."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Sid == "InvokeOrderProcessor"
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Effect == "Allow"
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Action == ["lambda:InvokeFunction"]
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Resource == ["arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"]
+    )
+    error_message = "The first iam_policies entry becomes a statement with matching Sid, Effect, Action and Resource."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Sid == "PublishNotifications"
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Effect == "Allow"
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Action == ["sns:Publish"]
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Resource == ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+    )
+    error_message = "The second iam_policies entry becomes its own statement with matching Sid, Effect, Action and Resource."
+  }
+
+  assert {
+    condition     = !contains(keys(jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1]), "Condition")
+    error_message = "A statement with no conditions must render no Condition key at all (not an empty one)."
+  }
+}
+
+run "iam_policies_conditions_render_as_the_statements_condition" {
+  command = plan
+
+  variables {
+    iam_policies = [
+      {
+        sid       = "PublishNotificationsKMS"
+        actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+        resources = ["arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"]
+        conditions = [
+          {
+            test     = "StringEquals"
+            variable = "kms:EncryptionContext:aws:sns:topicArn"
+            values   = ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+          }
+        ]
+      }
+    ]
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Condition.StringEquals["kms:EncryptionContext:aws:sns:topicArn"] == ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+    )
+    error_message = "A statement's conditions render as its Condition, grouped by test operator then by variable."
+  }
+}
+
+run "events_role_is_created_only_when_enabled_and_scoped_to_the_machine" {
+  command = apply
+
+  variables {
+    events_role_enabled = true
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.events[0].assume_role_policy).Statement[0].Principal.Service == "events.amazonaws.com"
+    error_message = "The events role trusts events.amazonaws.com."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.events_invoke[0].policy).Statement[0].Action == "states:StartExecution"
+    error_message = "The events role may only StartExecution."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.events_invoke[0].policy).Statement[0].Resource == aws_sfn_state_machine.this[0].arn
+    error_message = "states:StartExecution is scoped to this state machine only."
+  }
+
+  assert {
+    condition     = output.events_role_arn == aws_iam_role.events[0].arn
+    error_message = "events_role_arn reports the created role."
+  }
+}
+
+run "rejects_a_non_kms_key" {
+  command = plan
+
+  variables {
+    kms_key_arn = "alias/aws/states"
+  }
+
+  expect_failures = [var.kms_key_arn]
+}
+
+run "rejects_an_unsupported_type" {
+  command = plan
+
+  variables {
+    type = "PIPELINE"
+  }
+
+  expect_failures = [var.type]
+}
+
+run "rejects_an_empty_definition" {
+  command = plan
+
+  variables {
+    definition = {}
+  }
+
+  expect_failures = [var.definition]
+}
+
+run "rejects_an_unsupported_logging_level" {
+  command = plan
+
+  variables {
+    logging_configuration = {
+      level = "DEBUG"
+    }
+  }
+
+  expect_failures = [var.logging_configuration]
+}
+
+run "rejects_a_wildcard_allow_action_in_iam_policies" {
+  command = plan
+
+  variables {
+    iam_policies = [
+      {
+        actions   = ["*"]
+        resources = ["arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"]
+      }
+    ]
+  }
+
+  expect_failures = [var.iam_policies]
+}
+
+run "disabled_creates_nothing" {
+  command = plan
+
+  variables {
+    enabled             = false
+    events_role_enabled = true
+    logging_configuration = {
+      level = "ALL"
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_sfn_state_machine.this) == 0
+      && length(aws_iam_role.this) == 0
+      && length(aws_iam_role_policy.kms) == 0
+      && length(aws_cloudwatch_log_group.this) == 0
+      && length(aws_iam_role.events) == 0
+    )
+    error_message = "enabled = false must create nothing, including the KMS role policy, even with events_role_enabled and a logging level set."
+  }
+
+  assert {
+    condition     = output.state_machine_arn == null && output.role_arn == null && output.log_group_name == null && output.events_role_arn == null
+    error_message = "Outputs are null when disabled."
+  }
+}
