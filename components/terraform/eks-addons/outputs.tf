@@ -1,5 +1,5 @@
 output "addon_arns" {
-  value       = { for k, v in aws_eks_addon.addons : k => v.arn }
+  value       = { for k, v in merge(aws_eks_addon.core, aws_eks_addon.addons) : k => v.arn }
   description = "Map of addon names to addon ARNs"
 }
 
