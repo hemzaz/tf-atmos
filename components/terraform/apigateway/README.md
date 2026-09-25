@@ -29,7 +29,7 @@ its custom domain the same way).
 | `cors_configuration` (null) | HTTP APIs only. It used to be silently ignored (the code looked up an `enabled` key the object type does not have), so no HTTP API got CORS; it is now applied whenever set. Validated: `allow_credentials = true` with `"*"` in `allow_origins` is refused, and `max_age` must be 0-86400. REST APIs ignore it silently (live staging and prod `apigateway/main` set it on REST); rejecting that is a known gap left open so those instances keep planning |
 | `throttling_rate_limit`, `throttling_burst_limit` | REST: per-method settings (with caching). HTTP: the stage's `default_route_settings` |
 | `vpc_link_subnet_ids`, `vpc_link_security_group_ids` | HTTP APIs: a VPC link `<Environment>-<api_name>-vpc-link` for private integrations; the security groups are required with the subnets. Outputs `http_api_vpc_link_id` and `http_api_vpc_link_arn`; its Name tag is `<prefix>-vpc-link` |
-| `http_routes` ({}) | HTTP APIs only (a REST API ignores it silently, like `cors_configuration`); keyed by `route_key` (e.g. `"ANY /{proxy+}"`). One `aws_apigatewayv2_integration` + `aws_apigatewayv2_route` per entry. `integration_type` is `HTTP_PROXY` (typically `connection_type = "VPC_LINK"`, `connection_id` = the VPC link's id, `integration_uri` = the target listener's ARN — usually the `alb-controller-ingress-group` component's `http_listener_arn`/`https_listener_arn` output) or `AWS_PROXY` (`integration_uri` = a Lambda's `invoke_arn`; `lambda_function_name` is required so this component can grant it `apigateway.amazonaws.com` invoke permission, the same reasoning as `api_integrations`' `AWS_PROXY` requirement). `authorization_type` is `JWT` (uses this component's own JWT authorizer — validated: requires `authorizer_type = "JWT"` on this component, there is no per-route authorizer override) or `NONE`. Output `http_route_ids` maps `route_key` to the created route's id |
+| `http_routes` ({}) | HTTP APIs only (a REST API ignores it silently, like `cors_configuration`); keyed by `route_key` (e.g. `"ANY /{proxy+}"`). One `aws_apigatewayv2_integration` + `aws_apigatewayv2_route` per entry. `integration_type` is `HTTP_PROXY` (typically `connection_type = "VPC_LINK"`, `connection_id` = the VPC link's id, `integration_uri` = the target listener's ARN — usually the `alb-controller-ingress-group` component's `http_listener_arn`/`https_listener_arn` output) or `AWS_PROXY` (`integration_uri` = a Lambda's `invoke_arn`; `lambda_function_name` is required so this component can grant it `apigateway.amazonaws.com` invoke permission, the same reasoning as `api_integrations`' `AWS_PROXY` requirement). `authorization_type` is `JWT` (uses this component's own JWT authorizer — validated: requires `authorizer_type = "JWT"` on this component, there is no per-route authorizer override) or `NONE`. `tls_server_name_to_verify` (null) adds a `tls_config` block to the integration, enabling TLS on the private hop — only valid on an `HTTP_PROXY` + `connection_type = "VPC_LINK"` route into an HTTPS listener (`https_listener_arn`); left null the hop is plaintext HTTP_PROXY (`http_listener_arn`). Output `http_route_ids` maps `route_key` to the created route's id |
 
 ## Dependencies / gotchas
 
@@ -52,6 +52,15 @@ its custom domain the same way).
   ApiName/Stage dashboard dimensions and alarms. `api_name` is `null` for an HTTP API
   (`aws_api_gateway_rest_api.rest_api[0].name`, the real REST API name — not `var.api_name`,
   which is only its `-<api_name>` suffix).
+- **Known gap: `microservices-platform`'s `http_routes` hop is plaintext HTTP.** It targets
+  `alb-controller-ingress-group`'s `http_listener_arn` (no `certificate_arn` set there), not
+  `https_listener_arn` + `tls_server_name_to_verify`. `tls_config` support exists on this
+  component (above) precisely so a caller can close this gap: issue a cert for the internal ALB
+  (e.g. an internal-only `acm` instance, or a private CA), set it as `alb-ingress-group`'s
+  `certificate_arn`, point the route at `https_listener_arn`, and set
+  `tls_server_name_to_verify` to the cert's SAN. This was left open rather than done here because
+  it needs a domain and a validation path for a fully internal ALB the repo does not yet have
+  wired anywhere.
 
 ## Tests
 
@@ -59,9 +68,12 @@ its custom domain the same way).
 `tests/custom_domain.tftest.hcl` (REST custom domain: TLS_1_2/REGIONAL, root
 base path, Route53 alias, and the two "one input without the other" skip
 cases) and `tests/http_routes.tftest.hcl` (`HTTP_PROXY`/`VPC_LINK`,
-`AWS_PROXY` + Lambda permission, JWT authorization, the `connection_id`/
-`lambda_function_name` validations, and that a REST API ignores
-`http_routes`) run against a mock provider:
+`AWS_PROXY` + Lambda permission (including proxy-catch-all and `$default`
+route keys, whose `{`, `}`, `+`, `$` characters used to break the generated
+Lambda `statement_id`), JWT authorization, `tls_server_name_to_verify` wiring
+`tls_config` onto the integration (and its rejection on `AWS_PROXY`/
+`INTERNET` routes), the `connection_id`/`lambda_function_name` validations,
+and that a REST API ignores `http_routes`) run against a mock provider:
 `terraform init -backend=false && terraform test`.
 
 ## Usage

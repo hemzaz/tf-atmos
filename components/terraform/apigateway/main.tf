@@ -207,6 +207,18 @@ resource "aws_apigatewayv2_integration" "http_route" {
 
   timeout_milliseconds   = each.value.timeout_milliseconds
   payload_format_version = "1.0"
+
+  # Only meaningful for a VPC_LINK integration into an HTTPS listener (e.g.
+  # alb-controller-ingress-group's https_listener_arn): tls_server_name_to_verify
+  # left null keeps the hop as HTTP_PROXY plaintext, matching the plaintext
+  # http_listener_arn most callers still wire up.
+  dynamic "tls_config" {
+    for_each = each.value.tls_server_name_to_verify != null ? [each.value.tls_server_name_to_verify] : []
+
+    content {
+      server_name_to_verify = tls_config.value
+    }
+  }
 }
 
 resource "aws_apigatewayv2_route" "http_route" {
@@ -229,7 +241,13 @@ resource "aws_lambda_permission" "http_route_invoke" {
     if r.integration_type == "AWS_PROXY"
   }
 
-  statement_id  = "AllowHttpRouteInvoke-${replace(replace(each.key, " ", "-"), "/", "_")}"
+  # Lambda's statement_id must match ^[a-zA-Z0-9_-]+$. A route_key like
+  # "ANY /{proxy+}" or "$default" carries "{", "}", "+" and "$" -- none of
+  # them survive replace(" ", "-")/replace("/", "_") -- so a short sha1 of
+  # the full key is appended instead of trying to sanitise every character
+  # HTTP API route keys allow; it also keeps two keys that would normalise
+  # to the same string (e.g. "GET /a}" and "GET /a{") distinct.
+  statement_id  = "AllowHttpRouteInvoke-${substr(sha1(each.key), 0, 16)}"
   action        = "lambda:InvokeFunction"
   function_name = each.value.lambda_function_name
   principal     = "apigateway.amazonaws.com"

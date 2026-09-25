@@ -153,6 +153,124 @@ run "aws_proxy_route_grants_lambda_invoke_permission" {
   }
 }
 
+# Regression for a route_key with characters Lambda's statement_id forbids:
+# "{", "}", "+" (a proxy catch-all) and "$" (the API Gateway default route).
+# Only a space and a slash were ever sanitised before, so these route_keys
+# used to fail with "invalid value for statement_id" at plan time.
+run "aws_proxy_route_with_proxy_and_default_route_keys_gets_a_valid_statement_id" {
+  command = plan
+
+  variables {
+    http_routes = {
+      "ANY /{proxy+}" = {
+        integration_type     = "AWS_PROXY"
+        integration_uri      = "arn:aws:lambda:eu-west-2:123456789012:function:catchall"
+        lambda_function_name = "catchall"
+      }
+      "$default" = {
+        integration_type     = "AWS_PROXY"
+        integration_uri      = "arn:aws:lambda:eu-west-2:123456789012:function:default"
+        lambda_function_name = "default"
+      }
+    }
+  }
+
+  assert {
+    condition     = length(aws_lambda_permission.http_route_invoke) == 2
+    error_message = "Both AWS_PROXY routes get a matching aws_lambda_permission."
+  }
+
+  assert {
+    condition     = can(regex("^[a-zA-Z0-9_-]+$", aws_lambda_permission.http_route_invoke["ANY /{proxy+}"].statement_id))
+    error_message = "statement_id for the proxy catch-all route_key must only contain alphanumerics, underscores or dashes."
+  }
+
+  assert {
+    condition     = can(regex("^[a-zA-Z0-9_-]+$", aws_lambda_permission.http_route_invoke["$default"].statement_id))
+    error_message = "statement_id for the $default route_key must only contain alphanumerics, underscores or dashes."
+  }
+
+  assert {
+    condition     = aws_lambda_permission.http_route_invoke["ANY /{proxy+}"].statement_id != aws_lambda_permission.http_route_invoke["$default"].statement_id
+    error_message = "Distinct route_keys must produce distinct statement_ids."
+  }
+}
+
+run "tls_server_name_to_verify_wires_tls_config_onto_the_integration" {
+  command = plan
+
+  variables {
+    http_routes = {
+      "ANY /{proxy+}" = {
+        integration_type          = "HTTP_PROXY"
+        connection_type           = "VPC_LINK"
+        connection_id             = "vpcl-0123456789abcdef0"
+        integration_uri           = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        tls_server_name_to_verify = "internal.microservices.example.com"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_integration.http_route["ANY /{proxy+}"].tls_config[0].server_name_to_verify == "internal.microservices.example.com"
+    error_message = "tls_server_name_to_verify reaches the integration's tls_config block, enabling TLS on the private hop to an HTTPS listener."
+  }
+}
+
+run "no_tls_server_name_to_verify_leaves_the_hop_plaintext" {
+  command = plan
+
+  variables {
+    http_routes = {
+      "ANY /{proxy+}" = {
+        integration_type = "HTTP_PROXY"
+        connection_type  = "VPC_LINK"
+        connection_id    = "vpcl-0123456789abcdef0"
+        integration_uri  = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+      }
+    }
+  }
+
+  assert {
+    condition     = length(aws_apigatewayv2_integration.http_route["ANY /{proxy+}"].tls_config) == 0
+    error_message = "Leaving tls_server_name_to_verify null must not add a tls_config block (the plaintext HTTP_PROXY hop stays the default)."
+  }
+}
+
+run "rejects_tls_server_name_to_verify_on_an_aws_proxy_route" {
+  command = plan
+
+  variables {
+    http_routes = {
+      "POST /webhook" = {
+        integration_type          = "AWS_PROXY"
+        integration_uri           = "arn:aws:lambda:eu-west-2:123456789012:function:webhook"
+        lambda_function_name      = "webhook"
+        tls_server_name_to_verify = "internal.microservices.example.com"
+      }
+    }
+  }
+
+  expect_failures = [var.http_routes]
+}
+
+run "rejects_tls_server_name_to_verify_on_an_internet_connection_type" {
+  command = plan
+
+  variables {
+    http_routes = {
+      "ANY /{proxy+}" = {
+        integration_type          = "HTTP_PROXY"
+        connection_type           = "INTERNET"
+        integration_uri           = "https://example.com/{proxy}"
+        tls_server_name_to_verify = "example.com"
+      }
+    }
+  }
+
+  expect_failures = [var.http_routes]
+}
+
 run "rejects_aws_proxy_without_lambda_function_name" {
   command = plan
 

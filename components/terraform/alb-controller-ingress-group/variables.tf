@@ -66,6 +66,12 @@ variable "create_namespace" {
   default     = true
 }
 
+variable "ingress_class_name" {
+  type        = string
+  description = "Name of the IngressClass this Ingress references via spec.ingress_class_name (never the deprecated kubernetes.io/ingress.class annotation, which the controller's IngressClassParams lookup does not resolve). Defaults to \"alb\", the name eks-addons creates its default IngressClass under (aws-load-balancer-controller's ingressClassConfig, createIngressClassResource = true)"
+  default     = "alb"
+}
+
 variable "group_name" {
   type        = string
   description = "The IngressGroup name (alb.ingress.kubernetes.io/group.name). Every Ingress naming this group shares one ALB; this component's data aws_lb lookup filters on it too (the controller's ingress.k8s.aws/stack tag)"

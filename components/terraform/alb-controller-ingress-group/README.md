@@ -24,10 +24,13 @@ Two differences from the Cloud Posse component, both owner decisions for this re
    its default 404 backend. Per-microservice routing Ingresses join the same `group.name` and are out
    of this component's scope.
 
-The scheme stays internal regardless of the explicit annotation here: eks-addons's default `alb`
-IngressClass pins `ingressClassParams.spec.scheme = internal`, which an Ingress cannot override
-(`eks-addons/addons.tf`, README "Internet-facing load balancers"). The annotation is belt-and-braces,
-matching what the controller already enforces.
+The scheme stays internal because of two independent enforcements: `spec.ingress_class_name` (below,
+`var.ingress_class_name`, default `"alb"`) names eks-addons's default IngressClass explicitly, whose
+`ingressClassParams.spec.scheme = internal` an Ingress cannot override (`eks-addons/addons.tf`, README
+"Internet-facing load balancers") -- unlike the deprecated `kubernetes.io/ingress.class` annotation,
+which the controller still matches on but whose `ingressClassParams` lookup only resolves through
+`spec.ingress_class_name`; and the explicit `alb.ingress.kubernetes.io/scheme = internal` annotation
+here, belt-and-braces in case `ingressClassParams` is ever loosened.
 
 ## Inputs / Outputs
 
@@ -37,7 +40,8 @@ matching what the controller already enforces.
 | `vpc_id` | VPC the frontend security group is created in |
 | `group_name` | The IngressGroup name; also the `ingress.k8s.aws/stack` tag `data aws_lb` filters on. Validated: lowercase alphanumeric + hyphens, 1-63 characters (a valid IngressGroup name) |
 | `admit_security_group_ids` | Required, non-empty. Security groups admitted on the ALB's listener ports — never a CIDR block. Typically the API Gateway VPC link's security group (`microservices/securitygroup/vpc-link`) |
-| `certificate_arn` (null) | Set to add an HTTPS (443) listener alongside HTTP (80); null creates HTTP-only |
+| `ingress_class_name` (`"alb"`) | The IngressClass this Ingress's `spec.ingress_class_name` references — eks-addons's default IngressClass name |
+| `certificate_arn` (null) | Set to add an HTTPS (443) listener alongside HTTP (80); null creates HTTP-only. Every current caller (`microservices-platform`) leaves this null, so today's `http_routes` hop from `apigateway` to this ALB is plaintext HTTP — a known gap, see `apigateway/README.md`'s "Dependencies / gotchas" |
 | `ssl_policy` | TLS policy for the HTTPS listener; ignored unless `certificate_arn` is set |
 | `kubernetes_namespace` (`"alb-ingress-group"`) | Namespace the IngressGroup scaffold's Ingress is created in. Never `"default"` (validated, `CKV_K8S_21`) |
 | `create_namespace` (`true`) | Whether this component creates `kubernetes_namespace`; `false` when it already exists |
@@ -56,14 +60,22 @@ matching what the controller already enforces.
 - Depends on `microservices/eks` (for `cluster_name`/`host`/`cluster_ca_certificate`) and
   `microservices/eks-addons` (the controller must already be installed with its default IngressClass),
   plus `microservices/vpc` for `vpc_id` and whatever security group(s) it admits.
-- The frontend security group replaces on any rule change (`name_prefix` +
-  `create_before_destroy`), the same trade-off `alb/main.tf` documents for its own security group.
+- The frontend security group itself (`aws_security_group.alb`) only replaces when its `name_prefix`,
+  `description` or `vpc_id` changes; `create_before_destroy` covers that case, the same trade-off
+  `alb/main.tf` documents for its own security group. Changing `admit_security_group_ids` or the ports
+  in `listen_ports` only adds or removes the separate `aws_vpc_security_group_ingress_rule` resources
+  in place — it does not replace the group.
+- The controller merges group-wide annotations (`security-groups`, `listen-ports`, `scheme`,
+  `certificate-arn`, `ssl-policy`, `tags`) across every Ingress in an IngressGroup and rejects the group
+  if two members disagree. Per-microservice Ingresses that join `group.name` must omit these annotations
+  entirely, or set them to the exact same values this component does — never a conflicting value.
 
 ## Tests
 
 `tests/alb-controller-ingress-group.tftest.hcl` runs against mock `aws`/`kubernetes` providers:
 `terraform init -backend=false && terraform test`. Covers the group name and internal scheme
-annotations, `manage-backend-security-group-rules`, the non-default namespace (created by default,
+annotations, `manage-backend-security-group-rules`, `spec.ingress_class_name` (and the absence of the
+deprecated `kubernetes.io/ingress.class` annotation), the non-default namespace (created by default,
 skipped with `create_namespace = false`, rejected when set to `"default"`), HTTP-only vs. HTTP+HTTPS
 listen-ports, that every ingress rule references a security group and never a CIDR, the
 `admit_security_group_ids`/`group_name` validations, that the load balancer/listener lookups are wired

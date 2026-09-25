@@ -29,11 +29,20 @@
 #      Per-microservice routing Ingresses join the same group.name and are
 #      out of this component's scope.
 #
-# The scheme stays internal regardless of the explicit annotation below:
-# eks-addons's default `alb` IngressClass pins ingressClassParams.spec.scheme
-# = internal, which an Ingress cannot override (eks-addons/addons.tf,
-# README.md "Internet-facing load balancers"). The annotation here is
-# belt-and-braces, matching what the controller already enforces.
+# The scheme stays internal because of two independent enforcements:
+#
+#   1. spec.ingress_class_name = "alb" below names eks-addons's default
+#      IngressClass explicitly (rather than the deprecated
+#      kubernetes.io/ingress.class annotation, which the controller still
+#      honours but which the DefaultIngressClass admission plugin and the
+#      controller's own IngressClass lookup do not resolve the same way --
+#      only an Ingress with ingressClassName set to that IngressClass's name
+#      gets its ingressClassParams applied). That IngressClass pins
+#      ingressClassParams.spec.scheme = internal, which an Ingress cannot
+#      override (eks-addons/addons.tf, README.md "Internet-facing load
+#      balancers").
+#   2. The explicit alb.ingress.kubernetes.io/scheme = internal annotation
+#      below, belt-and-braces in case ingressClassParams is ever loosened.
 
 locals {
   enabled = var.enabled
@@ -137,7 +146,6 @@ resource "kubernetes_ingress_v1" "this" {
 
     annotations = merge(
       {
-        "kubernetes.io/ingress.class"                                   = "alb"
         "alb.ingress.kubernetes.io/scheme"                              = "internal"
         "alb.ingress.kubernetes.io/target-type"                         = "ip"
         "alb.ingress.kubernetes.io/group.name"                          = var.group_name
@@ -162,6 +170,8 @@ resource "kubernetes_ingress_v1" "this" {
   }
 
   spec {
+    ingress_class_name = var.ingress_class_name
+
     default_backend {
       service {
         name = local.default_backend_action_name

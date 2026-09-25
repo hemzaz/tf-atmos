@@ -426,13 +426,16 @@ components:
 
         # A single catch-all route to the shared ALB microservices/alb-ingress-group
         # provisions: HTTP_PROXY over the VPC link above, targeting the ALB's
-        # HTTP listener (microservices/alb-ingress-group sets no
-        # certificate_arn here, so it has no HTTPS listener; pass
-        # certificate_arn there and switch this to https_listener_arn to add
-        # one). Per-microservice Ingresses join that ALB's IngressGroup and
-        # route by path/host inside the cluster; this component only needs
-        # one route to reach it. JWT authorization uses the authorizer_type
-        # below.
+        # HTTP listener. This hop is plaintext HTTP -- a known gap (see
+        # apigateway/README.md's "Dependencies / gotchas") --
+        # microservices/alb-ingress-group sets no certificate_arn here, so it
+        # has no HTTPS listener. Closing it needs: certificate_arn on
+        # microservices/alb-ingress-group (an ACM cert for the internal ALB),
+        # switching integration_uri below to .https_listener_arn, and setting
+        # tls_server_name_to_verify to that cert's SAN. Per-microservice
+        # Ingresses join that ALB's IngressGroup and route by path/host inside
+        # the cluster; this component only needs one route to reach it. JWT
+        # authorization uses the authorizer_type below.
         http_routes:
           "ANY /{proxy+}":
             integration_type: "HTTP_PROXY"

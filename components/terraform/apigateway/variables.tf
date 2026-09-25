@@ -423,16 +423,17 @@ variable "api_integrations" {
 
 variable "http_routes" {
   type = map(object({
-    integration_type     = string
-    connection_type      = optional(string, "INTERNET")
-    connection_id        = optional(string)
-    integration_uri      = string
-    integration_method   = optional(string, "ANY")
-    timeout_milliseconds = optional(number, 29000)
-    lambda_function_name = optional(string)
-    authorization_type   = optional(string, "NONE")
+    integration_type          = string
+    connection_type           = optional(string, "INTERNET")
+    connection_id             = optional(string)
+    integration_uri           = string
+    integration_method        = optional(string, "ANY")
+    timeout_milliseconds      = optional(number, 29000)
+    lambda_function_name      = optional(string)
+    authorization_type        = optional(string, "NONE")
+    tls_server_name_to_verify = optional(string)
   }))
-  description = "HTTP API routes, keyed by route_key (e.g. \"ANY /{proxy+}\"). HTTP_PROXY integrations typically set connection_type = \"VPC_LINK\" to reach the cluster (integration_uri = the target listener's ARN -- usually the alb-controller-ingress-group component's http_listener_arn/https_listener_arn output); connection_id defaults to this component's own VPC link (var.vpc_link_subnet_ids) when left null, or names a different VPC link explicitly. AWS_PROXY integrations forward to a Lambda (integration_uri = its invoke_arn). HTTP APIs only; a REST API (api_type = \"REST\") ignores it silently, the same way it ignores cors_configuration."
+  description = "HTTP API routes, keyed by route_key (e.g. \"ANY /{proxy+}\"). HTTP_PROXY integrations typically set connection_type = \"VPC_LINK\" to reach the cluster (integration_uri = the target listener's ARN -- usually the alb-controller-ingress-group component's http_listener_arn/https_listener_arn output); connection_id defaults to this component's own VPC link (var.vpc_link_subnet_ids) when left null, or names a different VPC link explicitly. AWS_PROXY integrations forward to a Lambda (integration_uri = its invoke_arn). HTTP APIs only; a REST API (api_type = \"REST\") ignores it silently, the same way it ignores cors_configuration. tls_server_name_to_verify enables TLS on an HTTP_PROXY + VPC_LINK route to an HTTPS listener (e.g. alb-controller-ingress-group's https_listener_arn) -- the certificate's SAN to verify against; leave null for a plaintext HTTP_PROXY hop (e.g. http_listener_arn)."
   default     = {}
 
   validation {
@@ -494,6 +495,20 @@ variable "http_routes" {
       if r.authorization_type == "JWT"
     ])
     error_message = "An http_routes entry with authorization_type JWT requires authorizer_type = \"JWT\" on this component; the route uses this component's own JWT authorizer."
+  }
+
+  # tls_config is only meaningful for a private (VPC_LINK) HTTP_PROXY
+  # integration into an HTTPS listener; AWS_PROXY targets a Lambda (no TLS
+  # hop to verify) and an INTERNET connection_type is already TLS-terminated
+  # by API Gateway's own integration_uri (a public HTTPS endpoint), not a
+  # private listener whose certificate this component verifies itself.
+  validation {
+    condition = alltrue([
+      for r in values(var.http_routes) :
+      r.integration_type == "HTTP_PROXY" && r.connection_type == "VPC_LINK"
+      if r.tls_server_name_to_verify != null
+    ])
+    error_message = "http_routes[*].tls_server_name_to_verify only applies to an HTTP_PROXY route with connection_type = \"VPC_LINK\" (a private integration into an HTTPS listener)."
   }
 }
 

@@ -73,6 +73,16 @@ run "annotations_carry_the_group_name_and_internal_scheme" {
     condition     = kubernetes_ingress_v1.this[0].metadata[0].annotations["alb.ingress.kubernetes.io/manage-backend-security-group-rules"] == "true"
     error_message = "An explicit alb.ingress.kubernetes.io/security-groups annotation stops the controller managing backend (node/pod) SG rules on its own; this annotation must opt back in."
   }
+
+  assert {
+    condition     = kubernetes_ingress_v1.this[0].spec[0].ingress_class_name == "alb"
+    error_message = "The Ingress must reference the IngressClass via spec.ingress_class_name (default \"alb\"), not the deprecated kubernetes.io/ingress.class annotation, so eks-addons's ingressClassParams (the internal-scheme pin) actually applies."
+  }
+
+  assert {
+    condition     = !contains(keys(kubernetes_ingress_v1.this[0].metadata[0].annotations), "kubernetes.io/ingress.class")
+    error_message = "The deprecated kubernetes.io/ingress.class annotation must not be set alongside spec.ingress_class_name."
+  }
 }
 
 run "creates_a_non_default_namespace_by_default" {
