@@ -243,7 +243,12 @@ variable "enable_certificate_monitoring" {
 variable "eks_cluster_name" {
   type        = string
   description = "EKS cluster name for monitoring (certificate and backend services)"
-  default     = ""
+  # nullable = false: eks/main's eks_cluster_id output (one(aws_eks_cluster.default[*].name))
+  # is null when eks is disabled. Without this, an explicit null argument from
+  # !terraform.state stays null instead of falling back to "", and every
+  # `!= ""` gate below then evaluates true against a null dimension value.
+  nullable = false
+  default  = ""
 }
 
 variable "certificate_arns" {
@@ -304,7 +309,13 @@ variable "api_gateway_name" {
   # `var.api_gateway_name != ""`, dropping the widget when it is unset. The
   # sibling eks_cluster_name uses the same "" (not null) default for the same
   # `!= ""` comparison in its own widgets and alarms.
-  default = ""
+  #
+  # nullable = false: apigateway's api_name output is null for an HTTP API
+  # (api_type = "HTTP"). Without this, an explicit null argument from
+  # !terraform.state stays null instead of falling back to "", and the
+  # `!= ""` gates above then evaluate true against a null dimension value.
+  nullable = false
+  default  = ""
 }
 
 variable "api_gateway_stages" {

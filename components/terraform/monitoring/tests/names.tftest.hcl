@@ -457,3 +457,38 @@ run "every_dashboard_name_is_unique_with_all_flags_on" {
     error_message = "Every dashboard name must start with <Environment>-<name>."
   }
 }
+
+run "null_eks_and_api_gateway_names_fall_back_to_empty_string" {
+  command = plan
+
+  # Round 4 review finding: eks_cluster_name and api_gateway_name are fed from
+  # !terraform.state outputs that can genuinely be null (eks's eks_cluster_id
+  # is one(aws_eks_cluster.default[*].name), null when eks is disabled;
+  # apigateway's api_name is null for an HTTP API). Both variables are
+  # `nullable = false`, so an explicit null argument must fall back to the ""
+  # default instead of staying null and breaking the `!= ""` gates below.
+  variables {
+    name                      = "main"
+    enable_backend_monitoring = true
+    eks_cluster_name          = null
+    api_gateway_name          = null
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.eks_cluster_failed_requests) == 0
+    error_message = "A null eks_cluster_name must fall back to \"\" and drop the EKS failed-requests alarm, not plan with a null ClusterName dimension."
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.api_gateway_latency) == 0
+    error_message = "A null api_gateway_name must fall back to \"\" and drop the API Gateway latency alarm, not plan with a null ApiName dimension."
+  }
+
+  assert {
+    condition = alltrue([
+      for w in jsondecode(aws_cloudwatch_dashboard.backend_services[0].dashboard_body).widgets :
+      try(length(w.properties.metrics), 1) > 0
+    ])
+    error_message = "The backend dashboard must still plan (dropping the EKS and API Gateway widgets, not planning them with a null dimension value)."
+  }
+}
