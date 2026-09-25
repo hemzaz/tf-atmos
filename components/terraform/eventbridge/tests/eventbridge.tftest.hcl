@@ -152,6 +152,40 @@ run "disabled_creates_nothing" {
   }
 }
 
+run "schedule_replaces_the_pattern" {
+  command = plan
+
+  variables {
+    schedule_expression = "cron(0 2 * * ? *)"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_rule.this[0].schedule_expression == "cron(0 2 * * ? *)" && aws_cloudwatch_event_rule.this[0].event_pattern == null
+    error_message = "A scheduled rule fires on its schedule and carries no event pattern."
+  }
+}
+
+run "rejects_a_malformed_schedule" {
+  command = plan
+
+  variables {
+    schedule_expression = "every hour"
+  }
+
+  expect_failures = [var.schedule_expression]
+}
+
+run "rejects_a_schedule_on_a_custom_bus" {
+  command = plan
+
+  variables {
+    schedule_expression = "rate(1 hour)"
+    event_bus_name      = "test-microservices"
+  }
+
+  expect_failures = [var.schedule_expression]
+}
+
 run "rejects_an_archive_without_a_bus" {
   command = plan
 

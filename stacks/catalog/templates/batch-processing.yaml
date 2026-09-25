@@ -37,6 +37,7 @@ import:
   - catalog/vpc/defaults
   - catalog/iam/defaults
   - catalog/monitoring/defaults
+  - catalog/eventbridge/defaults
   - catalog/sqs/defaults
 
 # =============================================================================
@@ -160,14 +161,14 @@ components:
         tags:
           Layer: "security"
           Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: batch-processing/vpc
 
     # =========================================================================
     # STORAGE (S3)
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: batch-processing/vpc
     batch-processing/s3-input:
       metadata:
         component: s3
@@ -218,6 +219,9 @@ components:
         tags:
           Layer: "storage"
           DataType: "input"
+      dependencies:
+        components:
+          - component: batch-processing/sqs/trigger
 
     batch-processing/s3-output:
       metadata:
@@ -369,7 +373,19 @@ components:
           Layer: "messaging"
           Platform: "batch-processing"
 
-    # Job completion notifications
+    # The EventBridge rules' queues are applied before the rules, and their
+    # policies name those rules by ARN, built from names rather than read from
+    # state: arn:aws:events:<region>:<account>:rule/<rule> (the rules sit on
+    # the default bus, so there is no bus segment), each rule
+    # "<Environment>-<name>" (the batch-processing/eventbridge/* instances
+    # below). The account segment is "*" because the sqs component adds
+    # aws:SourceAccount = <this account> to every Allow
+    # (iam_policy_limit_to_current_account, on in sqs/defaults), which pins
+    # it. So no queue reads eventbridge state and there is no dependency
+    # cycle. kms/main's AllowEventBridgeSQSQueues (allow_eventbridge, on in
+    # catalog/kms/defaults) lets EventBridge use the queues' key.
+
+    # Job completion notifications, delivered by the batch-status rule.
     batch-processing/sqs/notifications:
       metadata:
         component: sqs
@@ -380,6 +396,54 @@ components:
         name: batch-notifications
         visibility_timeout_seconds: 60
         message_retention_seconds: 86400
+        iam_policy:
+          - statements:
+              - sid: AllowBatchStatusRule
+                actions:
+                  - "sqs:SendMessage"
+                principals:
+                  - type: Service
+                    identifiers:
+                      - "events.amazonaws.com"
+                conditions:
+                  - test: ArnLike
+                    variable: "aws:SourceArn"
+                    values:
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-batch-status"
+        tags:
+          Layer: "messaging"
+          Platform: "batch-processing"
+
+    # The dead-letter queue of every EventBridge rule target below, so
+    # EventBridge may send to it from each of those rules. Nothing consumes
+    # it: failed deliveries wait here, 14 days (the sqs maximum), for an
+    # operator to inspect and replay; batch-processing/monitoring alarms on it.
+    batch-processing/sqs/eventbridge-dlq:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: batch-eventbridge-dlq
+        message_retention_seconds: 1209600
+        iam_policy:
+          - statements:
+              - sid: AllowBatchRules
+                actions:
+                  - "sqs:SendMessage"
+                principals:
+                  - type: Service
+                    identifiers:
+                      - "events.amazonaws.com"
+                conditions:
+                  - test: ArnLike
+                    variable: "aws:SourceArn"
+                    values:
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-daily-batch"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-hourly-batch"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-s3-trigger"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-batch-status"
         tags:
           Layer: "messaging"
           Platform: "batch-processing"
@@ -483,15 +547,15 @@ components:
         tags:
           ComputeType: "ec2"
           Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: batch-processing/vpc
+          - component: batch-processing/securitygroups
 
     # =========================================================================
     # BATCH JOB QUEUES
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: batch-processing/vpc
-          - component: batch-processing/securitygroups
     batch-processing/batch-job-queues:
       metadata:
         component: batch-job-queue
@@ -539,15 +603,16 @@ components:
         tags:
           Layer: "compute"
           Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: batch-processing/batch-compute-fargate
+          - component: batch-processing/batch-compute-fargate-spot
+          - component: batch-processing/batch-compute-ec2
 
     # =========================================================================
     # BATCH JOB DEFINITIONS
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: batch-processing/batch-compute-fargate
-          - component: batch-processing/batch-compute-fargate-spot
     batch-processing/batch-job-definitions:
       metadata:
         component: batch-job-definition
@@ -710,14 +775,15 @@ components:
         tags:
           Layer: "compute"
           Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: batch-processing/s3-input
+          - component: batch-processing/s3-output
 
     # =========================================================================
     # WORKFLOW ORCHESTRATION (Step Functions)
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: batch-processing/batch-job-queues
     batch-processing/step-functions:
       metadata:
         component: step-functions
@@ -905,110 +971,188 @@ components:
         tags:
           Layer: "orchestration"
           Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: batch-processing/batch-job-definitions
+          - component: batch-processing/batch-job-queues
 
     # =========================================================================
     # SCHEDULING (EventBridge)
     # =========================================================================
+    # One rule per instance on the default bus, each "<Environment>-<name>"
+    # and logging what it fires on to its own CloudWatch log group (the Cloud
+    # Posse aws-eventbridge model). The queue policies above name these rules,
+    # so a renamed rule must be renamed there too. A delivery that still fails
+    # after the retry policy goes to batch-processing/sqs/eventbridge-dlq.
+    # Every instance lists kms/main itself: its own dependencies list replaces
+    # the one inherited from eventbridge/defaults.
 
-      dependencies:
-        components:
-          - component: batch-processing/batch-job-definitions
-          - component: batch-processing/sqs/notifications
-    batch-processing/eventbridge:
+    # Daily batch processing: starts the data pipeline at 2 AM UTC. The paths
+    # are built from the bucket names the s3 instances set (bucket_name).
+    # job_id is the event ID, since Batch job names take no colons (the
+    # pipeline names jobs "process-<job_id>"); processing_date is the time the
+    # schedule fired.
+    batch-processing/eventbridge/daily-batch:
       metadata:
         component: eventbridge
         type: real
+        inherits:
+          - eventbridge/defaults
       vars:
-        rules:
-          # Daily batch processing
-          daily_batch:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-batch"
-            description: "Triggers daily batch processing"
-            schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC
-            state: "ENABLED"
-            targets:
-              - id: "data-pipeline"
-                arn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
-                role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
-                input:
-                  job_id.$: "aws.scheduler.scheduled-time"
-                  input_path: !terraform.state batch-processing/s3-input .bucket_name | "s3://" + . + "/incoming/"
-                  output_path: !terraform.state batch-processing/s3-output .bucket_name | "s3://" + . + "/processed/"
-                  final_output_path: !terraform.state batch-processing/s3-output .bucket_name | "s3://" + . + "/final/"
-                  processing_date.$: "aws.scheduler.scheduled-time"
-
-          # Hourly lightweight processing
-          hourly_lightweight:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-hourly-batch"
-            description: "Triggers hourly lightweight batch jobs"
-            schedule_expression: "rate(1 hour)"
-            state: "DISABLED"
-            targets:
-              - id: "lightweight-job"
-                arn: !terraform.state batch-processing/batch-job-queues .job_queue_names.low_priority | "arn:aws:batch:{{ .vars.region }}:{{ .vars.account_id }}:job-queue/" + .
-                role_arn: "{{ .vars.eventbridge_batch_role_arn }}"
-                batch_parameters:
-                  job_definition: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.data_processor
-                  job_name: "hourly-process"
-
-          # S3 event processing
-          s3_trigger_processing:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-s3-trigger"
-            description: "Processes new files uploaded to S3"
-            event_pattern:
-              source:
-                - "aws.s3"
-              detail-type:
-                - "Object Created"
-              detail:
-                bucket:
-                  name:
-                    - !terraform.state batch-processing/s3-input .bucket_name
-                object:
-                  key:
-                    - prefix: "incoming/"
-            state: "ENABLED"
-            targets:
-              - id: "parallel-processor"
-                arn: !terraform.state batch-processing/step-functions .state_machine_arns.parallel_processor
-                role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
-                input_transformer:
-                  input_paths:
-                    bucket: "$.detail.bucket.name"
-                    key: "$.detail.object.key"
-                  input_template: '{"bucket": "<bucket>", "key": "<key>"}'
-
-          # Batch job status changes
-          batch_status_changes:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-status"
-            description: "Monitors batch job status changes"
-            event_pattern:
-              source:
-                - "aws.batch"
-              detail-type:
-                - "Batch Job State Change"
-              detail:
-                status:
-                  - "FAILED"
-                  - "SUCCEEDED"
-                jobQueue:
-                  - prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
-            targets:
-              - id: "notification-queue"
-                arn: !terraform.state batch-processing/sqs/notifications .queue_arn
-
+        name: daily-batch
+        cloudwatch_event_rule_description: "Triggers daily batch processing"
+        schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC
+        targets:
+          data-pipeline:
+            arn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
+            role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
+            input_transformer:
+              input_paths:
+                id: "$.id"
+                time: "$.time"
+              input_template: '{"job_id": "<id>", "input_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input/incoming/", "output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/processed/", "final_output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/final/", "processing_date": "<time>"}'
+            dead_letter_config:
+              arn: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_arn
+            retry_policy:
+              maximum_event_age_in_seconds: 3600
+              maximum_retry_attempts: 10
         tags:
           Layer: "scheduling"
           Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: batch-processing/step-functions
+          - component: batch-processing/sqs/eventbridge-dlq
+
+    # Hourly lightweight processing: submits a data-processor job to the
+    # low-priority queue. Off by default (the old rule was DISABLED); set
+    # metadata.enabled: true in a stack to run it.
+    batch-processing/eventbridge/hourly-batch:
+      metadata:
+        component: eventbridge
+        type: real
+        enabled: false
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: hourly-batch
+        cloudwatch_event_rule_description: "Triggers hourly lightweight batch jobs"
+        schedule_expression: "rate(1 hour)"
+        targets:
+          lightweight-job:
+            arn: !terraform.state batch-processing/batch-job-queues .job_queue_arns.low_priority
+            role_arn: "{{ .vars.eventbridge_batch_role_arn }}"
+            batch_target:
+              job_definition: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.data_processor
+              job_name: "hourly-process"
+            dead_letter_config:
+              arn: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_arn
+            retry_policy:
+              maximum_event_age_in_seconds: 3600
+              maximum_retry_attempts: 10
+        tags:
+          Layer: "scheduling"
+          Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: batch-processing/batch-job-queues
+          - component: batch-processing/batch-job-definitions
+          - component: batch-processing/sqs/eventbridge-dlq
+
+    # S3 event processing: runs the parallel processor for each object created
+    # under incoming/ in the input bucket (named as batch-processing/s3-input
+    # sets it). S3 only sends these events once the bucket's EventBridge
+    # notifications are on.
+    batch-processing/eventbridge/s3-trigger:
+      metadata:
+        component: eventbridge
+        type: real
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: s3-trigger
+        cloudwatch_event_rule_description: "Processes new files uploaded to S3"
+        cloudwatch_event_rule_pattern:
+          source:
+            - "aws.s3"
+          detail-type:
+            - "Object Created"
+          detail:
+            bucket:
+              name:
+                - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
+            object:
+              key:
+                - prefix: "incoming/"
+        targets:
+          parallel-processor:
+            arn: !terraform.state batch-processing/step-functions .state_machine_arns.parallel_processor
+            role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
+            input_transformer:
+              input_paths:
+                bucket: "$.detail.bucket.name"
+                key: "$.detail.object.key"
+              input_template: '{"bucket": "<bucket>", "key": "<key>"}'
+            dead_letter_config:
+              arn: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_arn
+            retry_policy:
+              maximum_event_age_in_seconds: 3600
+              maximum_retry_attempts: 10
+        tags:
+          Layer: "scheduling"
+          Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: batch-processing/step-functions
+          - component: batch-processing/sqs/eventbridge-dlq
+
+    # Batch job status changes: this stack's failed and succeeded jobs go to
+    # the notifications queue, whose policy lets this rule send
+    # (batch-processing/sqs/notifications).
+    batch-processing/eventbridge/batch-status:
+      metadata:
+        component: eventbridge
+        type: real
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: batch-status
+        cloudwatch_event_rule_description: "Monitors batch job status changes"
+        cloudwatch_event_rule_pattern:
+          source:
+            - "aws.batch"
+          detail-type:
+            - "Batch Job State Change"
+          detail:
+            status:
+              - "FAILED"
+              - "SUCCEEDED"
+            # The event carries the queue's ARN, not its name.
+            jobQueue:
+              - wildcard: "arn:aws:batch:{{ .vars.region }}:*:job-queue/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-*"
+        targets:
+          notification-queue:
+            arn: !terraform.state batch-processing/sqs/notifications .queue_arn
+            dead_letter_config:
+              arn: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_arn
+            retry_policy:
+              maximum_event_age_in_seconds: 3600
+              maximum_retry_attempts: 10
+        tags:
+          Layer: "scheduling"
+          Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: batch-processing/sqs/notifications
+          - component: batch-processing/sqs/eventbridge-dlq
 
     # =========================================================================
     # LAMBDA FUNCTIONS (Supporting)
     # =========================================================================
-
-      dependencies:
-        components:
-          - component: batch-processing/step-functions
-          - component: batch-processing/batch-job-queues
     batch-processing/lambda-job-submitter:
       metadata:
         component: lambda
@@ -1069,16 +1213,17 @@ components:
         tags:
           Layer: "compute"
           Function: "job-submitter"
-
-    # =========================================================================
-    # MONITORING
-    # =========================================================================
-
       dependencies:
         components:
           - component: batch-processing/sqs/jobs-high
           - component: batch-processing/sqs/jobs-low
           - component: batch-processing/batch-job-queues
+          - component: batch-processing/batch-job-definitions
+
+    # =========================================================================
+    # MONITORING
+    # =========================================================================
+
     batch-processing/monitoring:
       metadata:
         component: monitoring
@@ -1257,6 +1402,19 @@ components:
             dimensions:
               QueueName: !terraform.state batch-processing/sqs/jobs-low .dead_letter_queue_name
 
+          # EventBridge deliveries that failed after their retries
+          eventbridge_dlq_messages:
+            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-eventbridge-dlq"
+            metric_name: "ApproximateNumberOfMessagesVisible"
+            namespace: "AWS/SQS"
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Sum"
+            dimensions:
+              QueueName: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_name
+
           # Compute environment not scaling
           compute_not_scaling:
             name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-compute-stuck"
@@ -1278,6 +1436,14 @@ components:
         tags:
           Layer: "monitoring"
           Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: batch-processing/batch-compute-fargate
+          - component: batch-processing/batch-job-queues
+          - component: batch-processing/step-functions
+          - component: batch-processing/sqs/jobs-high
+          - component: batch-processing/sqs/jobs-low
+          - component: batch-processing/sqs/eventbridge-dlq
 
 # =============================================================================
 # ENVIRONMENT-SPECIFIC OVERRIDES
@@ -1351,9 +1517,3 @@ components:
 # batch_sns_topic_arn: "arn:aws:sns:..."
 # log_bucket_name: "my-log-bucket"
 # alarm_email_addresses: ["ops@example.com"]
-      dependencies:
-        components:
-          - component: batch-processing/batch-job-queues
-          - component: batch-processing/step-functions
-          - component: batch-processing/sqs/jobs-high
-          - component: batch-processing/sqs/jobs-low
