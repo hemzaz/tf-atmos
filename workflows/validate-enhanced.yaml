@@ -3,6 +3,7 @@
 # Usage:
 #   atmos workflow validate-all -f validate-enhanced
 #   atmos workflow validate-stack -f validate-enhanced -s <stack>
+#   atmos workflow terraform-test -f validate-enhanced
 workflows:
   validate-all:
     description: Validate atmos.yaml, all stack manifests, YAML, formatting and every Terraform root module
@@ -107,3 +108,31 @@ workflows:
         # per pair.
         type: shell
         command: bash scripts/plan-sweep.sh
+
+  # Runs `terraform test` (tests/*.tftest.hcl) for every component that has a
+  # tests/ directory. The CI job (.github/workflows/terraform-ci.yml,
+  # "Terraform tests") calls the same script directly once terraform is on
+  # PATH; this workflow entry exists so a local run gets terraform 1.16.3 from
+  # the toolchain too, without requiring a system-wide install.
+  #
+  # Usage:
+  #   atmos workflow terraform-test -f validate-enhanced           # every tested component
+  #   COMPONENTS=securitygroup atmos workflow terraform-test -f validate-enhanced
+  #
+  # Or skip atmos and call the script directly with terraform already on PATH:
+  #   workflows/scripts/common/terraform-test.sh securitygroup
+  terraform-test:
+    description: Run `terraform test` for every component with a tests/ directory (or $COMPONENTS)
+    dependencies:
+      tools:
+        terraform: "1.16.3"
+    steps:
+      - name: terraform-test
+        type: shell
+        # $COMPONENTS is optional and deliberately unquoted -- it is a
+        # space-separated list of component directory names, and unset it
+        # expands to nothing, so the script falls back to testing every
+        # component that has a tests/ directory.
+        command: |
+          # shellcheck disable=SC2086
+          sh workflows/scripts/common/terraform-test.sh ${COMPONENTS:-}

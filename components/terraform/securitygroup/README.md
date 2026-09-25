@@ -13,6 +13,16 @@ cannot reference `aws_security_group.this`, so a rule sourced from a sibling
 group in the same map is unexpressible; and inline blocks are authoritative for
 the whole group, so changing one rule updates the group itself.
 
+## Testing
+
+`tests/egress_default.tftest.hcl` regression-tests the `allow_all_egress`
+default and the `enforce_no_public_ingress` guard against `mock_provider`, no
+AWS credentials needed. Run it with `workflows/scripts/common/terraform-test.sh
+securitygroup`, or `atmos workflow terraform-test -f validate-enhanced` for
+every tested component; the "Terraform tests" CI job
+(`.github/workflows/terraform-ci.yml`) runs it on any PR that touches this
+directory.
+
 ## Deployed
 
 `securitygroup/app` in `fnx-local-sandbox` only
