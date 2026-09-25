@@ -41,6 +41,11 @@ components:
         allow_cloudwatch_alarms: true
         # cloudtrail/main encrypts its trail log files with this key.
         allow_cloudtrail: true
+        # SNS subscriptions delivering to SQS queues encrypted with this key
+        # (sqs, sns components), limited to this account's topics in this
+        # region. EventBridge rules delivering to such queues are covered by
+        # allow_eventbridge.
+        allow_sns: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates

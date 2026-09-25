@@ -18,13 +18,13 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
 - `kms/main` declares no `dependencies.components` of its own. Its consumers
   do: secretsmanager (via `secretsmanager/defaults`), eventbridge (via
-  `eventbridge/defaults`) and prod's rds, eks and ec2 instances list
+  `eventbridge/defaults`), sqs (via `sqs/defaults`) and prod's rds, eks and ec2 instances list
   `kms/main`, so it is applied before them.
 - The base sets `enable_default_policy: true` and no named
   `key_administrators`: the root-account statement delegates administration
@@ -41,12 +41,21 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   (`.../role/Admin`, `.../role/production-eks-node-role`) that must already
   exist before apply — the stack comment notes the iam ci/eks-node instances
   are disabled, so this repo's `iam` component does not create those roles.
-- `allow_eventbridge` covers three statements: `AllowEventBridge` (bus and
+- `allow_eventbridge` covers four statements: `AllowEventBridge` (bus and
   archive crypto, scoped by `kms:EncryptionContext:aws:events:event-bus:arn`,
   because archive calls carry no `aws:SourceArn`), `AllowEventBridgeDescribeKey`
-  (`aws:SourceAccount` only; DescribeKey has no encryption context) and
+  (`aws:SourceAccount` only; DescribeKey has no encryption context),
   `AllowEventBridgeSNSTopics` (rules publishing to an SNS topic encrypted with
-  this key).
+  this key) and `AllowEventBridgeSQSQueues` (rules delivering to an SQS queue
+  encrypted with this key, and buses using one as their dead-letter queue:
+  `kms:GenerateDataKey`/`kms:Decrypt`, scoped by `aws:SourceAccount` and
+  `aws:SourceArn` = this account's `rule/*` or `event-bus/*` in this region;
+  confirm those keys are sent on the first real apply).
+- `allow_sns` adds `AllowSNS`: `sns.amazonaws.com` may use
+  `kms:Decrypt`/`kms:GenerateDataKey*` to deliver to SQS queues encrypted with
+  this key (an sns subscription to an sqs queue), scoped by
+  `aws:SourceAccount` and `aws:SourceArn` = this account's topics in this
+  region. `kms/defaults` turns it on.
 - `allow_cloudwatch_alarms` adds `AllowCloudWatchAlarmsSNSTopics` for
   `cloudwatch.amazonaws.com`. Both SNS statements allow
   `kms:GenerateDataKey*`/`kms:Decrypt` only with
