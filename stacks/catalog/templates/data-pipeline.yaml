@@ -31,6 +31,7 @@ import:
   - catalog/_base/defaults
   - catalog/iam/defaults
   - catalog/monitoring/defaults
+  - catalog/kinesis/defaults
 
 # =============================================================================
 # COMPONENT DEFINITIONS
@@ -199,21 +200,21 @@ components:
       metadata:
         component: kinesis
         type: real
+        inherits:
+          - kinesis/defaults
       vars:
-        stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-ingest"
-        description: "Main data ingestion stream"
+        # Stream name is <Environment>-<name> (kinesis component convention,
+        # not the tenant-account-environment naming the older, full-name
+        # components below use).
+        name: "data-ingest"
 
-        # Stream configuration
-        stream_mode: "ON_DEMAND"
-        # For provisioned mode:
-        shard_count: 2
+        # ON_DEMAND (inherited from kinesis/defaults): no shard_count here,
+        # since the component's own validation rejects setting shard_count
+        # together with ON_DEMAND. Switch to stream_mode: PROVISIONED and add
+        # shard_count to size this explicitly.
 
-        # Retention
+        # Retention (kinesis/defaults already sets 24; explicit for clarity)
         retention_period: 24
-
-        # Encryption
-        encryption_type: "KMS"
-        kms_key_id: "{{ .vars.kinesis_kms_key_id }}"
 
         # Enhanced monitoring
         shard_level_metrics:
@@ -225,12 +226,10 @@ components:
           - "ReadProvisionedThroughputExceeded"
           - "IteratorAgeMilliseconds"
 
-        # Consumer configuration
-        enhanced_consumers:
-          - name: "lambda-processor"
-            description: "Lambda consumer for real-time processing"
-          - name: "firehose-delivery"
-            description: "Firehose consumer for S3 delivery"
+        # Enhanced fan-out consumers (aws_kinesis_stream_consumer)
+        consumers:
+          lambda-processor: {}
+          firehose-delivery: {}
 
         tags:
           DataPipeline: "ingestion"
@@ -240,20 +239,12 @@ components:
       metadata:
         component: kinesis
         type: real
+        inherits:
+          - kinesis/defaults
       vars:
-        stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-enriched"
-        description: "Enriched data stream after transformation"
+        name: "data-enriched"
 
-        # Stream configuration
-        stream_mode: "ON_DEMAND"
-        shard_count: 2
-
-        # Retention
         retention_period: 24
-
-        # Encryption
-        encryption_type: "KMS"
-        kms_key_id: "{{ .vars.kinesis_kms_key_id }}"
 
         # Enhanced monitoring
         shard_level_metrics:
@@ -320,6 +311,12 @@ components:
         # CloudWatch logs
         kms_key_id: "{{ .vars.lambda_logs_kms_key_id }}"
 
+        # kms:Decrypt on the ingest stream's key, scoped to that stream alone
+        # (kinesis's reader_kms_policy output): this function's event source
+        # mapping polls kinesis-ingest with its own execution role, which
+        # needs that grant to read an encrypted stream.
+        custom_policy: !terraform.state data-pipeline/kinesis-ingest .reader_kms_policy
+
         # Performance alarms
         create_performance_alarms: true
         duration_alarm_threshold: 250000  # 250 seconds
@@ -375,7 +372,11 @@ components:
         # X-Ray tracing
         tracing_mode: "Active"
 
-        # CloudWatch logs
+        # kms:Decrypt on the enriched stream's key, scoped to that stream
+        # alone (kinesis's reader_kms_policy output): this function's event
+        # source mapping polls kinesis-enriched with its own execution role,
+        # which needs that grant to read an encrypted stream.
+        custom_policy: !terraform.state data-pipeline/kinesis-enriched .reader_kms_policy
 
         tags:
           DataPipeline: "validation"
@@ -1149,9 +1150,10 @@ components:
 # =============================================================================
 #
 # Development:
+#   data-pipeline/kinesis-ingest, data-pipeline/kinesis-enriched vars:
+#     stream_mode: "ON_DEMAND"
+#     retention_period: 24
 #   vars:
-#     kinesis_stream_mode: "ON_DEMAND"
-#     kinesis_retention_hours: 24
 #     firehose_buffer_size: 64
 #     firehose_buffer_interval: 60
 #     transformer_memory: 512
@@ -1160,9 +1162,10 @@ components:
 #     enable_cross_region_replication: false
 #
 # Staging:
+#   data-pipeline/kinesis-ingest, data-pipeline/kinesis-enriched vars:
+#     stream_mode: "ON_DEMAND"
+#     retention_period: 48
 #   vars:
-#     kinesis_stream_mode: "ON_DEMAND"
-#     kinesis_retention_hours: 48
 #     firehose_buffer_size: 128
 #     firehose_buffer_interval: 300
 #     transformer_memory: 1024
@@ -1171,10 +1174,11 @@ components:
 #     enable_cross_region_replication: false
 #
 # Production:
+#   data-pipeline/kinesis-ingest, data-pipeline/kinesis-enriched vars:
+#     stream_mode: "PROVISIONED"
+#     shard_count: 10
+#     retention_period: 168  # 7 days
 #   vars:
-#     kinesis_stream_mode: "PROVISIONED"
-#     kinesis_shard_count: 10
-#     kinesis_retention_hours: 168  # 7 days
 #     firehose_buffer_size: 128
 #     firehose_buffer_interval: 300
 #     transformer_memory: 2048
@@ -1188,7 +1192,6 @@ components:
 # REQUIRED VARIABLES
 # =============================================================================
 # data_lake_kms_key_id: "arn:aws:kms:..."
-# kinesis_kms_key_id: "arn:aws:kms:..."
 # lambda_logs_kms_key_id: "arn:aws:kms:..."
 # athena_kms_key_arn: "arn:aws:kms:..."
 # dynamodb_kms_key_arn: "arn:aws:kms:..."
