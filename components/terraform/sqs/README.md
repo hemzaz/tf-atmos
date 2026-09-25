@@ -20,7 +20,7 @@ inherit it and set `name` and, as needed, `dlq_enabled` and `iam_policy`.
 | `visibility_timeout_seconds` (30), `message_retention_seconds` (345600), `max_message_size` (262144), `delay_seconds` (0), `receive_wait_time_seconds` (0), `kms_data_key_reuse_period_seconds` (300) | Cloud Posse's defaults, validated to the ranges SQS accepts |
 | `fifo_queue` (false), `content_based_deduplication` (false), `deduplication_scope`, `fifo_throughput_limit` (null) | FIFO settings; the last three require `fifo_queue` |
 | `dlq_enabled` (false), `dlq_name_suffix` (`dlq`), `dlq_max_receive_count` (5), `dlq_message_retention_seconds` (1209600) | a DLQ `<Environment>-<name>-<suffix>`, same key, with a redrive policy on the queue and a redrive-allow policy on the DLQ that accepts only this queue |
-| `iam_policy` ([]), `iam_policy_limit_to_current_account` (true) | Cloud Posse's queue policy: `aws_iam_policy_document` statements, each scoped to the queue ARN (`resources`/`not_resources` must be unset); the flag adds `aws:SourceAccount = <this account>` to every Allow statement that does not set it already (Deny statements are left unnarrowed). Allow statements must name principals and may not use wildcard actions (`*`, `sqs:*`), a `*` principal, `not_principals` or `not_actions` (no public queue); Deny statements take `actions` or `not_actions` |
+| `iam_policy` ([]), `iam_policy_limit_to_current_account` (true) | Cloud Posse's queue policy: `aws_iam_policy_document` statements, each scoped to the queue ARN (`resources`/`not_resources` must be unset); the flag adds `aws:SourceAccount = <this account>` to every Allow statement that does not set it already (Deny statements are left unnarrowed). Allow statements must name principals and may not use wildcard actions (`*`, `sqs:*`), a `*` principal or one with a wildcard inside it (`arn:aws:iam::*:root`), `not_principals` or `not_actions` (no public queue). An Allow for a `Service` principal must pin the caller, since a service acts for whoever calls it: the account flag does (when the statement has no `aws:SourceAccount` of its own), or a condition on `aws:SourceAccount`, `aws:SourceArn`, `aws:SourceOwner`, `aws:SourceOrgID`, `aws:PrincipalOrgID`, `aws:PrincipalAccount` or `aws:PrincipalArn` (any case), under a positive operator (not `...Not...`, `...IfExists` or `Null`) and with no value that is just `*`. Deny statements take `actions` or `not_actions` |
 | `enabled` (true) | false creates nothing |
 | out: `queue_id`, `queue_arn`, `queue_name`, `queue_url` | the queue (`queue_id` is the URL, as in SQS) |
 | out: `dead_letter_queue_id`, `dead_letter_queue_arn`, `dead_letter_queue_name`, `dead_letter_queue_url` | null unless `dlq_enabled` |
@@ -77,7 +77,8 @@ inherit it and set `name` and, as needed, `dlq_enabled` and `iam_policy`.
 - Trimmed: `dlq_redrive_allow_policy` (the DLQ always accepts only this
   queue) and `dlq_tags`.
 - Validations Cloud Posse does not have: the key ARN, numeric ranges, FIFO
-  settings requiring `fifo_queue`, no wildcard queue-policy actions, and
+  settings requiring `fifo_queue`, no wildcard queue-policy actions or
+  principals, service principals pinned to their caller, and
   preconditions on the 80-character queue name limit.
 
 ## Tests

@@ -222,7 +222,7 @@ variable "iam_policy" {
       })), [])
     }))
   }))
-  description = "Queue policy, as Cloud Posse's aws-sqs-queue iam_policy (aws_iam_policy_document statements). Every statement is scoped to the queue ARN (resources/not_resources must be unset); Allow statements may not use a \"*\" principal, not_principals or not_actions. Example: let events.amazonaws.com sqs:SendMessage with an ArnEquals aws:SourceArn condition on a rule ARN"
+  description = "Queue policy, as Cloud Posse's aws-sqs-queue iam_policy (aws_iam_policy_document statements). Every statement is scoped to the queue ARN (resources/not_resources must be unset); Allow statements may not use a \"*\" principal (or one with a wildcard inside it), not_principals or not_actions, and an Allow for a Service principal must pin the caller (iam_policy_limit_to_current_account, or an aws:SourceAccount/SourceArn/SourceOwner/SourceOrgID/PrincipalOrgID/PrincipalAccount/PrincipalArn condition). Example: let events.amazonaws.com sqs:SendMessage with an ArnEquals aws:SourceArn condition on a rule ARN"
   default     = []
   nullable    = false
 
@@ -242,17 +242,41 @@ variable "iam_policy" {
     error_message = "Allow statements in iam_policy need actions, and may not use \"*\" or \"sqs:*\"; Deny statements need actions or not_actions."
   }
 
-  # No public queue: an Allow must name its principals.
+  # No public queue: an Allow must name its principals, none of them "*" or
+  # with a wildcard inside it (arn:aws:iam::*:root).
   validation {
     condition = alltrue(flatten([for p in var.iam_policy : [
       for s in p.statements : coalesce(s.effect, "Allow") != "Allow" || (
         s.not_actions == null
         && length(s.not_principals) == 0
         && length(s.principals) > 0
-        && alltrue([for pr in s.principals : !contains(pr.identifiers, "*")])
+        && alltrue([for pr in s.principals : alltrue([for i in pr.identifiers : !strcontains(i, "*")])])
       )
     ]]))
-    error_message = "Allow statements in iam_policy must name principals, and must not use a \"*\" principal, not_principals or not_actions (no public queue policy)."
+    error_message = "Allow statements in iam_policy must name principals, and must not use a \"*\" principal (or one with a wildcard inside it), not_principals or not_actions (no public queue policy)."
+  }
+
+  # A service principal acts for whichever account or resource calls it (the
+  # confused deputy), so an Allow for one must pin the caller, as sns does for
+  # principal "*": iam_policy_limit_to_current_account (aws:SourceAccount), or
+  # a condition on aws:SourceAccount, aws:SourceArn, aws:SourceOwner,
+  # aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or
+  # aws:PrincipalArn (any case), under an operator that is not negated,
+  # ...IfExists or Null, with no value that is "*". The account limit only
+  # counts for a statement it is added to: one without its own
+  # aws:SourceAccount condition (see main.tf).
+  validation {
+    condition = alltrue(flatten([for p in var.iam_policy : [
+      for s in p.statements : coalesce(s.effect, "Allow") != "Allow"
+      || !anytrue([for pr in s.principals : lower(pr.type) == "service"])
+      || (var.iam_policy_limit_to_current_account && !contains([for c in s.conditions : lower(c.variable)], "aws:sourceaccount"))
+      || anytrue([for c in s.conditions :
+        contains(["aws:sourceaccount", "aws:sourcearn", "aws:sourceowner", "aws:sourceorgid", "aws:principalorgid", "aws:principalaccount", "aws:principalarn"], lower(c.variable))
+        && !strcontains(lower(c.test), "not") && !endswith(lower(c.test), "ifexists") && lower(c.test) != "null"
+        && length(c.values) > 0 && !contains(c.values, "*")
+      ])
+    ]]))
+    error_message = "An iam_policy Allow for a Service principal must pin the caller: through iam_policy_limit_to_current_account, or with a condition on aws:SourceAccount, aws:SourceArn, aws:SourceOwner, aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or aws:PrincipalArn, under a positive operator (not ...Not..., ...IfExists or Null) and not \"*\"."
   }
 
   validation {

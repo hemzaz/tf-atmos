@@ -2,7 +2,8 @@
 # CloudWatch log group, as Cloud Posse's aws-eventbridge component does (it
 # wraps cloudposse/cloudwatch-logs and cloudposse/cloudwatch-events). Written
 # as plain resources, like the other root components. Added for this repo: an
-# optional custom bus with an archive, and KMS encryption throughout.
+# optional custom bus with an archive, KMS encryption throughout, and further
+# targets (queues, topics, functions, ...) next to the log group.
 
 locals {
   enabled     = var.enabled
@@ -81,6 +82,77 @@ resource "aws_cloudwatch_event_target" "logs" {
   event_bus_name = local.event_bus_name
   target_id      = "cloudwatch-logs"
   arn            = aws_cloudwatch_log_group.this[0].arn
+}
+
+# The rule's other targets (var.targets), as Cloud Posse's cloudwatch-events
+# module creates its one target. SQS and SNS targets need their own resource
+# policy to let events.amazonaws.com send from this rule; see the README.
+resource "aws_cloudwatch_event_target" "this" {
+  for_each = local.enabled ? var.targets : {}
+
+  rule           = aws_cloudwatch_event_rule.this[0].name
+  event_bus_name = local.event_bus_name
+  target_id      = each.key
+  arn            = each.value.arn
+  role_arn       = each.value.role_arn
+  input_path     = each.value.input_path
+
+  dynamic "input_transformer" {
+    for_each = each.value.input_transformer != null ? [each.value.input_transformer] : []
+
+    content {
+      input_paths    = input_transformer.value.input_paths
+      input_template = input_transformer.value.input_template
+    }
+  }
+
+  dynamic "dead_letter_config" {
+    for_each = each.value.dead_letter_config != null ? [each.value.dead_letter_config] : []
+
+    content {
+      arn = dead_letter_config.value.arn
+    }
+  }
+
+  dynamic "retry_policy" {
+    for_each = each.value.retry_policy != null ? [each.value.retry_policy] : []
+
+    content {
+      maximum_event_age_in_seconds = retry_policy.value.maximum_event_age_in_seconds
+      maximum_retry_attempts       = retry_policy.value.maximum_retry_attempts
+    }
+  }
+
+  dynamic "sqs_target" {
+    for_each = each.value.sqs_message_group_id != null ? [each.value.sqs_message_group_id] : []
+
+    content {
+      message_group_id = sqs_target.value
+    }
+  }
+}
+
+# A Lambda target is invoked under the function's resource policy: let
+# events.amazonaws.com invoke it from this rule only.
+resource "aws_lambda_permission" "this" {
+  for_each = local.enabled ? {
+    for k, t in var.targets : k => t.arn
+    if split(":", t.arn)[2] == "lambda" && strcontains(t.arn, ":function:")
+  } : {}
+
+  # Statement IDs take letters, digits, hyphen and underscore only.
+  statement_id  = replace("AllowEventBridge-${local.name}-${each.key}", ".", "_")
+  action        = "lambda:InvokeFunction"
+  function_name = each.value
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.this[0].arn
+
+  lifecycle {
+    precondition {
+      condition     = length("AllowEventBridge-${local.name}-${each.key}") <= 100
+      error_message = "The Lambda permission statement ID (AllowEventBridge-<Environment>-<name>-<target key>) must be 100 characters or fewer: shorten the target key."
+    }
+  }
 }
 
 data "aws_caller_identity" "current" {}

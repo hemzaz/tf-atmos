@@ -270,6 +270,142 @@ run "rejects_a_wildcard_principal_arn_in_policy_json" {
   expect_failures = [var.sns_topic_policy_json]
 }
 
+run "public_allow_pinned_by_an_odd_cased_key_and_operator_is_accepted" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      version = "2012-10-17"
+      statement = [{
+        sid       = "AllowEventBridgeRule"
+        effect    = "allow"
+        principal = { AWS = "*" }
+        action    = "sns:Publish"
+        resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        condition = { ArnLike = { "AWS:SourceArn" = ["arn:aws:events:eu-west-2:123456789012:rule/test-*"] } }
+      }]
+    })
+  }
+
+  assert {
+    condition     = length(aws_sns_topic_policy.this) == 1
+    error_message = "A public Allow pinned by aws:SourceArn (any case, any positive operator) is accepted."
+  }
+}
+
+run "rejects_a_public_allow_with_a_non_pinning_condition" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { AWS = "*" }
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Condition = { Bool = { "aws:SecureTransport" = "true" } }
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_an_unconditioned_public_allow_with_lowercase_keys" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      version = "2012-10-17"
+      statement = [{
+        effect    = "allow"
+        principal = "*"
+        action    = "sns:Publish"
+        resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_a_public_allow_pinned_only_if_the_key_exists" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        # A caller without aws:SourceAccount passes an ...IfExists test.
+        Condition = { StringEqualsIfExists = { "aws:SourceAccount" = "123456789012" } }
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_a_public_allow_pinned_by_a_negated_operator" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Condition = { StringNotEquals = { "aws:SourceAccount" = "210987654321" } }
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_a_public_allow_pinned_to_a_wildcard" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Condition = { StringLike = { "aws:PrincipalArn" = ["*"] } }
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_not_principal_with_odd_cased_keys" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = {
+        EFFECT       = "Allow"
+        notPrincipal = { AWS = "arn:aws:iam::123456789012:root" }
+        Action       = "sns:Publish"
+        Resource     = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+      }
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
 run "disabled_creates_nothing" {
   command = plan
 

@@ -378,3 +378,109 @@ run "rejects_a_queue_name_over_80_characters" {
 
   expect_failures = [aws_sqs_queue.dlq[0]]
 }
+
+# --- caller pinning --------------------------------------------------------
+
+run "rejects_a_principal_arn_with_a_wildcard" {
+  command = plan
+
+  variables {
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "AWS", identifiers = ["arn:aws:iam::*:root"] }]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
+}
+
+run "service_allow_pinned_by_source_arn_needs_no_account_limit" {
+  command = plan
+
+  variables {
+    iam_policy_limit_to_current_account = false
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["events.amazonaws.com"] }]
+        conditions = [{ test = "ArnLike", variable = "AWS:SourceArn", values = ["arn:aws:events:eu-west-2:123456789012:rule/test-bus/test-rule"] }]
+      }]
+    }]
+  }
+
+  assert {
+    condition     = length(aws_sqs_queue_policy.this) == 1
+    error_message = "A service Allow pinned by aws:SourceArn (any case, any positive operator) is accepted without the account limit."
+  }
+}
+
+run "rejects_an_unpinned_service_allow_without_the_account_limit" {
+  command = plan
+
+  variables {
+    iam_policy_limit_to_current_account = false
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+        conditions = [{ test = "Bool", variable = "aws:SecureTransport", values = ["true"] }]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
+}
+
+run "rejects_a_service_allow_whose_own_source_account_is_negated" {
+  command = plan
+
+  variables {
+    # The account limit is on, but a statement with its own aws:SourceAccount
+    # does not get it, so the negated condition would be all it has.
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+        conditions = [{ test = "StringNotEquals", variable = "aws:SourceAccount", values = ["210987654321"] }]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
+}
+
+run "rejects_a_service_allow_pinned_only_if_the_key_exists" {
+  command = plan
+
+  variables {
+    iam_policy_limit_to_current_account = false
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+        conditions = [{ test = "ArnEqualsIfExists", variable = "aws:SourceArn", values = ["arn:aws:sns:eu-west-2:123456789012:test-topic"] }]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
+}
+
+run "rejects_a_service_allow_pinned_to_a_wildcard" {
+  command = plan
+
+  variables {
+    iam_policy_limit_to_current_account = false
+    iam_policy = [{
+      statements = [{
+        actions    = ["sqs:SendMessage"]
+        principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
+        conditions = [{ test = "StringLike", variable = "aws:SourceAccount", values = ["*"] }]
+      }]
+    }]
+  }
+
+  expect_failures = [var.iam_policy]
+}

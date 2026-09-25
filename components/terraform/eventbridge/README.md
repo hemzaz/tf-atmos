@@ -22,9 +22,41 @@ instances inherit it and set `name` and `cloudwatch_event_rule_pattern`.
 | `create_event_bus` (false), `event_bus_name` (`default`) | create a bus `<Environment>-<name>` for the rule, or put the rule on an existing one (another instance's `event_bus_name` output) |
 | `archive_enabled` (false), `archive_retention_days` (30, 0 = forever) | archive every event on the created bus; requires `create_event_bus` |
 | `event_bus_dlq_arn` (null) | ARN of an SQS queue EventBridge uses as a dead-letter queue for the created bus; only used when `create_event_bus` is true |
+| `targets` (`{}`) | further targets of the rule, keyed by target ID (at most 4: a rule takes 5 and the log group is one). Each has `arn`, and optionally `role_arn`, `input_path` or `input_transformer` (`input_paths`, `input_template`), `dead_letter_config.arn` (an SQS queue), `retry_policy` (`maximum_event_age_in_seconds` 60-86400, `maximum_retry_attempts` 0-185) and `sqs_message_group_id` (FIFO queues). See "Targets" below |
 | `enabled` (true) | false creates nothing |
 | out: `cloudwatch_logs_log_group_arn`, `cloudwatch_logs_log_group_name`, `cloudwatch_event_rule_arn`, `cloudwatch_event_rule_name` | Cloud Posse's outputs |
 | out: `event_bus_name`, `event_bus_arn`, `event_archive_arn` | the bus the rule is on (the created one, or `event_bus_name`); ARNs are null when not created |
+
+## Targets
+
+The log group is always a target. `targets` adds more, each an
+`aws_cloudwatch_event_target` on the rule's bus. How EventBridge is allowed to
+deliver depends on the target:
+
+- **Lambda functions**: the component creates an `aws_lambda_permission` that
+  lets `events.amazonaws.com` invoke the function from this rule only
+  (`source_arn` is the rule ARN). Don't also set the lambda component's
+  `cloudwatch_source_arn` for the same rule.
+- **SQS queues** (and SNS topics): EventBridge sends under the queue's
+  resource policy, which this component does not create. With this repo's sqs
+  component, give the queue an `iam_policy` statement that allows
+  `events.amazonaws.com` `sqs:SendMessage`, conditioned on `aws:SourceArn`
+  = the rule ARN (`arn:aws:events:<region>:<account>:rule/<bus>/<rule>`
+  on a custom bus; the sqs component adds `aws:SourceAccount` itself). The
+  same goes for a target's `dead_letter_config` queue and for the bus's
+  `event_bus_dlq_arn` queue (`aws:SourceArn` = the bus ARN there). The rule
+  ARN only depends on names, so the queue policy can be written before the
+  rule exists: queues first, rules second, no dependency cycle
+  (`stacks/catalog/templates/microservices-platform.yaml` does this).
+- **KMS**: a queue encrypted with a customer managed key also needs the key
+  policy to let `events.amazonaws.com` use it; this repo's kms component does
+  that under `allow_eventbridge` (`AllowEventBridgeSQSQueues`, scoped to
+  this account's rules and buses).
+- **Everything else** EventBridge reaches with an IAM role: `role_arn` is
+  required for Step Functions, Kinesis, Firehose, ECS, Batch and EventBridge
+  (another bus, API destinations) targets, and rejected for Lambda, SQS, SNS
+  and CloudWatch Logs, which use resource policies. This component does not
+  create that role.
 
 ## Dependencies / gotchas
 
@@ -57,6 +89,12 @@ instances inherit it and set `name` and `cloudwatch_event_rule_pattern`.
   `create_event_bus`/`event_bus_name` (Cloud Posse only uses the default
   bus), `archive_enabled`/`archive_retention_days`, `event_bus_dlq_arn`,
   `enabled`, and the `event_bus_*`/`event_archive_arn` outputs.
+- `targets` replaces the single target of Cloud Posse's
+  `cloudposse/cloudwatch-events` module (`cloudwatch_event_target_arn`,
+  `cloudwatch_event_target_role_arn`, `cloudwatch_event_target_id`, which
+  the aws-eventbridge component wires to its log group). It is a map, as in
+  terraform-aws-modules/eventbridge, and adds input, dead-letter and retry
+  settings and the Lambda permission.
 - The `aws_cloudwatch_log_resource_policy` is resource-scoped
   (`resource_arn = aws_cloudwatch_log_group.this[0].arn`, provider >= 6.36),
   not account-scoped (`policy_name`) as in Cloud Posse. Account-scoped
@@ -66,8 +104,10 @@ instances inherit it and set `name` and `cloudwatch_event_rule_pattern`.
   `aws:SourceAccount` condition Cloud Posse's policy does not have.
 - Validations Cloud Posse does not have: the key ARN, the pattern is a
   non-empty object, the retention is one CloudWatch accepts, an archive needs
-  a created bus, the DLQ ARN, and a precondition that the archive name
-  (`<Environment>-<name>`) is 48 characters or fewer.
+  a created bus, the DLQ ARN, the targets (count, IDs, ARNs, role use, input,
+  dead-letter queue, retry ranges), and preconditions that the archive name
+  (`<Environment>-<name>`) is 48 characters or fewer and a Lambda permission
+  statement ID 100 or fewer.
 
 ## Tests
 
