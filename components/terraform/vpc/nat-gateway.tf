@@ -1,13 +1,13 @@
 locals {
   # Determine how many NAT gateways to create based on the NAT strategy
-  nat_gateway_count = var.enable_nat_gateway ? (
+  nat_gateway_count = var.nat_gateway_enabled ? (
     var.nat_gateway_strategy == "one_per_az" ? length(var.public_subnets) : (
       var.nat_gateway_strategy == "single" ? 1 : 0
     )
   ) : 0
 
   # Determine the list of explicit subnet IDs to use for NAT gateways based on strategy.
-  # Derived from nat_gateway_count so enable_nat_gateway = false always wins: the
+  # Derived from nat_gateway_count so nat_gateway_enabled = false always wins: the
   # "single" strategy is the default, and testing the strategy first meant a
   # disabled NAT gateway was still created.
   nat_gateway_subnet_indices = local.nat_gateway_count == 0 ? [] : (

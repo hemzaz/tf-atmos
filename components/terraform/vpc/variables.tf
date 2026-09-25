@@ -9,20 +9,17 @@ variable "region" {
   }
 }
 
-variable "vpc_cidr" {
+# Input names follow cloudposse-terraform-components/aws-vpc wherever an input
+# maps one to one (ipv4_primary_cidr_block, availability_zones,
+# nat_gateway_enabled, map_public_ip_on_launch, vpc_flow_logs_*).
+variable "ipv4_primary_cidr_block" {
   type        = string
-  description = "CIDR block for the VPC"
+  description = "The primary IPv4 CIDR block for the VPC"
 
   validation {
-    condition     = can(cidrhost(var.vpc_cidr, 0))
+    condition     = can(cidrhost(var.ipv4_primary_cidr_block, 0))
     error_message = "Must be a valid IPv4 CIDR block address."
   }
-}
-
-variable "cidr_block" {
-  type        = string
-  description = "CIDR block for the VPC (alias for vpc_cidr for consistency)"
-  default     = null
 }
 
 variable "management_cidr" {
@@ -36,9 +33,14 @@ variable "management_cidr" {
   }
 }
 
-variable "azs" {
+variable "availability_zones" {
   type        = list(string)
-  description = "Availability Zones"
+  description = "Availability Zones for the subnets, in subnet order: subnet N goes to availability_zones[N]"
+
+  validation {
+    condition     = length(var.availability_zones) > 0
+    error_message = "At least one availability zone must be provided."
+  }
 }
 
 variable "private_subnets" {
@@ -82,10 +84,19 @@ variable "database_subnets" {
   }
 }
 
-variable "enable_nat_gateway" {
+variable "nat_gateway_enabled" {
   type        = bool
-  description = "Enable NAT Gateway"
+  description = "Flag to enable/disable NAT gateways"
   default     = true
+}
+
+# Cloud Posse defaults this to true. Here it defaults to false: an instance
+# launched into a public subnet gets no public IP unless the stack opts in
+# (trivy AWS-0164), and nothing in these stacks launches instances that need one.
+variable "map_public_ip_on_launch" {
+  type        = bool
+  description = "Instances launched into a public subnet should be assigned a public IP address"
+  default     = false
 }
 
 variable "nat_gateway_strategy" {
@@ -127,12 +138,6 @@ variable "ram_resource_share_arn" {
   type        = string
   description = "ARN of the Resource Access Manager (RAM) resource share"
   default     = ""
-}
-
-variable "create_vpc_iam_role" {
-  type        = bool
-  description = "Whether to create an IAM role for VPC management"
-  default     = true
 }
 
 variable "default_sg_ingress_self_only" {
@@ -230,9 +235,9 @@ variable "private_subnets_additional_tags" {
 }
 
 # VPC Flow Logs Variables
-variable "enable_flow_logs" {
+variable "vpc_flow_logs_enabled" {
   type        = bool
-  description = "Enable VPC Flow Logs for network monitoring and security analysis"
+  description = "Enable or disable the VPC Flow Logs"
   default     = true
 }
 
@@ -247,20 +252,31 @@ variable "flow_logs_retention_days" {
   }
 }
 
-variable "flow_logs_aggregation_interval" {
+variable "vpc_flow_logs_traffic_type" {
+  type        = string
+  description = "The type of traffic to capture. Valid values: ACCEPT, REJECT, ALL"
+  default     = "ALL"
+
+  validation {
+    condition     = contains(["ACCEPT", "REJECT", "ALL"], var.vpc_flow_logs_traffic_type)
+    error_message = "vpc_flow_logs_traffic_type must be ACCEPT, REJECT or ALL."
+  }
+}
+
+variable "vpc_flow_logs_max_aggregation_interval" {
   type        = number
   description = "Maximum interval of time during which a flow is captured and aggregated (60 or 600 seconds)"
   default     = 600
 
   validation {
-    condition     = contains([60, 600], var.flow_logs_aggregation_interval)
+    condition     = contains([60, 600], var.vpc_flow_logs_max_aggregation_interval)
     error_message = "Flow logs aggregation interval must be either 60 or 600 seconds."
   }
 }
 
-variable "flow_logs_custom_format" {
+variable "vpc_flow_logs_format" {
   type        = string
-  description = "Custom log format for VPC Flow Logs. If null, uses default format"
+  description = "The fields to include in the flow log record. If null, uses this component's default format"
   default     = null
 }
 

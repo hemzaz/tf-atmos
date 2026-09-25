@@ -560,9 +560,9 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "${VPC_CIDR}"
+        ipv4_primary_cidr_block: "${VPC_CIDR}"
 ${subnets_block}
-        enable_flow_logs: "{{ .settings.environment.enable_vpc_flow_logs }}"
+        vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
 EOF
 
     write_file "$(components_dir)/security.yaml" << EOF

@@ -21,8 +21,8 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.10.0.0/16"
-        azs:
+        ipv4_primary_cidr_block: "10.10.0.0/16"
+        availability_zones:
           - eu-west-2a
           - eu-west-2b
           - eu-west-2c
@@ -41,25 +41,24 @@ components:
           - "10.10.203.0/24"
 
         # NAT Gateway - single for staging (cost optimization)
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "single"
 
-        # DNS settings
         tags:
           NetworkTier: "primary"
 
     # ==========================================================================
     # Services VPC - Dedicated for backend services
     # ==========================================================================
-        enable_flow_logs: true
+        vpc_flow_logs_enabled: true
     vpc/services:
       metadata:
         component: vpc
         inherits:
           - vpc/defaults
       vars:
-        vpc_cidr: "10.11.0.0/16"
-        azs:
+        ipv4_primary_cidr_block: "10.11.0.0/16"
+        availability_zones:
           - eu-west-2a
           - eu-west-2b
           - eu-west-2c
@@ -73,7 +72,7 @@ components:
           - "10.11.102.0/24"
           - "10.11.103.0/24"
 
-        enable_nat_gateway: true
+        nat_gateway_enabled: true
         nat_gateway_strategy: "single"
         tags:
           NetworkTier: "services"
@@ -81,7 +80,7 @@ components:
     # ==========================================================================
     # Network Resources - DNS and routing for main VPC
     # ==========================================================================
-        enable_flow_logs: true
+        vpc_flow_logs_enabled: true
     network/main:
       metadata:
         component: dns

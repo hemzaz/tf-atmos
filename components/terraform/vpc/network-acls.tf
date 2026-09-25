@@ -1,5 +1,15 @@
 # Network ACLs for additional subnet-level security
 # These provide defense-in-depth beyond security groups
+#
+# EXCEPTION to the repo rule "no inbound from 0.0.0.0/0": the inbound
+# 0.0.0.0/0 entries below are deliberate and must stay. NACLs are stateless,
+# so the reply to any outbound connection (NAT gateway egress, package
+# downloads, AWS APIs) comes back from an internet address to an ephemeral
+# port; without the 32768-65535 /0 ingress entries on the public and private
+# NACLs that return traffic is dropped. The public NACL's 80/443 /0 entries
+# are what lets internet-facing load balancers (placed by the kubernetes.io/role/elb
+# subnet tag) receive traffic at all. Access control for workloads is done by
+# security groups, which are stateful and never open inbound to /0.
 
 # Public subnet NACL - More restrictive for internet-facing resources
 resource "aws_network_acl" "public" {
@@ -42,7 +52,7 @@ resource "aws_network_acl" "public" {
     protocol   = "-1"
     rule_no    = 130
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 0
     to_port    = 0
   }
@@ -90,7 +100,7 @@ resource "aws_network_acl" "private" {
     protocol   = "-1"
     rule_no    = 100
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 0
     to_port    = 0
   }
@@ -140,7 +150,7 @@ resource "aws_network_acl" "private" {
     protocol   = "-1"
     rule_no    = 130
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 0
     to_port    = 0
   }
@@ -175,7 +185,7 @@ resource "aws_network_acl" "database" {
     protocol   = "tcp"
     rule_no    = 100
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 5432 # PostgreSQL
     to_port    = 5432
   }
@@ -184,7 +194,7 @@ resource "aws_network_acl" "database" {
     protocol   = "tcp"
     rule_no    = 110
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 3306 # MySQL
     to_port    = 3306
   }
@@ -193,7 +203,7 @@ resource "aws_network_acl" "database" {
     protocol   = "tcp"
     rule_no    = 120
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 6379 # Redis
     to_port    = 6379
   }
@@ -202,7 +212,7 @@ resource "aws_network_acl" "database" {
     protocol   = "tcp"
     rule_no    = 130
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 27017 # MongoDB
     to_port    = 27017
   }
@@ -212,7 +222,7 @@ resource "aws_network_acl" "database" {
     protocol   = "tcp"
     rule_no    = 140
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 32768
     to_port    = 65535
   }
@@ -223,7 +233,7 @@ resource "aws_network_acl" "database" {
     protocol   = "tcp"
     rule_no    = 100
     action     = "allow"
-    cidr_block = coalesce(var.cidr_block, var.vpc_cidr)
+    cidr_block = var.ipv4_primary_cidr_block
     from_port  = 32768
     to_port    = 65535
   }
