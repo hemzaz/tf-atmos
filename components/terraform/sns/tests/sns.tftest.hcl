@@ -214,6 +214,62 @@ run "rejects_an_unconditioned_aws_star_allow_in_policy_json" {
   expect_failures = [var.sns_topic_policy_json]
 }
 
+run "rejects_not_principal_on_an_allow_in_policy_json" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect       = "Allow"
+        NotPrincipal = { AWS = "arn:aws:iam::123456789012:root" }
+        Action       = "sns:Publish"
+        Resource     = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_a_public_allow_with_an_empty_condition_in_policy_json" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { AWS = "*" }
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Condition = {}
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
+run "rejects_a_wildcard_principal_arn_in_policy_json" {
+  command = plan
+
+  variables {
+    sns_topic_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Effect    = "Allow"
+        Principal = { AWS = ["arn:aws:iam::*:root"] }
+        Action    = "sns:Publish"
+        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Condition = { StringEquals = { "aws:PrincipalOrgID" = "o-example" } }
+      }]
+    })
+  }
+
+  expect_failures = [var.sns_topic_policy_json]
+}
+
 run "disabled_creates_nothing" {
   command = plan
 

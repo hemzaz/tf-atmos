@@ -106,7 +106,7 @@ variable "allowed_iam_arns_for_sns_publish" {
 
 variable "sns_topic_policy_json" {
   type        = string
-  description = "A topic policy (JSON) merged into the generated one (as a source document: the generated DenyInsecureTransport and publish statements always win on a Sid clash). An Allow with principal \"*\" must carry a Condition"
+  description = "A topic policy (JSON) merged into the generated one (as a source document: the generated DenyInsecureTransport and publish statements always win on a Sid clash). Its statements are used as written, not rescoped to this topic: set Resource to the topic ARN yourself. Allow statements may not use NotPrincipal or a principal ARN with a wildcard, and an Allow for principal \"*\" needs a non-empty Condition"
   default     = ""
   nullable    = false
 
@@ -115,13 +115,21 @@ variable "sns_topic_policy_json" {
     error_message = "sns_topic_policy_json must be empty or a JSON document."
   }
 
-  # No public topic: an Allow for any principal must be conditioned.
+  # No public topic. For every Allow: no NotPrincipal; no principal with a
+  # wildcard inside it (arn:aws:iam::*:root); and principal "*" only with a
+  # non-empty Condition. Principal may be "*", or a map of string or list.
   validation {
     condition = var.sns_topic_policy_json == "" || alltrue([
       for s in flatten([try(jsondecode(var.sns_topic_policy_json).Statement, [])]) :
-      !(try(s.Effect, "") == "Allow" && try(s.Condition, null) == null && contains(try(s.Principal == "*" ? ["*"] : flatten([for v in values(s.Principal) : v]), []), "*"))
+      try(s.Effect, "") != "Allow" || (
+        try(s.NotPrincipal, null) == null
+        && alltrue([
+          for p in try(s.Principal == "*" ? ["*"] : flatten([for v in values(s.Principal) : v]), []) :
+          p == "*" ? length(try(s.Condition, {})) > 0 : !strcontains(p, "*")
+        ])
+      )
     ])
-    error_message = "sns_topic_policy_json must not Allow principal \"*\" without a Condition (no public topic)."
+    error_message = "sns_topic_policy_json Allow statements must not use NotPrincipal or a principal containing a wildcard, and may Allow principal \"*\" only with a non-empty Condition (no public topic)."
   }
 }
 
