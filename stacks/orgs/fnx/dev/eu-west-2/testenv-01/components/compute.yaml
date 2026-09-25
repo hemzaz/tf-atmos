@@ -175,7 +175,7 @@ components:
     # EKS add-ons, one instance per cluster: the load balancer controller,
     # cluster-autoscaler, metrics-server, external-dns and cert-manager, each
     # with its own IRSA role. external-dns and cert-manager may change records
-    # only in the dns instance's zones. The cluster endpoints are private, so
+    # only in the dns instance's public zones. The cluster endpoints are private, so
     # plan/apply these from inside the VPC (see the eks-addons README).
     eks-addons/main:
       metadata:
@@ -196,8 +196,10 @@ components:
             enable_external_dns: true
             enable_cert_manager: true
             vpc_id: !terraform.state vpc/main .vpc_id
-            dns_zone_ids: !terraform.state network/main .zone_ids
+            # Public zones only; internal.* is private and stays out.
+            dns_zone_ids: !terraform.state network/main '.zone_ids.main | [.]'
             cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+            cert_manager_acme_server: "https://acme-staging-v02.api.letsencrypt.org/directory"
       dependencies:
         components:
           - component: eks/main
@@ -222,8 +224,9 @@ components:
             enable_external_dns: true
             enable_cert_manager: true
             vpc_id: !terraform.state vpc/services .vpc_id
-            dns_zone_ids: !terraform.state network/services .zone_ids
+            dns_zone_ids: !terraform.state network/services '.zone_ids | [.services, .data]'
             cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+            cert_manager_acme_server: "https://acme-staging-v02.api.letsencrypt.org/directory"
       dependencies:
         components:
           - component: eks/data
