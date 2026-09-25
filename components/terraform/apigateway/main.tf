@@ -192,6 +192,21 @@ resource "aws_api_gateway_domain_name" "rest_domain" {
   }
 
   tags = local.tags
+
+  # regional_certificate_arn only works with a REGIONAL endpoint. EDGE needs
+  # certificate_arn (us-east-1) instead, and PRIVATE does not support a
+  # regional custom domain at all; either would plan fine here and fail at
+  # apply. Real stacks are unaffected: both apigateway/main and
+  # apigateway/data use the REGIONAL default.
+  lifecycle {
+    precondition {
+      # `var.endpoint_type == ["REGIONAL"]` is unreliable here: the variable
+      # is list(string) and the literal is a tuple, and Terraform's `==`
+      # does not treat those as equal even with identical elements.
+      condition     = length(var.endpoint_type) == 1 && var.endpoint_type[0] == "REGIONAL"
+      error_message = "A REST API custom domain (domain_name + certificate_arn) requires endpoint_type = [\"REGIONAL\"]; got ${jsonencode(var.endpoint_type)}."
+    }
+  }
 }
 
 # Custom Domain Name for HTTP API
