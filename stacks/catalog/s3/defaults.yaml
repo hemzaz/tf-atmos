@@ -1,0 +1,32 @@
+---
+##################################################
+# Catalog Configuration for Amazon S3
+##################################################
+# One bucket per instance (the Cloud Posse aws-s3-bucket model). Instances
+# inherit this base and set `name` and, as needed,
+# `lifecycle_configuration_rules`, `logging` and `source_policy_documents`.
+# Encryption, public access block, object ownership and the TLS-only policy
+# are fixed in the component.
+
+components:
+  terraform:
+    s3/defaults:
+      metadata:
+        component: s3
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults), so this
+        # resolves everywhere.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        bucket_key_enabled: true
+        versioning_enabled: true
+        force_destroy: false
+        tags:
+          Component: "S3"
