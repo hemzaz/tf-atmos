@@ -51,37 +51,35 @@ run "autoscaling_ebs_grants_the_service_linked_role" {
 
   assert {
     condition = (
-      # The principal is the account root, not the service-linked role
-      # itself: KMS validates every principal named in a key policy at
-      # CreateKey/PutKeyPolicy time and would reject the policy if the role
-      # does not exist yet in this account. The root always exists, and
-      # aws:PrincipalArn (a condition value, which KMS does not validate)
-      # narrows the grant back down to just this role.
-      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Principal.AWS == "arn:aws:iam::123456789012:root"
+      # The principal is the service-linked role itself, not the account
+      # root: a root-principal statement would grant nothing to this role by
+      # itself (AWS's key-policy docs: an account-principal statement only
+      # lets the account delegate access through IAM identity policies, and
+      # this role's AWS-managed policy carries no customer-managed-key
+      # permissions), so an aws:PrincipalArn condition narrowing a root
+      # principal back down to this role's ARN would be a no-op grant. `iam`
+      # provisions the role first (enable_autoscaling_service_linked_role)
+      # so KMS's principal-existence check at CreateKey/PutKeyPolicy time
+      # passes.
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Principal.AWS == "arn:aws:iam::123456789012:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Action) == toset(["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"])
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Condition == {
         StringEquals = {
-          "aws:PrincipalArn"  = "arn:aws:iam::123456789012:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
           "kms:ViaService"    = "ec2.eu-west-2.amazonaws.com"
           "kms:CallerAccount" = "123456789012"
         }
       }
     )
-    error_message = "The Auto Scaling service-linked role may use the key only via EC2 in this region, and only for this account."
+    error_message = "The Auto Scaling service-linked role may use the key only via EC2 in this region, and only for this account; the principal must be the role itself, not an account-root principal narrowed by aws:PrincipalArn (which would not actually grant the role anything)."
   }
 
   assert {
     condition = (
-      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Principal.AWS == "arn:aws:iam::123456789012:root"
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Principal.AWS == "arn:aws:iam::123456789012:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Action == "kms:CreateGrant"
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Condition == {
-        StringEquals = {
-          "aws:PrincipalArn" = "arn:aws:iam::123456789012:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
-        }
-        Bool = { "kms:GrantIsForAWSResource" = "true" }
-      }
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Condition == { Bool = { "kms:GrantIsForAWSResource" = "true" } }
     )
-    error_message = "The Auto Scaling service-linked role may create a grant only for an AWS resource (EBS), never an arbitrary grantee, and only when it is that role acting through the account root principal."
+    error_message = "The Auto Scaling service-linked role may create a grant only for an AWS resource (EBS), never an arbitrary grantee."
   }
 }
 

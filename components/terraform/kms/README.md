@@ -22,9 +22,11 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 ## Dependencies & gotchas
 
-- `kms/main` has no dependency on `iam` in any stack: `allow_autoscaling_ebs`
-  (below) targets the account root, which always exists, rather than naming
-  the Auto Scaling service-linked role directly. Its consumers add their own
+- `kms/main` depends on `iam` in dev, staging and prod (`iam/dev` in dev,
+  `iam/main` in staging and prod): `allow_autoscaling_ebs` (below) names the
+  Auto Scaling service-linked role directly, and `iam` provisions that role
+  (`enable_autoscaling_service_linked_role`, see `../iam/README.md`) so it
+  exists before `kms/main`'s first apply. Its own consumers add their own
   dependency on `kms/main`: secretsmanager (via `secretsmanager/defaults`),
   eventbridge (via `eventbridge/defaults`), sqs (via `sqs/defaults`), every
   eks and vpc instance above, and prod's rds and ec2 instances, so `kms/main`
@@ -95,7 +97,10 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   `kms:ViaService=ec2.<region>.amazonaws.com` and `kms:CallerAccount`) and
   `AllowAutoScalingEBSGrant` (`kms:CreateGrant`, scoped by
   `kms:GrantIsForAWSResource`) for the EC2 Auto Scaling service-linked role
-  (`role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling`).
+  (`role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling`),
+  named directly as the principal in both statements — AWS's documented
+  same-account pattern
+  (Example 1, https://docs.aws.amazon.com/autoscaling/ec2/userguide/key-policy-requirements-EBS-encryption.html).
   Every managed node group / ASG that launches instances from a CMK-encrypted
   launch template needs this or new instances fail to launch. `eks/defaults`
   sets `node_group_ebs_kms_key_id` to this key, and `kms/defaults` turns this
@@ -104,21 +109,22 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   automatically the first time an account uses Auto Scaling, so it may not
   exist yet when `kms/main` first applies, and AWS KMS validates every
   principal named in a key policy at `CreateKey`/`PutKeyPolicy` time — naming
-  the role directly would fail with `MalformedPolicyDocumentException: ...
-  invalid principals` in any account that has never used Auto Scaling. Both
-  statements instead target the account root (`arn:<partition>:iam::<account>:root`,
-  which always exists) and narrow the grant back down to just this role with
-  an `aws:PrincipalArn` condition — KMS validates principals but not condition
-  *values*, so this is accepted regardless of whether the role exists yet.
-  This is exactly the key-policy shape AWS documents for CMK-encrypted EBS
-  volumes launched by Auto Scaling
-  (https://docs.aws.amazon.com/autoscaling/ec2/userguide/key-policy-requirements-EBS-encryption.html).
-  Consequently `kms/main` has no dependency on `iam` in any stack, and no
-  component provisions the service-linked role — AWS creates it the first
-  time an account actually uses Auto Scaling, and the grant applies whether
-  or not that has happened yet. The sandbox lane's `kms/main` sets
+  the role directly fails with `MalformedPolicyDocumentException: ... invalid
+  principals` in any account that has never used Auto Scaling. This is
+  **not** solved by naming the account root instead: per AWS's key-policy
+  documentation, a statement whose principal is the account (its root ARN)
+  does not by itself grant any IAM principal access — it only lets the
+  account delegate access through IAM identity policies — so narrowing it
+  back down with an `aws:PrincipalArn` condition grants nothing, since this
+  role's AWS-managed policy is fixed and carries no customer-managed-key
+  permissions. Instead, `iam` provisions the role
+  (`enable_autoscaling_service_linked_role`, see `../iam/README.md`) and
+  `kms/main` declares a `dependencies.components` edge to that stack's iam
+  instance (`iam/dev` in dev, `iam/main` in staging and prod) so the role
+  exists before `kms/main`'s first apply. The sandbox lane's `kms/main` sets
   `allow_autoscaling_ebs: false` explicitly (overriding `kms/defaults`)
-  because nothing in that lane runs Auto Scaling or EKS node groups.
+  because nothing in that lane runs Auto Scaling or EKS node groups, so it
+  has no `iam` instance and needs none.
 - `replica_regions` requires `is_multi_region = true` (validation). Each
   replica gets its own generated policy, not a copy of the primary's: the
   region-specific statements above (`AllowCloudWatchLogs`,

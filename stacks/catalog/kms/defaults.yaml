@@ -60,14 +60,15 @@ components:
         # this key (eks/defaults), and the AWS Auto Scaling service-linked
         # role that launches their EBS volumes needs kms:CreateGrant plus
         # Encrypt/Decrypt/DescribeKey to do so, or new instances fail to
-        # launch. That role is created automatically the first time an
-        # account uses Auto Scaling; the key policy statement targets the
-        # account root with an aws:PrincipalArn condition naming the role
-        # (see components/terraform/kms/README.md), not the role directly,
-        # so it is accepted whether or not the role exists yet and no other
-        # component needs to provision it first. The sandbox lane
+        # launch. The key policy statement names that role directly (see
+        # components/terraform/kms/README.md); each stack's iam instance
+        # provisions the role (enable_autoscaling_service_linked_role, see
+        # components/terraform/iam/README.md) and kms/main declares a
+        # dependencies.components edge to it so the role exists before
+        # kms/main's first apply. The sandbox lane
         # (stacks/orgs/fnx/local/eu-west-2/sandbox.yaml) overrides this to
-        # false: it runs no Auto Scaling or EKS node groups.
+        # false: it runs no Auto Scaling or EKS node groups, and has no iam
+        # instance.
         allow_autoscaling_ebs: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
