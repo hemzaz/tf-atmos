@@ -132,6 +132,9 @@ components:
         enable_key_rotation: true
         deletion_window_in_days: 7
         alias_name: "alias/sandbox"
+        # This lane runs no Auto Scaling or EKS node groups, so the grant
+        # (kms/defaults default: true) would do nothing here.
+        allow_autoscaling_ebs: false
         tags:
           Environment: sandbox
           Tenant: fnx

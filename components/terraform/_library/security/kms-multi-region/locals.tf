@@ -495,9 +495,20 @@ data "aws_iam_policy_document" "default" {
   # on a CMK-encrypted launch template fail to launch. The role
   # (aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling)
   # is a service-linked role AWS creates the first time an account uses Auto
-  # Scaling, not something Terraform manages here; the key policy may name it
-  # even though nothing in this module creates it. kms:ViaService is scoped to
-  # this document's region: EC2 calls KMS through ec2.<region>.amazonaws.com,
+  # Scaling, not something Terraform manages here or anywhere else in this
+  # repo. AWS KMS validates every principal named in a key policy at
+  # CreateKey/PutKeyPolicy time and rejects the policy
+  # (MalformedPolicyDocumentException, "invalid principals") if a directly
+  # named IAM principal does not exist yet - which this role may not, in an
+  # account that has never used Auto Scaling. KMS does NOT validate condition
+  # *values*, only principals, so the statement instead targets the account
+  # root (which always exists) and narrows it back down to just this role via
+  # an aws:PrincipalArn condition - the pattern AWS documents for this exact
+  # ordering problem
+  # (https://docs.aws.amazon.com/autoscaling/ec2/userguide/key-policy-requirements-EBS-encryption.html).
+  # This also means the statement applies correctly whether or not the role
+  # exists yet: nothing needs to provision it first. kms:ViaService is scoped
+  # to this document's region: EC2 calls KMS through ec2.<region>.amazonaws.com,
   # so a replica's statement must name the replica's own region, not the
   # primary's.
   dynamic "statement" {
@@ -516,7 +527,13 @@ data "aws_iam_policy_document" "default" {
 
       principals {
         type        = "AWS"
-        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
+        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:PrincipalArn"
+        values   = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
       }
 
       condition {
@@ -543,7 +560,13 @@ data "aws_iam_policy_document" "default" {
 
       principals {
         type        = "AWS"
-        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
+        identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:PrincipalArn"
+        values   = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
       }
 
       condition {

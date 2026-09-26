@@ -42,9 +42,3 @@ output "ci_apply_role_name" {
   description = "Name of the GitHub Actions apply role"
   value       = one(aws_iam_role.ci_apply[*].name)
 }
-
-output "autoscaling_service_linked_role_arn" {
-  description = "ARN of the AWS Auto Scaling service-linked role, whether created here or already present in the account. kms/main depends on this component so its allow_autoscaling_ebs key-policy grant names a principal that exists."
-  # aws_iam_roles.arns is a set(string), which has no index; tolist() first.
-  value = length(aws_iam_service_linked_role.autoscaling) > 0 ? aws_iam_service_linked_role.autoscaling[0].arn : try(tolist(data.aws_iam_roles.existing_autoscaling_slr.arns)[0], null)
-}
