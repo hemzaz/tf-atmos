@@ -421,6 +421,97 @@ variable "api_integrations" {
   }
 }
 
+variable "http_routes" {
+  type = map(object({
+    integration_type          = string
+    connection_type           = optional(string, "INTERNET")
+    connection_id             = optional(string)
+    integration_uri           = string
+    integration_method        = optional(string, "ANY")
+    timeout_milliseconds      = optional(number, 29000)
+    lambda_function_name      = optional(string)
+    authorization_type        = optional(string, "NONE")
+    tls_server_name_to_verify = optional(string)
+  }))
+  description = "HTTP API routes, keyed by route_key (e.g. \"ANY /{proxy+}\"). HTTP_PROXY integrations typically set connection_type = \"VPC_LINK\" to reach the cluster (integration_uri = the target listener's ARN -- usually the alb-controller-ingress-group component's http_listener_arn/https_listener_arn output); connection_id defaults to this component's own VPC link (var.vpc_link_subnet_ids) when left null, or names a different VPC link explicitly. AWS_PROXY integrations forward to a Lambda (integration_uri = its invoke_arn). HTTP APIs only; a REST API (api_type = \"REST\") ignores it silently, the same way it ignores cors_configuration. tls_server_name_to_verify enables TLS on an HTTP_PROXY + VPC_LINK route to an HTTPS listener (e.g. alb-controller-ingress-group's https_listener_arn) -- the certificate's SAN to verify against; leave null for a plaintext HTTP_PROXY hop (e.g. http_listener_arn)."
+  default     = {}
+
+  validation {
+    condition     = alltrue([for r in values(var.http_routes) : contains(["HTTP_PROXY", "AWS_PROXY"], r.integration_type)])
+    error_message = "http_routes[*].integration_type must be HTTP_PROXY or AWS_PROXY."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.http_routes) : contains(["INTERNET", "VPC_LINK"], r.connection_type)])
+    error_message = "http_routes[*].connection_type must be INTERNET or VPC_LINK."
+  }
+
+  # connection_id may be left null when this component creates its own VPC
+  # link (vpc_link_subnet_ids set): the route then defaults to it (see
+  # aws_apigatewayv2_integration.http_route in main.tf). Otherwise it must
+  # name one explicitly.
+  validation {
+    condition = alltrue([
+      for r in values(var.http_routes) :
+      (r.connection_id != null && r.connection_id != "") || length(var.vpc_link_subnet_ids) > 0
+      if r.connection_type == "VPC_LINK"
+    ])
+    error_message = "http_routes[*].connection_id (the VPC link id) is required when connection_type is VPC_LINK, unless this component creates its own VPC link (vpc_link_subnet_ids set), which routes default to when connection_id is left null."
+  }
+
+  # Without a matching aws_lambda_permission, an AWS_PROXY route deploys clean
+  # and every call returns 500 with AccessDeniedException, visible only in the
+  # execution log -- same reasoning as api_integrations' AWS_PROXY validation
+  # above, so it is required here too.
+  validation {
+    condition = alltrue([
+      for r in values(var.http_routes) :
+      r.lambda_function_name != null && r.lambda_function_name != ""
+      if r.integration_type == "AWS_PROXY"
+    ])
+    error_message = "http_routes[*] of integration_type AWS_PROXY must set lambda_function_name, so this component can grant it invoke permission."
+  }
+
+  validation {
+    condition = alltrue([
+      for r in values(var.http_routes) :
+      r.lambda_function_name == null
+      if r.integration_type != "AWS_PROXY"
+    ])
+    error_message = "lambda_function_name only applies to an AWS_PROXY route; remove it from entries of any other type."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.http_routes) : contains(["JWT", "NONE"], r.authorization_type)])
+    error_message = "http_routes[*].authorization_type must be JWT or NONE."
+  }
+
+  # A JWT route uses this component's own JWT authorizer (var.authorizer_type
+  # = "JWT"); there is no per-route authorizer override.
+  validation {
+    condition = alltrue([
+      for r in values(var.http_routes) :
+      var.authorizer_type == "JWT"
+      if r.authorization_type == "JWT"
+    ])
+    error_message = "An http_routes entry with authorization_type JWT requires authorizer_type = \"JWT\" on this component; the route uses this component's own JWT authorizer."
+  }
+
+  # tls_config is only meaningful for a private (VPC_LINK) HTTP_PROXY
+  # integration into an HTTPS listener; AWS_PROXY targets a Lambda (no TLS
+  # hop to verify) and an INTERNET connection_type is already TLS-terminated
+  # by API Gateway's own integration_uri (a public HTTPS endpoint), not a
+  # private listener whose certificate this component verifies itself.
+  validation {
+    condition = alltrue([
+      for r in values(var.http_routes) :
+      r.integration_type == "HTTP_PROXY" && r.connection_type == "VPC_LINK"
+      if r.tls_server_name_to_verify != null
+    ])
+    error_message = "http_routes[*].tls_server_name_to_verify only applies to an HTTP_PROXY route with connection_type = \"VPC_LINK\" (a private integration into an HTTPS listener)."
+  }
+}
+
 variable "create_dashboard" {
   type        = bool
   description = "Whether to create a CloudWatch dashboard for the API Gateway"

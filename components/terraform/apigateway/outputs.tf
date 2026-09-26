@@ -153,6 +153,11 @@ output "dashboard_arn" {
   value       = var.create_dashboard ? aws_cloudwatch_dashboard.api_dashboard[0].dashboard_arn : null
 }
 
+output "http_route_ids" {
+  description = "Map of route_key to the HTTP API route's ID, for the entries in var.http_routes"
+  value       = { for k, r in aws_apigatewayv2_route.http_route : k => r.id }
+}
+
 output "api_name" {
   description = "Real name of the REST API (the ApiName dimension monitoring's AWS/ApiGateway CloudWatch widgets and alarms are keyed on); null for an HTTP API (api_type = \"HTTP\"), which is dimensioned by ApiId instead"
   value       = local.create_rest_api ? aws_api_gateway_rest_api.rest_api[0].name : null

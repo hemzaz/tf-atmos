@@ -1,0 +1,30 @@
+---
+##################################################
+# Catalog Configuration for the alb-controller-ingress-group component
+##################################################
+# Shared-ALB IngressGroup scaffold for the in-cluster AWS Load Balancer
+# Controller (see components/terraform/alb-controller-ingress-group/README.md),
+# modelled on Cloud Posse's aws-eks-alb-controller-ingress-group. Instances set
+# cluster_name/host/cluster_ca_certificate (from their eks instance), vpc_id,
+# group_name and admit_security_group_ids.
+#
+# Always internal (the eks-addons default IngressClass pins scheme: internal;
+# see that component's README, "Internet-facing load balancers") and never
+# admits a CIDR block -- only admit_security_group_ids, which every instance
+# must set to at least one security group.
+
+components:
+  terraform:
+    alb-controller-ingress-group/defaults:
+      metadata:
+        component: alb-controller-ingress-group
+        type: abstract
+      vars:
+        enabled: true
+        # kubernetes_namespace defaults to "alb-ingress-group" (never
+        # "default", CKV_K8S_21) and create_namespace creates it; override
+        # per instance for a different namespace.
+        ssl_policy: "ELBSecurityPolicy-TLS13-1-2-2021-06"
+        wait_for_load_balancer: true
+        tags:
+          Component: "ALB-Controller-Ingress-Group"
