@@ -1,7 +1,0 @@
----
-components:
-  terraform:
-    services:
-      metadata:
-        component: services
-        enabled: false
