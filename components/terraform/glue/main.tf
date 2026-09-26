@@ -35,6 +35,7 @@ locals {
 
   catalog_arn     = "arn:${local.partition}:glue:${local.region}:${local.account_id}:catalog"
   database_arn    = "arn:${local.partition}:glue:${local.region}:${local.account_id}:database/${local.database_name}"
+  default_db_arn  = "arn:${local.partition}:glue:${local.region}:${local.account_id}:database/default"
   tables_arn      = "arn:${local.partition}:glue:${local.region}:${local.account_id}:table/${local.database_name}/*"
   log_group_arn   = "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:/aws-glue/*"
   log_streams_arn = "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:/aws-glue/*:log-stream:*"
@@ -219,6 +220,14 @@ resource "aws_iam_role_policy" "service" {
           "glue:BatchUpdatePartition",
         ]
         Resource = [local.catalog_arn, local.database_arn, local.tables_arn]
+      },
+      {
+        # Spark with --enable-glue-datacatalog looks up the `default`
+        # database at session start; lookup only, nothing else on it.
+        Sid      = "AllowDefaultDatabaseLookup"
+        Effect   = "Allow"
+        Action   = "glue:GetDatabase"
+        Resource = local.default_db_arn
       },
       {
         Sid      = "AllowGlueLogGroups"

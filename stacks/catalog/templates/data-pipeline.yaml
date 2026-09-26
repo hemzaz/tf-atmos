@@ -378,6 +378,7 @@ components:
         components:
           - component: data-pipeline/kinesis-ingest
           - component: data-pipeline/kinesis-enriched
+          - component: data-pipeline/dynamodb-lookup
     data-pipeline/lambda-validator:
       metadata:
         component: lambda
@@ -438,6 +439,7 @@ components:
       dependencies:
         components:
           - component: data-pipeline/kinesis-enriched
+          - component: data-pipeline/s3-raw
     data-pipeline/firehose-raw:
       metadata:
         component: firehose
@@ -460,7 +462,7 @@ components:
             size_in_mb: 128
             interval_in_seconds: 300
           compression_format: "GZIP"
-          kms_key_arn: "{{ .vars.data_lake_kms_key_id }}"
+          kms_key_arn: !terraform.state kms/main .key_arn
 
         # Data format conversion (Parquet)
         data_format_conversion:
@@ -480,6 +482,10 @@ components:
             database_name: !terraform.state data-pipeline/glue-database .database_name
             table_name: !terraform.state data-pipeline/glue-database .table_names.raw_events
             region: "{{ .vars.region }}"
+            # glue-database sets account-wide Data Catalog encryption
+            # (kms/main), so this role needs kms:Decrypt on kms/main as well
+            # as glue:GetTable*; without it Firehose cannot read the schema
+            # and silently routes every record to errors/.
             role_arn: "{{ .vars.firehose_glue_role_arn }}"
 
         # CloudWatch logging
@@ -507,6 +513,7 @@ components:
 
       dependencies:
         components:
+          - component: kms/main
           - component: data-pipeline/kinesis-ingest
           - component: data-pipeline/s3-raw
           - component: data-pipeline/glue-database
@@ -532,7 +539,7 @@ components:
             size_in_mb: 128
             interval_in_seconds: 300
           compression_format: "UNCOMPRESSED"  # Parquet handles compression
-          kms_key_arn: "{{ .vars.data_lake_kms_key_id }}"
+          kms_key_arn: !terraform.state kms/main .key_arn
 
         # Data format conversion (Parquet)
         data_format_conversion:
@@ -551,6 +558,10 @@ components:
             database_name: !terraform.state data-pipeline/glue-database .database_name
             table_name: !terraform.state data-pipeline/glue-database .table_names.processed_events
             region: "{{ .vars.region }}"
+            # glue-database sets account-wide Data Catalog encryption
+            # (kms/main), so this role needs kms:Decrypt on kms/main as well
+            # as glue:GetTable*; without it Firehose cannot read the schema
+            # and silently routes every record to errors/.
             role_arn: "{{ .vars.firehose_glue_role_arn }}"
 
         # Dynamic partitioning
@@ -575,6 +586,7 @@ components:
 
       dependencies:
         components:
+          - component: kms/main
           - component: data-pipeline/kinesis-enriched
           - component: data-pipeline/s3-processed
           - component: data-pipeline/glue-database
@@ -589,13 +601,27 @@ components:
     # Flow: firehose-raw converts ingest records to Parquet against
     # raw_events' schema and writes s3-raw/data/year=/month=/day=/hour=/
     # (raw_events uses partition projection, so Athena sees new hours with
-    # no crawl). step-functions' daily ETL runs the transformation job
-    # (raw -> processed_events, registering its partitions through a
-    # catalog-updating sink), an Athena data quality query, then the
-    # curation job (processed -> s3-curated/daily_event_summary/), whose
-    # success fires the crawl-curated trigger to catalog the curated table.
-    # firehose-processed also lands in processed_events; the processed_data
-    # crawler adds those partitions every 6 hours.
+    # no crawl). firehose-processed (the streaming path) writes
+    # s3-processed/data/ = processed_events, the one canonical processed
+    # table; the processed_data crawler adds its partitions every 6 hours.
+    # step-functions' daily ETL (02:00 UTC) runs the transformation job
+    # (raw -> processed_events_batch under s3-processed/batch/, registering
+    # its partitions through a catalog-updating sink), an Athena data quality
+    # query, then the curation job (processed_events, de-duplicated on
+    # event_id -> s3-curated/daily_event_summary/), whose success fires the
+    # crawl-curated trigger to catalog the curated table.
+    #
+    # processed_events_batch is the reprocessing/backfill path: it re-derives
+    # the same events from s3-raw, so it is kept in its own prefix and table
+    # rather than appended to processed_events (which would count every event
+    # twice). Nothing reads it by default; point a curation run's
+    # --input_path at s3-processed/batch/ to rebuild a day from raw.
+    #
+    # Day semantics: both jobs process the PREVIOUS UTC day of the run's
+    # --date (EventBridge's $.time), so the 02:00 UTC run covers all 24 hours
+    # of yesterday. Pass --process_date YYYY-MM-DD (used as-is) to backfill a
+    # specific day. Both jobs are idempotent: re-running a day replaces that
+    # day's output instead of appending to it.
     data-pipeline/glue-database:
       metadata:
         component: glue
@@ -683,12 +709,14 @@ components:
               - name: "hour"
                 type: "string"
 
-          # Written by the transformation job and firehose-processed.
-          # Partitioned by source too (firehose-processed's dynamic
-          # partitioning), whose values are open-ended, so no projection:
-          # the processed_data crawler adds partitions.
+          # Written by firehose-processed only (the streaming path); the
+          # canonical processed table curation reads. Partitioned by source
+          # too (firehose-processed's dynamic partitioning), whose values are
+          # open-ended, so no projection: the processed_data crawler adds
+          # partitions. Firehose delivers at least once, so readers
+          # de-duplicate on event_id.
           processed_events:
-            description: "Validated, de-duplicated events (Parquet)"
+            description: "Validated events from the streaming path (Parquet, from firehose-processed)"
             location: !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
             input_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
             output_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
@@ -721,25 +749,55 @@ components:
               - name: "day"
                 type: "string"
 
-        crawlers:
-          # Keeps raw_events' schema in step with what firehose-raw writes
-          # (partitions come from projection).
-          raw_data:
-            description: "Crawls raw_events (catalog target)"
-            schedule: "cron(0 */6 * * ? *)"  # Every 6 hours
-            catalog_tables:
-              - raw_events
-            schema_change_policy:
-              delete_behavior: "LOG"
-              update_behavior: "UPDATE_IN_DATABASE"
-            configuration:
-              Version: 1.0
-              CrawlerOutput:
-                Partitions:
-                  AddOrUpdateBehavior: "InheritFromTable"
+          # Written by the transformation job only: raw_events re-derived
+          # in batch (reprocessing/backfill path). Same schema and
+          # partitioning as processed_events, its own prefix so the two
+          # never mix; the job's catalog-updating sink registers its
+          # partitions (source is open-ended, so no projection).
+          processed_events_batch:
+            description: "Batch-reprocessed events from raw_events (Parquet, from the transformation job)"
+            location: !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/batch/"
+            input_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+            output_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+            serialization_library: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+            parameters:
+              classification: "parquet"
+              EXTERNAL: "TRUE"
+            columns:
+              - name: "event_id"
+                type: "string"
+              - name: "event_time"
+                type: "timestamp"
+              - name: "event_type"
+                type: "string"
+              - name: "user_id"
+                type: "string"
+              - name: "error_code"
+                type: "string"
+              - name: "error_message"
+                type: "string"
+              - name: "payload"
+                type: "string"
+            partition_keys:
+              - name: "source"
+                type: "string"
+              - name: "year"
+                type: "string"
+              - name: "month"
+                type: "string"
+              - name: "day"
+                type: "string"
 
+        crawlers:
+          # No raw_events crawler: raw_events uses partition projection, and
+          # Athena ignores catalog partitions on a projection table.
+          #
           # Adds the processed_events partitions firehose-processed writes
-          # (the transformation job registers its own through its sink).
+          # (the transformation job registers processed_events_batch's own
+          # through its sink). update_behavior LOG: the table is
+          # Terraform-owned, so the crawler only adds partitions and logs
+          # schema changes instead of rewriting the table (which would drift
+          # against every plan).
           processed_data:
             description: "Crawls processed_events (catalog target)"
             schedule: "cron(0 */6 * * ? *)"  # Every 6 hours
@@ -747,7 +805,7 @@ components:
               - processed_events
             schema_change_policy:
               delete_behavior: "LOG"
-              update_behavior: "UPDATE_IN_DATABASE"
+              update_behavior: "LOG"
             configuration:
               Version: 1.0
               CrawlerOutput:
@@ -766,17 +824,22 @@ components:
             table_prefix: "curated_"
 
         # Run by step-functions' daily_etl (glue:startJobRun.sync) with
-        # --input_path, --output_path and --date (the run's ISO-8601 time).
+        # --input_path, --output_path and --date (the run's ISO-8601 time;
+        # the jobs process the previous UTC day of it). An optional
+        # --process_date YYYY-MM-DD replaces --date and is processed as-is
+        # (backfills).
         jobs:
           transformation:
-            description: "Raw -> processed: drop incomplete and duplicate events, partition by source/day"
+            description: "Raw -> processed_events_batch: drop incomplete and duplicate events, partition by source/day"
             job_bookmark_option: "job-bookmark-disable"  # each run selects its own day
             # --catalog_database is added by the component.
             default_arguments:
-              "--output_table": "processed_events"
+              "--output_table": "processed_events_batch"
             script: |
               import sys
+              from datetime import date, timedelta
 
+              import boto3
               from awsglue.context import GlueContext
               from awsglue.dynamicframe import DynamicFrame
               from awsglue.job import Job
@@ -784,16 +847,25 @@ components:
               from pyspark.context import SparkContext
               from pyspark.sql import functions as F
 
+              # --date is the run's ISO-8601 start time (EventBridge $.time);
+              # the 02:00 UTC run processes the previous, complete UTC day.
+              # --process_date YYYY-MM-DD, when given, is processed as-is
+              # (backfills) and replaces --date.
+              date_arg = "process_date" if "--process_date" in sys.argv else "date"
               args = getResolvedOptions(
                   sys.argv,
-                  ["JOB_NAME", "input_path", "output_path", "date", "catalog_database", "output_table"],
+                  ["JOB_NAME", "input_path", "output_path", date_arg, "catalog_database", "output_table"],
               )
               glue_context = GlueContext(SparkContext.getOrCreate())
               spark = glue_context.spark_session
               job = Job(glue_context)
               job.init(args["JOB_NAME"], args)
 
-              year, month, day = args["date"][:10].split("-")
+              if date_arg == "process_date":
+                  run_day = date.fromisoformat(args["process_date"])
+              else:
+                  run_day = date.fromisoformat(args["date"][:10]) - timedelta(days=1)
+              year, month, day = run_day.isoformat().split("-")
               day_path = args["input_path"] + "year=" + year + "/month=" + month + "/day=" + day + "/"
 
               events = (
@@ -806,9 +878,25 @@ components:
                   .withColumn("day", F.lit(day))
               )
 
-              # Writing through a catalog-updating sink registers the new
-              # processed_events partitions as part of the run, so the data
-              # quality query that follows in daily_etl sees them.
+              # Idempotent re-runs: the sink below appends, so first purge
+              # this day's existing output under every source= prefix
+              # (partitions are source/year/month/day, so the day is one
+              # prefix per source). The partitions stay registered and are
+              # refilled by the write.
+              bucket, _, prefix = args["output_path"][len("s3://"):].partition("/")
+              pages = boto3.client("s3").get_paginator("list_objects_v2").paginate(
+                  Bucket=bucket, Prefix=prefix, Delimiter="/"
+              )
+              for page in pages:
+                  for source_prefix in page.get("CommonPrefixes", []):
+                      glue_context.purge_s3_path(
+                          "s3://" + bucket + "/" + source_prefix["Prefix"]
+                          + "year=" + year + "/month=" + month + "/day=" + day + "/",
+                          {"retentionPeriod": 0},
+                      )
+
+              # Writing through a catalog-updating sink registers new
+              # processed_events_batch partitions as part of the run.
               sink = glue_context.getSink(
                   connection_type="s3",
                   path=args["output_path"],
@@ -827,6 +915,7 @@ components:
             job_bookmark_option: "job-bookmark-disable"  # each run selects its own day
             script: |
               import sys
+              from datetime import date, timedelta
 
               from awsglue.context import GlueContext
               from awsglue.job import Job
@@ -834,19 +923,31 @@ components:
               from pyspark.context import SparkContext
               from pyspark.sql import functions as F
 
-              args = getResolvedOptions(sys.argv, ["JOB_NAME", "input_path", "output_path", "date"])
+              # Same day semantics as transformation: the previous UTC day of
+              # --date, or --process_date YYYY-MM-DD as-is (backfills).
+              date_arg = "process_date" if "--process_date" in sys.argv else "date"
+              args = getResolvedOptions(sys.argv, ["JOB_NAME", "input_path", "output_path", date_arg])
               glue_context = GlueContext(SparkContext.getOrCreate())
               spark = glue_context.spark_session
+              # Re-running a day overwrites only that day's event_date partition.
               spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
               job = Job(glue_context)
               job.init(args["JOB_NAME"], args)
 
-              run_date = args["date"][:10]
+              if date_arg == "process_date":
+                  run_day = date.fromisoformat(args["process_date"])
+              else:
+                  run_day = date.fromisoformat(args["date"][:10]) - timedelta(days=1)
+              run_date = run_day.isoformat()
               year, month, day = run_date.split("-")
 
+              # --input_path is processed_events (the streaming path, the one
+              # canonical source). Firehose delivers at least once, so drop
+              # duplicate event_ids before counting.
               summary = (
                   spark.read.parquet(args["input_path"])
                   .where((F.col("year") == year) & (F.col("month") == month) & (F.col("day") == day))
+                  .dropDuplicates(["event_id"])
                   .groupBy("source", "event_type")
                   .agg(
                       F.count(F.lit(1)).alias("event_count"),
@@ -1011,6 +1112,10 @@ components:
     # WORKFLOW ORCHESTRATION (Step Functions)
     # =========================================================================
 
+    # The state machines' execution role reads the Glue Data Catalog
+    # (the Athena query on processed_events), which
+    # data-pipeline/glue-database encrypts account-wide with kms/main: that
+    # role needs kms:Decrypt on kms/main, as does every other catalog reader.
     data-pipeline/step-functions:
       metadata:
         component: step-functions
@@ -1032,8 +1137,10 @@ components:
               Comment: "Daily ETL workflow"
               # Crawls are not states here: raw_events uses partition
               # projection, the transformation job registers its own
-              # processed_events partitions, and data-pipeline/glue-database's
-              # crawl-curated trigger crawls the curation job's output.
+              # processed_events_batch partitions, and
+              # data-pipeline/glue-database's crawl-curated trigger crawls
+              # the curation job's output. Both jobs process the previous
+              # UTC day of $.execution_date (see data-pipeline/glue-database).
               StartAt: "RunTransformationJob"
               States:
                 RunTransformationJob:
@@ -1043,7 +1150,9 @@ components:
                     JobName: !terraform.state data-pipeline/glue-database .job_names.transformation
                     Arguments:
                       "--input_path": !terraform.state data-pipeline/s3-raw .bucket_name | "s3://" + . + "/data/"
-                      "--output_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
+                      # processed_events_batch (reprocessing path), never
+                      # processed_events: see data-pipeline/glue-database.
+                      "--output_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/batch/"
                       "--date.$": "$.execution_date"
                   Next: "RunDataQualityChecks"
                   Catch:
@@ -1069,6 +1178,7 @@ components:
                   Parameters:
                     JobName: !terraform.state data-pipeline/glue-database .job_names.curation
                     Arguments:
+                      # processed_events (streaming), the canonical source.
                       "--input_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
                       "--output_path": !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
                       "--date.$": "$.execution_date"
@@ -1450,16 +1560,22 @@ components:
 # =============================================================================
 # REQUIRED VARIABLES
 # =============================================================================
-# data_lake_kms_key_id: "arn:aws:kms:..."
 # lambda_logs_kms_key_id: "arn:aws:kms:..."
 # dynamodb_kms_key_arn: "arn:aws:kms:..."
 # log_bucket_name: "my-log-bucket"
 # firehose_kinesis_role_arn: "arn:aws:iam::..."
-# firehose_glue_role_arn: "arn:aws:iam::..."
+# firehose_glue_role_arn: "arn:aws:iam::..."   # needs kms:Decrypt on kms/main (see below)
 # eventbridge_step_functions_role_arn: "arn:aws:iam::..."
 # data_pipeline_sns_topic_arn: "arn:aws:sns:..."
 # dlq_arn: "arn:aws:sqs:..."
 # alarm_email_addresses: ["ops@example.com"]
+#
+# data-pipeline/glue-database enables Data Catalog encryption with kms/main,
+# which is account-wide: every principal that reads the Glue catalog in this
+# account/region (firehose_glue_role_arn, the step-functions execution role,
+# Athena users, any other job or crawler role) needs kms:Decrypt on kms/main.
+# Otherwise catalog reads fail - for Firehose silently: Parquet conversion
+# cannot load the schema and every record lands under errors/.
       dependencies:
         components:
           - component: data-pipeline/kinesis-ingest

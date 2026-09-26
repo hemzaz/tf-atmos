@@ -234,6 +234,14 @@ run "catalog_and_logs_permissions_are_scoped" {
   }
 
   assert {
+    condition = (
+      one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowDefaultDatabaseLookup"]).Resource == "arn:aws:glue:eu-west-2:123456789012:database/default"
+      && one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowDefaultDatabaseLookup"]).Action == "glue:GetDatabase"
+    )
+    error_message = "The default database is granted glue:GetDatabase only."
+  }
+
+  assert {
     condition     = one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowGlueLogGroups"]).Resource == "arn:aws:logs:eu-west-2:123456789012:log-group:/aws-glue/*"
     error_message = "Log group actions are limited to /aws-glue/*."
   }

@@ -26,18 +26,37 @@ plain resources, like this repo's other root components (`stepfunctions`,
 instance defines:
 
 - tables `raw_events` (Parquet written by `firehose-raw`, partition
-  projection on year/month/day/hour) and `processed_events` (Parquet written
-  by the transformation job and `firehose-processed`, partitioned by
-  source/year/month/day);
-- crawlers `raw_data` and `processed_data` (catalog targets on those two
-  tables) and `curated_data` (S3 target on the curated bucket);
-- jobs `transformation` (raw -> `processed_events`, registering partitions
-  through a catalog-updating sink) and `curation` (processed -> curated
-  daily summary), run by `data-pipeline/step-functions`' daily ETL;
+  projection on year/month/day/hour), `processed_events` (Parquet written
+  by `firehose-processed` - the streaming path and the one canonical
+  processed source) and `processed_events_batch` (same schema and
+  source/year/month/day partitioning, under `s3-processed/batch/`, written
+  only by the transformation job - the reprocessing/backfill path, kept
+  apart so no event is counted twice);
+- crawlers `processed_data` (catalog target on `processed_events`, adds the
+  partitions Firehose writes) and `curated_data` (S3 target on the curated
+  bucket). Catalog-target crawlers use `update_behavior = "LOG"`: the tables
+  are Terraform-owned, so a crawler that rewrote them would drift against
+  every plan. `raw_events` has no crawler - Athena ignores catalog
+  partitions on a partition-projection table;
+- jobs `transformation` (raw -> `processed_events_batch`, registering
+  partitions through a catalog-updating sink) and `curation`
+  (`processed_events` -> curated daily summary, de-duplicated on
+  `event_id` against Firehose's at-least-once delivery), run by
+  `data-pipeline/step-functions`' daily ETL. Both process **the previous
+  UTC day** of the run's `--date` (a 02:00 UTC run processes all 24 hours of
+  yesterday); an optional `--process_date YYYY-MM-DD` is used as-is instead,
+  for backfills. Both are idempotent: `transformation` purges the day's
+  output partitions before writing, `curation` overwrites its day's
+  partition (dynamic partition overwrite);
 - trigger `crawl-curated` (crawl the curated bucket when `curation`
   succeeds);
 - `enable_data_catalog_encryption: true` (the template's only glue
-  instance).
+  instance). This is **account-wide**: every principal that reads the
+  catalog in this account and region - Firehose's schema role
+  (`firehose_glue_role_arn`), the Step Functions role, Athena users, this
+  role - needs `kms:Decrypt` on `kms/main`. Without it Firehose's Parquet
+  conversion cannot read the table schema and silently routes every record
+  to the `errors/` prefix.
 
 Readers: `firehose-raw`/`firehose-processed` (`database_name`,
 `table_names`), `athena` (`database_name`), `step-functions` (`job_names`,
@@ -78,7 +97,9 @@ Readers: `firehose-raw`/`firehose-processed` (`database_name`,
   `query_policy`).
 - **Role** (`<Environment>-<name>-glue`, trusted by `glue.amazonaws.com`
   with `aws:SourceAccount`): inline policies only, no AWS managed policy -
-  Glue catalog actions on this catalog, database and `table/<db>/*`;
+  Glue catalog actions on this catalog, database and `table/<db>/*`, plus
+  `glue:GetDatabase` alone on `database/default` (Spark's catalog client
+  looks it up at session start);
   `logs:CreateLogGroup`/`AssociateKmsKey` on `/aws-glue/*` and
   `CreateLogStream`/`PutLogEvents` on its streams; `cloudwatch:PutMetricData`
   (no resource ARN exists) conditioned on namespace `Glue`; KMS on
@@ -105,7 +126,7 @@ Readers: `firehose-raw`/`firehose-processed` (`database_name`,
 
 `tests/glue.tftest.hcl` (mock provider): names, security configuration and
 script encryption, Data Catalog encryption on/off, role trust, scoped
-catalog/logs/metrics/KMS/S3 statements, projection template derivation,
+catalog (including the `default` database lookup)/logs/metrics/KMS/S3 statements, projection template derivation,
 catalog vs S3 crawler targets, trigger key resolution, input validations,
 and `enabled = false`.
 
