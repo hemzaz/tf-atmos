@@ -11,6 +11,7 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/cost-optimization/defaults
   - catalog/rds/prod
   - catalog/elasticache/prod
 
@@ -512,3 +513,23 @@ components:
           - component: lambda/data-processor
           - component: lambda/data-transformer
           - component: lambda/report-generator
+
+    # Cost optimization: Savings Plan/RI analyzer, resource cleanup, cost
+    # anomaly detection and monthly budget. No instance scheduler here:
+    # prod's per-stage settings (components/terraform/cost-optimization/
+    # main.tf) turn auto_shutdown off, so no scheduler Lambda/role/schedule
+    # is created for this instance.
+    cost-optimization/main:
+      metadata:
+        component: cost-optimization
+        inherits:
+          - cost-optimization/defaults
+      vars:
+        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
+        budget_notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
+        cost_anomaly_notification_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        cost_alert_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
