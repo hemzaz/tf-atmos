@@ -229,3 +229,156 @@ run "policy_is_scoped_to_account_region_and_kms_key" {
     error_message = "kms:ViaService must name both secretsmanager.<region>.amazonaws.com and ssm.<region>.amazonaws.com."
   }
 }
+
+# #195 follow-up: the trust policy must also condition on :aud, as eks-addons'
+# IRSA roles do (components/terraform/eks-addons).
+run "trust_policy_requires_aud_sts_amazonaws_com" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_role.external_secrets[0].assume_role_policy, "\"oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:aud\"")
+    error_message = "The trust policy must condition on \"<issuer>:aud\"."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_role.external_secrets[0].assume_role_policy, "\"sts.amazonaws.com\"")
+    error_message = "The \"aud\" condition must require \"sts.amazonaws.com\"."
+  }
+}
+
+# #195 follow-up: kms_key_arn must accept multi-region keys (key/mrk-<32 hex>).
+run "kms_key_arn_accepts_a_multi_region_key" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+    kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/mrk-1234567890abcdef1234567890abcdef"
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws:kms:eu-west-2:123456789012:key/mrk-1234567890abcdef1234567890abcdef")
+    error_message = "A multi-region KMS key ARN (key/mrk-<32 hex>) must be accepted."
+  }
+}
+
+# #195 follow-up: kms_key_arn must accept other AWS partitions (aws-us-gov,
+# aws-cn), not only the default "aws" partition.
+run "kms_key_arn_accepts_the_govcloud_partition" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+    kms_key_arn = "arn:aws-us-gov:kms:us-gov-west-1:123456789012:key/11111111-2222-3333-4444-555555555555"
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws-us-gov:kms:us-gov-west-1:123456789012:key/11111111-2222-3333-4444-555555555555")
+    error_message = "A GovCloud (aws-us-gov) partition KMS key ARN must be accepted."
+  }
+}
+
+# #195 follow-up: an instance disabled via var.enabled must plan even with a
+# null kms_key_arn (settings.environment.use_external_secrets: false, no
+# kms/main dependency needed).
+run "disabled_instance_plans_with_a_null_kms_key_arn" {
+  command = plan
+
+  variables {
+    enabled      = false
+    kms_key_arn  = null
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = length(aws_iam_role.external_secrets) == 0
+    error_message = "A disabled instance must not create the IAM role."
+  }
+
+  assert {
+    condition     = length(aws_iam_policy.external_secrets) == 0
+    error_message = "A disabled instance must not create the IAM policy."
+  }
+}
+
+# An *enabled* instance still requires kms_key_arn.
+run "enabled_instance_without_a_kms_key_arn_is_rejected" {
+  command = plan
+
+  variables {
+    kms_key_arn  = null
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  expect_failures = [var.kms_key_arn]
+}
+
+# #195 follow-up: the one-level-nested match must use the stack's explicit
+# context prefix, never a depth-agnostic "*/<prefix>/*" wildcard.
+run "context_prefix_scopes_the_nested_match_explicitly" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+    secret_path_context_prefixes = ["production"]
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "secret:production/app/*")
+    error_message = "A configured context prefix must produce an explicit \"<context>/<prefix>/*\" Secrets Manager resource."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "parameter/production/certificates/*")
+    error_message = "A configured context prefix must produce an explicit \"/<context>/<prefix>/*\" SSM resource."
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_policy.external_secrets[0].policy, "secret:*/") && !strcontains(aws_iam_policy.external_secrets[0].policy, "parameter/*/")
+    error_message = "The policy must never use a depth-agnostic \"*/<prefix>/*\" wildcard."
+  }
+}
+
+# With no context prefixes configured (the component default), only the
+# top-level "<prefix>/*" match should exist -- still no "*/" wildcard.
+run "no_context_prefixes_means_top_level_only" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_policy.external_secrets[0].policy, "secret:*/") && !strcontains(aws_iam_policy.external_secrets[0].policy, "parameter/*/")
+    error_message = "With no context prefixes configured, the policy must not contain a \"*/<prefix>/*\" wildcard."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "secret:app/*")
+    error_message = "The top-level \"<prefix>/*\" match must still be present."
+  }
+}

@@ -8,22 +8,41 @@ locals {
   name_prefix = startswith(lower(var.cluster_name), "${lower(var.tags["Environment"])}-") ? var.cluster_name : "${var.tags["Environment"]}-${var.cluster_name}"
 
   # Secrets Manager and SSM ARNs, scoped to this account/region and to the
-  # configured path prefixes, both as a top-level prefix and nested one level
-  # down (secretsmanager's full_path nests context_name/environment/path/name,
-  # e.g. "production/app/prod/production/app/credentials").
-  secretsmanager_resource_arns = flatten([
-    for prefix in var.secret_path_prefixes : [
-      "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${prefix}/*",
-      "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:*/${prefix}/*",
-    ]
-  ])
+  # configured path prefixes: a top-level prefix ("<prefix>/*"), plus, for
+  # every var.secret_path_context_prefixes entry, that context nested one
+  # level down ("<context>/<prefix>/*"). secretsmanager's full_path nests
+  # context_name/environment/path/name (e.g.
+  # "production/app/prod/production/app/credentials"), so a bare "*"
+  # wildcard there would also match an unrelated secret that merely contains
+  # "/<prefix>/" further down its name (e.g. "x/y/app/z"); using the stack's
+  # actual context (its descriptive stage name, settings.environment.stage,
+  # set in the catalog) instead of "*" keeps the nested match scoped to this
+  # stack.
+  secretsmanager_resource_arns = concat(
+    [
+      for prefix in var.secret_path_prefixes :
+      "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${prefix}/*"
+    ],
+    flatten([
+      for context in var.secret_path_context_prefixes : [
+        for prefix in var.secret_path_prefixes :
+        "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${context}/${prefix}/*"
+      ]
+    ])
+  )
 
-  ssm_resource_arns = flatten([
-    for prefix in var.ssm_parameter_path_prefixes : [
-      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${prefix}/*",
-      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/*/${prefix}/*",
-    ]
-  ])
+  ssm_resource_arns = concat(
+    [
+      for prefix in var.ssm_parameter_path_prefixes :
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${prefix}/*"
+    ],
+    flatten([
+      for context in var.secret_path_context_prefixes : [
+        for prefix in var.ssm_parameter_path_prefixes :
+        "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${context}/${prefix}/*"
+      ]
+    ])
+  )
 }
 
 # Create IAM role for external-secrets to access AWS Secrets Manager
@@ -44,6 +63,7 @@ resource "aws_iam_role" "external_secrets" {
         Condition = {
           StringEquals = {
             "${replace(var.oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:${var.namespace}:${var.service_account_name}"
+            "${replace(var.oidc_provider_url, "https://", "")}:aud" = "sts.amazonaws.com"
           }
         }
       }
