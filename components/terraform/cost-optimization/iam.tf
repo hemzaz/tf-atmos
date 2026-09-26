@@ -10,9 +10,8 @@
 #     resource must be deliberately tagged into this component's blast radius
 #     before it can be started/stopped/deleted, being "in the environment"
 #     alone is not enough. The condition key namespace is service-specific:
-#     EC2 has its own ec2:ResourceTag/<key> key; RDS, EKS, Auto Scaling and
-#     ELB do not, and use the aws:ResourceTag/<key> global key instead (ELB
-#     in particular does NOT support ec2:ResourceTag - only aws:ResourceTag);
+#     EC2 has its own ec2:ResourceTag/<key> key; RDS and Auto Scaling do not,
+#     and use the aws:ResourceTag/<key> global key instead;
 #   - a logs statement scoped to the function's own CloudWatch log group
 #     (created in lambda.tf), never the account-wide arn:aws:logs:*:*:*; or
 #   - an SNS publish + matching KMS statement, mirroring the pattern this

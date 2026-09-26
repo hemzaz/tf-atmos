@@ -66,6 +66,27 @@ run "names_follow_environment_name_convention" {
     condition     = aws_budgets_budget.monthly.name == "test-main-monthly-budget"
     error_message = "The budget is named <Environment>-<name>-monthly-budget."
   }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.scheduler_errors[0].alarm_name == "test-main-scheduler-errors"
+    error_message = "The scheduler errors alarm is named <Environment>-<name>-scheduler-errors."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.savings_analyzer_errors.alarm_name == "test-main-savings-analyzer-errors"
+    error_message = "The savings analyzer errors alarm is named <Environment>-<name>-savings-analyzer-errors."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.resource_cleanup_errors.alarm_name == "test-main-resource-cleanup-errors"
+    error_message = "The resource cleanup errors alarm is named <Environment>-<name>-resource-cleanup-errors."
+  }
+
+  # alarm_actions isn't asserted here: it's a set attribute built from the
+  # not-yet-created aws_sns_topic.cost_alerts.arn, so the whole set (not
+  # just the ARN element) is "known only after apply" on a plan-only real-
+  # provider run and can't be compared. The wiring is exercised by the
+  # component's own aws_sns_topic_subscription and by CI's plan sweep.
 }
 
 run "scheduler_describe_statement_is_separate_and_unconditioned" {
@@ -238,6 +259,11 @@ run "prod_disables_the_scheduler" {
   assert {
     condition     = length(aws_cloudwatch_event_rule.start_instances) == 0 && length(aws_cloudwatch_event_rule.stop_instances) == 0
     error_message = "prod has no schedule_on/schedule_off, so no start/stop EventBridge rules are created."
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.scheduler_errors) == 0
+    error_message = "prod's auto_shutdown is false, so no scheduler errors alarm is created either."
   }
 }
 

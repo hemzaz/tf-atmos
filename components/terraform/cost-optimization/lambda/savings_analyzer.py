@@ -24,6 +24,44 @@ ce = boto3.client('ce')
 compute_optimizer = boto3.client('compute-optimizer')
 sns = boto3.client('sns')
 
+# SNS caps a Publish Message at 256 KiB (262144 bytes) total; leave headroom
+# for the Subject and JSON overhead added after truncation.
+SNS_MESSAGE_SIZE_LIMIT_BYTES = 256 * 1024
+SNS_MESSAGE_TRUNCATION_MARGIN_BYTES = 1024
+MAX_ITEMS_PER_RECOMMENDATION_LIST = 50
+
+
+def _cap_list(value):
+    """Bound an unbounded recommendation list so a large account's
+    Compute Optimizer or RI recommendation count alone cannot push a single
+    recommendation source past SNS's message size limit."""
+    if isinstance(value, list) and len(value) > MAX_ITEMS_PER_RECOMMENDATION_LIST:
+        return value[:MAX_ITEMS_PER_RECOMMENDATION_LIST] + [
+            {'truncated': True, 'omitted_count': len(value) - MAX_ITEMS_PER_RECOMMENDATION_LIST}
+        ]
+    return value
+
+
+def _bounded_summary_message(summary):
+    """Serialize summary, falling back to a smaller, indent-free encoding
+    and then to an errors-only summary if it still exceeds SNS's limit."""
+    message = json.dumps(summary, indent=2, default=str)
+    if len(message.encode('utf-8')) <= SNS_MESSAGE_SIZE_LIMIT_BYTES - SNS_MESSAGE_TRUNCATION_MARGIN_BYTES:
+        return message
+
+    compact = json.dumps(summary, default=str)
+    if len(compact.encode('utf-8')) <= SNS_MESSAGE_SIZE_LIMIT_BYTES - SNS_MESSAGE_TRUNCATION_MARGIN_BYTES:
+        return compact
+
+    fallback = {
+        'environment': summary.get('environment'),
+        'errors': summary.get('errors'),
+        'truncated': True,
+        'truncation_reason': 'serialized recommendations exceeded the SNS message size limit',
+        'recommendation_sources': list(summary.get('recommendations', {}).keys()),
+    }
+    return json.dumps(fallback, default=str)
+
 
 def handler(event, context):
     environment = os.environ.get('ENVIRONMENT', 'unknown')
@@ -43,7 +81,7 @@ def handler(event, context):
         ('compute_optimizer_ebs', get_compute_optimizer_ebs_recommendations),
     ):
         try:
-            recommendations[name] = fn()
+            recommendations[name] = _cap_list(fn())
         except Exception as e:
             logger.warning(f"Could not gather {name} recommendations: {str(e)}")
             errors[name] = str(e)
@@ -58,7 +96,7 @@ def handler(event, context):
         sns.publish(
             TopicArn=sns_topic,
             Subject=f"[{environment}] Weekly savings analysis",
-            Message=json.dumps(summary, indent=2, default=str),
+            Message=_bounded_summary_message(summary),
         )
         logger.info("Published savings analysis summary to SNS")
     except Exception as e:
@@ -68,6 +106,14 @@ def handler(event, context):
         # silent even though the weekly summary never reached SNS.
         logger.error(f"Failed to publish savings analysis summary: {str(e)}")
         raise
+
+    if not recommendations:
+        # Every recommendation source failed (e.g. missing Cost Explorer /
+        # Compute Optimizer grants). The errors-only summary above was
+        # still published for visibility, but returning 200 here would
+        # leave the Errors metric and its alarm silent for a misconfigured
+        # analyzer, exactly the failure this function exists to catch.
+        raise RuntimeError(f"All recommendation sources failed: {errors}")
 
     return {'statusCode': 200, 'body': json.dumps(summary, default=str)}
 

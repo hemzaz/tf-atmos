@@ -220,4 +220,10 @@ def publish_summary(sns_topic, environment, results):
         )
         logger.info("Published cleanup summary to SNS")
     except Exception as e:
+        # Re-raise rather than swallowing: this runs inside handler's try
+        # block, so a caught-and-logged failure here would let a run that
+        # deleted resources but could not tell anyone (e.g. an SNS/KMS
+        # denial) still return 200, leaving the Errors metric and its alarm
+        # silent. See the same pattern in savings_analyzer.py's publish.
         logger.error(f"Failed to publish cleanup summary: {str(e)}")
+        raise
