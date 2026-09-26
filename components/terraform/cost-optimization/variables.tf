@@ -1,31 +1,5 @@
 # Cost Optimization Module Variables
 
-variable "namespace" {
-  type        = string
-  description = "Namespace for resource naming"
-
-  validation {
-    condition     = length(var.namespace) > 2 && length(var.namespace) < 20
-    error_message = "Namespace must be between 3 and 19 characters."
-  }
-}
-
-variable "environment" {
-  type        = string
-  description = "Environment name (dev, staging, prod)"
-
-  validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be one of: dev, staging, prod."
-  }
-}
-
-variable "stage" {
-  type        = string
-  description = "Stage/instance of the environment"
-  default     = "default"
-}
-
 variable "region" {
   type        = string
   description = "AWS region"
@@ -36,16 +10,64 @@ variable "region" {
   }
 }
 
-variable "cost_center" {
-  type        = string
-  description = "Cost center for billing allocation"
-  default     = "engineering"
-}
-
 variable "tags" {
   type        = map(string)
-  description = "Additional tags to apply to resources"
-  default     = {}
+  description = "Tags to apply to resources; must include Environment (used in resource names)"
+
+  validation {
+    condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
+    error_message = "tags must include a non-empty Environment value."
+  }
+}
+
+# Cloud Posse null-label style: every resource this component creates is
+# named "<tags.Environment>-<name>-<suffix>". Co-located instances of this
+# component must use distinct values.
+variable "name" {
+  type        = string
+  description = "Per-instance name, combined with tags.Environment to build every resource name (<Environment>-<name>-<suffix>)"
+  default     = "main"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.name))
+    error_message = "name must be non-empty, lowercase alphanumeric characters and hyphens, and must not start or end with a hyphen."
+  }
+}
+
+# The lifecycle tier this component's per-stage schedule map keys off, set
+# from settings.context.stage (dev/staging/prod) - NOT tags.Environment, which
+# is the real per-stack environment name (e.g. testenv-01). Validated to
+# exactly the map's keys, so lookup() with a default fallback is unnecessary:
+# an unrecognized value fails plan instead of silently running dev settings.
+variable "environment" {
+  type        = string
+  description = "Lifecycle tier (dev, staging or prod) that selects the per-stage schedule/auto-shutdown settings, from settings.context.stage"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "environment must be one of: dev, staging, prod."
+  }
+}
+
+variable "kms_key_arn" {
+  type        = string
+  description = "Customer managed KMS key ARN that encrypts the Lambda functions' CloudWatch log groups and the cost-alerts SNS topic. Its policy must allow logs.<region>.amazonaws.com (kms allow_cloudwatch_logs)"
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.kms_key_arn))
+    error_message = "kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>)."
+  }
+}
+
+variable "log_retention_days" {
+  type        = number
+  description = "Number of days to retain the Lambda functions' CloudWatch log groups"
+  default     = 90
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, ...)."
+  }
 }
 
 # Budget Configuration
@@ -87,7 +109,7 @@ variable "cost_anomaly_notification_email" {
 
 variable "cost_alert_emails" {
   type        = list(string)
-  description = "Email addresses for general cost alerts"
+  description = "Email addresses for general cost alerts (Savings Plan/RI recommendations, resource cleanup summaries)"
   default     = []
 
   validation {
@@ -102,7 +124,7 @@ variable "cost_alert_emails" {
 # Cleanup Configuration
 variable "cleanup_dry_run" {
   type        = string
-  description = "Run cleanup in dry-run mode (true/false)"
+  description = "Run cleanup in dry-run mode (true/false); dry-run only logs and publishes what would be deleted, it deletes nothing"
   default     = "true"
 
   validation {
@@ -113,19 +135,19 @@ variable "cleanup_dry_run" {
 
 variable "cleanup_unused_volumes" {
   type        = bool
-  description = "Enable cleanup of unused EBS volumes"
+  description = "Enable cleanup of unused (available, opt-in tagged) EBS volumes"
   default     = true
 }
 
 variable "cleanup_old_snapshots" {
   type        = bool
-  description = "Enable cleanup of old EBS snapshots"
+  description = "Enable cleanup of old (opt-in tagged) EBS snapshots"
   default     = true
 }
 
 variable "cleanup_unused_eips" {
   type        = bool
-  description = "Enable cleanup of unused Elastic IPs"
+  description = "Enable cleanup of unused (unassociated, opt-in tagged) Elastic IPs"
   default     = true
 }
 

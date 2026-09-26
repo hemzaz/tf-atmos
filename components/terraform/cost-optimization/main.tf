@@ -1,10 +1,44 @@
 # Cost Optimization Module - Automated Infrastructure Cost Management
-# This module implements automated cost optimization strategies across all environments
+#
+# No Cloud Posse component exists for this; each Lambda function is packaged
+# the way Cloud Posse's aws-lambda component does it
+# (https://github.com/cloudposse-terraform-components/aws-lambda): a local zip
+# built by the archive provider with source_code_hash driving replacement,
+# rather than a pre-built S3 artifact. IAM policies are built with
+# jsonencode(), as in this repo's lambda and stepfunctions components, so
+# every one of them is a plain value computable at plan time.
+#
+# Three scheduled Lambda functions:
+#   - scheduler:        start/stop EC2, RDS and ASGs on a per-stage schedule.
+#   - savings_analyzer: weekly Cost Explorer Savings Plans/RI recommendations.
+#   - resource_cleanup: weekly sweep of unattached volumes, old snapshots and
+#                        unassociated EIPs.
+# See iam.tf for their roles/policies and lambda.tf for the functions/log
+# groups/schedules themselves.
+
+data "aws_caller_identity" "current" {}
 
 locals {
-  name_prefix = "${var.namespace}-${var.environment}-${var.stage}"
+  environment_tag = var.tags["Environment"]
+  name            = "${local.environment_tag}-${var.name}"
+  account_id      = data.aws_caller_identity.current.account_id
 
-  # Cost optimization settings per environment
+  # ARNs built manually from known inputs (region/account id/name), never
+  # read back from the not-yet-created resource's own computed attribute:
+  # the AWS provider marks a to-be-created resource's computed attributes
+  # unknown until apply, which would make every IAM policy referencing them
+  # (iam.tf) unknown too, and unusable in a plan-only `terraform test` run
+  # (see this repo's stepfunctions component, which precomputes
+  # local.state_machine_arn the same way for the same reason).
+  scheduler_log_group_arn        = "arn:aws:logs:${var.region}:${local.account_id}:log-group:/aws/lambda/${local.name}-scheduler:*"
+  savings_analyzer_log_group_arn = "arn:aws:logs:${var.region}:${local.account_id}:log-group:/aws/lambda/${local.name}-savings-analyzer:*"
+  resource_cleanup_log_group_arn = "arn:aws:logs:${var.region}:${local.account_id}:log-group:/aws/lambda/${local.name}-resource-cleanup:*"
+  cost_alerts_topic_arn          = "arn:aws:sns:${var.region}:${local.account_id}:${local.name}-cost-alerts"
+
+  # Cost optimization settings per lifecycle tier (var.environment, from
+  # settings.context.stage - see variables.tf). var.environment is validated
+  # to exactly these three keys, so a direct index is safe: an unrecognized
+  # value fails plan instead of silently falling back to dev's settings.
   optimization_settings = {
     dev = {
       auto_shutdown   = true
@@ -35,190 +69,16 @@ locals {
     }
   }
 
-  current_settings = lookup(local.optimization_settings, var.environment, local.optimization_settings.dev)
+  current_settings = local.optimization_settings[var.environment]
 
-  common_tags = merge(
-    var.tags,
-    {
-      Namespace   = var.namespace
-      Environment = var.environment
-      Stage       = var.stage
-      CostCenter  = var.cost_center
-      ManagedBy   = "Terraform"
-      Module      = "cost-optimization"
-    }
-  )
-}
-
-# ========================================
-# Instance Scheduler for Auto Start/Stop
-# ========================================
-
-resource "aws_iam_role" "scheduler" {
-  count = local.current_settings.auto_shutdown ? 1 : 0
-
-  name = "${local.name_prefix}-instance-scheduler-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy" "scheduler" {
-  count = local.current_settings.auto_shutdown ? 1 : 0
-
-  name = "${local.name_prefix}-instance-scheduler-policy"
-  role = aws_iam_role.scheduler[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:DescribeInstances",
-          "ec2:StopInstances",
-          "ec2:StartInstances",
-          "ec2:DescribeTags",
-          "rds:DescribeDBInstances",
-          "rds:StopDBInstance",
-          "rds:StartDBInstance",
-          "rds:ListTagsForResource",
-          "eks:DescribeNodegroup",
-          "eks:UpdateNodegroupConfig",
-          "autoscaling:UpdateAutoScalingGroup",
-          "autoscaling:DescribeAutoScalingGroups"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      }
-    ]
-  })
-}
-
-# Lambda function for instance scheduling
-resource "aws_lambda_function" "scheduler" {
-  count = local.current_settings.auto_shutdown ? 1 : 0
-
-  function_name = "${local.name_prefix}-instance-scheduler"
-  role          = aws_iam_role.scheduler[0].arn
-  handler       = "index.handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 256
-
-  environment {
-    variables = {
-      ENVIRONMENT = var.environment
-      ACTION      = "START_STOP"
-      TAG_FILTERS = jsonencode({
-        Environment  = var.environment
-        AutoShutdown = "true"
-      })
-    }
-  }
-
-  filename         = data.archive_file.scheduler_lambda[0].output_path
-  source_code_hash = data.archive_file.scheduler_lambda[0].output_base64sha256
-
-  tags = local.common_tags
-}
-
-# Lambda deployment package
-data "archive_file" "scheduler_lambda" {
-  count = local.current_settings.auto_shutdown ? 1 : 0
-
-  type        = "zip"
-  output_path = "${path.module}/scheduler_lambda.zip"
-
-  source {
-    content  = file("${path.module}/lambda/scheduler.py")
-    filename = "index.py"
-  }
-}
-
-# CloudWatch Event Rules for scheduling
-resource "aws_cloudwatch_event_rule" "start_instances" {
-  count = local.current_settings.auto_shutdown && local.current_settings.schedule_on != null ? 1 : 0
-
-  name                = "${local.name_prefix}-start-instances"
-  description         = "Trigger instance start"
-  schedule_expression = "cron(${local.current_settings.schedule_on})"
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_event_rule" "stop_instances" {
-  count = local.current_settings.auto_shutdown && local.current_settings.schedule_off != null ? 1 : 0
-
-  name                = "${local.name_prefix}-stop-instances"
-  description         = "Trigger instance stop"
-  schedule_expression = "cron(${local.current_settings.schedule_off})"
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_event_target" "start_lambda" {
-  count = local.current_settings.auto_shutdown && local.current_settings.schedule_on != null ? 1 : 0
-
-  rule      = aws_cloudwatch_event_rule.start_instances[0].name
-  target_id = "StartInstancesLambda"
-  arn       = aws_lambda_function.scheduler[0].arn
-
-  input = jsonencode({
-    action = "START"
-  })
-}
-
-resource "aws_cloudwatch_event_target" "stop_lambda" {
-  count = local.current_settings.auto_shutdown && local.current_settings.schedule_off != null ? 1 : 0
-
-  rule      = aws_cloudwatch_event_rule.stop_instances[0].name
-  target_id = "StopInstancesLambda"
-  arn       = aws_lambda_function.scheduler[0].arn
-
-  input = jsonencode({
-    action = "STOP"
-  })
-}
-
-resource "aws_lambda_permission" "allow_cloudwatch_start" {
-  count = local.current_settings.auto_shutdown && local.current_settings.schedule_on != null ? 1 : 0
-
-  statement_id  = "AllowExecutionFromCloudWatchStart"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduler[0].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.start_instances[0].arn
-}
-
-resource "aws_lambda_permission" "allow_cloudwatch_stop" {
-  count = local.current_settings.auto_shutdown && local.current_settings.schedule_off != null ? 1 : 0
-
-  statement_id  = "AllowExecutionFromCloudWatchStop"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduler[0].function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.stop_instances[0].arn
+  # Mutating scheduler/cleanup IAM actions are conditioned on the target
+  # resource carrying tags.Environment AND one of these opt-in tag values, so
+  # a resource must be deliberately opted in before this component can
+  # start/stop or delete it - being tagged with the stack's Environment alone
+  # is not enough. See iam.tf.
+  opt_in_tag_key             = "CostOptimization"
+  scheduler_opt_in_tag_value = "scheduled"
+  cleanup_opt_in_tag_value   = "cleanup-eligible"
 }
 
 # ========================================
@@ -226,15 +86,15 @@ resource "aws_lambda_permission" "allow_cloudwatch_stop" {
 # ========================================
 
 resource "aws_ce_anomaly_monitor" "main" {
-  name              = "${local.name_prefix}-cost-monitor"
+  name              = "${local.name}-cost-monitor"
   monitor_type      = "DIMENSIONAL"
   monitor_dimension = "SERVICE"
 
-  tags = local.common_tags
+  tags = { Name = "${local.name}-cost-monitor" }
 }
 
 resource "aws_ce_anomaly_subscription" "main" {
-  name      = "${local.name_prefix}-cost-anomaly-subscription"
+  name      = "${local.name}-cost-anomaly-subscription"
   frequency = "DAILY"
 
   monitor_arn_list = [
@@ -254,7 +114,7 @@ resource "aws_ce_anomaly_subscription" "main" {
     }
   }
 
-  tags = local.common_tags
+  tags = { Name = "${local.name}-cost-anomaly-subscription" }
 }
 
 # ========================================
@@ -262,7 +122,7 @@ resource "aws_ce_anomaly_subscription" "main" {
 # ========================================
 
 resource "aws_budgets_budget" "monthly" {
-  name         = "${local.name_prefix}-monthly-budget"
+  name         = "${local.name}-monthly-budget"
   budget_type  = "COST"
   limit_amount = var.monthly_budget_limit
   limit_unit   = "USD"
@@ -271,7 +131,7 @@ resource "aws_budgets_budget" "monthly" {
   cost_filter {
     name = "TagKeyValue"
     values = [
-      "Environment$${var.environment}"
+      "Environment$${local.environment_tag}"
     ]
   }
 
@@ -293,289 +153,11 @@ resource "aws_budgets_budget" "monthly" {
 }
 
 # ========================================
-# Savings Plans Recommendation Tracker
-# ========================================
-
-resource "aws_lambda_function" "savings_analyzer" {
-  function_name = "${local.name_prefix}-savings-analyzer"
-  role          = aws_iam_role.savings_analyzer.arn
-  handler       = "index.handler"
-  runtime       = "python3.11"
-  timeout       = 300
-  memory_size   = 512
-
-  environment {
-    variables = {
-      ENVIRONMENT = var.environment
-      SNS_TOPIC   = aws_sns_topic.cost_alerts.arn
-    }
-  }
-
-  filename         = data.archive_file.savings_analyzer_lambda.output_path
-  source_code_hash = data.archive_file.savings_analyzer_lambda.output_base64sha256
-
-  tags = local.common_tags
-
-  lifecycle {
-    precondition {
-      condition     = fileexists("${path.module}/lambda/savings_analyzer.py")
-      error_message = "Lambda source ${path.module}/lambda/savings_analyzer.py is missing."
-    }
-  }
-}
-
-data "archive_file" "savings_analyzer_lambda" {
-  type        = "zip"
-  output_path = "${path.module}/savings_analyzer_lambda.zip"
-
-  source {
-    # Source is not committed; the function precondition reports it instead of failing validation
-    content  = try(file("${path.module}/lambda/savings_analyzer.py"), "")
-    filename = "index.py"
-  }
-}
-
-resource "aws_iam_role" "savings_analyzer" {
-  name = "${local.name_prefix}-savings-analyzer-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy" "savings_analyzer" {
-  name = "${local.name_prefix}-savings-analyzer-policy"
-  role = aws_iam_role.savings_analyzer.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ce:GetSavingsPlansPurchaseRecommendation",
-          "ce:GetReservationPurchaseRecommendation",
-          "ce:GetRightsizingRecommendation",
-          "ce:GetCostAndUsage",
-          "ce:GetCostForecast",
-          "compute-optimizer:GetEC2InstanceRecommendations",
-          "compute-optimizer:GetAutoScalingGroupRecommendations",
-          "compute-optimizer:GetEBSVolumeRecommendations"
-        ]
-        Resource = "*"
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "sns:Publish"
-        ]
-        Resource = aws_sns_topic.cost_alerts.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      }
-    ]
-  })
-}
-
-# Schedule weekly savings analysis
-resource "aws_cloudwatch_event_rule" "savings_analysis" {
-  name                = "${local.name_prefix}-savings-analysis"
-  description         = "Weekly savings plan analysis"
-  schedule_expression = "cron(0 9 ? * MON *)"
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_event_target" "savings_analyzer_lambda" {
-  rule      = aws_cloudwatch_event_rule.savings_analysis.name
-  target_id = "SavingsAnalyzerLambda"
-  arn       = aws_lambda_function.savings_analyzer.arn
-}
-
-resource "aws_lambda_permission" "allow_cloudwatch_savings" {
-  statement_id  = "AllowExecutionFromCloudWatchSavings"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.savings_analyzer.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.savings_analysis.arn
-}
-
-# ========================================
-# SNS Topic for Cost Alerts
-# ========================================
-
-resource "aws_sns_topic" "cost_alerts" {
-  name = "${local.name_prefix}-cost-alerts"
-
-  tags = local.common_tags
-}
-
-resource "aws_sns_topic_subscription" "cost_alerts_email" {
-  for_each = toset(var.cost_alert_emails)
-
-  topic_arn = aws_sns_topic.cost_alerts.arn
-  protocol  = "email"
-  endpoint  = each.value
-}
-
-# ========================================
-# Unused Resource Cleanup
-# ========================================
-
-resource "aws_lambda_function" "resource_cleanup" {
-  function_name = "${local.name_prefix}-resource-cleanup"
-  role          = aws_iam_role.resource_cleanup.arn
-  handler       = "index.handler"
-  runtime       = "python3.11"
-  timeout       = 300
-  memory_size   = 512
-
-  environment {
-    variables = {
-      ENVIRONMENT = var.environment
-      DRY_RUN     = var.cleanup_dry_run
-      SNS_TOPIC   = aws_sns_topic.cost_alerts.arn
-    }
-  }
-
-  filename         = data.archive_file.cleanup_lambda.output_path
-  source_code_hash = data.archive_file.cleanup_lambda.output_base64sha256
-
-  tags = local.common_tags
-
-  lifecycle {
-    precondition {
-      condition     = fileexists("${path.module}/lambda/cleanup.py")
-      error_message = "Lambda source ${path.module}/lambda/cleanup.py is missing."
-    }
-  }
-}
-
-data "archive_file" "cleanup_lambda" {
-  type        = "zip"
-  output_path = "${path.module}/cleanup_lambda.zip"
-
-  source {
-    # Source is not committed; the function precondition reports it instead of failing validation
-    content  = try(file("${path.module}/lambda/cleanup.py"), "")
-    filename = "index.py"
-  }
-}
-
-resource "aws_iam_role" "resource_cleanup" {
-  name = "${local.name_prefix}-resource-cleanup-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy" "resource_cleanup" {
-  name = "${local.name_prefix}-resource-cleanup-policy"
-  role = aws_iam_role.resource_cleanup.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ec2:DescribeVolumes",
-          "ec2:DescribeSnapshots",
-          "ec2:DescribeAddresses",
-          "ec2:DeleteVolume",
-          "ec2:DeleteSnapshot",
-          "ec2:ReleaseAddress",
-          "elasticloadbalancing:DescribeLoadBalancers",
-          "elasticloadbalancing:DeleteLoadBalancer",
-          "ec2:DescribeInstances",
-          "ec2:TerminateInstances"
-        ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "ec2:ResourceTag/Environment" = var.environment
-          }
-        }
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "sns:Publish"
-        ]
-        Resource = aws_sns_topic.cost_alerts.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      }
-    ]
-  })
-}
-
-# Schedule weekly cleanup
-resource "aws_cloudwatch_event_rule" "cleanup" {
-  name                = "${local.name_prefix}-resource-cleanup"
-  description         = "Weekly unused resource cleanup"
-  schedule_expression = "cron(0 2 ? * SUN *)"
-
-  tags = local.common_tags
-}
-
-resource "aws_cloudwatch_event_target" "cleanup_lambda" {
-  rule      = aws_cloudwatch_event_rule.cleanup.name
-  target_id = "CleanupLambda"
-  arn       = aws_lambda_function.resource_cleanup.arn
-}
-
-resource "aws_lambda_permission" "allow_cloudwatch_cleanup" {
-  statement_id  = "AllowExecutionFromCloudWatchCleanup"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.resource_cleanup.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.cleanup.arn
-}
-
-# ========================================
 # CloudWatch Dashboard for Cost Monitoring
 # ========================================
 
 resource "aws_cloudwatch_dashboard" "cost_optimization" {
-  dashboard_name = "${local.name_prefix}-cost-optimization"
+  dashboard_name = "${local.name}-cost-optimization"
 
   dashboard_body = jsonencode({
     widgets = [

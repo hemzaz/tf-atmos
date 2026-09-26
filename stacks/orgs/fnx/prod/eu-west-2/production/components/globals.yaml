@@ -66,6 +66,9 @@ settings:
       warning_alerts:
         - "prod-alerts@example.com"
       pagerduty_service_key_ssm_parameter: /fnx/production/pagerduty/service_key
+      # cost-optimization/main's monthly AWS Budget (numeric string - see
+      # components/terraform/cost-optimization/variables.tf).
+      budget_monthly_limit: "10000"
 
   # Change management - strict controls
     change_management:
