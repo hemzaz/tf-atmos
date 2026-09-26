@@ -60,12 +60,6 @@ variable "kms_key_arn" {
   }
 }
 
-variable "enforce_workgroup_configuration" {
-  type        = bool
-  description = "Force every query in the workgroup to use this workgroup's own settings (output location, encryption, bytes scanned cutoff) instead of client-supplied ones"
-  default     = true
-}
-
 variable "publish_cloudwatch_metrics_enabled" {
   type        = bool
   description = "Publish workgroup query metrics to CloudWatch"
@@ -110,4 +104,49 @@ variable "named_queries" {
   description = "Saved queries, keyed by a short suffix (each is named <Environment>-<name>-<key>). database is the Glue/Athena database name to run against, e.g. from a glue component instance's database_name output"
   default     = {}
   nullable    = false
+}
+
+variable "data_catalogs" {
+  type = map(object({
+    description = optional(string, "Managed by Terraform")
+    type        = string
+    parameters  = map(string)
+  }))
+  description = "Extra Athena data catalogs, keyed by a short suffix (each is named <Environment>-<name>-<key>). The account's own Glue Data Catalog (AwsDataCatalog) needs no entry. type is GLUE (parameters { catalog-id }), LAMBDA, HIVE or FEDERATED"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for c in values(var.data_catalogs) : contains(["GLUE", "LAMBDA", "HIVE", "FEDERATED"], c.type)])
+    error_message = "data_catalogs type must be GLUE, LAMBDA, HIVE or FEDERATED."
+  }
+
+  validation {
+    condition     = alltrue([for c in values(var.data_catalogs) : c.type != "GLUE" || can(regex("^[0-9]{12}$", lookup(c.parameters, "catalog-id", "")))])
+    error_message = "A GLUE data catalog needs parameters.catalog-id set to a 12-digit account ID."
+  }
+}
+
+variable "query_database_names" {
+  type        = list(string)
+  description = "Glue database names the query_policy output grants catalog read on (e.g. a glue instance's database_name)"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for d in var.query_database_names : can(regex("^[a-z0-9_]{1,255}$", d))])
+    error_message = "query_database_names entries must be Glue database names (lowercase letters, digits, underscores)."
+  }
+}
+
+variable "query_source_buckets" {
+  type        = list(string)
+  description = "Bucket names holding the queried data; the query_policy output grants read on them"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for b in var.query_source_buckets : can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", b))])
+    error_message = "query_source_buckets entries must be S3 bucket names (not ARNs or URIs)."
+  }
 }

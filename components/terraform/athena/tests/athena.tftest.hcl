@@ -16,6 +16,27 @@ mock_provider "aws" {
   }
 }
 
+override_data {
+  target = data.aws_partition.current
+  values = {
+    partition = "aws"
+  }
+}
+
+override_data {
+  target = data.aws_caller_identity.current
+  values = {
+    account_id = "123456789012"
+  }
+}
+
+override_data {
+  target = data.aws_region.current
+  values = {
+    region = "eu-west-2"
+  }
+}
+
 variables {
   region          = "eu-west-2"
   name            = "data-pipeline"
@@ -54,6 +75,115 @@ run "result_encryption_is_always_sse_kms" {
     condition     = aws_athena_workgroup.this[0].configuration[0].result_configuration[0].output_location == "s3://test-athena-results/"
     error_message = "output_location is passed through."
   }
+
+  assert {
+    condition     = aws_athena_workgroup.this[0].configuration[0].result_configuration[0].expected_bucket_owner == "123456789012"
+    error_message = "Results are only written to a bucket owned by this account."
+  }
+}
+
+run "workgroup_configuration_is_always_enforced" {
+  command = plan
+
+  assert {
+    condition     = aws_athena_workgroup.this[0].configuration[0].enforce_workgroup_configuration == true
+    error_message = "enforce_workgroup_configuration is always true, so clients cannot override output location or encryption."
+  }
+}
+
+run "query_policy_is_scoped_to_the_workgroup_results_bucket_and_key" {
+  command = plan
+
+  assert {
+    condition     = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowWorkgroupQueries"]).Resource == "arn:aws:athena:eu-west-2:123456789012:workgroup/test-data-pipeline"
+    error_message = "Athena actions are scoped to this workgroup's ARN."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowResultsBucket"]).Resource == "arn:aws:s3:::test-athena-results"
+    error_message = "Bucket-level S3 actions are scoped to the results bucket parsed from output_location."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowResultsObjects"]).Resource == "arn:aws:s3:::test-athena-results/*"
+    error_message = "Object-level S3 actions are scoped to the results bucket's objects."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowResultsKMS"]).Resource == var.kms_key_arn
+    error_message = "KMS actions are scoped to kms_key_arn."
+  }
+
+  assert {
+    condition     = alltrue([for s in jsondecode(output.query_policy).Statement : s.Resource != "*"])
+    error_message = "No query_policy statement uses a wildcard resource."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowCatalogRead" || s.Sid == "AllowReadSourceObjects"]) == 0
+    error_message = "Catalog and source-data statements are omitted when query_database_names/query_source_buckets are empty."
+  }
+}
+
+run "query_policy_adds_catalog_and_source_reads_when_given" {
+  command = plan
+
+  variables {
+    query_database_names = ["test_data_lake"]
+    query_source_buckets = ["test-data-lake-processed"]
+  }
+
+  assert {
+    condition = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowCatalogRead"]).Resource == [
+      "arn:aws:glue:eu-west-2:123456789012:catalog",
+      "arn:aws:glue:eu-west-2:123456789012:database/test_data_lake",
+      "arn:aws:glue:eu-west-2:123456789012:table/test_data_lake/*",
+    ]
+    error_message = "Catalog read is scoped to the catalog, the named databases and their tables."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowReadSourceObjects"]).Resource == ["arn:aws:s3:::test-data-lake-processed/*"]
+    error_message = "Source-data read is scoped to query_source_buckets."
+  }
+}
+
+run "data_catalogs_create_one_catalog_per_key" {
+  command = plan
+
+  variables {
+    data_catalogs = {
+      shared = {
+        type       = "GLUE"
+        parameters = { "catalog-id" = "210987654321" }
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_athena_data_catalog.this["shared"].name == "test-data-pipeline-shared" && aws_athena_data_catalog.this["shared"].type == "GLUE"
+    error_message = "A data catalog is named <Environment>-<name>-<key> with the given type."
+  }
+
+  assert {
+    condition     = output.data_catalog_names == { shared = "test-data-pipeline-shared" }
+    error_message = "data_catalog_names maps key to name."
+  }
+}
+
+run "rejects_a_glue_data_catalog_without_a_catalog_id" {
+  command = plan
+
+  variables {
+    data_catalogs = {
+      shared = {
+        type       = "GLUE"
+        parameters = {}
+      }
+    }
+  }
+
+  expect_failures = [var.data_catalogs]
 }
 
 run "bytes_scanned_cutoff_is_applied" {
@@ -210,5 +340,10 @@ run "disabled_creates_nothing" {
   assert {
     condition     = output.named_query_ids == {}
     error_message = "named_query_ids is an empty map when disabled."
+  }
+
+  assert {
+    condition     = output.query_policy == null && output.results_bucket_name == null && length(aws_athena_data_catalog.this) == 0
+    error_message = "query_policy/results_bucket_name are null and no data catalog is created when disabled."
   }
 }

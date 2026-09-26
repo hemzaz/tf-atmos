@@ -180,6 +180,37 @@ components:
           DataPipeline: "analytics"
           QueryEngine: "athena"
 
+    # Glue job scripts (uploaded by data-pipeline/glue-database under
+    # scripts/<Environment>-data-lake/) and the jobs' --TempDir
+    # (temporary/<Environment>-data-lake/). Kept apart from the data lake
+    # buckets so no crawler ever catalogs code or Spark scratch files.
+    data-pipeline/s3-glue-assets:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-glue-assets"
+        lifecycle_configuration_rules:
+          - id: "expire-temporary"
+            enabled: true
+            filter_and:
+              prefix: "temporary/"
+            expiration:
+              days: 7
+            noncurrent_version_expiration:
+              noncurrent_days: 7
+          - id: "expire-old-script-versions"
+            enabled: true
+            filter_and:
+              prefix: "scripts/"
+            noncurrent_version_expiration:
+              noncurrent_days: 90
+
+        tags:
+          DataPipeline: "etl"
+
     # =========================================================================
     # DATA INGESTION (Kinesis)
     # =========================================================================
@@ -447,7 +478,7 @@ components:
                 writer_version: "V2"
           schema_configuration:
             database_name: !terraform.state data-pipeline/glue-database .database_name
-            table_name: "raw_events"
+            table_name: !terraform.state data-pipeline/glue-database .table_names.raw_events
             region: "{{ .vars.region }}"
             role_arn: "{{ .vars.firehose_glue_role_arn }}"
 
@@ -478,6 +509,7 @@ components:
         components:
           - component: data-pipeline/kinesis-ingest
           - component: data-pipeline/s3-raw
+          - component: data-pipeline/glue-database
     data-pipeline/firehose-processed:
       metadata:
         component: firehose
@@ -517,7 +549,7 @@ components:
                 enable_dictionary_compression: true
           schema_configuration:
             database_name: !terraform.state data-pipeline/glue-database .database_name
-            table_name: "processed_events"
+            table_name: !terraform.state data-pipeline/glue-database .table_names.processed_events
             region: "{{ .vars.region }}"
             role_arn: "{{ .vars.firehose_glue_role_arn }}"
 
@@ -545,15 +577,25 @@ components:
         components:
           - component: data-pipeline/kinesis-enriched
           - component: data-pipeline/s3-processed
-    # The instance name (glue-database) predates folding the crawlers in -
-    # kept as-is so every existing `!terraform.state data-pipeline/glue-database
-    # ...` read below (and in firehose/athena above) stays valid. The
-    # former data-pipeline/glue-crawlers instance's three crawlers are now
-    # entries in this instance's own `crawlers` map (component glue is one
-    # database plus its crawlers - see components/terraform/glue/README.md);
-    # their `role`/`database_name` are no longer placeholders/repeated
-    # !terraform.state calls, since every crawler always shares this
-    # instance's own component-created role and database.
+          - component: data-pipeline/glue-database
+    # The whole Glue side of the pipeline in one glue instance (catalog
+    # database, tables, crawlers, ETL jobs, triggers, their shared role and
+    # KMS security configuration - see components/terraform/glue/README.md).
+    # The instance name predates the component and is kept so the
+    # `!terraform.state data-pipeline/glue-database ...` reads elsewhere in
+    # this template (firehose, athena, step-functions, eventbridge) stay
+    # stable; it replaces the former data-pipeline/glue-crawlers instance.
+    #
+    # Flow: firehose-raw converts ingest records to Parquet against
+    # raw_events' schema and writes s3-raw/data/year=/month=/day=/hour=/
+    # (raw_events uses partition projection, so Athena sees new hours with
+    # no crawl). step-functions' daily ETL runs the transformation job
+    # (raw -> processed_events, registering its partitions through a
+    # catalog-updating sink), an Athena data quality query, then the
+    # curation job (processed -> s3-curated/daily_event_summary/), whose
+    # success fires the crawl-curated trigger to catalog the curated table.
+    # firehose-processed also lands in processed_events; the processed_data
+    # crawler adds those partitions every 6 hours.
     data-pipeline/glue-database:
       metadata:
         component: glue
@@ -567,6 +609,11 @@ components:
         # Location
         location_uri: !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
 
+        # The Data Catalog's own metadata and connection-password encryption
+        # (kms/main) is one setting per account and region; this is the only
+        # glue instance in the template, so it owns it.
+        enable_data_catalog_encryption: true
+
         # Permissions
         create_table_default_permissions:
           - principal:
@@ -574,15 +621,114 @@ components:
             permissions:
               - "ALL"
 
+        # Job scripts and --TempDir; job inputs/outputs. Buckets the crawlers
+        # read (s3 targets, table locations) are granted automatically.
+        assets_bucket_name: !terraform.state data-pipeline/s3-glue-assets .bucket_name
+        s3_read_buckets:
+          - !terraform.state data-pipeline/s3-raw .bucket_name
+        s3_write_buckets:
+          - !terraform.state data-pipeline/s3-processed .bucket_name
+          - !terraform.state data-pipeline/s3-curated .bucket_name
+
+        tables:
+          # Written by firehose-raw (Parquet conversion against this schema).
+          raw_events:
+            description: "Raw ingest events (Parquet, from firehose-raw)"
+            location: !terraform.state data-pipeline/s3-raw .bucket_name | "s3://" + . + "/data/"
+            input_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+            output_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+            serialization_library: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+            parameters:
+              classification: "parquet"
+              EXTERNAL: "TRUE"
+              # Partition projection: Athena computes the partitions from
+              # these ranges; the component derives storage.location.template
+              # from the location and partition keys.
+              projection.enabled: "true"
+              projection.year.type: "integer"
+              projection.year.range: "2024,2099"
+              projection.month.type: "integer"
+              projection.month.range: "1,12"
+              projection.month.digits: "2"
+              projection.day.type: "integer"
+              projection.day.range: "1,31"
+              projection.day.digits: "2"
+              projection.hour.type: "integer"
+              projection.hour.range: "0,23"
+              projection.hour.digits: "2"
+            columns:
+              - name: "event_id"
+                type: "string"
+              - name: "event_time"
+                type: "timestamp"
+              - name: "event_type"
+                type: "string"
+              - name: "source"
+                type: "string"
+              - name: "user_id"
+                type: "string"
+              - name: "error_code"
+                type: "string"
+              - name: "error_message"
+                type: "string"
+              - name: "payload"
+                type: "string"
+            partition_keys:
+              - name: "year"
+                type: "string"
+              - name: "month"
+                type: "string"
+              - name: "day"
+                type: "string"
+              - name: "hour"
+                type: "string"
+
+          # Written by the transformation job and firehose-processed.
+          # Partitioned by source too (firehose-processed's dynamic
+          # partitioning), whose values are open-ended, so no projection:
+          # the processed_data crawler adds partitions.
+          processed_events:
+            description: "Validated, de-duplicated events (Parquet)"
+            location: !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
+            input_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+            output_format: "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+            serialization_library: "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+            parameters:
+              classification: "parquet"
+              EXTERNAL: "TRUE"
+            columns:
+              - name: "event_id"
+                type: "string"
+              - name: "event_time"
+                type: "timestamp"
+              - name: "event_type"
+                type: "string"
+              - name: "user_id"
+                type: "string"
+              - name: "error_code"
+                type: "string"
+              - name: "error_message"
+                type: "string"
+              - name: "payload"
+                type: "string"
+            partition_keys:
+              - name: "source"
+                type: "string"
+              - name: "year"
+                type: "string"
+              - name: "month"
+                type: "string"
+              - name: "day"
+                type: "string"
+
         crawlers:
-          # Raw data crawler
+          # Keeps raw_events' schema in step with what firehose-raw writes
+          # (partitions come from projection).
           raw_data:
-            description: "Crawls raw data in S3"
+            description: "Crawls raw_events (catalog target)"
             schedule: "cron(0 */6 * * ? *)"  # Every 6 hours
-            s3_targets:
-              - path: !terraform.state data-pipeline/s3-raw .bucket_name | "s3://" + . + "/data/"
-                exclusions:
-                  - "errors/**"
+            catalog_tables:
+              - raw_events
             schema_change_policy:
               delete_behavior: "LOG"
               update_behavior: "UPDATE_IN_DATABASE"
@@ -591,27 +737,27 @@ components:
               CrawlerOutput:
                 Partitions:
                   AddOrUpdateBehavior: "InheritFromTable"
-              Grouping:
-                TableGroupingPolicy: "CombineCompatibleSchemas"
-            table_prefix: "raw_"
 
-          # Processed data crawler
+          # Adds the processed_events partitions firehose-processed writes
+          # (the transformation job registers its own through its sink).
           processed_data:
-            description: "Crawls processed data in S3"
+            description: "Crawls processed_events (catalog target)"
             schedule: "cron(0 */6 * * ? *)"  # Every 6 hours
-            s3_targets:
-              - path: !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
-                exclusions:
-                  - "errors/**"
+            catalog_tables:
+              - processed_events
             schema_change_policy:
               delete_behavior: "LOG"
               update_behavior: "UPDATE_IN_DATABASE"
-            table_prefix: "processed_"
+            configuration:
+              Version: 1.0
+              CrawlerOutput:
+                Partitions:
+                  AddOrUpdateBehavior: "InheritFromTable"
 
-          # Curated data crawler
+          # Discovers the curation job's output tables (curated_*); run by
+          # the crawl-curated trigger after every curation job.
           curated_data:
             description: "Crawls curated data in S3"
-            schedule: "cron(0 0 * * ? *)"  # Daily
             s3_targets:
               - path: !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
             schema_change_policy:
@@ -619,20 +765,133 @@ components:
               update_behavior: "UPDATE_IN_DATABASE"
             table_prefix: "curated_"
 
+        # Run by step-functions' daily_etl (glue:startJobRun.sync) with
+        # --input_path, --output_path and --date (the run's ISO-8601 time).
+        jobs:
+          transformation:
+            description: "Raw -> processed: drop incomplete and duplicate events, partition by source/day"
+            job_bookmark_option: "job-bookmark-disable"  # each run selects its own day
+            # --catalog_database is added by the component.
+            default_arguments:
+              "--output_table": "processed_events"
+            script: |
+              import sys
+
+              from awsglue.context import GlueContext
+              from awsglue.dynamicframe import DynamicFrame
+              from awsglue.job import Job
+              from awsglue.utils import getResolvedOptions
+              from pyspark.context import SparkContext
+              from pyspark.sql import functions as F
+
+              args = getResolvedOptions(
+                  sys.argv,
+                  ["JOB_NAME", "input_path", "output_path", "date", "catalog_database", "output_table"],
+              )
+              glue_context = GlueContext(SparkContext.getOrCreate())
+              spark = glue_context.spark_session
+              job = Job(glue_context)
+              job.init(args["JOB_NAME"], args)
+
+              year, month, day = args["date"][:10].split("-")
+              day_path = args["input_path"] + "year=" + year + "/month=" + month + "/day=" + day + "/"
+
+              events = (
+                  spark.read.parquet(day_path)
+                  .drop("hour")
+                  .dropna(subset=["event_id", "event_time", "source"])
+                  .dropDuplicates(["event_id"])
+                  .withColumn("year", F.lit(year))
+                  .withColumn("month", F.lit(month))
+                  .withColumn("day", F.lit(day))
+              )
+
+              # Writing through a catalog-updating sink registers the new
+              # processed_events partitions as part of the run, so the data
+              # quality query that follows in daily_etl sees them.
+              sink = glue_context.getSink(
+                  connection_type="s3",
+                  path=args["output_path"],
+                  enableUpdateCatalog=True,
+                  updateBehavior="LOG",
+                  partitionKeys=["source", "year", "month", "day"],
+              )
+              sink.setFormat("glueparquet")
+              sink.setCatalogInfo(catalogDatabase=args["catalog_database"], catalogTableName=args["output_table"])
+              sink.writeFrame(DynamicFrame.fromDF(events, glue_context, "events"))
+
+              job.commit()
+
+          curation:
+            description: "Processed -> curated: daily event summary per source and event type"
+            job_bookmark_option: "job-bookmark-disable"  # each run selects its own day
+            script: |
+              import sys
+
+              from awsglue.context import GlueContext
+              from awsglue.job import Job
+              from awsglue.utils import getResolvedOptions
+              from pyspark.context import SparkContext
+              from pyspark.sql import functions as F
+
+              args = getResolvedOptions(sys.argv, ["JOB_NAME", "input_path", "output_path", "date"])
+              glue_context = GlueContext(SparkContext.getOrCreate())
+              spark = glue_context.spark_session
+              spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+              job = Job(glue_context)
+              job.init(args["JOB_NAME"], args)
+
+              run_date = args["date"][:10]
+              year, month, day = run_date.split("-")
+
+              summary = (
+                  spark.read.parquet(args["input_path"])
+                  .where((F.col("year") == year) & (F.col("month") == month) & (F.col("day") == day))
+                  .groupBy("source", "event_type")
+                  .agg(
+                      F.count(F.lit(1)).alias("event_count"),
+                      F.countDistinct("user_id").alias("unique_users"),
+                      F.sum(F.when(F.col("error_code").isNotNull(), 1).otherwise(0)).alias("error_count"),
+                  )
+                  .withColumn("event_date", F.lit(run_date))
+              )
+
+              (
+                  summary.write.mode("overwrite")
+                  .partitionBy("event_date")
+                  .parquet(args["output_path"] + "daily_event_summary/")
+              )
+
+              job.commit()
+
+        # The curation job writes plain Parquet, so its success crawls the
+        # curated bucket to (re)catalog curated_daily_event_summary.
+        triggers:
+          crawl-curated:
+            description: "Crawl the curated bucket after a successful curation run"
+            type: "CONDITIONAL"
+            actions:
+              - crawler: "curated_data"
+            predicate:
+              conditions:
+                - job: "curation"
+                  state: "SUCCEEDED"
+
         tags:
           DataPipeline: "catalog"
           CatalogType: "database"
 
       # list_merge_strategy is `replace` (atmos.yaml), so this instance-level
       # dependencies.components REPLACES glue/defaults' own ([kms/main])
-      # rather than adding to it - both, plus every bucket a crawler or
-      # location_uri reads, must be listed here.
+      # rather than adding to it - both, plus every bucket read above, must
+      # be listed here.
       dependencies:
         components:
           - component: kms/main
           - component: data-pipeline/s3-raw
           - component: data-pipeline/s3-processed
           - component: data-pipeline/s3-curated
+          - component: data-pipeline/s3-glue-assets
 
     # =========================================================================
     # QUERY ENGINE (Athena)
@@ -653,8 +912,8 @@ components:
         # bucket hardening (TLS-only policy, public access block, SSE-KMS).
         output_location: !terraform.state data-pipeline/s3-athena-results .bucket_name | "s3://" + . + "/"
 
-        # Configuration
-        enforce_workgroup_configuration: true
+        # Configuration (the component always enforces the workgroup's own
+        # output location and SSE_KMS encryption)
         publish_cloudwatch_metrics_enabled: true
         bytes_scanned_cutoff_per_query: 10737418240                                     # 10 GB
 
@@ -724,6 +983,16 @@ components:
               FROM processed_events
               WHERE event_type IS NULL OR source IS NULL
 
+        # Scope of the query_policy output (for principals running queries
+        # here): catalog read on the data lake database, read on the data
+        # lake buckets.
+        query_database_names:
+          - !terraform.state data-pipeline/glue-database .database_name
+        query_source_buckets:
+          - !terraform.state data-pipeline/s3-raw .bucket_name
+          - !terraform.state data-pipeline/s3-processed .bucket_name
+          - !terraform.state data-pipeline/s3-curated .bucket_name
+
         tags:
           DataPipeline: "analytics"
           QueryEngine: "athena"
@@ -734,6 +1003,9 @@ components:
           - component: kms/main
           - component: data-pipeline/glue-database
           - component: data-pipeline/s3-athena-results
+          - component: data-pipeline/s3-raw
+          - component: data-pipeline/s3-processed
+          - component: data-pipeline/s3-curated
 
     # =========================================================================
     # WORKFLOW ORCHESTRATION (Step Functions)
@@ -758,47 +1030,21 @@ components:
               enabled: true
             definition:
               Comment: "Daily ETL workflow"
-              StartAt: "RunRawCrawler"
+              # Crawls are not states here: raw_events uses partition
+              # projection, the transformation job registers its own
+              # processed_events partitions, and data-pipeline/glue-database's
+              # crawl-curated trigger crawls the curation job's output.
+              StartAt: "RunTransformationJob"
               States:
-                RunRawCrawler:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::glue:startJobRun.sync"
-                  Parameters:
-                    CrawlerName: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-raw-data-crawler"
-                  Next: "CheckRawCrawlerStatus"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
-
-                CheckRawCrawlerStatus:
-                  Type: "Choice"
-                  Choices:
-                    - Variable: "$.CrawlerStatus"
-                      StringEquals: "SUCCEEDED"
-                      Next: "RunTransformationJob"
-                  Default: "NotifyFailure"
-
                 RunTransformationJob:
                   Type: "Task"
                   Resource: "arn:aws:states:::glue:startJobRun.sync"
                   Parameters:
-                    JobName: "{{ .vars.transformation_glue_job_name }}"
+                    JobName: !terraform.state data-pipeline/glue-database .job_names.transformation
                     Arguments:
                       "--input_path": !terraform.state data-pipeline/s3-raw .bucket_name | "s3://" + . + "/data/"
                       "--output_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
                       "--date.$": "$.execution_date"
-                  Next: "RunProcessedCrawler"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
-
-                RunProcessedCrawler:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::glue:startJobRun.sync"
-                  Parameters:
-                    CrawlerName: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-processed-data-crawler"
                   Next: "RunDataQualityChecks"
                   Catch:
                     - ErrorEquals:
@@ -821,22 +1067,11 @@ components:
                   Type: "Task"
                   Resource: "arn:aws:states:::glue:startJobRun.sync"
                   Parameters:
-                    JobName: "{{ .vars.curation_glue_job_name }}"
+                    JobName: !terraform.state data-pipeline/glue-database .job_names.curation
                     Arguments:
                       "--input_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
                       "--output_path": !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
                       "--date.$": "$.execution_date"
-                  Next: "RunCuratedCrawler"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
-
-                RunCuratedCrawler:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::glue:startJobRun.sync"
-                  Parameters:
-                    CrawlerName: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-curated-data-crawler"
                   Next: "NotifySuccess"
                   Catch:
                     - ErrorEquals:
@@ -908,8 +1143,11 @@ components:
 
       dependencies:
         components:
-          - component: data-pipeline/glue-crawlers
+          - component: data-pipeline/glue-database
           - component: data-pipeline/athena
+          - component: data-pipeline/s3-raw
+          - component: data-pipeline/s3-processed
+          - component: data-pipeline/s3-curated
     data-pipeline/eventbridge:
       metadata:
         component: eventbridge
@@ -953,8 +1191,8 @@ components:
                 state:
                   - "Succeeded"
                   - "Failed"
-                crawlerName:
-                  - prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
+                # This pipeline's own crawlers (data-pipeline/glue-database).
+                crawlerName: !terraform.state data-pipeline/glue-database .crawler_names | [.[]]
             targets:
               - id: "process-crawler-completion"
                 arn: "{{ .vars.crawler_completion_lambda_arn }}"
@@ -970,6 +1208,7 @@ components:
       dependencies:
         components:
           - component: data-pipeline/step-functions
+          - component: data-pipeline/glue-database
     data-pipeline/dynamodb-lookup:
       metadata:
         component: dynamodb
@@ -1213,15 +1452,11 @@ components:
 # =============================================================================
 # data_lake_kms_key_id: "arn:aws:kms:..."
 # lambda_logs_kms_key_id: "arn:aws:kms:..."
-# athena_kms_key_arn: "arn:aws:kms:..."
 # dynamodb_kms_key_arn: "arn:aws:kms:..."
 # log_bucket_name: "my-log-bucket"
-# glue_crawler_role_arn: "arn:aws:iam::..."
 # firehose_kinesis_role_arn: "arn:aws:iam::..."
 # firehose_glue_role_arn: "arn:aws:iam::..."
 # eventbridge_step_functions_role_arn: "arn:aws:iam::..."
-# transformation_glue_job_name: "my-transformation-job"
-# curation_glue_job_name: "my-curation-job"
 # data_pipeline_sns_topic_arn: "arn:aws:sns:..."
 # dlq_arn: "arn:aws:sqs:..."
 # alarm_email_addresses: ["ops@example.com"]

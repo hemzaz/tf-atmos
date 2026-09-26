@@ -1,108 +1,115 @@
 # glue
 
-One Glue catalog database plus its crawlers per instance, modelled on Cloud
-Posse's
-[aws-glue-catalog-database](https://github.com/cloudposse-terraform-components/aws-glue-catalog-database)
-and
-[aws-glue-crawler](https://github.com/cloudposse-terraform-components/aws-glue-crawler)
-components (which wrap
-[cloudposse/terraform-aws-glue](https://github.com/cloudposse/terraform-aws-glue)'s
-`glue-catalog-database` and `glue-crawler` submodules), plus the
-`AWSGlueServiceRole` attachment from Cloud Posse's
-[aws-glue-iam](https://github.com/cloudposse-terraform-components/aws-glue-iam)
-component. Folded into ONE component (database + crawlers + crawler role +
-security configuration), unlike Cloud Posse's four separate components, since
-an instance of this component is meant to be the whole unit of deployment for
-one catalog and everything that populates it - an owner decision for this
-repo, not an upstream pattern. Written as plain resources, like this repo's
-other short-name root components (`stepfunctions`, `kinesis`, `sns`, `sqs`).
+One Glue catalog database and everything that populates and processes it
+per instance: catalog tables, crawlers, Spark ETL jobs, triggers, the IAM
+role they share, a KMS security configuration and, optionally, the account's
+Data Catalog encryption settings.
+
+Modelled on Cloud Posse's Glue components -
+[aws-glue-catalog-database](https://github.com/cloudposse-terraform-components/aws-glue-catalog-database),
+[aws-glue-catalog-table](https://github.com/cloudposse-terraform-components/aws-glue-catalog-table),
+[aws-glue-crawler](https://github.com/cloudposse-terraform-components/aws-glue-crawler),
+[aws-glue-job](https://github.com/cloudposse-terraform-components/aws-glue-job),
+[aws-glue-trigger](https://github.com/cloudposse-terraform-components/aws-glue-trigger) and
+[aws-glue-iam](https://github.com/cloudposse-terraform-components/aws-glue-iam),
+which wrap the matching submodules of
+[cloudposse/terraform-aws-glue](https://github.com/cloudposse/terraform-aws-glue) -
+folded into ONE component (an owner decision for this repo) and written as
+plain resources, like this repo's other root components (`stepfunctions`,
+`kinesis`, `sns`, `sqs`).
 
 ## Deployed instances
 
 `data-pipeline/glue-database` in `stacks/catalog/templates/data-pipeline.yaml`
-(a template, not a deployed stack) - the instance name predates this
-component and was kept so existing `!terraform.state data-pipeline/glue-database
-...` reads elsewhere in the template (firehose, athena, step-functions) did
-not need repointing, even though the instance now also creates the three
-crawlers that used to be the separate `data-pipeline/glue-crawlers` instance.
-The abstract base `glue/defaults` (`stacks/catalog/glue/defaults.yaml`) wires
-the key from `kms/main`; the instance sets `name`, `location_uri`,
-`create_table_default_permissions` and `crawlers`.
+(a template; no stack imports it yet). The abstract base `glue/defaults`
+(`stacks/catalog/glue/defaults.yaml`) wires the key from `kms/main`. The
+instance defines:
+
+- tables `raw_events` (Parquet written by `firehose-raw`, partition
+  projection on year/month/day/hour) and `processed_events` (Parquet written
+  by the transformation job and `firehose-processed`, partitioned by
+  source/year/month/day);
+- crawlers `raw_data` and `processed_data` (catalog targets on those two
+  tables) and `curated_data` (S3 target on the curated bucket);
+- jobs `transformation` (raw -> `processed_events`, registering partitions
+  through a catalog-updating sink) and `curation` (processed -> curated
+  daily summary), run by `data-pipeline/step-functions`' daily ETL;
+- trigger `crawl-curated` (crawl the curated bucket when `curation`
+  succeeds);
+- `enable_data_catalog_encryption: true` (the template's only glue
+  instance).
+
+Readers: `firehose-raw`/`firehose-processed` (`database_name`,
+`table_names`), `athena` (`database_name`), `step-functions` (`job_names`,
+`database_name`), `eventbridge` (`crawler_names`).
 
 ## Inputs / outputs
 
 | Key | Notes |
 |---|---|
-| `region`, `tags`, `name`, `kms_key_arn` (required) | `tags` must include a non-empty `Environment`. The crawler role, security configuration and each crawler are named `<Environment>-<name>[-<crawler key>]`; the catalog database reuses the same string with hyphens replaced by underscores, since Glue database names allow only lowercase letters, digits and underscores. `kms_key_arn` must be a full KMS key ARN |
-| `database_description` (`""`) | Glue catalog database description |
-| `location_uri` (`""`) | Default location for tables in the database, e.g. an `s3://` URI |
-| `create_table_default_permissions` (`[]`) | List of `{principal = {data_lake_principal_identifier}, permissions}`, one `aws_glue_catalog_database` `create_table_default_permission` block per entry. The data-pipeline instance sets one entry granting `ALL` to `IAM_ALLOWED_PRINCIPALS` (this repo's accounts run under that legacy-grants model, not Lake Formation's fine-grained access control - see "Not implemented" in `main.tf`) |
-| `crawlers` (`{}`) | Map of crawlers to create against this instance's own catalog database, keyed by a short suffix. Each entry: `description` (optional), `schedule` (optional, a `cron(...)` expression), `table_prefix` (optional), `configuration` (optional, a map the component `jsonencode()`s into the crawler's `configuration` JSON string), `s3_targets` (required, list of `{path, exclusions (optional, [])}`) and `schema_change_policy` (optional, `{delete_behavior, update_behavior}`). A variable validation requires at least one `s3_targets` entry per crawler and rejects a `schema_change_policy` with values AWS does not accept |
-| `enabled` (`true`) | `false` creates nothing, including the crawler role and security configuration |
-| out: `database_name`, `database_arn` | Always set when enabled |
-| out: `crawler_names`, `crawler_arns` | Maps keyed by the `crawlers` key. Empty maps when `crawlers = {}` |
-| out: `role_arn` | ARN of the IAM role every crawler in this instance assumes |
-| out: `security_configuration_name` | Name of the KMS-encrypted security configuration every crawler in this instance uses |
+| `region`, `tags`, `name`, `kms_key_arn` (required) | `tags` must include a non-empty `Environment`. The role is `<Environment>-<name>-glue`; the security configuration, crawlers, jobs and triggers are `<Environment>-<name>[-<key>]`; the database is the same string with hyphens replaced by underscores. `kms_key_arn` must be a full KMS key ARN |
+| `database_description` (`""`), `location_uri` (`""`) | Database description and default `s3://` location |
+| `create_table_default_permissions` (`[]`) | `{principal = {data_lake_principal_identifier}, permissions}` blocks. The data-pipeline instance grants `ALL` to `IAM_ALLOWED_PRINCIPALS` (no Lake Formation fine-grained access control) |
+| `enable_data_catalog_encryption` (`false`) | Sets the account's Data Catalog encryption: metadata `SSE-KMS` and connection password encryption, both with `kms_key_arn`. **One setting per account and region** - enable it on exactly one instance |
+| `tables` (`{}`) | Map keyed by table name: `location` (`s3://.../`), `input_format`, `output_format`, `serialization_library` (required), `columns` (required, `{name, type, comment}`), optional `partition_keys`, `parameters`, `ser_de_parameters`, `table_type` (`EXTERNAL_TABLE`), `compressed`, `description`. With `parameters["projection.enabled"] = "true"` and no `storage.location.template`, the component derives `<location><key>=${<key>}/...` from the partition keys |
+| `crawlers` (`{}`) | Map keyed by suffix: exactly one of `s3_targets` (`[{path, exclusions}]`) or `catalog_tables` (keys of `tables`; requires `schema_change_policy.delete_behavior = "LOG"`), plus optional `description`, `schedule`, `table_prefix`, `configuration` (map, `jsonencode`d) and `schema_change_policy` |
+| `jobs` (`{}`) | Map keyed by suffix: `script` (PySpark source, required) plus optional `description`, `glue_version` (`5.0`), `worker_type` (`G.1X`), `number_of_workers` (`2`), `timeout` (`60`), `max_retries` (`0`), `max_concurrent_runs` (`1`), `job_bookmark_option` (`job-bookmark-enable`), `default_arguments` (merged over the component's `--TempDir`, `--enable-glue-datacatalog`, `--enable-metrics`, `--enable-continuous-cloudwatch-log`, `--job-bookmark-option`, `--catalog_database`) |
+| `assets_bucket_name` (`""`) | Required with `jobs`: scripts are uploaded (SSE-KMS) to `scripts/<Environment>-<name>/<key>.py`; `--TempDir` is `temporary/<Environment>-<name>/` |
+| `s3_read_buckets` / `s3_write_buckets` (`[]`) | Bucket names (not ARNs) the role may read / write, e.g. job inputs and outputs. Crawler `s3_targets` and table-location buckets are added to the read set automatically |
+| `triggers` (`{}`) | Map keyed by suffix: `type` (`SCHEDULED` needs `schedule`, `CONDITIONAL` needs `predicate`, or `ON_DEMAND`), `actions` (`[{job | crawler, arguments, timeout}]`), `predicate` (`{logical = AND|ANY, conditions = [{job | crawler, state}]}`), `enabled`, `start_on_creation`, `description`. Jobs and crawlers are named by their key in this instance; validations reject unknown keys and invalid states |
+| `enabled` (`true`) | `false` creates nothing |
+| out: `database_name`, `database_arn`, `role_arn`, `role_name`, `security_configuration_name` | `null` when disabled |
+| out: `table_names`/`table_arns`, `crawler_names`/`crawler_arns`, `job_names`/`job_arns`, `trigger_names` | Maps keyed by the input keys |
 
-## Dependencies / gotchas
+## Encryption and IAM
 
-- **One role, one security configuration, shared by every crawler in the
-  instance.** Cloud Posse's `aws-glue-iam` component creates a role once per
-  *instance* of itself and its `aws-glue-crawler` component takes that role's
-  ARN as an input, so a caller wiring several crawlers to one role already
-  has to compose three components per crawler group. Folding all of it into
-  one component (the owner decision this component implements) removes that
-  composition: every entry in `crawlers` shares `aws_iam_role.crawler` and
-  `aws_glue_security_configuration.this`, matching how the original
-  `data-pipeline/glue-crawlers` instance's three crawlers were always meant
-  to run under a single `glue_crawler_role_arn` placeholder.
-- **The crawler role's S3 grant is derived from `s3_targets`, not a separate
-  input.** `s3:ListBucket`/`s3:GetObject` are scoped to exactly the buckets
-  every crawler's `s3_targets[*].path` names (parsed out of the `s3://`
-  URI, deduplicated across all crawlers) - there is no `target_bucket_arns`
-  variable to keep in sync by hand. Add a crawler with a new bucket in its
-  `s3_targets` and the role's policy picks it up on the next `apply`, with
-  no other change.
-- **KMS grants for the crawler role, not a key-policy change.** `kms/main`'s
-  key policy delegates to the account root, so (as in this repo's kinesis
-  and s3 components) an IAM identity's own policy is sufficient to use the
-  key; this component's crawler role gets `kms:Decrypt` (source S3 objects
-  under SSE-KMS) plus `kms:Encrypt`/`kms:GenerateDataKey` (the security
-  configuration's own CloudWatch Logs/job bookmark/S3 output encryption -
-  see [AWS's Glue encryption
-  docs](https://docs.aws.amazon.com/glue/latest/dg/set-up-encryption.html)
-  for why the role itself, not just the key policy, needs these).
-- **PITFALL: no `aws_glue_data_catalog_encryption_settings`.** That resource
-  is an account-wide singleton (one per account per region, keyed by
-  `catalog_id`, not by database) - deliberately not created here. A second
-  instance of this component in the same account/region would collide with
-  the first's on apply if it tried to.
-- **Lake Formation permissions are out of scope.** Cloud Posse's
-  `aws-glue-catalog-database` also grants `aws_lakeformation_permissions` to
-  the crawler role, to avoid crawler failures on accounts with Lake
-  Formation's fine-grained access control switched on. This repo's accounts
-  use `IAM_ALLOWED_PRINCIPALS` (this component's `create_table_default_permissions`
-  default in `data-pipeline.yaml`), under which Lake Formation grants
-  nothing extra - see the "Not implemented" note in `main.tf` for what
-  turning that on later would need.
+- **Security configuration** (every crawler and job): CloudWatch Logs
+  `SSE-KMS`, job bookmarks `CSE-KMS`, S3 output `SSE-KMS`, all with
+  `kms_key_arn`. The encrypted `/aws-glue/*` log groups are covered by
+  `kms/main`'s `allow_cloudwatch_logs` key-policy statement (the
+  `logs.<region>.amazonaws.com` principal, scoped by
+  `kms:EncryptionContext:aws:logs:arn` to this account's log groups); no new
+  key-policy statement is needed.
+- **Data Catalog encryption** (`enable_data_catalog_encryption`): catalog
+  metadata and connection passwords with `kms_key_arn`. Every principal that
+  reads the catalog (this role, Athena users, Firehose's schema role) then
+  needs `kms:Decrypt` on the key; `kms/main`'s root delegation makes their
+  own IAM policies sufficient (this role has it; see `athena`'s
+  `query_policy`).
+- **Role** (`<Environment>-<name>-glue`, trusted by `glue.amazonaws.com`
+  with `aws:SourceAccount`): inline policies only, no AWS managed policy -
+  Glue catalog actions on this catalog, database and `table/<db>/*`;
+  `logs:CreateLogGroup`/`AssociateKmsKey` on `/aws-glue/*` and
+  `CreateLogStream`/`PutLogEvents` on its streams; `cloudwatch:PutMetricData`
+  (no resource ARN exists) conditioned on namespace `Glue`; KMS on
+  `kms_key_arn`; S3 list/read on the read set, read/write on
+  `s3_write_buckets`, read on its own script prefix and read/write on its
+  own temporary prefix.
 
 ## Differences from Cloud Posse
 
-- One component (database + crawlers + role + security configuration)
-  instead of Cloud Posse's four (`aws-glue-catalog-database`,
-  `aws-glue-crawler`, `aws-glue-iam`, plus whatever wires them together) -
-  see "One role, one security configuration" above.
-- Plain resources instead of `cloudposse/terraform-aws-glue`'s modules; no
-  `context.tf`/null-label, names come from `tags.Environment` and
-  `default_tags` carries the tags.
-- `crawlers` is a map keyed by a short suffix (matching this repo's
-  for-each-over-a-map convention for repeatable sub-resources, as in
-  `eventbridge`'s `targets` or `kinesis`'s `consumers`), rather than one
-  `aws-glue-crawler` component instance per crawler.
-- Always creates an `aws_glue_security_configuration` with SSE-KMS/CSE-KMS
-  everywhere and wires every crawler to it; Cloud Posse's `aws-glue-crawler`
-  takes `security_configuration` as a plain string input and creates none of
-  its own, leaving KMS-encrypted crawler output to whatever the caller
-  separately provisions.
-- No Lake Formation grants (see "Lake Formation permissions are out of
-  scope" above).
+- One component instead of six; one role and one security configuration
+  shared by every crawler and job in the instance.
+- Scoped inline policies instead of attaching `AWSGlueServiceRole` (whose
+  Glue/S3/EC2 statements use wildcard resources).
+- Job scripts are uploaded by the component from inline source, instead of a
+  pre-uploaded `script_location`.
+- No Lake Formation grants (upstream's `aws_lakeformation_permissions`):
+  this repo's accounts use the `IAM_ALLOWED_PRINCIPALS` model. Turning on
+  Lake Formation access control would need them.
+- No Glue connections, workflows, registries or schemas (upstream
+  submodules) - the data pipeline uses none. Connection passwords are still
+  encrypted account-wide once `enable_data_catalog_encryption` is set.
+
+## Tests
+
+`tests/glue.tftest.hcl` (mock provider): names, security configuration and
+script encryption, Data Catalog encryption on/off, role trust, scoped
+catalog/logs/metrics/KMS/S3 statements, projection template derivation,
+catalog vs S3 crawler targets, trigger key resolution, input validations,
+and `enabled = false`.
+
+```sh
+cd components/terraform/glue
+terraform init -backend=false && terraform test
+```

@@ -1,32 +1,41 @@
 # Mock-provider tests: no AWS credentials, no network. Run from the component
-# directory with `terraform init -backend=false && terraform test`. IAM role
-# arn is mocked to a fixed, valid-looking value (as in this repo's
-# stepfunctions tests) so plan-only runs can assert a crawler's `role`
-# equals it. data.aws_partition is overridden too: a mock provider's default
-# fake value for it fails aws_iam_role_policy_attachment.policy_arn's ARN
-# format validation (the policy ARN is built from it), even under mocking.
+# directory with `terraform init -backend=false && terraform test`. The role
+# ARN is mocked to a fixed value so plan-only runs can assert crawlers/jobs
+# use it; the data sources are overridden so ARNs built from them are real.
+
 mock_provider "aws" {
   mock_resource "aws_glue_catalog_database" {
+    override_during = plan
     defaults = {
       arn = "arn:aws:glue:eu-west-2:123456789012:database/test_data_lake"
     }
   }
 
   mock_resource "aws_iam_role" {
+    override_during = plan
     defaults = {
-      arn = "arn:aws:iam::123456789012:role/mock"
-    }
-  }
-
-  mock_resource "aws_glue_security_configuration" {
-    defaults = {
-      id = "test-data-lake-security-config"
+      arn = "arn:aws:iam::123456789012:role/test-data-lake-glue"
     }
   }
 
   mock_resource "aws_glue_crawler" {
+    override_during = plan
     defaults = {
-      arn = "arn:aws:glue:eu-west-2:123456789012:crawler/test-data-lake-raw_data"
+      arn = "arn:aws:glue:eu-west-2:123456789012:crawler/mock"
+    }
+  }
+
+  mock_resource "aws_glue_job" {
+    override_during = plan
+    defaults = {
+      arn = "arn:aws:glue:eu-west-2:123456789012:job/mock"
+    }
+  }
+
+  mock_resource "aws_glue_catalog_table" {
+    override_during = plan
+    defaults = {
+      arn = "arn:aws:glue:eu-west-2:123456789012:table/test_data_lake/mock"
     }
   }
 }
@@ -45,6 +54,13 @@ override_data {
   }
 }
 
+override_data {
+  target = data.aws_region.current
+  values = {
+    region = "eu-west-2"
+  }
+}
+
 variables {
   region      = "eu-west-2"
   name        = "data-lake"
@@ -54,238 +70,315 @@ variables {
     Tenant      = "fnx"
     ManagedBy   = "Terraform"
   }
+
+  assets_bucket_name = "test-glue-assets"
+  s3_read_buckets    = ["test-raw"]
+  s3_write_buckets   = ["test-processed"]
+
+  tables = {
+    raw_events = {
+      location              = "s3://test-raw/data/"
+      input_format          = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+      output_format         = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+      parameters = {
+        classification       = "parquet"
+        "projection.enabled" = "true"
+      }
+      columns = [
+        { name = "event_id", type = "string" },
+      ]
+      partition_keys = [
+        { name = "year", type = "string" },
+        { name = "month", type = "string" },
+      ]
+    }
+  }
+
   crawlers = {
     raw_data = {
-      schedule = "cron(0 */6 * * ? *)"
-      s3_targets = [
-        {
-          path       = "s3://test-raw-bucket/data/"
-          exclusions = ["errors/**"]
-        }
-      ]
+      catalog_tables = ["raw_events"]
       schema_change_policy = {
         delete_behavior = "LOG"
         update_behavior = "UPDATE_IN_DATABASE"
       }
-      table_prefix = "raw_"
     }
-    processed_data = {
+    curated_data = {
+      schedule = "cron(0 0 * * ? *)"
       s3_targets = [
-        { path = "s3://test-processed-bucket/data/" }
+        { path = "s3://test-curated/" },
       ]
+    }
+  }
+
+  jobs = {
+    transformation = {
+      script = "print('hello')"
+    }
+  }
+
+  triggers = {
+    after_transformation = {
+      type = "CONDITIONAL"
+      actions = [
+        { crawler = "raw_data" },
+      ]
+      predicate = {
+        conditions = [
+          { job = "transformation", state = "SUCCEEDED" },
+        ]
+      }
     }
   }
 }
 
-run "database_name_is_environment_name_with_hyphens_replaced_by_underscores" {
+run "names_follow_environment_name" {
   command = plan
 
   assert {
     condition     = aws_glue_catalog_database.this[0].name == "test_data_lake"
-    error_message = "The database is named <Environment>-<name> with hyphens replaced by underscores."
+    error_message = "The database is <Environment>-<name> with hyphens replaced by underscores."
+  }
+
+  assert {
+    condition     = aws_iam_role.this[0].name == "test-data-lake-glue"
+    error_message = "The role is named <Environment>-<name>-glue."
+  }
+
+  assert {
+    condition     = aws_glue_crawler.this["raw_data"].name == "test-data-lake-raw_data" && aws_glue_job.this["transformation"].name == "test-data-lake-transformation"
+    error_message = "Crawlers and jobs are named <Environment>-<name>-<key>."
   }
 }
 
-run "location_uri_and_description_are_passed_through" {
+run "security_configuration_encrypts_everything_with_the_key" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_glue_security_configuration.this[0].encryption_configuration[0].cloudwatch_encryption[0].cloudwatch_encryption_mode == "SSE-KMS"
+      && aws_glue_security_configuration.this[0].encryption_configuration[0].cloudwatch_encryption[0].kms_key_arn == var.kms_key_arn
+      && aws_glue_security_configuration.this[0].encryption_configuration[0].job_bookmarks_encryption[0].job_bookmarks_encryption_mode == "CSE-KMS"
+      && aws_glue_security_configuration.this[0].encryption_configuration[0].job_bookmarks_encryption[0].kms_key_arn == var.kms_key_arn
+      && aws_glue_security_configuration.this[0].encryption_configuration[0].s3_encryption[0].s3_encryption_mode == "SSE-KMS"
+      && aws_glue_security_configuration.this[0].encryption_configuration[0].s3_encryption[0].kms_key_arn == var.kms_key_arn
+    )
+    error_message = "CloudWatch Logs, job bookmarks and S3 output are all encrypted with kms_key_arn."
+  }
+
+  assert {
+    condition     = aws_glue_crawler.this["raw_data"].security_configuration == "test-data-lake-security-config" && aws_glue_job.this["transformation"].security_configuration == "test-data-lake-security-config"
+    error_message = "Every crawler and job uses the security configuration."
+  }
+
+  assert {
+    condition     = aws_s3_object.script["transformation"].server_side_encryption == "aws:kms" && aws_s3_object.script["transformation"].kms_key_id == var.kms_key_arn
+    error_message = "Job scripts are uploaded SSE-KMS with kms_key_arn."
+  }
+}
+
+run "data_catalog_encryption_is_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_glue_data_catalog_encryption_settings.this) == 0
+    error_message = "The account-wide catalog encryption settings are only set when enable_data_catalog_encryption is true."
+  }
+}
+
+run "data_catalog_encryption_uses_the_key_for_metadata_and_passwords" {
   command = plan
 
   variables {
-    location_uri          = "s3://test-curated-bucket/"
-    database_description  = "Data lake catalog database"
+    enable_data_catalog_encryption = true
   }
 
   assert {
-    condition     = aws_glue_catalog_database.this[0].location_uri == "s3://test-curated-bucket/"
-    error_message = "location_uri is passed through."
-  }
-
-  assert {
-    condition     = aws_glue_catalog_database.this[0].description == "Data lake catalog database"
-    error_message = "database_description is passed through."
+    condition = (
+      aws_glue_data_catalog_encryption_settings.this[0].data_catalog_encryption_settings[0].encryption_at_rest[0].catalog_encryption_mode == "SSE-KMS"
+      && aws_glue_data_catalog_encryption_settings.this[0].data_catalog_encryption_settings[0].encryption_at_rest[0].sse_aws_kms_key_id == var.kms_key_arn
+      && aws_glue_data_catalog_encryption_settings.this[0].data_catalog_encryption_settings[0].connection_password_encryption[0].return_connection_password_encrypted == true
+      && aws_glue_data_catalog_encryption_settings.this[0].data_catalog_encryption_settings[0].connection_password_encryption[0].aws_kms_key_id == var.kms_key_arn
+    )
+    error_message = "Catalog metadata and connection passwords are encrypted with kms_key_arn."
   }
 }
 
-run "create_table_default_permissions_becomes_a_permission_block" {
-  command = plan
-
-  variables {
-    create_table_default_permissions = [{
-      principal   = { data_lake_principal_identifier = "IAM_ALLOWED_PRINCIPALS" }
-      permissions = ["ALL"]
-    }]
-  }
-
-  assert {
-    condition     = aws_glue_catalog_database.this[0].create_table_default_permission[0].principal[0].data_lake_principal_identifier == "IAM_ALLOWED_PRINCIPALS"
-    error_message = "create_table_default_permissions.principal is passed through."
-  }
-
-  assert {
-    condition     = aws_glue_catalog_database.this[0].create_table_default_permission[0].permissions == toset(["ALL"])
-    error_message = "create_table_default_permissions.permissions is passed through."
-  }
-}
-
-run "every_crawler_creates_an_aws_glue_crawler_named_after_its_key" {
+run "role_trust_is_glue_in_this_account" {
   command = plan
 
   assert {
-    condition     = length(aws_glue_crawler.this) == 2
-    error_message = "One aws_glue_crawler per crawlers entry."
+    condition = (
+      jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Principal.Service == "glue.amazonaws.com"
+      && jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+    )
+    error_message = "Only glue.amazonaws.com, acting for this account, can assume the role."
   }
 
   assert {
-    condition     = aws_glue_crawler.this["raw_data"].name == "test-data-lake-raw_data"
-    error_message = "A crawler is named <Environment>-<name>-<crawlers key>."
-  }
-
-  assert {
-    condition     = aws_glue_crawler.this["raw_data"].database_name == "test_data_lake"
-    error_message = "Every crawler targets this instance's own catalog database."
-  }
-
-  assert {
-    condition     = aws_glue_crawler.this["raw_data"].table_prefix == "raw_"
-    error_message = "table_prefix is passed through."
-  }
-
-  assert {
-    condition     = toset(aws_glue_crawler.this["raw_data"].s3_target[0].exclusions) == toset(["errors/**"])
-    error_message = "s3_targets.exclusions is passed through."
-  }
-
-  assert {
-    condition     = aws_glue_crawler.this["raw_data"].schema_change_policy[0].delete_behavior == "LOG"
-    error_message = "schema_change_policy is passed through."
+    condition     = aws_glue_crawler.this["raw_data"].role == "arn:aws:iam::123456789012:role/test-data-lake-glue" && aws_glue_job.this["transformation"].role_arn == "arn:aws:iam::123456789012:role/test-data-lake-glue"
+    error_message = "Crawlers and jobs share the component's own role."
   }
 }
 
-run "every_crawler_shares_the_one_component_created_role_and_security_configuration" {
-  # role compares two Computed-only (mocked) attributes to each other,
-  # which is unknown until apply even under mock_provider - apply here runs
-  # against the mock, not real AWS.
-  command = apply
-
-  assert {
-    condition     = aws_glue_crawler.this["raw_data"].role == aws_iam_role.crawler[0].arn
-    error_message = "Every crawler uses the component-created crawler role."
-  }
-
-  assert {
-    condition     = aws_glue_crawler.this["processed_data"].role == aws_iam_role.crawler[0].arn
-    error_message = "Every crawler uses the same crawler role, not one each."
-  }
-
-  assert {
-    condition     = aws_glue_crawler.this["raw_data"].security_configuration == aws_glue_security_configuration.this[0].name
-    error_message = "Every crawler uses the component-created security configuration."
-  }
-}
-
-run "the_crawler_role_attaches_the_aws_managed_glue_service_role_policy" {
+run "catalog_and_logs_permissions_are_scoped" {
   command = plan
 
   assert {
-    condition     = aws_iam_role_policy_attachment.glue_service_role[0].policy_arn == "arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"
-    error_message = "The crawler role attaches the AWS managed AWSGlueServiceRole policy."
+    condition = one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowOwnCatalogDatabase"]).Resource == [
+      "arn:aws:glue:eu-west-2:123456789012:catalog",
+      "arn:aws:glue:eu-west-2:123456789012:database/test_data_lake",
+      "arn:aws:glue:eu-west-2:123456789012:table/test_data_lake/*",
+    ]
+    error_message = "Catalog actions are limited to this instance's own database and its tables."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowGlueLogGroups"]).Resource == "arn:aws:logs:eu-west-2:123456789012:log-group:/aws-glue/*"
+    error_message = "Log group actions are limited to /aws-glue/*."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowGlueMetrics"]).Condition.StringEquals["cloudwatch:namespace"] == "Glue"
+    error_message = "PutMetricData (no resource ARN) is limited to the Glue namespace."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Resource == "*" && s.Sid != "AllowGlueMetrics"]) == 0
+    error_message = "Only the namespace-conditioned metrics statement uses a wildcard resource."
   }
 }
 
-run "the_crawler_role_s3_policy_is_scoped_to_exactly_the_target_buckets" {
+run "kms_grant_is_scoped_to_the_key" {
   command = plan
 
   assert {
-    condition     = length(aws_iam_role_policy.crawler_s3) == 1
-    error_message = "An S3 policy is created when crawlers have s3_targets."
-  }
-
-  assert {
-    # toset() on both sides: order-independent (map iteration order is by
-    # sorted key, "processed_data" before "raw_data", not declaration
-    # order), and sidesteps jsondecode()'s tuple type vs a list literal's
-    # list type showing up as "different types" in a direct == compare.
-    condition = toset(jsondecode(aws_iam_role_policy.crawler_s3[0].policy).Statement[0].Resource) == toset([
-      "arn:aws:s3:::test-raw-bucket",
-      "arn:aws:s3:::test-processed-bucket",
-    ])
-    error_message = "s3:ListBucket is scoped to exactly the buckets derived from every crawler's s3_targets, deduplicated - not a wildcard."
-  }
-
-  assert {
-    condition = toset(jsondecode(aws_iam_role_policy.crawler_s3[0].policy).Statement[1].Resource) == toset([
-      "arn:aws:s3:::test-raw-bucket/*",
-      "arn:aws:s3:::test-processed-bucket/*",
-    ])
-    error_message = "s3:GetObject is scoped to the objects in exactly those same target buckets."
+    condition     = jsondecode(aws_iam_role_policy.kms[0].policy).Statement[0].Resource == var.kms_key_arn
+    error_message = "The role's KMS grant is limited to kms_key_arn."
   }
 }
 
-run "the_crawler_role_kms_policy_grants_decrypt_encrypt_and_generate_data_key_on_the_key" {
+run "s3_permissions_are_scoped_to_derived_and_declared_buckets" {
   command = plan
 
   assert {
-    condition     = jsondecode(aws_iam_role_policy.crawler_kms[0].policy).Statement[0].Resource == var.kms_key_arn
-    error_message = "The KMS grant is scoped to kms_key_arn."
+    condition     = toset(one([for s in jsondecode(aws_iam_role_policy.s3[0].policy).Statement : s if s.Sid == "AllowReadObjects"]).Resource) == toset(["arn:aws:s3:::test-curated/*", "arn:aws:s3:::test-raw/*"])
+    error_message = "Read covers crawler s3_targets buckets, table-location buckets and s3_read_buckets (deduplicated)."
   }
 
   assert {
-    condition     = toset(jsondecode(aws_iam_role_policy.crawler_kms[0].policy).Statement[0].Action) == toset(["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"])
-    error_message = "The crawler role can decrypt source data and encrypt/decrypt its own CloudWatch Logs, job bookmark and S3 output via the security configuration."
+    condition     = one([for s in jsondecode(aws_iam_role_policy.s3[0].policy).Statement : s if s.Sid == "AllowWriteObjects"]).Resource == ["arn:aws:s3:::test-processed/*"]
+    error_message = "Write covers only s3_write_buckets."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.s3[0].policy).Statement : s if s.Sid == "AllowReadOwnScripts"]).Resource == "arn:aws:s3:::test-glue-assets/scripts/test-data-lake/*"
+    error_message = "Script read is limited to this instance's own script prefix."
+  }
+
+  assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.s3[0].policy).Statement : s if s.Sid == "AllowOwnTemporaryPrefix"]).Resource == "arn:aws:s3:::test-glue-assets/temporary/test-data-lake/*"
+    error_message = "Temporary read/write is limited to this instance's own temporary prefix."
   }
 }
 
-run "the_security_configuration_uses_sse_kms_everywhere" {
+run "jobs_upload_their_script_and_get_default_arguments" {
   command = plan
 
   assert {
-    condition     = aws_glue_security_configuration.this[0].encryption_configuration[0].cloudwatch_encryption[0].cloudwatch_encryption_mode == "SSE-KMS"
-    error_message = "CloudWatch Logs encryption is SSE-KMS."
+    condition     = aws_s3_object.script["transformation"].bucket == "test-glue-assets" && aws_s3_object.script["transformation"].key == "scripts/test-data-lake/transformation.py"
+    error_message = "The script is uploaded to scripts/<Environment>-<name>/<key>.py in assets_bucket_name."
   }
 
   assert {
-    condition     = aws_glue_security_configuration.this[0].encryption_configuration[0].cloudwatch_encryption[0].kms_key_arn == var.kms_key_arn
-    error_message = "CloudWatch Logs encryption uses kms_key_arn."
+    condition     = aws_glue_job.this["transformation"].command[0].script_location == "s3://test-glue-assets/scripts/test-data-lake/transformation.py"
+    error_message = "The job runs the uploaded script."
   }
 
   assert {
-    condition     = aws_glue_security_configuration.this[0].encryption_configuration[0].job_bookmarks_encryption[0].job_bookmarks_encryption_mode == "CSE-KMS"
-    error_message = "Job bookmark encryption is CSE-KMS."
-  }
-
-  assert {
-    condition     = aws_glue_security_configuration.this[0].encryption_configuration[0].s3_encryption[0].s3_encryption_mode == "SSE-KMS"
-    error_message = "Crawler S3 output encryption is SSE-KMS."
-  }
-
-  assert {
-    condition     = aws_glue_security_configuration.this[0].encryption_configuration[0].s3_encryption[0].kms_key_arn == var.kms_key_arn
-    error_message = "S3 output encryption uses kms_key_arn."
+    condition = (
+      aws_glue_job.this["transformation"].default_arguments["--TempDir"] == "s3://test-glue-assets/temporary/test-data-lake/"
+      && aws_glue_job.this["transformation"].default_arguments["--enable-glue-datacatalog"] == "true"
+      && aws_glue_job.this["transformation"].default_arguments["--job-bookmark-option"] == "job-bookmark-enable"
+    )
+    error_message = "Jobs get the component's default arguments."
   }
 }
 
-run "rejects_a_crawler_with_no_s3_targets" {
+run "tables_derive_a_projection_location_template" {
+  command = plan
+
+  assert {
+    condition     = aws_glue_catalog_table.this["raw_events"].parameters["storage.location.template"] == "s3://test-raw/data/year=$${year}/month=$${month}/"
+    error_message = "A projected table gets <location><key>=$${<key>}/ for each partition key."
+  }
+
+  assert {
+    condition     = length(aws_glue_catalog_table.this["raw_events"].partition_keys) == 2
+    error_message = "Partition keys are passed through."
+  }
+}
+
+run "crawlers_target_s3_or_catalog_tables" {
+  command = plan
+
+  assert {
+    condition     = length(aws_glue_crawler.this["raw_data"].catalog_target) == 1 && aws_glue_crawler.this["raw_data"].catalog_target[0].tables == tolist(["raw_events"])
+    error_message = "catalog_tables becomes one catalog_target over the instance's own tables."
+  }
+
+  assert {
+    condition     = length(aws_glue_crawler.this["curated_data"].s3_target) == 1 && length(aws_glue_crawler.this["curated_data"].catalog_target) == 0
+    error_message = "s3_targets become s3_target blocks."
+  }
+}
+
+run "triggers_resolve_job_and_crawler_keys" {
+  command = plan
+
+  assert {
+    condition     = aws_glue_trigger.this["after_transformation"].actions[0].crawler_name == "test-data-lake-raw_data"
+    error_message = "A trigger action's crawler key resolves to the crawler name."
+  }
+
+  assert {
+    condition = (
+      aws_glue_trigger.this["after_transformation"].predicate[0].conditions[0].job_name == "test-data-lake-transformation"
+      && aws_glue_trigger.this["after_transformation"].predicate[0].conditions[0].state == "SUCCEEDED"
+    )
+    error_message = "A predicate condition's job key resolves to the job name and keeps its state."
+  }
+}
+
+run "rejects_a_crawler_with_both_target_kinds" {
   command = plan
 
   variables {
     crawlers = {
-      empty = {
-        s3_targets = []
+      both = {
+        s3_targets     = [{ path = "s3://test-raw/" }]
+        catalog_tables = ["raw_events"]
+        schema_change_policy = {
+          delete_behavior = "LOG"
+          update_behavior = "LOG"
+        }
       }
     }
+    triggers = {}
   }
 
   expect_failures = [var.crawlers]
 }
 
-run "rejects_an_invalid_schema_change_policy" {
+run "rejects_a_catalog_crawler_that_deletes" {
   command = plan
 
   variables {
     crawlers = {
       raw_data = {
-        s3_targets = [{ path = "s3://test-raw-bucket/data/" }]
+        catalog_tables = ["raw_events"]
         schema_change_policy = {
-          delete_behavior = "NOT_A_REAL_BEHAVIOR"
+          delete_behavior = "DELETE_FROM_DATABASE"
           update_behavior = "UPDATE_IN_DATABASE"
         }
       }
@@ -295,21 +388,51 @@ run "rejects_an_invalid_schema_change_policy" {
   expect_failures = [var.crawlers]
 }
 
-run "rejects_an_invalid_name" {
+run "rejects_jobs_without_an_assets_bucket" {
   command = plan
 
   variables {
-    name = "Data_Lake"
+    assets_bucket_name = ""
   }
 
-  expect_failures = [var.name]
+  expect_failures = [var.jobs]
 }
 
-run "rejects_an_empty_kms_key_arn" {
+run "rejects_a_trigger_referencing_an_unknown_job" {
   command = plan
 
   variables {
-    kms_key_arn = ""
+    triggers = {
+      bad = {
+        type    = "ON_DEMAND"
+        actions = [{ job = "does_not_exist" }]
+      }
+    }
+  }
+
+  expect_failures = [var.triggers]
+}
+
+run "rejects_a_scheduled_trigger_without_a_schedule" {
+  command = plan
+
+  variables {
+    triggers = {
+      bad = {
+        type    = "SCHEDULED"
+        actions = [{ job = "transformation" }]
+      }
+    }
+  }
+
+  expect_failures = [var.triggers]
+}
+
+run "rejects_an_invalid_kms_key_arn" {
+  command = plan
+
+  variables {
+    kms_key_arn = "alias/main"
   }
 
   expect_failures = [var.kms_key_arn]
@@ -323,17 +446,21 @@ run "disabled_creates_nothing" {
   }
 
   assert {
-    condition     = length(aws_glue_catalog_database.this) == 0 && length(aws_glue_crawler.this) == 0 && length(aws_iam_role.crawler) == 0 && length(aws_glue_security_configuration.this) == 0
-    error_message = "enabled = false must create nothing."
+    condition = (
+      length(aws_glue_catalog_database.this) == 0
+      && length(aws_glue_catalog_table.this) == 0
+      && length(aws_iam_role.this) == 0
+      && length(aws_glue_security_configuration.this) == 0
+      && length(aws_glue_crawler.this) == 0
+      && length(aws_glue_job.this) == 0
+      && length(aws_s3_object.script) == 0
+      && length(aws_glue_trigger.this) == 0
+    )
+    error_message = "enabled = false creates nothing."
   }
 
   assert {
-    condition     = output.database_name == null && output.database_arn == null && output.role_arn == null && output.security_configuration_name == null
-    error_message = "Outputs are null when disabled."
-  }
-
-  assert {
-    condition     = output.crawler_names == {} && output.crawler_arns == {}
-    error_message = "crawler_names and crawler_arns are empty maps when disabled."
+    condition     = output.database_name == null && output.role_arn == null && output.job_names == {}
+    error_message = "Outputs are null/empty when disabled."
   }
 }
