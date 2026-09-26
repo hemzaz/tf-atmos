@@ -1,0 +1,21 @@
+---
+# Baseline ElastiCache (Redis) settings shared by every stage that runs one.
+# Only production runs an elasticache instance today (elasticache/main); this
+# defaults/stage-abstract split exists so dev or staging can pick up the same
+# pattern the moment they add one, the same shape stacks/catalog/vpc and
+# stacks/catalog/rds already use (defaults.yaml + one file per stage).
+components:
+  terraform:
+    elasticache/defaults:
+      metadata:
+        component: elasticache
+        type: abstract
+        custom:
+          version: "1.0.0"
+          description: "Baseline ElastiCache Redis settings common to every stage"
+          category: "cache"
+      vars:
+        engine: "redis"
+        at_rest_encryption_enabled: true
+        transit_encryption_enabled: true
+        auto_minor_version_upgrade: true

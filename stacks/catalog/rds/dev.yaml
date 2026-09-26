@@ -1,0 +1,29 @@
+---
+import:
+  - catalog/rds/defaults
+
+# Dev is disposable and cost-optimized: no deletion protection, no final
+# snapshot on destroy, and enhanced monitoring / Performance Insights off,
+# since nobody watches a dev database's dashboards. These override the rds
+# module's own defaults, which assume production (deletion_protection and
+# performance_insights_enabled both default to true; monitoring_interval
+# defaults to 60 with create_monitoring_role true) - see the PR description
+# for the full list of behavior changes this introduces versus the previous,
+# uninherited state.
+components:
+  terraform:
+    rds/dev:
+      metadata:
+        component: rds
+        type: abstract
+        inherits:
+          - rds/defaults
+      vars:
+        multi_az: false
+        deletion_protection: false
+        skip_final_snapshot: true
+        backup_retention_period: 7
+        performance_insights_enabled: false
+        monitoring_interval: 0
+        create_monitoring_role: false
+        iam_database_authentication_enabled: false
