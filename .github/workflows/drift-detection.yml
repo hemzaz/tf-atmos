@@ -45,15 +45,55 @@ jobs:
         with:
           persist-credentials: false
       - id: stacks
+        shell: python3 {0}
         env:
           ONLY_STACK: ${{ inputs.stack }}
         run: |
-          if [ -n "$ONLY_STACK" ]; then
-            matrix="{\"stack\":[\"$ONLY_STACK\"]}"
-          else
-            matrix="$(atmos describe stacks --process-functions=false --format json --query '{"stack": keys}' | tr -d '\n ')"
-          fi
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          import json, os, subprocess
+
+          out_file = os.environ["GITHUB_OUTPUT"]
+          only_stack = os.environ.get("ONLY_STACK", "")
+
+          # fnx-local-* target the Floci/LocalEmu emulators (account_id
+          # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have
+          # no AWS_PLAN_ROLE_ARN trust; emulator.yml covers them instead.
+          # Excluded via settings.github.actions_enabled (the same key Cloud
+          # Posse's own atmos-terraform-plan/-apply actions read; data-driven,
+          # survives a stack rename) rather than matching the `fnx-local-`
+          # name prefix. This matrix is per-stack, so a stack is excluded
+          # only when EVERY one of its terraform components opts out.
+          stacks = json.loads(subprocess.check_output(
+              ["atmos", "describe", "stacks", "--process-functions=false",
+               "--format", "json", "--sections", "settings"]))
+          disabled = set()
+          for stack, config in stacks.items():
+              components = (config.get("components") or {}).get("terraform") or {}
+              if components and all(
+                  (((spec or {}).get("settings") or {}).get("github") or {}).get("actions_enabled") is False
+                  for spec in components.values()
+              ):
+                  disabled.add(stack)
+
+          if only_stack:
+              # An explicit ONLY_STACK dispatch still must name a real,
+              # CI-enabled stack: the local stacks must never enter this
+              # AWS-credentialed matrix, dispatch included, and a typo must
+              # fail up front instead of producing a matrix entry that fails
+              # later in `detect-drift`.
+              if only_stack not in stacks:
+                  raise SystemExit(f"::error::Unknown stack '{only_stack}'")
+              if only_stack in disabled:
+                  raise SystemExit(
+                      f"::error::'{only_stack}' has settings.github.actions_enabled: false "
+                      "(local/emulator stack); drift detection only runs against real AWS "
+                      "stacks. Use the Emulator workflow for local stacks."
+                  )
+              matrix = {"stack": [only_stack]}
+          else:
+              matrix = {"stack": sorted(s for s in stacks if s not in disabled)}
+
+          with open(out_file, "a") as out:
+              out.write(f"matrix={json.dumps(matrix)}\n")
 
   detect-drift:
     name: Drift ${{ matrix.stack }}

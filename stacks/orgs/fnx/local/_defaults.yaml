@@ -13,3 +13,17 @@ settings:
     account: local
     account_id: "000000000000"
     aws_profile: "local"
+  # Read by terraform-ci.yml/terraform-cd.yml/drift-detection.yml to keep these
+  # emulator-only stacks out of the AWS plan/deploy/drift matrices: they have no
+  # AWS_PLAN_ROLE_ARN/AWS_ROLE_ARN trust and are covered instead by
+  # emulator.yml. This mirrors Cloud Posse's own Atmos GitHub Action key
+  # (settings.github.actions_enabled — see
+  # cloudposse/github-action-atmos-terraform-plan and
+  # -terraform-apply, which read exactly this path to skip a component's
+  # Terraform steps), but with the default inverted: Cloud Posse's actions
+  # opt a component IN with `actions_enabled: true`; here a missing value
+  # means enabled (so the three real stacks need no change) and only the
+  # local stacks opt OUT with `actions_enabled: false`. Data-driven (survives
+  # a stack rename) rather than a `fnx-local-` name-prefix check.
+  github:
+    actions_enabled: false
