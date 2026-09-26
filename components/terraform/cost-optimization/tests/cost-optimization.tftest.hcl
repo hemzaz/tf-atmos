@@ -182,7 +182,7 @@ run "no_iam_policy_has_an_unconditioned_mutating_statement_on_a_wildcard_resourc
         jsondecode(aws_iam_role_policy.scheduler[0].policy),
         jsondecode(aws_iam_role_policy.savings_analyzer.policy),
         jsondecode(aws_iam_role_policy.resource_cleanup.policy),
-      ] : [
+        ] : [
         for s in policy.Statement :
         !contains(flatten([s.Resource]), "*") || try(s.Condition, null) != null || alltrue([
           for a in s.Action : can(regex("^(ec2:Describe|ec2:List|rds:Describe|rds:List|rds:ListTagsForResource|autoscaling:Describe|autoscaling:List|ce:Get|compute-optimizer:Get)", a))
