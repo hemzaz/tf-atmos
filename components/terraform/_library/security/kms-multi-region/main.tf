@@ -49,8 +49,12 @@ resource "aws_kms_replica_key" "replicas" {
   deletion_window_in_days = var.replica_deletion_window_in_days
   enabled                 = true
 
-  # Replicas inherit policy from primary key
-  policy = local.use_custom_policy ? var.key_policy : local.default_policy
+  # A custom policy is reused verbatim (the caller owns its regional
+  # scoping); the default policy is generated per region
+  # (local.default_policy_by_region), so a replica's service-principal
+  # conditions (ViaService, log/event/trail ARNs, ...) name its own region,
+  # not the primary's (#186).
+  policy = local.use_custom_policy ? var.key_policy : local.default_policy_by_region[each.value]
 
   tags = merge(
     local.common_tags,

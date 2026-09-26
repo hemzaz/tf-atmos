@@ -36,9 +36,40 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
+  }
+}
+
+run "autoscaling_ebs_grants_the_service_linked_role" {
+  command = plan
+
+  variables {
+    allow_autoscaling_ebs = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Principal.AWS == "arn:aws:iam::123456789012:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Action) == toset(["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Condition == {
+        StringEquals = {
+          "kms:ViaService"    = "ec2.eu-west-2.amazonaws.com"
+          "kms:CallerAccount" = "123456789012"
+        }
+      }
+    )
+    error_message = "The Auto Scaling service-linked role may use the key only via EC2 in this region, and only for this account."
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Principal.AWS == "arn:aws:iam::123456789012:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Action == "kms:CreateGrant"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSGrant"]).Condition == { Bool = { "kms:GrantIsForAWSResource" = "true" } }
+    )
+    error_message = "The Auto Scaling service-linked role may create a grant only for an AWS resource (EBS), never an arbitrary grantee."
   }
 }
 
@@ -253,5 +284,53 @@ run "cloudtrail_is_scoped_to_this_accounts_trails" {
   assert {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowEventBridge", "AllowCloudWatchLogs", "AllowCloudWatchAlarmsSNSTopics"], try(s.Sid, ""))]) == 0
     error_message = "allow_cloudtrail must not grant other services anything."
+  }
+}
+
+# --- #186: a replica must not copy the primary region's conditions ---
+
+run "replica_policy_is_scoped_to_its_own_region_not_the_primarys" {
+  command = plan
+
+  variables {
+    allow_cloudwatch_logs = true
+    allow_autoscaling_ebs = true
+    is_multi_region       = true
+    replica_regions       = ["us-east-1"]
+  }
+
+  assert {
+    condition = (
+      one([
+        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        if try(s.Sid, "") == "AllowCloudWatchLogs"
+      ]).Principal.Service == "logs.us-east-1.amazonaws.com"
+      && one([
+        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        if try(s.Sid, "") == "AllowCloudWatchLogs"
+      ]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:us-east-1:123456789012:log-group:*"
+    )
+    error_message = "A replica's AllowCloudWatchLogs statement must name the replica's own region (us-east-1), not the primary's (eu-west-2)."
+  }
+
+  assert {
+    condition = (
+      one([
+        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        if try(s.Sid, "") == "AllowAutoScalingEBSUsage"
+      ]).Condition.StringEquals["kms:ViaService"] == "ec2.us-east-1.amazonaws.com"
+    )
+    error_message = "A replica's AllowAutoScalingEBSUsage statement's kms:ViaService must name the replica's own region."
+  }
+
+  # The logs condition on the *primary's own* policy (module.kms.key_policy),
+  # left untested until now, must still be scoped to the primary's region
+  # once replicas exist alongside it.
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Principal.Service == "logs.eu-west-2.amazonaws.com"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:eu-west-2:123456789012:log-group:*"
+    )
+    error_message = "The primary key's own policy must stay scoped to the primary's region even when replicas exist."
   }
 }

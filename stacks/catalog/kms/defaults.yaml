@@ -56,6 +56,12 @@ components:
         # encrypted with this key, e.g. batch-processing's trigger queue,
         # limited to this account's buckets.
         allow_s3: true
+        # eks node groups' launch templates set node_group_ebs_kms_key_id to
+        # this key (eks/defaults), and the AWS Auto Scaling service-linked
+        # role that launches their EBS volumes needs kms:CreateGrant plus
+        # Encrypt/Decrypt/DescribeKey to do so, or new instances fail to
+        # launch. The role exists in any account that has used Auto Scaling.
+        allow_autoscaling_ebs: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates

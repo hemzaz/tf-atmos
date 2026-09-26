@@ -22,3 +22,8 @@ output "replica_keys" {
   description = "Replica keys by region (empty for a single-region key)"
   value       = module.kms.replica_keys
 }
+
+output "replica_key_policies" {
+  description = "Map of replica region to the key policy JSON applied to that replica, generated per region rather than copied from the primary (#186)"
+  value       = module.kms.replica_key_policies
+}

@@ -18,7 +18,7 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3/allow_autoscaling_ebs, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), by `eks/defaults` (`node_group_ebs_kms_key_id`) and `vpc/defaults` (`flow_logs_kms_key_arn`) in every stack, and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
@@ -87,7 +87,24 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   bucket uses an S3 Bucket Key) and `AllowCloudTrailDescribeKey`, all limited by
   `aws:SourceArn` to this account's trails in this region. cloudtrail/main
   encrypts its log files with this key; `kms/defaults` turns it on.
-- `replica_regions` requires `is_multi_region = true` (validation).
+- `allow_autoscaling_ebs` adds `AllowAutoScalingEBSUsage` (`kms:Encrypt`/
+  `Decrypt`/`ReEncrypt*`/`GenerateDataKey*`/`DescribeKey`, scoped by
+  `kms:ViaService=ec2.<region>.amazonaws.com` and `kms:CallerAccount`) and
+  `AllowAutoScalingEBSGrant` (`kms:CreateGrant`, scoped by
+  `kms:GrantIsForAWSResource`) for the EC2 Auto Scaling service-linked role
+  (`role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling`).
+  Every managed node group / ASG that launches instances from a CMK-encrypted
+  launch template needs this or new instances fail to launch; the role exists
+  in any account that has ever used Auto Scaling. `eks/defaults` sets
+  `node_group_ebs_kms_key_id` to this key, and `kms/defaults` turns this flag
+  on for every stack.
+- `replica_regions` requires `is_multi_region = true` (validation). Each
+  replica gets its own generated policy, not a copy of the primary's: the
+  region-specific statements above (`AllowCloudWatchLogs`,
+  `AllowEventBridge*`, `AllowCloudTrail*`, `AllowAutoScalingEBS*`) are scoped
+  to the replica's own region, never the primary's (`key_policy` output is
+  the *primary's* document; a replica's is read from the resource itself,
+  `module.kms.aws_kms_replica_key.replicas["<region>"].policy`).
 - `rotation_period_in_days` validated 90-2560; `deletion_window_in_days`
   validated 7-30.
 

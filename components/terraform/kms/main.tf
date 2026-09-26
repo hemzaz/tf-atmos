@@ -22,6 +22,7 @@ module "kms" {
   allow_eventbridge               = var.allow_eventbridge
   allow_cloudwatch_alarms         = var.allow_cloudwatch_alarms
   allow_cloudtrail                = var.allow_cloudtrail
+  allow_autoscaling_ebs           = var.allow_autoscaling_ebs
   allow_sns                       = var.allow_sns
   allow_s3                        = var.allow_s3
   alias_name                      = var.alias_name
