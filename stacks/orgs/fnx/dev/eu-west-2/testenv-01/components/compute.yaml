@@ -20,6 +20,9 @@ components:
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
+        # Prod already used kms/main for secrets; dev now matches so the
+        # component's own per-cluster key is never created here either.
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
         node_groups:
           workers:
             instance_types: ["t3.medium"]
@@ -42,6 +45,7 @@ components:
       dependencies:
         components:
           - component: vpc/main
+          - component: kms/main
     eks/data:
       metadata:
         component: eks
@@ -53,6 +57,7 @@ components:
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: false
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
         node_groups:
           data-workers:
             instance_types: ["m5.large"]
@@ -64,6 +69,7 @@ components:
       dependencies:
         components:
           - component: vpc/services
+          - component: kms/main
 
     # EC2 instances: one instance each
     ec2/bastion:

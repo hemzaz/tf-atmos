@@ -19,8 +19,14 @@ components:
         # "<Environment>-<name>", so `name` must not repeat the Environment
         # (`main`, not `production-main`).
 
+        # Every managed node group's EBS volumes; kms/main's allow_autoscaling_ebs
+        # grants the AWS Auto Scaling service-linked role what it needs to launch
+        # them. Every instance also lists kms/main in dependencies.components.
+        node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
+
         tags:
           Component: "EKS"
       dependencies:
         components:
           - component: vpc/main
+          - component: kms/main
