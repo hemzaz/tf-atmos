@@ -45,15 +45,42 @@ jobs:
         with:
           persist-credentials: false
       - id: stacks
+        shell: python3 {0}
         env:
           ONLY_STACK: ${{ inputs.stack }}
         run: |
-          if [ -n "$ONLY_STACK" ]; then
-            matrix="{\"stack\":[\"$ONLY_STACK\"]}"
-          else
-            matrix="$(atmos describe stacks --process-functions=false --format json --query '{"stack": keys}' | tr -d '\n ')"
-          fi
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          import json, os, subprocess
+
+          out_file = os.environ["GITHUB_OUTPUT"]
+          only_stack = os.environ.get("ONLY_STACK", "")
+
+          if only_stack:
+              # An explicit ONLY_STACK input bypasses the fnx-local-* filter
+              # below: a dispatcher who names a stack directly gets it.
+              matrix = {"stack": [only_stack]}
+          else:
+              # fnx-local-* target the Floci/LocalEmu emulators (account_id
+              # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and
+              # have no AWS_PLAN_ROLE_ARN trust; emulator.yml covers them
+              # instead. Excluded via settings.ci.enabled (data-driven,
+              # survives a stack rename) rather than matching the
+              # `fnx-local-` name prefix.
+              stacks = json.loads(subprocess.check_output(
+                  ["atmos", "describe", "stacks", "--process-functions=false",
+                   "--format", "json", "--sections", "settings"]))
+              included = []
+              for stack, config in sorted(stacks.items()):
+                  components = (config.get("components") or {}).get("terraform") or {}
+                  disabled = any(
+                      (((spec or {}).get("settings") or {}).get("ci") or {}).get("enabled") is False
+                      for spec in components.values()
+                  )
+                  if not disabled:
+                      included.append(stack)
+              matrix = {"stack": included}
+
+          with open(out_file, "a") as out:
+              out.write(f"matrix={json.dumps(matrix)}\n")
 
   detect-drift:
     name: Drift ${{ matrix.stack }}

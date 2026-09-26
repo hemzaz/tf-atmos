@@ -13,3 +13,10 @@ settings:
     account: local
     account_id: "000000000000"
     aws_profile: "local"
+  # Read by terraform-ci.yml/terraform-cd.yml/drift-detection.yml to keep these
+  # emulator-only stacks out of the AWS plan/deploy/drift matrices: they have no
+  # AWS_PLAN_ROLE_ARN/AWS_ROLE_ARN trust and are covered instead by
+  # emulator.yml. Data-driven (survives a stack rename) rather than a
+  # `fnx-local-` name-prefix check.
+  ci:
+    enabled: false
