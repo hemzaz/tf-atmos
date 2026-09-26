@@ -60,8 +60,6 @@ settings:
     secrets_manager_path_prefix: "myapp/fnx/certificates"
     enable_container_insights: false
     enable_vpc_flow_logs: false
-    security:
-      vpc_flow_logs: true
 
   # Environment tagging strategy
   context:

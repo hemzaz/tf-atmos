@@ -27,6 +27,3 @@ components:
         monitoring_interval: 0
         create_monitoring_role: false
         iam_database_authentication_enabled: false
-settings:
-  context:
-    stage: dev

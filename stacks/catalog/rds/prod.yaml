@@ -26,6 +26,3 @@ components:
         monitoring_interval: 60
         create_monitoring_role: true
         iam_database_authentication_enabled: true
-settings:
-  context:
-    stage: prod

@@ -19,6 +19,3 @@ components:
         automatic_failover_enabled: true
         multi_az_enabled: true
         snapshot_retention_limit: 7
-settings:
-  context:
-    stage: prod
