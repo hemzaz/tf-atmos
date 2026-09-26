@@ -325,28 +325,37 @@ def output_guarded(expr, output):
 def _guarded_at(e, start, path_end):
     """Helper for output_guarded: does a '//' (not '//=') directly follow the
     reference path that begins at E[start] and whose own identifier ends at
-    PATH_END, once any further `.key` / `["key"]` / `[0]` selectors on the
-    same path are consumed too -- allowing one wrapping `(...)` around the
-    whole path, as in `(.output) // x`."""
+    PATH_END, once any further `.key` / `["key"]` / `[0]` / `[]` / `?`
+    selectors on the same path are consumed too -- allowing one wrapping
+    `(...)` around the whole path, as in `(.output) // x`.
+
+    Whitespace between the path and the '//' is any yq-insignificant
+    whitespace, not just a literal space: a folded YAML scalar can put a
+    newline there (`.output\\n// x`), and Atmos passes the expression
+    through as written."""
     j = path_end
     while True:
         m = re.match(r'\.' + IDENT, e[j:])
         if m:
             j += m.end()
             continue
-        m = re.match(r'\[(?:"[^"\\]*"|\d+)\]', e[j:])
+        m = re.match(r'\[(?:"[^"\\]*"|\d+)?\]', e[j:])
+        if m:
+            j += m.end()
+            continue
+        m = re.match(r'\?', e[j:])
         if m:
             j += m.end()
             continue
         break
     k = j
-    while k < len(e) and e[k] == ' ':
+    while k < len(e) and e[k] in ' \t\n\r':
         k += 1
     if e[k:k + 2] == '//' and e[k:k + 3] != '//=':
         return True
     if start > 0 and e[start - 1] == '(' and k < len(e) and e[k] == ')':
         k2 = k + 1
-        while k2 < len(e) and e[k2] == ' ':
+        while k2 < len(e) and e[k2] in ' \t\n\r':
             k2 += 1
         if e[k2:k2 + 2] == '//' and e[k2:k2 + 3] != '//=':
             return True
@@ -725,6 +734,18 @@ def resolve_ref(s, var, resolver, warnings=None):
         return 'defect', '%s: %s (component %s) declares no output "%s", so it reads null with ' \
             'real state, no // guards it directly, and the rest of the expression does not ' \
             'tolerate that (%s)' % (var, instance, comp_name, missing[0], s)
+    # Survived the defect check above without a direct '//' guard on its own
+    # path (those are already in `stale` from the loop): the rest of the
+    # expression still tolerates the missing output's null, whether through
+    # a guard one hop away (`.missing | .x // "d"`) or because it is simply
+    # never reached (`.vpc_id // .missing` once .vpc_id succeeds). Either
+    # way the expression still names an output the component does not
+    # declare, so it is reported stale rather than passing silently (#184
+    # follow-up: narrowing output_guarded to a direct guard must not also
+    # narrow which missing outputs get reported at all).
+    stale.extend('%s: %s (component %s) declares no output "%s"; the rest of the expression '
+                 'tolerates its null, so the reference is stale (%s)'
+                 % (var, instance, comp_name, o, s) for o in missing)
     if has_null(got) and maps:
         # Would the result still hold that null if every map held every key the
         # expression could name? If not, the null is a key the builder did
@@ -1164,18 +1185,23 @@ def self_test(components_dir, tmp):
     ]:
         check(what, vref(args)[0], 'defect')
     # L5'. Behind a '//' Atmos succeeds with the default (ATMOS_CASES), so
-    # the reference is evaluated, and shaped without failing. Rows 1 and 4
-    # are output_guarded (a direct guard, and the review's own
+    # the reference is evaluated, and shaped without failing. All four rows
+    # are reported stale -- the expression still names an output the
+    # component does not declare -- but by two different paths: rows 1 and
+    # 4 are output_guarded (a direct guard, and the review's own
     # `"s3://" + . // "d"` example -- a real guard one pipe hop later, once
-    # '//' precedence is accounted for), so only those two are also reported
-    # stale: rows 2 and 3 resolve fine on evaluation for a different reason
-    # -- a short-circuited '//' branch, and a '//' guarding `.x`, not the
-    # bare piped value -- neither of which is this output's own guard
-    # (#184 follow-up).
+    # '//' precedence is accounted for), so the loop appends `stale` itself;
+    # rows 2 and 3 resolve fine on evaluation for a different reason -- a
+    # short-circuited '//' branch, and a '//' guarding `.x`, not the bare
+    # piped value -- neither of which is this output's own guard, so they
+    # reach `missing` instead and are reported stale only once evaluation
+    # confirms the rest of the expression tolerates the null (#184
+    # follow-up: narrowing output_guarded must not silently drop the
+    # warning for the missing outputs it no longer covers).
     for args, want, warn_count in [
         ('vpc/main .no_such_output // "x"', 'x', 1),
-        ('vpc/main .vpc_id // .no_such_output', 'vpc-0123456789abcdef0', 0),
-        ('vpc/main .no_such_output | .x // "d"', 'd', 0),
+        ('vpc/main .vpc_id // .no_such_output', 'vpc-0123456789abcdef0', 1),
+        ('vpc/main .no_such_output | .x // "d"', 'd', 1),
         ('vpc/main .no_such_output | "s3://" + . // "d"', 's3://d', 1),
     ]:
         warned = []
@@ -1193,6 +1219,20 @@ def self_test(components_dir, tmp):
     warned = []
     got = resolve_ref('!terraform.state fake/main .no_such_output // .unreadable', 'x', res, warned)
     check('stale kept when a later output falls back', (got, len(warned)), (('fallback', None), 1))
+    # Before _guarded_at learned '?' and '[]' selectors (review round 1,
+    # finding 2), this was a spurious FAIL: output_guarded missed the direct
+    # guard, so the missing output reached the evaluate-and-probe defect
+    # check, which cannot tell a real guard from lucky evaluation the way
+    # output_guarded can (a non-null probe value always changes a genuine
+    # `? // default`'s result, since that is the whole point of the guard).
+    for args, want in [
+        ('vpc/main .no_such_output? // "x"', 'x'),
+        ('vpc/main .no_such_output[] // "x"', 'x'),
+    ]:
+        warned = []
+        got = resolve_ref('!terraform.state ' + args, 'x', res, warned)
+        check('guarded selector suffix is not a spurious FAIL: %s' % args,
+              (got, len(warned)), (('shaped', want), 1))
     # #184 follow-up: output_guarded(expr, output) is True only for the '//'
     # that directly guards OUTPUT's own value -- true positives first, then
     # the three reviewer probes that the old whole-expression has_alternative
@@ -1206,6 +1246,21 @@ def self_test(components_dir, tmp):
         ('(.a) // "x"', 'a', True),
         ('.a // {} | .[]', 'a', True),
         ('.a | . // "x"', 'a', True),
+        # '?' (suppress-error) and a bare '[]' iterator are further
+        # selectors on the same path, like `.k` / `["k"]` / `[0]`; a folded
+        # YAML scalar can put a newline (or any other yq-insignificant
+        # whitespace) between the path and its '//' instead of a space.
+        # Verified against real yq: all three still resolve to the default
+        # with a missing output (#184 follow-up, review round 1).
+        ('.a? // "x"', 'a', True),
+        ('.a[] // "x"', 'a', True),
+        ('.a\n// "x"', 'a', True),
+        # Not caught: `select(...)` is a function call, not a bare '.', so
+        # _bare_dot_guarded's syntactic scan misses it even though yq
+        # confirms this is a real guard too. A documented gap (like the
+        # run-time key in accessed_keys above) rather than the syntactic
+        # scan growing a mini yq parser for it.
+        ('.a | select(. != null) // "x"', 'a', False),
         # Probe 1 (the review's own example, verified against real yq): '//'
         # binds tighter than '+', so this is really `"s3://" + (. // "d")`
         # -- a real guard on the piped value, one token later than `.a`.
