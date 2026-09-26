@@ -268,14 +268,14 @@ variable "iam_policy" {
   # aws:SourceAccount condition (see main.tf).
   validation {
     condition = alltrue(flatten([for p in var.iam_policy : [
-      for s in p.statements : coalesce(s.effect, "Allow") != "Allow"
-      || !anytrue([for pr in s.principals : lower(pr.type) == "service"])
-      || (var.iam_policy_limit_to_current_account && !contains([for c in s.conditions : lower(c.variable)], "aws:sourceaccount"))
-      || anytrue([for c in s.conditions :
-        contains(["aws:sourceaccount", "aws:sourcearn", "aws:sourceowner", "aws:sourceorgid", "aws:principalorgid", "aws:principalaccount", "aws:principalarn"], lower(c.variable))
-        && !strcontains(lower(c.test), "not") && !endswith(lower(c.test), "ifexists") && lower(c.test) != "null"
-        && !startswith(lower(c.test), "forallvalues:")
-        && length(c.values) > 0 && !anytrue([for x in c.values : replace(replace(x, "*", ""), "?", "") == ""])
+      for s in p.statements : coalesce(s.effect, "Allow") != "Allow" ||
+      !anytrue([for pr in s.principals : lower(pr.type) == "service"]) ||
+      (var.iam_policy_limit_to_current_account && !contains([for c in s.conditions : lower(c.variable)], "aws:sourceaccount")) ||
+      anytrue([for c in s.conditions :
+        contains(["aws:sourceaccount", "aws:sourcearn", "aws:sourceowner", "aws:sourceorgid", "aws:principalorgid", "aws:principalaccount", "aws:principalarn"], lower(c.variable)) &&
+        !strcontains(lower(c.test), "not") && !endswith(lower(c.test), "ifexists") && lower(c.test) != "null" &&
+        !startswith(lower(c.test), "forallvalues:") &&
+        length(c.values) > 0 && !anytrue([for x in c.values : replace(replace(x, "*", ""), "?", "") == ""])
       ])
     ]]))
     error_message = "An iam_policy Allow for a Service principal must pin the caller: through iam_policy_limit_to_current_account, or with a condition on aws:SourceAccount, aws:SourceArn, aws:SourceOwner, aws:SourceOrgID, aws:PrincipalOrgID, aws:PrincipalAccount or aws:PrincipalArn, under a positive operator (not ...Not..., ...IfExists, Null or ForAllValues:...) and with a value that is not only wildcards."

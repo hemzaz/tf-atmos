@@ -1,4 +1,4 @@
-# Trivy baseline 2026-09-19 - burn down, don't add.
+# Trivy baseline 2026-09-26 - burn down, don't add.
 # HIGH/CRITICAL misconfigurations present when the baseline was taken; the PR
 # gate ignores exactly these (rule, file) pairs. Regenerate with
 # `atmos workflow security-baseline -f lint`.
@@ -23,13 +23,7 @@ misconfigurations:
       - "idp-platform/main.tf"
   - id: AWS-0095
     paths:
-      - "cost-optimization/main.tf"
-  - id: AWS-0095
-    paths:
       - "idp-platform/main.tf"
-  - id: AWS-0095
-    paths:
-      - "monitoring/main.tf"
   - id: AWS-0104
     paths:
       - "rds/main.tf"
