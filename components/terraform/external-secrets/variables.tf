@@ -142,13 +142,19 @@ variable "kms_key_arn" {
 
 variable "secret_path_prefixes" {
   type        = list(string)
-  description = "Secrets Manager secret-name path prefixes external-secrets may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover this repo's certificate secrets (components/terraform/secretsmanager), bastion SSH keys (ec2's \"ssh-key/<Environment>/<name>\"), and the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod)."
-  default     = ["certificates", "ssh-key", "app", "infra"]
+  description = "Secrets Manager secret-name path prefixes external-secrets may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover this repo's certificate secrets (components/terraform/secretsmanager), bastion SSH keys (ec2's \"ssh-key/<Environment>/<name>\"), the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod), and elasticache's redis AUTH token secrets (\"redis-auth/<Environment>/<cluster_id>\")."
+  default     = ["certificates", "ssh-key", "app", "infra", "redis-auth"]
 
   validation {
     condition     = alltrue([for p in var.secret_path_prefixes : can(regex("^[0-9A-Za-z_.-]+$", p))])
     error_message = "secret_path_prefixes entries must be a single non-empty path segment, without leading/trailing slashes or wildcards."
   }
+}
+
+variable "rds_managed_secret_access" {
+  type        = bool
+  description = "Grant read access to any RDS-managed master-user secret in this account/region (aws_db_instance's manage_master_user_password, secret names \"rds!db-<AWS-generated-id>\"). RDS generates that name itself only after the instance is created, so it cannot be listed ahead of time in secret_path_prefixes -- whose entries may not contain \"!\", the character RDS's fixed naming convention requires. Off by default; a stack whose consumer (e.g. eks-backend-services) reads an RDS-managed secret through this ClusterSecretStore turns it on."
+  default     = false
 }
 
 variable "ssm_parameter_path_prefixes" {

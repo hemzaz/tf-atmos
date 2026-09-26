@@ -164,3 +164,30 @@ resource "aws_elasticache_replication_group" "main" {
 
   tags = { Name = local.name }
 }
+
+# Mirrors ec2's ssh_key Secrets Manager pattern: auth_token reaches this
+# component as a Terraform variable (from a secret store, per its own
+# description), but nothing downstream of this component could read it back
+# out of Terraform state -- so it is also stored as a real Secrets Manager
+# secret a consumer (eks-backend-services) reads via an ExternalSecret,
+# matching how rds/main's RDS-managed master user secret is consumed.
+resource "aws_secretsmanager_secret" "auth_token" {
+  count = local.enabled && var.store_auth_token_in_secrets_manager ? 1 : 0
+
+  name        = "redis-auth/${var.tags["Environment"]}/${var.cluster_id}"
+  description = "Redis AUTH token for the ${local.name} cache"
+  kms_key_id  = var.auth_token_secret_kms_key_id
+
+  recovery_window_in_days = var.auth_token_secret_recovery_window_in_days
+
+  tags = { Name = "${local.name}-auth-token" }
+}
+
+resource "aws_secretsmanager_secret_version" "auth_token" {
+  count = local.enabled && var.store_auth_token_in_secrets_manager ? 1 : 0
+
+  secret_id = aws_secretsmanager_secret.auth_token[0].id
+  secret_string = jsonencode({
+    auth_token = var.auth_token
+  })
+}

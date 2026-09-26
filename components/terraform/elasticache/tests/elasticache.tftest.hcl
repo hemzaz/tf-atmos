@@ -241,3 +241,30 @@ run "ingress_slash_00_is_rejected" {
 
   expect_failures = [var.allowed_cidr_blocks]
 }
+
+run "auth_token_is_also_stored_in_secrets_manager_by_default" {
+  command = plan
+
+  assert {
+    condition     = aws_secretsmanager_secret.auth_token[0].name == "redis-auth/test/cache"
+    error_message = "The auth token secret must be named redis-auth/<Environment>/<cluster_id>."
+  }
+
+  assert {
+    condition     = jsondecode(aws_secretsmanager_secret_version.auth_token[0].secret_string).auth_token == "plan-only-token-0123456789"
+    error_message = "The secret version must hold the same auth_token the replication group uses."
+  }
+}
+
+run "auth_token_secret_can_be_turned_off" {
+  command = plan
+
+  variables {
+    store_auth_token_in_secrets_manager = false
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret.auth_token) == 0 && length(aws_secretsmanager_secret_version.auth_token) == 0
+    error_message = "store_auth_token_in_secrets_manager = false must create neither the secret nor its version."
+  }
+}

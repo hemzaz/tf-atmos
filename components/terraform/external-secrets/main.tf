@@ -28,7 +28,13 @@ locals {
         for prefix in var.secret_path_prefixes :
         "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${context}/${prefix}/*"
       ]
-    ])
+    ]),
+    # RDS generates "rds!db-<id>" only once the instance exists, so it cannot
+    # be a secret_path_prefixes entry (which also rejects "!"); this grants
+    # the one fixed naming convention directly instead of a specific ARN.
+    var.rds_managed_secret_access ? [
+      "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:rds!db-*"
+    ] : []
   )
 
   ssm_resource_arns = concat(

@@ -506,3 +506,57 @@ run "no_context_prefixes_means_top_level_only" {
     error_message = "The top-level \"<prefix>/*\" match must still be present."
   }
 }
+
+# elasticache's redis AUTH token secrets are covered by the default
+# secret_path_prefixes, without any catalog override needed.
+run "redis_auth_prefix_is_covered_by_default" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "secret:redis-auth/*")
+    error_message = "redis-auth must be in the default secret_path_prefixes, so elasticache/main's auth_token_secret_arn is readable without a stack override."
+  }
+}
+
+# rds_managed_secret_access grants the fixed "rds!db-*" naming convention,
+# which cannot be a secret_path_prefixes entry (RDS generates that suffix
+# itself, and "!" fails that variable's own validation regex).
+run "rds_managed_secret_access_is_off_by_default" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_policy.external_secrets[0].policy, "rds!db-")
+    error_message = "rds_managed_secret_access defaults to false; the policy must not grant access to RDS-managed secrets until a stack turns it on."
+  }
+}
+
+run "rds_managed_secret_access_grants_the_fixed_naming_convention" {
+  command = plan
+
+  variables {
+    cluster_name              = "production-main"
+    rds_managed_secret_access = true
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds!db-*")
+    error_message = "rds_managed_secret_access = true must grant secret:rds!db-*, scoped to this account/region."
+  }
+}
