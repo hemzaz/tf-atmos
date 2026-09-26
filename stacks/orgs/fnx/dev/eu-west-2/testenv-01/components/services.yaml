@@ -4,6 +4,7 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/cost-optimization/defaults
   - catalog/rds/dev
 
 components:
@@ -307,3 +308,20 @@ components:
           - component: rds/data
           - component: apigateway/data
           - component: lambda/data-processor
+
+    # Cost optimization: instance scheduler, Savings Plan/RI analyzer,
+    # resource cleanup, cost anomaly detection and monthly budget.
+    cost-optimization/main:
+      metadata:
+        component: cost-optimization
+        inherits:
+          - cost-optimization/defaults
+      vars:
+        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
+        budget_notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
+        cost_anomaly_notification_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        cost_alert_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
