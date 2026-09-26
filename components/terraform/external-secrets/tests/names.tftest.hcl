@@ -14,6 +14,12 @@ mock_provider "aws" {
       account_id = "123456789012"
     }
   }
+  override_data {
+    target = data.aws_partition.current
+    values = {
+      partition = "aws"
+    }
+  }
 }
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
@@ -272,9 +278,19 @@ run "kms_key_arn_accepts_a_multi_region_key" {
 }
 
 # #195 follow-up: kms_key_arn must accept other AWS partitions (aws-us-gov,
-# aws-cn), not only the default "aws" partition.
+# aws-cn), not only the default "aws" partition. The Secrets Manager/SSM
+# resource ARNs (built from data.aws_partition.current, not a hardcoded
+# "arn:aws:") must also switch to the account's real partition, or the policy
+# would grant nothing on secrets/parameters in a GovCloud/China account.
 run "kms_key_arn_accepts_the_govcloud_partition" {
   command = plan
+
+  override_data {
+    target = data.aws_partition.current
+    values = {
+      partition = "aws-us-gov"
+    }
+  }
 
   variables {
     cluster_name = "production-main"
@@ -287,6 +303,16 @@ run "kms_key_arn_accepts_the_govcloud_partition" {
   assert {
     condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws-us-gov:kms:us-gov-west-1:123456789012:key/11111111-2222-3333-4444-555555555555")
     error_message = "A GovCloud (aws-us-gov) partition KMS key ARN must be accepted."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws-us-gov:secretsmanager:")
+    error_message = "The Secrets Manager resource ARNs must use the account's real partition (aws-us-gov), not a hardcoded \"arn:aws:\"."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws-us-gov:ssm:")
+    error_message = "The SSM resource ARNs must use the account's real partition (aws-us-gov), not a hardcoded \"arn:aws:\"."
   }
 }
 
@@ -314,6 +340,49 @@ run "disabled_instance_plans_with_a_null_kms_key_arn" {
     condition     = length(aws_iam_policy.external_secrets) == 0
     error_message = "A disabled instance must not create the IAM policy."
   }
+}
+
+# #195 follow-up: an instance disabled via var.enabled must also plan with an
+# EMPTY kms_key_arn -- var.kms_key_arn's own default (tflint runs without
+# stack vars, and "" is what interpolates into the policy template without
+# crashing; see variables.tf), not only the null case above.
+run "disabled_instance_plans_with_an_empty_kms_key_arn" {
+  command = plan
+
+  variables {
+    enabled      = false
+    kms_key_arn  = ""
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = length(aws_iam_role.external_secrets) == 0
+    error_message = "A disabled instance must not create the IAM role."
+  }
+
+  assert {
+    condition     = length(aws_iam_policy.external_secrets) == 0
+    error_message = "A disabled instance must not create the IAM policy."
+  }
+}
+
+# An *enabled* instance with an empty kms_key_arn must also be rejected, the
+# same as the null case.
+run "enabled_instance_with_an_empty_kms_key_arn_is_rejected" {
+  command = plan
+
+  variables {
+    kms_key_arn  = ""
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  expect_failures = [var.kms_key_arn]
 }
 
 # An *enabled* instance still requires kms_key_arn.

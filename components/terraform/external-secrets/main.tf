@@ -21,12 +21,12 @@ locals {
   secretsmanager_resource_arns = concat(
     [
       for prefix in var.secret_path_prefixes :
-      "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${prefix}/*"
+      "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${prefix}/*"
     ],
     flatten([
       for context in var.secret_path_context_prefixes : [
         for prefix in var.secret_path_prefixes :
-        "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${context}/${prefix}/*"
+        "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${context}/${prefix}/*"
       ]
     ])
   )
@@ -34,12 +34,12 @@ locals {
   ssm_resource_arns = concat(
     [
       for prefix in var.ssm_parameter_path_prefixes :
-      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${prefix}/*"
+      "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${prefix}/*"
     ],
     flatten([
       for context in var.secret_path_context_prefixes : [
         for prefix in var.ssm_parameter_path_prefixes :
-        "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${context}/${prefix}/*"
+        "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${context}/${prefix}/*"
       ]
     ])
   )

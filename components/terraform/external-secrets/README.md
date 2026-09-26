@@ -22,9 +22,14 @@ deploy nothing if that flag is false.
 ## IAM policy
 
 The operator's IAM policy (`policies/external-secrets-policy.json.tpl`, rendered
-with `templatefile()`) is scoped to this account and region via `data.aws_region`
-and `data.aws_caller_identity`, instead of the `arn:aws:secretsmanager:*:*:secret:*`
-wildcards a static policy would need:
+with `templatefile()`) is scoped to this account, region and partition via
+`data.aws_region`, `data.aws_caller_identity` and `data.aws_partition`, instead
+of the `arn:aws:secretsmanager:*:*:secret:*` wildcards a static policy would
+need. The Secrets Manager/SSM resource ARNs use `data.aws_partition.current.partition`
+(not a hardcoded `"aws"`), matching `kms_key_arn`'s own partition support
+below — a hardcoded `"aws"` here would grant nothing on secrets/parameters in
+a GovCloud (`aws-us-gov`) or China (`aws-cn`) account even though `kms:Decrypt`
+worked:
 
 - Secrets Manager reads (`GetSecretValue`, `DescribeSecret`, etc.) and SSM reads
   (`GetParameter*`) are scoped to `var.secret_path_prefixes` /
@@ -51,6 +56,17 @@ wildcards a static policy would need:
   (`ssh-key/<Environment>/<name>` from `components/terraform/ec2`), and the
   app/infra secretsmanager instances (`context_name` `app`/`infra` in dev,
   `<stage>/app`/`<stage>/infra` in staging and prod).
+  **Deliberately not covered**: each stack's `settings.environment.secrets_manager_path_prefix`
+  convention (e.g. `production/fnx/certificates`) and the tenant (`settings.context.tenant`,
+  e.g. `fnx`) segment it implies. Neither has a Terraform consumer today — no
+  resource or data source in this repo reads `secrets_manager_path_prefix`,
+  and the `tls.crt_ssm_parameter` string some `secretsmanager` secrets embed
+  in their JSON value (e.g. `security.yaml`'s `istio_certificates`) is
+  `"reference_only"` data, not a live SSM Parameter Store resource ESO
+  reads. If a future `secretsmanager`/SSM instance is wired to a real
+  tenant-prefixed path, add the tenant (`{{ .settings.context.tenant }}`) as
+  its own `secret_path_context_prefixes` entry in
+  `stacks/catalog/external-secrets/defaults.yaml` at that time.
 - `secretsmanager:ListSecrets` stays on `"*"`: AWS does not support
   resource-level restriction for that action.
 - `kms:Decrypt` is scoped to `var.kms_key_arn` (the stack's `kms/main` key, fed
