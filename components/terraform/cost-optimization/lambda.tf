@@ -2,7 +2,11 @@
 # component, to avoid circular dependencies and so the function's IAM policy
 # can reference a real ARN - see iam.tf), the three Lambda functions
 # themselves (packaged as a local zip via the archive provider, Cloud Posse
-# aws-lambda style), and their EventBridge schedules.
+# aws-lambda style), their EventBridge schedules, and a CloudWatch alarm per
+# function on its own Errors metric (each handler re-raises after logging
+# rather than swallowing the exception into a 500 body, since EventBridge
+# ignores a target Lambda's return value - only an unhandled exception
+# increments Errors and can trigger an alarm).
 
 # ========================================
 # Instance Scheduler
@@ -57,6 +61,30 @@ resource "aws_lambda_function" "scheduler" {
   depends_on = [aws_cloudwatch_log_group.scheduler]
 
   tags = { Name = "${local.name}-scheduler" }
+}
+
+resource "aws_cloudwatch_metric_alarm" "scheduler_errors" {
+  count = local.current_settings.auto_shutdown ? 1 : 0
+
+  alarm_name          = "${local.name}-scheduler-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "The scheduler Lambda raised an unhandled exception (EventBridge invocations ignore return values, so only the Errors metric surfaces a failed run)."
+
+  dimensions = {
+    FunctionName = aws_lambda_function.scheduler[0].function_name
+  }
+
+  alarm_actions = [aws_sns_topic.cost_alerts.arn]
+  ok_actions    = [aws_sns_topic.cost_alerts.arn]
+
+  tags = { Name = "${local.name}-scheduler-errors" }
 }
 
 resource "aws_cloudwatch_event_rule" "start_instances" {
@@ -168,6 +196,28 @@ resource "aws_lambda_function" "savings_analyzer" {
   tags = { Name = "${local.name}-savings-analyzer" }
 }
 
+resource "aws_cloudwatch_metric_alarm" "savings_analyzer_errors" {
+  alarm_name          = "${local.name}-savings-analyzer-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "The savings analyzer Lambda raised an unhandled exception (EventBridge invocations ignore return values, so only the Errors metric surfaces a failed run)."
+
+  dimensions = {
+    FunctionName = aws_lambda_function.savings_analyzer.function_name
+  }
+
+  alarm_actions = [aws_sns_topic.cost_alerts.arn]
+  ok_actions    = [aws_sns_topic.cost_alerts.arn]
+
+  tags = { Name = "${local.name}-savings-analyzer-errors" }
+}
+
 resource "aws_cloudwatch_event_rule" "savings_analysis" {
   name                = "${local.name}-savings-analysis"
   description         = "Weekly savings plan analysis"
@@ -240,6 +290,28 @@ resource "aws_lambda_function" "resource_cleanup" {
   depends_on = [aws_cloudwatch_log_group.resource_cleanup]
 
   tags = { Name = "${local.name}-resource-cleanup" }
+}
+
+resource "aws_cloudwatch_metric_alarm" "resource_cleanup_errors" {
+  alarm_name          = "${local.name}-resource-cleanup-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_description   = "The resource cleanup Lambda raised an unhandled exception (EventBridge invocations ignore return values, so only the Errors metric surfaces a failed run)."
+
+  dimensions = {
+    FunctionName = aws_lambda_function.resource_cleanup.function_name
+  }
+
+  alarm_actions = [aws_sns_topic.cost_alerts.arn]
+  ok_actions    = [aws_sns_topic.cost_alerts.arn]
+
+  tags = { Name = "${local.name}-resource-cleanup-errors" }
 }
 
 resource "aws_cloudwatch_event_rule" "cleanup" {

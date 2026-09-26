@@ -61,7 +61,6 @@ resource "aws_iam_role_policy" "scheduler" {
           "ec2:DescribeTags",
           "rds:DescribeDBInstances",
           "rds:ListTagsForResource",
-          "eks:DescribeNodegroup",
           "autoscaling:DescribeAutoScalingGroups",
         ]
         Resource = "*"
@@ -88,18 +87,6 @@ resource "aws_iam_role_policy" "scheduler" {
           "rds:StartDBInstance",
           "rds:StopDBInstance",
         ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "aws:ResourceTag/Environment"             = var.tags["Environment"]
-            "aws:ResourceTag/${local.opt_in_tag_key}" = local.scheduler_opt_in_tag_value
-          }
-        }
-      },
-      {
-        Sid      = "ScaleEKSNodegroup"
-        Effect   = "Allow"
-        Action   = ["eks:UpdateNodegroupConfig"]
         Resource = "*"
         Condition = {
           StringEquals = {
@@ -180,6 +167,12 @@ resource "aws_iam_role_policy" "savings_analyzer" {
           "compute-optimizer:GetEC2InstanceRecommendations",
           "compute-optimizer:GetAutoScalingGroupRecommendations",
           "compute-optimizer:GetEBSVolumeRecommendations",
+          # Dependent actions the Service Authorization Reference lists for
+          # the Get*Recommendations calls above; without them Compute
+          # Optimizer may fail to resolve the underlying resources.
+          "ec2:DescribeInstances",
+          "ec2:DescribeVolumes",
+          "autoscaling:DescribeAutoScalingGroups",
         ]
         Resource = "*"
       },

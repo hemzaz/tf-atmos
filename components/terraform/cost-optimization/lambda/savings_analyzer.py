@@ -62,8 +62,12 @@ def handler(event, context):
         )
         logger.info("Published savings analysis summary to SNS")
     except Exception as e:
+        # Re-raise rather than returning a 500: EventBridge ignores an
+        # invoked Lambda's return value, so catching-and-returning would
+        # leave the function's Errors metric at zero and any alarm on it
+        # silent even though the weekly summary never reached SNS.
         logger.error(f"Failed to publish savings analysis summary: {str(e)}")
-        return {'statusCode': 500, 'body': json.dumps({'error': str(e), 'summary': summary}, default=str)}
+        raise
 
     return {'statusCode': 200, 'body': json.dumps(summary, default=str)}
 

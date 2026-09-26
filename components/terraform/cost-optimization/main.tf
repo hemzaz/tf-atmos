@@ -44,17 +44,21 @@ locals {
       auto_shutdown   = true
       use_spot        = true
       spot_percentage = 70
-      schedule_on     = "0 7 * * MON-FRI"
-      schedule_off    = "0 19 * * MON-FRI"
-      enable_ri       = false
-      enable_sp       = false
+      # EventBridge schedule expressions are the 6-field cron(min hour dom
+      # month dow year) form, with '?' in whichever of day-of-month/day-of-week
+      # is not used - a 5-field Unix cron string is rejected at apply time
+      # ("Parameter ScheduleExpression is not valid").
+      schedule_on  = "0 7 ? * MON-FRI *"
+      schedule_off = "0 19 ? * MON-FRI *"
+      enable_ri    = false
+      enable_sp    = false
     }
     staging = {
       auto_shutdown   = true
       use_spot        = true
       spot_percentage = 50
-      schedule_on     = "0 6 * * MON-FRI"
-      schedule_off    = "0 20 * * MON-FRI"
+      schedule_on     = "0 6 ? * MON-FRI *"
+      schedule_off    = "0 20 ? * MON-FRI *"
       enable_ri       = false
       enable_sp       = true
     }
@@ -131,7 +135,11 @@ resource "aws_budgets_budget" "monthly" {
   cost_filter {
     name = "TagKeyValue"
     values = [
-      "Environment$${local.environment_tag}"
+      # AWS Budgets matches user-defined cost-allocation tags as
+      # "user:<Key>$<Value>" (AWS-owned tags use "aws:..."); the Environment
+      # tag must also be activated as a cost allocation tag in the payer
+      # account, or no spend will be attributed to it - see README.
+      "user:Environment$${local.environment_tag}"
     ]
   }
 
@@ -165,7 +173,7 @@ resource "aws_cloudwatch_dashboard" "cost_optimization" {
         type = "metric"
         properties = {
           metrics = [
-            ["AWS/Billing", "EstimatedCharges", { stat = "Maximum", label = "Current Month Charges" }]
+            ["AWS/Billing", "EstimatedCharges", "Currency", "USD", { stat = "Maximum", label = "Current Month Charges" }]
           ]
           period = 86400
           stat   = "Maximum"

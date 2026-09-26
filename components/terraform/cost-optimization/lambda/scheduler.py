@@ -53,11 +53,12 @@ def handler(event, context):
         }
         
     except Exception as e:
+        # Re-raise rather than returning a 500: EventBridge ignores an
+        # invoked Lambda's return value, so catching-and-returning would
+        # leave the function's Errors metric at zero and any alarm on it
+        # silent even though every scheduling run failed.
         logger.error(f"Scheduler error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)})
-        }
+        raise
 
 def process_ec2_instances(action, tag_filters):
     """

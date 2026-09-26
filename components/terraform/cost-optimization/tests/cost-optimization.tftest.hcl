@@ -84,7 +84,7 @@ run "scheduler_describe_statement_is_separate_and_unconditioned" {
       for a in one([
         for s in jsondecode(aws_iam_role_policy.scheduler[0].policy).Statement : s
         if s.Sid == "DescribeTargets"
-      ]).Action : can(regex("^(ec2:Describe|rds:Describe|rds:ListTagsForResource|eks:Describe|autoscaling:Describe)", a))
+      ]).Action : can(regex("^(ec2:Describe|rds:Describe|rds:ListTagsForResource|autoscaling:Describe)", a))
     ])
     error_message = "The DescribeTargets statement contains only read-only Describe*/List* actions."
   }
@@ -136,6 +136,60 @@ run "scheduler_logs_are_scoped_to_its_own_log_group" {
       if s.Sid == "OwnLogGroup"
     ]).Resource[0] == "arn:aws:logs:eu-west-2:123456789012:log-group:/aws/lambda/test-main-scheduler:*"
     error_message = "The logs statement is scoped to the scheduler function's own log group, never arn:aws:logs:*:*:*."
+  }
+}
+
+run "scheduler_cron_schedules_use_valid_eventbridge_syntax" {
+  command = plan
+
+  # EventBridge schedule expressions are the 6-field
+  # cron(min hour dom month dow year) form with '?' in whichever of
+  # day-of-month/day-of-week is unused - a 5-field Unix cron string is
+  # rejected at apply time ("Parameter ScheduleExpression is not valid").
+  assert {
+    condition     = can(regex("^cron\\(\\S+ \\S+ \\S+ \\S+ \\S+ \\S+\\)$", aws_cloudwatch_event_rule.start_instances[0].schedule_expression))
+    error_message = "start_instances uses the 6-field EventBridge cron syntax, not a 5-field Unix cron string."
+  }
+
+  assert {
+    condition     = strcontains(aws_cloudwatch_event_rule.start_instances[0].schedule_expression, "?")
+    error_message = "start_instances's cron expression uses '?' in day-of-month or day-of-week, as EventBridge requires."
+  }
+
+  assert {
+    condition     = can(regex("^cron\\(\\S+ \\S+ \\S+ \\S+ \\S+ \\S+\\)$", aws_cloudwatch_event_rule.stop_instances[0].schedule_expression))
+    error_message = "stop_instances uses the 6-field EventBridge cron syntax, not a 5-field Unix cron string."
+  }
+
+  assert {
+    condition     = strcontains(aws_cloudwatch_event_rule.stop_instances[0].schedule_expression, "?")
+    error_message = "stop_instances's cron expression uses '?' in day-of-month or day-of-week, as EventBridge requires."
+  }
+}
+
+run "no_iam_policy_has_an_unconditioned_mutating_statement_on_a_wildcard_resource" {
+  command = plan
+
+  # Across all three Lambda IAM policies: any statement whose Resource is
+  # "*" must either carry a Condition, or contain only read-only
+  # Describe*/List*/Get*/ce:/compute-optimizer: actions (the only actions
+  # with no resource-level permission support). A future unconditioned
+  # mutating action (e.g. a Delete*) added to Resource "*" on any of the
+  # three policies fails this.
+  assert {
+    condition = alltrue(flatten([
+      for policy in [
+        jsondecode(aws_iam_role_policy.scheduler[0].policy),
+        jsondecode(aws_iam_role_policy.savings_analyzer.policy),
+        jsondecode(aws_iam_role_policy.resource_cleanup.policy),
+      ] : [
+        for s in policy.Statement :
+        !contains(flatten([s.Resource]), "*") || try(s.Condition, null) != null || alltrue([
+          for a in s.Action : can(regex("^(ec2:Describe|ec2:List|rds:Describe|rds:List|rds:ListTagsForResource|autoscaling:Describe|autoscaling:List|ce:Get|compute-optimizer:Get)", a))
+        ])
+      ]
+    ]))
+    error_message = "Every statement whose Resource is '*' either carries a Condition or contains only read-only Describe*/List*/Get*/ce:/compute-optimizer: actions, in the scheduler, savings_analyzer and resource_cleanup policies."
   }
 }
 

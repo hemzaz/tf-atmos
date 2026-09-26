@@ -20,8 +20,12 @@ EventBridge rules, CloudWatch log groups and SNS:
   candidates are logged and published to SNS, nothing is deleted.
 
 Also creates a Cost Explorer anomaly monitor + subscription, a monthly
-`aws_budgets_budget`, an SNS topic for cost alerts, and a CloudWatch
-dashboard.
+`aws_budgets_budget`, an SNS topic for cost alerts, a CloudWatch dashboard,
+and a CloudWatch alarm per Lambda function on its own `Errors` metric,
+publishing to the cost-alerts SNS topic. Each handler re-raises after
+logging rather than swallowing the exception into a `500` response body:
+EventBridge ignores a target Lambda's return value, so only an unhandled
+exception increments `Errors` and can trigger the alarm.
 
 ## Deployed instances
 
@@ -48,8 +52,8 @@ Every IAM statement is one of:
   deliberately tagged into this component's blast radius before it can be
   started/stopped/scaled/deleted - being in the stack's Environment alone is
   not enough. The condition key namespace is service-specific: EC2 has its
-  own `ec2:ResourceTag/<key>`; RDS, EKS, Auto Scaling and ELB do not, and use
-  the `aws:ResourceTag/<key>` global key instead;
+  own `ec2:ResourceTag/<key>`; RDS and Auto Scaling do not, and use the
+  `aws:ResourceTag/<key>` global key instead;
 - a `logs` statement scoped to the function's own CloudWatch log group
   (never the account-wide `arn:aws:logs:*:*:*`); or
 - an SNS `Publish` + matching KMS `GenerateDataKey`/`Decrypt` statement,
@@ -87,6 +91,7 @@ creates, not an AWS service principal.
 | `tags` (required) | must include a non-empty `Environment` |
 | `environment` (required) | one of `dev`/`staging`/`prod` - the **lifecycle tier** (from `settings.context.stage`), not `tags.Environment`; selects the per-stage schedule/auto-shutdown settings |
 | `kms_key_arn` (required) | validated as a KMS key ARN |
+| `log_retention_days` (default `365`) | CloudWatch Logs retention for the three Lambda log groups; Checkov (CKV_AWS_338) requires at least 365 days for KMS-encrypted log groups |
 | `monthly_budget_limit` (required) | numeric string (validated) |
 | `budget_notification_emails`, `cost_alert_emails`, `cost_anomaly_notification_email` | validated as email addresses |
 | `cleanup_dry_run` | string `"true"`/`"false"` (not a real bool - validated as one of those strings) |
@@ -100,6 +105,17 @@ creates, not an AWS service principal.
   validation; must be quoted `"true"`/`"false"` (defaults to `"true"`).
 - Every numeric/threshold var (retention days, spot price %, S3 lifecycle)
   has a range validation - see `variables.tf`.
+- The monthly budget's `cost_filter` matches the **user-defined** cost
+  allocation tag `Environment` (`TagKeyValue = "user:Environment$<value>"` -
+  AWS-owned tags use the `aws:` prefix instead). The `Environment` tag must
+  be activated as a cost allocation tag in the payer account (Billing and
+  Cost Management console) or no spend will ever attribute to this filter
+  and the budget will show ~$0 with no notifications firing.
+- `lambda/cleanup.py`'s describe/list calls filter on both `tag:Environment`
+  and the opt-in tag, matching the execution role's IAM Condition exactly -
+  in a shared account where more than one stack's resources carry the same
+  opt-in tag, a resource opted in by a *different* environment is never even
+  listed as a dry-run candidate.
 
 ## Usage
 
