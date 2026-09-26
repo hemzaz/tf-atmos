@@ -51,7 +51,7 @@ variable "environment" {
 
 variable "kms_key_arn" {
   type        = string
-  description = "Customer managed KMS key ARN that encrypts the Lambda functions' CloudWatch log groups and the cost-alerts SNS topic. Its policy must allow logs.<region>.amazonaws.com (kms allow_cloudwatch_logs)"
+  description = "Customer managed KMS key ARN that encrypts the Lambda functions' CloudWatch log groups and the cost-alerts SNS topic. Its policy must allow logs.<region>.amazonaws.com (kms allow_cloudwatch_logs) for the log groups, and cloudwatch.amazonaws.com (kms allow_cloudwatch_alarms) so the *_errors alarms can publish to the encrypted SNS topic"
 
   validation {
     condition     = can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.kms_key_arn))

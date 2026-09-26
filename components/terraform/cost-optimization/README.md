@@ -76,12 +76,15 @@ it is unattached/old/unassociated).
 ## Encryption
 
 The Lambda functions' CloudWatch log groups and the cost-alerts SNS topic
-are encrypted with `kms_key_arn` (kms/main). kms/main already allows
-`logs.<region>.amazonaws.com` to use the key (`allow_cloudwatch_logs` in
-`catalog/kms/defaults.yaml`); the SNS-publishing Lambda roles (savings
-analyzer, cleanup) get their own scoped KMS grant instead of a kms/main
-`allow_*` flag, since the principal here is an IAM role this component
-creates, not an AWS service principal.
+are encrypted with `kms_key_arn` (kms/main). kms/main already allows two
+principals this component depends on: `logs.<region>.amazonaws.com`
+(`allow_cloudwatch_logs` in `catalog/kms/defaults.yaml`) for the log groups,
+and `cloudwatch.amazonaws.com` (`allow_cloudwatch_alarms`, also on in
+`catalog/kms/defaults.yaml`) so the three `*_errors` alarms can publish their
+notifications to the encrypted `cost_alerts` SNS topic. The SNS-publishing
+Lambda roles (savings analyzer, cleanup) get their own scoped KMS grant
+instead of a third kms/main `allow_*` flag, since that principal is an IAM
+role this component creates, not an AWS service principal.
 
 ## Inputs / outputs
 

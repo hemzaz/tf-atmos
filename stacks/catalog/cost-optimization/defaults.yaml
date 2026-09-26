@@ -25,8 +25,11 @@ components:
         # Every stack runs a kms/main instance (catalog/kms/defaults) with
         # allow_cloudwatch_logs on, so this resolves everywhere for the
         # Lambda functions' log groups. The cost-alerts SNS topic is also
-        # encrypted with this key; the publishing Lambda roles get their own
-        # scoped grant (iam.tf), not a kms/main allow_* flag.
+        # encrypted with this key: publishing to it works two ways -
+        # cloudwatch.amazonaws.com (the three *_errors alarms) relies on
+        # kms/main's allow_cloudwatch_alarms flag (also on in
+        # catalog/kms/defaults.yaml), while the savings-analyzer/cleanup
+        # Lambda roles get their own scoped grant instead (iam.tf).
         kms_key_arn: !terraform.state kms/main .key_arn
         # The lifecycle tier (dev/staging/prod), NOT the real per-stack
         # environment name: selects the per-stage schedule/auto-shutdown

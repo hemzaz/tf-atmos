@@ -145,18 +145,23 @@ def get_reservation_recommendation():
     )
     summary = response.get('Metadata', {})
     recommendations = response.get('Recommendations', [])
+    recommendation_details = [
+        {
+            'instance_details': r.get('RecommendationDetails', [{}])[0].get('InstanceDetails'),
+            'estimated_monthly_savings': r.get('RecommendationDetails', [{}])[0].get(
+                'EstimatedMonthlySavingsAmount'
+            ),
+        }
+        for r in recommendations
+    ]
     return {
         'recommendation_id': summary.get('RecommendationId'),
         'recommendation_count': len(recommendations),
-        'recommendations': [
-            {
-                'instance_details': r.get('RecommendationDetails', [{}])[0].get('InstanceDetails'),
-                'estimated_monthly_savings': r.get('RecommendationDetails', [{}])[0].get(
-                    'EstimatedMonthlySavingsAmount'
-                ),
-            }
-            for r in recommendations
-        ],
+        # This dict, not the list itself, is what handler()'s _cap_list sees
+        # (get_reservation_recommendation's return value), so an oversized
+        # nested list must be capped here rather than relying on the
+        # top-level cap.
+        'recommendations': _cap_list(recommendation_details),
     }
 
 
