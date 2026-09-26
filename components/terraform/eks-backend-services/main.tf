@@ -479,9 +479,13 @@ resource "kubernetes_deployment_v1" "backend_services" {
           }
         }
 
-        # Init container for database migrations (if needed)
+        # Init container for database migrations (if needed). Only
+        # platform_api owns the schema -- api_gateway is a pure reverse
+        # proxy with no reason to run `migrate`, and its image (a
+        # release-pipeline-owned gateway image, not a Go binary with a
+        # `migrate` CLI baked in) would exit 127 if this ever ran there.
         dynamic "init_container" {
-          for_each = var.enable_database_migrations && contains(["api_gateway", "platform_api"], each.key) ? [1] : []
+          for_each = var.enable_database_migrations && each.key == "platform_api" ? [1] : []
           content {
             name  = "db-migrate"
             image = each.value.image

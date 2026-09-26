@@ -40,7 +40,11 @@ Manager:
 
 - **database**: `var.database_secret_arn` is `rds/main`'s `password_secret_arn`
   output — the RDS-managed master user secret (`manage_master_user_password`).
-  Its JSON has `username`/`password` keys; the ExternalSecret's
+  `fnx-prod-production`'s `rds/main` also sets `master_user_secret_kms_key_id`
+  to `kms/main`'s `key_arn` (see the `rds` component's README), matching the
+  CMK posture prod uses everywhere else; `external-secrets/main`'s IAM policy
+  already grants `kms:Decrypt` on that key, so this component's ExternalSecret
+  needed no new grant. Its JSON has `username`/`password` keys; the ExternalSecret's
   `target.template` builds `database_url` as
   `postgres://{{ .username | urlquery }}:{{ .password | urlquery }}@<host:port>/<dbname>`,
   with `<host:port>` (`var.database_endpoint`, `rds/main`'s `instance_endpoint`
@@ -78,10 +82,33 @@ it off, prod's instance turns it on and wires `elasticache/main`'s outputs.
 
 `api_gateway_image`, `platform_api_image`, `auth_service_image` and
 `job_processor_image` have no default: a stack must set every one explicitly
-(from `settings.environment` or the catalog). Terraform's own "no value for
-required variable" error is the failure when one is left unset. Each is also
-validated to reject a `:latest` tag, so a stack cannot accidentally deploy an
-unpinned image.
+(from `settings.environment` or the catalog). Each stack's `compute.yaml`
+template wraps the lookup in Sprig's `required` (e.g.
+`{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}`),
+so a missing `backend_service_images` entry fails at template-render time with
+a clear message. That alone isn't enough at the Terraform layer: Go's
+`text/template` renders a missing map key as the literal string `<no value>`,
+which is non-empty and would pass a bare "not blank" check. Each variable's
+validation therefore requires the value to actually look like an image
+reference — `repository:tag` or `repository@sha256:<digest>` — and separately
+rejects a `:latest` tag, so neither an unset stack setting nor an
+accidentally-unpinned/untagged image can reach a plan.
+
+Each stack's `backend_service_images` map is release-pipeline-owned (built
+elsewhere, not by this repo); `api_gateway` in particular must point at a
+real gateway image built to this component's expectations (listens on
+`var.api_gateway_image`'s configured `port`, serves `/health`, runs as a
+non-root uid) — a stock base image like `nginx` would not, on any of those
+points.
+
+## Only `platform_api` runs database migrations
+
+The `db-migrate` init container (`var.enable_database_migrations`, default
+`true` in the catalog) is gated to `each.key == "platform_api"` only.
+`api_gateway` is a pure reverse proxy with no schema of its own, and its
+image is not expected to carry a `migrate` CLI — attaching this init
+container there would exit non-zero and leave the pod in
+`Init:CrashLoopBackOff` forever.
 
 ## Inputs / Outputs
 

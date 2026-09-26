@@ -268,10 +268,10 @@ components:
         database_secret_arn: !terraform.state rds/main .password_secret_arn
         database_endpoint: !terraform.state rds/main .instance_endpoint
         database_name: !terraform.state rds/main .instance_name
-        api_gateway_image: "{{ .settings.environment.backend_service_images.api_gateway }}"
-        platform_api_image: "{{ .settings.environment.backend_service_images.platform_api }}"
-        auth_service_image: "{{ .settings.environment.backend_service_images.auth_service }}"
-        job_processor_image: "{{ .settings.environment.backend_service_images.job_processor }}"
+        api_gateway_image: '{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}'
+        platform_api_image: '{{ required "settings.environment.backend_service_images.platform_api must be set" .settings.environment.backend_service_images.platform_api }}'
+        auth_service_image: '{{ required "settings.environment.backend_service_images.auth_service must be set" .settings.environment.backend_service_images.auth_service }}'
+        job_processor_image: '{{ required "settings.environment.backend_service_images.job_processor must be set" .settings.environment.backend_service_images.job_processor }}'
       dependencies:
         components:
           - component: eks/main

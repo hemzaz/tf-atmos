@@ -360,10 +360,10 @@ components:
         redis_secret_arn: !terraform.state elasticache/main .auth_token_secret_arn
         redis_host: !terraform.state elasticache/main .primary_endpoint_address
         redis_port: !terraform.state elasticache/main .port
-        api_gateway_image: "{{ .settings.environment.backend_service_images.api_gateway }}"
-        platform_api_image: "{{ .settings.environment.backend_service_images.platform_api }}"
-        auth_service_image: "{{ .settings.environment.backend_service_images.auth_service }}"
-        job_processor_image: "{{ .settings.environment.backend_service_images.job_processor }}"
+        api_gateway_image: '{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}'
+        platform_api_image: '{{ required "settings.environment.backend_service_images.platform_api must be set" .settings.environment.backend_service_images.platform_api }}'
+        auth_service_image: '{{ required "settings.environment.backend_service_images.auth_service must be set" .settings.environment.backend_service_images.auth_service }}'
+        job_processor_image: '{{ required "settings.environment.backend_service_images.job_processor must be set" .settings.environment.backend_service_images.job_processor }}'
       dependencies:
         components:
           - component: eks/main

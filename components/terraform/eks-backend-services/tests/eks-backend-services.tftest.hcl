@@ -22,7 +22,7 @@ variables {
   database_secret_arn       = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds!db-11111111-2222-3333-4444-555555555555"
   database_endpoint         = "testenv-01-main-db.abcdefghijk.eu-west-2.rds.amazonaws.com:5432"
   database_name             = "mainapp"
-  api_gateway_image         = "nginx:1.25-alpine"
+  api_gateway_image         = "ghcr.io/fnx-platform/api-gateway:1.4.2"
   platform_api_image        = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/platform-api:1.4.2"
   auth_service_image        = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/auth-service:1.4.2"
   job_processor_image       = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/job-processor:1.4.2"
@@ -139,6 +139,37 @@ run "images_reject_a_latest_tag" {
   ]
 }
 
+# An untagged reference implicitly pulls ":latest" from the registry; the
+# variable must require an explicit tag or @sha256 digest.
+run "images_reject_an_untagged_reference" {
+  command = plan
+
+  variables {
+    api_gateway_image = "nginx"
+  }
+
+  expect_failures = [
+    var.api_gateway_image,
+  ]
+}
+
+# Go's text/template renders a missing map key (e.g. an unset
+# settings.environment.backend_service_images.* entry, before the stack
+# templates added their own `required` guard) as the literal string
+# "<no value>" -- non-empty, so a plain "not blank" check would miss it. The
+# regex must reject it outright.
+run "images_reject_the_go_template_missing_key_sentinel" {
+  command = plan
+
+  variables {
+    auth_service_image = "<no value>"
+  }
+
+  expect_failures = [
+    var.auth_service_image,
+  ]
+}
+
 # Container names must be DNS-1123 labels (lowercase alphanumeric and "-",
 # no "_"): local.backend_services' keys (api_gateway, ...) are not, so the
 # container name must come from local.slug, never each.key directly.
@@ -174,6 +205,19 @@ run "init_container_exposes_database_url_by_name" {
       e.name != "DATABASE_URL" || e.value == null
     ])
     error_message = "DATABASE_URL must never carry a literal value in the init container either."
+  }
+}
+
+# api_gateway is a pure reverse proxy with no schema of its own -- only
+# platform_api owns the database and runs `migrate`. api_gateway's image is
+# also a release-pipeline-owned gateway image, not a Go binary with a
+# `migrate` CLI baked in, so an init container there would exit 127.
+run "api_gateway_runs_no_migration_init_container" {
+  command = plan
+
+  assert {
+    condition     = length(kubernetes_deployment_v1.backend_services["api_gateway"].spec[0].template[0].spec[0].init_container) == 0
+    error_message = "api_gateway's Deployment must not have a db-migrate init container."
   }
 }
 

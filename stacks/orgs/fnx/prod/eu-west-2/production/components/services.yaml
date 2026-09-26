@@ -233,6 +233,16 @@ components:
         maintenance_window: "Sun:04:30-Sun:05:30"
         performance_insights_retention_period: 7
         performance_insights_kms_key_id: !terraform.state kms/main .key_arn
+        # RDS-managed master user secret (manage_master_user_password is
+        # always true in this component). Without this, the secret sits on
+        # the AWS-managed aws/secretsmanager key -- functionally fine (ESO
+        # needs no grant on an AWS-managed key), but inconsistent with the
+        # CMK posture the rest of this stack's RDS encryption uses.
+        # external-secrets/main's IAM policy already grants kms:Decrypt on
+        # this same key (gated by kms:ViaService=secretsmanager), so no new
+        # grant is needed for eks-backend-services/main's ExternalSecret to
+        # keep reading it.
+        master_user_secret_kms_key_id: !terraform.state kms/main .key_arn
         enabled_cloudwatch_logs_exports:
           - "postgresql"
           - "upgrade"

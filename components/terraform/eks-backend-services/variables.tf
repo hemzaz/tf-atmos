@@ -154,46 +154,53 @@ variable "redis_port" {
 
 # Service Images. Required -- no defaults, including no "<name>:latest"
 # placeholders: a stack must set every image explicitly (settings.environment
-# or the catalog), and Terraform's own "no value for required variable"
-# failure is the clear error when one is left unset. ":latest" is rejected on
-# top of that so a stack cannot accidentally deploy an unpinned tag.
+# or the catalog). The templated stack values themselves use Sprig's
+# `required` so a missing settings key fails at template render time with a
+# clear message; the regex below is the second line of defense in Terraform
+# itself, in case a value ever *is* set to something that isn't a real
+# `repository:tag`/`repository@sha256:digest` reference -- Go's text/template
+# renders a missing map key as the literal string "<no value>", which is
+# non-empty and would otherwise sail through Terraform's own "required
+# variable" check and a bare non-empty/non-":latest" test. Requiring an
+# explicit tag or digest also rejects an untagged reference like "nginx",
+# which would otherwise silently pull an implicit ":latest".
 variable "api_gateway_image" {
   type        = string
-  description = "Docker image (repository:tag) for the API Gateway service. Required; must not use a \":latest\" tag"
+  description = "Docker image (repository:tag or repository@sha256:digest) for the API Gateway service. Required; must not use a \":latest\" tag"
 
   validation {
-    condition     = trimspace(var.api_gateway_image) != "" && !can(regex(":latest$", var.api_gateway_image))
-    error_message = "api_gateway_image must be set to a specific, non-\"latest\" image tag."
+    condition     = can(regex("^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|@sha256:[a-f0-9]{64})$", var.api_gateway_image)) && !can(regex(":latest$", var.api_gateway_image))
+    error_message = "api_gateway_image must be a repository with an explicit, non-\"latest\" tag or a @sha256 digest."
   }
 }
 
 variable "platform_api_image" {
   type        = string
-  description = "Docker image (repository:tag) for the Platform API service. Required; must not use a \":latest\" tag"
+  description = "Docker image (repository:tag or repository@sha256:digest) for the Platform API service. Required; must not use a \":latest\" tag"
 
   validation {
-    condition     = trimspace(var.platform_api_image) != "" && !can(regex(":latest$", var.platform_api_image))
-    error_message = "platform_api_image must be set to a specific, non-\"latest\" image tag."
+    condition     = can(regex("^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|@sha256:[a-f0-9]{64})$", var.platform_api_image)) && !can(regex(":latest$", var.platform_api_image))
+    error_message = "platform_api_image must be a repository with an explicit, non-\"latest\" tag or a @sha256 digest."
   }
 }
 
 variable "auth_service_image" {
   type        = string
-  description = "Docker image (repository:tag) for the Authentication service. Required; must not use a \":latest\" tag"
+  description = "Docker image (repository:tag or repository@sha256:digest) for the Authentication service. Required; must not use a \":latest\" tag"
 
   validation {
-    condition     = trimspace(var.auth_service_image) != "" && !can(regex(":latest$", var.auth_service_image))
-    error_message = "auth_service_image must be set to a specific, non-\"latest\" image tag."
+    condition     = can(regex("^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|@sha256:[a-f0-9]{64})$", var.auth_service_image)) && !can(regex(":latest$", var.auth_service_image))
+    error_message = "auth_service_image must be a repository with an explicit, non-\"latest\" tag or a @sha256 digest."
   }
 }
 
 variable "job_processor_image" {
   type        = string
-  description = "Docker image (repository:tag) for the Job Processor service. Required; must not use a \":latest\" tag"
+  description = "Docker image (repository:tag or repository@sha256:digest) for the Job Processor service. Required; must not use a \":latest\" tag"
 
   validation {
-    condition     = trimspace(var.job_processor_image) != "" && !can(regex(":latest$", var.job_processor_image))
-    error_message = "job_processor_image must be set to a specific, non-\"latest\" image tag."
+    condition     = can(regex("^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|@sha256:[a-f0-9]{64})$", var.job_processor_image)) && !can(regex(":latest$", var.job_processor_image))
+    error_message = "job_processor_image must be a repository with an explicit, non-\"latest\" tag or a @sha256 digest."
   }
 }
 

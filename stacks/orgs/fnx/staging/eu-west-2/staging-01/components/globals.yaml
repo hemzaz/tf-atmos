@@ -74,7 +74,7 @@ settings:
     # them to be non-empty and not ":latest" (variable validation) -- keep
     # this map's tags in step with what the release pipeline actually pushes.
     backend_service_images:
-      api_gateway: "nginx:1.25-alpine"
+      api_gateway: "ghcr.io/fnx-platform/api-gateway:1.4.2"
       platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
