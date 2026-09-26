@@ -18,7 +18,6 @@ import:
   - catalog/eks/defaults
   - catalog/iam/defaults
   - catalog/acm/defaults
-  - catalog/services/defaults
   - catalog/apigateway/defaults
   - catalog/backend/defaults
   - catalog/monitoring/defaults
