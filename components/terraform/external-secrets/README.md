@@ -72,8 +72,13 @@ worked:
 - `kms:Decrypt` is scoped to `var.kms_key_arn` (the stack's `kms/main` key, fed
   by `!terraform.state kms/main .key_arn` in the catalog defaults — the same key
   `secretsmanager/defaults` uses as `default_kms_key_id`), with a
-  `kms:ViaService` condition restricting it to `secretsmanager.<region>.amazonaws.com`
-  and `ssm.<region>.amazonaws.com`. `kms_key_arn` accepts single-region
+  `kms:ViaService` condition restricting it to `secretsmanager.<region>.<dns_suffix>`
+  and `ssm.<region>.<dns_suffix>`, where `<dns_suffix>` is
+  `data.aws_partition.current.dns_suffix` (`amazonaws.com` for the `aws` and
+  `aws-us-gov` partitions, `amazonaws.com.cn` for `aws-cn`) — a hardcoded
+  `amazonaws.com` would never match in a China account, since its service
+  endpoints end in `amazonaws.com.cn`, and ESO would never be able to decrypt
+  CMK-encrypted secrets/parameters there. `kms_key_arn` accepts single-region
   (`key/<uuid>`) and multi-region (`key/mrk-<32 hex>`) keys in any AWS
   partition (`aws`, `aws-us-gov`, `aws-cn`); it is required only when
   `enabled` is true, so a disabled instance's `kms/main` dependency doesn't

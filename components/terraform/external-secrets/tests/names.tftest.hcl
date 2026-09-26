@@ -17,7 +17,8 @@ mock_provider "aws" {
   override_data {
     target = data.aws_partition.current
     values = {
-      partition = "aws"
+      partition  = "aws"
+      dns_suffix = "amazonaws.com"
     }
   }
 }
@@ -288,7 +289,14 @@ run "kms_key_arn_accepts_the_govcloud_partition" {
   override_data {
     target = data.aws_partition.current
     values = {
-      partition = "aws-us-gov"
+      partition  = "aws-us-gov"
+      dns_suffix = "amazonaws.com"
+    }
+  }
+  override_data {
+    target = data.aws_region.current
+    values = {
+      region = "us-gov-west-1"
     }
   }
 
@@ -313,6 +321,53 @@ run "kms_key_arn_accepts_the_govcloud_partition" {
   assert {
     condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws-us-gov:ssm:")
     error_message = "The SSM resource ARNs must use the account's real partition (aws-us-gov), not a hardcoded \"arn:aws:\"."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "secretsmanager.us-gov-west-1.amazonaws.com") && strcontains(aws_iam_policy.external_secrets[0].policy, "ssm.us-gov-west-1.amazonaws.com")
+    error_message = "kms:ViaService must use the GovCloud partition's dns_suffix (amazonaws.com), not a hardcoded one."
+  }
+}
+
+# Round 2 follow-up: China (aws-cn) uses "amazonaws.com.cn" service endpoints,
+# not "amazonaws.com". The kms:ViaService condition must render from
+# data.aws_partition.current.dns_suffix, or ESO would never be able to
+# decrypt CMK-encrypted secrets/parameters in a China region (the
+# kms:Decrypt statement's ViaService condition would never match the real
+# service principal there).
+run "kms_via_service_uses_the_china_partition_dns_suffix" {
+  command = plan
+
+  override_data {
+    target = data.aws_partition.current
+    values = {
+      partition  = "aws-cn"
+      dns_suffix = "amazonaws.com.cn"
+    }
+  }
+  override_data {
+    target = data.aws_region.current
+    values = {
+      region = "cn-north-1"
+    }
+  }
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+    kms_key_arn = "arn:aws-cn:kms:cn-north-1:123456789012:key/11111111-2222-3333-4444-555555555555"
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "secretsmanager.cn-north-1.amazonaws.com.cn") && strcontains(aws_iam_policy.external_secrets[0].policy, "ssm.cn-north-1.amazonaws.com.cn")
+    error_message = "kms:ViaService must use the China partition's dns_suffix (amazonaws.com.cn), not \"amazonaws.com\"."
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws-cn:secretsmanager:") && strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws-cn:ssm:")
+    error_message = "The Secrets Manager/SSM resource ARNs must use the account's real partition (aws-cn)."
   }
 }
 

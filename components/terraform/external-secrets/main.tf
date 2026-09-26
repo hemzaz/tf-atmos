@@ -87,6 +87,7 @@ resource "aws_iam_policy" "external_secrets" {
   description = "Policy for external-secrets to access AWS Secrets Manager"
   policy = templatefile("${path.module}/policies/external-secrets-policy.json.tpl", {
     region                       = data.aws_region.current.region
+    dns_suffix                   = data.aws_partition.current.dns_suffix
     kms_key_arn                  = var.kms_key_arn
     secretsmanager_resource_arns = local.secretsmanager_resource_arns
     ssm_resource_arns            = local.ssm_resource_arns
