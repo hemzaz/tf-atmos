@@ -83,7 +83,8 @@ it off, prod's instance turns it on and wires `elasticache/main`'s outputs.
 `api_gateway_image`, `platform_api_image`, `auth_service_image` and
 `job_processor_image` have no default: a stack must set every one explicitly
 (from `settings.environment` or the catalog). Each stack's `compute.yaml`
-template wraps the lookup in Sprig's `required` (e.g.
+template wraps the lookup in Gomplate's `required` (`templates.settings.gomplate.enabled` in
+`atmos.yaml`; e.g.
 `{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}`),
 so a missing `backend_service_images` entry fails at template-render time with
 a clear message. That alone isn't enough at the Terraform layer: Go's

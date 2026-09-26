@@ -154,9 +154,10 @@ variable "redis_port" {
 
 # Service Images. Required -- no defaults, including no "<name>:latest"
 # placeholders: a stack must set every image explicitly (settings.environment
-# or the catalog). The templated stack values themselves use Sprig's
-# `required` so a missing settings key fails at template render time with a
-# clear message; the regex below is the second line of defense in Terraform
+# or the catalog). The templated stack values themselves use Gomplate's
+# `required` (templates.settings.gomplate.enabled in atmos.yaml) so a missing
+# settings key fails at template render time with a clear message; the regex
+# below is the second line of defense in Terraform
 # itself, in case a value ever *is* set to something that isn't a real
 # `repository:tag`/`repository@sha256:digest` reference -- Go's text/template
 # renders a missing map key as the literal string "<no value>", which is
