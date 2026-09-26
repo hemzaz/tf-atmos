@@ -18,14 +18,18 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3/allow_autoscaling_ebs, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), by `eks/defaults` (`node_group_ebs_kms_key_id`) and `vpc/defaults` (`flow_logs_kms_key_arn`) in every stack, and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3/allow_autoscaling_ebs, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), by `eks/defaults` (`node_group_ebs_kms_key_id`) in every stack that runs eks, by dev/staging/prod's compute.yaml (`cluster_encryption_config_kms_key_id` on `eks/main` and `eks/data`), by every `vpc/main`/`vpc/services` instance in dev/staging/prod and the sandbox lane's `vpc/main` (`flow_logs_kms_key_arn`, set per instance next to its `dependencies.components` entry — **not** in `vpc/defaults`, since the LocalEmu stack inherits that abstract base but has no `kms/main` of its own), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
-- `kms/main` declares no `dependencies.components` of its own. Its consumers
-  do: secretsmanager (via `secretsmanager/defaults`), eventbridge (via
-  `eventbridge/defaults`), sqs (via `sqs/defaults`) and prod's rds, eks and ec2 instances list
-  `kms/main`, so it is applied before them.
+- `kms/main` in dev, staging and prod declares `dependencies.components:
+  [iam/dev]` (dev) or `[iam/main]` (staging, prod) — see `allow_autoscaling_ebs`
+  below. Its other consumers add their own dependency on `kms/main`:
+  secretsmanager (via `secretsmanager/defaults`), eventbridge (via
+  `eventbridge/defaults`), sqs (via `sqs/defaults`), every eks and vpc instance
+  above, and prod's rds and ec2 instances, so `kms/main` is applied before them.
+  The sandbox lane's `kms/main` has no `iam` instance to depend on (see
+  `allow_autoscaling_ebs` below).
 - The base sets `enable_default_policy: true` and no named
   `key_administrators`: the root-account statement delegates administration
   to IAM, as Cloud Posse's aws-kms does. Only prod adds named ARNs.
@@ -94,10 +98,24 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   `kms:GrantIsForAWSResource`) for the EC2 Auto Scaling service-linked role
   (`role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling`).
   Every managed node group / ASG that launches instances from a CMK-encrypted
-  launch template needs this or new instances fail to launch; the role exists
-  in any account that has ever used Auto Scaling. `eks/defaults` sets
-  `node_group_ebs_kms_key_id` to this key, and `kms/defaults` turns this flag
-  on for every stack.
+  launch template needs this or new instances fail to launch. `eks/defaults`
+  sets `node_group_ebs_kms_key_id` to this key, and `kms/defaults` turns this
+  flag on for every stack.
+  **Failure mode:** that service-linked role is created automatically the
+  first time an account uses Auto Scaling, but it does not necessarily exist
+  before `kms/main`'s first apply, and AWS KMS validates every principal named
+  in a key policy at `CreateKey`/`PutKeyPolicy` time — if the role is missing,
+  the apply fails with `MalformedPolicyDocumentException: ... invalid
+  principals`. Dev, staging and prod avoid this: `kms/main`'s
+  `dependencies.components` names the stack's `iam` instance (`iam/dev` or
+  `iam/main`), which provisions the role first (create-if-absent — see
+  `../iam/service-linked-roles.tf` and its `manage_autoscaling_service_linked_role`
+  variable). The sandbox lane's `kms/main` inherits `allow_autoscaling_ebs:
+  true` from `kms/defaults` but has no `iam` instance to depend on; it is
+  applied against Floci, not real AWS, and has not been independently
+  confirmed to hit this validation there. If `kms/main`'s apply ever fails
+  this way in a stack with no `iam` instance, the one-time remedy is `aws iam
+  create-service-linked-role --aws-service-name autoscaling.amazonaws.com`.
 - `replica_regions` requires `is_multi_region = true` (validation). Each
   replica gets its own generated policy, not a copy of the primary's: the
   region-specific statements above (`AllowCloudWatchLogs`,

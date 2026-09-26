@@ -367,3 +367,9 @@ variable "ci_role_max_session_duration" {
     error_message = "ci_role_max_session_duration must be between 3600 and 43200 seconds."
   }
 }
+
+variable "manage_autoscaling_service_linked_role" {
+  type        = bool
+  description = "Create the AWS Auto Scaling service-linked role (aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling) when this account does not already have it. kms/main's allow_autoscaling_ebs flag (catalog/kms/defaults.yaml) names this role as a principal in its key policy so that node-group EBS volumes on a CMK-encrypted launch template can launch; KMS's CreateKey/PutKeyPolicy rejects a policy naming an IAM principal that does not exist, so kms/main fails to apply in any account that has never used Auto Scaling until this role exists. This component looks the role up first (aws_iam_roles) and only creates it when absent, so leaving this true is safe whether or not the account already has it; set to false only if this component's principal is not allowed iam:CreateServiceLinkedRole/iam:ListRoles."
+  default     = true
+}

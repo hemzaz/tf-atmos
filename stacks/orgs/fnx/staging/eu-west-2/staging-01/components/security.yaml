@@ -96,6 +96,12 @@ components:
         description: Staging main encryption key (Secrets Manager, EBS, RDS)
         alias_name: staging-01-main  # without the alias/ prefix
         deletion_window_in_days: 7   # non-prod: shorter window, faster teardown
+      dependencies:
+        components:
+          # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
+          # service-linked role as a principal; iam/main provisions it
+          # (create-if-absent) so KMS does not reject the key policy.
+          - component: iam/main
 
     acm/main:
       metadata:

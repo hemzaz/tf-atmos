@@ -60,7 +60,17 @@ components:
         # this key (eks/defaults), and the AWS Auto Scaling service-linked
         # role that launches their EBS volumes needs kms:CreateGrant plus
         # Encrypt/Decrypt/DescribeKey to do so, or new instances fail to
-        # launch. The role exists in any account that has used Auto Scaling.
+        # launch. That role is created automatically the first time an
+        # account uses Auto Scaling, but AWS KMS validates every principal
+        # named in a key policy at CreateKey/PutKeyPolicy time: if the role
+        # does not exist yet, kms/main's apply fails with
+        # MalformedPolicyDocumentException ("invalid principals"). Every
+        # instance that sets this true depends on the iam component (see
+        # dependencies.components on kms/main in each stack's security.yaml),
+        # which provisions the role (create-if-absent) before kms applies. If
+        # a stack has no iam instance and this apply fails, the one-time
+        # remedy is `aws iam create-service-linked-role --aws-service-name
+        # autoscaling.amazonaws.com`.
         allow_autoscaling_ebs: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms

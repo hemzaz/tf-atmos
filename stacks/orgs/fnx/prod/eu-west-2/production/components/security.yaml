@@ -104,6 +104,12 @@ components:
         key_users:
           - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-eks-node-role
           - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-ci-role
+      dependencies:
+        components:
+          # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
+          # service-linked role as a principal; iam/main provisions it
+          # (create-if-absent) so KMS does not reject the key policy.
+          - component: iam/main
 
     # ==========================================================================
     # ACM Certificates - Production
