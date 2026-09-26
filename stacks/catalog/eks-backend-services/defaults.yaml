@@ -13,5 +13,10 @@ components:
         # (stacks/catalog/elasticache/defaults.yaml); every stack starts with
         # redis off and prod's instance turns it on explicitly.
         redis_enabled: false
-        enable_prometheus_monitoring: true
+        # No stack in this repo installs the Prometheus Operator or its CRDs
+        # (monitoring.coreos.com), so ServiceMonitor resources have no schema
+        # to resolve against the live API server and every plan would fail.
+        # Flip to true only once a stack wires kube-prometheus-stack (or
+        # equivalent) into eks-addons for that cluster.
+        enable_prometheus_monitoring: false
         enable_database_migrations: true

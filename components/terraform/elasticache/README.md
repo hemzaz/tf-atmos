@@ -16,7 +16,11 @@ only stack with a real cache workload today; dev and staging run no instance
 (see `stacks/catalog/elasticache/defaults.yaml`). `eks-backend-services/main`
 in prod reads `auth_token_secret_arn` below to populate its redis
 `ExternalSecret` (its `redis_enabled` flag is off in dev/staging for the same
-reason).
+reason). `allowed_security_group_ids` is `eks/main`'s
+`eks_cluster_managed_security_group_id` (`eks-backend-services/main`'s pods
+are the consumer), and `auth_token_secret_kms_key_id` is `kms/main`'s
+`key_arn` — `external-secrets/main`'s IAM policy already grants `kms:Decrypt`
+on that key, gated by `kms:ViaService=secretsmanager`.
 
 ## Inputs / outputs
 
@@ -42,6 +46,11 @@ reason).
 - One `#checkov:skip=CKV2_AWS_5`: checkov's graph does not follow
   `aws_security_group.main[0].id` through the `count` index. The identical
   config passes with `count` removed.
+- One `#checkov:skip=CKV2_AWS_57` on `aws_secretsmanager_secret.auth_token`:
+  that secret only ever mirrors the replication group's `auth_token` input
+  (`!env PROD_ELASTICACHE_AUTH_TOKEN` today); rotating the secret alone, with
+  no matching update to `aws_elasticache_replication_group.main`, would
+  desync the two. Rotate by changing `auth_token`.
 
 ## Tests
 

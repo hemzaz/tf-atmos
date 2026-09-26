@@ -246,10 +246,15 @@ components:
             value: "1000"
           - name: "shared_preload_libraries"
             value: "pg_stat_statements"
+        # Without this, the RDS security group's only ingress rule has an
+        # empty security_groups list and nothing on eks/main can reach the
+        # database (eks-backend-services/main's pods run there).
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
       dependencies:
         components:
           - component: vpc/main
           - component: kms/main
+          - component: eks/main
 
     # Redis cache (was infrastructure/main.elasticache)
     elasticache/main:
@@ -265,17 +270,22 @@ components:
         # Secret: export PROD_ELASTICACHE_AUTH_TOKEN before plan/apply
         auth_token: !env PROD_ELASTICACHE_AUTH_TOKEN
         kms_key_id: !terraform.state kms/main .key_arn
+        # external-secrets/main's IAM policy grants kms:Decrypt on this same
+        # key (gated by kms:ViaService=secretsmanager), so the redis-auth
+        # secret eks-backend-services/main reads is encrypted with the CMK,
+        # not the AWS-managed aws/secretsmanager key.
+        auth_token_secret_kms_key_id: !terraform.state kms/main .key_arn
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
-        # Fail closed: nothing can reach the cache until a consumer's security
-        # group is listed here. ECS services are not managed by this repo, so
-        # there is no group to reference yet - add it when there is one.
-        allowed_security_group_ids: []
+        # eks-backend-services/main's pods (on eks/main) are now the
+        # consumer: their security group is the EKS cluster's managed one.
+        allowed_security_group_ids: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
         allowed_cidr_blocks: []
       dependencies:
         components:
           - component: vpc/main
           - component: kms/main
+          - component: eks/main
 
     # Analytics database with a read replica (was infrastructure/data.rds)
     rds/data:

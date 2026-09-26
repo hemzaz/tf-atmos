@@ -227,6 +227,9 @@ components:
         # eks-backend-services/main reads rds/main's RDS-managed master user
         # secret (name "rds!db-<id>") through this ClusterSecretStore.
         rds_managed_secret_access: true
+        # Least privilege: only eks-backend-services/main's namespace may use
+        # this store, now that it grants read on any RDS-managed secret.
+        allowed_namespaces: ["backend-services"]
       dependencies:
         components:
           - component: eks/main
@@ -341,10 +344,10 @@ components:
         database_secret_arn: !terraform.state rds/main .password_secret_arn
         database_endpoint: !terraform.state rds/main .instance_endpoint
         database_name: !terraform.state rds/main .instance_name
-        api_gateway_image: "nginx:1.25-alpine"
-        platform_api_image: "ghcr.io/fnx-platform/platform-api:1.4.2"
-        auth_service_image: "ghcr.io/fnx-platform/auth-service:1.4.2"
-        job_processor_image: "ghcr.io/fnx-platform/job-processor:1.4.2"
+        api_gateway_image: "{{ .settings.environment.backend_service_images.api_gateway }}"
+        platform_api_image: "{{ .settings.environment.backend_service_images.platform_api }}"
+        auth_service_image: "{{ .settings.environment.backend_service_images.auth_service }}"
+        job_processor_image: "{{ .settings.environment.backend_service_images.job_processor }}"
       dependencies:
         components:
           - component: eks/main

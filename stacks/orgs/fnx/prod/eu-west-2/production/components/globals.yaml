@@ -86,6 +86,15 @@ settings:
     rds_engine: "postgres"
     rds_engine_version: "14"
     use_external_secrets: true
+    # eks-backend-services/main's images. Release-pipeline-owned: these
+    # repositories/tags are not built by this repo, and Terraform requires
+    # them to be non-empty and not ":latest" (variable validation) -- keep
+    # this map's tags in step with what the release pipeline actually pushes.
+    backend_service_images:
+      api_gateway: "nginx:1.25-alpine"
+      platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
+      auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
+      job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     secrets_manager_path_prefix: "production/fnx/certificates"
     enable_container_insights: true
     enable_vpc_flow_logs: true

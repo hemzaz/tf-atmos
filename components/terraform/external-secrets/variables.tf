@@ -157,6 +157,20 @@ variable "rds_managed_secret_access" {
   default     = false
 }
 
+# Least-privilege scoping for the default ClusterSecretStore (RBAC, not IAM):
+# without it, any namespace on the cluster can create an ExternalSecret that
+# reads anything the IAM policy above allows -- including, once
+# rds_managed_secret_access is on, any RDS-managed master password in the
+# account/region. Off (empty list) by default so it never breaks a store with
+# consumers this component does not know about; a stack sets it to the exact
+# namespaces its known consumers (e.g. eks-backend-services' "backend-services")
+# use.
+variable "allowed_namespaces" {
+  type        = list(string)
+  description = "Kubernetes namespaces allowed to use the default ClusterSecretStore (\"aws-secretsmanager\"), via spec.conditions[].namespaces. Empty (the default) leaves the store usable from any namespace -- set this once every consumer namespace is known, especially alongside rds_managed_secret_access."
+  default     = []
+}
+
 variable "ssm_parameter_path_prefixes" {
   type        = list(string)
   description = "SSM Parameter Store path prefixes external-secrets may read, matched as a top-level prefix (\"/<prefix>/*\"), plus \"/<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes."

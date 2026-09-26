@@ -42,21 +42,29 @@ Manager:
   output — the RDS-managed master user secret (`manage_master_user_password`).
   Its JSON has `username`/`password` keys; the ExternalSecret's
   `target.template` builds `database_url` as
-  `postgres://{{ .username }}:{{ .password }}@<host:port>/<dbname>`, with
-  `<host:port>` (`var.database_endpoint`, `rds/main`'s `instance_endpoint`
+  `postgres://{{ .username | urlquery }}:{{ .password | urlquery }}@<host:port>/<dbname>`,
+  with `<host:port>` (`var.database_endpoint`, `rds/main`'s `instance_endpoint`
   output) and `<dbname>` (`var.database_name`, `instance_name`) as plain,
-  non-secret Terraform inputs.
+  non-secret Terraform inputs. `urlquery` (a Go `text/template` builtin ESO's
+  template engine exposes) percent-encodes the credential, since RDS-generated
+  passwords are not restricted to a URL-safe alphabet.
 - **redis** (only when `var.redis_enabled`): `var.redis_secret_arn` is
   `elasticache/main`'s new `auth_token_secret_arn` output (see the elasticache
   component's README — its AUTH token is now also stored in Secrets Manager,
   since `elasticache`'s own `auth_token` input never was). `redis_url` is
-  templated as `redis://:{{ .auth_token }}@<host>:<port>`.
+  templated as `rediss://:{{ .auth_token | urlquery }}@<host>:<port>` --
+  `rediss://` (TLS), never `redis://`: `elasticache`'s own
+  `transit_encryption_enabled` validation pins it to `true` for every cache in
+  this repo, so the cache only ever accepts TLS connections.
 
 The resulting Kubernetes `Secret` objects (`database-credentials`,
 `redis-credentials`) are created by the external-secrets operator, not by
 Terraform — this component only ever references them by name
 (`local.database_secret_name`/`local.redis_secret_name`), via `secretKeyRef` in
-the Deployments' `env` and the `db-migrate` init container's `envFrom`.
+the Deployments' `env` and the `db-migrate` init container's own `env`
+(an explicit `secretKeyRef` naming the `database_url` key -- not `envFrom`,
+which would expose it as lowercase `database_url`, not the `$DATABASE_URL`
+the migration command reads).
 
 ## Redis is optional
 
@@ -106,9 +114,28 @@ unpinned image.
   `local.backend_services`' keys (`api_gateway`, `platform_api`, ...) do
   contain one; `local.slug` hyphenates each key wherever it becomes an object
   *name* (Service/Deployment/HPA/PDB/ServiceMonitor/ServiceAccount/ConfigMap
-  names, and the `service_urls`/`prometheus_service_monitors` outputs). Labels
-  and map keys keep the original underscored key -- only object names are
-  slugged.
+  names, the main container's own `name` inside each Deployment, and the
+  `service_urls`/`prometheus_service_monitors` outputs). Labels and map keys
+  keep the original underscored key -- only object names (including the
+  container name) are slugged.
+- `enable_prometheus_monitoring` defaults to `false`: no component in this
+  repo installs the Prometheus Operator or its CRDs
+  (`monitoring.coreos.com`), and `kubernetes_manifest` resolves a
+  `ServiceMonitor`'s schema from the live API server at plan time -- with no
+  Operator installed, every plan would fail with "no matches for kind
+  ServiceMonitor". Turn it on only once a stack wires an Operator (e.g.
+  `kube-prometheus-stack`) into `eks-addons` for that cluster.
+- Consumers are wired at the network layer: each stack's `rds/main` sets
+  `allowed_security_groups` to `eks/main`'s
+  `eks_cluster_managed_security_group_id` (the security group the cluster's
+  managed node groups use), and `fnx-prod-production`'s `elasticache/main`
+  sets `allowed_security_group_ids` the same way -- otherwise pods on
+  `eks/main` cannot reach the database or the cache.
+- The default `ClusterSecretStore` (`aws-secretsmanager`) this component's
+  ExternalSecrets reference is scoped to this component's own `backend-services`
+  namespace via `external-secrets/main`'s `allowed_namespaces` var, so turning
+  on `rds_managed_secret_access` there does not let some other namespace on
+  the cluster read an RDS-managed master password through the same store.
 
 ## Tests
 

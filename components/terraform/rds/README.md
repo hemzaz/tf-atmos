@@ -14,6 +14,12 @@ LocalEmu on every CI run — the lane that caught the backup/maintenance window
 overlap which would have failed `CreateDBInstance` in staging and prod. Floci
 cannot run it: no `CreateDBSubnetGroup`.
 
+In all three real stacks, `rds/main`'s `allowed_security_groups` is
+`eks/main`'s `eks_cluster_managed_security_group_id` — the consumer is
+`eks-backend-services/main`'s pods, which run on `eks/main`'s managed node
+groups. Without it, the security group's only ingress rule has an empty
+`security_groups` list and nothing can reach the database.
+
 ## Inputs / outputs
 
 | Key | Notes |

@@ -241,12 +241,17 @@ resource "kubernetes_network_policy_v1" "backend_services_network_policy" {
       }
     }
 
-    # Allow DNS resolution
+    # Allow DNS resolution. Both UDP and TCP 53: truncated or large responses
+    # fall back to TCP, which UDP-only egress would silently drop.
     egress {
       to {}
       ports {
         port     = "53"
         protocol = "UDP"
+      }
+      ports {
+        port     = "53"
+        protocol = "TCP"
       }
     }
   }
@@ -292,7 +297,11 @@ resource "kubernetes_manifest" "database_external_secret" {
             # RDS's managed master user secret's JSON has "username"/"password"
             # keys; the (non-secret) host/port/dbname come from Terraform
             # inputs, so only the credentials themselves flow through ESO.
-            database_url = "postgres://{{ .username }}:{{ .password }}@${var.database_endpoint}/${var.database_name}"
+            # urlquery percent-encodes URL-reserved characters (RDS-generated
+            # passwords are not restricted to a URL-safe alphabet), so the
+            # connection string stays parseable regardless of the generated
+            # value.
+            database_url = "postgres://{{ .username | urlquery }}:{{ .password | urlquery }}@${var.database_endpoint}/${var.database_name}"
           }
         }
       }
@@ -339,7 +348,13 @@ resource "kubernetes_manifest" "redis_external_secret" {
         template = {
           type = "Opaque"
           data = {
-            redis_url = "redis://:{{ .auth_token }}@${var.redis_host}:${var.redis_port}"
+            # elasticache/main's transit_encryption_enabled is pinned to true
+            # for every cache in this repo (its own variable validation
+            # rejects false), so the cache only ever accepts TLS -- the
+            # scheme is always "rediss://", never "redis://". auth_token is
+            # urlquery-encoded for the same reason as the database password
+            # above: it is not restricted to a URL-safe alphabet.
+            redis_url = "rediss://:{{ .auth_token | urlquery }}@${var.redis_host}:${var.redis_port}"
           }
         }
       }
@@ -474,9 +489,17 @@ resource "kubernetes_deployment_v1" "backend_services" {
             command = ["/bin/sh", "-c"]
             args    = ["echo 'Running database migrations...' && migrate -path /migrations -database $DATABASE_URL up"]
 
-            env_from {
-              secret_ref {
-                name = local.database_secret_name
+            # env_from would expose the ExternalSecret's target Secret keys
+            # as env vars of the same name (lowercase "database_url"), not
+            # "DATABASE_URL" -- an explicit secret_key_ref is required to get
+            # the exact env var name this command reads.
+            env {
+              name = "DATABASE_URL"
+              value_from {
+                secret_key_ref {
+                  name = local.database_secret_name
+                  key  = "database_url"
+                }
               }
             }
 
@@ -493,7 +516,7 @@ resource "kubernetes_deployment_v1" "backend_services" {
 
         # Main container
         container {
-          name  = each.key
+          name  = local.slug[each.key]
           image = each.value.image
 
           image_pull_policy = "IfNotPresent"

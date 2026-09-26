@@ -138,3 +138,58 @@ run "images_reject_a_latest_tag" {
     var.platform_api_image,
   ]
 }
+
+# Container names must be DNS-1123 labels (lowercase alphanumeric and "-",
+# no "_"): local.backend_services' keys (api_gateway, ...) are not, so the
+# container name must come from local.slug, never each.key directly.
+run "container_names_are_dns_1123_compliant" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for k, d in kubernetes_deployment_v1.backend_services :
+      can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", d.spec[0].template[0].spec[0].container[0].name))
+    ])
+    error_message = "Every container name must be a DNS-1123 label (lowercase alphanumeric and '-', no '_')."
+  }
+}
+
+# The db-migrate init container's `migrate ... -database $DATABASE_URL`
+# reads the DATABASE_URL env var by that exact name; env_from would expose
+# the target Secret's lowercase "database_url" key instead.
+run "init_container_exposes_database_url_by_name" {
+  command = plan
+
+  assert {
+    condition = contains(
+      [for e in kubernetes_deployment_v1.backend_services["platform_api"].spec[0].template[0].spec[0].init_container[0].env : e.name],
+      "DATABASE_URL"
+    )
+    error_message = "The db-migrate init container must expose an env var named exactly DATABASE_URL."
+  }
+
+  assert {
+    condition = alltrue([
+      for e in kubernetes_deployment_v1.backend_services["platform_api"].spec[0].template[0].spec[0].init_container[0].env :
+      e.name != "DATABASE_URL" || e.value == null
+    ])
+    error_message = "DATABASE_URL must never carry a literal value in the init container either."
+  }
+}
+
+# elasticache/main's transit_encryption_enabled is pinned to true for every
+# cache in this repo, so the cache only ever accepts TLS.
+run "redis_url_uses_the_tls_scheme" {
+  command = plan
+
+  variables {
+    redis_enabled    = true
+    redis_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:redis-auth/dev/dev-cache-AbCdEf"
+    redis_host       = "dev-cache.abcdefg.euw2.cache.amazonaws.com"
+  }
+
+  assert {
+    condition     = startswith(kubernetes_manifest.redis_external_secret[0].manifest.spec.target.template.data.redis_url, "rediss://")
+    error_message = "redis_url must use the rediss:// (TLS) scheme, never redis://."
+  }
+}

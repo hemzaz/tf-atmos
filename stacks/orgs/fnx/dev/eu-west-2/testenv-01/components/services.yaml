@@ -170,9 +170,14 @@ components:
         allocated_storage: 5
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # Without this, the RDS security group's only ingress rule has an
+        # empty security_groups list and nothing on eks/main can reach the
+        # database (eks-backend-services/main's pods run there).
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
       dependencies:
         components:
           - component: vpc/main
+          - component: eks/main
 
     # Analytics database (was infrastructure/data.rds)
     rds/data:

@@ -199,22 +199,32 @@ resource "kubernetes_manifest" "cluster_secret_store" {
     metadata = {
       name = "aws-secretsmanager"
     }
-    spec = {
-      provider = {
-        aws = {
-          service = "SecretsManager"
-          region  = var.region
-          auth = {
-            jwt = {
-              serviceAccountRef = {
-                name      = var.service_account_name
-                namespace = var.namespace
+    spec = merge(
+      {
+        provider = {
+          aws = {
+            service = "SecretsManager"
+            region  = var.region
+            auth = {
+              jwt = {
+                serviceAccountRef = {
+                  name      = var.service_account_name
+                  namespace = var.namespace
+                }
               }
             }
           }
         }
-      }
-    }
+      },
+      # Restricts which namespaces may bind an ExternalSecret to this store;
+      # an empty list (the default) omits the field, matching the previous,
+      # unrestricted behavior.
+      length(var.allowed_namespaces) > 0 ? {
+        conditions = [
+          { namespaces = var.allowed_namespaces }
+        ]
+      } : {}
+    )
   }
 
   depends_on = [helm_release.external_secrets]

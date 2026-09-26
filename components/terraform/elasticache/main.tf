@@ -172,6 +172,7 @@ resource "aws_elasticache_replication_group" "main" {
 # secret a consumer (eks-backend-services) reads via an ExternalSecret,
 # matching how rds/main's RDS-managed master user secret is consumed.
 resource "aws_secretsmanager_secret" "auth_token" {
+  #checkov:skip=CKV2_AWS_57:Mirror of the replication group's auth_token input; rotating the secret alone would desync it from aws_elasticache_replication_group.main -- rotate by changing auth_token
   count = local.enabled && var.store_auth_token_in_secrets_manager ? 1 : 0
 
   name        = "redis-auth/${var.tags["Environment"]}/${var.cluster_id}"

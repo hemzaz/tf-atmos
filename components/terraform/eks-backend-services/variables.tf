@@ -256,8 +256,8 @@ variable "enable_tracing" {
 
 variable "enable_prometheus_monitoring" {
   type        = bool
-  description = "Enable Prometheus monitoring with ServiceMonitor resources"
-  default     = true
+  description = "Enable Prometheus monitoring with ServiceMonitor resources. Off by default: no component in this repo installs the Prometheus Operator or its CRDs, and kubernetes_manifest resolves the ServiceMonitor CRD's schema from the live API server at plan time -- with no Operator installed, that plan fails with \"no matches for kind ServiceMonitor\". Only turn this on once a Prometheus Operator (e.g. kube-prometheus-stack) is wired into eks-addons for the target cluster."
+  default     = false
 }
 
 # Autoscaling Configuration
