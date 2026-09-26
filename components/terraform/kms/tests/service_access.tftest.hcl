@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowBackupSNSTopics"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -253,5 +253,30 @@ run "cloudtrail_is_scoped_to_this_accounts_trails" {
   assert {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowEventBridge", "AllowCloudWatchLogs", "AllowCloudWatchAlarmsSNSTopics"], try(s.Sid, ""))]) == 0
     error_message = "allow_cloudtrail must not grant other services anything."
+  }
+}
+
+run "backup_publishes_to_sns_topics_only_for_this_accounts_topics" {
+  command = plan
+
+  variables {
+    allow_backup = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Principal.Service == "backup.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+      }
+    )
+    error_message = "AWS Backup may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region (aws:SourceAccount and the SNS encryption context)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowEventBridge", "AllowCloudWatchLogs", "AllowCloudWatchAlarmsSNSTopics", "AllowSNS", "AllowS3", "AllowCloudTrailEncryptLogs"], try(s.Sid, ""))]) == 0
+    error_message = "allow_backup must not grant other services anything."
   }
 }

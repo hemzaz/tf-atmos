@@ -198,6 +198,11 @@ components:
         environment: "{{ .settings.context.stage }}"
         identifier: "staging-main-db"
         db_name: "stagingapp"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         instance_class: "db.t3.medium"
@@ -225,6 +230,11 @@ components:
         environment: "{{ .settings.context.stage }}"
         identifier: "staging-data-db"
         db_name: "stagingdata"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         instance_class: "db.r5.large"

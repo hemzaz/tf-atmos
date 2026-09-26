@@ -164,6 +164,9 @@ crash.log
 components/terraform/*/*.terraform.tfvars.json
 components/terraform/*/backend.tf.json
 components/terraform/*/providers_override.tf.json
+# data.archive_file output_path zips (backup, cost-optimization): rebuilt from
+# the committed lambda/*.py source at plan/apply time, never committed.
+components/terraform/*/*_lambda.zip
 
 # Additional logs and temporary files
 *.tmp
