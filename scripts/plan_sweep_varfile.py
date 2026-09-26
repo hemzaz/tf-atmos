@@ -278,17 +278,113 @@ def skip_yq_string(e, i):
     return i + 1
 
 
-def has_alternative(expr):
-    """True when the expression uses yq's '//' alternative operator -- outside
-    a string: the '//' of `"s3://" + .` is no default, and reading it as one
-    turned a broken reference into a stale warning."""
-    i = 0
-    while i < len(expr):
-        if expr[i] == '"':
-            i = skip_yq_string(expr, i)
+def output_guarded(expr, output):
+    """True only when a '//' default directly guards OUTPUT's own value in
+    EXPR: `.output // x`, `.output.k // x`, `.output["k"] // x`,
+    `(.output) // x`, or one pipe hop later, `.output | . // x` (yq's '//'
+    binds tighter than '+', so `.output | "s3://" + . // "d"` -- the
+    review's own example -- is really `"s3://" + (. // "d")`: a real guard on
+    the piped value, just one token later than `.output` itself). These are
+    the forms where the default actually guards THIS output, so a missing
+    output is reported as merely stale.
+
+    A yq-aware scan built the same way as root_outputs: only double-quoted
+    strings are skipped ('//' is yq's alternative operator, not a comment),
+    and a `.output` counts only when it is not piped -- after a pipe the
+    context is the piped value, a different node. Anywhere else a '//'
+    appears -- guarding a sibling branch, or landing on an unrelated node
+    such as the '//' inside `"s3://" + .` itself, with nothing guarding the
+    piped value that follows it -- is not a guard for THIS output:
+    resolve_ref evaluates the expression instead of assuming a default, and
+    FAILs when a missing output's null reaches, or is laundered into a
+    different but still-broken value inside, the result (#184 follow-up; any
+    unquoted '//' anywhere in the expression used to be read as one).
+    """
+    e = atmos_expr(expr)
+    n = len(e)
+    piped, i = [False], 0
+    while i < n:
+        c = e[i]
+        if c == '"':
+            i = skip_yq_string(e, i)
             continue
-        if expr.startswith('//', i) and not expr.startswith('//=', i):
+        if c in '([{':
+            piped.append(piped[-1])
+        elif c in ')]}' and len(piped) > 1:
+            piped.pop()
+        elif c == '|':
+            piped[-1] = True
+        elif c == '.' and not piped[-1] and (i == 0 or not re.match(r'[\w\]\)".]', e[i - 1])):
+            m = re.compile(IDENT).match(e, i + 1)
+            if m and m.group(0) == output and _guarded_at(e, i, m.end()):
+                return True
+        i += 1
+    return False
+
+
+def _guarded_at(e, start, path_end):
+    """Helper for output_guarded: does a '//' (not '//=') directly follow the
+    reference path that begins at E[start] and whose own identifier ends at
+    PATH_END, once any further `.key` / `["key"]` / `[0]` selectors on the
+    same path are consumed too -- allowing one wrapping `(...)` around the
+    whole path, as in `(.output) // x`."""
+    j = path_end
+    while True:
+        m = re.match(r'\.' + IDENT, e[j:])
+        if m:
+            j += m.end()
+            continue
+        m = re.match(r'\[(?:"[^"\\]*"|\d+)\]', e[j:])
+        if m:
+            j += m.end()
+            continue
+        break
+    k = j
+    while k < len(e) and e[k] == ' ':
+        k += 1
+    if e[k:k + 2] == '//' and e[k:k + 3] != '//=':
+        return True
+    if start > 0 and e[start - 1] == '(' and k < len(e) and e[k] == ')':
+        k2 = k + 1
+        while k2 < len(e) and e[k2] == ' ':
+            k2 += 1
+        if e[k2:k2 + 2] == '//' and e[k2:k2 + 3] != '//=':
             return True
+    if k < len(e) and e[k] == '|':
+        return _bare_dot_guarded(e, k + 1)
+    return False
+
+
+def _bare_dot_guarded(e, i):
+    """Helper for output_guarded: within the pipe segment starting at E[i] --
+    up to the next top-level '|', '(', ')', matching bracket, or the end of
+    the expression -- is a bare '.' (the piped value itself, unmodified)
+    directly followed by '//'? A named or indexed continuation (`.k`,
+    `["k"]`) is a different node and does not count; nor does a '//' that
+    lands anywhere else in the segment, such as after a '+' concatenation
+    (`"s3://" + . + "/"` has no '//' at all; `"s3://" + . // "d"` does, right
+    after the bare '.', which is exactly what this looks for)."""
+    depth, n = 0, len(e)
+    while i < n:
+        c = e[i]
+        if c == '"':
+            i = skip_yq_string(e, i)
+            continue
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            if depth == 0:
+                break
+            depth -= 1
+        elif c == '|' and depth == 0:
+            break
+        elif c == '.' and (i == 0 or not re.match(r'[\w\]\)".]', e[i - 1])) \
+                and not re.match(r'\w', e[i + 1:i + 2]):
+            k = i + 1
+            while k < n and e[k] == ' ':
+                k += 1
+            if e[k:k + 2] == '//' and e[k:k + 3] != '//=':
+                return True
         i += 1
     return False
 
@@ -582,7 +678,7 @@ def resolve_ref(s, var, resolver, warnings=None):
     outputs = root_outputs(expr)
     if not outputs or not comp.readable or not comp.outputs:
         return 'fallback', None
-    doc, maps, stale = {}, [], []
+    doc, maps, stale, missing = {}, [], [], []
 
     def done(kind, value):
         # A stale reference is reported whenever the reference itself does
@@ -596,17 +692,23 @@ def resolve_ref(s, var, resolver, warnings=None):
             if comp.declares_output(output):
                 return done('fallback', None)   # declared, but the reader could not parse it
             # With real state a missing output reads as null from an S3
-            # backend (an error from a static one). Without a '//' default
-            # that null is the stack's defect.
-            if not has_alternative(expr):
-                return 'defect', '%s: %s (component %s) declares no output "%s", so it reads ' \
-                    'null with real state (%s)' % (var, instance, comp_name, output, s)
-            # With one, Atmos succeeds (both backends: the recorded rows in
-            # ATMOS_CASES), so it is evaluated as Atmos would, the output
-            # absent, and reported as stale without failing.
-            stale.append('%s: %s (component %s) declares no output "%s", read in an expression '
-                         'with a // default: the reference is stale (%s)' % (
-                             var, instance, comp_name, output, s))
+            # backend (an error from a static one). A '//' that directly
+            # guards THIS output's own path (#184 follow-up -- not just any
+            # '//' anywhere in the expression, which is how a broken
+            # reference such as `.missing | "s3://" + . // "d"` used to pass
+            # as merely stale) makes Atmos succeed with the default (both
+            # backends: the recorded rows in ATMOS_CASES), so it is reported
+            # as stale without failing. Otherwise the output is simply left
+            # out of the synthetic map -- reading as null below, exactly as
+            # it would from real state -- and evaluated like any other
+            # reference: a null anywhere in the result is the stack's defect,
+            # anything else means the rest of the expression tolerates it.
+            if output_guarded(expr, output):
+                stale.append('%s: %s (component %s) declares no output "%s", read in an '
+                             'expression with a // default guarding it: the reference is stale '
+                             '(%s)' % (var, instance, comp_name, output, s))
+            else:
+                missing.append(output)
             continue
         shape = shape_of(comp.outputs[output], Ctx(comp))
         value = synth_value(shape, [output, singular(output), var],
@@ -619,6 +721,10 @@ def resolve_ref(s, var, resolver, warnings=None):
     got, err = atmos_yq(expr, doc)
     if err is not None:
         return 'defect', '%s: yq cannot evaluate %r: %s' % (var, atmos_expr(expr), err)
+    if missing and (has_null(got) or _missing_output_reaches(expr, doc, missing, got)):
+        return 'defect', '%s: %s (component %s) declares no output "%s", so it reads null with ' \
+            'real state, no // guards it directly, and the rest of the expression does not ' \
+            'tolerate that (%s)' % (var, instance, comp_name, missing[0], s)
     if has_null(got) and maps:
         # Would the result still hold that null if every map held every key the
         # expression could name? If not, the null is a key the builder did
@@ -644,6 +750,30 @@ def has_null(v):
     if isinstance(v, list):
         return any(has_null(x) for x in v)
     return False
+
+
+# A missing output's real reading (null, from either backend) is not always a
+# null in the RESULT: yq's `+`, like jq's, treats null as the other operand's
+# identity, so the repo's own `"s3://" + .` idiom turns a null into a
+# differently-broken, non-null string ("s3:///") instead of surfacing one.
+# Distinctive enough that no real synthetic value collides with it.
+MISSING_OUTPUT_SENTINEL = '\x00plan-sweep-missing-output\x00'
+
+
+def _missing_output_reaches(expr, doc, missing, got):
+    """True when EXPR's result actually depends on one of MISSING's real
+    (null) value -- as opposed to the reference being unreachable, as in
+    `.vpc_id // .no_such_output` once .vpc_id succeeds, or the null landing
+    on a `//` that already reports the reference as stale.
+
+    Swaps a distinctive non-null placeholder in for every missing output and
+    re-evaluates: if that changes the result GOT, or breaks the expression
+    outright, the null was not harmlessly absorbed -- it was silently
+    laundered into something else non-null, which is no less broken.
+    """
+    probe = dict(doc, **{o: MISSING_OUTPUT_SENTINEL for o in missing})
+    probed, err = atmos_yq(expr, probe)
+    return err is not None or probed != got
 
 
 SENTINEL = object()
@@ -1034,16 +1164,24 @@ def self_test(components_dir, tmp):
     ]:
         check(what, vref(args)[0], 'defect')
     # L5'. Behind a '//' Atmos succeeds with the default (ATMOS_CASES), so
-    # the reference is evaluated, and reported as stale without failing.
-    for args, want in [
-        ('vpc/main .no_such_output // "x"', 'x'),
-        ('vpc/main .vpc_id // .no_such_output', 'vpc-0123456789abcdef0'),
-        ('vpc/main .no_such_output | .x // "d"', 'd'),
+    # the reference is evaluated, and shaped without failing. Rows 1 and 4
+    # are output_guarded (a direct guard, and the review's own
+    # `"s3://" + . // "d"` example -- a real guard one pipe hop later, once
+    # '//' precedence is accounted for), so only those two are also reported
+    # stale: rows 2 and 3 resolve fine on evaluation for a different reason
+    # -- a short-circuited '//' branch, and a '//' guarding `.x`, not the
+    # bare piped value -- neither of which is this output's own guard
+    # (#184 follow-up).
+    for args, want, warn_count in [
+        ('vpc/main .no_such_output // "x"', 'x', 1),
+        ('vpc/main .vpc_id // .no_such_output', 'vpc-0123456789abcdef0', 0),
+        ('vpc/main .no_such_output | .x // "d"', 'd', 0),
+        ('vpc/main .no_such_output | "s3://" + . // "d"', 's3://d', 1),
     ]:
         warned = []
         got = resolve_ref('!terraform.state ' + args, 'x', res, warned)
         check('stale %s' % args, (got, len(warned), all('stale' in w for w in warned)),
-              (('shaped', want), 1, True))
+              (('shaped', want), warn_count, True))
     for args in ['vpc/main .no_such_output', 'vpc/main .no_such_output // "x" | ][',
                  'vpc/main .no_such_output | "s3://" + . + "/"']:
         warned = []
@@ -1055,9 +1193,45 @@ def self_test(components_dir, tmp):
     warned = []
     got = resolve_ref('!terraform.state fake/main .no_such_output // .unreadable', 'x', res, warned)
     check('stale kept when a later output falls back', (got, len(warned)), (('fallback', None), 1))
-    check('has_alternative', [has_alternative(e) for e in
-                              ['.a // "x"', '.a | "s3://" + .', '"x//y" + .a', '"a\\"//" + .b', '.a //= 1']],
-          [True, False, False, False, False])
+    # #184 follow-up: output_guarded(expr, output) is True only for the '//'
+    # that directly guards OUTPUT's own value -- true positives first, then
+    # the three reviewer probes that the old whole-expression has_alternative
+    # scan got wrong by reading ANY unquoted '//' as a guard for EVERY output
+    # the expression names.
+    for expr, output, want in [
+        # True positives: the '//' is OUTPUT's own guard.
+        ('.a // "x"', 'a', True),
+        ('.a.k // "x"', 'a', True),
+        ('.a["k"] // "x"', 'a', True),
+        ('(.a) // "x"', 'a', True),
+        ('.a // {} | .[]', 'a', True),
+        ('.a | . // "x"', 'a', True),
+        # Probe 1 (the review's own example, verified against real yq): '//'
+        # binds tighter than '+', so this is really `"s3://" + (. // "d")`
+        # -- a real guard on the piped value, one token later than `.a`.
+        ('.a | "s3://" + . // "d"', 'a', True),
+        # But `"s3://" + . + "/"` has no '//' guarding the piped value at
+        # all: `+`'s null-is-identity rule (yq, like jq) still turns a null
+        # into a plausible-looking but broken "s3:///", so this stays
+        # unguarded -- resolve_ref evaluates it and FAILs on that (verified
+        # in ATMOS_CASES and the 'missing output, // only in a string' case
+        # below), it is not waved through as stale.
+        ('.a | "s3://" + . + "/"', 'a', False),
+        # Probe 2: an unrelated '//' in another branch of the expression.
+        ('.other // "y", .missing', 'missing', False),
+        ('.missing, .other // "y"', 'missing', False),
+        # Probe 3: a '//' inside a string is no default at all.
+        ('.missing | "a//b" + .', 'missing', False),
+        ('"a//b" + .missing', 'missing', False),
+        # Not a guard: the missing output is the ALTERNATIVE, not the guarded
+        # value -- `.a`'s '//' is `.a`'s own guard, not `.missing`'s.
+        ('.a // .missing', 'missing', False),
+        # Not a guard: `.k` is a different node than the bare piped value.
+        ('.missing | .k // "x"', 'missing', False),
+        # '//=' is assignment, not the alternative operator.
+        ('.a //= 1', 'a', False),
+    ]:
+        check('output_guarded %r for %s' % (expr, output), output_guarded(expr, output), want)
     top, b = build({'vars': {'x': '!terraform.state vpc/main .no_such_output // "x"'}},
                    stack, tmp, components_dir)
     check('stale reference is a warning, not a defect', (top, b.defects, len(b.warnings)),
