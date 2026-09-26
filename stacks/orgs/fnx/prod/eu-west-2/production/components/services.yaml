@@ -11,6 +11,8 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/rds/prod
+  - catalog/elasticache/prod
 
 components:
   terraform:
@@ -212,6 +214,8 @@ components:
     rds/main:
       metadata:
         component: rds
+        inherits:
+          - rds/prod
       vars:
         # Without this, environment falls back to the module default "dev"
         # and every environment == "prod" gate in the component silently
@@ -224,20 +228,11 @@ components:
         instance_class: "db.r5.xlarge"
         allocated_storage: 100
         max_allocated_storage: 500
-        multi_az: true
-        storage_encrypted: true
         kms_key_id: !terraform.state kms/main .key_arn
-        iam_database_authentication_enabled: true
-        deletion_protection: true
-        backup_retention_period: 30
         backup_window: "03:00-04:00"
         maintenance_window: "Sun:04:30-Sun:05:30"
-        copy_tags_to_snapshot: true
-        performance_insights_enabled: true
         performance_insights_retention_period: 7
         performance_insights_kms_key_id: !terraform.state kms/main .key_arn
-        monitoring_interval: 60
-        create_monitoring_role: true
         enabled_cloudwatch_logs_exports:
           - "postgresql"
           - "upgrade"
@@ -260,16 +255,13 @@ components:
     elasticache/main:
       metadata:
         component: elasticache
+        inherits:
+          - elasticache/prod
       vars:
         cluster_id: "production-cache"
-        engine: "redis"
         engine_version: "7.0"
         node_type: "cache.r5.large"
         num_cache_nodes: 3
-        automatic_failover_enabled: true
-        multi_az_enabled: true
-        at_rest_encryption_enabled: true
-        transit_encryption_enabled: true
         # Secret: export PROD_ELASTICACHE_AUTH_TOKEN before plan/apply
         auth_token: !env PROD_ELASTICACHE_AUTH_TOKEN
         kms_key_id: !terraform.state kms/main .key_arn
@@ -289,6 +281,8 @@ components:
     rds/data:
       metadata:
         component: rds
+        inherits:
+          - rds/prod
       vars:
         # Without this, environment falls back to the module default "dev"
         # and every environment == "prod" gate in the component silently
@@ -301,12 +295,7 @@ components:
         instance_class: "db.r5.2xlarge"
         allocated_storage: 200
         max_allocated_storage: 1000
-        multi_az: true
-        storage_encrypted: true
         kms_key_id: !terraform.state kms/main .key_arn
-        deletion_protection: true
-        backup_retention_period: 30
-        performance_insights_enabled: true
         create_read_replica: true
         read_replica_instance_class: "db.r5.xlarge"
         vpc_id: !terraform.state vpc/services .vpc_id

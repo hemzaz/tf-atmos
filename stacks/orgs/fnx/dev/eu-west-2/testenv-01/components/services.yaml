@@ -4,6 +4,7 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/rds/dev
 
 components:
   terraform:
@@ -154,6 +155,8 @@ components:
     rds/main:
       metadata:
         component: rds
+        inherits:
+          - rds/dev
       vars:
         # Without this, environment falls back to the module default "dev"
         # and every environment == "prod" gate in the component silently
@@ -175,6 +178,8 @@ components:
     rds/data:
       metadata:
         component: rds
+        inherits:
+          - rds/dev
       vars:
         # Without this, environment falls back to the module default "dev"
         # and every environment == "prod" gate in the component silently

@@ -17,7 +17,6 @@
 import:
   - orgs/fnx/prod/_defaults
   - mixins/region/eu-west-2
-  - mixins/production
   - catalog/_base/defaults
   - catalog/kms/defaults
   - catalog/vpc/defaults
@@ -26,6 +25,7 @@ import:
   - catalog/eks-addons/defaults
   - catalog/secretsmanager/defaults
   - catalog/monitoring/defaults
+  - catalog/rds/prod
   # Optional environment profile from templates/configs (import it last):
   # - mixins/profiles/production
 
@@ -209,9 +209,15 @@ components:
 
     # PostgreSQL on RDS. The master password is managed by RDS in Secrets
     # Manager (output: password_secret_arn); no password lives in config.
+    # Inherits multi_az/deletion_protection/monitoring from catalog/rds/prod
+    # (stacks/catalog/rds/prod.yaml); backup_retention_period is overridden
+    # below to 7 days for this smaller example environment instead of the
+    # stage default of 30.
     rds/main:
       metadata:
         component: rds
+        inherits:
+          - rds/prod
       vars:
         identifier: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-db"
         engine: "{{ .settings.environment.rds_engine }}"
@@ -228,14 +234,10 @@ components:
           - !terraform.state securitygroup/rds .security_group_ids.rds
         allocated_storage: 100
         max_allocated_storage: 1000
-        storage_encrypted: true
-        multi_az: true
-        deletion_protection: true
         skip_final_snapshot: false
         backup_retention_period: 7
         backup_window: "03:00-04:00"
         maintenance_window: "sun:04:00-sun:05:00"
-        performance_insights_enabled: true
       dependencies:
         components:
           - component: vpc/main

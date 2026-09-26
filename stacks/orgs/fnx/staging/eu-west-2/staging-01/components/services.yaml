@@ -10,6 +10,7 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/rds/staging
 
 components:
   terraform:
@@ -188,6 +189,8 @@ components:
     rds/main:
       metadata:
         component: rds
+        inherits:
+          - rds/staging
       vars:
         # Without this, environment falls back to the module default "dev"
         # and every environment == "prod" gate in the component silently
@@ -200,15 +203,8 @@ components:
         instance_class: "db.t3.medium"
         allocated_storage: 20
         max_allocated_storage: 100
-        multi_az: false
-        deletion_protection: false
-        skip_final_snapshot: true
-        storage_encrypted: true
-        iam_database_authentication_enabled: true
-        backup_retention_period: 7
         backup_window: "03:00-04:00"
         maintenance_window: "Mon:04:30-Mon:05:30"
-        performance_insights_enabled: true
         performance_insights_retention_period: 7
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .database_subnet_ids
@@ -220,6 +216,8 @@ components:
     rds/data:
       metadata:
         component: rds
+        inherits:
+          - rds/staging
       vars:
         # Without this, environment falls back to the module default "dev"
         # and every environment == "prod" gate in the component silently
@@ -232,9 +230,6 @@ components:
         instance_class: "db.r5.large"
         allocated_storage: 50
         max_allocated_storage: 200
-        multi_az: false
-        storage_encrypted: true
-        backup_retention_period: 7
         vpc_id: !terraform.state vpc/services .vpc_id
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
       dependencies:

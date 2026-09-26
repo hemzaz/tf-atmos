@@ -14,7 +14,6 @@ import:
   - mixins/tenant/fnx
   - mixins/stage/prod
   - mixins/region/eu-west-2
-  - mixins/production  # Production-specific overrides
 
   # Import org defaults
   - orgs/fnx/prod/_defaults

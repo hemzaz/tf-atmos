@@ -1,0 +1,35 @@
+---
+# Baseline RDS settings shared by every stage. Stage abstracts (rds/dev,
+# rds/staging, rds/prod - see the sibling files in this directory) inherit
+# this and layer the stage-appropriate availability, backup and monitoring
+# knobs on top, following the Cloud Posse catalog/mixins pattern
+# (https://atmos.tools/design-patterns/component-catalog-with-mixins), the
+# same shape stacks/catalog/vpc already uses (defaults.yaml + one file per
+# stage).
+#
+# This replaces the dead stacks/mixins/{development,production}.yaml
+# `_environment_defaults` abstract: its vars (environment_type, multi_az,
+# deletion_protection, automatic_backup_retention, create_alarms,
+# instance_size, min_capacity, max_capacity) named no real component input
+# and had no inheritor, so nothing ever applied them. This abstract and its
+# stage children map the same intent onto the rds root module's real
+# variables (components/terraform/rds/variables.tf) and are actually
+# inherited by every rds instance.
+components:
+  terraform:
+    rds/defaults:
+      metadata:
+        component: rds
+        type: abstract
+        custom:
+          version: "1.0.0"
+          description: "Baseline RDS settings common to every stage"
+          category: "database"
+      vars:
+        # storage_encrypted is already forced to true by the module's own
+        # validation block regardless of what is set here; declaring it
+        # explicitly documents the requirement instead of relying on that
+        # validation to explain it.
+        storage_encrypted: true
+        copy_tags_to_snapshot: true
+        auto_minor_version_upgrade: true
