@@ -101,20 +101,25 @@ jobs:
           # fnx-local-* target the Floci/LocalEmu emulators (account_id
           # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have no
           # AWS_ROLE_ARN deploy-role trust for their GitHub Environment;
-          # emulator.yml covers them instead. Excluded via settings.ci.enabled
-          # (data-driven, survives a stack rename) rather than matching the
-          # `fnx-local-` name prefix.
+          # emulator.yml covers them instead. Excluded via
+          # settings.github.actions_enabled (the same key Cloud Posse's own
+          # atmos-terraform-plan/-apply actions read; data-driven, survives a
+          # stack rename) rather than matching the `fnx-local-` name prefix.
+          # This matrix is per-stack (deploy runs the whole stack's affected
+          # set), so a stack is excluded only when EVERY one of its terraform
+          # components opts out — one disabled component among others must
+          # not silently drop the rest of a real stack from CD.
           stack_settings = json.loads(subprocess.check_output(
               ["atmos", "describe", "stacks", "--process-functions=false",
                "--format", "json", "--sections", "settings"]))
           disabled = set()
           for stack, config in stack_settings.items():
               components = (config.get("components") or {}).get("terraform") or {}
-              for spec in components.values():
-                  ci = ((spec or {}).get("settings") or {}).get("ci") or {}
-                  if ci.get("enabled") is False:
-                      disabled.add(stack)
-                      break
+              if components and all(
+                  (((spec or {}).get("settings") or {}).get("github") or {}).get("actions_enabled") is False
+                  for spec in components.values()
+              ):
+                  disabled.add(stack)
 
           stacks = [s for s in stack_settings.keys() if s not in disabled]
           stacks.sort(key=lambda s: (ORDER.index(s) if s in ORDER else len(ORDER), s))

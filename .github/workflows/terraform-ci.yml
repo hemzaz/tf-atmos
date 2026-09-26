@@ -411,20 +411,23 @@ jobs:
           # fnx-local-* target the Floci/LocalEmu emulators (account_id
           # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have no
           # AWS_PLAN_ROLE_ARN trust; emulator.yml covers them instead. Read the
-          # exclusion from settings.ci.enabled (data-driven, survives a stack
-          # rename) rather than matching the `fnx-local-` name prefix.
-          def local_ci_disabled_stacks():
+          # exclusion from settings.github.actions_enabled (the same key Cloud
+          # Posse's own atmos-terraform-plan/-apply actions read; data-driven
+          # and survives a stack rename, unlike matching the `fnx-local-` name
+          # prefix). Filtered per (stack, component) pair — not per whole
+          # stack — so a future per-component opt-out on a real stack only
+          # drops that one instance from the matrix, not the entire stack.
+          def disabled_pairs():
               stacks = json.loads(subprocess.check_output(
                   ["atmos", "describe", "stacks", "--process-functions=false",
                    "--format", "json", "--sections", "settings"]))
               disabled = set()
               for stack, config in stacks.items():
                   components = (config.get("components") or {}).get("terraform") or {}
-                  for spec in components.values():
-                      ci = ((spec or {}).get("settings") or {}).get("ci") or {}
-                      if ci.get("enabled") is False:
-                          disabled.add(stack)
-                          break
+                  for component, spec in components.items():
+                      github = ((spec or {}).get("settings") or {}).get("github") or {}
+                      if github.get("actions_enabled") is False:
+                          disabled.add((stack, component))
               return disabled
 
           cmd = ["atmos", "describe", "affected", "--format=matrix", "--include-dependents",
@@ -439,11 +442,14 @@ jobs:
                   for line in src:
                       if line.startswith("matrix="):
                           matrix = json.loads(line[len("matrix="):])
-              excluded = local_ci_disabled_stacks()
-              matrix["include"] = [i for i in matrix["include"] if i.get("stack") not in excluded]
+              excluded = disabled_pairs()
+              matrix["include"] = [
+                  i for i in matrix["include"]
+                  if (i.get("stack"), i.get("component")) not in excluded
+              ]
               with open(out_file, "a") as out:
                   out.write(f"matrix={json.dumps(matrix)}\n")
-              print(f"{len(matrix['include'])} instances (excluded stacks: {sorted(excluded)})")
+              print(f"{len(matrix['include'])} instances (excluded pairs: {sorted(excluded)})")
               raise SystemExit(0)
 
           print("::warning title=describe affected failed::Falling back to planning every "
@@ -456,11 +462,10 @@ jobs:
               components = (config.get("components") or {}).get("terraform") or {}
               for component, spec in sorted(components.items()):
                   metadata = (spec or {}).get("metadata") or {}
-                  settings = (spec or {}).get("settings") or {}
-                  ci = settings.get("ci") or {}
+                  github = ((spec or {}).get("settings") or {}).get("github") or {}
                   if metadata.get("type") == "abstract" or metadata.get("enabled") is False:
                       continue
-                  if ci.get("enabled") is False:
+                  if github.get("actions_enabled") is False:
                       continue
                   include.append({"stack": stack, "component": component})
           with open(out_file, "a") as out:
