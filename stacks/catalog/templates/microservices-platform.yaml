@@ -59,6 +59,12 @@
 #      allow_cloudwatch_logs: true
 #      allow_eventbridge: true
 #      allow_autoscaling_ebs: true
+#    allow_autoscaling_ebs names the Auto Scaling service-linked role
+#    directly, so the importing stack also needs the role provisioned first:
+#    one of its iam instances sets enable_autoscaling_service_linked_role:
+#    true (see components/terraform/iam/README.md), and kms/main declares a
+#    dependencies.components edge to that instance (every real dev/staging/
+#    prod stack already does both).
 # 2. settings.microservices, read by eks-addons, apigateway and the
 #    welcome-email Lambda:
 #      settings:
