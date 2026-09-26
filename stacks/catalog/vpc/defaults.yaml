@@ -45,10 +45,16 @@ components:
 
         # VPC Flow Logs
         vpc_flow_logs_enabled: true
-        # kms/main's allow_cloudwatch_logs already grants every log group in
-        # this account and region, so the flow logs log group uses it instead
-        # of creating its own per-VPC key.
-        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
+        # flow_logs_kms_key_arn is NOT set here: this abstract component is
+        # inherited by every vpc/main and vpc/services instance, including
+        # the LocalEmu lane (fnx-local-localemu), which has no kms/main
+        # instance at all. Atmos resolves deferred `!terraform.state`
+        # functions inherited from an abstract component even when an
+        # instance overrides the resulting var with a literal, so a
+        # catalog-level default here breaks any stack without kms/main. Set
+        # `flow_logs_kms_key_arn: !terraform.state kms/main .key_arn` (plus
+        # the matching `dependencies.components` entry) per instance, only in
+        # stacks that actually declare kms/main.
 
         # Default security group configuration
         default_sg_ingress_self_only: true
@@ -59,6 +65,3 @@ components:
         tags:
           Component: "VPC"
           NetworkTier: "core"
-      dependencies:
-        components:
-          - component: kms/main
