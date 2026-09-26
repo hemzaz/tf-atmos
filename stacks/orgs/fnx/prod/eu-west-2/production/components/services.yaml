@@ -223,6 +223,11 @@ components:
         environment: "{{ .settings.context.stage }}"
         identifier: "production-main-db"
         db_name: "productionapp"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         instance_class: "db.r5.xlarge"
@@ -290,6 +295,11 @@ components:
         environment: "{{ .settings.context.stage }}"
         identifier: "production-data-db"
         db_name: "productiondata"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         instance_class: "db.r5.2xlarge"

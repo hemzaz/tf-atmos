@@ -470,4 +470,36 @@ data "aws_iam_policy_document" "default" {
       }
     }
   }
+
+  # AWS Backup publishing job-status notifications to an SNS topic encrypted
+  # with this key (the backup component's aws_sns_topic.backup_notifications).
+  # Scoped the same way as CloudWatch alarms above: this account
+  # (aws:SourceAccount) and this account's topics in this region
+  # (kms:EncryptionContext:aws:sns:topicArn).
+  dynamic "statement" {
+    for_each = var.allow_backup ? [1] : []
+
+    content {
+      sid       = "AllowBackupSNSTopics"
+      actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["backup.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "kms:EncryptionContext:aws:sns:topicArn"
+        values   = ["arn:${data.aws_partition.current.partition}:sns:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*"]
+      }
+    }
+  }
 }

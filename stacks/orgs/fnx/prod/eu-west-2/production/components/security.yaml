@@ -18,6 +18,7 @@ import:
   - catalog/guardduty/defaults
   - catalog/securityhub/defaults
   - catalog/security-monitoring/defaults
+  - catalog/backup/defaults
 
 components:
   terraform:
@@ -258,3 +259,24 @@ components:
         component: security-monitoring
         inherits:
           - security-monitoring/defaults
+
+    # ==========================================================================
+    # AWS Backup - vault, plans and tag-based selection for rds/main,
+    # rds/data (Backup=true in their own services.yaml vars.tags) and any
+    # EC2/EBS resource tagged the same way. Retention matches the account's
+    # pci-sox-gdpr compliance tag (globals.yaml): 7-year monthly retention for
+    # SOX. Vault lock and cross-region replication stay off until an owner
+    # explicitly configures a replica region/key.
+    # ==========================================================================
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/defaults
+      vars:
+        daily_retention_days: 35
+        weekly_retention_days: 90
+        monthly_retention_days: 2555 # 7 years, SOX
+        notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"

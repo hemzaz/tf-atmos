@@ -164,6 +164,11 @@ components:
         environment: "{{ .settings.context.stage }}"
         identifier: "main-db"
         db_name: "mainapp"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         instance_class: "db.t3.micro"
@@ -187,6 +192,11 @@ components:
         environment: "{{ .settings.context.stage }}"
         identifier: "data-db"
         db_name: "datawarehouse"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         instance_class: "db.r5.large"

@@ -24,6 +24,7 @@ module "kms" {
   allow_cloudtrail                = var.allow_cloudtrail
   allow_sns                       = var.allow_sns
   allow_s3                        = var.allow_s3
+  allow_backup                    = var.allow_backup
   alias_name                      = var.alias_name
   create_alias                    = var.create_alias
   replica_regions                 = var.replica_regions

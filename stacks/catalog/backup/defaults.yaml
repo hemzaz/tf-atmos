@@ -1,0 +1,48 @@
+---
+##################################################
+# Catalog Configuration for AWS Backup
+##################################################
+# Mirrors cloudposse-terraform-components/aws-backup's model: a vault with
+# daily/weekly/monthly plans and tag-based resource selection, in place of
+# reading each protected component's state directly.
+#
+# Resource selection is entirely tag-based, never !terraform.state: this
+# component's own aws_backup_selection.ec2_daily/ebs_daily/rds_tagged_daily
+# resources select by the Backup/Environment tags a protected resource sets
+# on itself. This is required, not just preferred -- workflows/deploy-full-stack.yaml
+# (see plan-data/deploy-data) runs backup in the same "data" phase as rds and
+# elasticache, and workflows/scripts/common/check-deploy-layers.py rejects an
+# instance that reads (!terraform.state) a same-phase instance's state,
+# because that phase's plan step runs before any of its deploy steps apply.
+#
+# Instances inherit this base and set retention/notification variables
+# appropriate to their stage. Vault lock and cross-region replication stay
+# off unless an instance explicitly turns them on.
+
+components:
+  terraform:
+    backup/defaults:
+      metadata:
+        component: backup
+        type: abstract
+      # kms_key_arn reads kms/main, so the key (and its allow_backup grant
+      # for this component's notifications SNS topic -- catalog/kms/defaults.yaml)
+      # is applied first. workflows/scripts/common/check-dependencies.py
+      # enforces that every !terraform.state target is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        kms_key_arn: !terraform.state kms/main .key_arn
+        enable_ec2_backup: true
+        enable_ebs_backup: true
+        enable_rds_backup: true
+        enable_backup_notifications: true
+        # Compliance features stay off until an instance explicitly turns
+        # them on: vault lock is irreversible past its changeable window, and
+        # cross-region replication needs a replica_region/replica_kms_key_arn
+        # no stack currently provisions.
+        enable_vault_lock: false
+        enable_cross_region_backup: false
+        tags:
+          Component: "Backup"

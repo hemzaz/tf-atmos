@@ -1,5 +1,19 @@
 locals {
   name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "backup")}"
+
+  # The tag the restore-test Lambda sets on the resource its own restore job
+  # creates, and the only tag its IAM policy (aws_iam_role_policy.backup_testing_custom)
+  # will ever allow it to delete (M11 fix: no destructive action there carries
+  # an unconditioned Resource "*" any more).
+  restore_test_tag_key   = "BackupRestoreTest"
+  restore_test_tag_value = "true"
+
+  # Built from known values (not aws_backup_vault.main.arn / aws_iam_role.backup.arn)
+  # so the policy below is fully computable at `terraform plan` time -- both
+  # ARN formats are deterministic, and tests/backup.tftest.hcl asserts this
+  # policy's JSON with `command = plan`.
+  backup_vault_arn        = "arn:aws:backup:${var.region}:${data.aws_caller_identity.current.account_id}:backup-vault:${aws_backup_vault.main.name}"
+  backup_service_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${aws_iam_role.backup.name}"
 }
 
 # AWS Backup Vault
@@ -191,6 +205,32 @@ resource "aws_backup_selection" "rds_daily" {
   resources = [for instance in var.rds_instances : "arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:${instance}"]
 }
 
+# Backup Selection for RDS by tag. Selecting by tag (rather than by reading
+# rds state) keeps this component decoupled from rds/main and rds/data:
+# workflows/deploy-full-stack.yaml runs backup in the same "data" phase as
+# rds, and workflows/scripts/common/check-deploy-layers.py rejects a
+# same-phase !terraform.state read. rds/main and rds/data set Backup=true in
+# their own stack vars.tags to opt in.
+resource "aws_backup_selection" "rds_tagged_daily" {
+  count = var.enable_rds_backup ? 1 : 0
+
+  name         = "${local.name_prefix}-rds-tagged-daily"
+  plan_id      = aws_backup_plan.daily.id
+  iam_role_arn = aws_iam_role.backup.arn
+
+  selection_tag {
+    type  = "STRINGEQUALS"
+    key   = "Backup"
+    value = "true"
+  }
+
+  selection_tag {
+    type  = "STRINGEQUALS"
+    key   = "Environment"
+    value = var.tags["Environment"]
+  }
+}
+
 # Backup Selection for DynamoDB
 resource "aws_backup_selection" "dynamodb_daily" {
   count = length(var.dynamodb_tables) > 0 ? 1 : 0
@@ -330,33 +370,42 @@ resource "aws_backup_report_plan" "main" {
   }
 }
 
+# Lambda deployment package, built from the committed source at plan/apply
+# time (the components/terraform/cost-optimization pattern) rather than a
+# committed zip.
+data "archive_file" "backup_testing_lambda" {
+  count = var.enable_backup_testing ? 1 : 0
+
+  type        = "zip"
+  output_path = "${path.module}/backup_testing_lambda.zip"
+
+  source {
+    content  = file("${path.module}/lambda/backup_testing.py")
+    filename = "index.py"
+  }
+}
+
 # Lambda function for automated backup testing (optional)
 resource "aws_lambda_function" "backup_testing" {
   count = var.enable_backup_testing ? 1 : 0
 
-  filename      = "${path.module}/lambda/backup-testing.zip"
-  function_name = "${local.name_prefix}-testing"
-  role          = aws_iam_role.backup_testing[0].arn
-  handler       = "index.handler"
-  # The package is not committed; try() keeps the disabled path valid and the precondition
-  # below reports a missing package when the function is enabled.
-  source_code_hash = try(filebase64sha256("${path.module}/lambda/backup-testing.zip"), null)
+  filename         = data.archive_file.backup_testing_lambda[0].output_path
+  function_name    = "${local.name_prefix}-testing"
+  role             = aws_iam_role.backup_testing[0].arn
+  handler          = "index.handler"
+  source_code_hash = data.archive_file.backup_testing_lambda[0].output_base64sha256
   runtime          = "python3.11"
   timeout          = 900
   memory_size      = 512
 
   environment {
     variables = {
-      BACKUP_VAULT_NAME = aws_backup_vault.main.name
-      TEST_TAG          = "BackupTest"
-      ENVIRONMENT       = var.tags["Environment"]
-    }
-  }
-
-  lifecycle {
-    precondition {
-      condition     = fileexists("${path.module}/lambda/backup-testing.zip")
-      error_message = "Lambda package ${path.module}/lambda/backup-testing.zip is missing; build it before enabling this function."
+      BACKUP_VAULT_NAME    = aws_backup_vault.main.name
+      RESTORE_IAM_ROLE_ARN = local.backup_service_role_arn
+      TEST_TAG_KEY         = local.restore_test_tag_key
+      TEST_TAG_VALUE       = local.restore_test_tag_value
+      RESOURCE_TYPE        = var.backup_testing_resource_type
+      ENVIRONMENT          = var.tags["Environment"]
     }
   }
 }
@@ -388,6 +437,20 @@ resource "aws_iam_role_policy_attachment" "backup_testing_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# M11 fix: the previous version of this policy allowed ec2:DeleteVolume and
+# rds:DeleteDBInstance (plus the Create/Restore actions) on Resource "*" with
+# no condition, so a bug in the restore-test Lambda could delete ANY volume
+# or database in the account. Now:
+#   - backup:* is scoped to this component's own vault, not "*".
+#   - ec2:CreateVolume / rds:RestoreDBInstanceFromDBSnapshot are not granted
+#     here at all: AWS Backup performs the actual restore under the passed
+#     backup service role (PassBackupServiceRoleForRestore below), which
+#     already carries AWSBackupServiceRolePolicyForRestores.
+#   - ec2:CreateTags / rds:AddTagsToResource require the request itself to
+#     set the BackupRestoreTest marker tag (aws:RequestTag).
+#   - ec2:DeleteVolume / rds:DeleteDBInstance require the target resource to
+#     already carry that same tag (aws:ResourceTag) -- so this Lambda can
+#     only ever delete a resource it tagged itself in this run.
 resource "aws_iam_role_policy" "backup_testing_custom" {
   count = var.enable_backup_testing ? 1 : 0
 
@@ -398,19 +461,52 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "backup:ListRecoveryPointsByBackupVault",
-          "backup:StartRestoreJob",
-          "backup:DescribeRestoreJob",
-          "ec2:CreateVolume",
-          "ec2:DeleteVolume",
-          "ec2:DescribeVolumes",
-          "rds:RestoreDBInstanceFromDBSnapshot",
-          "rds:DeleteDBInstance",
-          "rds:DescribeDBInstances"
-        ]
+        Sid      = "BackupVaultReadAndRestore"
+        Effect   = "Allow"
+        Action   = ["backup:ListRecoveryPointsByBackupVault", "backup:StartRestoreJob", "backup:DescribeRestoreJob"]
+        Resource = local.backup_vault_arn
+      },
+      {
+        Sid      = "PassBackupServiceRoleForRestore"
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = local.backup_service_role_arn
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "backup.amazonaws.com"
+          }
+        }
+      },
+      {
+        Sid      = "DescribeRestoredResources"
+        Effect   = "Allow"
+        Action   = ["ec2:DescribeVolumes", "ec2:DescribeAvailabilityZones", "rds:DescribeDBInstances"]
         Resource = "*"
+      },
+      {
+        Sid    = "TagRestoredResourcesOnlyWithTheTestTag"
+        Effect = "Allow"
+        Action = ["ec2:CreateTags", "rds:AddTagsToResource"]
+        # Resource "*": neither action supports resource-level ARN scoping
+        # combined with a wildcard resource id at plan time, so the tag
+        # condition below is what limits this grant.
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
+          }
+        }
+      },
+      {
+        Sid      = "DeleteOnlyResourcesTaggedByThisTest"
+        Effect   = "Allow"
+        Action   = ["ec2:DeleteVolume", "rds:DeleteDBInstance"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
+          }
+        }
       }
     ]
   })

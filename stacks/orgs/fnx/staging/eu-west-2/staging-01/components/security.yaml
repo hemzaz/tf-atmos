@@ -17,6 +17,7 @@ import:
   - catalog/guardduty/defaults
   - catalog/securityhub/defaults
   - catalog/security-monitoring/defaults
+  - catalog/backup/defaults
 
 components:
   terraform:
@@ -224,3 +225,21 @@ components:
         component: security-monitoring
         inherits:
           - security-monitoring/defaults
+
+    # ==========================================================================
+    # AWS Backup - vault, plans and tag-based selection for rds/main,
+    # rds/data (Backup=true in their own services.yaml vars.tags) and any
+    # EC2/EBS resource tagged the same way. Medium retention, no vault lock or
+    # cross-region replication in staging.
+    # ==========================================================================
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/defaults
+      vars:
+        daily_retention_days: 14
+        weekly_retention_days: 30
+        monthly_retention_days: 90
+        notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"

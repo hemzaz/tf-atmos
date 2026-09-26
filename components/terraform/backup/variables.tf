@@ -150,8 +150,14 @@ variable "enable_archive_tier" {
 # Resource Selection Variables
 variable "rds_instances" {
   type        = list(string)
-  description = "List of RDS instance identifiers to backup"
+  description = "List of RDS instance identifiers to backup, selected by ARN. Prefer enable_rds_backup (tag-based) when the RDS instance is deployed in the same Atmos deploy phase as this component: reading its state (to build this list) is rejected by workflows/scripts/common/check-deploy-layers.py"
   default     = []
+}
+
+variable "enable_rds_backup" {
+  type        = bool
+  description = "Enable RDS instance backups based on tags (STRINGEQUALS Backup=true and Environment=var.tags[\"Environment\"]) instead of an explicit rds_instances ARN list"
+  default     = false
 }
 
 variable "dynamodb_tables" {
@@ -242,4 +248,15 @@ variable "backup_testing_schedule" {
   type        = string
   description = "Schedule for automated backup testing"
   default     = "cron(0 5 ? * MON *)" # 5 AM UTC Monday
+}
+
+variable "backup_testing_resource_type" {
+  type        = string
+  description = "AWS Backup resource type the restore-test Lambda (lambda/backup_testing.py) restores, tags, validates and deletes"
+  default     = "EBS"
+
+  validation {
+    condition     = contains(["EBS", "RDS"], var.backup_testing_resource_type)
+    error_message = "backup_testing_resource_type must be EBS or RDS (the two types lambda/backup_testing.py implements)."
+  }
 }

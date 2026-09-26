@@ -18,7 +18,7 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3/allow_backup, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), by `backup/main` in every stack (`kms_key_arn`, set in `stacks/catalog/backup/defaults.yaml`, encrypting the vault and its job-notifications SNS topic — `allow_backup` above lets AWS Backup publish to it), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
@@ -87,6 +87,12 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   bucket uses an S3 Bucket Key) and `AllowCloudTrailDescribeKey`, all limited by
   `aws:SourceArn` to this account's trails in this region. cloudtrail/main
   encrypts its log files with this key; `kms/defaults` turns it on.
+- `allow_backup` adds `AllowBackupSNSTopics` for `backup.amazonaws.com`, scoped
+  the same way as the CloudWatch alarms statement (`aws:SourceAccount` and
+  `kms:EncryptionContext:aws:sns:topicArn` matching this account's topics in
+  this region). `backup/main` encrypts its job-notifications SNS topic with
+  this key; without it, AWS Backup cannot publish to that topic. `kms/defaults`
+  turns it on.
 - `replica_regions` requires `is_multi_region = true` (validation).
 - `rotation_period_in_days` validated 90-2560; `deletion_window_in_days`
   validated 7-30.
