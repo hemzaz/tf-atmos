@@ -1,0 +1,41 @@
+---
+##################################################
+# Catalog Configuration for AWS Glue
+##################################################
+# One catalog database plus its tables, crawlers, jobs and triggers per
+# instance (Cloud Posse's aws-glue-catalog-database, -catalog-table,
+# -crawler, -job, -trigger and -iam components folded into one - see the
+# glue component's README). Instances inherit this base and set `name` and
+# whichever of `tables`, `crawlers`, `jobs` (with `assets_bucket_name`) and
+# `triggers` they need.
+
+components:
+  terraform:
+    glue/defaults:
+      metadata:
+        component: glue
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults), whose
+        # policy delegates to the account root (enable_default_policy), so
+        # the Glue role's own IAM policy is sufficient to use the key; the
+        # security configuration's encrypted /aws-glue/* log groups are
+        # covered by kms/main's allow_cloudwatch_logs statement.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        # Account-wide setting: exactly one instance per account/region
+        # turns it on.
+        enable_data_catalog_encryption: false
+        create_table_default_permissions: []
+        tables: {}
+        crawlers: {}
+        jobs: {}
+        triggers: {}
+        tags:
+          Component: "Glue"
