@@ -45,6 +45,10 @@ components:
 
         # VPC Flow Logs
         vpc_flow_logs_enabled: true
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow logs log group uses it instead
+        # of creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Default security group configuration
         default_sg_ingress_self_only: true
@@ -55,3 +59,6 @@ components:
         tags:
           Component: "VPC"
           NetworkTier: "core"
+      dependencies:
+        components:
+          - component: kms/main

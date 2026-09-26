@@ -29,12 +29,11 @@
 #   - Secrets Manager secrets for the platform (the Redis AUTH token among them)
 #
 # Encryption: the stack's customer managed key, kms/main, encrypts the EKS
-# secrets, DynamoDB tables, the EventBridge bus, archive and log groups, the
-# SQS queues, the Lambda's environment and log group, the API Gateway log
-# group, ElastiCache and the Secrets Manager secrets. Not yet:
-# EKS node EBS volumes use the AWS managed aws/ebs key, the eks and vpc log
-# groups use those components' own keys, and the monitoring SNS topic is
-# unencrypted.
+# secrets, control-plane log group and managed node groups' EBS volumes, the
+# VPC's flow-log group, DynamoDB tables, the EventBridge bus, archive and log
+# groups, the SQS queues, the Lambda's environment and log group, the API
+# Gateway log group, ElastiCache and the Secrets Manager secrets. Not yet: the
+# monitoring SNS topic is unencrypted.
 #
 # Cost Estimates (Monthly):
 #   Development:  ~$200-400/month

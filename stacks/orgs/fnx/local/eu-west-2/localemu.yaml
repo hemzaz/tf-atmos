@@ -131,12 +131,24 @@ components:
           - "10.91.202.0/24"
         nat_gateway_enabled: false
         vpc_flow_logs_enabled: false
+        # This lane has no kms/main instance (see the header - only rds runs
+        # here, and nothing else needs a CMK). vpc/defaults now points
+        # flow_logs_kms_key_arn at kms/main, but flow logs are off above, so
+        # the value is never used; overridden to "" so this lane does not
+        # gain a dependency on a component it never declares.
+        flow_logs_kms_key_arn: ""
         manage_network_acls: false
         manage_default_security_group: false
         tags:
           Environment: localemu
           Tenant: fnx
           ManagedBy: Terraform
+      dependencies:
+        # vpc/defaults now depends on kms/main (flow_logs_kms_key_arn), but
+        # this lane has no kms/main instance at all - overridden to empty
+        # rather than inheriting a dependency on a component this stack never
+        # declares.
+        components: []
 
     # Re-run of the lambda component against a second emulator, not new
     # coverage: apigateway cannot run in this lane (see the header), so nothing
