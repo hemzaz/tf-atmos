@@ -75,6 +75,13 @@ components:
     # Services VPC - Dedicated Backend Services (High Availability)
     # ==========================================================================
         vpc_flow_logs_enabled: true
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main
     vpc/services:
       metadata:
         component: vpc
@@ -107,6 +114,10 @@ components:
         nat_gateway_strategy: "one_per_az"
 
         vpc_flow_logs_enabled: true
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Load balancer subnet discovery for the AWS Load Balancer Controller that
         # catalog/eks-addons enables on eks/data, as in Cloud Posse's
@@ -122,6 +133,9 @@ components:
         tags:
           NetworkTier: "services"
           HighAvailability: "true"
+      dependencies:
+        components:
+          - component: kms/main
 
     # ==========================================================================
     # VPC Peering - Connect Main and Services VPCs

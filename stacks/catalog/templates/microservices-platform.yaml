@@ -29,12 +29,11 @@
 #   - Secrets Manager secrets for the platform (the Redis AUTH token among them)
 #
 # Encryption: the stack's customer managed key, kms/main, encrypts the EKS
-# secrets, DynamoDB tables, the EventBridge bus, archive and log groups, the
-# SQS queues, the Lambda's environment and log group, the API Gateway log
-# group, ElastiCache and the Secrets Manager secrets. Not yet:
-# EKS node EBS volumes use the AWS managed aws/ebs key, the eks and vpc log
-# groups use those components' own keys, and the monitoring SNS topic is
-# unencrypted.
+# secrets, control-plane log group and managed node groups' EBS volumes, the
+# VPC's flow-log group, DynamoDB tables, the EventBridge bus, archive and log
+# groups, the SQS queues, the Lambda's environment and log group, the API
+# Gateway log group, ElastiCache and the Secrets Manager secrets. Not yet: the
+# monitoring SNS topic is unencrypted.
 #
 # Cost Estimates (Monthly):
 #   Development:  ~$200-400/month
@@ -53,10 +52,19 @@
 #    deep-merge over that stack's own alias_name/description. CloudWatch Logs
 #    (the EventBridge, Lambda and API Gateway log groups) and EventBridge (the
 #    bus and archive, and delivery to the encrypted queues) use the key as
-#    service principals, so the stack's kms/main must keep the two scoped
-#    grants that catalog/kms/defaults turns on:
+#    service principals, and the EC2 Auto Scaling service-linked role needs it
+#    for the EKS managed node groups' CMK-encrypted EBS volumes, so the
+#    stack's kms/main must keep the three scoped grants that
+#    catalog/kms/defaults turns on:
 #      allow_cloudwatch_logs: true
 #      allow_eventbridge: true
+#      allow_autoscaling_ebs: true
+#    allow_autoscaling_ebs names the Auto Scaling service-linked role
+#    directly, so the importing stack also needs the role provisioned first:
+#    one of its iam instances sets enable_autoscaling_service_linked_role:
+#    true (see components/terraform/iam/README.md), and kms/main declares a
+#    dependencies.components edge to that instance (every real dev/staging/
+#    prod stack already does both).
 # 2. settings.microservices, read by eks-addons, apigateway and the
 #    welcome-email Lambda:
 #      settings:
@@ -143,6 +151,10 @@ components:
         # Flow logs capture ALL traffic; DNS hostnames and support are always
         # on in the vpc component (EKS needs both).
         vpc_flow_logs_enabled: true
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Subnet tags for EKS load balancer discovery. The cluster tag names
         # the cluster, which the eks component names "<Environment>-<name>":
@@ -157,6 +169,9 @@ components:
         tags:
           Layer: "networking"
           Platform: "microservices"
+      dependencies:
+        components:
+          - component: kms/main
 
     # =========================================================================
     # EKS CLUSTER

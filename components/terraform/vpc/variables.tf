@@ -327,3 +327,15 @@ variable "flow_logs_s3_backup" {
   description = "Enable S3 bucket for long-term Flow Logs storage and archival"
   default     = false
 }
+
+variable "flow_logs_kms_key_arn" {
+  type        = string
+  description = "KMS key ARN encrypting the flow logs CloudWatch log group (and, when flow_logs_s3_backup is enabled, the archive bucket). Empty creates and uses this component's own key. The given key's policy needs a statement granting logs.<region>.amazonaws.com use of the key scoped by kms:EncryptionContext:aws:logs:arn to this or a broader log-group pattern (kms/main's allow_cloudwatch_logs, catalog/kms/defaults.yaml, already grants every log group in this account and region)."
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition     = var.flow_logs_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.flow_logs_kms_key_arn))
+    error_message = "flow_logs_kms_key_arn must be a valid KMS key ARN (e.g., arn:aws:kms:region:account-id:key/key-id)."
+  }
+}

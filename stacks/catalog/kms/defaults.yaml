@@ -56,6 +56,20 @@ components:
         # encrypted with this key, e.g. batch-processing's trigger queue,
         # limited to this account's buckets.
         allow_s3: true
+        # eks node groups' launch templates set node_group_ebs_kms_key_id to
+        # this key (eks/defaults), and the AWS Auto Scaling service-linked
+        # role that launches their EBS volumes needs kms:CreateGrant plus
+        # Encrypt/Decrypt/DescribeKey to do so, or new instances fail to
+        # launch. The key policy statement names that role directly (see
+        # components/terraform/kms/README.md); each stack's iam instance
+        # provisions the role (enable_autoscaling_service_linked_role, see
+        # components/terraform/iam/README.md) and kms/main declares a
+        # dependencies.components edge to it so the role exists before
+        # kms/main's first apply. The sandbox lane
+        # (stacks/orgs/fnx/local/eu-west-2/sandbox.yaml) overrides this to
+        # false: it runs no Auto Scaling or EKS node groups, and has no iam
+        # instance.
+        allow_autoscaling_ebs: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates

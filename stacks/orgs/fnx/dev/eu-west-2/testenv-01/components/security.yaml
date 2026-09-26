@@ -27,6 +27,11 @@ components:
         policy_name: "testenv-01-dev-fnx-CrossAccountPolicy"
         trusted_account_ids:
           - "{{ .settings.environment.management_account_id }}"
+        # kms/main's allow_autoscaling_ebs grant (catalog/kms/defaults.yaml)
+        # names the Auto Scaling service-linked role directly as a
+        # key-policy principal; this is the one iam instance per account
+        # that provisions it.
+        enable_autoscaling_service_linked_role: true
 
       providers:
         aws:
@@ -91,6 +96,13 @@ components:
         description: Dev main encryption key (Secrets Manager, EBS, RDS)
         alias_name: testenv-01-main  # without the alias/ prefix
         deletion_window_in_days: 7   # non-prod: shorter window, faster teardown
+      dependencies:
+        components:
+          # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
+          # service-linked role directly as a principal; iam/dev provisions
+          # it (enable_autoscaling_service_linked_role) so KMS does not
+          # reject the key policy.
+          - component: iam/dev
 
     acm/main:
       metadata:

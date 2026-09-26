@@ -372,7 +372,7 @@ run "no_endpoint_is_rejected" {
 
 # --- KMS: prod passes its own key for secrets ---
 
-run "caller_key_encrypts_secrets_component_key_the_log_group" {
+run "caller_key_encrypts_secrets_and_the_log_group_no_component_key_created" {
   command = apply
 
   variables {
@@ -385,13 +385,13 @@ run "caller_key_encrypts_secrets_component_key_the_log_group" {
   }
 
   assert {
-    condition     = aws_cloudwatch_log_group.default[0].kms_key_id == aws_kms_key.cluster[0].arn
-    error_message = "The log group keeps the component key (kms/main grants CloudWatch Logs nothing)."
+    condition     = aws_cloudwatch_log_group.default[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    error_message = "With a caller key given, the log group must use it too (kms/main's allow_cloudwatch_logs already grants every log group in this account and region)."
   }
 
   assert {
-    condition     = strcontains(aws_kms_key.cluster[0].description, "control-plane log") && !strcontains(aws_kms_key.cluster[0].description, "secrets and")
-    error_message = "With a caller key, the component key must not claim to encrypt secrets."
+    condition     = length(aws_kms_key.cluster) == 0
+    error_message = "With a caller key given, the component's own key is unused for both secrets and the log group, so it must not be created at all."
   }
 }
 
@@ -401,6 +401,85 @@ run "component_key_encrypts_secrets_by_default" {
   assert {
     condition     = aws_eks_cluster.default[0].encryption_config[0].provider[0].key_arn == aws_kms_key.cluster[0].arn
     error_message = "Without a caller key, secrets use the component key."
+  }
+
+  assert {
+    condition     = length(aws_kms_key.cluster) == 1
+    error_message = "Without a caller key, the component must create its own key."
+  }
+}
+
+# --- Node group EBS: node_group_ebs_kms_key_id (kms/main) is the default ---
+
+run "node_group_ebs_kms_key_id_defaults_every_devices_key" {
+  command = plan
+
+  variables {
+    node_group_ebs_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+  }
+
+  assert {
+    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    error_message = "A block device with no ebs.kms_key_id of its own must default to node_group_ebs_kms_key_id."
+  }
+}
+
+run "device_level_kms_key_id_wins_over_the_default" {
+  command = plan
+
+  variables {
+    node_group_ebs_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    node_groups = {
+      workers = {
+        instance_types = ["m5.xlarge"]
+        block_device_map = {
+          "/dev/xvda" = {
+            ebs = {
+              kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/33333333-4444-5555-6666-777777777777"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/33333333-4444-5555-6666-777777777777"
+    error_message = "A device's own ebs.kms_key_id must win over node_group_ebs_kms_key_id."
+  }
+}
+
+run "node_group_ebs_kms_key_id_empty_leaves_the_aws_managed_key" {
+  command = plan
+
+  assert {
+    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == null
+    error_message = "With node_group_ebs_kms_key_id empty (the default) and no device-level key, the volume stays on the AWS managed aws/ebs key (kms_key_id unset)."
+  }
+}
+
+run "unencrypted_device_does_not_get_the_default_kms_key_id" {
+  command = plan
+
+  variables {
+    node_group_ebs_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    node_groups = {
+      workers = {
+        instance_types = ["m5.xlarge"]
+        block_device_map = {
+          "/dev/xvda" = {
+            ebs = {
+              encrypted = false
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == null
+    error_message = "A device with encrypted = false must not get node_group_ebs_kms_key_id: EC2 rejects a launch template that sets KmsKeyId on an unencrypted device."
   }
 }
 

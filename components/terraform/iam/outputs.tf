@@ -42,3 +42,8 @@ output "ci_apply_role_name" {
   description = "Name of the GitHub Actions apply role"
   value       = one(aws_iam_role.ci_apply[*].name)
 }
+
+output "autoscaling_service_linked_role_arn" {
+  description = "ARN of the AWS Auto Scaling service-linked role created by this instance, or null when enable_autoscaling_service_linked_role is false"
+  value       = one(aws_iam_service_linked_role.autoscaling[*].arn)
+}

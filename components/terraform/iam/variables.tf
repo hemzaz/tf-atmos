@@ -367,3 +367,9 @@ variable "ci_role_max_session_duration" {
     error_message = "ci_role_max_session_duration must be between 3600 and 43200 seconds."
   }
 }
+
+variable "enable_autoscaling_service_linked_role" {
+  type        = bool
+  description = "Create the AWS Auto Scaling service-linked role (aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling) in this account. Set true on exactly one iam instance per account (iam/dev in dev, iam/main in staging and prod) - kms/main's allow_autoscaling_ebs key-policy grant (catalog/kms/defaults.yaml) names this role directly as a principal, and kms/main declares a dependencies.components edge to that instance so the role exists first. Leave false everywhere else, including iam/ci: enabling it on two instances in the same account races (aws_iam_service_linked_role fails with \"has been taken in this account\" on the second). If the account already has this role from prior Auto Scaling usage outside this repo, leave this false and either import it once (terraform import aws_iam_service_linked_role.autoscaling arn:<partition>:iam::<account>:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling) or set it true after confirming no other instance in the account has it enabled."
+  default     = false
+}
