@@ -64,15 +64,8 @@
             ]
         },
         {
-            "file": "/cost-optimization/main.tf",
+            "file": "/cost-optimization/lambda.tf",
             "findings": [
-                {
-                    "resource": "aws_iam_role_policy.scheduler",
-                    "check_ids": [
-                        "CKV_AWS_290",
-                        "CKV_AWS_355"
-                    ]
-                },
                 {
                     "resource": "aws_lambda_function.resource_cleanup",
                     "check_ids": [
@@ -104,12 +97,6 @@
                         "CKV_AWS_173",
                         "CKV_AWS_272",
                         "CKV_AWS_50"
-                    ]
-                },
-                {
-                    "resource": "aws_sns_topic.cost_alerts",
-                    "check_ids": [
-                        "CKV_AWS_26"
                     ]
                 }
             ]
@@ -170,17 +157,6 @@
                     "resource": "module.eks_cluster.aws_eks_cluster.default[0]",
                     "check_ids": [
                         "CKV_AWS_339"
-                    ]
-                }
-            ]
-        },
-        {
-            "file": "/idp-platform/data.tf",
-            "findings": [
-                {
-                    "resource": "aws_availability_zones.available",
-                    "check_ids": [
-                        "CKV_AWS_394"
                     ]
                 }
             ]
@@ -367,25 +343,13 @@
             ]
         },
         {
-            "file": "/monitoring/main.tf",
-            "findings": [
-                {
-                    "resource": "aws_sns_topic.alarms[0]",
-                    "check_ids": [
-                        "CKV_AWS_26"
-                    ]
-                }
-            ]
-        },
-        {
             "file": "/rds/main.tf",
             "findings": [
                 {
                     "resource": "module.idp_database.aws_db_instance.main",
                     "check_ids": [
                         "CKV2_AWS_69",
-                        "CKV_AWS_129",
-                        "CKV_AWS_354"
+                        "CKV_AWS_129"
                     ]
                 },
                 {
@@ -414,12 +378,13 @@
             ]
         },
         {
-            "file": "/security-monitoring/main.tf",
+            "file": "/securitygroup/audit.tf",
             "findings": [
                 {
-                    "resource": "aws_guardduty_detector.main",
+                    "resource": "aws_cloudwatch_log_group.security_group_changes[0]",
                     "check_ids": [
-                        "CKV2_AWS_3"
+                        "CKV_AWS_158",
+                        "CKV_AWS_338"
                     ]
                 }
             ]
@@ -436,38 +401,12 @@
             ]
         },
         {
-            "file": "/securitygroup/rules.tf",
-            "findings": [
-                {
-                    "resource": "aws_cloudwatch_log_group.security_group_changes[0]",
-                    "check_ids": [
-                        "CKV_AWS_158",
-                        "CKV_AWS_338"
-                    ]
-                }
-            ]
-        },
-        {
             "file": "/vpc/flow-logs.tf",
             "findings": [
                 {
                     "resource": "aws_cloudwatch_log_group.flow_logs[0]",
                     "check_ids": [
                         "CKV_AWS_338"
-                    ]
-                },
-                {
-                    "resource": "aws_cloudwatch_log_group.flow_logs",
-                    "check_ids": [
-                        "CKV_AWS_338"
-                    ]
-                },
-                {
-                    "resource": "aws_s3_bucket.flow_logs",
-                    "check_ids": [
-                        "CKV2_AWS_62",
-                        "CKV_AWS_144",
-                        "CKV_AWS_18"
                     ]
                 },
                 {

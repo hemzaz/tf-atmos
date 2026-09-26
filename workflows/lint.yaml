@@ -139,6 +139,59 @@ workflows:
       - name: reports-dir
         type: shell
         command: mkdir -p reports
+      # checkov's --baseline flag (used by the `checkov` step below) reduces the
+      # printed passed/failed/skipped counts to only the delta versus baseline:
+      # checkov/common/output/baseline.py Baseline.compare_and_reduce_reports()
+      # keeps a passed/skipped check only if it matches a baseline entry, and
+      # drops a failed check that matches one -- everything else (the vast
+      # majority of a healthy scan) is filtered out of the report entirely.
+      # That is correct for a burn-down gate (fail only on genuinely NEW
+      # findings), but it means the baselined run's own summary line stays
+      # near-zero even when every component was fully scanned, which is what
+      # made this gate look like it had stopped scanning. This unbaselined,
+      # always-soft-fail pass measures real coverage and fails the job if it
+      # collapses, independent of whether the baselined gate below happens to
+      # pass.
+      - name: checkov-coverage
+        type: shell
+        output: none
+        command: >-
+          checkov --directory components/terraform --framework terraform
+          --output json --output-file-path reports --soft-fail --quiet --compact
+      - name: checkov-coverage-guard
+        type: script
+        interpreter: python3
+        script: |
+          import json
+          import sys
+
+          with open("reports/results_json.json") as f:
+              summary = json.load(f)["summary"]
+
+          passed = summary.get("passed", 0)
+          failed = summary.get("failed", 0)
+          skipped = summary.get("skipped", 0)
+          parsing_errors = summary.get("parsing_errors", 0)
+          resources = summary.get("resource_count", 0)
+
+          print(
+              f"checkov coverage: {resources} resources scanned in "
+              f"components/terraform ({passed} passed, {failed} failed, "
+              f"{skipped} skipped, {parsing_errors} parsing errors)"
+          )
+
+          # components/terraform currently yields ~570 resources across every
+          # root module. A collapse to a handful (as happened when this number
+          # was only ever read off the --baseline run below, see the comment
+          # above) means checkov stopped actually scanning almost everything.
+          # Lower this only alongside a deliberate removal of components.
+          min_resources = 400
+          if resources < min_resources:
+              print(
+                  f"FAIL: only {resources} resources scanned, expected at "
+                  f"least {min_resources} -- checkov coverage collapsed"
+              )
+              sys.exit(1)
       - type: parallel
         fail:
           mode: wait_all
