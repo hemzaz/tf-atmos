@@ -458,6 +458,31 @@ run "node_group_ebs_kms_key_id_empty_leaves_the_aws_managed_key" {
   }
 }
 
+run "unencrypted_device_does_not_get_the_default_kms_key_id" {
+  command = plan
+
+  variables {
+    node_group_ebs_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    node_groups = {
+      workers = {
+        instance_types = ["m5.xlarge"]
+        block_device_map = {
+          "/dev/xvda" = {
+            ebs = {
+              encrypted = false
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == null
+    error_message = "A device with encrypted = false must not get node_group_ebs_kms_key_id: EC2 rejects a launch template that sets KmsKeyId on an unencrypted device."
+  }
+}
+
 # --- Name validation: no false positives, and the boundaries ---
 
 run "names_that_merely_resemble_the_environment_are_accepted" {

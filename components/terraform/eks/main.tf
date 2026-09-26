@@ -43,12 +43,16 @@ locals {
       # A device's own ebs.kms_key_id always wins; otherwise fall back to
       # var.node_group_ebs_kms_key_id (kms/main, when the stack sets it) so
       # every EBS volume a node group launches is encrypted with a key this
-      # repo controls rather than the AWS managed aws/ebs key.
+      # repo controls rather than the AWS managed aws/ebs key. Only when the
+      # device is actually encrypted: EC2 rejects a launch template that sets
+      # KmsKeyId on a device with encrypted = false.
       block_device_mappings = {
         for device_name, device in ng.block_device_map : device_name => (
           device.ebs == null ? device : merge(device, {
             ebs = merge(device.ebs, {
-              kms_key_id = device.ebs.kms_key_id != null ? device.ebs.kms_key_id : (var.node_group_ebs_kms_key_id != "" ? var.node_group_ebs_kms_key_id : null)
+              kms_key_id = device.ebs.kms_key_id != null ? device.ebs.kms_key_id : (
+                device.ebs.encrypted && var.node_group_ebs_kms_key_id != "" ? var.node_group_ebs_kms_key_id : null
+              )
             })
           })
         )
