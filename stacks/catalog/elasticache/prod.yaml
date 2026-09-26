@@ -1,0 +1,24 @@
+---
+import:
+  - catalog/elasticache/defaults
+
+# Production keeps automatic failover and Multi-AZ on, with a week of
+# snapshot retention. These values match what elasticache/main already set
+# inline (this is a purely structural move: it should produce zero resolved
+# diff), so the instance actually inherits its stage tier instead of
+# hardcoding it.
+components:
+  terraform:
+    elasticache/prod:
+      metadata:
+        component: elasticache
+        type: abstract
+        inherits:
+          - elasticache/defaults
+      vars:
+        automatic_failover_enabled: true
+        multi_az_enabled: true
+        snapshot_retention_limit: 7
+settings:
+  context:
+    stage: prod

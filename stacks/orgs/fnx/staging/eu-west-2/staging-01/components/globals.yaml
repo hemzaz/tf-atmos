@@ -7,7 +7,6 @@
 
 import:
   - orgs/fnx/staging/eu-west-2/_defaults
-  - mixins/development
 
   # Import catalog defaults for all components
   - catalog/vpc/defaults

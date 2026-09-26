@@ -5,7 +5,6 @@
 import:
   # Import hierarchy - no .yaml extensions
   - orgs/fnx/dev/eu-west-2/_defaults
-  - mixins/development
 
   # Import catalog defaults for all components used in this environment
   - catalog/vpc/defaults
@@ -62,7 +61,7 @@ settings:
     enable_container_insights: false
     enable_vpc_flow_logs: false
     security:
-      vpc_flow_logs: true # Override development mixin default
+      vpc_flow_logs: true
 
   # Environment tagging strategy
   context:

@@ -1,0 +1,33 @@
+---
+import:
+  - catalog/rds/defaults
+
+# Staging validates production behavior, so it keeps prod-shaped durability
+# (encryption, IAM auth) but stays tolerant of teardown/recreate: no
+# deletion protection, and a final snapshot is skipped. Applying this
+# uniformly, instead of per rds/main and rds/data inline vars as before,
+# fixes a real drift: rds/data previously left deletion_protection,
+# skip_final_snapshot and iam_database_authentication_enabled unset, so it
+# silently inherited the module's production-shaped defaults
+# (deletion_protection=true, iam auth off) while rds/main set them
+# explicitly. See the PR description for the itemized diff.
+components:
+  terraform:
+    rds/staging:
+      metadata:
+        component: rds
+        type: abstract
+        inherits:
+          - rds/defaults
+      vars:
+        multi_az: false
+        deletion_protection: false
+        skip_final_snapshot: true
+        backup_retention_period: 7
+        performance_insights_enabled: true
+        monitoring_interval: 60
+        create_monitoring_role: true
+        iam_database_authentication_enabled: true
+settings:
+  context:
+    stage: staging

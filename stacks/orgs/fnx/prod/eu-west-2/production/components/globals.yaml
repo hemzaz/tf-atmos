@@ -8,7 +8,6 @@
 
 import:
   - orgs/fnx/prod/eu-west-2/_defaults
-  - mixins/production
 
   # Import catalog defaults for all components
   - catalog/vpc/defaults

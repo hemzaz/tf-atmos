@@ -1,0 +1,31 @@
+---
+import:
+  - catalog/rds/defaults
+
+# Production: Multi-AZ, deletion protection, full backup retention, IAM
+# database authentication and Performance Insights across every instance.
+# Applying this uniformly fixes a drift: rds/data previously left
+# iam_database_authentication_enabled unset, so it silently ran without IAM
+# auth while rds/main had it on. See the PR description for the itemized
+# diff. skip_final_snapshot is intentionally left at the module default
+# (false): production always keeps a final snapshot on destroy, on top of
+# deletion_protection already blocking destroy outright.
+components:
+  terraform:
+    rds/prod:
+      metadata:
+        component: rds
+        type: abstract
+        inherits:
+          - rds/defaults
+      vars:
+        multi_az: true
+        deletion_protection: true
+        backup_retention_period: 30
+        performance_insights_enabled: true
+        monitoring_interval: 60
+        create_monitoring_role: true
+        iam_database_authentication_enabled: true
+settings:
+  context:
+    stage: prod
