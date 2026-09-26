@@ -2,6 +2,19 @@
 # This component manages backend services running on EKS for the IDP platform
 
 locals {
+  # Names of the Secret objects the external-secrets operator materializes
+  # from the ExternalSecret resources below -- not Terraform-managed
+  # kubernetes_secret_v1 resources, so referenced here as plain strings.
+  database_secret_name = "database-credentials"
+  redis_secret_name    = "redis-credentials"
+
+  # local.backend_services' keys (api_gateway, platform_api, ...) are used as
+  # Go/HCL identifiers and map keys throughout, but a Kubernetes object *name*
+  # must be an RFC 1123 subdomain (lowercase alphanumeric and "-" only, no
+  # "_"). slug hyphenates every key for that purpose; look up the object's
+  # for_each key normally everywhere else.
+  slug = { for k in keys(local.backend_services) : k => replace(k, "_", "-") }
+
   # Service configurations with resource requirements and scaling policies
   backend_services = {
     # API Gateway microservice
@@ -88,43 +101,50 @@ locals {
     }
   }
 
-  # Common environment variables for all services
-  common_env_vars = [
-    {
-      name  = "ENVIRONMENT"
-      value = var.tags["Environment"]
-    },
-    {
-      name  = "LOG_LEVEL"
-      value = var.log_level
-    },
-    {
-      name  = "METRICS_ENABLED"
-      value = "true"
-    },
-    {
-      name  = "TRACING_ENABLED"
-      value = var.enable_tracing ? "true" : "false"
-    },
-    {
-      name = "DATABASE_URL"
-      value_from = {
-        secret_key_ref = {
-          name = kubernetes_secret_v1.database_credentials.metadata[0].name
-          key  = "database_url"
+  # Common environment variables for all services. DATABASE_URL/REDIS_URL are
+  # never a literal value here -- both come from secretKeyRef, into a key an
+  # ExternalSecret below templated from Secrets Manager, so no credential
+  # ever passes through a Terraform variable or is written to state.
+  common_env_vars = concat(
+    [
+      {
+        name  = "ENVIRONMENT"
+        value = var.tags["Environment"]
+      },
+      {
+        name  = "LOG_LEVEL"
+        value = var.log_level
+      },
+      {
+        name  = "METRICS_ENABLED"
+        value = "true"
+      },
+      {
+        name  = "TRACING_ENABLED"
+        value = var.enable_tracing ? "true" : "false"
+      },
+      {
+        name = "DATABASE_URL"
+        value_from = {
+          secret_key_ref = {
+            name = local.database_secret_name
+            key  = "database_url"
+          }
         }
-      }
-    },
-    {
-      name = "REDIS_URL"
-      value_from = {
-        secret_key_ref = {
-          name = kubernetes_secret_v1.redis_credentials.metadata[0].name
-          key  = "redis_url"
+      },
+    ],
+    var.redis_enabled ? [
+      {
+        name = "REDIS_URL"
+        value_from = {
+          secret_key_ref = {
+            name = local.redis_secret_name
+            key  = "redis_url"
+          }
         }
-      }
-    }
-  ]
+      },
+    ] : []
+  )
 }
 
 # Namespace for backend services
@@ -221,12 +241,17 @@ resource "kubernetes_network_policy_v1" "backend_services_network_policy" {
       }
     }
 
-    # Allow DNS resolution
+    # Allow DNS resolution. Both UDP and TCP 53: truncated or large responses
+    # fall back to TCP, which UDP-only egress would silently drop.
     egress {
       to {}
       ports {
         port     = "53"
         protocol = "UDP"
+      }
+      ports {
+        port     = "53"
+        protocol = "TCP"
       }
     }
   }
@@ -237,7 +262,7 @@ resource "kubernetes_service_account_v1" "backend_services" {
   for_each = local.backend_services
 
   metadata {
-    name      = "${each.key}-service-account"
+    name      = "${local.slug[each.key]}-service-account"
     namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
 
     annotations = var.service_account_annotations
@@ -246,37 +271,106 @@ resource "kubernetes_service_account_v1" "backend_services" {
   automount_service_account_token = true
 }
 
-# Secrets management
-resource "kubernetes_secret_v1" "database_credentials" {
-  metadata {
-    name      = "database-credentials"
-    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
+# Secrets management: ExternalSecret resources pull credentials straight from
+# Secrets Manager through the ClusterSecretStore external-secrets/main
+# creates -- no database/redis password ever passes through a Terraform
+# variable or Kubernetes Secret Terraform itself writes.
+resource "kubernetes_manifest" "database_external_secret" {
+  manifest = {
+    apiVersion = "external-secrets.io/v1beta1"
+    kind       = "ExternalSecret"
+    metadata = {
+      name      = local.database_secret_name
+      namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
+    }
+    spec = {
+      refreshInterval = "1h"
+      secretStoreRef = {
+        name = var.cluster_secret_store_name
+        kind = "ClusterSecretStore"
+      }
+      target = {
+        name = local.database_secret_name
+        template = {
+          type = "Opaque"
+          data = {
+            # RDS's managed master user secret's JSON has "username"/"password"
+            # keys; the (non-secret) host/port/dbname come from Terraform
+            # inputs, so only the credentials themselves flow through ESO.
+            # urlquery percent-encodes URL-reserved characters (RDS-generated
+            # passwords are not restricted to a URL-safe alphabet), so the
+            # connection string stays parseable regardless of the generated
+            # value.
+            database_url = "postgres://{{ .username | urlquery }}:{{ .password | urlquery }}@${var.database_endpoint}/${var.database_name}"
+          }
+        }
+      }
+      data = [
+        {
+          secretKey = "username"
+          remoteRef = {
+            key      = var.database_secret_arn
+            property = "username"
+          }
+        },
+        {
+          secretKey = "password"
+          remoteRef = {
+            key      = var.database_secret_arn
+            property = "password"
+          }
+        },
+      ]
+    }
   }
 
-  type = "Opaque"
-
-  # Write-only: credentials reach the cluster but are never stored in Terraform state
-  data_wo = {
-    database_url = var.database_url
-    username     = var.database_username
-    password     = var.database_password
-  }
-  data_wo_revision = var.credentials_revision
+  depends_on = [kubernetes_namespace_v1.backend_services]
 }
 
-resource "kubernetes_secret_v1" "redis_credentials" {
-  metadata {
-    name      = "redis-credentials"
-    namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
+resource "kubernetes_manifest" "redis_external_secret" {
+  count = var.redis_enabled ? 1 : 0
+
+  manifest = {
+    apiVersion = "external-secrets.io/v1beta1"
+    kind       = "ExternalSecret"
+    metadata = {
+      name      = local.redis_secret_name
+      namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
+    }
+    spec = {
+      refreshInterval = "1h"
+      secretStoreRef = {
+        name = var.cluster_secret_store_name
+        kind = "ClusterSecretStore"
+      }
+      target = {
+        name = local.redis_secret_name
+        template = {
+          type = "Opaque"
+          data = {
+            # elasticache/main's transit_encryption_enabled is pinned to true
+            # for every cache in this repo (its own variable validation
+            # rejects false), so the cache only ever accepts TLS -- the
+            # scheme is always "rediss://", never "redis://". auth_token is
+            # urlquery-encoded for the same reason as the database password
+            # above: it is not restricted to a URL-safe alphabet.
+            redis_url = "rediss://:{{ .auth_token | urlquery }}@${var.redis_host}:${var.redis_port}"
+          }
+        }
+      }
+      data = [
+        {
+          secretKey = "auth_token"
+          remoteRef = {
+            key      = var.redis_secret_arn
+            property = "auth_token"
+          }
+        },
+      ]
+    }
   }
 
-  type = "Opaque"
-
-  data_wo = {
-    redis_url = var.redis_url
-    password  = var.redis_password
-  }
-  data_wo_revision = var.credentials_revision
+  depends_on = [kubernetes_namespace_v1.backend_services]
 }
 
 # ConfigMaps for service configuration
@@ -284,7 +378,7 @@ resource "kubernetes_config_map_v1" "backend_services_config" {
   for_each = local.backend_services
 
   metadata {
-    name      = "${each.key}-config"
+    name      = "${local.slug[each.key]}-config"
     namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
 
@@ -299,7 +393,7 @@ resource "kubernetes_deployment_v1" "backend_services" {
   for_each = local.backend_services
 
   metadata {
-    name      = each.key
+    name      = local.slug[each.key]
     namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
 
     labels = {
@@ -385,9 +479,13 @@ resource "kubernetes_deployment_v1" "backend_services" {
           }
         }
 
-        # Init container for database migrations (if needed)
+        # Init container for database migrations (if needed). Only
+        # platform_api owns the schema -- api_gateway is a pure reverse
+        # proxy with no reason to run `migrate`, and its image (a
+        # release-pipeline-owned gateway image, not a Go binary with a
+        # `migrate` CLI baked in) would exit 127 if this ever ran there.
         dynamic "init_container" {
-          for_each = var.enable_database_migrations && contains(["api_gateway", "platform_api"], each.key) ? [1] : []
+          for_each = var.enable_database_migrations && each.key == "platform_api" ? [1] : []
           content {
             name  = "db-migrate"
             image = each.value.image
@@ -395,9 +493,17 @@ resource "kubernetes_deployment_v1" "backend_services" {
             command = ["/bin/sh", "-c"]
             args    = ["echo 'Running database migrations...' && migrate -path /migrations -database $DATABASE_URL up"]
 
-            env_from {
-              secret_ref {
-                name = kubernetes_secret_v1.database_credentials.metadata[0].name
+            # env_from would expose the ExternalSecret's target Secret keys
+            # as env vars of the same name (lowercase "database_url"), not
+            # "DATABASE_URL" -- an explicit secret_key_ref is required to get
+            # the exact env var name this command reads.
+            env {
+              name = "DATABASE_URL"
+              value_from {
+                secret_key_ref {
+                  name = local.database_secret_name
+                  key  = "database_url"
+                }
               }
             }
 
@@ -414,7 +520,7 @@ resource "kubernetes_deployment_v1" "backend_services" {
 
         # Main container
         container {
-          name  = each.key
+          name  = local.slug[each.key]
           image = each.value.image
 
           image_pull_policy = "IfNotPresent"
@@ -545,8 +651,8 @@ resource "kubernetes_deployment_v1" "backend_services" {
   }
 
   depends_on = [
-    kubernetes_secret_v1.database_credentials,
-    kubernetes_secret_v1.redis_credentials,
+    kubernetes_manifest.database_external_secret,
+    kubernetes_manifest.redis_external_secret,
     kubernetes_config_map_v1.backend_services_config
   ]
 }
@@ -556,7 +662,7 @@ resource "kubernetes_service_v1" "backend_services" {
   for_each = local.backend_services
 
   metadata {
-    name      = each.key
+    name      = local.slug[each.key]
     namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
 
     labels = {
@@ -598,7 +704,7 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "backend_services" {
   for_each = local.backend_services
 
   metadata {
-    name      = each.key
+    name      = local.slug[each.key]
     namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
 
@@ -606,7 +712,7 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "backend_services" {
     scale_target_ref {
       api_version = "apps/v1"
       kind        = "Deployment"
-      name        = each.key
+      name        = local.slug[each.key]
     }
 
     min_replicas = each.value.replicas_min
@@ -664,7 +770,7 @@ resource "kubernetes_pod_disruption_budget_v1" "backend_services" {
   for_each = local.backend_services
 
   metadata {
-    name      = each.key
+    name      = local.slug[each.key]
     namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
   }
 
@@ -687,7 +793,7 @@ resource "kubernetes_manifest" "service_monitor" {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "ServiceMonitor"
     metadata = {
-      name      = each.key
+      name      = local.slug[each.key]
       namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
       labels = {
         app = each.key

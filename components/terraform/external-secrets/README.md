@@ -17,7 +17,7 @@ deploy nothing if that flag is false.
 
 | Inputs (required) | Inputs (behavior) | Outputs |
 |---|---|---|
-| region, cluster_name, host, cluster_ca_certificate, oidc_provider_arn, oidc_provider_url, tags (must have a non-empty `Environment` value), kms_key_arn (required only when `enabled` is true; null/empty is accepted on a disabled instance) | chart_version, create_default_cluster_secret_store, create_certificate_secret_store, namespace/service_account_name, secret_path_prefixes, ssm_parameter_path_prefixes, secret_path_context_prefixes | external_secrets_role_arn/name, policy_arn/name (not consumed elsewhere via `!terraform.state`) |
+| region, cluster_name, host, cluster_ca_certificate, oidc_provider_arn, oidc_provider_url, tags (must have a non-empty `Environment` value), kms_key_arn (required only when `enabled` is true; null/empty is accepted on a disabled instance) | chart_version, create_default_cluster_secret_store, create_certificate_secret_store, namespace/service_account_name, secret_path_prefixes, ssm_parameter_path_prefixes, secret_path_context_prefixes, rds_managed_secret_access, allowed_namespaces | external_secrets_role_arn/name, default_cluster_secret_store_name (consumed via `!terraform.state`, e.g. by `eks-backend-services`), policy_arn/name |
 
 ## IAM policy
 
@@ -50,12 +50,32 @@ worked:
   var, a different segment of `full_path`) scopes it to this stack's real
   context instead. It defaults to `[]`, so a component instance with no
   catalog override gets only the top-level match.
-  Defaults (`certificates`, `ssh-key`, `app`, `infra` for Secrets Manager;
-  `certificates` for SSM) cover this repo's certificate secrets
+  Defaults (`certificates`, `ssh-key`, `app`, `infra`, `redis-auth` for Secrets
+  Manager; `certificates` for SSM) cover this repo's certificate secrets
   (`components/terraform/secretsmanager`), bastion SSH keys
-  (`ssh-key/<Environment>/<name>` from `components/terraform/ec2`), and the
+  (`ssh-key/<Environment>/<name>` from `components/terraform/ec2`), the
   app/infra secretsmanager instances (`context_name` `app`/`infra` in dev,
-  `<stage>/app`/`<stage>/infra` in staging and prod).
+  `<stage>/app`/`<stage>/infra` in staging and prod), and elasticache's redis
+  AUTH token secrets (`redis-auth/<Environment>/<cluster_id>` from
+  `components/terraform/elasticache`).
+- `var.rds_managed_secret_access` (default `false`) grants a fourth ARN pattern
+  outside `secret_path_prefixes` entirely: `secret:rds!db-*`, the fixed naming
+  convention every `aws_db_instance` with `manage_master_user_password = true`
+  gets (`rds/main`'s `password_secret_arn` output). That name only exists once
+  RDS creates the secret, so it can never be a `secret_path_prefixes` entry
+  ahead of time -- and `!` is rejected by that variable's own validation
+  regardless. A stack turns this on only when a consumer (e.g.
+  `eks-backend-services`) actually reads an RDS-managed secret through this
+  `ClusterSecretStore`.
+- `var.allowed_namespaces` (default `[]`, no restriction) sets the default
+  `ClusterSecretStore`'s `spec.conditions[].namespaces` (an
+  external-secrets.io RBAC control, separate from the IAM policy above): only
+  the listed namespaces may bind an `ExternalSecret` to it. Every stack that
+  turns on `rds_managed_secret_access` also sets this to its known consumer's
+  namespace (`["backend-services"]`, `eks-backend-services/main`'s
+  namespace) — otherwise any namespace on the cluster could create an
+  `ExternalSecret` reading any RDS-managed master password the IAM policy
+  now allows.
   **Deliberately not covered**: each stack's `settings.environment.secrets_manager_path_prefix`
   convention (e.g. `production/fnx/certificates`) and the tenant (`settings.context.tenant`,
   e.g. `fnx`) segment it implies. Neither has a Terraform consumer today — no

@@ -1,0 +1,22 @@
+---
+# Catalog defaults for eks-backend-services. Instances set the EKS/ClusterSecretStore/
+# database/redis wiring (all !terraform.state) themselves -- see each stack's
+# compute.yaml -- because those targets differ per stack (redis only in prod).
+components:
+  terraform:
+    eks-backend-services/defaults:
+      metadata:
+        component: eks-backend-services
+        type: abstract
+      vars:
+        # Only fnx-prod-production runs an elasticache/main instance today
+        # (stacks/catalog/elasticache/defaults.yaml); every stack starts with
+        # redis off and prod's instance turns it on explicitly.
+        redis_enabled: false
+        # No stack in this repo installs the Prometheus Operator or its CRDs
+        # (monitoring.coreos.com), so ServiceMonitor resources have no schema
+        # to resolve against the live API server and every plan would fail.
+        # Flip to true only once a stack wires kube-prometheus-stack (or
+        # equivalent) into eks-addons for that cluster.
+        enable_prometheus_monitoring: false
+        enable_database_migrations: true

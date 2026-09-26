@@ -506,3 +506,97 @@ run "no_context_prefixes_means_top_level_only" {
     error_message = "The top-level \"<prefix>/*\" match must still be present."
   }
 }
+
+# elasticache's redis AUTH token secrets are covered by the default
+# secret_path_prefixes, without any catalog override needed.
+run "redis_auth_prefix_is_covered_by_default" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "secret:redis-auth/*")
+    error_message = "redis-auth must be in the default secret_path_prefixes, so elasticache/main's auth_token_secret_arn is readable without a stack override."
+  }
+}
+
+# rds_managed_secret_access grants the fixed "rds!db-*" naming convention,
+# which cannot be a secret_path_prefixes entry (RDS generates that suffix
+# itself, and "!" fails that variable's own validation regex).
+run "rds_managed_secret_access_is_off_by_default" {
+  command = plan
+
+  variables {
+    cluster_name = "production-main"
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_policy.external_secrets[0].policy, "rds!db-")
+    error_message = "rds_managed_secret_access defaults to false; the policy must not grant access to RDS-managed secrets until a stack turns it on."
+  }
+}
+
+run "rds_managed_secret_access_grants_the_fixed_naming_convention" {
+  command = plan
+
+  variables {
+    cluster_name              = "production-main"
+    rds_managed_secret_access = true
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_policy.external_secrets[0].policy, "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds!db-*")
+    error_message = "rds_managed_secret_access = true must grant secret:rds!db-*, scoped to this account/region."
+  }
+}
+
+# allowed_namespaces off (the default) must not add a conditions field to the
+# ClusterSecretStore, preserving the previous, unrestricted behavior.
+run "allowed_namespaces_off_by_default_leaves_the_store_unrestricted" {
+  command = plan
+
+  variables {
+    cluster_name                        = "production-main"
+    create_default_cluster_secret_store = true
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = !contains(keys(kubernetes_manifest.cluster_secret_store[0].manifest.spec), "conditions")
+    error_message = "With allowed_namespaces unset, the ClusterSecretStore must not have a spec.conditions field."
+  }
+}
+
+# allowed_namespaces scopes the default ClusterSecretStore to exactly the
+# consumer namespaces a stack lists -- least privilege once
+# rds_managed_secret_access grants read on any RDS-managed secret.
+run "allowed_namespaces_scopes_the_default_cluster_secret_store" {
+  command = plan
+
+  variables {
+    cluster_name                        = "production-main"
+    create_default_cluster_secret_store = true
+    allowed_namespaces                  = ["backend-services"]
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = kubernetes_manifest.cluster_secret_store[0].manifest.spec.conditions[0].namespaces[0] == "backend-services"
+    error_message = "allowed_namespaces must produce spec.conditions[0].namespaces on the default ClusterSecretStore."
+  }
+}

@@ -14,6 +14,24 @@ LocalEmu on every CI run — the lane that caught the backup/maintenance window
 overlap which would have failed `CreateDBInstance` in staging and prod. Floci
 cannot run it: no `CreateDBSubnetGroup`.
 
+In all three real stacks, `rds/main`'s `allowed_security_groups` is
+`eks/main`'s `eks_cluster_managed_security_group_id` — the consumer is
+`eks-backend-services/main`'s pods, which run on `eks/main`'s managed node
+groups. Without it, the security group's only ingress rule has an empty
+`security_groups` list and nothing can reach the database.
+
+`manage_master_user_password` is always `true`, so RDS itself creates and
+owns the master user's Secrets Manager secret. `fnx-prod-production`'s
+`rds/main` also sets `master_user_secret_kms_key_id` to `kms/main`'s
+`key_arn`, matching the CMK this stack already uses for `kms_key_id` and
+`performance_insights_kms_key_id` — dev/staging leave it unset (AWS-managed
+`aws/secretsmanager` key), which is fine functionally since ESO needs no
+grant on an AWS-managed key, but prod's CMK posture is intentionally
+consistent everywhere. `external-secrets/main`'s IAM policy already grants
+`kms:Decrypt` on the CMK (gated by `kms:ViaService=secretsmanager`), so
+setting this needs no new grant for `eks-backend-services/main`'s
+ExternalSecret to keep reading the secret.
+
 ## Inputs / outputs
 
 | Key | Notes |
