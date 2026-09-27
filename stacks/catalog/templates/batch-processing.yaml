@@ -39,6 +39,7 @@ import:
   - catalog/monitoring/defaults
   - catalog/eventbridge/defaults
   - catalog/sqs/defaults
+  - catalog/s3/defaults
 
 # =============================================================================
 # COMPONENT DEFINITIONS
@@ -169,99 +170,119 @@ components:
     # STORAGE (S3)
     # =========================================================================
 
+    # The three buckets below inherit s3/defaults (imported above), which
+    # supplies kms_key_arn (from kms/main) and versioning_enabled: true; the
+    # legacy `description`/`server_side_encryption`/`lifecycle_rules`/
+    # `block_public_access` inputs no longer exist on the s3 component (it
+    # always encrypts with SSE-KMS via kms/main and always blocks public
+    # access; lifecycle rules are `lifecycle_configuration_rules`) and have
+    # been dropped or converted rather than silently ignored. `bucket_name`
+    # is kept explicit on all three: the trigger queue's policy (below),
+    # the s3-trigger EventBridge pattern and the job-definition/schedule
+    # input/output paths all reference these names literally. `logging` is
+    # left unset (disabled, the s3 component's default) rather than pointed
+    # at a `{{ .vars.log_bucket_name }}` placeholder: atmos.yaml sets no
+    # `missingkey` option, so an unset template key renders as the literal
+    # string `<no value>`, which fails the s3 component's logging.bucket_name
+    # validation at plan time. The target must be a separate SSE-S3 bucket
+    # anyway (S3 cannot deliver access logs to an SSE-KMS bucket), and no such
+    # bucket exists in this template, so enable it per stack instead by
+    # overriding the instance directly, e.g.:
+    #   batch-processing/s3-input:
+    #     vars:
+    #       logging:
+    #         bucket_name: "my-log-bucket"
+    #         prefix: "s3-access-logs/batch-input/"
     batch-processing/s3-input:
       metadata:
         component: s3
         type: real
+        inherits:
+          - s3/defaults
       vars:
+        # name is required even though bucket_name overrides the name it would
+        # otherwise generate.
+        name: "batch-input"
         bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
-        description: "Input data for batch jobs"
 
-        # Versioning
-        versioning_enabled: true
-
-        # Encryption
-        server_side_encryption:
-          sse_algorithm: "aws:kms"
-          kms_master_key_id: "{{ .vars.batch_kms_key_id }}"
-
-        # Lifecycle rules
-        lifecycle_rules:
+        lifecycle_configuration_rules:
           - id: "expire-processed"
             enabled: true
-            prefix: "processed/"
+            abort_incomplete_multipart_upload_days: 7
+            filter_and:
+              prefix: "processed/"
             expiration:
               days: 30
+            noncurrent_version_expiration:
+              noncurrent_days: 30
           - id: "transition-archive"
             enabled: true
-            prefix: "archive/"
-            transitions:
+            abort_incomplete_multipart_upload_days: 7
+            filter_and:
+              prefix: "archive/"
+            transition:
               - days: 1
                 storage_class: "GLACIER"
 
-        # Access control
-        block_public_access: true
-
-        # Event notifications
-        event_notifications:
-          sqs:
+        # S3 sends these once PutBucketNotification finds the trigger
+        # queue's policy already admitting s3.amazonaws.com (that policy is
+        # on batch-processing/sqs/trigger, listed in dependencies.components
+        # below so Atmos applies it first) and the aws.s3 "Object Created"
+        # pattern below is matched only once EventBridge notifications
+        # (eventbridge: true) are on.
+        event_notification_details:
+          enabled: true
+          eventbridge: true
+          queue_list:
             - queue_arn: !terraform.state batch-processing/sqs/trigger .queue_arn
               events:
                 - "s3:ObjectCreated:*"
               filter_prefix: "incoming/"
-              filter_suffix: ""
 
-        # Logging
-        logging:
-          target_bucket: "{{ .vars.log_bucket_name }}"
-          target_prefix: "s3-access-logs/batch-input/"
+        # logging disabled by default -- see the STORAGE (S3) note above
+        # for how to enable it per stack.
 
         tags:
           Layer: "storage"
           DataType: "input"
       dependencies:
         components:
+          - component: kms/main
           - component: batch-processing/sqs/trigger
 
     batch-processing/s3-output:
       metadata:
         component: s3
         type: real
+        inherits:
+          - s3/defaults
       vars:
+        name: "batch-output"
         bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output"
-        description: "Output data from batch jobs"
 
-        # Versioning
-        versioning_enabled: true
-
-        # Encryption
-        server_side_encryption:
-          sse_algorithm: "aws:kms"
-          kms_master_key_id: "{{ .vars.batch_kms_key_id }}"
-
-        # Lifecycle rules
-        lifecycle_rules:
+        lifecycle_configuration_rules:
           - id: "transition-ia"
             enabled: true
-            prefix: ""
-            transitions:
+            abort_incomplete_multipart_upload_days: 7
+            filter_and:
+              prefix: ""
+            transition:
               - days: 30
                 storage_class: "STANDARD_IA"
               - days: 90
                 storage_class: "GLACIER"
           - id: "expire-temp"
             enabled: true
-            prefix: "temp/"
+            abort_incomplete_multipart_upload_days: 7
+            filter_and:
+              prefix: "temp/"
             expiration:
               days: 7
+            noncurrent_version_expiration:
+              noncurrent_days: 7
 
-        # Access control
-        block_public_access: true
-
-        # Logging
-        logging:
-          target_bucket: "{{ .vars.log_bucket_name }}"
-          target_prefix: "s3-access-logs/batch-output/"
+        # logging disabled by default -- see the STORAGE (S3) note above
+        # for how to enable it per stack.
 
         tags:
           Layer: "storage"
@@ -271,22 +292,13 @@ components:
       metadata:
         component: s3
         type: real
+        inherits:
+          - s3/defaults
       vars:
+        name: "batch-scripts"
         bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-scripts"
-        description: "Batch job scripts and configurations"
 
-        # Versioning (important for scripts)
-        versioning_enabled: true
-
-        # Encryption
-        server_side_encryption:
-          sse_algorithm: "aws:kms"
-          kms_master_key_id: "{{ .vars.batch_kms_key_id }}"
-
-        # No lifecycle - keep scripts indefinitely
-
-        # Access control
-        block_public_access: true
+        # No lifecycle rules - keep scripts indefinitely.
 
         tags:
           Layer: "storage"
@@ -1501,7 +1513,6 @@ components:
 # =============================================================================
 # REQUIRED VARIABLES
 # =============================================================================
-# batch_kms_key_id: "arn:aws:kms:..."
 # batch_service_role_arn: "arn:aws:iam::..."
 # batch_instance_role_arn: "arn:aws:iam::..." (for EC2)
 # batch_job_role_arn: "arn:aws:iam::..."
@@ -1515,5 +1526,28 @@ components:
 # list_files_lambda_arn: "arn:aws:lambda:..."
 # aggregate_lambda_arn: "arn:aws:lambda:..."
 # batch_sns_topic_arn: "arn:aws:sns:..."
-# log_bucket_name: "my-log-bucket"
 # alarm_email_addresses: ["ops@example.com"]
+#
+# log_bucket_name is NOT required: logging is disabled by default. See the
+# STORAGE (S3) note above to opt in per stack.
+#
+# KMS: the job role (batch_job_role_arn) and the execution roles behind the
+# validation_lambda_arn, list_files_lambda_arn and aggregate_lambda_arn
+# Lambdas are the principals that actually read and write the S3 buckets
+# above, which are encrypted with kms/main's key (not a batch-specific
+# key). kms/main delegates to IAM through its root-account statement, so
+# no key-policy change is needed, but each of those externally-supplied
+# roles still needs its own IAM policy granting kms:Decrypt and
+# kms:GenerateDataKey* on `!terraform.state kms/main .key_arn`, scoped
+# with `kms:ViaService: s3.<region>.amazonaws.com` -- otherwise
+# GetObject/PutObject against these buckets fails with AccessDenied.
+#
+# batch_execution_role_arn is the ECS task-execution role: it only pulls
+# container images and writes logs, and eventbridge_step_functions_role_arn
+# is the role EventBridge assumes to call states:StartExecution -- neither
+# touches these buckets, so neither needs a grant here. Each state
+# machine's own execution role is created by the stepfunctions component
+# itself (components/terraform/stepfunctions/main.tf) and already carries
+# a KMS policy for its own log group; give it S3/KMS access too only if a
+# state reads or writes these buckets directly (e.g. via an AWS SDK
+# service integration) rather than through the Lambdas above.

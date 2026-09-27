@@ -16,11 +16,31 @@
                     ]
                 },
                 {
+                    "resource": "aws_api_gateway_rest_api.rest_api[0]",
+                    "check_ids": [
+                        "CKV_AWS_237"
+                    ]
+                },
+                {
                     "resource": "aws_api_gateway_stage.rest_stage",
                     "check_ids": [
                         "CKV2_AWS_51",
                         "CKV2_AWS_77",
                         "CKV_AWS_120"
+                    ]
+                },
+                {
+                    "resource": "aws_api_gateway_stage.rest_stage[0]",
+                    "check_ids": [
+                        "CKV2_AWS_51",
+                        "CKV2_AWS_77",
+                        "CKV_AWS_120"
+                    ]
+                },
+                {
+                    "resource": "aws_cloudwatch_log_group.api_logs",
+                    "check_ids": [
+                        "CKV_AWS_338"
                     ]
                 },
                 {
@@ -34,6 +54,12 @@
                     "check_ids": [
                         "CKV2_AWS_31"
                     ]
+                },
+                {
+                    "resource": "aws_wafv2_web_acl.api_waf[0]",
+                    "check_ids": [
+                        "CKV2_AWS_31"
+                    ]
                 }
             ]
         },
@@ -42,6 +68,13 @@
             "findings": [
                 {
                     "resource": "aws_s3_bucket.terraform_state",
+                    "check_ids": [
+                        "CKV2_AWS_62",
+                        "CKV_AWS_144"
+                    ]
+                },
+                {
+                    "resource": "aws_s3_bucket.terraform_state_access_logs",
                     "check_ids": [
                         "CKV2_AWS_62",
                         "CKV_AWS_144"
@@ -64,15 +97,8 @@
             ]
         },
         {
-            "file": "/cost-optimization/main.tf",
+            "file": "/cost-optimization/lambda.tf",
             "findings": [
-                {
-                    "resource": "aws_iam_role_policy.scheduler",
-                    "check_ids": [
-                        "CKV_AWS_290",
-                        "CKV_AWS_355"
-                    ]
-                },
                 {
                     "resource": "aws_lambda_function.resource_cleanup",
                     "check_ids": [
@@ -107,9 +133,14 @@
                     ]
                 },
                 {
-                    "resource": "aws_sns_topic.cost_alerts",
+                    "resource": "aws_lambda_function.scheduler[0]",
                     "check_ids": [
-                        "CKV_AWS_26"
+                        "CKV_AWS_115",
+                        "CKV_AWS_116",
+                        "CKV_AWS_117",
+                        "CKV_AWS_173",
+                        "CKV_AWS_272",
+                        "CKV_AWS_50"
                     ]
                 }
             ]
@@ -123,12 +154,25 @@
                         "CKV2_AWS_38",
                         "CKV2_AWS_39"
                     ]
+                },
+                {
+                    "resource": "aws_route53_zone.root_zone[0]",
+                    "check_ids": [
+                        "CKV2_AWS_38",
+                        "CKV2_AWS_39"
+                    ]
                 }
             ]
         },
         {
             "file": "/ec2/launch-template.tf",
             "findings": [
+                {
+                    "resource": "aws_instance.from_launch_template",
+                    "check_ids": [
+                        "CKV2_AWS_41"
+                    ]
+                },
                 {
                     "resource": "aws_instance.from_launch_template[0]",
                     "check_ids": [
@@ -140,6 +184,12 @@
         {
             "file": "/ec2/main.tf",
             "findings": [
+                {
+                    "resource": "aws_secretsmanager_secret.ssh_key",
+                    "check_ids": [
+                        "CKV2_AWS_57"
+                    ]
+                },
                 {
                     "resource": "aws_secretsmanager_secret.ssh_key[0]",
                     "check_ids": [
@@ -167,20 +217,15 @@
             "file": "/eks/main.tf",
             "findings": [
                 {
-                    "resource": "module.eks_cluster.aws_eks_cluster.default[0]",
+                    "resource": "module.eks_cluster.aws_eks_cluster.default",
                     "check_ids": [
                         "CKV_AWS_339"
                     ]
-                }
-            ]
-        },
-        {
-            "file": "/idp-platform/data.tf",
-            "findings": [
+                },
                 {
-                    "resource": "aws_availability_zones.available",
+                    "resource": "module.eks_cluster.aws_eks_cluster.default[0]",
                     "check_ids": [
-                        "CKV_AWS_394"
+                        "CKV_AWS_339"
                     ]
                 }
             ]
@@ -359,20 +404,15 @@
                     ]
                 },
                 {
-                    "resource": "aws_security_group.lambda[0]",
+                    "resource": "aws_security_group.lambda",
                     "check_ids": [
                         "CKV2_AWS_5"
                     ]
-                }
-            ]
-        },
-        {
-            "file": "/monitoring/main.tf",
-            "findings": [
+                },
                 {
-                    "resource": "aws_sns_topic.alarms[0]",
+                    "resource": "aws_security_group.lambda[0]",
                     "check_ids": [
-                        "CKV_AWS_26"
+                        "CKV2_AWS_5"
                     ]
                 }
             ]
@@ -384,8 +424,7 @@
                     "resource": "module.idp_database.aws_db_instance.main",
                     "check_ids": [
                         "CKV2_AWS_69",
-                        "CKV_AWS_129",
-                        "CKV_AWS_354"
+                        "CKV_AWS_129"
                     ]
                 },
                 {
@@ -395,7 +434,19 @@
                     ]
                 },
                 {
+                    "resource": "module.idp_database.aws_db_instance.read_replica[0]",
+                    "check_ids": [
+                        "CKV2_AWS_60"
+                    ]
+                },
+                {
                     "resource": "module.idp_database.aws_security_group.rds_proxy",
+                    "check_ids": [
+                        "CKV2_AWS_5"
+                    ]
+                },
+                {
+                    "resource": "module.idp_database.aws_security_group.rds_proxy[0]",
                     "check_ids": [
                         "CKV2_AWS_5"
                     ]
@@ -414,12 +465,20 @@
             ]
         },
         {
-            "file": "/security-monitoring/main.tf",
+            "file": "/securitygroup/audit.tf",
             "findings": [
                 {
-                    "resource": "aws_guardduty_detector.main",
+                    "resource": "aws_cloudwatch_log_group.security_group_changes",
                     "check_ids": [
-                        "CKV2_AWS_3"
+                        "CKV_AWS_158",
+                        "CKV_AWS_338"
+                    ]
+                },
+                {
+                    "resource": "aws_cloudwatch_log_group.security_group_changes[0]",
+                    "check_ids": [
+                        "CKV_AWS_158",
+                        "CKV_AWS_338"
                     ]
                 }
             ]
@@ -436,28 +495,16 @@
             ]
         },
         {
-            "file": "/securitygroup/rules.tf",
-            "findings": [
-                {
-                    "resource": "aws_cloudwatch_log_group.security_group_changes[0]",
-                    "check_ids": [
-                        "CKV_AWS_158",
-                        "CKV_AWS_338"
-                    ]
-                }
-            ]
-        },
-        {
             "file": "/vpc/flow-logs.tf",
             "findings": [
                 {
-                    "resource": "aws_cloudwatch_log_group.flow_logs[0]",
+                    "resource": "aws_cloudwatch_log_group.flow_logs",
                     "check_ids": [
                         "CKV_AWS_338"
                     ]
                 },
                 {
-                    "resource": "aws_cloudwatch_log_group.flow_logs",
+                    "resource": "aws_cloudwatch_log_group.flow_logs[0]",
                     "check_ids": [
                         "CKV_AWS_338"
                     ]

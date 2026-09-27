@@ -20,29 +20,24 @@ output "service_endpoints" {
 }
 
 output "deployment_status" {
-  description = "Deployment status for backend services"
+  description = "Deployment configuration for backend services (desired state only -- kubernetes_deployment_v1 has no status block in this provider version to read live rollout status from)"
   value = {
     for service_name, deployment in kubernetes_deployment_v1.backend_services : service_name => {
-      name               = deployment.metadata[0].name
-      namespace          = deployment.metadata[0].namespace
-      replicas           = deployment.spec[0].replicas
-      ready_replicas     = deployment.status[0].ready_replicas
-      updated_replicas   = deployment.status[0].updated_replicas
-      available_replicas = deployment.status[0].available_replicas
+      name      = deployment.metadata[0].name
+      namespace = deployment.metadata[0].namespace
+      replicas  = deployment.spec[0].replicas
     }
   }
 }
 
 output "hpa_status" {
-  description = "Horizontal Pod Autoscaler status for backend services"
+  description = "Horizontal Pod Autoscaler configuration for backend services (desired bounds only -- kubernetes_horizontal_pod_autoscaler_v2 has no status block in this provider version to read live replica counts from)"
   value = {
     for service_name, hpa in kubernetes_horizontal_pod_autoscaler_v2.backend_services : service_name => {
-      name             = hpa.metadata[0].name
-      namespace        = hpa.metadata[0].namespace
-      min_replicas     = hpa.spec[0].min_replicas
-      max_replicas     = hpa.spec[0].max_replicas
-      current_replicas = hpa.status[0].current_replicas
-      desired_replicas = hpa.status[0].desired_replicas
+      name         = hpa.metadata[0].name
+      namespace    = hpa.metadata[0].namespace
+      min_replicas = hpa.spec[0].min_replicas
+      max_replicas = hpa.spec[0].max_replicas
     }
   }
 }
@@ -70,12 +65,11 @@ output "service_accounts" {
 }
 
 output "secrets" {
-  description = "Secret names (not values) for reference"
+  description = "Names (not values) of the Secret objects the external-secrets operator materializes from the ExternalSecret resources"
   value = {
-    database_secret = kubernetes_secret_v1.database_credentials.metadata[0].name
-    redis_secret    = kubernetes_secret_v1.redis_credentials.metadata[0].name
+    database_secret = local.database_secret_name
+    redis_secret    = var.redis_enabled ? local.redis_secret_name : null
   }
-  sensitive = true
 }
 
 output "config_maps" {
@@ -100,9 +94,9 @@ output "service_urls" {
   description = "Internal service URLs for inter-service communication"
   value = {
     for service_name, service_config in local.backend_services : service_name => {
-      internal_url = "http://${service_name}.${kubernetes_namespace_v1.backend_services.metadata[0].name}.svc.cluster.local:${service_config.port}"
-      health_url   = "http://${service_name}.${kubernetes_namespace_v1.backend_services.metadata[0].name}.svc.cluster.local:${service_config.port}${service_config.health_check}"
-      metrics_url  = "http://${service_name}.${kubernetes_namespace_v1.backend_services.metadata[0].name}.svc.cluster.local:${service_config.metrics_port}/metrics"
+      internal_url = "http://${local.slug[service_name]}.${kubernetes_namespace_v1.backend_services.metadata[0].name}.svc.cluster.local:${service_config.port}"
+      health_url   = "http://${local.slug[service_name]}.${kubernetes_namespace_v1.backend_services.metadata[0].name}.svc.cluster.local:${service_config.port}${service_config.health_check}"
+      metrics_url  = "http://${local.slug[service_name]}.${kubernetes_namespace_v1.backend_services.metadata[0].name}.svc.cluster.local:${service_config.metrics_port}/metrics"
     }
   }
 }
@@ -111,7 +105,7 @@ output "prometheus_service_monitors" {
   description = "Prometheus ServiceMonitor resources"
   value = var.enable_prometheus_monitoring ? {
     for service_name, _ in local.backend_services : service_name => {
-      name      = service_name
+      name      = local.slug[service_name]
       namespace = kubernetes_namespace_v1.backend_services.metadata[0].name
       enabled   = true
     }
