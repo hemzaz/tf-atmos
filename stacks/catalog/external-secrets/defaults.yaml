@@ -32,6 +32,19 @@ components:
         # (catalog/kms/defaults), so this resolves in all stacks.
         kms_key_arn: !terraform.state kms/main .key_arn
 
+        # Scopes the one-level-nested secret/parameter match to this stack's
+        # own context instead of a depth-agnostic "*/<prefix>/*" wildcard.
+        # settings.environment.stage is the descriptive stage name each
+        # stack's security.yaml already hardcodes as the leading segment of
+        # its secretsmanager/app and secretsmanager/infra context_name
+        # ("production/app", "staging/infra", plain "app"/"infra" in dev
+        # where there's no stage prefix to match). Note this is NOT the same
+        # as Atmos's own settings.context.stage (the short stage folder name,
+        # e.g. "prod"), which secretsmanager/defaults uses for its
+        # "environment" var, a *different* segment of full_path.
+        secret_path_context_prefixes:
+          - "{{ .settings.environment.stage }}"
+
         tags:
           Component: "external-secrets"
           Team: "platform"

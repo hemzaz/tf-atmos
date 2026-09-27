@@ -20,7 +20,6 @@
 # them up. Only `region` and `tags` are global vars.
 
 import:
-  - mixins/production
   - catalog/vpc/defaults
   - catalog/eks/defaults
   - catalog/secretsmanager/defaults

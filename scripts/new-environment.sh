@@ -435,12 +435,6 @@ generate_stack_file() {
         region_mixin_import="  # (no stacks/mixins/region/${REGION}.yaml)"
     fi
 
-    local env_mixin_import=""
-    case "$ENV_TYPE" in
-        production) env_mixin_import="  - mixins/production" ;;
-        development) env_mixin_import="  - mixins/development" ;;
-    esac
-
     write_file "$(stack_file)" << EOF
 ---
 # =============================================================================
@@ -458,7 +452,6 @@ import:
   - mixins/tenant/${TENANT}
   - mixins/stage/${STAGE}
 ${region_mixin_import}
-${env_mixin_import}
 
   # Org and stage defaults (backend, toolchain, account)
   - orgs/${TENANT}/${STAGE}/_defaults

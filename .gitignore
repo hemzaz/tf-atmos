@@ -164,6 +164,8 @@ crash.log
 components/terraform/*/*.terraform.tfvars.json
 components/terraform/*/backend.tf.json
 components/terraform/*/providers_override.tf.json
+# archive_file output (cost-optimization packages its Lambda sources locally)
+components/terraform/cost-optimization/*.zip
 
 # Additional logs and temporary files
 *.tmp

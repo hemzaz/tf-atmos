@@ -139,6 +139,123 @@ workflows:
       - name: reports-dir
         type: shell
         command: mkdir -p reports
+      # checkov's --baseline flag (used by the `checkov` step below) reduces the
+      # printed passed/failed/skipped counts to only the delta versus baseline:
+      # checkov/common/output/baseline.py Baseline.compare_and_reduce_reports()
+      # keeps a passed/skipped check only if it matches a baseline entry, and
+      # drops a failed check that matches one -- everything else (the vast
+      # majority of a healthy scan) is filtered out of the report entirely.
+      # That is correct for a burn-down gate (fail only on genuinely NEW
+      # findings), but it means the baselined run's own summary line stays
+      # near-zero even when every component was fully scanned, which is what
+      # made this gate look like it had stopped scanning. This unbaselined,
+      # always-soft-fail pass measures real coverage and fails the job if it
+      # collapses, independent of whether the baselined gate below happens to
+      # pass.
+      # --quiet is deliberately NOT passed here (unlike the baselined `checkov`
+      # step below): checkov's JSON output only includes the per-file
+      # `results.parsing_errors` list (needed by the guard below) when --quiet
+      # is absent -- with --quiet, get_dict() takes the "is_quiet" branch and
+      # drops everything except summary + failed_checks. This step's own
+      # console output is still suppressed by `output: none`.
+      - name: checkov-coverage
+        type: shell
+        output: none
+        command: >-
+          checkov --directory components/terraform --framework terraform
+          --output json --output-file-path reports --soft-fail --compact
+      - name: checkov-coverage-guard
+        type: script
+        interpreter: python3
+        script: |
+          import json
+          import os
+          import sys
+
+          with open("reports/results_json.json") as f:
+              data = json.load(f)
+
+          # On a total scan collapse (zero resources matched) checkov skips the
+          # per-report "results"/"summary" wrapper and returns Report("").get_summary()
+          # flat at the top level; with more than one matched framework it returns a
+          # list of per-framework report dicts instead of one dict. Normalize all
+          # three shapes so this guard prints a clear message instead of a KeyError.
+          reports = data if isinstance(data, list) else [data]
+          summaries = [r.get("summary", r) for r in reports]
+
+          passed = sum(s.get("passed", 0) for s in summaries)
+          failed = sum(s.get("failed", 0) for s in summaries)
+          skipped = sum(s.get("skipped", 0) for s in summaries)
+          parsing_errors = sum(s.get("parsing_errors", 0) for s in summaries)
+          resources = sum(s.get("resource_count", 0) for s in summaries)
+
+          print(
+              f"checkov coverage: {resources} resources scanned in "
+              f"components/terraform ({passed} passed, {failed} failed, "
+              f"{skipped} skipped, {parsing_errors} parsing errors)"
+          )
+
+          # A file checkov can't parse is scanned as if it doesn't exist: any check
+          # that resolves a var.* default from it (e.g. the SNS/SQS encryption
+          # checks CKV_AWS_26/CKV_AWS_27) then evaluates an unresolved string and
+          # can silently false-pass. Fail loudly instead of letting a parsing
+          # failure hide in the count the way it used to.
+          if parsing_errors > 0:
+              parse_error_files = [
+                  path
+                  for r in reports
+                  for path in r.get("results", {}).get("parsing_errors", [])
+              ]
+              print(f"FAIL: checkov could not parse {parsing_errors} file(s):")
+              for path in parse_error_files:
+                  print(f"  - {path}")
+              sys.exit(1)
+
+          # components/terraform currently yields ~570 resources across every
+          # root module. A collapse to a handful (as happened when this number
+          # was only ever read off the --baseline run below, see the comment
+          # above) means checkov stopped actually scanning almost everything.
+          # Lower this only alongside a deliberate removal of components.
+          min_resources = 400
+          if resources < min_resources:
+              print(
+                  f"FAIL: only {resources} resources scanned, expected at "
+                  f"least {min_resources} -- checkov coverage collapsed"
+              )
+              sys.exit(1)
+
+          # A single global count can still hide a real regression -- e.g. ten
+          # small components dropped by a bad --skip-path while a couple of large
+          # ones gain resources elsewhere. Assert every components/terraform/*
+          # directory that has its own .tf files is actually represented in the
+          # scan's check results.
+          scanned_dirs = set()
+          for r in reports:
+              for key in ("passed_checks", "failed_checks", "skipped_checks"):
+                  for check in r.get("results", {}).get(key, []):
+                      top = check.get("file_path", "").lstrip("/").split("/", 1)[0]
+                      if top:
+                          scanned_dirs.add(top)
+
+          terraform_root = "components/terraform"
+          expected_dirs = {
+              name
+              for name in os.listdir(terraform_root)
+              if os.path.isdir(os.path.join(terraform_root, name))
+              and any(
+                  f.endswith(".tf")
+                  for _, _, files in os.walk(os.path.join(terraform_root, name))
+                  for f in files
+              )
+          }
+
+          missing = sorted(expected_dirs - scanned_dirs)
+          if missing:
+              print(
+                  f"FAIL: {len(missing)} components/terraform/* module(s) with "
+                  f".tf files are missing from the checkov scan: {', '.join(missing)}"
+              )
+              sys.exit(1)
       - type: parallel
         fail:
           mode: wait_all
@@ -167,6 +284,48 @@ workflows:
       - name: reports-dir
         type: shell
         command: mkdir -p reports
+      # Report-only job (SARIF findings never fail it), but a silent coverage
+      # collapse here would still look like a healthy run in the nightly log
+      # and the SARIF published to code scanning. Print-only, same shape as
+      # `security-scan`'s checkov-coverage-guard, but never exits non-zero.
+      - name: checkov-coverage
+        type: shell
+        output: none
+        command: >-
+          checkov --directory components/terraform --framework terraform
+          --output json --output-file-path reports --soft-fail --compact
+      - name: checkov-coverage-print
+        type: script
+        interpreter: python3
+        script: |
+          import json
+
+          with open("reports/results_json.json") as f:
+              data = json.load(f)
+
+          reports = data if isinstance(data, list) else [data]
+          summaries = [r.get("summary", r) for r in reports]
+
+          passed = sum(s.get("passed", 0) for s in summaries)
+          failed = sum(s.get("failed", 0) for s in summaries)
+          skipped = sum(s.get("skipped", 0) for s in summaries)
+          parsing_errors = sum(s.get("parsing_errors", 0) for s in summaries)
+          resources = sum(s.get("resource_count", 0) for s in summaries)
+
+          print(
+              f"checkov coverage: {resources} resources scanned in "
+              f"components/terraform ({passed} passed, {failed} failed, "
+              f"{skipped} skipped, {parsing_errors} parsing errors)"
+          )
+          if parsing_errors > 0:
+              parse_error_files = [
+                  path
+                  for r in reports
+                  for path in r.get("results", {}).get("parsing_errors", [])
+              ]
+              print(f"WARNING: checkov could not parse {parsing_errors} file(s):")
+              for path in parse_error_files:
+                  print(f"  - {path}")
       - type: parallel
         fail:
           mode: wait_all
