@@ -374,12 +374,20 @@ resource "aws_lambda_permission" "secretsmanager" {
 
 # Configures rotation_secret_arn's rotation from THIS component instance, not
 # the secretsmanager component -- see rotation_secret_arn's own description
-# for why. depends_on the invoke permission above: Secrets Manager's
-# RotateSecret API (which creating/updating this resource calls) tests the
-# rotation configuration -- createSecret/setSecret/testSecret against a
-# temporary AWSPENDING version -- even when rotate_immediately is false, so
-# secretsmanager.amazonaws.com must already be able to invoke this function,
-# not merely have it exist, before this resource applies.
+# for why. depends_on the invoke permission above AND every IAM grant the
+# function's own execution role needs (lambda_custom, lambda_kms_env,
+# lambda_basic, lambda_vpc_access): Secrets Manager's RotateSecret API (which
+# creating/updating this resource calls) invokes the function -- at minimum
+# running its testSecret step against a temporary AWSPENDING version it
+# creates and then removes, even when rotate_immediately is false, and the
+# function's own handler starts with describe_secret/get_secret_value calls
+# that need those grants. aws_lambda_function.main only has an IMPLICIT
+# dependency on aws_iam_role.lambda (via its arn), not on the role's
+# policies -- attaching a policy to a role is a separate resource that does
+# not block the role, or anything referencing it, from being usable. Without
+# these explicit depends_on, Terraform can create this resource (and AWS can
+# invoke the function) before those policies exist or have propagated,
+# failing the function's first call with AccessDenied.
 resource "aws_secretsmanager_secret_rotation" "this" {
   count = var.rotation_secret_arn != null ? 1 : 0
 
@@ -391,11 +399,17 @@ resource "aws_secretsmanager_secret_rotation" "this" {
     automatically_after_days = var.rotation_days
   }
 
-  depends_on = [aws_lambda_permission.secretsmanager]
+  depends_on = [
+    aws_lambda_permission.secretsmanager,
+    aws_iam_role_policy.lambda_custom,
+    aws_iam_role_policy.lambda_kms_env,
+    aws_iam_role_policy_attachment.lambda_basic,
+    aws_iam_role_policy_attachment.lambda_vpc_access,
+  ]
 
   lifecycle {
     precondition {
-      condition     = var.secretsmanager_source_arn != null
+      condition     = var.secretsmanager_source_arn != null && var.secretsmanager_source_arn == var.rotation_secret_arn
       error_message = "rotation_secret_arn requires secretsmanager_source_arn to be set to the SAME secret's ARN, so this function is actually permitted to be invoked by Secrets Manager before rotation is configured on it."
     }
   }

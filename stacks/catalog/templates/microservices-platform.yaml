@@ -1293,18 +1293,32 @@ components:
     # redis-auth-rotation, elasticache's replication group ARN and endpoint
     # too) cannot have aws_secretsmanager_secret_rotation configured on the
     # SECRET's own component instance: Secrets Manager's RotateSecret API
-    # tests the rotation configuration -- createSecret/setSecret/testSecret
-    # against a temporary AWSPENDING version -- even when rotate_immediately
-    # is false, and on microservices/secrets' own first apply, these
-    # functions and their secretsmanager.amazonaws.com invoke permissions do
-    # not exist yet. Configuring it here instead is safe: each Lambda
-    # instance already depends on microservices/secrets (to read the
+    # invokes the function -- at minimum running its testSecret step against
+    # a temporary AWSPENDING version it creates and then removes -- even when
+    # rotate_immediately is false, and on microservices/secrets' own first
+    # apply, these functions and their secretsmanager.amazonaws.com invoke
+    # permissions do not exist yet. Configuring it here instead is safe: each
+    # Lambda instance already depends on microservices/secrets (to read the
     # secret's ARN), so by the time ITS OWN aws_secretsmanager_secret_rotation
-    # applies, the function and its permission already exist. See the lambda
-    # component's rotation_secret_arn for the full rationale, and
+    # applies, the function, its permission and its IAM role policies already
+    # exist (the lambda component's depends_on covers all of them). See the
+    # lambda component's rotation_secret_arn for the full rationale, and
     # microservices/secrets below, which sets rotation_managed_externally:
     # true on the redis and jwt_signing entries instead of
     # rotation_lambda_arn/rotation_automatically.
+    #
+    # redis-auth-rotation sets rotate_immediately: true below (jwt-secret-
+    # rotation keeps the default false). At rotate_immediately = false,
+    # Secrets Manager's test invokes ONLY testSecret, against a temporary
+    # AWSPENDING version it manufactures itself -- setSecret, the step that
+    # actually calls ElastiCache ModifyReplicationGroup to push a new token
+    # onto the replication group, never runs. redis-auth-rotation's
+    # testSecret AUTHs against the replication group with that pending
+    # token, so it fails every time unless setSecret already pushed it --
+    # which only a real (rotate_immediately = true) rotation does.
+    # jwt-secret-rotation's testSecret only round-trips the pending value
+    # through Secrets Manager itself (setSecret is a no-op for it), so it
+    # passes regardless and keeps the safer default.
 
     # Redis AUTH token rotation: setSecret calls ElastiCache
     # ModifyReplicationGroup with AuthTokenUpdateStrategy=ROTATE (the new
@@ -1374,6 +1388,11 @@ components:
         secretsmanager_source_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_secret_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_days: 30
+        # See the SECRET ROTATION comment above: setSecret (the step that
+        # pushes a new token onto the replication group) never runs during
+        # rotate_immediately = false's test-only path, so this function's
+        # testSecret would always fail the AUTH check without this.
+        rotate_immediately: true
         custom_policy: !terraform.state microservices/elasticache .rotation_policy
         tags:
           Layer: "security"

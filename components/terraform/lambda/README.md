@@ -24,7 +24,7 @@ fnx-staging-staging-01, fnx-prod-production) — zero instances. Add a
 | `architectures` | `x86_64`/`arm64` only (validated) |
 | `configure_event_invoke`, `on_success_destination`, `on_failure_destination`, `dead_letter_target_arn`, `delivery_kms_key_arn` | asynchronous-invocation destinations and the dead-letter target. For each SQS queue / SNS topic named there the execution role gets `sqs:SendMessage` / `sns:Publish` (policy `<Environment>-<function_name>-delivery`), and `kms:GenerateDataKey`/`kms:Decrypt` on `delivery_kms_key_arn` when the queue or topic is encrypted with a customer managed key. Other destination types (Lambda, EventBridge) still need `custom_policy` |
 | `secretsmanager_source_arn` | adds a resource-based permission letting `secretsmanager.amazonaws.com` invoke this function as a rotation function, scoped by that secret's ARN and this account |
-| `rotation_secret_arn`, `rotation_days` (30), `rotate_immediately` (`false`) | configures `aws_secretsmanager_secret_rotation` on that secret from **this** component instance (not the secretsmanager component's own `rotation_lambda_arn`) -- see "Rotation functions" below for why |
+| `rotation_secret_arn`, `rotation_days` (30), `rotate_immediately` (`false`) | configures `aws_secretsmanager_secret_rotation` on that secret from **this** component instance (not the secretsmanager component's own `rotation_lambda_arn`), `depends_on` this function's own invoke permission AND its IAM role policies -- see "Rotation functions" below for why, and for when `rotate_immediately` needs to be `true` instead |
 | `additional_security_group_ids` | extra security group IDs attached to this function's VPC ENI alongside the one this component creates itself -- e.g. a cache's client security group, so that cache's own security group never has to read this function's security group back |
 | `kms_key_arn` | encrypts this function's environment variables with a customer managed key; the execution role also gets a `kms:Decrypt` grant scoped to it and to `kms:EncryptionContext:aws:lambda:FunctionArn` = this function's own ARN (the AWS-owned default key needs no such grant) |
 | `tags` | required; must include a non-empty `Environment` (validated), used in every resource name |
@@ -42,13 +42,25 @@ configuration itself) to the SAME secret's ARN, and are packaged via `source_dir
 - **Rotation is configured here, not on the secretsmanager component.** A rotation Lambda that
   itself reads the secret it rotates (to scope its own `custom_policy` to that one secret) cannot
   have `aws_secretsmanager_secret_rotation` configured on the secretsmanager component instance,
-  because Secrets Manager's `RotateSecret` API tests the configuration -- `createSecret`/`setSecret`/
-  `testSecret` against a temporary `AWSPENDING` version -- even when `rotate_immediately` is `false`,
-  and on the secret's own first apply this function and its invoke permission do not exist yet. This
-  Lambda instance already depends on the secret's own component instance, so by the time
-  `rotation_secret_arn`'s resource applies HERE, the function and its permission already exist. The
-  paired secretsmanager entry sets `rotation_managed_externally: true` instead of
-  `rotation_lambda_arn`/`rotation_automatically`.
+  because Secrets Manager's `RotateSecret` API invokes the function -- at minimum running its
+  `testSecret` step against a temporary `AWSPENDING` version it creates and then removes -- even when
+  `rotate_immediately` is `false`, and on the secret's own first apply this function and its invoke
+  permission do not exist yet. This Lambda instance already depends on the secret's own component
+  instance, so by the time `rotation_secret_arn`'s resource applies HERE, the function, its permission
+  and its IAM role policies already exist (`depends_on` covers all of them). The paired secretsmanager
+  entry sets `rotation_managed_externally: true` instead of `rotation_lambda_arn`/
+  `rotation_automatically`.
+- **`rotate_immediately` and `setSecret`.** At `rotate_immediately = false`, Secrets Manager's test
+  runs ONLY the `testSecret` step against a temporary `AWSPENDING` version it manufactures itself for
+  the test -- `setSecret`, the step that actually pushes a new value to whatever external system the
+  function updates, never runs. A `testSecret` step that depends on that push having happened (like
+  `redis-auth-rotation`'s, which AUTHs against the replication group with the pending token) will
+  therefore always fail while `rotate_immediately` stays `false`. `redis-auth-rotation` sets
+  `rotate_immediately = true` in `microservices-platform.yaml` for exactly this reason -- safe now
+  that this resource's own dependency ordering (above) guarantees the function is fully permissioned
+  before RotateSecret's real four-step rotation runs. `jwt-secret-rotation` keeps the default `false`:
+  its `testSecret` only round-trips the pending value through Secrets Manager itself, so it passes
+  regardless of whether `setSecret` (a no-op for that function) ran.
 - **`redis-auth-rotation`**: environment variables `REPLICATION_GROUP_ID`, `REDIS_HOST`, `REDIS_PORT`
   (the ElastiCache replication group to modify and to AUTH-test against). Runs in the VPC's private
   subnets, with `additional_security_group_ids` set to the cache's `client_security_group_id` (egress

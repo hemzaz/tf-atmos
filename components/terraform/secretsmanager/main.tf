@@ -195,12 +195,13 @@ resource "aws_secretsmanager_secret_rotation" "this" {
   # Default false: rotate_immediately (the AWS provider's own default is
   # true) would invoke rotation_lambda_arn the moment this resource applies.
   # Even at false, Secrets Manager's RotateSecret API (which creating this
-  # resource calls under the hood) tests the rotation configuration --
-  # running createSecret/setSecret/testSecret against a temporary AWSPENDING
-  # version -- so rotation_lambda_arn must already be invokable by
-  # secretsmanager.amazonaws.com before this resource applies, not merely
-  # exist. Set true only once the rotation function is confirmed deployed,
-  # invokable, and tested independently of this apply.
+  # resource calls under the hood) tests the rotation configuration by
+  # invoking the function's testSecret step against a temporary AWSPENDING
+  # version it creates and then removes -- so rotation_lambda_arn must
+  # already be invokable by secretsmanager.amazonaws.com before this
+  # resource applies, not merely exist. Set true only once the rotation
+  # function is confirmed deployed, invokable, and tested independently of
+  # this apply.
   rotate_immediately = each.value.rotate_immediately
 
   rotation_rules {

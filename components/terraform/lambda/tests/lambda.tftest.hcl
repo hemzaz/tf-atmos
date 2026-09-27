@@ -208,10 +208,33 @@ run "no_rotation_secret_arn_no_rotation_resource" {
 run "rotation_secret_arn_configures_rotation_from_this_instance" {
   command = plan
 
+  # custom_policy, kms_key_arn and subnet_ids each give this rotation
+  # resource's depends_on a real (count = 1) resource to resolve --
+  # aws_iam_role_policy.lambda_custom, aws_iam_role_policy.lambda_kms_env and
+  # aws_iam_role_policy_attachment.lambda_vpc_access respectively (lambda_basic
+  # is unconditional). If depends_on ever regresses to referencing a resource
+  # address that does not exist for this configuration, `terraform plan`
+  # fails outright with "Reference to undeclared resource" -- this run is the
+  # regression guard for that, not just for the rotation resource's own
+  # attributes below. See main.tf's own comment on aws_secretsmanager_secret_rotation.this
+  # for why depends_on needs all four: aws_lambda_function.main only has an
+  # IMPLICIT dependency on aws_iam_role.lambda (via its arn), never on the
+  # role's own policies, so without these, Secrets Manager could invoke this
+  # function before its permissions exist or have propagated.
   variables {
-    secretsmanager_source_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
-    rotation_secret_arn       = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
-    rotation_days             = 30
+    secretsmanager_source_arn    = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+    rotation_secret_arn          = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+    rotation_days                = 30
+    custom_policy                = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = "*" }] })
+    kms_key_arn                  = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+    vpc_id                       = "vpc-0123456789abcdef0"
+    subnet_ids                   = ["subnet-0123456789abcdef0"]
+    vpc_endpoint_prefix_list_ids = ["pl-0123456789abcdef0"]
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.lambda_custom) == 1 && length(aws_iam_role_policy.lambda_kms_env) == 1 && length(aws_iam_role_policy_attachment.lambda_vpc_access) == 1
+    error_message = "This run must actually instantiate every resource aws_secretsmanager_secret_rotation.this depends_on, or it is not exercising the ordering fix."
   }
 
   assert {
@@ -240,6 +263,23 @@ run "rotation_secret_arn_requires_secretsmanager_source_arn" {
 
   variables {
     rotation_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+  }
+
+  expect_failures = [aws_secretsmanager_secret_rotation.this]
+}
+
+run "rotation_secret_arn_requires_matching_secretsmanager_source_arn" {
+  command = plan
+
+  # secretsmanager_source_arn set, but to a DIFFERENT secret than
+  # rotation_secret_arn -- the precondition must reject this too, not just
+  # a null secretsmanager_source_arn, since a mismatch would otherwise plan
+  # cleanly and only fail later at RotateSecret (the invoke permission's
+  # SourceArn would name a different secret than the one rotation is
+  # configured on).
+  variables {
+    secretsmanager_source_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/api/other-secret-AbCdEf"
+    rotation_secret_arn       = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
   }
 
   expect_failures = [aws_secretsmanager_secret_rotation.this]
