@@ -43,6 +43,11 @@ output "security_group_id" {
   description = "ID of the cache security group; grant application groups access by adding it to allowed_security_group_ids"
 }
 
+output "client_security_group_id" {
+  value       = local.enabled ? aws_security_group.client[0].id : null
+  description = "Attach this security group to another resource in the same VPC (e.g. a Secrets Manager rotation Lambda's additional_security_group_ids) to grant it access to this cache on port -- without this component ever having to read that resource's own security group back into allowed_security_group_ids, which would create a dependency cycle for a consumer that already reads this component's other outputs (e.g. a rotation Lambda that also reads replication_group_id/configuration_endpoint_address)"
+}
+
 output "subnet_group_name" {
   value       = local.enabled ? aws_elasticache_subnet_group.main[0].name : null
   description = "Name of the cache subnet group"

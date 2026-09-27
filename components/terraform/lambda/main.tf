@@ -2,9 +2,22 @@
 # Only fetched when actually needed: an unconditional data source here would
 # make every plan of this component call STS GetCallerIdentity, which breaks
 # the fully offline test suite in tests/ (dummy credentials, no real AWS
-# call ever made) for every run, not just ones that set secretsmanager_source_arn.
+# call ever made) for every run, not just ones that set secretsmanager_source_arn,
+# kms_key_arn or rotation_secret_arn.
 data "aws_caller_identity" "current" {
-  count = var.secretsmanager_source_arn != null ? 1 : 0
+  count = var.secretsmanager_source_arn != null || var.kms_key_arn != null || var.rotation_secret_arn != null ? 1 : 0
+}
+
+locals {
+  # aws_lambda_function.main.arn is Computed by the AWS provider -- unknown
+  # at plan time -- even though a Lambda ARN is fully deterministic (no
+  # AWS-assigned random element, unlike e.g. ElastiCache's cluster-mode
+  # endpoint hostname). Built here instead so the KMS environment-variable
+  # decrypt grant and rotation_lambda_arn below stay plannable without an
+  # apply, the same reasoning the microservices-platform template used to
+  # spell this same ARN out as a literal string before rotation moved into
+  # this component's own aws_secretsmanager_secret_rotation.
+  function_arn = var.kms_key_arn != null || var.rotation_secret_arn != null ? "arn:aws:lambda:${var.region}:${data.aws_caller_identity.current[0].account_id}:function:${aws_lambda_function.main.function_name}" : null
 }
 
 # In-component packaging for small, in-repo function sources (see
@@ -16,6 +29,13 @@ data "archive_file" "source" {
   type        = "zip"
   source_dir  = "${path.module}/${var.source_dir}"
   output_path = "${path.module}/.archives/${var.function_name}.zip"
+  # Pinned so output_base64sha256 depends only on file content, not on the
+  # file modes a checkout happens to produce -- macOS and the Linux CI
+  # container can otherwise zip the same source_dir to different hashes,
+  # causing a perpetual source_code_hash diff (or an unwanted redeploy
+  # between plan and apply). Cloud Posse's own aws-lambda component pins this
+  # too on its zip/archive_file path.
+  output_file_mode = "0644"
 }
 
 locals {
@@ -58,6 +78,34 @@ resource "aws_iam_role_policy" "lambda_custom" {
   name   = "${var.tags["Environment"]}-${var.function_name}-custom-policy"
   role   = aws_iam_role.lambda.id
   policy = var.custom_policy
+}
+
+# kms_key_arn (below, on aws_lambda_function.main) tells Lambda to encrypt
+# this function's environment variables with a customer managed key instead
+# of the AWS-owned default. Lambda decrypts them as the function's own
+# execution role at invoke time, using an encryption context of
+# aws:lambda:FunctionArn -- so, unlike the AWS-owned default key, this role
+# needs an explicit kms:Decrypt grant, or every invocation fails with "KMS
+# access was denied" the moment an environment variable is read.
+resource "aws_iam_role_policy" "lambda_kms_env" {
+  count = var.kms_key_arn != null ? 1 : 0
+  name  = "${var.tags["Environment"]}-${var.function_name}-kms-env"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "AllowEnvironmentVariableDecryption"
+      Effect   = "Allow"
+      Action   = ["kms:Decrypt"]
+      Resource = var.kms_key_arn
+      Condition = {
+        StringEquals = {
+          "kms:EncryptionContext:aws:lambda:FunctionArn" = local.function_arn
+        }
+      }
+    }]
+  })
 }
 
 # Lambda delivers to asynchronous-invocation destinations and to the dead
@@ -234,7 +282,7 @@ resource "aws_lambda_function" "main" {
     for_each = length(var.subnet_ids) > 0 ? [1] : []
     content {
       subnet_ids         = var.subnet_ids
-      security_group_ids = [aws_security_group.lambda[0].id]
+      security_group_ids = concat([aws_security_group.lambda[0].id], var.additional_security_group_ids)
     }
   }
 
@@ -322,6 +370,35 @@ resource "aws_lambda_permission" "secretsmanager" {
   principal      = "secretsmanager.amazonaws.com"
   source_arn     = var.secretsmanager_source_arn
   source_account = data.aws_caller_identity.current[0].account_id
+}
+
+# Configures rotation_secret_arn's rotation from THIS component instance, not
+# the secretsmanager component -- see rotation_secret_arn's own description
+# for why. depends_on the invoke permission above: Secrets Manager's
+# RotateSecret API (which creating/updating this resource calls) tests the
+# rotation configuration -- createSecret/setSecret/testSecret against a
+# temporary AWSPENDING version -- even when rotate_immediately is false, so
+# secretsmanager.amazonaws.com must already be able to invoke this function,
+# not merely have it exist, before this resource applies.
+resource "aws_secretsmanager_secret_rotation" "this" {
+  count = var.rotation_secret_arn != null ? 1 : 0
+
+  secret_id           = var.rotation_secret_arn
+  rotation_lambda_arn = local.function_arn
+  rotate_immediately  = var.rotate_immediately
+
+  rotation_rules {
+    automatically_after_days = var.rotation_days
+  }
+
+  depends_on = [aws_lambda_permission.secretsmanager]
+
+  lifecycle {
+    precondition {
+      condition     = var.secretsmanager_source_arn != null
+      error_message = "rotation_secret_arn requires secretsmanager_source_arn to be set to the SAME secret's ARN, so this function is actually permitted to be invoked by Secrets Manager before rotation is configured on it."
+    }
+  }
 }
 
 resource "aws_lambda_permission" "api_gateway" {

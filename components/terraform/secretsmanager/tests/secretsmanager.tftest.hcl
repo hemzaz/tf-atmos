@@ -99,6 +99,31 @@ run "rotate_immediately_can_be_turned_on_per_secret" {
   }
 }
 
+run "rotation_managed_externally_gets_the_rotating_version_resource_without_a_rotation_resource" {
+  command = plan
+
+  variables {
+    secrets = {
+      redis = {
+        name                        = "auth-token"
+        path                        = "cache"
+        generate_random_password    = true
+        rotation_managed_externally = true
+      }
+    }
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret_version.rotating) == 1 && length(aws_secretsmanager_secret_version.this) == 0
+    error_message = "rotation_managed_externally alone forces the ignore_changes version resource, same as rotation_automatically + rotation_lambda_arn."
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret_rotation.this) == 0
+    error_message = "rotation_managed_externally must not create this component's own aws_secretsmanager_secret_rotation -- a separate component instance (e.g. the lambda component's rotation_secret_arn) owns rotation instead."
+  }
+}
+
 run "rejects_an_invalid_rotation_lambda_arn" {
   command = plan
 
@@ -187,6 +212,14 @@ run "secret_access_policy_grants_exactly_one_secret_and_its_key" {
       == aws_secretsmanager_secret.this["redis"].arn
     )
     error_message = "The KMS statement is scoped by the encryption context Secrets Manager itself sets: SecretARN = this secret's own ARN."
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(output.secret_access_policy["redis"]).Statement : s if s.Sid == "AllowSecretKMSUse"]).Condition.StringEquals["kms:ViaService"]
+      == "secretsmanager.eu-west-2.amazonaws.com"
+    )
+    error_message = "The KMS statement also requires kms:ViaService=secretsmanager, so the grant cannot be used to call KMS directly with a forged encryption context naming this secret."
   }
 
   assert {

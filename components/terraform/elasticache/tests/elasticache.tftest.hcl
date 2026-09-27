@@ -312,6 +312,25 @@ run "rotation_policy_folds_in_additional_policy_json" {
   }
 }
 
+run "client_security_group_is_created_and_allowed_ingress_by_reference" {
+  command = plan
+
+  assert {
+    condition     = length(aws_security_group.client) == 1
+    error_message = "The rule-less client security group is always created alongside the cache."
+  }
+
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.from_client_security_group[0].referenced_security_group_id == aws_security_group.client[0].id
+    error_message = "The cache's own security group allows ingress from the client security group by reference, not a resource that reads this component's outputs back."
+  }
+
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.from_client_security_group[0].from_port == var.port && aws_vpc_security_group_ingress_rule.from_client_security_group[0].to_port == var.port
+    error_message = "The client ingress rule is scoped to the cache port, same as from_security_groups and from_cidr_blocks."
+  }
+}
+
 run "rejects_additional_policy_json_without_a_statement_key" {
   command = plan
 

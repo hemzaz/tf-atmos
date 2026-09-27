@@ -37,19 +37,29 @@ import time
 import boto3
 from botocore.exceptions import ClientError
 
-# ElastiCache AUTH tokens may not contain '/', '"', '@' or a space (the same
-# exclusion the Terraform-side random_password generator for this secret
-# uses, see stacks/catalog/templates/microservices-platform.yaml).
-_EXCLUDE_CHARACTERS = '/"@'
+# ElastiCache AUTH tokens may contain ONLY the following punctuation:
+# ! & # $ ^ < > - (ModifyReplicationGroup rejects anything else with
+# InvalidParameterValue). GetRandomPassword's default punctuation set (used
+# whenever ExcludePunctuation is False) is !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~ --
+# this excludes every character in that set EXCEPT the eight above, so
+# RequireEachIncludedType's "one symbol" requirement below is always
+# satisfiable with an allowed one. The Terraform-side random_password
+# generator for this secret must use the same allowed set (see this
+# component's random_password_override_special on the redis entry in
+# stacks/catalog/templates/microservices-platform.yaml) for its initial
+# value to be valid too.
+_EXCLUDE_CHARACTERS = "\"%'()*+,./:;=?@[\\]_`{|}~"
 _PASSWORD_LENGTH = 32
 
 # How long to wait for ModifyReplicationGroup's async change to land before
 # giving up. ElastiCache's own operation typically finishes in well under a
-# minute for an AUTH token change; this gives it generous headroom without
-# risking the Lambda's own timeout (the microservices-platform instance sets
-# timeout = 300s).
+# minute for an AUTH token change, but a cluster-mode group rolls the token
+# across every node, so this gives it generous headroom without risking the
+# Lambda's own timeout (the microservices-platform instance sets
+# timeout = 900s, and each of setSecret/finishSecret waits at most once
+# before AND once after its own modify_replication_group call).
 _MODIFY_POLL_INTERVAL_SECONDS = 10
-_MODIFY_POLL_MAX_ATTEMPTS = 24
+_MODIFY_POLL_MAX_ATTEMPTS = 40
 
 
 def lambda_handler(event, context):
@@ -121,13 +131,12 @@ def set_secret(service_client, arn, token):
     replication_group_id = _require_env("REPLICATION_GROUP_ID")
     elasticache_client = boto3.client("elasticache")
 
-    elasticache_client.modify_replication_group(
-        ReplicationGroupId=replication_group_id,
-        AuthToken=pending_token,
-        AuthTokenUpdateStrategy="ROTATE",
-        ApplyImmediately=True,
-    )
-
+    # Wait BEFORE modifying too: a retried Secrets Manager invocation (after
+    # an earlier attempt's own wait timed out while the group was still
+    # applying a previous change) must not immediately fail with
+    # InvalidReplicationGroupState -- wait for it to settle first.
+    _wait_for_replication_group_available(elasticache_client, replication_group_id)
+    _modify_auth_token(elasticache_client, replication_group_id, pending_token, "ROTATE")
     _wait_for_replication_group_available(elasticache_client, replication_group_id)
 
 
@@ -155,12 +164,8 @@ def finish_secret(service_client, arn, token):
     replication_group_id = _require_env("REPLICATION_GROUP_ID")
     elasticache_client = boto3.client("elasticache")
 
-    elasticache_client.modify_replication_group(
-        ReplicationGroupId=replication_group_id,
-        AuthToken=pending_token,
-        AuthTokenUpdateStrategy="SET",
-        ApplyImmediately=True,
-    )
+    _wait_for_replication_group_available(elasticache_client, replication_group_id)
+    _modify_auth_token(elasticache_client, replication_group_id, pending_token, "SET")
     _wait_for_replication_group_available(elasticache_client, replication_group_id)
 
     metadata = service_client.describe_secret(SecretId=arn)
@@ -179,6 +184,29 @@ def finish_secret(service_client, arn, token):
         MoveToVersionId=token,
         RemoveFromVersionId=current_version,
     )
+
+
+def _modify_auth_token(elasticache_client, replication_group_id, auth_token, strategy):
+    """modify_replication_group, retried once if the group is caught mid-way
+    through an earlier change (InvalidReplicationGroupState) -- the case a
+    retried Secrets Manager invocation hits after a prior attempt's own call
+    succeeded but its post-modify wait then timed out or the Lambda itself
+    was killed. Waits for the group to settle and tries exactly once more
+    before giving up, rather than raising straight back to Secrets Manager
+    (which would otherwise require a THIRD invocation just to make progress)."""
+    for attempt in range(2):
+        try:
+            elasticache_client.modify_replication_group(
+                ReplicationGroupId=replication_group_id,
+                AuthToken=auth_token,
+                AuthTokenUpdateStrategy=strategy,
+                ApplyImmediately=True,
+            )
+            return
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "InvalidReplicationGroupState" or attempt == 1:
+                raise
+            _wait_for_replication_group_available(elasticache_client, replication_group_id)
 
 
 def _wait_for_replication_group_available(elasticache_client, replication_group_id):
