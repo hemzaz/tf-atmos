@@ -243,6 +243,63 @@ run "backup_plan_has_a_daily_weekly_and_monthly_rule" {
   }
 }
 
+# HIGH fix (round-5 review): dev sets monthly_retention_days = 30 and
+# staging sets monthly_retention_days = 90, and neither overrides
+# monthly_cold_storage_days, so both used to inherit the variable's old
+# default of 90. AWS Backup requires delete_after >= cold_storage_after + 90
+# (a recovery point must stay in cold storage at least 90 days before it can
+# be deleted), so both combinations would reject aws_backup_plan.main at
+# apply time with InvalidParameterValueException -- after the plan sweep,
+# and every other check, already passed. This reproduces that exact
+# combination directly against the resource's new lifecycle precondition.
+run "monthly_retention_shorter_than_cold_storage_plus_90_days_fails_plan" {
+  command = plan
+
+  variables {
+    monthly_retention_days    = 30
+    monthly_cold_storage_days = 90
+  }
+
+  expect_failures = [aws_backup_plan.main]
+}
+
+# The catalog fix for the above (stacks/catalog/backup/defaults.yaml sets
+# monthly_cold_storage_days: null; only the prod instance turns it back on
+# at 90, alongside its 2555-day retention) resolves to these two valid
+# combinations. Asserts they plan cleanly, i.e. the precondition does not
+# reject a stack that already fixed the mismatch.
+run "dev_and_staging_resolved_monthly_retention_and_cold_storage_are_valid" {
+  command = plan
+
+  variables {
+    daily_retention_days      = 7
+    weekly_retention_days     = 14
+    monthly_retention_days    = 30
+    monthly_cold_storage_days = null
+  }
+
+  assert {
+    condition     = length(aws_backup_plan.main.rule) == 3
+    error_message = "dev's resolved retention/cold-storage combination (monthly_retention_days = 30, monthly_cold_storage_days = null) must plan cleanly."
+  }
+}
+
+run "staging_resolved_monthly_retention_and_cold_storage_are_valid" {
+  command = plan
+
+  variables {
+    daily_retention_days      = 14
+    weekly_retention_days     = 30
+    monthly_retention_days    = 90
+    monthly_cold_storage_days = null
+  }
+
+  assert {
+    condition     = length(aws_backup_plan.main.rule) == 3
+    error_message = "staging's resolved retention/cold-storage combination (monthly_retention_days = 90, monthly_cold_storage_days = null) must plan cleanly."
+  }
+}
+
 run "rds_tag_based_selection_is_and_scoped_to_rds_and_this_environment" {
   command = plan
 

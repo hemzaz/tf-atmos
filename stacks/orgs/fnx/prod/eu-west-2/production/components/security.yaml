@@ -277,6 +277,12 @@ components:
         daily_retention_days: 35
         weekly_retention_days: 90
         monthly_retention_days: 2555 # 7 years, SOX
+        # Only prod re-enables cold storage: 2555 days of retention easily
+        # clears AWS Backup's delete_after >= cold_storage_after + 90
+        # requirement. backup/defaults sets this to null so dev's and
+        # staging's shorter monthly retention (30/90 days) don't inherit a
+        # cold-storage floor they can't satisfy (round-5 review HIGH fix).
+        monthly_cold_storage_days: 90
         notification_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
           - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"

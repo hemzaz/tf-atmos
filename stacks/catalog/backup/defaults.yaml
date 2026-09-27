@@ -44,5 +44,16 @@ components:
         # no stack currently provisions.
         enable_vault_lock: false
         enable_cross_region_backup: false
+        # Cold storage stays off (null) by default, the same as this
+        # component's daily_cold_storage_days/weekly_cold_storage_days.
+        # AWS Backup requires delete_after >= cold_storage_after + 90 (a
+        # recovery point must sit in cold storage at least 90 days before it
+        # can be deleted); the component's variables.tf default of 90 for
+        # monthly_cold_storage_days only holds for a retention long enough
+        # to satisfy that (prod's 2555-day/7-year monthly retention), not
+        # dev's or staging's shorter monthly retention. Only the prod
+        # instance turns this back on, explicitly, alongside its long
+        # retention (round-5 review HIGH fix).
+        monthly_cold_storage_days: null
         tags:
           Component: "Backup"

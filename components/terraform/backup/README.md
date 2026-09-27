@@ -27,6 +27,27 @@ below attaches to that one plan, so daily/weekly/monthly retention is
 reachable for every selected resource, not only the daily rule. Vault lock and
 cross-region replication are off in every instance.
 
+Retention days (`delete_after`) by cadence, and the monthly cadence's cold
+storage days (`cold_storage_after`):
+
+| Stage   | daily | weekly | monthly | monthly cold storage |
+|---------|-------|--------|---------|-----------------------|
+| dev     | 7     | 14     | 30      | off (`null`)          |
+| staging | 14    | 30     | 90      | off (`null`)          |
+| prod    | 35    | 90     | 2555    | 90                    |
+
+AWS Backup requires `delete_after >= cold_storage_after + 90` (a recovery
+point must sit in cold storage at least 90 days before it can be deleted).
+`backup/defaults` sets `monthly_cold_storage_days: null` for exactly this
+reason: the component's own variable default of 90 only satisfies that rule
+against prod's 2555-day monthly retention, not dev's or staging's shorter
+one. Only the prod instance turns cold storage back on (`monthly_cold_storage_days: 90`),
+alongside its long retention. `aws_backup_plan.main` also carries a
+`lifecycle.precondition` per cadence enforcing this relationship, so a stack
+that gets it wrong fails at `terraform plan`, not at `apply`. Daily and
+weekly cold storage stay off (`null`) in every instance; no stage's
+daily/weekly retention is long enough to turn them on.
+
 Resource selection is entirely tag-based (`enable_rds_backup`,
 `enable_ec2_backup`, `enable_ebs_backup`, all on in `backup/defaults`), never
 `!terraform.state`: `workflows/deploy-full-stack.yaml` runs `backup` in the

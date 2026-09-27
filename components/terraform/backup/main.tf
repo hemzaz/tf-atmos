@@ -203,6 +203,35 @@ resource "aws_backup_plan" "main" {
     }
     resource_type = "EC2"
   }
+
+  # HIGH fix (round-5 review): AWS Backup requires a recovery point to sit in
+  # cold storage for at least 90 days before it can be deleted, so
+  # CreateBackupPlan/UpdateBackupPlan rejects any rule whose
+  # delete_after < cold_storage_after + 90. That combination previously had
+  # no guard anywhere -- not in these variables, not in a test -- so a stack
+  # could set a cold_storage_after (e.g. this component's own
+  # monthly_cold_storage_days default of 90) together with a shorter
+  # retention (e.g. a dev/staging monthly_retention_days of 30/90) and the
+  # break would only surface as an apply-time InvalidParameterValueException,
+  # after the plan sweep and every other check already passed. These
+  # preconditions turn that into a `terraform plan` failure with a clear
+  # message, one per cadence.
+  lifecycle {
+    precondition {
+      condition     = var.daily_cold_storage_days == null || var.daily_retention_days >= var.daily_cold_storage_days + 90
+      error_message = "daily_retention_days (${var.daily_retention_days}) must be at least daily_cold_storage_days (${coalesce(var.daily_cold_storage_days, 0)}) + 90: AWS Backup keeps a recovery point in cold storage for a minimum of 90 days before it can be deleted."
+    }
+
+    precondition {
+      condition     = var.weekly_cold_storage_days == null || var.weekly_retention_days >= var.weekly_cold_storage_days + 90
+      error_message = "weekly_retention_days (${var.weekly_retention_days}) must be at least weekly_cold_storage_days (${coalesce(var.weekly_cold_storage_days, 0)}) + 90: AWS Backup keeps a recovery point in cold storage for a minimum of 90 days before it can be deleted."
+    }
+
+    precondition {
+      condition     = var.monthly_cold_storage_days == null || var.monthly_retention_days >= var.monthly_cold_storage_days + 90
+      error_message = "monthly_retention_days (${var.monthly_retention_days}) must be at least monthly_cold_storage_days (${coalesce(var.monthly_cold_storage_days, 0)}) + 90: AWS Backup keeps a recovery point in cold storage for a minimum of 90 days before it can be deleted."
+    }
+  }
 }
 
 # Backup Selection for RDS, by explicit ARN list
