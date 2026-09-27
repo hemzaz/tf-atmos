@@ -200,12 +200,16 @@ components:
         lifecycle_configuration_rules:
           - id: "expire-processed"
             enabled: true
+            abort_incomplete_multipart_upload_days: 7
             filter_and:
               prefix: "processed/"
             expiration:
               days: 30
+            noncurrent_version_expiration:
+              noncurrent_days: 30
           - id: "transition-archive"
             enabled: true
+            abort_incomplete_multipart_upload_days: 7
             filter_and:
               prefix: "archive/"
             transition:
@@ -252,6 +256,7 @@ components:
         lifecycle_configuration_rules:
           - id: "transition-ia"
             enabled: true
+            abort_incomplete_multipart_upload_days: 7
             filter_and:
               prefix: ""
             transition:
@@ -261,10 +266,13 @@ components:
                 storage_class: "GLACIER"
           - id: "expire-temp"
             enabled: true
+            abort_incomplete_multipart_upload_days: 7
             filter_and:
               prefix: "temp/"
             expiration:
               days: 7
+            noncurrent_version_expiration:
+              noncurrent_days: 7
 
         logging:
           bucket_name: "{{ .vars.log_bucket_name }}"

@@ -32,6 +32,7 @@ resource "aws_s3_bucket" "this" {
   #checkov:skip=CKV2_AWS_61:Lifecycle rules are an input (lifecycle_configuration_rules), set per instance
   #checkov:skip=CKV_AWS_18:Access logging is an input (logging); the target must be an SSE-S3 bucket outside this component
   #checkov:skip=CKV_AWS_144:Cross-region replication is out of scope for this component (trimmed from Cloud Posse's)
+  #checkov:skip=CKV2_AWS_62:False positive, checkov's graph check cannot follow the count-gated aws_s3_bucket_notification.this below; event_notification_details is an input, and setting enabled: true on it covers this bucket
   count = local.enabled ? 1 : 0
 
   bucket        = local.bucket_name
