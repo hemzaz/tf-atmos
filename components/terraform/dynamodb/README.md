@@ -20,8 +20,8 @@ instances inherit it and set `name`, `hash_key` and the rest.
 | `table_name` (null) | exact name override, as in Cloud Posse |
 | `billing_mode` (`PAY_PER_REQUEST`), `read_capacity` / `write_capacity` (5) | capacities apply only to `PROVISIONED`, to the table and to every GSI that sets none |
 | `hash_key_type`, `range_key`, `range_key_type`, `dynamodb_attributes` | attributes are the key attributes plus `dynamodb_attributes`, each declared once |
-| `global_secondary_index_map`, `local_secondary_index_map` | `projection_type` defaults to `ALL`; a plan fails if an index key is not a declared attribute, or an LSI is added to a table with no `range_key` |
-| `point_in_time_recovery_enabled` (true), `deletion_protection_enabled` (false) | Cloud Posse defaults |
+| `global_secondary_index_map`, `local_secondary_index_map` | `projection_type` defaults to `ALL`; a plan fails if an index key is not a declared attribute, if a `dynamodb_attributes` entry is declared but used by no key or index (AWS rejects both directions), if `projection_type = INCLUDE` is set without a non-empty `non_key_attributes`, if `non_key_attributes` is set with `ALL` or `KEYS_ONLY`, or if an LSI is added to a table with no `range_key` |
+| `point_in_time_recovery_enabled` (true), `deletion_protection_enabled` (false) | Cloud Posse defaults. Prod instances must override `deletion_protection_enabled` to `true` (see `stacks/catalog/dynamodb/defaults.yaml`) |
 | `streams_enabled` (false) + `stream_view_type`, `ttl_enabled` (false) + `ttl_attribute` | each pair is validated: enabling one requires the other |
 | `enabled` (true) | false creates nothing |
 | out: `table_name`, `table_id`, `table_arn`, `table_stream_arn`, `table_stream_label`, `global_secondary_index_names`, `local_secondary_index_names`, `hash_key`, `range_key` | same outputs as Cloud Posse; stream outputs are null with streams off |

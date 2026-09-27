@@ -112,5 +112,24 @@ resource "aws_dynamodb_table" "this" {
       condition     = length(var.local_secondary_index_map) == 0 || var.range_key != ""
       error_message = "Local secondary indexes need a table range_key."
     }
+
+    # The reverse of the check above: DynamoDB also rejects attribute
+    # definitions that no key schema (table or index) uses ("number of
+    # attributes in key schema must match ..."). Every dynamodb_attributes
+    # entry must be the table's hash/range key or an index key.
+    precondition {
+      condition = alltrue([
+        for a in var.dynamodb_attributes : contains(
+          concat(
+            [var.hash_key, var.range_key],
+            [for i in var.global_secondary_index_map : i.hash_key],
+            [for i in var.global_secondary_index_map : i.range_key if i.range_key != null],
+            [for i in var.local_secondary_index_map : i.range_key],
+          ),
+          a.name
+        )
+      ])
+      error_message = "Every dynamodb_attributes entry must be used by hash_key, range_key or an index key; DynamoDB rejects unused attribute definitions."
+    }
   }
 }

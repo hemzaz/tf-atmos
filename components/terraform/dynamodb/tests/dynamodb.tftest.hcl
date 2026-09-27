@@ -178,3 +178,133 @@ run "rejects_an_index_on_an_undeclared_attribute" {
 
   expect_failures = [aws_dynamodb_table.this]
 }
+
+run "rejects_an_unused_declared_attribute" {
+  command = plan
+
+  variables {
+    # "status" is declared but used by no key or index (the reverse of the
+    # check above): DynamoDB rejects it too.
+    dynamodb_attributes = [
+      { name = "status", type = "S" },
+    ]
+  }
+
+  expect_failures = [aws_dynamodb_table.this]
+}
+
+run "rejects_include_without_non_key_attributes" {
+  command = plan
+
+  variables {
+    dynamodb_attributes = [{ name = "gsi1pk", type = "S" }]
+    global_secondary_index_map = [
+      { name = "gsi1", hash_key = "gsi1pk", projection_type = "INCLUDE" },
+    ]
+  }
+
+  expect_failures = [var.global_secondary_index_map]
+}
+
+run "rejects_non_key_attributes_with_projection_type_all" {
+  command = plan
+
+  variables {
+    # non_key_attributes need not be declared in dynamodb_attributes (AWS
+    # does not require them as table attributes), so only gsi1pk is here.
+    dynamodb_attributes = [{ name = "gsi1pk", type = "S" }]
+    global_secondary_index_map = [
+      { name = "gsi1", hash_key = "gsi1pk", projection_type = "ALL", non_key_attributes = ["extra"] },
+    ]
+  }
+
+  expect_failures = [var.global_secondary_index_map]
+}
+
+run "accepts_include_with_non_key_attributes" {
+  command = plan
+
+  variables {
+    dynamodb_attributes = [{ name = "gsi1pk", type = "S" }]
+    global_secondary_index_map = [
+      { name = "gsi1", hash_key = "gsi1pk", projection_type = "INCLUDE", non_key_attributes = ["extra"] },
+    ]
+  }
+
+  assert {
+    condition     = one(aws_dynamodb_table.this[0].global_secondary_index).projection_type == "INCLUDE"
+    error_message = "INCLUDE with non_key_attributes must be accepted."
+  }
+
+  assert {
+    condition     = tolist(one(aws_dynamodb_table.this[0].global_secondary_index).non_key_attributes) == tolist(["extra"])
+    error_message = "non_key_attributes must be passed through for INCLUDE."
+  }
+}
+
+run "rejects_lsi_include_without_non_key_attributes" {
+  command = plan
+
+  variables {
+    range_key = "sk"
+    local_secondary_index_map = [
+      { name = "lsi1", range_key = "sk", projection_type = "INCLUDE" },
+    ]
+  }
+
+  expect_failures = [var.local_secondary_index_map]
+}
+
+run "rejects_lsi_non_key_attributes_with_projection_type_keys_only" {
+  command = plan
+
+  variables {
+    range_key = "sk"
+    local_secondary_index_map = [
+      { name = "lsi1", range_key = "sk", projection_type = "KEYS_ONLY", non_key_attributes = ["extra"] },
+    ]
+  }
+
+  expect_failures = [var.local_secondary_index_map]
+}
+
+run "accepts_attributes_used_only_as_gsi_or_lsi_range_keys" {
+  command = plan
+
+  variables {
+    # gsi1sk is used only via the GSI range_key branch of the reverse
+    # precondition (main.tf's concat list, third element); lsi_sk only via
+    # the LSI range_key branch (fourth element). The table's own range_key
+    # ("sk") already covers the first element, so neither attribute would be
+    # exercised without a dedicated GSI/LSI range key of its own. This guards
+    # against a future edit accidentally dropping either branch from the
+    # concat list, which would reject valid tables like
+    # microservices/dynamodb/service-state (gsi1sk as a GSI range key).
+    range_key = "sk"
+    dynamodb_attributes = [
+      { name = "gsi1sk", type = "S" },
+      { name = "lsi_sk", type = "S" },
+    ]
+    global_secondary_index_map = [
+      { name = "gsi1", hash_key = "pk", range_key = "gsi1sk" },
+    ]
+    local_secondary_index_map = [
+      { name = "lsi1", range_key = "lsi_sk" },
+    ]
+  }
+
+  assert {
+    condition     = length(aws_dynamodb_table.this[0].attribute) == 4
+    error_message = "Attributes are pk, sk, gsi1sk and lsi_sk, each declared once."
+  }
+
+  assert {
+    condition     = one(aws_dynamodb_table.this[0].global_secondary_index).name == "gsi1"
+    error_message = "The GSI using gsi1sk as its range key must be created."
+  }
+
+  assert {
+    condition     = one(aws_dynamodb_table.this[0].local_secondary_index).name == "lsi1"
+    error_message = "The LSI using lsi_sk as its range key must be created."
+  }
+}

@@ -25,6 +25,11 @@ components:
         # resolves everywhere. The component accepts only a KMS key ARN.
         server_side_encryption_kms_key_arn: !terraform.state kms/main .key_arn
         point_in_time_recovery_enabled: true
+        # Default off here; prod instances (fnx-prod-production) must override
+        # this to `true` in their stack manifest, the same way `rds/prod`
+        # forces `deletion_protection` (stacks/catalog/rds/prod.yaml). No
+        # dynamodb instance is deployed to a real stack yet — this is a note
+        # for whoever adds the first one.
         deletion_protection_enabled: false
         tags:
           Component: "DynamoDB"
