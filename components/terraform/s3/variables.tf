@@ -154,3 +154,34 @@ variable "source_policy_documents" {
     error_message = "Each source_policy_documents entry must be a JSON document."
   }
 }
+
+variable "event_notification_details" {
+  type = object({
+    enabled     = bool
+    eventbridge = optional(bool, false)
+    lambda_list = optional(list(object({
+      lambda_function_arn = string
+      events              = optional(list(string), ["s3:ObjectCreated:*"])
+      filter_prefix       = optional(string)
+      filter_suffix       = optional(string)
+    })), [])
+
+    queue_list = optional(list(object({
+      queue_arn     = string
+      events        = optional(list(string), ["s3:ObjectCreated:*"])
+      filter_prefix = optional(string)
+      filter_suffix = optional(string)
+    })), [])
+
+    topic_list = optional(list(object({
+      topic_arn     = string
+      events        = optional(list(string), ["s3:ObjectCreated:*"])
+      filter_prefix = optional(string)
+      filter_suffix = optional(string)
+    })), [])
+  })
+  description = "S3 event notifications, Cloud Posse's event_notification_details input verbatim: enabled, eventbridge, and lambda_list/queue_list/topic_list destinations (each entry: arn, events, filter_prefix, filter_suffix). The destination's own resource policy (e.g. an SQS queue policy admitting s3.amazonaws.com) must exist first; PutBucketNotification validates it at apply time, so add the destination component to dependencies.components"
+  default = {
+    enabled = false
+  }
+}

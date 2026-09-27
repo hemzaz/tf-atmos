@@ -32,7 +32,7 @@ resource "aws_s3_bucket" "this" {
   #checkov:skip=CKV2_AWS_61:Lifecycle rules are an input (lifecycle_configuration_rules), set per instance
   #checkov:skip=CKV_AWS_18:Access logging is an input (logging); the target must be an SSE-S3 bucket outside this component
   #checkov:skip=CKV_AWS_144:Cross-region replication is out of scope for this component (trimmed from Cloud Posse's)
-  #checkov:skip=CKV2_AWS_62:Event notifications are out of scope for this component (trimmed from Cloud Posse's)
+  #checkov:skip=CKV2_AWS_62:False positive, checkov's graph check cannot follow the count-gated aws_s3_bucket_notification.this below; event_notification_details is an input, and setting enabled: true on it covers this bucket
   count = local.enabled ? 1 : 0
 
   bucket        = local.bucket_name
@@ -225,4 +225,45 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
   # Versioning must be configured before lifecycle rules that act on
   # noncurrent versions.
   depends_on = [aws_s3_bucket_versioning.this]
+}
+
+# Cloud Posse's event_notification_details input, ported from
+# cloudposse/terraform-aws-s3-bucket's aws_s3_bucket_notification.bucket_notification
+# (dynamic lambda_function/queue/topic blocks plus the eventbridge flag).
+resource "aws_s3_bucket_notification" "this" {
+  count = local.enabled && var.event_notification_details.enabled ? 1 : 0
+
+  bucket = aws_s3_bucket.this[0].id
+
+  eventbridge = var.event_notification_details.eventbridge
+
+  dynamic "lambda_function" {
+    for_each = var.event_notification_details.lambda_list
+    content {
+      lambda_function_arn = lambda_function.value.lambda_function_arn
+      events              = lambda_function.value.events
+      filter_prefix       = lambda_function.value.filter_prefix
+      filter_suffix       = lambda_function.value.filter_suffix
+    }
+  }
+
+  dynamic "queue" {
+    for_each = var.event_notification_details.queue_list
+    content {
+      queue_arn     = queue.value.queue_arn
+      events        = queue.value.events
+      filter_prefix = queue.value.filter_prefix
+      filter_suffix = queue.value.filter_suffix
+    }
+  }
+
+  dynamic "topic" {
+    for_each = var.event_notification_details.topic_list
+    content {
+      topic_arn     = topic.value.topic_arn
+      events        = topic.value.events
+      filter_prefix = topic.value.filter_prefix
+      filter_suffix = topic.value.filter_suffix
+    }
+  }
 }
