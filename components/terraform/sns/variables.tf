@@ -141,8 +141,8 @@ variable "sns_topic_policy_json" {
           !(
             try(s.principal == "*", false)
             || anytrue([for k in try(keys(s.principal), []) : lower(k) == "service" || contains(flatten([s.principal[k]]), "*")])
-          )
-          || anytrue(flatten([
+          ) ||
+          anytrue(flatten([
             for op, kv in lookup(s, "condition", {}) : [
               for k, v in kv : contains(
                 ["aws:sourceaccount", "aws:sourcearn", "aws:sourceowner", "aws:sourceorgid", "aws:principalorgid", "aws:principalaccount", "aws:principalarn"],
