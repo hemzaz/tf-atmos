@@ -167,6 +167,7 @@ components/terraform/*/providers_override.tf.json
 # data.archive_file output_path zips (backup, cost-optimization): rebuilt from
 # the committed lambda/*.py source at plan/apply time, never committed.
 components/terraform/*/*_lambda.zip
+components/terraform/cost-optimization/*.zip
 
 # Additional logs and temporary files
 *.tmp

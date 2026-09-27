@@ -38,8 +38,8 @@
       "Condition": {
         "StringEquals": {
           "kms:ViaService": [
-            "secretsmanager.${region}.amazonaws.com",
-            "ssm.${region}.amazonaws.com"
+            "secretsmanager.${region}.${dns_suffix}",
+            "ssm.${region}.${dns_suffix}"
           ]
         }
       }

@@ -57,6 +57,9 @@ settings:
     monitoring:
       critical_alerts: ["staging-alerts@example.com"]
       warning_alerts: ["team@example.com"]
+      # cost-optimization/main's monthly AWS Budget (numeric string - see
+      # components/terraform/cost-optimization/variables.tf).
+      budget_monthly_limit: "2000"
 
   # Change management
     change_management:

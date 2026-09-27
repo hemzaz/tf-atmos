@@ -50,6 +50,9 @@ settings:
     monitoring:
       critical_alerts: ["ops@example.com"]
       warning_alerts: ["team@example.com"]
+      # cost-optimization/main's monthly AWS Budget (numeric string - see
+      # components/terraform/cost-optimization/variables.tf).
+      budget_monthly_limit: "500"
     tenant_name: testenv-01
     hosted_zone_id: "Z1234567890EXAMPLE"
     eks_kubernetes_version: "1.36"
