@@ -329,3 +329,39 @@ variable "apply_immediately" {
   description = "Apply modifications immediately instead of during the maintenance window"
   default     = false
 }
+
+# auth_token itself is never exported (see outputs.tf); a consumer that needs
+# it in-cluster (eks-backend-services) reads it back out of Secrets Manager
+# through an ExternalSecret, the same way rds/main's RDS-managed master user
+# secret is consumed -- so it must exist as a real secret, not only as a
+# Terraform variable that only ever lives in this component's state.
+variable "store_auth_token_in_secrets_manager" {
+  type        = bool
+  description = "Store auth_token in a Secrets Manager secret so it can be read back by an ExternalSecret (e.g. eks-backend-services)"
+  default     = true
+}
+
+variable "auth_token_secret_kms_key_id" {
+  type        = string
+  description = "KMS key (ARN, key ID or alias) encrypting the Secrets Manager secret that holds auth_token. null: the AWS-managed aws/secretsmanager key. Set to the same key as kms_key_id to reuse an existing IAM grant scoped to it (e.g. external-secrets' kms_key_arn)"
+  default     = null
+
+  validation {
+    condition = var.auth_token_secret_kms_key_id == null ? true : can(regex(
+      "^(arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:(key|alias)/.+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|mrk-[0-9a-f]{32}|alias/.+)$",
+      var.auth_token_secret_kms_key_id
+    ))
+    error_message = "auth_token_secret_kms_key_id must be a KMS key ARN, alias ARN, key ID, multi-Region key ID or alias/<name>."
+  }
+}
+
+variable "auth_token_secret_recovery_window_in_days" {
+  type        = number
+  description = "Days a deleted auth_token secret stays recoverable: 0 (delete at once) or 7-30, as Cloud Posse's secrets-manager recovery_window_in_days"
+  default     = 30
+
+  validation {
+    condition     = var.auth_token_secret_recovery_window_in_days == 0 || (var.auth_token_secret_recovery_window_in_days >= 7 && var.auth_token_secret_recovery_window_in_days <= 30)
+    error_message = "auth_token_secret_recovery_window_in_days must be 0 or between 7 and 30."
+  }
+}

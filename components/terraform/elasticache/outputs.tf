@@ -47,3 +47,8 @@ output "subnet_group_name" {
   value       = local.enabled ? aws_elasticache_subnet_group.main[0].name : null
   description = "Name of the cache subnet group"
 }
+
+output "auth_token_secret_arn" {
+  value       = local.enabled && var.store_auth_token_in_secrets_manager ? aws_secretsmanager_secret.auth_token[0].arn : null
+  description = "ARN of the Secrets Manager secret holding auth_token (JSON key auth_token); null when store_auth_token_in_secrets_manager is false. A consumer (e.g. eks-backend-services) reads it back via an ExternalSecret -- never exported directly, unlike this, the token itself is never in an output"
+}

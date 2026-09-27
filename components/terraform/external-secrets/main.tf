@@ -28,7 +28,13 @@ locals {
         for prefix in var.secret_path_prefixes :
         "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${context}/${prefix}/*"
       ]
-    ])
+    ]),
+    # RDS generates "rds!db-<id>" only once the instance exists, so it cannot
+    # be a secret_path_prefixes entry (which also rejects "!"); this grants
+    # the one fixed naming convention directly instead of a specific ARN.
+    var.rds_managed_secret_access ? [
+      "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:rds!db-*"
+    ] : []
   )
 
   ssm_resource_arns = concat(
@@ -193,22 +199,32 @@ resource "kubernetes_manifest" "cluster_secret_store" {
     metadata = {
       name = "aws-secretsmanager"
     }
-    spec = {
-      provider = {
-        aws = {
-          service = "SecretsManager"
-          region  = var.region
-          auth = {
-            jwt = {
-              serviceAccountRef = {
-                name      = var.service_account_name
-                namespace = var.namespace
+    spec = merge(
+      {
+        provider = {
+          aws = {
+            service = "SecretsManager"
+            region  = var.region
+            auth = {
+              jwt = {
+                serviceAccountRef = {
+                  name      = var.service_account_name
+                  namespace = var.namespace
+                }
               }
             }
           }
         }
-      }
-    }
+      },
+      # Restricts which namespaces may bind an ExternalSecret to this store;
+      # an empty list (the default) omits the field, matching the previous,
+      # unrestricted behavior.
+      length(var.allowed_namespaces) > 0 ? {
+        conditions = [
+          { namespaces = var.allowed_namespaces }
+        ]
+      } : {}
+    )
   }
 
   depends_on = [helm_release.external_secrets]
