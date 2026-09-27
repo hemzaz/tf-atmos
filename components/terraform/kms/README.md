@@ -130,8 +130,11 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   exists — any account that has ever run an ASG or an EKS managed node group
   outside this repo has it. `aws_iam_service_linked_role` always fails with
   "has been taken in this account" if it does, no matter which `iam`
-  instance sets `enable_autoscaling_service_linked_role`; import it instead
-  (see `../iam/README.md`).
+  instance sets `enable_autoscaling_service_linked_role`. If it already
+  exists, leaving the flag `false` everywhere is enough — `kms/main` only
+  needs the role to exist, not to be managed by that resource — or, to have
+  Terraform manage it, import the role first (see `../iam/README.md` for
+  both options and the exact import command).
 - `replica_regions` requires `is_multi_region = true` (validation). Each
   replica gets its own generated policy, not a copy of the primary's: the
   region-specific statements above (`AllowCloudWatchLogs`,

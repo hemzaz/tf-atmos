@@ -40,6 +40,23 @@ fnx-dev-testenv-01. The `iam/ci` and `iam/eks-*` stack entries are still
   `iam/ci` or any second instance in the same account, and each stack's
   `kms/main` declares a `dependencies.components` edge to that instance so
   the role exists before `kms/main`'s first apply.
+  **If the role already exists** (any account that has ever run an ASG or
+  an EKS managed node group outside this repo has it — check first with
+  `aws iam get-role --role-name AWSServiceRoleForAutoScaling`), you have two
+  correct options. (a) Leave `enable_autoscaling_service_linked_role` `false`
+  everywhere and do nothing else: `kms/main` only needs the role to exist,
+  not to be managed by this resource, so the `dependencies.components` edge
+  is satisfied either way. (b) To have Terraform manage the role instead,
+  set the flag `true` on that one instance and import it first, at the
+  indexed address — the resource sits behind `count`, so the unindexed
+  address does not exist:
+  ```
+  atmos terraform import iam/main 'aws_iam_service_linked_role.autoscaling[0]' \
+    arn:<partition>:iam::<account>:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling \
+    -s <stack>
+  ```
+  Once imported and set `true`, never flip the flag back to `false` — the
+  next plan would destroy the imported role.
 
 ## Usage
 
