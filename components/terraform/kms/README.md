@@ -125,6 +125,13 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   `allow_autoscaling_ebs: false` explicitly (overriding `kms/defaults`)
   because nothing in that lane runs Auto Scaling or EKS node groups, so it
   has no `iam` instance and needs none.
+  **Before the first `iam` apply in an account**, run `aws iam get-role
+  --role-name AWSServiceRoleForAutoScaling` to check whether the role already
+  exists — any account that has ever run an ASG or an EKS managed node group
+  outside this repo has it. `aws_iam_service_linked_role` always fails with
+  "has been taken in this account" if it does, no matter which `iam`
+  instance sets `enable_autoscaling_service_linked_role`; import it instead
+  (see `../iam/README.md`).
 - `replica_regions` requires `is_multi_region = true` (validation). Each
   replica gets its own generated policy, not a copy of the primary's: the
   region-specific statements above (`AllowCloudWatchLogs`,
