@@ -388,3 +388,10 @@ workflows:
       - name: move-checkov-baseline
         type: shell
         command: mv components/terraform/.checkov.baseline .checkov.baseline
+      # checkov names a count-guarded singleton `x[0]` or `x` depending on the
+      # size of the whole directory scan, and --baseline matches names exactly.
+      # Record both spellings so an unrelated PR can't flip baselined findings
+      # to "new" (see the script's docstring).
+      - name: checkov-baseline-index-twins
+        type: shell
+        command: python3 workflows/scripts/common/checkov-baseline-index-twins.py .checkov.baseline components/terraform
