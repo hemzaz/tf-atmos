@@ -561,17 +561,27 @@ resource "aws_iam_role_policy_attachment" "backup_testing_basic" {
 #     ARN to local.restore_test_db_prefix* -- lambda/backup_testing.py names
 #     every RDS restore-test instance under that exact prefix, so this role
 #     cannot reach a real database's ARN no matter what tag the request sets.
-#   - EC2 (ec2:CreateTags/ec2:DeleteVolume): the EC2 API does not support
-#     scoping these two actions by a resource-id ARN pattern together with a
-#     wildcard id, so instead a Null condition requires the target volume to
-#     NOT already carry an Environment tag -- every Terraform-managed volume
-#     in this repo always carries Environment via provider default_tags, and
-#     a volume AWS Backup has just restored never does until this Lambda tags
-#     it, so this still can't reach a real, managed volume.
-#   - A final explicit Deny (not merely omitting an Allow) blocks
-#     CreateTags/AddTagsToResource/DeleteVolume/DeleteDBInstance outright on
-#     any resource that already carries an Environment tag, as a backstop
-#     that holds even if either scoping above is ever loosened by mistake.
+#   - EC2 (ec2:CreateTags/ec2:DeleteVolume): both actions do support
+#     resource-level ARN scoping to the volume resource type, but this policy
+#     instead relies on Resource "*" plus a Null condition requiring the
+#     target volume to NOT already carry an Environment tag -- every
+#     Terraform-managed volume in this repo always carries Environment via
+#     provider default_tags, and a volume AWS Backup has just restored never
+#     does either: StartRestoreJob only copies a recovery point's tags onto
+#     the resource it creates when the caller passes
+#     CopySourceTagsToRestoredResource=True, which this Lambda never does, so
+#     this still can't reach a real, managed volume.
+#   - Two final explicit Denies (not merely omitting an Allow) block all four
+#     of CreateTags/AddTagsToResource/DeleteVolume/DeleteDBInstance outright
+#     on any resource that already carries an Environment tag, or already
+#     carries a Backup=true tag, as a backstop that holds even if either
+#     scoping above is ever loosened by mistake. Both Denies list the RDS
+#     actions too, even though the RDS Allow grants above are already
+#     ARN-prefix scoped to the restore-test namespace and a freshly restored
+#     RDS instance carries neither tag at creation for the same
+#     CopySourceTagsToRestoredResource reason as the EBS volume above -- this
+#     is defense in depth, not a live restriction on today's restore-test
+#     flow.
 resource "aws_iam_role_policy" "backup_testing_custom" {
   count = var.enable_backup_testing ? 1 : 0
 

@@ -75,12 +75,15 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
   `local.restore_test_db_prefix` every RDS restore-test instance is named
   under, `ec2:CreateTags` additionally requires the target volume to carry no
   `Environment` tag yet (every Terraform-managed volume always does, via
-  provider `default_tags`; a just-restored volume never does until this
-  Lambda tags it), and an explicit `Deny` blocks all four actions outright on
-  any resource already carrying an `Environment` or `Backup` tag as a
-  backstop. So a bug in `lambda/backup_testing.py` that tags/deletes the wrong
-  ARN still cannot reach a real, managed volume or database — not just an
-  untagged one. The actual `ec2:CreateVolume`/`rds:RestoreDBInstanceFromDBSnapshot`
+  provider `default_tags`; a just-restored volume never does either —
+  `StartRestoreJob` only copies a recovery point's tags onto the restored
+  resource when the caller passes `CopySourceTagsToRestoredResource=True`,
+  which this Lambda never does), and two explicit `Deny` statements block all
+  four actions outright on any resource already carrying an `Environment`
+  tag, or already carrying a `Backup=true` tag, as a backstop over both the
+  EC2 and RDS grants. So a bug in `lambda/backup_testing.py` that tags/deletes
+  the wrong ARN still cannot reach a real, managed volume or database — not
+  just an untagged one. The actual `ec2:CreateVolume`/`rds:RestoreDBInstanceFromDBSnapshot`
   calls happen under the backup service role (`aws_iam_role.backup`, passed
   as `IamRoleArn` to `backup:StartRestoreJob`), which already carries
   `AWSBackupServiceRolePolicyForRestores` — this Lambda's own role is never
@@ -97,6 +100,15 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
   (`aws_sns_topic_policy.backup_notifications`) allowing
   `backup.amazonaws.com` (and `cloudwatch.amazonaws.com`, scoped to the two
   backup/restore failure alarm ARNs) to `SNS:Publish`.
+- **RDS restore-test metadata overrides:** `lambda/backup_testing.py`'s RDS
+  branch of `_restore_metadata` seeds its `Metadata` from the source
+  instance's own restore metadata (`backup:GetRecoveryPointRestoreMetadata`),
+  then explicitly overrides `DeletionProtection` and `MultiAZ` to `"false"`
+  alongside `DBInstanceIdentifier` — a prod source instance's
+  `deletion_protection = true` (`stacks/catalog/rds/prod.yaml`) would
+  otherwise carry onto this short-lived test instance and make
+  `_delete_restored_resource` fail, and Multi-AZ would needlessly double its
+  cost for an instance that only exists long enough to validate the restore.
 
 ## Usage
 

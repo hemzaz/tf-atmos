@@ -16,10 +16,16 @@ itself only via a request that sets that exact tag (an aws:RequestTag
 condition on ec2:CreateTags/rds:AddTagsToResource). Beyond that, RDS
 tagging/deletion is further scoped by ARN to the fixed
 RDS_RESTORE_TEST_DB_PREFIX this function itself names every restore-test
-instance under, EC2 tagging/deletion is blocked outright (an explicit Deny)
-on any resource that already carries an Environment or Backup tag, and every
+instance under, and two explicit Denies block all four of
+ec2:CreateTags/ec2:DeleteVolume/rds:AddTagsToResource/rds:DeleteDBInstance
+outright on any resource that already carries an Environment tag or a
+Backup=true tag, as a backstop over both the EC2 and RDS Allow grants. Every
 Terraform-managed resource in this repo carries Environment via provider
-default_tags. So a bug in this code that passes the wrong ARN into
+default_tags, and AWS Backup's StartRestoreJob does not copy a recovery
+point's tags onto the resource it restores unless the caller passes
+CopySourceTagsToRestoredResource=True (this function never does), so a
+freshly restored volume or DB instance carries neither tag until this code
+tags it itself. So a bug in this code that passes the wrong ARN into
 _tag_restored_resource/_delete_restored_resource still cannot reach a real,
 managed volume or database -- not just an untagged one (this is the M11
 finding, and its later hardening, that this function's IAM policy fixes).
@@ -221,8 +227,22 @@ def _restore_metadata(vault_name: str, recovery_point_arn: str, resource_type: s
         # local.restore_test_db_prefix in main.tf, which scopes this
         # function's own IAM policy's rds:AddTagsToResource/
         # rds:DeleteDBInstance grants to that exact ARN prefix.
+        #
+        # DeletionProtection and MultiAZ are overridden alongside the
+        # identifier: `base` is seeded from the source instance's own
+        # restore metadata, so a prod source with deletion_protection=true
+        # (stacks/catalog/rds/prod.yaml) would otherwise carry that setting
+        # onto this ephemeral test instance and make
+        # _delete_restored_resource fail; Multi-AZ is disabled too, since
+        # this instance only exists long enough to validate the restore and
+        # is deleted right after.
         prefix = os.environ.get("RDS_RESTORE_TEST_DB_PREFIX", "restore-test-")
-        return {**base, "DBInstanceIdentifier": f"{prefix}{suffix}"}
+        return {
+            **base,
+            "DBInstanceIdentifier": f"{prefix}{suffix}",
+            "DeletionProtection": "false",
+            "MultiAZ": "false",
+        }
     raise ValueError(f"No restore metadata builder for resource_type '{resource_type}'")
 
 
