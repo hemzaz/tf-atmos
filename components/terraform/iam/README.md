@@ -42,21 +42,25 @@ fnx-dev-testenv-01. The `iam/ci` and `iam/eks-*` stack entries are still
   the role exists before `kms/main`'s first apply.
   **If the role already exists** (any account that has ever run an ASG or
   an EKS managed node group outside this repo has it — check first with
-  `aws iam get-role --role-name AWSServiceRoleForAutoScaling`), you have two
-  correct options. (a) Leave `enable_autoscaling_service_linked_role` `false`
-  everywhere and do nothing else: `kms/main` only needs the role to exist,
-  not to be managed by this resource, so the `dependencies.components` edge
-  is satisfied either way. (b) To have Terraform manage the role instead,
-  set the flag `true` on that one instance and import it first, at the
-  indexed address — the resource sits behind `count`, so the unindexed
-  address does not exist:
+  `aws iam get-role --role-name AWSServiceRoleForAutoScaling`), note that
+  the committed stacks already set the flag `true` on that one instance per
+  account (`iam/dev` in dev, `iam/main` in staging and prod —
+  `stacks/orgs/fnx/<stage>/.../components/security.yaml`), so you have two
+  correct options. (a) Set `enable_autoscaling_service_linked_role: false`
+  on that stack's `iam` instance in its `security.yaml` and do nothing
+  else: `kms/main` only needs the role to exist, not to be managed by this
+  resource, so the `dependencies.components` edge is satisfied either way.
+  (b) Leave the flag `true` and instead import the role into that same
+  instance first, at the indexed address — the resource sits behind
+  `count`, so the unindexed address does not exist. Use `iam/dev` in dev or
+  `iam/main` in staging and prod:
   ```
-  atmos terraform import iam/main 'aws_iam_service_linked_role.autoscaling[0]' \
+  atmos terraform import iam/dev 'aws_iam_service_linked_role.autoscaling[0]' \
     arn:<partition>:iam::<account>:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling \
-    -s <stack>
+    -s <stack>   # iam/dev in dev; iam/main in staging and prod
   ```
-  Once imported and set `true`, never flip the flag back to `false` — the
-  next plan would destroy the imported role.
+  Once imported, never flip the flag back to `false` afterward — the next
+  plan would destroy the imported role.
 
 ## Usage
 
