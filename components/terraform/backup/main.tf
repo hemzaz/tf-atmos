@@ -8,12 +8,24 @@ locals {
   restore_test_tag_key   = "BackupRestoreTest"
   restore_test_tag_value = "true"
 
-  # Built from known values (not aws_backup_vault.main.arn / aws_iam_role.backup.arn)
-  # so the policy below is fully computable at `terraform plan` time -- both
-  # ARN formats are deterministic, and tests/backup.tftest.hcl asserts this
-  # policy's JSON with `command = plan`.
-  backup_vault_arn        = "arn:aws:backup:${var.region}:${data.aws_caller_identity.current.account_id}:backup-vault:${aws_backup_vault.main.name}"
-  backup_service_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${aws_iam_role.backup.name}"
+  # Every RDS restore-test instance is named with this prefix (lambda/backup_testing.py's
+  # _restore_metadata builds DBInstanceIdentifier from it). aws_iam_role_policy.backup_testing_custom
+  # scopes rds:AddTagsToResource/rds:DeleteDBInstance to this ARN prefix so the
+  # Lambda's own role can only ever touch a DB instance this test itself created
+  # (defense in depth alongside the aws:RequestTag/aws:ResourceTag conditions
+  # below -- a wrong ARN passed internally still can't reach a real database).
+  restore_test_db_prefix = "${local.name_prefix}-restore-test-"
+
+  # Built from known values (not aws_backup_vault.main.arn / aws_iam_role.backup.arn
+  # / aws_sns_topic.backup_notifications[0].arn / aws_cloudwatch_metric_alarm.*.arn)
+  # so the policies below are fully computable at `terraform plan` time -- all
+  # of these ARN formats are deterministic, and tests/backup.tftest.hcl
+  # asserts their JSON with `command = plan`.
+  backup_vault_arn               = "arn:aws:backup:${var.region}:${data.aws_caller_identity.current.account_id}:backup-vault:${aws_backup_vault.main.name}"
+  backup_service_role_arn        = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${aws_iam_role.backup.name}"
+  backup_notifications_topic_arn = "arn:aws:sns:${var.region}:${data.aws_caller_identity.current.account_id}:${local.name_prefix}-notifications"
+  backup_failures_alarm_arn      = "arn:aws:cloudwatch:${var.region}:${data.aws_caller_identity.current.account_id}:alarm:${local.name_prefix}-backup-failures"
+  restore_failures_alarm_arn     = "arn:aws:cloudwatch:${var.region}:${data.aws_caller_identity.current.account_id}:alarm:${local.name_prefix}-restore-failures"
 }
 
 # AWS Backup Vault
@@ -73,9 +85,18 @@ resource "aws_iam_role_policy_attachment" "restore" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
 }
 
-# Daily Backup Plan
-resource "aws_backup_plan" "daily" {
-  name = "${local.name_prefix}-daily"
+# Backup Plan: one plan with a daily/weekly/monthly rule each, mirroring
+# cloudposse/terraform-aws-backup's model (a single aws_backup_plan built from
+# var.rules, one rule per cadence) rather than one aws_backup_plan per cadence.
+# This matters operationally, not just cosmetically: an aws_backup_selection
+# attaches to a *plan*, and covers every rule inside that plan. Three separate
+# plans would need three separate (or tripled) selections -- one per cadence --
+# or the weekly/monthly rules simply never run against anything, which is
+# exactly the bug this merge fixes (HIGH finding: weekly/monthly retention was
+# unreachable because every selection below pointed only at the old daily-only
+# plan).
+resource "aws_backup_plan" "main" {
+  name = local.name_prefix
 
   rule {
     rule_name         = "daily-backup"
@@ -110,18 +131,6 @@ resource "aws_backup_plan" "daily" {
     )
   }
 
-  advanced_backup_setting {
-    backup_options = {
-      WindowsVSS = "enabled"
-    }
-    resource_type = "EC2"
-  }
-}
-
-# Weekly Backup Plan
-resource "aws_backup_plan" "weekly" {
-  name = "${local.name_prefix}-weekly"
-
   rule {
     rule_name         = "weekly-backup"
     target_vault_name = aws_backup_vault.main.name
@@ -154,11 +163,6 @@ resource "aws_backup_plan" "weekly" {
       }
     )
   }
-}
-
-# Monthly Backup Plan
-resource "aws_backup_plan" "monthly" {
-  name = "${local.name_prefix}-monthly"
 
   rule {
     rule_name         = "monthly-backup"
@@ -192,14 +196,21 @@ resource "aws_backup_plan" "monthly" {
       }
     )
   }
+
+  advanced_backup_setting {
+    backup_options = {
+      WindowsVSS = "enabled"
+    }
+    resource_type = "EC2"
+  }
 }
 
-# Backup Selection for RDS
+# Backup Selection for RDS, by explicit ARN list
 resource "aws_backup_selection" "rds_daily" {
   count = length(var.rds_instances) > 0 ? 1 : 0
 
-  name         = "${local.name_prefix}-rds-daily"
-  plan_id      = aws_backup_plan.daily.id
+  name         = "${local.name_prefix}-rds-explicit"
+  plan_id      = aws_backup_plan.main.id
   iam_role_arn = aws_iam_role.backup.arn
 
   resources = [for instance in var.rds_instances : "arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:${instance}"]
@@ -211,23 +222,33 @@ resource "aws_backup_selection" "rds_daily" {
 # rds, and workflows/scripts/common/check-deploy-layers.py rejects a
 # same-phase !terraform.state read. rds/main and rds/data set Backup=true in
 # their own stack vars.tags to opt in.
+#
+# CRITICAL fix: this used to be two `selection_tag` blocks (Backup=true,
+# Environment=<env>). BackupSelection.ListOfTags combines multiple
+# selection_tag entries with OR, not AND, so that selected every RDS instance
+# with EITHER tag -- in practice every RDS instance in the account, since
+# Environment is set on all of them via provider default_tags. `resources`
+# (an RDS-only ARN pattern) plus a `condition` block (AND semantics, per
+# cloudposse/terraform-aws-backup's `conditions` selection style) is the fix:
+# only RDS instances matching the ARN pattern AND carrying both tags qualify.
 resource "aws_backup_selection" "rds_tagged_daily" {
   count = var.enable_rds_backup ? 1 : 0
 
-  name         = "${local.name_prefix}-rds-tagged-daily"
-  plan_id      = aws_backup_plan.daily.id
+  name         = "${local.name_prefix}-rds-tagged"
+  plan_id      = aws_backup_plan.main.id
   iam_role_arn = aws_iam_role.backup.arn
 
-  selection_tag {
-    type  = "STRINGEQUALS"
-    key   = "Backup"
-    value = "true"
-  }
+  resources = ["arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:*"]
 
-  selection_tag {
-    type  = "STRINGEQUALS"
-    key   = "Environment"
-    value = var.tags["Environment"]
+  condition {
+    string_equals {
+      key   = "aws:ResourceTag/Backup"
+      value = "true"
+    }
+    string_equals {
+      key   = "aws:ResourceTag/Environment"
+      value = var.tags["Environment"]
+    }
   }
 }
 
@@ -235,8 +256,8 @@ resource "aws_backup_selection" "rds_tagged_daily" {
 resource "aws_backup_selection" "dynamodb_daily" {
   count = length(var.dynamodb_tables) > 0 ? 1 : 0
 
-  name         = "${local.name_prefix}-dynamodb-daily"
-  plan_id      = aws_backup_plan.daily.id
+  name         = "${local.name_prefix}-dynamodb"
+  plan_id      = aws_backup_plan.main.id
   iam_role_arn = aws_iam_role.backup.arn
 
   resources = [for table in var.dynamodb_tables : "arn:aws:dynamodb:${var.region}:${data.aws_caller_identity.current.account_id}:table/${table}"]
@@ -246,49 +267,74 @@ resource "aws_backup_selection" "dynamodb_daily" {
 resource "aws_backup_selection" "efs_daily" {
   count = length(var.efs_file_systems) > 0 ? 1 : 0
 
-  name         = "${local.name_prefix}-efs-daily"
-  plan_id      = aws_backup_plan.daily.id
+  name         = "${local.name_prefix}-efs"
+  plan_id      = aws_backup_plan.main.id
   iam_role_arn = aws_iam_role.backup.arn
 
   resources = [for fs in var.efs_file_systems : "arn:aws:elasticfilesystem:${var.region}:${data.aws_caller_identity.current.account_id}:file-system/${fs}"]
 }
 
-# Backup Selection for EC2 (by tags)
+# Backup Selection for EC2 (by tags). Same CRITICAL fix as rds_tagged_daily
+# above: ARN pattern scoped to EC2 instances plus an AND'd condition block,
+# not two OR'd selection_tag entries.
 resource "aws_backup_selection" "ec2_daily" {
   count = var.enable_ec2_backup ? 1 : 0
 
-  name         = "${local.name_prefix}-ec2-daily"
-  plan_id      = aws_backup_plan.daily.id
+  name         = "${local.name_prefix}-ec2-tagged"
+  plan_id      = aws_backup_plan.main.id
   iam_role_arn = aws_iam_role.backup.arn
 
-  selection_tag {
-    type  = "STRINGEQUALS"
-    key   = "Backup"
-    value = "true"
-  }
+  resources = ["arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:instance/*"]
 
-  selection_tag {
-    type  = "STRINGEQUALS"
-    key   = "Environment"
-    value = var.tags["Environment"]
+  condition {
+    string_equals {
+      key   = "aws:ResourceTag/Backup"
+      value = "true"
+    }
+    string_equals {
+      key   = "aws:ResourceTag/Environment"
+      value = var.tags["Environment"]
+    }
   }
 }
 
-# Backup Selection for EBS Volumes
+# Backup Selection for EBS Volumes, by explicit ARN list (mirrors rds_daily above)
 resource "aws_backup_selection" "ebs_daily" {
-  count = var.enable_ebs_backup ? 1 : 0
+  count = length(var.ebs_volume_ids) > 0 ? 1 : 0
 
-  name         = "${local.name_prefix}-ebs-daily"
-  plan_id      = aws_backup_plan.daily.id
+  name         = "${local.name_prefix}-ebs-explicit"
+  plan_id      = aws_backup_plan.main.id
   iam_role_arn = aws_iam_role.backup.arn
 
-  selection_tag {
-    type  = "STRINGEQUALS"
-    key   = "Backup"
-    value = "true"
-  }
+  resources = [for vol in var.ebs_volume_ids : "arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:volume/${vol}"]
+}
 
-  resources = var.ebs_volume_ids != null ? [for vol in var.ebs_volume_ids : "arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:volume/${vol}"] : []
+# Backup Selection for EBS Volumes, by tag (mirrors rds_tagged_daily/ec2_daily
+# above). The pre-fix version of this selection used a single selection_tag
+# (Backup=true only, no Environment) with no resource-type ARN scoping at
+# all, which per the BackupSelection API selects every backup-supported
+# resource type carrying that tag, not just EBS volumes, and does not match
+# this component's own README ("Backup=true + Environment=..."). Now scoped
+# to EBS volumes specifically, AND'd with both tags like the other two.
+resource "aws_backup_selection" "ebs_tagged_daily" {
+  count = var.enable_ebs_backup ? 1 : 0
+
+  name         = "${local.name_prefix}-ebs-tagged"
+  plan_id      = aws_backup_plan.main.id
+  iam_role_arn = aws_iam_role.backup.arn
+
+  resources = ["arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:volume/*"]
+
+  condition {
+    string_equals {
+      key   = "aws:ResourceTag/Backup"
+      value = "true"
+    }
+    string_equals {
+      key   = "aws:ResourceTag/Environment"
+      value = var.tags["Environment"]
+    }
+  }
 }
 
 # Backup Notifications
@@ -305,6 +351,56 @@ resource "aws_sns_topic_subscription" "backup_email" {
   topic_arn = aws_sns_topic.backup_notifications[0].arn
   protocol  = "email"
   endpoint  = var.notification_emails[count.index]
+}
+
+# HIGH fix: aws_backup_vault_notifications alone does not let AWS Backup
+# publish to the topic -- it also needs an access policy statement allowing
+# backup.amazonaws.com to SNS:Publish (see the aws_backup_vault_notifications
+# registry example), same as this repo's own
+# aws_sns_topic_policy.security_alerts pattern in security-monitoring/main.tf.
+# The alarms below (backup_failures/restore_failures) publish to this same
+# topic, so cloudwatch.amazonaws.com is allowed too, scoped to those two
+# alarm ARNs specifically.
+resource "aws_sns_topic_policy" "backup_notifications" {
+  count = var.enable_backup_notifications ? 1 : 0
+
+  arn = aws_sns_topic.backup_notifications[0].arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowBackupToPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "backup.amazonaws.com"
+        }
+        Action   = "SNS:Publish"
+        Resource = local.backup_notifications_topic_arn
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+        }
+      },
+      {
+        Sid    = "AllowBackupAlarmsToPublish"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudwatch.amazonaws.com"
+        }
+        Action   = "SNS:Publish"
+        Resource = local.backup_notifications_topic_arn
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+          ArnEquals = {
+            "aws:SourceArn" = [
+              local.backup_failures_alarm_arn,
+              local.restore_failures_alarm_arn,
+            ]
+          }
+        }
+      }
+    ]
+  })
 }
 
 # Backup Vault Notifications
@@ -400,12 +496,13 @@ resource "aws_lambda_function" "backup_testing" {
 
   environment {
     variables = {
-      BACKUP_VAULT_NAME    = aws_backup_vault.main.name
-      RESTORE_IAM_ROLE_ARN = local.backup_service_role_arn
-      TEST_TAG_KEY         = local.restore_test_tag_key
-      TEST_TAG_VALUE       = local.restore_test_tag_value
-      RESOURCE_TYPE        = var.backup_testing_resource_type
-      ENVIRONMENT          = var.tags["Environment"]
+      BACKUP_VAULT_NAME          = aws_backup_vault.main.name
+      RESTORE_IAM_ROLE_ARN       = local.backup_service_role_arn
+      TEST_TAG_KEY               = local.restore_test_tag_key
+      TEST_TAG_VALUE             = local.restore_test_tag_value
+      RESOURCE_TYPE              = var.backup_testing_resource_type
+      ENVIRONMENT                = var.tags["Environment"]
+      RDS_RESTORE_TEST_DB_PREFIX = local.restore_test_db_prefix
     }
   }
 }
@@ -437,10 +534,10 @@ resource "aws_iam_role_policy_attachment" "backup_testing_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# M11 fix: the previous version of this policy allowed ec2:DeleteVolume and
-# rds:DeleteDBInstance (plus the Create/Restore actions) on Resource "*" with
-# no condition, so a bug in the restore-test Lambda could delete ANY volume
-# or database in the account. Now:
+# M11 fix, hardened further below: the previous version of this policy
+# allowed ec2:DeleteVolume and rds:DeleteDBInstance (plus the Create/Restore
+# actions) on Resource "*" with no condition, so a bug in the restore-test
+# Lambda could delete ANY volume or database in the account. Now:
 #   - backup:* is scoped to this component's own vault, not "*".
 #   - ec2:CreateVolume / rds:RestoreDBInstanceFromDBSnapshot are not granted
 #     here at all: AWS Backup performs the actual restore under the passed
@@ -449,8 +546,32 @@ resource "aws_iam_role_policy_attachment" "backup_testing_basic" {
 #   - ec2:CreateTags / rds:AddTagsToResource require the request itself to
 #     set the BackupRestoreTest marker tag (aws:RequestTag).
 #   - ec2:DeleteVolume / rds:DeleteDBInstance require the target resource to
-#     already carry that same tag (aws:ResourceTag) -- so this Lambda can
-#     only ever delete a resource it tagged itself in this run.
+#     already carry that same tag (aws:ResourceTag).
+#
+# HIGH fix: request-tag/resource-tag conditions alone are bypassable -- this
+# role could ec2:CreateTags/rds:AddTagsToResource onto ANY existing resource
+# (Resource "*") as long as the request set BackupRestoreTest=true, then
+# ec2:DeleteVolume/rds:DeleteDBInstance it, so a bug in
+# lambda/backup_testing.py that passes the wrong ARN into
+# _tag_restored_resource/_delete_restored_resource could tag-and-delete a
+# real, in-use resource, not just its own restore-test resource. Two
+# independent layers now bound what can be tagged, not only what the tag
+# says:
+#   - RDS: rds:AddTagsToResource/rds:DeleteDBInstance are scoped by Resource
+#     ARN to local.restore_test_db_prefix* -- lambda/backup_testing.py names
+#     every RDS restore-test instance under that exact prefix, so this role
+#     cannot reach a real database's ARN no matter what tag the request sets.
+#   - EC2 (ec2:CreateTags/ec2:DeleteVolume): the EC2 API does not support
+#     scoping these two actions by a resource-id ARN pattern together with a
+#     wildcard id, so instead a Null condition requires the target volume to
+#     NOT already carry an Environment tag -- every Terraform-managed volume
+#     in this repo always carries Environment via provider default_tags, and
+#     a volume AWS Backup has just restored never does until this Lambda tags
+#     it, so this still can't reach a real, managed volume.
+#   - A final explicit Deny (not merely omitting an Allow) blocks
+#     CreateTags/AddTagsToResource/DeleteVolume/DeleteDBInstance outright on
+#     any resource that already carries an Environment tag, as a backstop
+#     that holds even if either scoping above is ever loosened by mistake.
 resource "aws_iam_role_policy" "backup_testing_custom" {
   count = var.enable_backup_testing ? 1 : 0
 
@@ -461,9 +582,19 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "BackupVaultReadAndRestore"
-        Effect   = "Allow"
-        Action   = ["backup:ListRecoveryPointsByBackupVault", "backup:StartRestoreJob", "backup:DescribeRestoreJob"]
+        Sid    = "BackupVaultReadAndRestore"
+        Effect = "Allow"
+        Action = [
+          "backup:ListRecoveryPointsByBackupVault",
+          "backup:StartRestoreJob",
+          "backup:DescribeRestoreJob",
+          # MEDIUM fix: seeds _restore_metadata from the source recovery
+          # point's own restore metadata (availabilityZone, subnet group,
+          # security groups, encryption, etc.) instead of guessing a bare
+          # DBInstanceIdentifier/availabilityZone, which is the AWS Backup
+          # registry's documented pattern for StartRestoreJob's Metadata arg.
+          "backup:GetRecoveryPointRestoreMetadata",
+        ]
         Resource = local.backup_vault_arn
       },
       {
@@ -484,13 +615,28 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
         Resource = "*"
       },
       {
-        Sid    = "TagRestoredResourcesOnlyWithTheTestTag"
+        Sid    = "TagRestoredEbsVolumesOnlyBeforeTheyAreEnvironmentManaged"
         Effect = "Allow"
-        Action = ["ec2:CreateTags", "rds:AddTagsToResource"]
-        # Resource "*": neither action supports resource-level ARN scoping
-        # combined with a wildcard resource id at plan time, so the tag
-        # condition below is what limits this grant.
+        Action = "ec2:CreateTags"
+        # Resource "*": ec2:CreateTags does not support resource-level ARN
+        # scoping combined with a wildcard resource id, so the Null condition
+        # (target has no Environment tag yet) is what limits this grant --
+        # see the comment above this resource.
         Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
+          }
+          Null = {
+            "aws:ResourceTag/Environment" = "true"
+          }
+        }
+      },
+      {
+        Sid      = "TagRestoredRdsInstancesOnlyUnderTheRestoreTestPrefix"
+        Effect   = "Allow"
+        Action   = "rds:AddTagsToResource"
+        Resource = "arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:${local.restore_test_db_prefix}*"
         Condition = {
           StringEquals = {
             "aws:RequestTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
@@ -498,13 +644,46 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
         }
       },
       {
-        Sid      = "DeleteOnlyResourcesTaggedByThisTest"
+        Sid      = "DeleteOnlyEbsVolumesTaggedByThisTest"
         Effect   = "Allow"
-        Action   = ["ec2:DeleteVolume", "rds:DeleteDBInstance"]
+        Action   = "ec2:DeleteVolume"
         Resource = "*"
         Condition = {
           StringEquals = {
             "aws:ResourceTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
+          }
+        }
+      },
+      {
+        Sid      = "DeleteOnlyRdsInstancesUnderTheRestoreTestPrefix"
+        Effect   = "Allow"
+        Action   = "rds:DeleteDBInstance"
+        Resource = "arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:${local.restore_test_db_prefix}*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
+          }
+        }
+      },
+      {
+        Sid      = "DenyTaggingOrDeletingEnvironmentManagedResources"
+        Effect   = "Deny"
+        Action   = ["ec2:CreateTags", "ec2:DeleteVolume", "rds:AddTagsToResource", "rds:DeleteDBInstance"]
+        Resource = "*"
+        Condition = {
+          Null = {
+            "aws:ResourceTag/Environment" = "false"
+          }
+        }
+      },
+      {
+        Sid      = "DenyTaggingOrDeletingBackupOptedInResources"
+        Effect   = "Deny"
+        Action   = ["ec2:CreateTags", "ec2:DeleteVolume", "rds:AddTagsToResource", "rds:DeleteDBInstance"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/Backup" = "true"
           }
         }
       }

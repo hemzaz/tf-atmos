@@ -18,24 +18,14 @@ output "cross_region_vault_arn" {
   value       = var.enable_cross_region_backup ? aws_backup_vault.cross_region[0].arn : null
 }
 
-output "daily_backup_plan_id" {
-  description = "ID of the daily backup plan"
-  value       = aws_backup_plan.daily.id
+output "backup_plan_id" {
+  description = "ID of the backup plan (one plan with a daily/weekly/monthly rule each -- see components/terraform/backup/README.md)"
+  value       = aws_backup_plan.main.id
 }
 
-output "daily_backup_plan_arn" {
-  description = "ARN of the daily backup plan"
-  value       = aws_backup_plan.daily.arn
-}
-
-output "weekly_backup_plan_id" {
-  description = "ID of the weekly backup plan"
-  value       = aws_backup_plan.weekly.id
-}
-
-output "monthly_backup_plan_id" {
-  description = "ID of the monthly backup plan"
-  value       = aws_backup_plan.monthly.id
+output "backup_plan_arn" {
+  description = "ARN of the backup plan"
+  value       = aws_backup_plan.main.arn
 }
 
 output "backup_role_arn" {

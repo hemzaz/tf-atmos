@@ -22,8 +22,8 @@
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
 # eks-addons reads its dns instance's zone_ids, so it has its own addons layer
 # after dns (and after compute, for the cluster it installs into).
-# A layer whose root modules no stack uses yet (backup, eks-backend-services,
-# cost-optimization) plans nothing: "No components matched".
+# A layer whose root modules no stack uses yet (eks-backend-services) plans
+# nothing: "No components matched".
 #
 # Every enabled, non-abstract instance of every stack must be selected by exactly
 # one layer, in that order. validate-all enforces it with

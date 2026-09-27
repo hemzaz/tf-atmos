@@ -156,7 +156,7 @@ variable "rds_instances" {
 
 variable "enable_rds_backup" {
   type        = bool
-  description = "Enable RDS instance backups based on tags (STRINGEQUALS Backup=true and Environment=var.tags[\"Environment\"]) instead of an explicit rds_instances ARN list"
+  description = "Enable RDS instance backups based on tags (an RDS-scoped ARN pattern, AND-conditioned on Backup=true and Environment=var.tags[\"Environment\"]) instead of an explicit rds_instances ARN list"
   default     = false
 }
 
@@ -174,19 +174,19 @@ variable "efs_file_systems" {
 
 variable "enable_ec2_backup" {
   type        = bool
-  description = "Enable EC2 instance backups based on tags"
+  description = "Enable EC2 instance backups based on tags (an EC2-instance-scoped ARN pattern, AND-conditioned on Backup=true and Environment=var.tags[\"Environment\"])"
   default     = false
 }
 
 variable "enable_ebs_backup" {
   type        = bool
-  description = "Enable EBS volume backups"
+  description = "Enable EBS volume backups based on tags (an EBS-volume-scoped ARN pattern, AND-conditioned on Backup=true and Environment=var.tags[\"Environment\"]); see ebs_volume_ids for an explicit-ARN-list alternative"
   default     = false
 }
 
 variable "ebs_volume_ids" {
   type        = list(string)
-  description = "List of EBS volume IDs to backup"
+  description = "List of EBS volume IDs to backup by explicit ARN, independent of enable_ebs_backup's tag-based selection"
   default     = []
 }
 

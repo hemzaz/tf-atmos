@@ -11,11 +11,32 @@ resource came up healthy, and finally deletes it.
 This function's own IAM role (aws_iam_role.backup_testing / the
 aws_iam_role_policy.backup_testing_custom policy in main.tf) can delete a
 resource ONLY when it already carries that marker tag (an aws:ResourceTag
-condition on ec2:DeleteVolume/rds:DeleteDBInstance) and can only apply the
-tag itself via a request that sets that exact tag (an aws:RequestTag
-condition on ec2:CreateTags/rds:AddTagsToResource). A bug in this code can
-therefore never delete an arbitrary, untagged volume or database (this was
-the M11 finding this function's IAM policy fixes).
+condition on ec2:DeleteVolume/rds:DeleteDBInstance), and can apply the tag
+itself only via a request that sets that exact tag (an aws:RequestTag
+condition on ec2:CreateTags/rds:AddTagsToResource). Beyond that, RDS
+tagging/deletion is further scoped by ARN to the fixed
+RDS_RESTORE_TEST_DB_PREFIX this function itself names every restore-test
+instance under, EC2 tagging/deletion is blocked outright (an explicit Deny)
+on any resource that already carries an Environment or Backup tag, and every
+Terraform-managed resource in this repo carries Environment via provider
+default_tags. So a bug in this code that passes the wrong ARN into
+_tag_restored_resource/_delete_restored_resource still cannot reach a real,
+managed volume or database -- not just an untagged one (this is the M11
+finding, and its later hardening, that this function's IAM policy fixes).
+
+Known limitation: RESTORE_JOB_TIMEOUT_SECONDS leaves headroom under this
+Lambda's own 900s timeout, but a real RDS restore (as opposed to this EBS-
+sized default) commonly takes longer than that -- and AWS Lambda's hard
+15-minute cap means no single synchronous invocation can safely poll a slow
+RDS restore to completion. If the poll in _restore_and_wait times out, the
+restore job itself keeps running server-side; this function tags the
+resource if AWS Backup has assigned it a CreatedResourceArn by then (so it
+becomes identifiable and IAM-deletable for manual or follow-up cleanup), but
+cannot always delete it itself within this invocation. Splitting the
+start/poll/cleanup steps across an EventBridge-driven restore-job-completed
+flow (rather than one blocking Lambda invocation) would remove this
+limitation if RDS restore testing on realistically-sized databases becomes a
+requirement; EBS restores complete in well under the budget above today.
 """
 
 import json
@@ -40,8 +61,24 @@ SUPPORTED_RESOURCE_TYPES = ("EBS", "RDS")
 
 RESTORE_JOB_POLL_SECONDS = 15
 # Leaves headroom under the Lambda's own timeout (900s, main.tf) for the
-# tag/validate/delete steps that follow.
+# tag/validate/delete steps that follow. See the module docstring's "Known
+# limitation" note: this is not enough for a realistically-sized RDS restore.
 RESTORE_JOB_TIMEOUT_SECONDS = 780
+
+
+class RestoreJobTimeout(TimeoutError):
+    """Raised when a restore job does not reach COMPLETED within budget.
+
+    Carries whatever AWS Backup had already assigned by the time we gave up
+    polling, so the caller can still tag (and thereby make cleanable) a
+    resource that was in fact created, even though this invocation cannot
+    wait for it to finish and delete it itself.
+    """
+
+    def __init__(self, restore_job_id: str, created_resource_arn: Optional[str], message: str) -> None:
+        super().__init__(message)
+        self.restore_job_id = restore_job_id
+        self.created_resource_arn = created_resource_arn
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -65,15 +102,33 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.warning(message)
         return {"statusCode": 200, "body": json.dumps({"skipped": True, "reason": message})}
 
-    restore_job_id, created_resource_arn = _restore_and_wait(
-        recovery_point_arn=recovery_point["RecoveryPointArn"],
-        resource_type=resource_type,
-        restore_role_arn=restore_role_arn,
-    )
+    try:
+        restore_job_id, created_resource_arn = _restore_and_wait(
+            vault_name=vault_name,
+            recovery_point_arn=recovery_point["RecoveryPointArn"],
+            resource_type=resource_type,
+            restore_role_arn=restore_role_arn,
+        )
+    except RestoreJobTimeout as exc:
+        if exc.created_resource_arn:
+            logger.warning(
+                "Restore job %s timed out but AWS Backup had already created %s; "
+                "tagging it now so it stays identifiable and IAM-deletable for cleanup.",
+                exc.restore_job_id,
+                exc.created_resource_arn,
+            )
+            _tag_restored_resource(resource_type, exc.created_resource_arn, tag_key, tag_value)
+        raise
 
+    # Tag before validating: if validation raises (not just returns an
+    # unhealthy result), the finally block below still deletes the resource
+    # instead of leaving it orphaned and, being untagged before this point,
+    # un-deletable by this role's own IAM policy.
     _tag_restored_resource(resource_type, created_resource_arn, tag_key, tag_value)
-    healthy = _validate_restore(resource_type, created_resource_arn)
-    _delete_restored_resource(resource_type, created_resource_arn)
+    try:
+        healthy = _validate_restore(resource_type, created_resource_arn)
+    finally:
+        _delete_restored_resource(resource_type, created_resource_arn)
 
     result = {
         "recoveryPointArn": recovery_point["RecoveryPointArn"],
@@ -100,7 +155,9 @@ def _latest_recovery_point(vault_name: str, resource_type: str) -> Optional[dict
     return max(candidates, key=lambda rp: rp["CreationDate"])
 
 
-def _restore_and_wait(recovery_point_arn: str, resource_type: str, restore_role_arn: str) -> tuple[str, str]:
+def _restore_and_wait(
+    vault_name: str, recovery_point_arn: str, resource_type: str, restore_role_arn: str
+) -> tuple[str, str]:
     """Start a restore job and block, within the Lambda's own timeout, until it finishes.
 
     restore_role_arn must be a role trusted by backup.amazonaws.com (the
@@ -108,7 +165,7 @@ def _restore_and_wait(recovery_point_arn: str, resource_type: str, restore_role_
     assumes it to perform the actual ec2:CreateVolume /
     rds:RestoreDBInstanceFromDBSnapshot calls, not this function's own role.
     """
-    metadata = _restore_metadata(resource_type)
+    metadata = _restore_metadata(vault_name, recovery_point_arn, resource_type)
     start = backup_client.start_restore_job(
         RecoveryPointArn=recovery_point_arn,
         Metadata=metadata,
@@ -127,17 +184,45 @@ def _restore_and_wait(recovery_point_arn: str, resource_type: str, restore_role_
         if state in ("ABORTED", "FAILED"):
             raise RuntimeError(f"Restore job {restore_job_id} ended in {state}: {status.get('StatusMessage')}")
         if time.monotonic() > deadline:
-            raise TimeoutError(f"Restore job {restore_job_id} did not complete within {RESTORE_JOB_TIMEOUT_SECONDS}s")
+            raise RestoreJobTimeout(
+                restore_job_id,
+                status.get("CreatedResourceArn"),
+                f"Restore job {restore_job_id} did not complete within {RESTORE_JOB_TIMEOUT_SECONDS}s",
+            )
         time.sleep(RESTORE_JOB_POLL_SECONDS)
 
 
-def _restore_metadata(resource_type: str) -> dict[str, str]:
-    """Metadata AWS Backup's StartRestoreJob requires for this resource type."""
+def _restore_metadata(vault_name: str, recovery_point_arn: str, resource_type: str) -> dict[str, str]:
+    """Metadata AWS Backup's StartRestoreJob requires for this resource type.
+
+    Seeded from backup:GetRecoveryPointRestoreMetadata -- the source
+    resource's own restore metadata (for RDS: subnet group, security groups,
+    encryption/KMS key, instance class, etc; for EBS: availabilityZone,
+    encrypted, kmsKeyId, volumeType) -- rather than a bare hand-built dict, so
+    a restore doesn't silently drop into default networking/encryption
+    settings. Only the identifier is overridden.
+    """
+    base = backup_client.get_recovery_point_restore_metadata(
+        BackupVaultName=vault_name, RecoveryPointArn=recovery_point_arn
+    )["RestoreMetadata"]
     suffix = str(int(time.time()))
     if resource_type == "EBS":
-        return {"availabilityZone": _first_availability_zone()}
+        # availabilityZone is required and not part of the source volume's
+        # own restore metadata (a volume doesn't carry a target AZ), so it is
+        # always set explicitly rather than overridden from `base`.
+        return {**base, "availabilityZone": _first_availability_zone()}
     if resource_type == "RDS":
-        return {"TargetDBInstanceIdentifier": f"backup-restore-test-{suffix}"}
+        # StartRestoreJob's RDS metadata key is DBInstanceIdentifier (the
+        # RestoreDBInstanceFromDBSnapshot parameter name), not
+        # TargetDBInstanceIdentifier -- the latter is silently ignored by the
+        # API, so the previous version of this function restored into a
+        # random, AWS-generated identifier every time. The fixed
+        # RDS_RESTORE_TEST_DB_PREFIX below must match
+        # local.restore_test_db_prefix in main.tf, which scopes this
+        # function's own IAM policy's rds:AddTagsToResource/
+        # rds:DeleteDBInstance grants to that exact ARN prefix.
+        prefix = os.environ.get("RDS_RESTORE_TEST_DB_PREFIX", "restore-test-")
+        return {**base, "DBInstanceIdentifier": f"{prefix}{suffix}"}
     raise ValueError(f"No restore metadata builder for resource_type '{resource_type}'")
 
 
