@@ -192,3 +192,20 @@ resource "aws_secretsmanager_secret_version" "auth_token" {
     auth_token = var.auth_token
   })
 }
+
+# rotation_policy's own two statements, folding in additional_policy_json --
+# see that variable's description for the full rationale.
+locals {
+  rotation_own_statements = local.enabled ? [{
+    Sid      = "AllowElastiCacheAuthTokenRotation"
+    Effect   = "Allow"
+    Action   = ["elasticache:ModifyReplicationGroup", "elasticache:DescribeReplicationGroups"]
+    Resource = aws_elasticache_replication_group.main[0].arn
+  }] : []
+
+  rotation_additional_statements = var.additional_policy_json != null ? [
+    for i, s in jsondecode(var.additional_policy_json).Statement : merge(s, {
+      Sid = "Additional${try(s.Sid, "")}${i}"
+    })
+  ] : []
+}

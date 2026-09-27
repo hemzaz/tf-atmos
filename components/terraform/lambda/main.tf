@@ -1,4 +1,30 @@
 # components/terraform/lambda/main.tf
+# Only fetched when actually needed: an unconditional data source here would
+# make every plan of this component call STS GetCallerIdentity, which breaks
+# the fully offline test suite in tests/ (dummy credentials, no real AWS
+# call ever made) for every run, not just ones that set secretsmanager_source_arn.
+data "aws_caller_identity" "current" {
+  count = var.secretsmanager_source_arn != null ? 1 : 0
+}
+
+# In-component packaging for small, in-repo function sources (see
+# var.source_dir's description). Zips ${path.module}/${var.source_dir} at
+# plan time; external build pipelines keep using filename or s3_bucket+s3_key
+# instead, both left untouched by this.
+data "archive_file" "source" {
+  count       = var.source_dir != null ? 1 : 0
+  type        = "zip"
+  source_dir  = "${path.module}/${var.source_dir}"
+  output_path = "${path.module}/.archives/${var.function_name}.zip"
+}
+
+locals {
+  # Exactly one of these three ends up non-null for a Zip package; the
+  # precondition on aws_lambda_function.main below enforces that.
+  package_filename         = var.source_dir != null ? data.archive_file.source[0].output_path : var.filename
+  package_source_code_hash = var.source_dir != null ? data.archive_file.source[0].output_base64sha256 : var.source_code_hash
+}
+
 resource "aws_iam_role" "lambda" {
   name = "${var.tags["Environment"]}-${var.function_name}-role"
 
@@ -174,8 +200,8 @@ resource "aws_lambda_function" "main" {
   role              = aws_iam_role.lambda.arn
   handler           = var.handler
   runtime           = var.runtime
-  filename          = var.filename
-  source_code_hash  = var.source_code_hash
+  filename          = local.package_filename
+  source_code_hash  = local.package_source_code_hash
   s3_bucket         = var.s3_bucket
   s3_key            = var.s3_key
   s3_object_version = var.s3_object_version
@@ -275,7 +301,27 @@ resource "aws_lambda_function" "main" {
       condition     = var.memory_size >= 128 && var.memory_size <= 10240
       error_message = "Memory size must be between 128 MB and 10,240 MB."
     }
+
+    # Exactly one packaging source for a Zip package (image packages carry
+    # no filename at all -- see the image_config block below).
+    precondition {
+      condition = (
+        var.package_type == "Image" ||
+        (var.source_dir != null ? 1 : 0) + (var.filename != null ? 1 : 0) + (var.s3_bucket != null ? 1 : 0) == 1
+      )
+      error_message = "Exactly one of source_dir, filename or s3_bucket (with s3_key) must be set for a Zip package."
+    }
   }
+}
+
+resource "aws_lambda_permission" "secretsmanager" {
+  count          = var.secretsmanager_source_arn != null ? 1 : 0
+  statement_id   = "AllowSecretsManagerInvoke"
+  action         = "lambda:InvokeFunction"
+  function_name  = aws_lambda_function.main.function_name
+  principal      = "secretsmanager.amazonaws.com"
+  source_arn     = var.secretsmanager_source_arn
+  source_account = data.aws_caller_identity.current[0].account_id
 }
 
 resource "aws_lambda_permission" "api_gateway" {

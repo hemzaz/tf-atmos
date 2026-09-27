@@ -63,6 +63,7 @@ variable "secrets" {
       - rotation_lambda_arn: ARN of the Lambda function for rotation (optional)
       - rotation_days: Days between automatic rotation (defaults to default_rotation_days)
       - rotation_automatically: Whether to enable automatic rotation (defaults to default_rotation_automatically)
+      - rotate_immediately: Whether enabling rotation invokes rotation_lambda_arn right away (defaults to default_rotate_immediately)
       - recovery_window_in_days: Window for recovery before permanent deletion (defaults to default_recovery_window_in_days)
       - generate_random_password: Whether to generate a random password for this secret (defaults to false)
   EOT
@@ -97,6 +98,12 @@ variable "default_rotation_days" {
 variable "default_rotation_automatically" {
   type        = bool
   description = "Default setting for automatic rotation if not specified at the secret level"
+  default     = false
+}
+
+variable "default_rotate_immediately" {
+  type        = bool
+  description = "Default for rotate_immediately (whether enabling rotation invokes rotation_lambda_arn right away) if not specified at the secret level. Defaults to false, opposite of the AWS provider's own default of true: rotation_lambda_arn is commonly a Lambda applied by a separate component instance, which may not exist and be invokable yet on this component's first apply."
   default     = false
 }
 

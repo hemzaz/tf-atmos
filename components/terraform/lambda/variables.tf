@@ -54,6 +54,12 @@ variable "s3_object_version" {
   default     = null
 }
 
+variable "source_dir" {
+  type        = string
+  description = "A directory under this component (e.g. \"functions/redis-auth-rotation\", resolved relative to path.module) that the component zips itself via the archive_file data source, producing filename/source_code_hash internally -- for small, in-repo function sources (e.g. Secrets Manager rotation functions) that do not warrant an external build pipeline. Mutually exclusive with filename and s3_bucket+s3_key (validated on aws_lambda_function.main): exactly one packaging source is required for package_type = \"Zip\"."
+  default     = null
+}
+
 variable "layers" {
   type        = list(string)
   description = "List of Lambda layer ARNs to attach"
@@ -159,6 +165,17 @@ variable "sns_source_arn" {
   type        = string
   description = "ARN of the SNS topic that invokes the Lambda function"
   default     = null
+}
+
+variable "secretsmanager_source_arn" {
+  type        = string
+  description = "ARN of the Secrets Manager secret that invokes this Lambda as its rotation function. Adds a resource-based permission for principal secretsmanager.amazonaws.com, scoped by aws:SourceArn (this secret) and aws:SourceAccount (this account) -- the two conditions AWS's rotation documentation requires so no other secret or account can invoke the function. Wire the same secret's ARN into the secretsmanager component's rotation_lambda_arn on this function's own ARN to complete the pairing."
+  default     = null
+
+  validation {
+    condition     = var.secretsmanager_source_arn == null || can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.secretsmanager_source_arn))
+    error_message = "secretsmanager_source_arn must be a Secrets Manager secret ARN (arn:aws:secretsmanager:<region>:<account-id>:secret:<name>)."
+  }
 }
 
 variable "configure_event_invoke" {

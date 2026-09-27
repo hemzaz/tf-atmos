@@ -268,3 +268,56 @@ run "auth_token_secret_can_be_turned_off" {
     error_message = "store_auth_token_in_secrets_manager = false must create neither the secret nor its version."
   }
 }
+
+run "rotation_policy_carries_only_its_own_statement_by_default" {
+  # apply, not plan: rotation_policy's Resource is the replication group's
+  # arn, a computed attribute unknown until apply even under mock_provider,
+  # as kinesis's own reader_policy/combined_policy tests need too.
+  command = apply
+
+  assert {
+    condition     = length(jsondecode(output.rotation_policy).Statement) == 1
+    error_message = "Without additional_policy_json, rotation_policy is exactly this cache's own grant."
+  }
+
+  assert {
+    condition = (
+      one(jsondecode(output.rotation_policy).Statement).Sid == "AllowElastiCacheAuthTokenRotation"
+      && toset(one(jsondecode(output.rotation_policy).Statement).Action) == toset(["elasticache:ModifyReplicationGroup", "elasticache:DescribeReplicationGroups"])
+    )
+    error_message = "rotation_policy's own statement grants exactly the two rotation actions on this replication group."
+  }
+}
+
+run "rotation_policy_folds_in_additional_policy_json" {
+  command = apply
+
+  variables {
+    additional_policy_json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        { Sid = "AllowSecretReadWrite", Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:test" },
+      ]
+    })
+  }
+
+  assert {
+    condition     = length(jsondecode(output.rotation_policy).Statement) == 2
+    error_message = "additional_policy_json's Statement entries are folded into rotation_policy alongside this cache's own."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(output.rotation_policy).Statement : s if s.Sid == "AdditionalAllowSecretReadWrite0"]) == 1
+    error_message = "The folded-in statement's Sid is rewritten Additional<original-Sid><index> so it can never collide with rotation_policy's own Sid."
+  }
+}
+
+run "rejects_additional_policy_json_without_a_statement_key" {
+  command = plan
+
+  variables {
+    additional_policy_json = jsonencode({ Version = "2012-10-17" })
+  }
+
+  expect_failures = [var.additional_policy_json]
+}

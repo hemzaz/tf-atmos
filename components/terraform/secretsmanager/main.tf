@@ -16,9 +16,16 @@ locals {
     rotation_lambda_arn      = lookup(v, "rotation_lambda_arn", null)
     rotation_days            = lookup(v, "rotation_days", var.default_rotation_days)
     rotation_automatically   = lookup(v, "rotation_automatically", var.default_rotation_automatically)
+    rotate_immediately       = lookup(v, "rotate_immediately", var.default_rotate_immediately)
     recovery_window_in_days  = lookup(v, "recovery_window_in_days", var.default_recovery_window_in_days)
     generate_random_password = lookup(v, "generate_random_password", false)
   } if var.enabled && var.secrets_enabled }
+
+  # A secret with rotation enabled is henceforth managed by its rotation
+  # Lambda, not by this resource's secret_string -- see the two
+  # aws_secretsmanager_secret_version resources below for why they are split
+  # on this.
+  rotation_enabled = { for k, v in local.secrets_with_path : k => v if v.rotation_automatically && v.rotation_lambda_arn != null }
 
   # Process secret paths with proper structure
   secrets_with_path = { for k, v in local.defined_secrets : k => merge(v, {
@@ -77,34 +84,62 @@ resource "aws_secretsmanager_secret" "this" {
   }
 }
 
-# Create secret versions with values
+# Create secret versions with values. Split in two by rotation status: once a
+# secret's rotation Lambda has run at least once, the value AWS actually
+# holds under AWSCURRENT is whatever the Lambda's finishSecret step put
+# there, not var.secret_data/random_password.this -- so this resource, which
+# only ever knows the ORIGINAL value, must not fight the Lambda for it on
+# every later apply. The rotation-enabled half below is otherwise identical
+# but ignores secret_string after the initial create; the non-rotating half
+# keeps managing it exactly as before.
 resource "aws_secretsmanager_secret_version" "this" {
-  for_each = { for k, v in local.secrets_with_path : k => v if v.secret_data != null || v.generate_random_password }
+  for_each = { for k, v in local.secrets_with_path : k => v if(v.secret_data != null || v.generate_random_password) && !contains(keys(local.rotation_enabled), k) }
 
   secret_id     = aws_secretsmanager_secret.this[each.key].id
   secret_string = each.value.generate_random_password ? random_password.this[each.key].result : each.value.secret_data
 
   lifecycle {
-    # Add validation to ensure secret data is not empty
     precondition {
       condition     = each.value.generate_random_password || (each.value.secret_data != null && length(each.value.secret_data) > 0)
       error_message = "Secret data must not be empty. For secret ${each.key}, either provide non-empty secret_data or set generate_random_password=true."
     }
 
-    # Add validation for JSON-formatted secrets with strict checking
     precondition {
-      # More robust JSON validation for secret data
-      # First check if random password is being generated or if secret data is null (both are valid)
-      # Then check if it doesn't look like JSON (starts with '{') - if not JSON, no validation needed
-      # Finally, if it looks like JSON, validate it can be decoded and is not empty
       condition     = each.value.generate_random_password || (each.value.secret_data == null) || (!can(regex("^\\s*\\{", each.value.secret_data))) || (can(jsondecode(each.value.secret_data)) && length(jsondecode(each.value.secret_data)) > 0)
       error_message = "Secret data for ${each.key} appears to be JSON but is not valid or is empty. Ensure the JSON is well-formed and contains data."
     }
 
-    # Add comprehensive validation for sensitive data patterns
     precondition {
-      # Check that secrets don't contain obviously hardcoded credentials in dev/test patterns
-      # More comprehensive regex pattern to catch various forms of weak or test credentials
+      condition     = each.value.generate_random_password || each.value.secret_data == null || (!can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", each.value.secret_data)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", each.value.secret_data)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", each.value.secret_data)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", each.value.secret_data)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", each.value.secret_data)))
+      error_message = "Secret data for ${each.key} appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without using predictable patterns."
+    }
+  }
+}
+
+# The rotation-enabled half of the version resource above: same secret_data/
+# generate_random_password validation, but secret_string changes after the
+# initial create are ignored, because the rotation Lambda's finishSecret step
+# owns the value from then on (see the comment above aws_secretsmanager_secret_version.this).
+resource "aws_secretsmanager_secret_version" "rotating" {
+  for_each = { for k, v in local.secrets_with_path : k => v if(v.secret_data != null || v.generate_random_password) && contains(keys(local.rotation_enabled), k) }
+
+  secret_id     = aws_secretsmanager_secret.this[each.key].id
+  secret_string = each.value.generate_random_password ? random_password.this[each.key].result : each.value.secret_data
+
+  lifecycle {
+    ignore_changes = [secret_string]
+
+    precondition {
+      condition     = each.value.generate_random_password || (each.value.secret_data != null && length(each.value.secret_data) > 0)
+      error_message = "Secret data must not be empty. For secret ${each.key}, either provide non-empty secret_data or set generate_random_password=true."
+    }
+
+    precondition {
+      condition     = each.value.generate_random_password || (each.value.secret_data == null) || (!can(regex("^\\s*\\{", each.value.secret_data))) || (can(jsondecode(each.value.secret_data)) && length(jsondecode(each.value.secret_data)) > 0)
+      error_message = "Secret data for ${each.key} appears to be JSON but is not valid or is empty. Ensure the JSON is well-formed and contains data."
+    }
+
+    precondition {
       condition     = each.value.generate_random_password || each.value.secret_data == null || (!can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", each.value.secret_data)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", each.value.secret_data)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", each.value.secret_data)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", each.value.secret_data)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", each.value.secret_data)))
       error_message = "Secret data for ${each.key} appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without using predictable patterns."
     }
@@ -121,10 +156,20 @@ resource "aws_secretsmanager_secret_policy" "this" {
 
 # Configure rotation for secrets that require it
 resource "aws_secretsmanager_secret_rotation" "this" {
-  for_each = { for k, v in local.secrets_with_path : k => v if v.rotation_automatically && v.rotation_lambda_arn != null }
+  for_each = local.rotation_enabled
 
   secret_id           = aws_secretsmanager_secret.this[each.key].id
   rotation_lambda_arn = each.value.rotation_lambda_arn
+  # Default false: rotate_immediately (the AWS provider's own default is
+  # true) would invoke rotation_lambda_arn the moment this resource applies.
+  # rotation_lambda_arn is commonly set to a deterministic ARN string of a
+  # Lambda applied by a SEPARATE component instance (see
+  # microservices-platform.yaml's comment on why it can't be read via
+  # !terraform.state here) -- on this component's OWN first apply that
+  # function, and the secretsmanager.amazonaws.com invoke permission on it,
+  # may not exist yet. Set true only once the rotation function is confirmed
+  # deployed and invokable.
+  rotate_immediately = each.value.rotate_immediately
 
   rotation_rules {
     automatically_after_days = each.value.rotation_days

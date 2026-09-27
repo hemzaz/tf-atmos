@@ -365,3 +365,29 @@ variable "auth_token_secret_recovery_window_in_days" {
     error_message = "auth_token_secret_recovery_window_in_days must be 0 or between 7 and 30."
   }
 }
+
+# Raw Statement entries from another component's own ready-made IAM policy
+# document (JSON, {Version, Statement}) folded into rotation_policy --
+# typically the secretsmanager component's secret_access_policy output for
+# the secret holding this cache's auth_token, wired in via !terraform.state.
+# Lets a single Secrets Manager rotation Lambda (whose custom_policy input
+# accepts only one document) get both this cache's ModifyReplicationGroup
+# grant and the secret's own read/write grant in one shot, without Atmos ever
+# having to read two components' live state into one YAML value (which
+# !terraform.state alone cannot do, and an Atmos Go template can, but only by
+# requiring live state at describe/validate time too, breaking `atmos
+# describe stacks`/`atmos validate stacks` for the whole stack before first
+# apply) -- mirrors the kinesis component's additional_policy_json/
+# combined_policy pattern. Each folded-in Statement's Sid is rewritten
+# (prefixed "Additional") so it can never collide with rotation_policy's own
+# Sid. Null (the default) adds nothing.
+variable "additional_policy_json" {
+  type        = string
+  description = "An additional IAM policy document (JSON, {Version, Statement}) whose Statement entries are folded into rotation_policy -- see the comment above this variable for the full rationale"
+  default     = null
+
+  validation {
+    condition     = var.additional_policy_json == null || can(jsondecode(var.additional_policy_json).Statement)
+    error_message = "additional_policy_json must be null or a JSON policy document with a Statement key."
+  }
+}
