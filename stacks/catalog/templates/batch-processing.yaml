@@ -1531,15 +1531,23 @@ components:
 # log_bucket_name is NOT required: logging is disabled by default. See the
 # STORAGE (S3) note above to opt in per stack.
 #
-# KMS: the job role (batch_job_role_arn), the execution role
-# (batch_execution_role_arn), and the Step Functions / Lambda roles behind
-# the parallel processor (eventbridge_step_functions_role_arn and the
-# validation/list-files/aggregate Lambda roles) all read and write the S3
-# buckets above, which are encrypted with kms/main's key (not a
-# batch-specific key). kms/main delegates to IAM through its root-account
-# statement, so no key-policy change is needed, but each of those
-# externally-supplied roles still needs its own IAM policy granting
-# kms:Decrypt and kms:GenerateDataKey* on
-# `!terraform.state kms/main .key_arn`, scoped with
-# `kms:ViaService: s3.<region>.amazonaws.com` -- otherwise GetObject/PutObject
-# against these buckets fails with AccessDenied.
+# KMS: the job role (batch_job_role_arn) and the execution roles behind the
+# validation_lambda_arn, list_files_lambda_arn and aggregate_lambda_arn
+# Lambdas are the principals that actually read and write the S3 buckets
+# above, which are encrypted with kms/main's key (not a batch-specific
+# key). kms/main delegates to IAM through its root-account statement, so
+# no key-policy change is needed, but each of those externally-supplied
+# roles still needs its own IAM policy granting kms:Decrypt and
+# kms:GenerateDataKey* on `!terraform.state kms/main .key_arn`, scoped
+# with `kms:ViaService: s3.<region>.amazonaws.com` -- otherwise
+# GetObject/PutObject against these buckets fails with AccessDenied.
+#
+# batch_execution_role_arn is the ECS task-execution role: it only pulls
+# container images and writes logs, and eventbridge_step_functions_role_arn
+# is the role EventBridge assumes to call states:StartExecution -- neither
+# touches these buckets, so neither needs a grant here. Each state
+# machine's own execution role is created by the stepfunctions component
+# itself (components/terraform/stepfunctions/main.tf) and already carries
+# a KMS policy for its own log group; give it S3/KMS access too only if a
+# state reads or writes these buckets directly (e.g. via an AWS SDK
+# service integration) rather than through the Lambdas above.
