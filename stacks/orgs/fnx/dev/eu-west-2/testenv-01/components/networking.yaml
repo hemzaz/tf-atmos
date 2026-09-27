@@ -28,6 +28,10 @@ components:
           - "10.0.103.0/24"
 
         vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Load balancer subnet discovery for the AWS Load Balancer Controller that
         # catalog/eks-addons enables on eks/main, as in Cloud Posse's
@@ -39,6 +43,9 @@ components:
         private_subnets_additional_tags:
           "kubernetes.io/role/internal-elb": "1"
           "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+      dependencies:
+        components:
+          - component: kms/main
     vpc/services:
       metadata:
         component: vpc
@@ -55,6 +62,10 @@ components:
           - "10.1.102.0/24"
           - "10.1.103.0/24"
         vpc_flow_logs_enabled: "{{ .settings.environment.enable_vpc_flow_logs }}"
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Load balancer subnet discovery for the AWS Load Balancer Controller that
         # catalog/eks-addons enables on eks/data, as in Cloud Posse's
@@ -66,6 +77,9 @@ components:
         private_subnets_additional_tags:
           "kubernetes.io/role/internal-elb": "1"
           "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+      dependencies:
+        components:
+          - component: kms/main
 
     # Network resources for main VPC
     network/main:

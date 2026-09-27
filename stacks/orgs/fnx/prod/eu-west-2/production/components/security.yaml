@@ -40,6 +40,12 @@ components:
         # MFA required for production access (trust condition)
         require_mfa: true
 
+        # kms/main's allow_autoscaling_ebs grant (catalog/kms/defaults.yaml)
+        # names the Auto Scaling service-linked role directly as a
+        # key-policy principal; this is the one iam instance per account
+        # that provisions it.
+        enable_autoscaling_service_linked_role: true
+
         # MFA required for production access
       dependencies:
         components:
@@ -104,6 +110,13 @@ components:
         key_users:
           - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-eks-node-role
           - arn:aws:iam::{{ .settings.environment.aws_account_id }}:role/production-ci-role
+      dependencies:
+        components:
+          # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
+          # service-linked role directly as a principal; iam/main provisions
+          # it (enable_autoscaling_service_linked_role) so KMS does not
+          # reject the key policy.
+          - component: iam/main
 
     # ==========================================================================
     # ACM Certificates - Production

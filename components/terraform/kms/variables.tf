@@ -194,6 +194,12 @@ variable "allow_cloudtrail" {
   default     = false
 }
 
+variable "allow_autoscaling_ebs" {
+  type        = bool
+  description = "Let the EC2 Auto Scaling service-linked role (arn:<partition>:iam::<account>:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling) use the key to encrypt/decrypt EBS volumes it launches for a managed node group or ASG (kms:Encrypt/Decrypt/ReEncrypt*/GenerateDataKey*/DescribeKey, scoped by kms:ViaService=ec2.<region>.amazonaws.com and kms:CallerAccount) and create the grant EC2 needs to do so (kms:CreateGrant, scoped by kms:GrantIsForAWSResource). The role exists in every account that has used Auto Scaling; without this, new instances on a CMK-encrypted launch template fail to launch"
+  default     = false
+}
+
 ##############################################
 # Alias Configuration
 ##############################################

@@ -131,6 +131,10 @@ components:
           - "10.91.202.0/24"
         nat_gateway_enabled: false
         vpc_flow_logs_enabled: false
+        # This lane has no kms/main instance (see the header - only rds runs
+        # here, and nothing else needs a CMK). flow_logs_kms_key_arn is left
+        # unset (component default: "", its own per-VPC key), since
+        # vpc/defaults no longer sets it - see stacks/catalog/vpc/defaults.yaml.
         manage_network_acls: false
         manage_default_security_group: false
         tags:
