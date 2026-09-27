@@ -70,20 +70,32 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
   the restore-test Lambda's own IAM role can `ec2:CreateTags`/`rds:AddTagsToResource`
   only when the request itself sets `BackupRestoreTest=true` (`aws:RequestTag`),
   and can `ec2:DeleteVolume`/`rds:DeleteDBInstance` only on a resource that
-  already carries that tag (`aws:ResourceTag`). Beyond that: `rds:AddTagsToResource`/
-  `rds:DeleteDBInstance` are further scoped by Resource ARN to the fixed
+  already carries that tag (`aws:ResourceTag`). Beyond that: `ec2:CreateTags`/
+  `ec2:DeleteVolume` are ARN-scoped to `arn:...:volume/*` and
+  `rds:AddTagsToResource`/`rds:DeleteDBInstance` are ARN-scoped to the fixed
   `local.restore_test_db_prefix` every RDS restore-test instance is named
-  under, `ec2:CreateTags` additionally requires the target volume to carry no
-  `Environment` tag yet (every Terraform-managed volume always does, via
-  provider `default_tags`; a just-restored volume never does either —
+  under; `ec2:CreateTags` additionally requires the target volume to carry no
+  `Environment` tag yet (every Terraform-managed volume in this repo carries
+  one, via provider `default_tags`; a just-restored volume never does either —
   `StartRestoreJob` only copies a recovery point's tags onto the restored
   resource when the caller passes `CopySourceTagsToRestoredResource=True`,
-  which this Lambda never does), and two explicit `Deny` statements block all
-  four actions outright on any resource already carrying an `Environment`
-  tag, or already carrying a `Backup=true` tag, as a backstop over both the
-  EC2 and RDS grants. So a bug in `lambda/backup_testing.py` that tags/deletes
-  the wrong ARN still cannot reach a real, managed volume or database — not
-  just an untagged one. The actual `ec2:CreateVolume`/`rds:RestoreDBInstanceFromDBSnapshot`
+  which this Lambda never does). That `Environment`-tag check alone is **not**
+  sufficient, though: every EBS volume the `eks-addons` `aws-ebs-csi-driver`
+  addon provisions for a Kubernetes `PersistentVolume` also carries no
+  `Environment` tag — the CSI driver creates volumes via its own AWS API
+  calls, not this repo's Terraform, so `default_tags` never reaches them —
+  and those are real, in-use application data, not just untagged. So three
+  explicit `Deny` statements (not two) block all four actions outright on any
+  resource already carrying an `Environment` tag, already carrying a
+  `Backup=true` tag, or carrying the `ebs.csi.aws.com/cluster` tag the AWS EBS
+  CSI driver adds unconditionally, by default, to every volume and snapshot
+  it manages (upstream `kubernetes-sigs/aws-ebs-csi-driver` `docs/tagging.md`,
+  "Default Cluster Tag") — a backstop over the EC2 and RDS grants that holds
+  for Kubernetes-managed volumes too, not only Terraform-managed ones. So a
+  bug in `lambda/backup_testing.py` that tags/deletes the wrong ARN still
+  cannot reach a real, managed volume or database, whether it's a
+  Terraform-managed resource or a Kubernetes `PersistentVolume`'s backing
+  volume — not just an untagged one. The actual `ec2:CreateVolume`/`rds:RestoreDBInstanceFromDBSnapshot`
   calls happen under the backup service role (`aws_iam_role.backup`, passed
   as `IamRoleArn` to `backup:StartRestoreJob`), which already carries
   `AWSBackupServiceRolePolicyForRestores` — this Lambda's own role is never
@@ -92,6 +104,14 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
   `tests/backup.tftest.hcl` (real AWS provider, dummy credentials,
   `command = plan`; the policy is asserted directly since it is `jsonencode()`d
   on the resource, not built via `aws_iam_policy_document`).
+- **MEDIUM fix (`aws_backup_selection.rds_tagged_daily`):** `not_resources`
+  excludes any RDS instance ARN ending in `-read-replica` from the tag-based
+  RDS selection. `rds/main`/`rds/data`'s `Backup=true` tag reaches a
+  `create_read_replica = true` instance's read replica too (same
+  `var.tags`), and AWS Backup's handling of RDS read replicas is restricted
+  — without the exclusion the replica would either duplicate the primary's
+  snapshots or fail its own backup job and fire the
+  `NumberOfBackupJobsFailed` alarm.
 - The vault's own SNS topic (`aws_sns_topic.backup_notifications`) is
   encrypted with `kms_key_arn`; `catalog/kms/defaults.yaml` turns on the
   key's `allow_backup` flag so `backup.amazonaws.com` may publish to it. That

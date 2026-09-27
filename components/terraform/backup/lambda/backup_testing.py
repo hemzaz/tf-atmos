@@ -11,24 +11,32 @@ resource came up healthy, and finally deletes it.
 This function's own IAM role (aws_iam_role.backup_testing / the
 aws_iam_role_policy.backup_testing_custom policy in main.tf) can delete a
 resource ONLY when it already carries that marker tag (an aws:ResourceTag
-condition on ec2:DeleteVolume/rds:DeleteDBInstance), and can apply the tag
-itself only via a request that sets that exact tag (an aws:RequestTag
-condition on ec2:CreateTags/rds:AddTagsToResource). Beyond that, RDS
-tagging/deletion is further scoped by ARN to the fixed
-RDS_RESTORE_TEST_DB_PREFIX this function itself names every restore-test
-instance under, and two explicit Denies block all four of
+condition on ec2:DeleteVolume/rds:DeleteDBInstance, both also ARN-scoped to
+their own resource type -- volume/* for EC2, the fixed
+RDS_RESTORE_TEST_DB_PREFIX for RDS), and can apply the tag itself only via a
+request that sets that exact tag (an aws:RequestTag condition on
+ec2:CreateTags/rds:AddTagsToResource, rds:AddTagsToResource likewise
+ARN-scoped to RDS_RESTORE_TEST_DB_PREFIX). Beyond that, three explicit Denies
+block all four of
 ec2:CreateTags/ec2:DeleteVolume/rds:AddTagsToResource/rds:DeleteDBInstance
-outright on any resource that already carries an Environment tag or a
-Backup=true tag, as a backstop over both the EC2 and RDS Allow grants. Every
-Terraform-managed resource in this repo carries Environment via provider
-default_tags, and AWS Backup's StartRestoreJob does not copy a recovery
-point's tags onto the resource it restores unless the caller passes
-CopySourceTagsToRestoredResource=True (this function never does), so a
-freshly restored volume or DB instance carries neither tag until this code
-tags it itself. So a bug in this code that passes the wrong ARN into
-_tag_restored_resource/_delete_restored_resource still cannot reach a real,
-managed volume or database -- not just an untagged one (this is the M11
-finding, and its later hardening, that this function's IAM policy fixes).
+outright on any resource that already carries an Environment tag, already
+carries a Backup=true tag, or is a CSI/Kubernetes-managed EBS volume (tagged
+"ebs.csi.aws.com/cluster" = "true" by the eks-addons aws-ebs-csi-driver addon
+on every volume it manages, unconditionally by default) -- a backstop over
+both the EC2 and RDS Allow grants. Every Terraform-managed resource in this
+repo carries Environment via provider default_tags, and every EKS-managed
+EBS volume carries the CSI cluster tag instead (the CSI driver provisions
+volumes through its own AWS API calls, not this repo's Terraform, so
+default_tags never reaches them); AWS Backup's StartRestoreJob does not copy
+a recovery point's tags onto the resource it restores unless the caller
+passes CopySourceTagsToRestoredResource=True (this function never does), so
+a freshly restored volume or DB instance carries none of those tags until
+this code tags it itself. So a bug in this code that passes the wrong ARN
+into _tag_restored_resource/_delete_restored_resource still cannot reach a
+real, managed volume or database, whether it's a Terraform-managed resource
+or a Kubernetes PersistentVolume's backing volume -- not just an untagged
+one (this is the M11 finding, and its later hardening, that this function's
+IAM policy fixes).
 
 Known limitation: RESTORE_JOB_TIMEOUT_SECONDS leaves headroom under this
 Lambda's own 900s timeout, but a real RDS restore (as opposed to this EBS-

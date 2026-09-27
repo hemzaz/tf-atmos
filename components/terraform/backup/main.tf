@@ -240,6 +240,19 @@ resource "aws_backup_selection" "rds_tagged_daily" {
 
   resources = ["arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:*"]
 
+  # MEDIUM fix (round-2 review): rds/main and rds/data set Backup=true in
+  # their own var.tags, which reaches every resource they create, including
+  # a `create_read_replica = true` instance's aws_db_instance.read_replica
+  # (identifier "${Environment}-${identifier}-read-replica"). AWS Backup's
+  # handling of RDS read replicas is restricted (it cannot be backed up
+  # independently of its source), so without this exclusion the replica
+  # would either duplicate the source's snapshots or fail its backup job and
+  # fire the NumberOfBackupJobsFailed alarm. `not_resources` (an AWS Backup
+  # selection field the provider supports alongside `resources`/`condition`)
+  # excludes every RDS instance whose identifier ends in "-read-replica",
+  # regardless of which rds/* instance created it.
+  not_resources = ["arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:*-read-replica"]
+
   condition {
     string_equals {
       key   = "aws:ResourceTag/Backup"
@@ -561,27 +574,38 @@ resource "aws_iam_role_policy_attachment" "backup_testing_basic" {
 #     ARN to local.restore_test_db_prefix* -- lambda/backup_testing.py names
 #     every RDS restore-test instance under that exact prefix, so this role
 #     cannot reach a real database's ARN no matter what tag the request sets.
-#   - EC2 (ec2:CreateTags/ec2:DeleteVolume): both actions do support
-#     resource-level ARN scoping to the volume resource type, but this policy
-#     instead relies on Resource "*" plus a Null condition requiring the
-#     target volume to NOT already carry an Environment tag -- every
-#     Terraform-managed volume in this repo always carries Environment via
-#     provider default_tags, and a volume AWS Backup has just restored never
-#     does either: StartRestoreJob only copies a recovery point's tags onto
-#     the resource it creates when the caller passes
-#     CopySourceTagsToRestoredResource=True, which this Lambda never does, so
-#     this still can't reach a real, managed volume.
-#   - Two final explicit Denies (not merely omitting an Allow) block all four
-#     of CreateTags/AddTagsToResource/DeleteVolume/DeleteDBInstance outright
-#     on any resource that already carries an Environment tag, or already
-#     carries a Backup=true tag, as a backstop that holds even if either
-#     scoping above is ever loosened by mistake. Both Denies list the RDS
-#     actions too, even though the RDS Allow grants above are already
-#     ARN-prefix scoped to the restore-test namespace and a freshly restored
-#     RDS instance carries neither tag at creation for the same
-#     CopySourceTagsToRestoredResource reason as the EBS volume above -- this
-#     is defense in depth, not a live restriction on today's restore-test
-#     flow.
+#   - EC2 (ec2:CreateTags/ec2:DeleteVolume): both actions DO support
+#     resource-level ARN scoping to the volume resource type (see the AWS
+#     "Resource-level permissions for EC2 API actions" reference -- `volume`
+#     is a listed resource type for both), so both are scoped to
+#     "arn:...:volume/*", not "*". The Null condition (target has no
+#     Environment tag yet) narrows this further for most volumes, but it is
+#     NOT sufficient on its own in this repo: eks-addons installs
+#     aws-ebs-csi-driver as a core addon in every cluster
+#     (components/terraform/eks-addons/main.tf), and every EBS volume it
+#     provisions for a Kubernetes PersistentVolume carries only CSI/k8s
+#     tags -- no Environment tag, since the CSI driver creates volumes
+#     through its own AWS API calls, not through this repo's Terraform, so
+#     `default_tags` never reaches them. Those volumes are real, in-use
+#     application data (for example Retain-policy PVs or scaled-down
+#     StatefulSets), not just "untagged". The third Deny below closes that
+#     gap: the AWS EBS CSI driver tags every volume and snapshot it manages
+#     with "ebs.csi.aws.com/cluster" = "true" unconditionally, by default,
+#     independent of any `--k8s-tag-cluster-id`/`extraVolumeTags`
+#     configuration (upstream kubernetes-sigs/aws-ebs-csi-driver
+#     docs/tagging.md, "Default Cluster Tag"), so this Deny reaches every
+#     CSI-managed volume even one that -- through a future addon config
+#     change or a manually created PV -- ends up without an Environment tag.
+#   - Three final explicit Denies (not merely omitting an Allow) block all
+#     four of CreateTags/AddTagsToResource/DeleteVolume/DeleteDBInstance
+#     outright on any resource that already carries an Environment tag,
+#     already carries a Backup=true tag, or is a CSI/Kubernetes-managed EBS
+#     volume, as a backstop that holds even if the scoping above is ever
+#     loosened by mistake. All three Denies list the RDS actions too, even
+#     though the RDS Allow grants above are already ARN-prefix scoped to the
+#     restore-test namespace and a freshly restored RDS instance carries
+#     neither the Environment nor the CSI tag -- this is defense in depth,
+#     not a live restriction on today's restore-test flow.
 resource "aws_iam_role_policy" "backup_testing_custom" {
   count = var.enable_backup_testing ? 1 : 0
 
@@ -625,14 +649,10 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
         Resource = "*"
       },
       {
-        Sid    = "TagRestoredEbsVolumesOnlyBeforeTheyAreEnvironmentManaged"
-        Effect = "Allow"
-        Action = "ec2:CreateTags"
-        # Resource "*": ec2:CreateTags does not support resource-level ARN
-        # scoping combined with a wildcard resource id, so the Null condition
-        # (target has no Environment tag yet) is what limits this grant --
-        # see the comment above this resource.
-        Resource = "*"
+        Sid      = "TagRestoredEbsVolumesOnlyBeforeTheyAreEnvironmentManaged"
+        Effect   = "Allow"
+        Action   = "ec2:CreateTags"
+        Resource = "arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:volume/*"
         Condition = {
           StringEquals = {
             "aws:RequestTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
@@ -657,7 +677,7 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
         Sid      = "DeleteOnlyEbsVolumesTaggedByThisTest"
         Effect   = "Allow"
         Action   = "ec2:DeleteVolume"
-        Resource = "*"
+        Resource = "arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:volume/*"
         Condition = {
           StringEquals = {
             "aws:ResourceTag/${local.restore_test_tag_key}" = local.restore_test_tag_value
@@ -694,6 +714,27 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
         Condition = {
           StringEquals = {
             "aws:ResourceTag/Backup" = "true"
+          }
+        }
+      },
+      {
+        # HIGH fix (round-2 review): the Null-Environment-tag condition above
+        # is not sufficient on its own -- every EBS volume the eks-addons
+        # aws-ebs-csi-driver addon provisions for a Kubernetes
+        # PersistentVolume carries only CSI/k8s tags, never Environment (see
+        # the comment above aws_iam_role_policy.backup_testing_custom). The
+        # AWS EBS CSI driver tags every volume and snapshot it manages with
+        # "ebs.csi.aws.com/cluster" = "true" unconditionally by default
+        # (upstream docs/tagging.md, "Default Cluster Tag"), so this Deny
+        # blocks all four actions on any such volume outright, regardless of
+        # whether it also happens to carry an Environment tag.
+        Sid      = "DenyTaggingOrDeletingCsiManagedEbsVolumes"
+        Effect   = "Deny"
+        Action   = ["ec2:CreateTags", "ec2:DeleteVolume", "rds:AddTagsToResource", "rds:DeleteDBInstance"]
+        Resource = "*"
+        Condition = {
+          Null = {
+            "aws:ResourceTag/ebs.csi.aws.com/cluster" = "false"
           }
         }
       }
