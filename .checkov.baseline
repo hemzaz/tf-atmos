@@ -397,12 +397,6 @@
                     ]
                 },
                 {
-                    "resource": "aws_cloudwatch_log_group.lambda[0]",
-                    "check_ids": [
-                        "CKV_AWS_338"
-                    ]
-                },
-                {
                     "resource": "aws_lambda_function.main",
                     "check_ids": [
                         "CKV_AWS_272",
@@ -440,7 +434,19 @@
                     ]
                 },
                 {
+                    "resource": "module.idp_database.aws_db_instance.read_replica[0]",
+                    "check_ids": [
+                        "CKV2_AWS_60"
+                    ]
+                },
+                {
                     "resource": "module.idp_database.aws_security_group.rds_proxy",
+                    "check_ids": [
+                        "CKV2_AWS_5"
+                    ]
+                },
+                {
+                    "resource": "module.idp_database.aws_security_group.rds_proxy[0]",
                     "check_ids": [
                         "CKV2_AWS_5"
                     ]
