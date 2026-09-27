@@ -267,3 +267,44 @@ run "rejects_lsi_non_key_attributes_with_projection_type_keys_only" {
 
   expect_failures = [var.local_secondary_index_map]
 }
+
+run "accepts_attributes_used_only_as_gsi_or_lsi_range_keys" {
+  command = plan
+
+  variables {
+    # gsi1sk is used only via the GSI range_key branch of the reverse
+    # precondition (main.tf's concat list, third element); lsi_sk only via
+    # the LSI range_key branch (fourth element). The table's own range_key
+    # ("sk") already covers the first element, so neither attribute would be
+    # exercised without a dedicated GSI/LSI range key of its own. This guards
+    # against a future edit accidentally dropping either branch from the
+    # concat list, which would reject valid tables like
+    # microservices/dynamodb/service-state (gsi1sk as a GSI range key).
+    range_key = "sk"
+    dynamodb_attributes = [
+      { name = "gsi1sk", type = "S" },
+      { name = "lsi_sk", type = "S" },
+    ]
+    global_secondary_index_map = [
+      { name = "gsi1", hash_key = "pk", range_key = "gsi1sk" },
+    ]
+    local_secondary_index_map = [
+      { name = "lsi1", range_key = "lsi_sk" },
+    ]
+  }
+
+  assert {
+    condition     = length(aws_dynamodb_table.this[0].attribute) == 4
+    error_message = "Attributes are pk, sk, gsi1sk and lsi_sk, each declared once."
+  }
+
+  assert {
+    condition     = one(aws_dynamodb_table.this[0].global_secondary_index).name == "gsi1"
+    error_message = "The GSI using gsi1sk as its range key must be created."
+  }
+
+  assert {
+    condition     = one(aws_dynamodb_table.this[0].local_secondary_index).name == "lsi1"
+    error_message = "The LSI using lsi_sk as its range key must be created."
+  }
+}
