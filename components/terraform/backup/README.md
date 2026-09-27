@@ -104,14 +104,21 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
   `tests/backup.tftest.hcl` (real AWS provider, dummy credentials,
   `command = plan`; the policy is asserted directly since it is `jsonencode()`d
   on the resource, not built via `aws_iam_policy_document`).
-- **MEDIUM fix (`aws_backup_selection.rds_tagged_daily`):** `not_resources`
-  excludes any RDS instance ARN ending in `-read-replica` from the tag-based
-  RDS selection. `rds/main`/`rds/data`'s `Backup=true` tag reaches a
-  `create_read_replica = true` instance's read replica too (same
-  `var.tags`), and AWS Backup's handling of RDS read replicas is restricted
-  — without the exclusion the replica would either duplicate the primary's
-  snapshots or fail its own backup job and fire the
-  `NumberOfBackupJobsFailed` alarm.
+- **MEDIUM fix (`aws_backup_selection.rds_tagged_daily`), corrected in
+  round-3:** a `string_not_equals` condition on `aws:ResourceTag/Role` =
+  `read-replica` (ANDed with the existing `Backup=true`/`Environment=<env>`
+  conditions) excludes RDS read replicas from the tag-based RDS selection.
+  `rds/main`/`rds/data`'s `Backup=true` tag reaches a `create_read_replica =
+  true` instance's read replica too (same `var.tags`), and AWS Backup's
+  handling of RDS read replicas is restricted — without the exclusion the
+  replica would either duplicate the primary's snapshots or fail its own
+  backup job and fire the `NumberOfBackupJobsFailed` alarm. The initial fix
+  used `not_resources` with a leading-wildcard ARN pattern
+  (`*-read-replica`), but the BackupSelection API only supports a wildcard at
+  the end of an ARN pattern (a prefix match), so that pattern would not
+  work. `rds/main.tf`'s `aws_db_instance.read_replica` already tags itself
+  `Role = "read-replica"`, so excluding by that tag avoids ARN wildcards
+  entirely.
 - The vault's own SNS topic (`aws_sns_topic.backup_notifications`) is
   encrypted with `kms_key_arn`; `catalog/kms/defaults.yaml` turns on the
   key's `allow_backup` flag so `backup.amazonaws.com` may publish to it. That

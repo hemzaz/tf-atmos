@@ -240,19 +240,27 @@ resource "aws_backup_selection" "rds_tagged_daily" {
 
   resources = ["arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:*"]
 
-  # MEDIUM fix (round-2 review): rds/main and rds/data set Backup=true in
-  # their own var.tags, which reaches every resource they create, including
-  # a `create_read_replica = true` instance's aws_db_instance.read_replica
-  # (identifier "${Environment}-${identifier}-read-replica"). AWS Backup's
-  # handling of RDS read replicas is restricted (it cannot be backed up
-  # independently of its source), so without this exclusion the replica
-  # would either duplicate the source's snapshots or fail its backup job and
-  # fire the NumberOfBackupJobsFailed alarm. `not_resources` (an AWS Backup
-  # selection field the provider supports alongside `resources`/`condition`)
-  # excludes every RDS instance whose identifier ends in "-read-replica",
-  # regardless of which rds/* instance created it.
-  not_resources = ["arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:db:*-read-replica"]
-
+  # MEDIUM fix (round-2 review), corrected in round-3: rds/main and rds/data
+  # set Backup=true in their own var.tags, which reaches every resource they
+  # create, including a `create_read_replica = true` instance's
+  # aws_db_instance.read_replica. AWS Backup's handling of RDS read replicas
+  # is restricted (it cannot be backed up independently of its source), so
+  # without an exclusion the replica would either duplicate the source's
+  # snapshots or fail its own backup job and fire the
+  # NumberOfBackupJobsFailed alarm.
+  #
+  # The round-2 fix used `not_resources` with a leading-wildcard pattern
+  # ("*-read-replica"), which the BackupSelection API rejects: per its
+  # reference, a wildcard in an ARN pattern must appear at the end (a prefix
+  # match, e.g. "my-bucket-*"), never at the start, so that pattern would
+  # either fail CreateBackupSelection at apply time or silently not exclude
+  # anything. Excluding by a `string_not_equals` condition on the tag
+  # rds/main already sets on the replica (`Role = "read-replica"`,
+  # rds/main.tf's aws_db_instance.read_replica) avoids ARN wildcards
+  # entirely, and AWS Backup's `Conditions` parameter ANDs every condition in
+  # the block together (unlike `ListOfTags`, which ORs), so this narrows the
+  # existing Backup=true/Environment=<env> selection rather than replacing
+  # its semantics.
   condition {
     string_equals {
       key   = "aws:ResourceTag/Backup"
@@ -261,6 +269,10 @@ resource "aws_backup_selection" "rds_tagged_daily" {
     string_equals {
       key   = "aws:ResourceTag/Environment"
       value = var.tags["Environment"]
+    }
+    string_not_equals {
+      key   = "aws:ResourceTag/Role"
+      value = "read-replica"
     }
   }
 }

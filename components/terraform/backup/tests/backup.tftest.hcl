@@ -282,14 +282,22 @@ run "rds_tag_based_selection_excludes_read_replicas" {
     enable_rds_backup = true
   }
 
-  # MEDIUM fix (round-2 review): rds/main and rds/data set Backup=true on
-  # their own var.tags, which reaches a create_read_replica = true
-  # instance's read replica too. AWS Backup's handling of RDS read replicas
-  # is restricted, so not_resources excludes any RDS ARN ending in
-  # "-read-replica" regardless of which rds/* instance created it.
+  # MEDIUM fix (round-2 review), corrected in round-3: rds/main and rds/data
+  # set Backup=true on their own var.tags, which reaches a
+  # create_read_replica = true instance's read replica too. AWS Backup's
+  # handling of RDS read replicas is restricted, so a string_not_equals
+  # condition on aws:ResourceTag/Role = "read-replica" (rds/main.tf's
+  # aws_db_instance.read_replica tags itself that way) excludes it,
+  # regardless of which rds/* instance created it. The round-2 fix used
+  # not_resources with a leading-wildcard ARN pattern, which the
+  # BackupSelection API does not support (a wildcard may only appear at the
+  # end of an ARN pattern), so it is replaced by this tag condition.
   assert {
-    condition     = toset(aws_backup_selection.rds_tagged_daily[0].not_resources) == toset(["arn:aws:rds:eu-west-2:123456789012:db:*-read-replica"])
-    error_message = "enable_rds_backup's tag-based selection must exclude RDS read replicas via not_resources."
+    condition = anytrue([
+      for c in one(aws_backup_selection.rds_tagged_daily[0].condition).string_not_equals :
+      c.key == "aws:ResourceTag/Role" && c.value == "read-replica"
+    ])
+    error_message = "enable_rds_backup's tag-based selection must exclude RDS read replicas via a string_not_equals condition on aws:ResourceTag/Role."
   }
 }
 
