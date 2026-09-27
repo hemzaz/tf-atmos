@@ -94,13 +94,29 @@ def create_secret(service_client, arn, token):
 
 def test_secret(service_client, arn, token):
     """No external system to test against: confirm the staged value round-
-    trips and is non-empty."""
+    trips and is non-empty.
+
+    Deliberately NOT checking `len(pending_key) == _PASSWORD_LENGTH` here:
+    when Secrets Manager tests a rotation configuration without immediately
+    rotating it (`rotate_immediately = false`, this function's default in
+    microservices-platform.yaml), it runs ONLY this step, against a
+    temporary AWSPENDING version it manufactures itself for the test rather
+    than one createSecret produced -- AWS's docs say only that this version
+    is "created and then removed", but AWS's own reference templates (e.g.
+    the RDS ones, which log in with it) only pass that test if it is a copy
+    of AWSCURRENT. For this secret, AWSCURRENT can be whatever length the
+    Terraform-side generator that first created it used (32 chars by this
+    repo's secretsmanager component default), not this function's own
+    64-char createSecret output. A length check keyed to _PASSWORD_LENGTH
+    would then reject that copy and fail every test-only invocation --
+    i.e. every `terraform apply` that (re)configures this resource -- even
+    though nothing is actually wrong."""
     pending_key = service_client.get_secret_value(
         SecretId=arn, VersionId=token, VersionStage="AWSPENDING"
     )["SecretString"]
 
-    if not pending_key or len(pending_key) < _PASSWORD_LENGTH:
-        raise ValueError(f"AWSPENDING value for secret {arn} is missing or shorter than expected")
+    if not pending_key:
+        raise ValueError(f"AWSPENDING value for secret {arn} is missing or empty")
 
 
 def finish_secret(service_client, arn, token):

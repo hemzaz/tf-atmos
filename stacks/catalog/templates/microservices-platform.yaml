@@ -1308,17 +1308,18 @@ components:
     # rotation_lambda_arn/rotation_automatically.
     #
     # redis-auth-rotation sets rotate_immediately: true below (jwt-secret-
-    # rotation keeps the default false). At rotate_immediately = false,
-    # Secrets Manager's test invokes ONLY testSecret, against a temporary
-    # AWSPENDING version it manufactures itself -- setSecret, the step that
+    # rotation keeps the default false). At rotate_immediately = false, only
+    # testSecret runs, against a temporary AWSPENDING version Secrets
+    # Manager manufactures itself for the test -- setSecret, the step that
     # actually calls ElastiCache ModifyReplicationGroup to push a new token
-    # onto the replication group, never runs. redis-auth-rotation's
-    # testSecret AUTHs against the replication group with that pending
-    # token, so it fails every time unless setSecret already pushed it --
-    # which only a real (rotate_immediately = true) rotation does.
-    # jwt-secret-rotation's testSecret only round-trips the pending value
-    # through Secrets Manager itself (setSecret is a no-op for it), so it
-    # passes regardless and keeps the safer default.
+    # onto the replication group, never runs, so this path never exercises
+    # that call. rotate_immediately: true is set on redis-auth-rotation so
+    # every apply that (re)configures this resource performs and verifies a
+    # real end-to-end rotation instead of a same-value round-trip.
+    # jwt-secret-rotation's testSecret only confirms the AWSPENDING value is
+    # non-empty (setSecret is a no-op for it either way), so it keeps the
+    # safer rotate_immediately = false default -- see that function's own
+    # test_secret docstring for why it does NOT check the value's length.
 
     # Redis AUTH token rotation: setSecret calls ElastiCache
     # ModifyReplicationGroup with AuthTokenUpdateStrategy=ROTATE (the new

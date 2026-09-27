@@ -50,17 +50,28 @@ configuration itself) to the SAME secret's ARN, and are packaged via `source_dir
   and its IAM role policies already exist (`depends_on` covers all of them). The paired secretsmanager
   entry sets `rotation_managed_externally: true` instead of `rotation_lambda_arn`/
   `rotation_automatically`.
-- **`rotate_immediately` and `setSecret`.** At `rotate_immediately = false`, Secrets Manager's test
-  runs ONLY the `testSecret` step against a temporary `AWSPENDING` version it manufactures itself for
-  the test -- `setSecret`, the step that actually pushes a new value to whatever external system the
-  function updates, never runs. A `testSecret` step that depends on that push having happened (like
-  `redis-auth-rotation`'s, which AUTHs against the replication group with the pending token) will
-  therefore always fail while `rotate_immediately` stays `false`. `redis-auth-rotation` sets
-  `rotate_immediately = true` in `microservices-platform.yaml` for exactly this reason -- safe now
-  that this resource's own dependency ordering (above) guarantees the function is fully permissioned
-  before RotateSecret's real four-step rotation runs. `jwt-secret-rotation` keeps the default `false`:
-  its `testSecret` only round-trips the pending value through Secrets Manager itself, so it passes
-  regardless of whether `setSecret` (a no-op for that function) ran.
+- **`rotate_immediately` and `setSecret`.** At `rotate_immediately = false`, only the `testSecret`
+  step runs, against a temporary `AWSPENDING` version Secrets Manager manufactures itself for the
+  test; `setSecret` -- the step that actually pushes a new value to whatever external system the
+  function updates -- never runs, so this path never exercises that call. This does NOT mean a
+  `testSecret` like `redis-auth-rotation`'s (which AUTHs against the replication group with the
+  pending token) fails at `rotate_immediately = false`: AWS's own docs only say the manufactured
+  `AWSPENDING` version is "created and then removed", but AWS's own reference templates only pass
+  their equivalent test if it is a copy of `AWSCURRENT` -- i.e. the still-valid current token, which
+  does AUTH successfully. `redis-auth-rotation` sets `rotate_immediately = true` in
+  `microservices-platform.yaml` not to avoid a failure, but so every apply that (re)configures this
+  resource performs and verifies a REAL rotation (a fresh token, pushed via `setSecret`, confirmed via
+  `testSecret`) end to end, rather than a same-value round-trip that proves nothing. `jwt-secret-
+  rotation` keeps the default `false`: its `testSecret` only confirms the `AWSPENDING` value is
+  non-empty (`setSecret` is a no-op for it either way), and deliberately does NOT check the value's
+  length, precisely because that value may be the copy-of-`AWSCURRENT` this test-only path supplies --
+  see that function's own `test_secret` docstring.
+  **Caution:** with `rotate_immediately = true`, ANY later change to this resource (e.g. a
+  `rotation_days` edit, or a new `rotation_lambda_arn` from a function rename/replacement) re-invokes
+  `RotateSecret` with `RotateImmediately = true`, triggering an unscheduled rotation at that
+  `terraform apply` -- for `redis-auth-rotation`, an unscheduled AUTH token change on the replication
+  group (two `ModifyReplicationGroup` calls). Plan for that before changing this resource's other
+  arguments.
 - **`redis-auth-rotation`**: environment variables `REPLICATION_GROUP_ID`, `REDIS_HOST`, `REDIS_PORT`
   (the ElastiCache replication group to modify and to AUTH-test against). Runs in the VPC's private
   subnets, with `additional_security_group_ids` set to the cache's `client_security_group_id` (egress
