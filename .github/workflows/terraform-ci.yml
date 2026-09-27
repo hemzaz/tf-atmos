@@ -407,6 +407,29 @@ jobs:
           import json, os, subprocess
 
           out_file = os.environ["GITHUB_OUTPUT"]
+
+          # fnx-local-* target the Floci/LocalEmu emulators (account_id
+          # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have no
+          # AWS_PLAN_ROLE_ARN trust; emulator.yml covers them instead. Read the
+          # exclusion from settings.github.actions_enabled (the same key Cloud
+          # Posse's own atmos-terraform-plan/-apply actions read; data-driven
+          # and survives a stack rename, unlike matching the `fnx-local-` name
+          # prefix). Filtered per (stack, component) pair — not per whole
+          # stack — so a future per-component opt-out on a real stack only
+          # drops that one instance from the matrix, not the entire stack.
+          def disabled_pairs():
+              stacks = json.loads(subprocess.check_output(
+                  ["atmos", "describe", "stacks", "--process-functions=false",
+                   "--format", "json", "--sections", "settings"]))
+              disabled = set()
+              for stack, config in stacks.items():
+                  components = (config.get("components") or {}).get("terraform") or {}
+                  for component, spec in components.items():
+                      github = ((spec or {}).get("settings") or {}).get("github") or {}
+                      if github.get("actions_enabled") is False:
+                          disabled.add((stack, component))
+              return disabled
+
           cmd = ["atmos", "describe", "affected", "--format=matrix", "--include-dependents",
                  "--process-functions=false", "--output-file", "affected.out"]
           base_sha = os.environ.get("BASE_SHA")
@@ -414,21 +437,35 @@ jobs:
               cmd += ["--base", base_sha]
           affected = subprocess.run(cmd)
           if affected.returncode == 0:
-              with open("affected.out") as src, open(out_file, "a") as out:
-                  out.write(src.read())
+              matrix = {"include": []}
+              with open("affected.out") as src:
+                  for line in src:
+                      if line.startswith("matrix="):
+                          matrix = json.loads(line[len("matrix="):])
+              excluded = disabled_pairs()
+              matrix["include"] = [
+                  i for i in matrix["include"]
+                  if (i.get("stack"), i.get("component")) not in excluded
+              ]
+              with open(out_file, "a") as out:
+                  out.write(f"matrix={json.dumps(matrix)}\n")
+              print(f"{len(matrix['include'])} instances (excluded pairs: {sorted(excluded)})")
               raise SystemExit(0)
 
           print("::warning title=describe affected failed::Falling back to planning every "
                 "enabled, non-abstract component instance (see the error above).")
           stacks = json.loads(subprocess.check_output(
               ["atmos", "describe", "stacks", "--process-functions=false",
-               "--format", "json", "--sections", "metadata"]))
+               "--format", "json", "--sections", "metadata,settings"]))
           include = []
           for stack, config in sorted(stacks.items()):
               components = (config.get("components") or {}).get("terraform") or {}
               for component, spec in sorted(components.items()):
                   metadata = (spec or {}).get("metadata") or {}
+                  github = ((spec or {}).get("settings") or {}).get("github") or {}
                   if metadata.get("type") == "abstract" or metadata.get("enabled") is False:
+                      continue
+                  if github.get("actions_enabled") is False:
                       continue
                   include.append({"stack": stack, "component": component})
           with open(out_file, "a") as out:
