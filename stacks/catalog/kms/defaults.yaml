@@ -70,6 +70,10 @@ components:
         # false: it runs no Auto Scaling or EKS node groups, and has no iam
         # instance.
         allow_autoscaling_ebs: true
+        # backup/main encrypts its job-notifications SNS topic with this key;
+        # AWS Backup needs this to publish to it, limited to this account's
+        # topics in this region.
+        allow_backup: true
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates

@@ -187,6 +187,12 @@ variable "allow_autoscaling_ebs" {
   default     = false
 }
 
+variable "allow_backup" {
+  type        = bool
+  description = "Let AWS Backup (backup.amazonaws.com) publish backup/restore job notifications to this account's SNS topics encrypted with the key (kms:GenerateDataKey*, kms:Decrypt), scoped by aws:SourceAccount and kms:EncryptionContext:aws:sns:topicArn"
+  default     = false
+}
+
 ##############################################
 # Alias Configuration
 ##############################################

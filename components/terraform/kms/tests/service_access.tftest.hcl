@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -305,6 +305,7 @@ run "replica_policy_is_scoped_to_its_own_region_not_the_primarys" {
   variables {
     allow_cloudwatch_logs = true
     allow_autoscaling_ebs = true
+    allow_backup          = true
     is_multi_region       = true
     replica_regions       = ["us-east-1"]
   }
@@ -333,6 +334,16 @@ run "replica_policy_is_scoped_to_its_own_region_not_the_primarys" {
     error_message = "A replica's AllowAutoScalingEBSUsage statement's kms:ViaService must name the replica's own region."
   }
 
+  assert {
+    condition = (
+      one([
+        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        if try(s.Sid, "") == "AllowBackupSNSTopics"
+      ]).Condition.ArnLike["kms:EncryptionContext:aws:sns:topicArn"] == "arn:aws:sns:us-east-1:123456789012:*"
+    )
+    error_message = "A replica's AllowBackupSNSTopics statement's kms:EncryptionContext:aws:sns:topicArn must name the replica's own region (us-east-1), not the primary's (eu-west-2)."
+  }
+
   # The logs condition on the *primary's own* policy (module.kms.key_policy),
   # left untested until now, must still be scoped to the primary's region
   # once replicas exist alongside it.
@@ -342,5 +353,30 @@ run "replica_policy_is_scoped_to_its_own_region_not_the_primarys" {
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:eu-west-2:123456789012:log-group:*"
     )
     error_message = "The primary key's own policy must stay scoped to the primary's region even when replicas exist."
+  }
+}
+
+run "backup_publishes_to_sns_topics_only_for_this_accounts_topics" {
+  command = plan
+
+  variables {
+    allow_backup = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Principal.Service == "backup.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+      }
+    )
+    error_message = "AWS Backup may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region (aws:SourceAccount and the SNS encryption context)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowEventBridge", "AllowCloudWatchLogs", "AllowCloudWatchAlarmsSNSTopics", "AllowSNS", "AllowS3", "AllowCloudTrailEncryptLogs"], try(s.Sid, ""))]) == 0
+    error_message = "allow_backup must not grant other services anything."
   }
 }

@@ -18,7 +18,7 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
 
 | Inputs (required) | Inputs (behavior) | Outputs consumed |
 |---|---|---|
-| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3/allow_autoscaling_ebs, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), by `eks/defaults` (`node_group_ebs_kms_key_id`) in every stack that runs eks, by dev/staging/prod's compute.yaml (`cluster_encryption_config_kms_key_id` on `eks/main` and `eks/data`), by every `vpc/main`/`vpc/services` instance in dev/staging/prod and the sandbox lane's `vpc/main` (`flow_logs_kms_key_arn`, set per instance next to its `dependencies.components` entry — **not** in `vpc/defaults`, since the LocalEmu stack inherits that abstract base but has no `kms/main` of its own), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
+| name_prefix, region | is_multi_region + replica_regions, enable_key_rotation/rotation_period_in_days, key_administrators/key_users/key_service_users, allow_cloudwatch_logs/allow_log_delivery/allow_eventbridge/allow_cloudwatch_alarms/allow_cloudtrail/allow_sns/allow_s3/allow_autoscaling_ebs/allow_backup, alias_name/create_alias, key_policy | `key_arn` read via `!terraform.state kms/main .key_arn` by secretsmanager in every stack (`default_kms_key_id`, set in `stacks/catalog/secretsmanager/defaults.yaml`), by eventbridge (`kms_key_arn`, set in `stacks/catalog/eventbridge/defaults.yaml`), by security-monitoring (`kms_key_id`, set in `stacks/catalog/security-monitoring/defaults.yaml`), by `monitoring/main` and `monitoring/data` in every stack (`kms_key_id`, encrypting the alarm SNS topic and log groups — `allow_cloudwatch_alarms` above lets CloudWatch publish to it), by stepfunctions (`kms_key_arn`, set in `stacks/catalog/stepfunctions/defaults.yaml`), by `eks/defaults` (`node_group_ebs_kms_key_id`) in every stack that runs eks, by dev/staging/prod's compute.yaml (`cluster_encryption_config_kms_key_id` on `eks/main` and `eks/data`), by every `vpc/main`/`vpc/services` instance in dev/staging/prod and the sandbox lane's `vpc/main` (`flow_logs_kms_key_arn`, set per instance next to its `dependencies.components` entry — **not** in `vpc/defaults`, since the LocalEmu stack inherits that abstract base but has no `kms/main` of its own), by `backup/main` in every stack (`kms_key_arn`, set in `stacks/catalog/backup/defaults.yaml`, encrypting the vault and its job-notifications SNS topic — `allow_backup` above lets AWS Backup publish to it), and in prod also by services.yaml (RDS `kms_key_id`, `performance_insights_kms_key_id`) and compute.yaml (EBS/EC2 `kms_key_arn`, `root_volume_kms_key_id`) |
 
 ## Dependencies & gotchas
 
@@ -138,12 +138,19 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   not to be managed by that resource — or leave it `true` and import the role
   into that instance first, at `aws_iam_service_linked_role.autoscaling[0]`
   (see `../iam/README.md` for both options and the exact import command).
+- `allow_backup` adds `AllowBackupSNSTopics` for `backup.amazonaws.com`, scoped
+  the same way as the CloudWatch alarms statement (`aws:SourceAccount` and
+  `kms:EncryptionContext:aws:sns:topicArn` matching this account's topics in
+  this document's region). `backup/main` encrypts its job-notifications SNS
+  topic with this key; without it, AWS Backup cannot publish to that topic.
+  `kms/defaults` turns it on.
 - `replica_regions` requires `is_multi_region = true` (validation). Each
   replica gets its own generated policy, not a copy of the primary's: the
   region-specific statements above (`AllowCloudWatchLogs`,
-  `AllowEventBridge*`, `AllowCloudTrail*`, `AllowAutoScalingEBS*`) are scoped
-  to the replica's own region, never the primary's (`key_policy` output is
-  the *primary's* document; a replica's is read from the resource itself,
+  `AllowEventBridge*`, `AllowCloudTrail*`, `AllowAutoScalingEBS*`,
+  `AllowBackupSNSTopics`) are scoped to the replica's own region, never the
+  primary's (`key_policy` output is the *primary's* document; a replica's is
+  read from the resource itself,
   `module.kms.aws_kms_replica_key.replicas["<region>"].policy`).
 - `rotation_period_in_days` validated 90-2560; `deletion_window_in_days`
   validated 7-30.

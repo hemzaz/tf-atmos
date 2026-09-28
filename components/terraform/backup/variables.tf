@@ -150,8 +150,14 @@ variable "enable_archive_tier" {
 # Resource Selection Variables
 variable "rds_instances" {
   type        = list(string)
-  description = "List of RDS instance identifiers to backup"
+  description = "List of RDS instance identifiers to backup, selected by ARN. Prefer enable_rds_backup (tag-based) when the RDS instance is deployed in the same Atmos deploy phase as this component: reading its state (to build this list) is rejected by workflows/scripts/common/check-deploy-layers.py"
   default     = []
+}
+
+variable "enable_rds_backup" {
+  type        = bool
+  description = "Enable RDS instance backups based on tags (an RDS-scoped ARN pattern, AND-conditioned on Backup=true and Environment=var.tags[\"Environment\"]) instead of an explicit rds_instances ARN list"
+  default     = false
 }
 
 variable "dynamodb_tables" {
@@ -168,19 +174,19 @@ variable "efs_file_systems" {
 
 variable "enable_ec2_backup" {
   type        = bool
-  description = "Enable EC2 instance backups based on tags"
+  description = "Enable EC2 instance backups based on tags (an EC2-instance-scoped ARN pattern, AND-conditioned on Backup=true and Environment=var.tags[\"Environment\"])"
   default     = false
 }
 
 variable "enable_ebs_backup" {
   type        = bool
-  description = "Enable EBS volume backups"
+  description = "Enable EBS volume backups based on tags (an EBS-volume-scoped ARN pattern, AND-conditioned on Backup=true and Environment=var.tags[\"Environment\"]); see ebs_volume_ids for an explicit-ARN-list alternative"
   default     = false
 }
 
 variable "ebs_volume_ids" {
   type        = list(string)
-  description = "List of EBS volume IDs to backup"
+  description = "List of EBS volume IDs to backup by explicit ARN, independent of enable_ebs_backup's tag-based selection"
   default     = []
 }
 
@@ -242,4 +248,26 @@ variable "backup_testing_schedule" {
   type        = string
   description = "Schedule for automated backup testing"
   default     = "cron(0 5 ? * MON *)" # 5 AM UTC Monday
+}
+
+variable "backup_testing_resource_type" {
+  type        = string
+  description = "AWS Backup resource type the restore-test Lambda (lambda/backup_testing.py) restores, tags, validates and deletes"
+  default     = "EBS"
+
+  validation {
+    condition     = contains(["EBS", "RDS"], var.backup_testing_resource_type)
+    error_message = "backup_testing_resource_type must be EBS or RDS (the two types lambda/backup_testing.py implements)."
+  }
+}
+
+variable "log_retention_days" {
+  type        = number
+  description = "Retention in days for the restore-test Lambda's CloudWatch log group"
+  default     = 365
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, ...)."
+  }
 }
