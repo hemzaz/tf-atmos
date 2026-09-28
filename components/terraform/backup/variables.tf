@@ -115,6 +115,11 @@ variable "daily_cold_storage_days" {
   type        = number
   description = "Days until daily backups move to cold storage"
   default     = null
+
+  validation {
+    condition     = var.daily_cold_storage_days == null || (var.daily_cold_storage_days >= 1 && var.daily_cold_storage_days == floor(var.daily_cold_storage_days))
+    error_message = "daily_cold_storage_days must be null (no cold storage transition) or a positive whole number of days."
+  }
 }
 
 variable "weekly_retention_days" {
@@ -127,6 +132,11 @@ variable "weekly_cold_storage_days" {
   type        = number
   description = "Days until weekly backups move to cold storage"
   default     = null
+
+  validation {
+    condition     = var.weekly_cold_storage_days == null || (var.weekly_cold_storage_days >= 1 && var.weekly_cold_storage_days == floor(var.weekly_cold_storage_days))
+    error_message = "weekly_cold_storage_days must be null (no cold storage transition) or a positive whole number of days."
+  }
 }
 
 variable "monthly_retention_days" {
@@ -138,7 +148,21 @@ variable "monthly_retention_days" {
 variable "monthly_cold_storage_days" {
   type        = number
   description = "Days until monthly backups move to cold storage"
-  default     = 90
+  # Off (null) by default, matching daily_cold_storage_days/weekly_cold_storage_days
+  # above and cloudposse/terraform-aws-backup's model (rules[].lifecycle.cold_storage_after
+  # is unset/null unless a caller opts in). AWS Backup requires
+  # delete_after >= cold_storage_after + 90 (a recovery point must sit in cold
+  # storage at least 90 days before it can be deleted), so a non-null default
+  # here would only be valid for a long enough retention -- it is each
+  # instance's decision, not this component's, whether its monthly retention
+  # is long enough to turn cold storage on (see the lifecycle.precondition
+  # below and stacks/catalog/backup/defaults.yaml).
+  default = null
+
+  validation {
+    condition     = var.monthly_cold_storage_days == null || (var.monthly_cold_storage_days >= 1 && var.monthly_cold_storage_days == floor(var.monthly_cold_storage_days))
+    error_message = "monthly_cold_storage_days must be null (no cold storage transition) or a positive whole number of days."
+  }
 }
 
 variable "enable_archive_tier" {

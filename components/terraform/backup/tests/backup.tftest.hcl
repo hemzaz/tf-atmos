@@ -332,6 +332,80 @@ run "staging_resolved_monthly_retention_and_cold_storage_are_valid" {
   }
 }
 
+# monthly_cold_storage_days now defaults to null (matching
+# daily_cold_storage_days/weekly_cold_storage_days and
+# cloudposse/terraform-aws-backup's rules[].lifecycle.cold_storage_after,
+# unset unless a caller opts in). No override here at all -- this exercises
+# the component's own bare default, not a catalog-supplied value -- and
+# asserts the monthly rule's lifecycle has no cold storage transition.
+run "monthly_cold_storage_default_is_null_no_transition" {
+  command = plan
+
+  assert {
+    condition     = var.monthly_cold_storage_days == null
+    error_message = "monthly_cold_storage_days must default to null."
+  }
+
+  assert {
+    condition     = [for r in aws_backup_plan.main.rule : r.lifecycle[0].cold_storage_after if r.rule_name == "monthly-backup"][0] == null
+    error_message = "With monthly_cold_storage_days left at its default (null), the monthly rule's lifecycle.cold_storage_after must be null: no cold storage transition."
+  }
+}
+
+# An instance that explicitly opts into cold storage (e.g. prod's
+# monthly_cold_storage_days = 90 in security.yaml) with a retention long
+# enough to satisfy delete_after >= cold_storage_after + 90 gets an actual
+# transition, and the precondition passes rather than rejecting the plan.
+run "monthly_cold_storage_days_explicit_90_sets_transition" {
+  command = plan
+
+  variables {
+    monthly_retention_days    = 365
+    monthly_cold_storage_days = 90
+  }
+
+  assert {
+    condition     = [for r in aws_backup_plan.main.rule : r.lifecycle[0].cold_storage_after if r.rule_name == "monthly-backup"][0] == 90
+    error_message = "With monthly_cold_storage_days = 90 and monthly_retention_days = 365 (>= 90 + 90), the monthly rule's lifecycle.cold_storage_after must be 90."
+  }
+}
+
+# LOW fix (independent reviewer, round 1): none of the three
+# *_cold_storage_days variables had a validation block, so a non-null value
+# that is 0, negative or fractional (e.g. 0.5) passed straight through to
+# `terraform plan` and was only ever rejected by AWS at apply time. These
+# three runs exercise each variable's new validation block directly.
+run "daily_cold_storage_days_rejects_zero" {
+  command = plan
+
+  variables {
+    daily_cold_storage_days = 0
+  }
+
+  expect_failures = [var.daily_cold_storage_days]
+}
+
+run "weekly_cold_storage_days_rejects_negative" {
+  command = plan
+
+  variables {
+    weekly_cold_storage_days = -1
+  }
+
+  expect_failures = [var.weekly_cold_storage_days]
+}
+
+run "monthly_cold_storage_days_rejects_fractional" {
+  command = plan
+
+  variables {
+    monthly_cold_storage_days = 0.5
+    monthly_retention_days    = 365
+  }
+
+  expect_failures = [var.monthly_cold_storage_days]
+}
+
 run "rds_tag_based_selection_is_and_scoped_to_rds_and_this_environment" {
   command = plan
 

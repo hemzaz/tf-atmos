@@ -38,11 +38,16 @@ storage days (`cold_storage_after`):
 
 AWS Backup requires `delete_after >= cold_storage_after + 90` (a recovery
 point must sit in cold storage at least 90 days before it can be deleted).
-`backup/defaults` sets `monthly_cold_storage_days: null` for exactly this
-reason: the component's own variable default of 90 only satisfies that rule
-against prod's 2555-day monthly retention, not dev's or staging's shorter
-one. Only the prod instance turns cold storage back on (`monthly_cold_storage_days: 90`),
-alongside its long retention. `aws_backup_plan.main` also carries a
+`daily_cold_storage_days`/`weekly_cold_storage_days`/`monthly_cold_storage_days`
+all default to `null` (off) in `variables.tf`, matching
+[cloudposse/terraform-aws-backup](https://github.com/cloudposse/terraform-aws-backup)'s
+model (`rules[].lifecycle.cold_storage_after` is unset unless a caller opts
+in) -- a fixed non-null default would only be valid for a retention long
+enough to satisfy the 90-day rule, and that is each instance's call, not
+this component's. `backup/defaults` also sets `monthly_cold_storage_days:
+null` explicitly to document the intent. Only the prod instance turns cold
+storage back on (`monthly_cold_storage_days: 90`), alongside its long
+2555-day monthly retention. `aws_backup_plan.main` also carries a
 `lifecycle.precondition` per cadence enforcing this relationship, so a stack
 that gets it wrong fails at `terraform plan`, not at `apply`. Daily and
 weekly cold storage stay off (`null`) in every instance; no stage's
@@ -75,6 +80,8 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
 | `kms_key_arn` | Read via `!terraform.state kms/main .key_arn`; encrypts the vault and the notifications SNS topic |
 | `enable_rds_backup`, `enable_ec2_backup`, `enable_ebs_backup` | Tag-based selection: an `aws_backup_selection.condition` block ANDing `Backup=true` with `Environment=<var.tags.Environment>`, scoped by `resources` to that resource type's ARN pattern; all on in `backup/defaults` |
 | `rds_instances`, `ebs_volume_ids`, `dynamodb_tables`, `efs_file_systems` | ARN-list selections, for resources this component's own stack does not tag (or is in a different deploy phase); independent of the tag-based selections above |
+| `daily_retention_days` (default `7`), `weekly_retention_days` (default `30`), `monthly_retention_days` (default `365`) | `delete_after` per cadence; each must satisfy `>= corresponding *_cold_storage_days + 90`, enforced by a precondition on `aws_backup_plan.main` |
+| `daily_cold_storage_days`, `weekly_cold_storage_days`, `monthly_cold_storage_days` | Default `null` (no cold storage transition), matching [cloudposse/terraform-aws-backup](https://github.com/cloudposse/terraform-aws-backup)'s `rules[].lifecycle.cold_storage_after`; when set, must satisfy `*_retention_days >= value + 90`, enforced by the same precondition |
 | `enable_vault_lock`, `enable_cross_region_backup` | Off by default and in every real instance |
 | `enable_backup_testing` | Off by default in every real instance (spins up and tears down a real EBS volume or RDS instance on a schedule); `backup_testing_resource_type` picks `EBS` or `RDS` (RDS restore-test support is best-effort — see the Lambda's module docstring's "Known limitation" note on Lambda's 15-minute cap vs. realistic RDS restore times) |
 | `log_retention_days` (default `365`) | CloudWatch Logs retention for the restore-test Lambda's log group; Checkov (CKV_AWS_338) requires at least 365 days for KMS-encrypted log groups |
