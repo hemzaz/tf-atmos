@@ -73,6 +73,18 @@ components:
         # backend/main is already a declared dependency below.
         ci_state_bucket_name: !terraform.state backend/main .backend_bucket
         ci_state_kms_key_arn: !terraform.state backend/main .backend_kms_key_arn
+        # kms/main's key: eks/main's cluster_encryption_config_kms_key_id
+        # (compute.yaml) points every EKS cluster this apply role deploys at
+        # this key, and AWS requires the calling principal -- not the
+        # cluster's own service role -- to hold kms:DescribeKey/CreateGrant/
+        # Encrypt on it. Scoped by alias, not !terraform.state kms/main
+        # .key_arn: iam/ci plans and applies in the deploy-full-stack "iam"
+        # layer, BEFORE the "kms" layer (workflows/deploy-full-stack.yaml), so
+        # the key's ARN does not exist yet on a first deploy. Must match
+        # kms/main's alias_name below, prefixed with "alias/". Inert while
+        # ci_apply_role_enabled is false, same as ci_state_kms_key_arn above.
+        ci_apply_kms_key_aliases:
+          - alias/testenv-01-main
       dependencies:
         components:
           - component: backend/main

@@ -389,8 +389,9 @@ run "backup_publishes_to_sns_topics_only_for_this_accounts_topics" {
 # any principal beyond the account root (enable_default_policy above), so
 # the first real apply against a fresh account cannot fail that way. Real
 # consumers instead get least-privilege access through their own IAM policy
-# scoped to this key's ARN (e.g. iam's ci_apply_kms_key_arn), never through
-# these lists -- the Cloud Posse pattern.
+# scoped to this key -- by ARN, or by alias when the consumer's own component
+# plans/applies before kms/main (e.g. iam's ci_apply_kms_key_aliases) -- never
+# through these lists -- the Cloud Posse pattern.
 run "no_named_key_administrators_or_users_by_default" {
   command = plan
 

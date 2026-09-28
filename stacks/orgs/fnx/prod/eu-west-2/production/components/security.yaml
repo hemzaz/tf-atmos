@@ -87,13 +87,20 @@ components:
         # (compute.yaml) points every EKS cluster this apply role deploys at
         # this key, and AWS requires the calling principal -- not the
         # cluster's own service role -- to hold kms:DescribeKey/CreateGrant/
-        # Encrypt on it (see kms/main's comment below). Inert while
+        # Encrypt on it (see kms/main's comment below). Scoped by alias, not
+        # !terraform.state kms/main .key_arn: iam/ci plans and applies in the
+        # deploy-full-stack "iam" layer, BEFORE the "kms" layer
+        # (workflows/deploy-full-stack.yaml), so the key's ARN does not exist
+        # yet on a first deploy, and reading it here would make iam/ci depend
+        # on kms/main while kms/main already depends on iam/main below (a
+        # layer-order cycle check-deploy-layers.py rejects). Must match
+        # kms/main's alias_name below, prefixed with "alias/". Inert while
         # ci_apply_role_enabled is false, same as ci_state_kms_key_arn above.
-        ci_apply_kms_key_arn: !terraform.state kms/main .key_arn
+        ci_apply_kms_key_aliases:
+          - alias/production-main
       dependencies:
         components:
           - component: backend/main
-          - component: kms/main
     backend/main:
       metadata:
         component: backend
@@ -115,7 +122,7 @@ components:
         # No named key_administrators/key_users: KMS validates every principal
         # named in a key policy at CreateKey/PutKeyPolicy time, and this repo's
         # IaC creates neither a "role/Admin" nor a "production-eks-node-role" /
-        # "production-ci-role" (iam/ci IS enabled here -- see below -- but its
+        # "production-ci-role" (iam/ci IS enabled here -- see above -- but its
         # real role names are "{ci_role_name_prefix}-plan"/"-apply", never
         # "production-ci-role"); naming any of them would fail the first real
         # apply with MalformedPolicyDocumentException. kms/defaults's
@@ -124,7 +131,7 @@ components:
         # principal applies this stack, same as dev and staging.
         #
         # Real consumers get least-privilege key use through their OWN IAM
-        # policy scoped to this key's ARN, never through key_users:
+        # policy scoped to this key, never through key_users:
         #   - EKS node groups' EBS volumes: already covered by
         #     allow_autoscaling_ebs (kms/defaults) naming the Auto Scaling
         #     service-linked role directly -- AWS's documented pattern, see
@@ -136,9 +143,12 @@ components:
         #     kms:CreateGrant and kms:Encrypt on this key (AWS's
         #     "Encrypting Kubernetes secrets" doc); iam/ci's ci_apply role is
         #     that principal in this repo's CI-driven deploys, granted above
-        #     via ci_apply_kms_key_arn -- the same pattern as Cloud Posse's
-        #     cloudposse-terraform-components/aws-eks-cluster
-        #     github-actions-iam-policy.mixin.tf `AllowKMSAccess` statement.
+        #     via ci_apply_kms_key_aliases (scoped by alias, not this key's
+        #     ARN, since iam/ci plans and applies in the layer before this
+        #     kms/main instance -- see the comment above) -- the Cloud Posse
+        #     pattern of root-account delegation plus a consumer's own scoped
+        #     IAM policy (cloudposse/terraform-aws-kms-key's default key
+        #     policy).
       dependencies:
         components:
           # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling

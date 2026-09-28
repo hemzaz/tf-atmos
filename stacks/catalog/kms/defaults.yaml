@@ -6,8 +6,9 @@
 # customer-managed key (secretsmanager, rds, eks, ebs) resolve to a real key via
 # `!terraform.state kms/main .key_arn` in all stacks rather than only in prod.
 #
-# Concrete instances inherit this base and supply the env-specific `alias_name`,
-# `description`, and `key_users`.
+# Concrete instances inherit this base and supply the env-specific `alias_name`
+# and `description`. No instance adds `key_users`/`key_administrators`: see
+# below.
 
 components:
   terraform:
@@ -23,10 +24,11 @@ components:
         enable_key_rotation: true
         rotation_period_in_days: 365
         deletion_window_in_days: 30
-        # Root-account access keeps the key usable by whichever role applies the
-        # stack. Instances add named roles to `key_users` only once those roles
-        # exist, because KMS rejects a policy naming a principal it cannot
-        # resolve.
+        # Root-account access (the Cloud Posse aws-kms/aws-kms-key default)
+        # keeps the key usable by whichever role applies the stack, and is how
+        # every real consumer gets key use: through their OWN IAM policy scoped
+        # to this key, never through `key_users`/`key_administrators` -- see
+        # the note below on why naming principals there is unsafe in this repo.
         enable_default_policy: true
         # CloudWatch Logs and EventBridge are service principals, which the
         # root-account statement does not reach. Components encrypting log
@@ -87,10 +89,14 @@ components:
         #
         # Real consumers (CI/deploy roles, application roles) that need
         # least-privilege key use, as opposed to full administration, should
-        # get it through their OWN IAM identity policy scoped to this key's
-        # ARN (`!terraform.state kms/main .key_arn`) — the Cloud Posse pattern
-        # (cloudposse-terraform-components/aws-eks-cluster's
-        # github-actions-iam-policy.mixin.tf `AllowKMSAccess` statement) —
-        # never by adding them to `key_users`/`key_administrators` here: that
-        # list is a key-policy principal list, so every entry must already
-        # exist at apply time or the whole key fails to create.
+        # get it through their OWN IAM identity policy scoped to this key —
+        # by ARN (`!terraform.state kms/main .key_arn`) when the consumer
+        # deploys in a later layer than kms, or by alias (`kms:ResourceAliases`
+        # condition) when it must plan/apply earlier, as iam/ci's
+        # ci_apply_kms_key_aliases does (`components/terraform/iam/README.md`)
+        # — the Cloud Posse pattern of root-account delegation plus a
+        # consumer's own scoped IAM policy
+        # (`cloudposse/terraform-aws-kms-key`'s default key policy) — never by
+        # adding them to `key_users`/`key_administrators` here: that list is a
+        # key-policy principal list, so every entry must already exist at
+        # apply time or the whole key fails to create.
