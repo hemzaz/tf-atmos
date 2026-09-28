@@ -147,7 +147,7 @@ variable "enable_vpc_endpoints" {
 }
 
 # Cloud Posse's aws-vpc splits Gateway and Interface endpoints into two
-# separate inputs (interface_vpc_endpoints, vpc_gateway_endpoints). Here they
+# separate inputs (interface_vpc_endpoints, gateway_vpc_endpoints). Here they
 # share one flat list and the component classifies each name itself (see
 # vpc-endpoints.tf): "s3" and "dynamodb" are the only AWS services that use
 # the Gateway type; everything else gets an Interface endpoint.

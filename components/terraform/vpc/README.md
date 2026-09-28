@@ -29,10 +29,17 @@ inherit abstract `vpc/defaults`; a plain abstract `vpc` catalog entry is not a r
 | `tags` / `nat_gateway_strategy` | tags must include a non-empty `Environment`; strategy is `single` or `one_per_az` |
 | `manage_default_security_group` | default true: strips every rule from the VPC's AWS-created default SG (one way) |
 | `public_subnets_additional_tags`, `private_subnets_additional_tags` | extra tags on every public / private subnet (Cloud Posse's names), e.g. the `kubernetes.io/role/elb` and `kubernetes.io/cluster/<name>` tags EKS load balancers discover subnets by; `Name` is refused |
-| `enable_vpc_endpoints`, `vpc_endpoints` | default `false` / `[]`. `vpc_endpoints` is a flat list of bare AWS PrivateLink service names (e.g. `secretsmanager`, `elasticache`, `s3`); the component classifies each one itself -- `s3` and `dynamodb` get a Gateway endpoint (route-table based, free), everything else an Interface endpoint (ENI + private DNS in the private subnets, behind a dedicated `<Environment>-vpce-sg` security group scoped to HTTPS from the VPC CIDR). Cloud Posse's `aws-vpc` splits these into two inputs (`interface_vpc_endpoints`, `vpc_gateway_endpoints`); this component keeps one list and does the split internally |
+| `enable_vpc_endpoints`, `vpc_endpoints` | default `false` / `[]`. `vpc_endpoints` is a flat list of bare AWS PrivateLink service names (e.g. `secretsmanager`, `elasticache`, `s3`); the component classifies each one itself -- `s3` and `dynamodb` get a Gateway endpoint (route-table based, free), everything else an Interface endpoint (ENI + private DNS in the private subnets, behind a dedicated `<Environment>-vpce-sg` security group scoped to HTTPS from the VPC CIDR). Cloud Posse's `aws-vpc` splits these into two inputs (`interface_vpc_endpoints`, `gateway_vpc_endpoints`); this component keeps one list and does the split internally |
 
 Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 `dns`, `ec2`, `eks`, `monitoring`, `rds`, `securitygroup` and `services` catalog defaults.
+
+`vpc_endpoint_interface_ids`, `vpc_endpoint_gateway_ids` (both maps of AWS PrivateLink
+service name to endpoint ID) and `vpc_endpoint_security_group_id` are empty/null unless
+`enable_vpc_endpoints` is true; they mirror Cloud Posse's `interface_vpc_endpoints`,
+`gateway_vpc_endpoints` and `vpc_endpoint_interface_security_group_id` outputs. A
+consumer can scope its own security group's egress to `vpc_endpoint_security_group_id`
+instead of the whole VPC CIDR once it lists `vpc` in `dependencies.components`.
 
 ## Dependencies / gotchas
 

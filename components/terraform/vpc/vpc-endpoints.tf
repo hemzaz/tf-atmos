@@ -1,6 +1,6 @@
 # VPC Endpoints (AWS PrivateLink). Mirrors
 # cloudposse-terraform-components/aws-vpc's interface_vpc_endpoints /
-# vpc_gateway_endpoints inputs, collapsed here into the single
+# gateway_vpc_endpoints inputs, collapsed here into the single
 # var.vpc_endpoints list: "s3" and "dynamodb" are the only AWS services that
 # use the Gateway endpoint type (free, route-table based); every other name
 # in the list gets an Interface endpoint (ENI + private DNS in the private
@@ -23,7 +23,13 @@ locals {
 }
 
 # Shared by every Interface endpoint. Scoped to HTTPS from the VPC CIDR only
-# -- never 0.0.0.0/0 -- since every caller is inside this VPC.
+# -- never 0.0.0.0/0 -- since every caller is inside this VPC. No egress rule:
+# an Interface endpoint's ENI never opens outbound connections of its own, it
+# only answers the inbound 443 above, and security groups are stateful, so
+# the reply flows back without a matching egress rule. Terraform drops AWS's
+# default allow-all egress rule too once any rule (here, the ingress block)
+# is declared on the resource.
+#checkov:skip=CKV2_AWS_5:Attached to aws_vpc_endpoint.interface via security_group_ids; checkov's graph does not follow the count index in aws_security_group.vpc_endpoints[0].id
 resource "aws_security_group" "vpc_endpoints" {
   count       = var.enable_vpc_endpoints && length(local.vpc_endpoint_interface_services) > 0 ? 1 : 0
   name        = "${var.tags["Environment"]}-vpce-sg"
@@ -36,14 +42,6 @@ resource "aws_security_group" "vpc_endpoints" {
     from_port   = 443
     to_port     = 443
     cidr_blocks = [var.ipv4_primary_cidr_block]
-  }
-
-  egress {
-    description = "Allow all outbound"
-    protocol    = "-1"
-    from_port   = 0
-    to_port     = 0
-    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = { Name = "${var.tags["Environment"]}-vpce-sg" }

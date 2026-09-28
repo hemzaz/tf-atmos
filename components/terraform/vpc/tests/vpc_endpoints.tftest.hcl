@@ -70,6 +70,23 @@ run "interface_endpoints_scoped_to_vpc_cidr" {
   }
 }
 
+run "interface_endpoint_sg_has_no_egress_rule" {
+  # aws_security_group.egress is an unknown set of objects until the plan is
+  # applied (it depends on the mock provider's post-apply state), so this
+  # assertion needs command = apply, unlike the plan-only run above.
+  command = apply
+
+  variables {
+    enable_vpc_endpoints = true
+    vpc_endpoints        = ["secretsmanager", "elasticache"]
+  }
+
+  assert {
+    condition     = length(aws_security_group.vpc_endpoints[0].egress) == 0
+    error_message = "The endpoint security group must declare no egress rule at all (never 0.0.0.0/0) -- an Interface endpoint's ENI only answers inbound 443, and security groups are stateful, so the reply flows back without one."
+  }
+}
+
 run "s3_uses_gateway_type_and_every_route_table" {
   # route_table_ids is only known after apply (it is built from computed
   # route table ids), so this run needs command = apply, unlike the plan-only
