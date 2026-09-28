@@ -55,6 +55,27 @@ resource "aws_backup_vault_lock_configuration" "main" {
   changeable_for_days = var.vault_lock_changeable_days
   min_retention_days  = var.vault_lock_min_retention_days
   max_retention_days  = var.vault_lock_max_retention_days
+
+  # A locked vault rejects any backup or copy job whose retention falls
+  # outside [min_retention_days, max_retention_days], so a plan rule with a
+  # shorter or longer delete_after would only fail at job run time, after a
+  # clean apply. Catch it at plan time instead, one check per cadence.
+  lifecycle {
+    precondition {
+      condition     = var.daily_retention_days >= var.vault_lock_min_retention_days && var.daily_retention_days <= var.vault_lock_max_retention_days
+      error_message = "daily_retention_days (${var.daily_retention_days}) must be within the vault lock range ${var.vault_lock_min_retention_days}-${var.vault_lock_max_retention_days} days, or the locked vault rejects daily backup jobs."
+    }
+
+    precondition {
+      condition     = var.weekly_retention_days >= var.vault_lock_min_retention_days && var.weekly_retention_days <= var.vault_lock_max_retention_days
+      error_message = "weekly_retention_days (${var.weekly_retention_days}) must be within the vault lock range ${var.vault_lock_min_retention_days}-${var.vault_lock_max_retention_days} days, or the locked vault rejects weekly backup jobs."
+    }
+
+    precondition {
+      condition     = var.monthly_retention_days >= var.vault_lock_min_retention_days && var.monthly_retention_days <= var.vault_lock_max_retention_days
+      error_message = "monthly_retention_days (${var.monthly_retention_days}) must be within the vault lock range ${var.vault_lock_min_retention_days}-${var.vault_lock_max_retention_days} days, or the locked vault rejects monthly backup jobs."
+    }
+  }
 }
 
 # IAM Role for AWS Backup
