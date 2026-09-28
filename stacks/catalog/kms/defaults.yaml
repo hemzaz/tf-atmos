@@ -79,5 +79,18 @@ components:
         # design), and a templated ARN is unsafe in a shared base: Go templates
         # render before YAML functions, so in dev `aws_account_id` (an `!env`
         # tag) lands in the ARN as raw text and CreateKey rejects the policy.
-        # Add named administrators per instance, with a literal account id and
-        # only for roles known to exist (prod does).
+        # No instance names one either (prod doesn't): KMS validates every
+        # named principal at CreateKey/PutKeyPolicy time, and this repo's IaC
+        # creates no admin role to name (see prod's security.yaml). Add named
+        # administrators only once a real instance provisions that role, with
+        # a literal account id.
+        #
+        # Real consumers (CI/deploy roles, application roles) that need
+        # least-privilege key use, as opposed to full administration, should
+        # get it through their OWN IAM identity policy scoped to this key's
+        # ARN (`!terraform.state kms/main .key_arn`) — the Cloud Posse pattern
+        # (cloudposse-terraform-components/aws-eks-cluster's
+        # github-actions-iam-policy.mixin.tf `AllowKMSAccess` statement) —
+        # never by adding them to `key_users`/`key_administrators` here: that
+        # list is a key-policy principal list, so every entry must already
+        # exist at apply time or the whole key fails to create.

@@ -380,3 +380,43 @@ run "backup_publishes_to_sns_topics_only_for_this_accounts_topics" {
     error_message = "allow_backup must not grant other services anything."
   }
 }
+
+# key_administrators/key_users are a key-policy principal list: AWS KMS
+# validates every principal named there at CreateKey/PutKeyPolicy time
+# ("invalid principal" MalformedPolicyDocumentException for one that doesn't
+# exist yet). A prod-shaped instance (no named key_administrators/key_users
+# -- see stacks/orgs/fnx/prod/.../security.yaml's kms/main -- must not name
+# any principal beyond the account root (enable_default_policy above), so
+# the first real apply against a fresh account cannot fail that way. Real
+# consumers instead get least-privilege access through their own IAM policy
+# scoped to this key's ARN (e.g. iam's ci_apply_kms_key_arn), never through
+# these lists -- the Cloud Posse pattern.
+run "no_named_key_administrators_or_users_by_default" {
+  command = plan
+
+  assert {
+    condition = length([
+      for s in jsondecode(module.kms.key_policy).Statement : s
+      if contains(["AllowKeyAdministration", "AllowKeyUsage", "AllowGrantsForAWSResources"], try(s.Sid, ""))
+    ]) == 0
+    error_message = "key_administrators/key_users default to [], so the key policy must name no principal beyond the account root."
+  }
+}
+
+run "named_key_administrators_and_users_are_the_only_principals_granted" {
+  command = plan
+
+  variables {
+    key_administrators = ["arn:aws:iam::123456789012:role/Admin"]
+    key_users          = ["arn:aws:iam::123456789012:role/deploy"]
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowKeyAdministration"]).Principal.AWS == "arn:aws:iam::123456789012:role/Admin"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowKeyUsage"]).Principal.AWS == "arn:aws:iam::123456789012:role/deploy"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowGrantsForAWSResources"]).Principal.AWS == "arn:aws:iam::123456789012:role/deploy"
+    )
+    error_message = "Named key_administrators/key_users must appear as the exact principal on their own statements, and only when explicitly set."
+  }
+}

@@ -222,3 +222,43 @@ resource "aws_iam_role_policy" "ci_apply_state" {
   role   = aws_iam_role.ci_apply[0].id
   policy = data.aws_iam_policy_document.ci_apply_state[0].json
 }
+
+# Least-privilege access to a customer-managed key this role deploys
+# resources against (kms/main), scoped to that one ARN -- the Cloud Posse
+# pattern of a consumer's own IAM policy rather than a kms key-policy
+# key_users entry (see ../kms/README.md and cloudposse-terraform-components/
+# aws-eks-cluster's github-actions-iam-policy.mixin.tf AllowKMSAccess
+# statement). AWS requires the principal that calls eks:CreateCluster/
+# UpdateClusterConfig -- not the EKS cluster's own service role -- to hold
+# DescribeKey/CreateGrant/Encrypt on the key named in
+# cluster_encryption_config_kms_key_id ("Encrypting Kubernetes secrets", AWS
+# EKS docs); Encrypt/Decrypt/GenerateDataKey* additionally cover the other
+# kms/main consumers this role deploys (secretsmanager, rds, elasticache,
+# ec2).
+data "aws_iam_policy_document" "ci_apply_kms" {
+  count = local.create_ci_apply_role && var.ci_apply_kms_key_arn != null ? 1 : 0
+
+  statement {
+    sid    = "DeployKms"
+    effect = "Allow"
+    actions = [
+      "kms:DescribeKey",
+      "kms:CreateGrant",
+      "kms:ListGrants",
+      "kms:RevokeGrant",
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+    ]
+    resources = [var.ci_apply_kms_key_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "ci_apply_kms" {
+  count = local.create_ci_apply_role && var.ci_apply_kms_key_arn != null ? 1 : 0
+
+  name   = "deploy-kms"
+  role   = aws_iam_role.ci_apply[0].id
+  policy = data.aws_iam_policy_document.ci_apply_kms[0].json
+}

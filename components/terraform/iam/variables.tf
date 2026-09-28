@@ -357,6 +357,17 @@ variable "ci_state_kms_key_arn" {
   }
 }
 
+variable "ci_apply_kms_key_arn" {
+  type        = string
+  description = "Customer-managed KMS key ARN the apply role deploys resources against (e.g. kms/main): grants kms:DescribeKey/CreateGrant/ListGrants/Encrypt/Decrypt/ReEncrypt*/GenerateDataKey* on it, scoped to this ARN. AWS requires the principal that calls eks:CreateCluster/UpdateClusterConfig -- not the cluster's own service role -- to hold DescribeKey/CreateGrant/Encrypt on the cluster_encryption_config key; other consumers (secretsmanager, rds, elasticache, ec2) need Encrypt/Decrypt/GenerateDataKey* to write values encrypted with it."
+  default     = null
+
+  validation {
+    condition     = var.ci_apply_kms_key_arn == null || can(regex("^arn:aws:kms:", var.ci_apply_kms_key_arn))
+    error_message = "ci_apply_kms_key_arn must be a KMS key ARN."
+  }
+}
+
 variable "ci_role_max_session_duration" {
   type        = number
   description = "Maximum session duration in seconds for the CI roles"

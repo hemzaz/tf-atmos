@@ -51,10 +51,26 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   though `allow_cloudwatch_logs` already lets the log group itself be
   encrypted. `kms/defaults` turns it on for every stack; stepfunctions is the
   only consumer today.
-- Prod's `key_administrators`/`key_users` are hardcoded ARNs
-  (`.../role/Admin`, `.../role/production-eks-node-role`) that must already
-  exist before apply — the stack comment notes the iam ci/eks-node instances
-  are disabled, so this repo's `iam` component does not create those roles.
+- Prod sets **no** `key_administrators`/`key_users` (as of the KMS-key-
+  principals fix), same as dev and staging: it previously named
+  `.../role/Admin` and `.../role/production-eks-node-role`/
+  `.../role/production-ci-role`, but this repo's IaC creates none of those
+  roles (`iam/ci`'s real role names are `<ci_role_name_prefix>-plan`/`-apply`,
+  and node EBS access needs no key-policy entry — see
+  `allow_autoscaling_ebs` above), and KMS validates every key-policy
+  principal at `CreateKey`/`PutKeyPolicy` time, so naming them failed the
+  first real apply with `MalformedPolicyDocumentException`. Real consumers
+  get least-privilege key use through their own IAM policy scoped to this
+  key's ARN instead — `iam`'s `ci_apply_kms_key_arn` (`../iam/README.md`) for
+  the CI apply role, which AWS requires to hold `kms:DescribeKey`/
+  `CreateGrant`/`Encrypt` on the key named in eks/main's
+  `cluster_encryption_config_kms_key_id` because it is the principal calling
+  `eks:CreateCluster`/`UpdateClusterConfig`, not the EKS cluster's own
+  service role. This is the Cloud Posse pattern:
+  `cloudposse-terraform-components/aws-eks-cluster`'s
+  `github-actions-iam-policy.mixin.tf` grants its GitHub Actions deploy role
+  the same `kms:Decrypt`/`DescribeKey` via an IAM policy, not a key-policy
+  entry.
 - `allow_eventbridge` covers four statements: `AllowEventBridge` (bus and
   archive crypto, scoped by `kms:EncryptionContext:aws:events:event-bus:arn`,
   because archive calls carry no `aws:SourceArn`), `AllowEventBridgeDescribeKey`
