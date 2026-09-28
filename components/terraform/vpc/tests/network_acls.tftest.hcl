@@ -37,7 +37,7 @@ variables {
 # (rules 100-130), never on rule 140 -- so it stays at the standard Linux
 # 32768-65535 range; widening it would also make the per-engine rules
 # 100-130 redundant for any VPC-CIDR host on ports 1024-32767.
-run "database_nacl_admits_full_lambda_ephemeral_range" {
+run "database_nacl_lambda_reply_leg_ranges" {
   command = plan
 
   assert {
