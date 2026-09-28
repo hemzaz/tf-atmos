@@ -185,12 +185,44 @@ run "explicit_deny_blocks_environment_managed_and_backup_opted_in_resources" {
 run "backup_actions_are_scoped_to_this_components_own_vault" {
   command = plan
 
+  # HIGH fix (independent review of the master merge): per the AWS Backup IAM
+  # Service Authorization reference, only backup:ListRecoveryPointsByBackupVault
+  # actually authorizes against the backupVault resource type.
+  # backup:StartRestoreJob and backup:GetRecoveryPointRestoreMetadata
+  # authorize against the recoveryPoint* resource type (the underlying EC2 or
+  # RDS snapshot ARN), and backup:DescribeRestoreJob has no resource type at
+  # all. Scoping all four to the vault ARN made StartRestoreJob and
+  # GetRecoveryPointRestoreMetadata AccessDenied at runtime.
   assert {
     condition = (
-      toset(one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "BackupVaultReadAndRestore"]).Action) == toset(["backup:ListRecoveryPointsByBackupVault", "backup:StartRestoreJob", "backup:DescribeRestoreJob", "backup:GetRecoveryPointRestoreMetadata"])
-      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "BackupVaultReadAndRestore"]).Resource == "arn:aws:backup:eu-west-2:123456789012:backup-vault:test-backup"
+      one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "ListRecoveryPointsInOwnVault"]).Action == "backup:ListRecoveryPointsByBackupVault"
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "ListRecoveryPointsInOwnVault"]).Resource == "arn:aws:backup:eu-west-2:123456789012:backup-vault:test-backup"
     )
-    error_message = "backup:* read/restore/metadata actions must be scoped to this component's own vault ARN, not '*'."
+    error_message = "backup:ListRecoveryPointsByBackupVault must be scoped to this component's own vault ARN, not '*'."
+  }
+
+  assert {
+    condition = (
+      toset(one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "StartRestoreAndGetMetadataForOwnEnvironmentRecoveryPoints"]).Action) == toset(["backup:StartRestoreJob", "backup:GetRecoveryPointRestoreMetadata"])
+      && toset(one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "StartRestoreAndGetMetadataForOwnEnvironmentRecoveryPoints"]).Resource) == toset([
+        "arn:aws:ec2:eu-west-2::snapshot/*",
+        "arn:aws:rds:eu-west-2:123456789012:snapshot:awsbackup:*",
+        "arn:aws:backup:eu-west-2:123456789012:recovery-point:*",
+      ])
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "StartRestoreAndGetMetadataForOwnEnvironmentRecoveryPoints"]).Condition == {
+        StringEquals = { "aws:ResourceTag/Environment" = "test" }
+      }
+    )
+    error_message = "backup:StartRestoreJob and backup:GetRecoveryPointRestoreMetadata must be scoped to the recovery-point/snapshot resource types, not the vault ARN, and must require the recovery point's own Environment tag."
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DescribeAnyRestoreJob"]).Action == "backup:DescribeRestoreJob"
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DescribeAnyRestoreJob"]).Resource == "*"
+      && !contains(keys(one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DescribeAnyRestoreJob"])), "Condition")
+    )
+    error_message = "backup:DescribeRestoreJob has no resource-level permissions in the AWS Backup IAM reference and must be Resource \"*\"."
   }
 }
 
@@ -443,6 +475,23 @@ run "backup_notifications_topic_has_a_publish_policy" {
       ]) == 1
     )
     error_message = "The backup notifications topic must have a policy allowing backup.amazonaws.com and cloudwatch.amazonaws.com to publish."
+  }
+}
+
+run "backup_testing_lambda_has_its_own_encrypted_log_group" {
+  command = plan
+
+  # LOW fix: without an explicit log group, Lambda auto-creates
+  # /aws/lambda/<name> with no retention and no CMK encryption, against this
+  # repo's encrypt-at-rest convention.
+  assert {
+    condition = (
+      length(aws_cloudwatch_log_group.backup_testing) == 1
+      && aws_cloudwatch_log_group.backup_testing[0].name == "/aws/lambda/test-backup-testing"
+      && aws_cloudwatch_log_group.backup_testing[0].retention_in_days == 365
+      && aws_cloudwatch_log_group.backup_testing[0].kms_key_id == null
+    )
+    error_message = "The restore-test Lambda must have its own named, retained CloudWatch log group. kms_key_id is null here only because this test's variables don't set kms_key_arn; real instances pass kms/main's key."
   }
 }
 

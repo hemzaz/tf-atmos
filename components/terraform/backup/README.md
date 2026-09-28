@@ -77,6 +77,7 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
 | `rds_instances`, `ebs_volume_ids`, `dynamodb_tables`, `efs_file_systems` | ARN-list selections, for resources this component's own stack does not tag (or is in a different deploy phase); independent of the tag-based selections above |
 | `enable_vault_lock`, `enable_cross_region_backup` | Off by default and in every real instance |
 | `enable_backup_testing` | Off by default in every real instance (spins up and tears down a real EBS volume or RDS instance on a schedule); `backup_testing_resource_type` picks `EBS` or `RDS` (RDS restore-test support is best-effort — see the Lambda's module docstring's "Known limitation" note on Lambda's 15-minute cap vs. realistic RDS restore times) |
+| `log_retention_days` (default `365`) | CloudWatch Logs retention for the restore-test Lambda's log group; Checkov (CKV_AWS_338) requires at least 365 days for KMS-encrypted log groups |
 | out: `backup_plan_id`, `backup_plan_arn`, `backup_vault_arn`, `backup_role_arn`, `backup_testing_function_arn` | — |
 
 ## Dependencies / gotchas
@@ -120,11 +121,30 @@ and `enable_ebs_backup` follow the same AND'd, resource-type-scoped pattern.
   calls happen under the backup service role (`aws_iam_role.backup`, passed
   as `IamRoleArn` to `backup:StartRestoreJob`), which already carries
   `AWSBackupServiceRolePolicyForRestores` — this Lambda's own role is never
-  granted those two actions. `backup:*` read/restore/metadata actions are
-  scoped to this component's own vault ARN, not `"*"`. Tested in
+  granted those two actions. The `backup:*` read/restore/metadata actions are
+  split across three statements to match what each one actually authorizes
+  against (per the AWS Backup IAM Service Authorization reference):
+  `backup:ListRecoveryPointsByBackupVault` is scoped to this component's own
+  vault ARN; `backup:StartRestoreJob`/`backup:GetRecoveryPointRestoreMetadata`
+  authorize against the recoveryPoint resource type (the underlying EC2/RDS
+  snapshot ARN, not the vault), so they are scoped to those resource-type
+  patterns instead, further narrowed by an `aws:ResourceTag/Environment`
+  condition matching this component's own recovery points; and
+  `backup:DescribeRestoreJob` has no resource type at all and must be
+  `Resource "*"`. Scoping all four to the vault ARN (as an earlier version of
+  this policy did) made `StartRestoreJob`/`GetRecoveryPointRestoreMetadata`
+  `AccessDenied` at runtime, so the restore test never actually ran. Tested in
   `tests/backup.tftest.hcl` (real AWS provider, dummy credentials,
   `command = plan`; the policy is asserted directly since it is `jsonencode()`d
   on the resource, not built via `aws_iam_policy_document`).
+- **LOW fix — restore-test Lambda log group:** `aws_lambda_function.backup_testing`
+  has its own `aws_cloudwatch_log_group.backup_testing`
+  (`/aws/lambda/<name>-testing`), encrypted with `kms_key_arn` and retained
+  for `log_retention_days` (default 365) — Lambda's own auto-created log
+  group has no retention and no CMK encryption, against this repo's
+  encrypt-at-rest convention. `catalog/kms/defaults.yaml`'s
+  `allow_cloudwatch_logs` already grants `logs.<region>.amazonaws.com` on
+  `kms/main`, so no new KMS grant was needed.
 - **MEDIUM fix (`aws_backup_selection.rds_tagged_daily`), corrected in
   round-3:** a `string_not_equals` condition on `aws:ResourceTag/Role` =
   `read-replica` (ANDed with the existing `Backup=true`/`Environment=<env>`

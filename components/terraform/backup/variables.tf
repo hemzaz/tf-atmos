@@ -260,3 +260,14 @@ variable "backup_testing_resource_type" {
     error_message = "backup_testing_resource_type must be EBS or RDS (the two types lambda/backup_testing.py implements)."
   }
 }
+
+variable "log_retention_days" {
+  type        = number
+  description = "Retention in days for the restore-test Lambda's CloudWatch log group"
+  default     = 365
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, ...)."
+  }
+}

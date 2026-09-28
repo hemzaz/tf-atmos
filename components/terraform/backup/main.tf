@@ -535,6 +535,23 @@ data "archive_file" "backup_testing_lambda" {
   }
 }
 
+# LOW fix: without an explicit log group, Lambda auto-creates
+# /aws/lambda/<name> with no retention and no CMK encryption -- this repo's
+# encrypt-at-rest convention -- the components/terraform/cost-optimization
+# pattern (lambda.tf's aws_cloudwatch_log_group.scheduler/etc.) creates the
+# log group itself, ahead of the function, so it can reference a real ARN.
+# kms/main already grants logs.<region>.amazonaws.com via allow_cloudwatch_logs
+# in catalog/kms/defaults.yaml, so this key can encrypt it.
+resource "aws_cloudwatch_log_group" "backup_testing" {
+  count = var.enable_backup_testing ? 1 : 0
+
+  name              = "/aws/lambda/${local.name_prefix}-testing"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
+
+  tags = { Name = "/aws/lambda/${local.name_prefix}-testing" }
+}
+
 # Lambda function for automated backup testing (optional)
 resource "aws_lambda_function" "backup_testing" {
   count = var.enable_backup_testing ? 1 : 0
@@ -559,6 +576,8 @@ resource "aws_lambda_function" "backup_testing" {
       RDS_RESTORE_TEST_DB_PREFIX = local.restore_test_db_prefix
     }
   }
+
+  depends_on = [aws_cloudwatch_log_group.backup_testing]
 }
 
 # IAM role for backup testing Lambda
@@ -657,20 +676,68 @@ resource "aws_iam_role_policy" "backup_testing_custom" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "BackupVaultReadAndRestore"
+        # HIGH fix (independent review round-1 of the merge to master): only
+        # backup:ListRecoveryPointsByBackupVault actually authorizes against
+        # the backupVault resource type. It was the only one of these four
+        # actions that belonged on the vault ARN.
+        Sid      = "ListRecoveryPointsInOwnVault"
+        Effect   = "Allow"
+        Action   = "backup:ListRecoveryPointsByBackupVault"
+        Resource = local.backup_vault_arn
+      },
+      {
+        # HIGH fix: per the AWS Backup IAM Service Authorization reference,
+        # backup:StartRestoreJob and backup:GetRecoveryPointRestoreMetadata
+        # both authorize against the recoveryPoint* resource type -- the
+        # underlying resource's own ARN (an EC2 snapshot or an RDS
+        # snapshot:awsbackup:* snapshot), never the backup vault ARN. Scoping
+        # them to local.backup_vault_arn made both calls AccessDenied at
+        # runtime, so lambda/backup_testing.py's restore test never actually
+        # ran (get_recovery_point_restore_metadata first, then
+        # start_restore_job) -- latent today only because
+        # enable_backup_testing defaults to false in every stack.
+        #
+        # MEDIUM fix (kept from the previous version): seeds _restore_metadata
+        # from the source recovery point's own restore metadata
+        # (availabilityZone, subnet group, security groups, encryption, etc.)
+        # instead of guessing a bare DBInstanceIdentifier/availabilityZone,
+        # which is the AWS Backup registry's documented pattern for
+        # StartRestoreJob's Metadata arg.
+        Sid    = "StartRestoreAndGetMetadataForOwnEnvironmentRecoveryPoints"
         Effect = "Allow"
         Action = [
-          "backup:ListRecoveryPointsByBackupVault",
           "backup:StartRestoreJob",
-          "backup:DescribeRestoreJob",
-          # MEDIUM fix: seeds _restore_metadata from the source recovery
-          # point's own restore metadata (availabilityZone, subnet group,
-          # security groups, encryption, etc.) instead of guessing a bare
-          # DBInstanceIdentifier/availabilityZone, which is the AWS Backup
-          # registry's documented pattern for StartRestoreJob's Metadata arg.
           "backup:GetRecoveryPointRestoreMetadata",
         ]
-        Resource = local.backup_vault_arn
+        # EC2 recovery points restore from an unnamed account-wide snapshot
+        # (AWS Backup manages the underlying snap-* id, not this component),
+        # so the EC2 branch is a resource-type wildcard rather than a single
+        # ARN; RDS and AWS Backup's own recovery-point ARNs are similarly
+        # unnamed until the recovery point exists. The aws:ResourceTag
+        # condition below is what actually narrows this to recovery points
+        # this component's own backup plan created (recovery_point_tags on
+        # every rule above sets Environment from var.tags).
+        Resource = [
+          "arn:aws:ec2:${var.region}::snapshot/*",
+          "arn:aws:rds:${var.region}:${data.aws_caller_identity.current.account_id}:snapshot:awsbackup:*",
+          "arn:aws:backup:${var.region}:${data.aws_caller_identity.current.account_id}:recovery-point:*",
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/Environment" = var.tags["Environment"]
+          }
+        }
+      },
+      {
+        # HIGH fix: backup:DescribeRestoreJob has no resource type in the IAM
+        # Service Authorization reference at all -- it must be Resource "*".
+        # It only ever reads back the status of a restore job this role
+        # itself started (via StartRestoreJob above), so this is not a
+        # meaningful widening of what the role can do.
+        Sid      = "DescribeAnyRestoreJob"
+        Effect   = "Allow"
+        Action   = "backup:DescribeRestoreJob"
+        Resource = "*"
       },
       {
         Sid      = "PassBackupServiceRoleForRestore"
