@@ -483,15 +483,21 @@ run "backup_testing_lambda_has_its_own_encrypted_log_group" {
 
   # LOW fix: without an explicit log group, Lambda auto-creates
   # /aws/lambda/<name> with no retention and no CMK encryption, against this
-  # repo's encrypt-at-rest convention.
+  # repo's encrypt-at-rest convention. Set kms_key_arn explicitly so this run
+  # actually proves the log group is wired to it, not just that kms_key_id is
+  # null when the variable is unset.
+  variables {
+    kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  }
+
   assert {
     condition = (
       length(aws_cloudwatch_log_group.backup_testing) == 1
       && aws_cloudwatch_log_group.backup_testing[0].name == "/aws/lambda/test-backup-testing"
       && aws_cloudwatch_log_group.backup_testing[0].retention_in_days == 365
-      && aws_cloudwatch_log_group.backup_testing[0].kms_key_id == null
+      && aws_cloudwatch_log_group.backup_testing[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
     )
-    error_message = "The restore-test Lambda must have its own named, retained CloudWatch log group. kms_key_id is null here only because this test's variables don't set kms_key_arn; real instances pass kms/main's key."
+    error_message = "The restore-test Lambda's CloudWatch log group must use var.kms_key_arn for encryption, not be left on the default/unencrypted path."
   }
 }
 
