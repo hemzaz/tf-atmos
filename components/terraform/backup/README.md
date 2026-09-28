@@ -38,11 +38,16 @@ storage days (`cold_storage_after`):
 
 AWS Backup requires `delete_after >= cold_storage_after + 90` (a recovery
 point must sit in cold storage at least 90 days before it can be deleted).
-`backup/defaults` sets `monthly_cold_storage_days: null` for exactly this
-reason: the component's own variable default of 90 only satisfies that rule
-against prod's 2555-day monthly retention, not dev's or staging's shorter
-one. Only the prod instance turns cold storage back on (`monthly_cold_storage_days: 90`),
-alongside its long retention. `aws_backup_plan.main` also carries a
+`daily_cold_storage_days`/`weekly_cold_storage_days`/`monthly_cold_storage_days`
+all default to `null` (off) in `variables.tf`, matching
+[cloudposse/terraform-aws-backup](https://github.com/cloudposse/terraform-aws-backup)'s
+model (`rules[].lifecycle.cold_storage_after` is unset unless a caller opts
+in) -- a fixed non-null default would only be valid for a retention long
+enough to satisfy the 90-day rule, and that is each instance's call, not
+this component's. `backup/defaults` also sets `monthly_cold_storage_days:
+null` explicitly to document the intent. Only the prod instance turns cold
+storage back on (`monthly_cold_storage_days: 90`), alongside its long
+2555-day monthly retention. `aws_backup_plan.main` also carries a
 `lifecycle.precondition` per cadence enforcing this relationship, so a stack
 that gets it wrong fails at `terraform plan`, not at `apply`. Daily and
 weekly cold storage stay off (`null`) in every instance; no stage's

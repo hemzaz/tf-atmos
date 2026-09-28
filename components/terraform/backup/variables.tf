@@ -138,7 +138,16 @@ variable "monthly_retention_days" {
 variable "monthly_cold_storage_days" {
   type        = number
   description = "Days until monthly backups move to cold storage"
-  default     = 90
+  # Off (null) by default, matching daily_cold_storage_days/weekly_cold_storage_days
+  # above and cloudposse/terraform-aws-backup's model (rules[].lifecycle.cold_storage_after
+  # is unset/null unless a caller opts in). AWS Backup requires
+  # delete_after >= cold_storage_after + 90 (a recovery point must sit in cold
+  # storage at least 90 days before it can be deleted), so a non-null default
+  # here would only be valid for a long enough retention -- it is each
+  # instance's decision, not this component's, whether its monthly retention
+  # is long enough to turn cold storage on (see the lifecycle.precondition
+  # below and stacks/catalog/backup/defaults.yaml).
+  default = null
 }
 
 variable "enable_archive_tier" {

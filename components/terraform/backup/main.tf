@@ -209,13 +209,16 @@ resource "aws_backup_plan" "main" {
   # CreateBackupPlan/UpdateBackupPlan rejects any rule whose
   # delete_after < cold_storage_after + 90. That combination previously had
   # no guard anywhere -- not in these variables, not in a test -- so a stack
-  # could set a cold_storage_after (e.g. this component's own
-  # monthly_cold_storage_days default of 90) together with a shorter
+  # could set a *_cold_storage_days override together with a shorter
   # retention (e.g. a dev/staging monthly_retention_days of 30/90) and the
   # break would only surface as an apply-time InvalidParameterValueException,
   # after the plan sweep and every other check already passed. These
   # preconditions turn that into a `terraform plan` failure with a clear
-  # message, one per cadence.
+  # message, one per cadence. All three *_cold_storage_days variables default
+  # to null (off), matching cloudposse/terraform-aws-backup's
+  # rules[].lifecycle.cold_storage_after; only an instance that opts in with
+  # a long enough retention (e.g. this repo's prod instance) needs these
+  # preconditions at all.
   lifecycle {
     precondition {
       condition     = var.daily_cold_storage_days == null || var.daily_retention_days >= var.daily_cold_storage_days + 90
