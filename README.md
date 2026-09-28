@@ -228,7 +228,7 @@ authenticate to AWS with OIDC, not stored keys.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep and the Trivy/Checkov security gate run PR/merge-queue only; on push to the default branch only `terraform test` runs, for every component with a `tests/` directory (on PR/merge-queue it's scoped to components the change affects); affected components are planned with the read-only role and commented on the PR (PR/merge-queue only) |
+| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep and the Trivy/Checkov security gate run PR/merge-queue only; `terraform test` covers every component with a `tests/` directory on push and merge queue, and only the components a PR changes on pull_request; affected components are planned with the read-only role (PR/merge-queue) and the plan is commented on the PR (pull_request only) |
 | `emulator.yml` | PR, push to default branch, manual | Runs the LocalEmu lane (`vpc`, `lambda`, `rds`, `monitoring`, `iam`) against a real LocalEmu instance and destroys it — the only CI gate that actually provisions. The Floci [sandbox](#sandbox) lane is not wired into CI yet; it still runs locally |
 | `terraform-cd.yml` | push to default branch, manual | Deploys each stack in turn (dev, staging, prod) since its `deployed/<stack>` tag, then moves the tag |
 | `drift-detection.yml` | hourly, manual | Plans every stack read-only; drift fails the job |
