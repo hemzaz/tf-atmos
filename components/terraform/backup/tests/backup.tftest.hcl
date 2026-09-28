@@ -723,3 +723,48 @@ run "vault_lock_rejects_weekly_retention_above_its_maximum" {
 
   expect_failures = [aws_backup_vault_lock_configuration.main]
 }
+
+# A null changeable_for_days would make a governance-mode lock and a null
+# min/max would drop that bound, so null lock inputs are rejected outright.
+run "vault_lock_changeable_days_rejects_null" {
+  command = plan
+
+  variables {
+    vault_lock_changeable_days = null
+  }
+
+  expect_failures = [var.vault_lock_changeable_days]
+}
+
+run "vault_lock_min_retention_days_rejects_null" {
+  command = plan
+
+  variables {
+    vault_lock_min_retention_days = null
+  }
+
+  expect_failures = [var.vault_lock_min_retention_days]
+}
+
+run "vault_lock_max_retention_days_rejects_null" {
+  command = plan
+
+  variables {
+    vault_lock_max_retention_days = null
+  }
+
+  expect_failures = [var.vault_lock_max_retention_days]
+}
+
+run "null_retention_falls_back_to_the_default" {
+  command = plan
+
+  variables {
+    daily_retention_days = null
+  }
+
+  assert {
+    condition     = one([for r in aws_backup_plan.main.rule : r.lifecycle[0].delete_after if r.rule_name == "daily-backup"]) == 7
+    error_message = "A null daily_retention_days should fall back to the 7-day default."
+  }
+}

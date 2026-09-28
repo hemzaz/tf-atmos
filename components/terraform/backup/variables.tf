@@ -35,11 +35,10 @@ variable "vault_lock_changeable_days" {
   type        = number
   description = "Number of days before the lock becomes immutable"
   default     = 3
-  nullable    = false
 
   validation {
-    condition     = var.vault_lock_changeable_days >= 3 && var.vault_lock_changeable_days <= 36500 && var.vault_lock_changeable_days == floor(var.vault_lock_changeable_days)
-    error_message = "vault_lock_changeable_days must be a whole number of days, from 3 to 36500 (the AWS Backup range for ChangeableForDays)."
+    condition     = var.vault_lock_changeable_days != null ? (var.vault_lock_changeable_days >= 3 && var.vault_lock_changeable_days <= 36500 && var.vault_lock_changeable_days == floor(var.vault_lock_changeable_days)) : false
+    error_message = "vault_lock_changeable_days must not be null (a null lock input would change the lock mode or drop a bound) and must be a whole number of days, from 3 to 36500 (the AWS Backup range for ChangeableForDays)."
   }
 }
 
@@ -47,11 +46,10 @@ variable "vault_lock_min_retention_days" {
   type        = number
   description = "Minimum retention days for locked backups"
   default     = 7
-  nullable    = false
 
   validation {
-    condition     = var.vault_lock_min_retention_days >= 1 && var.vault_lock_min_retention_days <= 36500 && var.vault_lock_min_retention_days == floor(var.vault_lock_min_retention_days)
-    error_message = "vault_lock_min_retention_days must be a whole number of days from 1 to 36500."
+    condition     = var.vault_lock_min_retention_days != null ? (var.vault_lock_min_retention_days >= 1 && var.vault_lock_min_retention_days <= 36500 && var.vault_lock_min_retention_days == floor(var.vault_lock_min_retention_days)) : false
+    error_message = "vault_lock_min_retention_days must not be null (a null lock input would change the lock mode or drop a bound) and must be a whole number of days from 1 to 36500."
   }
 }
 
@@ -59,11 +57,10 @@ variable "vault_lock_max_retention_days" {
   type        = number
   description = "Maximum retention days for locked backups"
   default     = 365
-  nullable    = false
 
   validation {
-    condition     = var.vault_lock_max_retention_days == floor(var.vault_lock_max_retention_days) && var.vault_lock_max_retention_days <= 36500 && var.vault_lock_max_retention_days >= var.vault_lock_min_retention_days
-    error_message = "vault_lock_max_retention_days must be a whole number of days, at most 36500 and no smaller than vault_lock_min_retention_days."
+    condition     = var.vault_lock_max_retention_days != null ? (var.vault_lock_max_retention_days == floor(var.vault_lock_max_retention_days) && var.vault_lock_max_retention_days <= 36500 && (var.vault_lock_min_retention_days == null || var.vault_lock_max_retention_days >= var.vault_lock_min_retention_days)) : false
+    error_message = "vault_lock_max_retention_days must not be null (a null lock input would change the lock mode or drop a bound) and must be a whole number of days, at most 36500 and no smaller than vault_lock_min_retention_days."
   }
 }
 
@@ -127,6 +124,7 @@ variable "daily_retention_days" {
   type        = number
   description = "Retention period for daily backups in days"
   default     = 7
+  nullable    = false
 
   validation {
     condition     = var.daily_retention_days >= 1 && var.daily_retention_days == floor(var.daily_retention_days) && var.daily_retention_days <= 36500
@@ -149,6 +147,7 @@ variable "weekly_retention_days" {
   type        = number
   description = "Retention period for weekly backups in days"
   default     = 30
+  nullable    = false
 
   validation {
     condition     = var.weekly_retention_days >= 1 && var.weekly_retention_days == floor(var.weekly_retention_days) && var.weekly_retention_days <= 36500
@@ -171,6 +170,7 @@ variable "monthly_retention_days" {
   type        = number
   description = "Retention period for monthly backups in days"
   default     = 365
+  nullable    = false
 
   validation {
     condition     = var.monthly_retention_days >= 1 && var.monthly_retention_days == floor(var.monthly_retention_days) && var.monthly_retention_days <= 36500
