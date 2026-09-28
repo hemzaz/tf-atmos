@@ -15,18 +15,24 @@ longer verify against AWSCURRENT alone. Any verifier for this secret MUST
 accept a token signed by either AWSCURRENT or AWSPREVIOUS for at least the
 token's own max lifetime after each rotation (fetch both stages with
 GetSecretValue and try each), or version tokens with a `kid` claim naming
-which secret version signed them, before rotation_automatically is turned on
-in production -- otherwise every token issued in the rotation_days window
-before a rotation is rejected the moment it lands.
+which secret version signed them, before any consumer relies on this secret
+(rotation is live as soon as microservices/lambda/jwt-secret-rotation is
+applied -- rotation_automatically is not the switch here; see that
+instance's own rotation_secret_arn wiring in microservices-platform.yaml) --
+otherwise every token issued in the rotation_days window before a rotation
+is rejected the moment it lands.
 """
 
 import boto3
 from botocore.exceptions import ClientError
 
 # Excludes characters that break naive shell/env-var handling if a consumer
-# ever exports this value directly, mirroring the exclusion the Redis AUTH
-# rotation function and this repo's Terraform-side random_password generator
-# both use.
+# ever exports this value directly. This is its own exclusion set, not a
+# mirror of anything else: the Redis AUTH rotation function excludes a
+# different set (its target is ElastiCache's AUTH token, with its own
+# character constraints), and this repo's Terraform-side random_password
+# generator uses override_special, an ALLOWLIST of which characters count as
+# "special", not an exclude list -- the two are not directly comparable.
 _EXCLUDE_CHARACTERS = '/"@\'\\'
 _PASSWORD_LENGTH = 64
 
