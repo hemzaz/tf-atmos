@@ -65,7 +65,7 @@ run "enabled_creates_the_service_linked_role" {
 # kms:ResourceAliases condition rather than a key ARN -- a consumer's own IAM
 # policy, never a kms key-policy key_users entry (see ../../kms/README.md).
 # Alias-scoped, not ARN-scoped, because iam/ci plans and applies in the
-# deploy-full-stack layer BEFORE kms/main (../../../workflows/deploy-full-stack.yaml),
+# deploy-full-stack layer BEFORE kms/main (../../../../workflows/deploy-full-stack.yaml),
 # so a !terraform.state read of the key's ARN would create a layer-order
 # cycle (kms/main already depends on iam).
 run "ci_apply_kms_policy_is_inert_without_the_apply_role" {
