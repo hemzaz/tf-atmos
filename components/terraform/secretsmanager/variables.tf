@@ -60,11 +60,24 @@ variable "secrets" {
       - path: Additional path segments to insert between environment and name (optional)
       - kms_key_id: KMS key ID to use for encryption (defaults to default_kms_key_id)
       - secret_data: The secret data to store (optional, mutually exclusive with generate_random_password)
-      - rotation_lambda_arn: ARN of the Lambda function for rotation (optional)
+      - rotation_lambda_arn: ARN of the Lambda function for rotation (optional). Only safe when that
+        function already exists and is permitted to be invoked by Secrets Manager AT THIS component's
+        own apply time -- a Lambda that itself reads this secret (the common case) cannot satisfy that
+        on the secret's first apply; use rotation_managed_externally for that instead, and configure
+        rotation from the Lambda's own component instance (the lambda component's rotation_secret_arn)
       - rotation_days: Days between automatic rotation (defaults to default_rotation_days)
       - rotation_automatically: Whether to enable automatic rotation (defaults to default_rotation_automatically)
+      - rotate_immediately: Whether enabling rotation invokes rotation_lambda_arn right away (defaults to default_rotate_immediately)
+      - rotation_managed_externally: Set true when a SEPARATE component instance's own
+        aws_secretsmanager_secret_rotation (not this component's rotation_lambda_arn/rotation_automatically
+        above) owns this secret's rotation. Has the same effect on this secret's version resource as
+        rotation_automatically + rotation_lambda_arn (stop overwriting the value after the initial
+        create), without this component ever needing to know the Lambda's ARN. Defaults to false
       - recovery_window_in_days: Window for recovery before permanent deletion (defaults to default_recovery_window_in_days)
       - generate_random_password: Whether to generate a random password for this secret (defaults to false)
+      - random_password_override_special: Special characters for this secret's generated password
+        (defaults to random_password_override_special); override per-secret when the consumer's
+        allowed character set differs from the component default, e.g. ElastiCache AUTH tokens
   EOT
   default     = {}
 
@@ -97,6 +110,12 @@ variable "default_rotation_days" {
 variable "default_rotation_automatically" {
   type        = bool
   description = "Default setting for automatic rotation if not specified at the secret level"
+  default     = false
+}
+
+variable "default_rotate_immediately" {
+  type        = bool
+  description = "Default for rotate_immediately (whether enabling rotation invokes rotation_lambda_arn right away) if not specified at the secret level. Defaults to false, opposite of the AWS provider's own default of true: rotation_lambda_arn is commonly a Lambda applied by a separate component instance, which may not exist and be invokable yet on this component's first apply."
   default     = false
 }
 

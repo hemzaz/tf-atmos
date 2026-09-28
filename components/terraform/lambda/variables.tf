@@ -54,6 +54,12 @@ variable "s3_object_version" {
   default     = null
 }
 
+variable "source_dir" {
+  type        = string
+  description = "A directory under this component (e.g. \"functions/redis-auth-rotation\", resolved relative to path.module) that the component zips itself via the archive_file data source, producing filename/source_code_hash internally -- for small, in-repo function sources (e.g. Secrets Manager rotation functions) that do not warrant an external build pipeline. Mutually exclusive with filename and s3_bucket+s3_key (validated on aws_lambda_function.main): exactly one packaging source is required for package_type = \"Zip\"."
+  default     = null
+}
+
 variable "layers" {
   type        = list(string)
   description = "List of Lambda layer ARNs to attach"
@@ -159,6 +165,45 @@ variable "sns_source_arn" {
   type        = string
   description = "ARN of the SNS topic that invokes the Lambda function"
   default     = null
+}
+
+variable "secretsmanager_source_arn" {
+  type        = string
+  description = "ARN of the Secrets Manager secret that invokes this Lambda as its rotation function. Adds a resource-based permission for principal secretsmanager.amazonaws.com, scoped by aws:SourceArn (this secret) and aws:SourceAccount (this account) -- the two conditions AWS's rotation documentation requires so no other secret or account can invoke the function. Pair with rotation_secret_arn set to the SAME secret's ARN to also configure that secret's rotation from this component instance (see rotation_secret_arn's own description for why that must happen here, not on the secretsmanager component, when this function itself reads the secret)."
+  default     = null
+
+  validation {
+    condition     = var.secretsmanager_source_arn == null || can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.secretsmanager_source_arn))
+    error_message = "secretsmanager_source_arn must be a Secrets Manager secret ARN (arn:aws:secretsmanager:<region>:<account-id>:secret:<name>)."
+  }
+}
+
+variable "rotation_secret_arn" {
+  type        = string
+  description = "ARN of the Secrets Manager secret to configure THIS function as the rotation Lambda for (aws_secretsmanager_secret_rotation, depends_on the secretsmanager.amazonaws.com invoke permission and this function's own IAM role policies below). Configuring rotation on the secretsmanager component instead is only safe when that function already exists and is invokable at the SECRET's own apply time -- a function that itself reads the secret (the common case, to scope its own custom_policy) cannot satisfy that on the secret's first apply, because Secrets Manager's RotateSecret API invokes the function -- at minimum running its testSecret step against a temporary AWSPENDING version it creates and then removes -- even when rotate_immediately is false. Configuring it here instead is safe: this Lambda instance already depends on the secret's own component instance (to read this ARN and to scope its own IAM policy), so by the time THIS resource applies, the function, its invoke permission and its IAM policies already exist. Pair with secretsmanager_source_arn set to the SAME secret's ARN (enforced by a precondition), and set the secretsmanager component's own secret entry to rotation_managed_externally = true instead of rotation_lambda_arn/rotation_automatically. For a secret with an external system to update (e.g. the redis-auth-rotation function's ElastiCache replication group), also set rotate_immediately = true here once this resource's own dependency ordering is safe: at rotate_immediately = false, only testSecret runs, against a temporary AWSPENDING version Secrets Manager itself creates for the test, so setSecret -- the step that actually pushes a new value to the external system -- never runs, and this path never performs or verifies a real end-to-end rotation (a testSecret that depends on setSecret's push, like redis-auth-rotation's, is exercised only against the AWSPENDING version's own test-time value, not a value setSecret pushed)."
+  default     = null
+
+  validation {
+    condition     = var.rotation_secret_arn == null || can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", var.rotation_secret_arn))
+    error_message = "rotation_secret_arn must be a Secrets Manager secret ARN (arn:aws:secretsmanager:<region>:<account-id>:secret:<name>)."
+  }
+}
+
+variable "rotation_days" {
+  type        = number
+  description = "Days between automatic rotations of rotation_secret_arn. Ignored when rotation_secret_arn is null."
+  default     = 30
+
+  validation {
+    condition     = var.rotation_days >= 1 && var.rotation_days <= 365
+    error_message = "rotation_days must be between 1 and 365."
+  }
+}
+
+variable "rotate_immediately" {
+  type        = bool
+  description = "Whether configuring rotation on rotation_secret_arn invokes this function right away (the AWS provider's own default for aws_secretsmanager_secret_rotation is true), versus only testing the configuration and waiting for the first scheduled rotation window. Default false, matching the secretsmanager component's own default_rotate_immediately. Ignored when rotation_secret_arn is null. When true, any LATER change to this resource (e.g. rotation_days, or a new rotation_lambda_arn from a function rename/replacement) also re-invokes RotateSecret with RotateImmediately = true, triggering an unscheduled rotation at that apply -- not just the first one."
+  default     = false
 }
 
 variable "configure_event_invoke" {
@@ -343,6 +388,17 @@ variable "database_cidr_blocks" {
   type        = list(string)
   description = "CIDR blocks for database access"
   default     = []
+}
+
+variable "additional_security_group_ids" {
+  type        = list(string)
+  description = "Extra security group IDs to attach to this function's VPC-attached ENI, alongside the one this component creates itself (aws_security_group.lambda). For example, a cache's client security group (e.g. elasticache's client_security_group_id), so that cache's own security group never has to read this function's security group back -- which would create a dependency cycle for a function that already reads the cache's outputs. Ignored when subnet_ids is empty."
+  default     = []
+
+  validation {
+    condition     = alltrue([for sg in var.additional_security_group_ids : can(regex("^sg-[a-f0-9]+$", sg))])
+    error_message = "Each entry must be a valid security group ID (e.g. sg-0123456789abcdef0)."
+  }
 }
 
 variable "custom_egress_rules" {

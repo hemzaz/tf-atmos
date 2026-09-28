@@ -168,6 +168,7 @@ components/terraform/*/providers_override.tf.json
 # the committed lambda/*.py source at plan/apply time, never committed.
 components/terraform/*/*_lambda.zip
 components/terraform/cost-optimization/*.zip
+components/terraform/lambda/.archives/
 
 # Additional logs and temporary files
 *.tmp

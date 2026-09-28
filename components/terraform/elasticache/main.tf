@@ -84,6 +84,34 @@ resource "aws_vpc_security_group_ingress_rule" "from_security_groups" {
   ip_protocol                  = "tcp"
 }
 
+# A rule-less "client" tag security group: attach it to any OTHER resource
+# (e.g. a Secrets Manager rotation Lambda) that needs cache access, instead
+# of this component reading that resource's own security group back into
+# from_security_groups above. The latter would create a dependency cycle for
+# a consumer that (like a rotation Lambda) already reads THIS component's
+# own outputs -- see client_security_group_id's own description.
+resource "aws_security_group" "client" {
+  #checkov:skip=CKV2_AWS_5:Intentionally rule-less; aws_vpc_security_group_ingress_rule.from_client_security_group references it by ID as a source, which is the group's entire purpose
+  count = local.enabled ? 1 : 0
+
+  name        = "${local.name}-client-sg"
+  description = "Attach to any resource that needs access to the ${var.cluster_id} cache, without this component reading that resource's own security group back"
+  vpc_id      = var.vpc_id
+
+  tags = { Name = "${local.name}-client-sg" }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "from_client_security_group" {
+  count = local.enabled ? 1 : 0
+
+  security_group_id            = aws_security_group.main[0].id
+  description                  = "Cache access from anything attached to the client security group"
+  referenced_security_group_id = aws_security_group.client[0].id
+  from_port                    = var.port
+  to_port                      = var.port
+  ip_protocol                  = "tcp"
+}
+
 resource "aws_vpc_security_group_ingress_rule" "from_cidr_blocks" {
   for_each = local.enabled ? toset(var.allowed_cidr_blocks) : toset([])
 
@@ -191,4 +219,21 @@ resource "aws_secretsmanager_secret_version" "auth_token" {
   secret_string = jsonencode({
     auth_token = var.auth_token
   })
+}
+
+# rotation_policy's own two statements, folding in additional_policy_json --
+# see that variable's description for the full rationale.
+locals {
+  rotation_own_statements = local.enabled ? [{
+    Sid      = "AllowElastiCacheAuthTokenRotation"
+    Effect   = "Allow"
+    Action   = ["elasticache:ModifyReplicationGroup", "elasticache:DescribeReplicationGroups"]
+    Resource = aws_elasticache_replication_group.main[0].arn
+  }] : []
+
+  rotation_additional_statements = var.additional_policy_json != null ? [
+    for i, s in jsondecode(var.additional_policy_json).Statement : merge(s, {
+      Sid = "Additional${try(s.Sid, "")}${i}"
+    })
+  ] : []
 }

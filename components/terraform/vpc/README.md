@@ -29,9 +29,17 @@ inherit abstract `vpc/defaults`; a plain abstract `vpc` catalog entry is not a r
 | `tags` / `nat_gateway_strategy` | tags must include a non-empty `Environment`; strategy is `single` or `one_per_az` |
 | `manage_default_security_group` | default true: strips every rule from the VPC's AWS-created default SG (one way) |
 | `public_subnets_additional_tags`, `private_subnets_additional_tags` | extra tags on every public / private subnet (Cloud Posse's names), e.g. the `kubernetes.io/role/elb` and `kubernetes.io/cluster/<name>` tags EKS load balancers discover subnets by; `Name` is refused |
+| `enable_vpc_endpoints`, `vpc_endpoints` | default `false` / `[]`. `vpc_endpoints` is a flat list of bare AWS PrivateLink service names (e.g. `secretsmanager`, `elasticache`, `s3`); the component classifies each one itself -- `s3` and `dynamodb` get a Gateway endpoint (route-table based, free), everything else an Interface endpoint (ENI + private DNS in the private subnets, behind a dedicated `<Environment>-vpce-sg` security group scoped to HTTPS from the VPC CIDR). Cloud Posse's `aws-vpc` splits these into two inputs (`interface_vpc_endpoints`, `gateway_vpc_endpoints`); this component keeps one list and does the split internally |
 
 Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 `dns`, `ec2`, `eks`, `monitoring`, `rds`, `securitygroup` and `services` catalog defaults.
+
+`vpc_endpoint_interface_ids`, `vpc_endpoint_gateway_ids` (both maps of AWS PrivateLink
+service name to endpoint ID) and `vpc_endpoint_security_group_id` are empty/null unless
+`enable_vpc_endpoints` is true; they mirror Cloud Posse's `interface_vpc_endpoints`,
+`gateway_vpc_endpoints` and `vpc_endpoint_interface_security_group_id` outputs. A
+consumer can scope its own security group's egress to `vpc_endpoint_security_group_id`
+instead of the whole VPC CIDR once it lists `vpc` in `dependencies.components`.
 
 ## Dependencies / gotchas
 
@@ -46,6 +54,28 @@ Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 - The network ACLs allow inbound from `0.0.0.0/0` on the ephemeral ports (stateless
   return traffic) and, on public subnets, 80/443 for internet-facing load balancers.
   This is the documented exception to the "no inbound /0" rule; see `network-acls.tf`.
+- The database NACL's VPC-CIDR egress rule 100 (the reply leg back to an
+  application-tier client) spans `1024-65535`, not the narrower `32768-65535`
+  used elsewhere: AWS Lambda functions attached to the VPC (e.g.
+  redis-auth-rotation) source outbound connections from their Hyperplane ENI
+  across the full documented range, so the database subnet's stateless reply
+  needs the wider window. Ingress rule 140 stays at `32768-65535` — it covers
+  replies to connections the database subnet itself initiates outbound, not a
+  Lambda's inbound request, whose destination port is the fixed service port
+  (rules 100-130), not an ephemeral one. VPC-internal only, so it does not
+  touch the no-inbound-/0 rule.
+- The database-subnet fix above does not cover a VPC-attached Lambda's calls
+  to *AWS APIs themselves* (e.g. redis-auth-rotation's Secrets Manager and
+  ElastiCache calls): those go out the NAT gateway to a public endpoint, and
+  the reply comes back to the Lambda's own ephemeral source port, which for
+  a Hyperplane ENI can be anywhere in 1024-65535 — but the private NACL's
+  only `/0` ingress rule (110) admits just `32768-65535`. Widening that `/0`
+  rule would need explicit owner sign-off (it is a real inbound-`/0` change,
+  not the VPC-internal one above), so instead the fix is `enable_vpc_endpoints`
+  / `vpc_endpoints`: an Interface endpoint's reply comes from an address
+  inside the VPC CIDR, which the existing VPC-CIDR NACL rules already admit,
+  so no widening is needed at all. `microservices/vpc` enables `secretsmanager`
+  and `elasticache` for this reason.
 - `stacks/mixins/stage/*` set stage defaults on the abstract `vpc/defaults`, never on a
   bare `vpc` key (which would create a real, stray instance). An instance's own values
   win over the stage defaults.
