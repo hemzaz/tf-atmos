@@ -147,20 +147,12 @@ atmos workflow deploy-serverless -f deploy-template -s <stack>   # quick deploy,
 atmos workflow deploy-parallel -f deploy-template -s <stack>     # independent components concurrently
 ```
 
-Only `microservices-platform` can be deployed end to end today — every `component:` it names
-under `components/terraform/` exists. The other four templates name instances of components that
-have not been built yet, so `deploy-template` cannot find their component directory:
-
-| Template | Missing component(s) |
-|----------|-----------------------|
-| `web-application` | `cloudfront`, `ecs-service` (`stacks/catalog/templates/web-application.yaml:619`, `:373`) |
-| `serverless-api` | `cloudfront` (`stacks/catalog/templates/serverless-api.yaml:792`) |
-| `data-pipeline` | `firehose`, `step-functions` — the implemented component is `stepfunctions` (`stacks/catalog/templates/data-pipeline.yaml:445`, `:1121`) |
-| `batch-processing` | `batch`, `batch-job-definition`, `batch-job-queue`, `step-functions` — the implemented component is `stepfunctions` (`stacks/catalog/templates/batch-processing.yaml:469`, `:630`, `:573`, `:801`) |
-
-Building these components (or renaming `step-functions` to `stepfunctions` in the two templates
-that use it) is out of scope here — the templates under `stacks/catalog/templates/` are owned by
-other tasks.
+A template deploys only if every `component:` it names resolves to a directory under
+`components/terraform/`; otherwise `deploy-template` cannot find that component. As of this
+writing only `microservices-platform` meets that bar — check
+`git grep -n 'component:' stacks/catalog/templates/<template>.yaml` against
+`components/terraform/` for the current state of the other four, since it changes as their
+missing components land.
 
 ## CI across several AWS accounts
 

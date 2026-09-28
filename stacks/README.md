@@ -71,10 +71,12 @@ one today.
 | `data-pipeline` | Kinesis, Lambda, S3 data lake, Glue, Athena | No — `firehose`, `step-functions` (implemented as `stepfunctions`) not found |
 | `batch-processing` | AWS Batch, SQS, Step Functions | No — `batch`, `batch-job-definition`, `batch-job-queue`, `step-functions` (implemented as `stepfunctions`) not found |
 
-`microservices-platform` is the only template whose `component:` references all resolve to a
-directory under `components/terraform/`; the other four name instances of components that do not
-exist yet, so `deploy-template` cannot find them. See
-[Deployment Guide](../docs/DEPLOYMENT.md#deploying-a-stack-template) for the file:line evidence.
+A template deploys only if every `component:` it names resolves to a directory under
+`components/terraform/`; otherwise `deploy-template` cannot find that component. The "Deployable
+today?" column above reflects the current state — re-check it with
+`git grep -n 'component:' stacks/catalog/templates/<template>.yaml` against
+`components/terraform/`, since it changes as missing components land. See
+[Deployment Guide](../docs/DEPLOYMENT.md#deploying-a-stack-template) for more.
 
 Use one by importing it into a stack manifest and setting its required variables (see the
 template's YAML file for the full variable list), then deploy with

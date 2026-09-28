@@ -161,10 +161,12 @@ Two things to know:
 `idp-platform` is unsupported (no stack deploys it; `plan` fails unless
 `acknowledge_unsupported = true`). There are no `metadata.enabled: false` instances left in
 `stacks/orgs/`, but not every component has an instance: `alb`, `alb-controller-ingress-group`,
-`athena`, `dynamodb`, `eventbridge`, `glue`, `kinesis`, `s3`, `ses`, `sns`, `sqs`, `stepfunctions`
-and `waf` are used only by the opt-in [stack templates](./stacks/README.md#stack-templates),
-`securitygroup` is deployed only in `fnx-local-sandbox`, and every other component except
-`idp-platform` has an instance in the three real stacks.
+`athena`, `dynamodb`, `eventbridge`, `glue`, `kinesis`, `s3`, `ses`, `sqs` and `waf` are used only
+by the opt-in [stack templates](./stacks/README.md#stack-templates). `sns` and `stepfunctions`
+have only a catalog base (`stacks/catalog/<component>/defaults.yaml`) and no instance or template
+reference yet. `securitygroup` is deployed only in `fnx-local-sandbox`, and every other component
+except `idp-platform` has an instance in at least one of the three real stacks (`elasticache` and
+`network` only in prod).
 
 An instance name does not have to match its component: `metadata.component` decides which module
 runs. `network/main` and `network/services` are `dns` instances, while `network/vpc-peering` is
@@ -226,7 +228,7 @@ authenticate to AWS with OIDC, not stored keys.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep, Trivy/Checkov security gate, `terraform test` for components with a `tests/` directory that the change affects (all of them on push and merge queue), plans affected components with the read-only role and comments on the PR (PR/merge-queue only) |
+| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep and the Trivy/Checkov security gate run PR/merge-queue only; on push to the default branch only `terraform test` runs, for every component with a `tests/` directory (on PR/merge-queue it's scoped to components the change affects); affected components are planned with the read-only role and commented on the PR (PR/merge-queue only) |
 | `emulator.yml` | PR, push to default branch, manual | Runs the LocalEmu lane (`vpc`, `lambda`, `rds`, `monitoring`, `iam`) against a real LocalEmu instance and destroys it — the only CI gate that actually provisions. The Floci [sandbox](#sandbox) lane is not wired into CI yet; it still runs locally |
 | `terraform-cd.yml` | push to default branch, manual | Deploys each stack in turn (dev, staging, prod) since its `deployed/<stack>` tag, then moves the tag |
 | `drift-detection.yml` | hourly, manual | Plans every stack read-only; drift fails the job |
