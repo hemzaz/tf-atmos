@@ -150,6 +150,16 @@ variable "global_secondary_index_map" {
     condition     = alltrue([for i in var.global_secondary_index_map : contains(["ALL", "KEYS_ONLY", "INCLUDE"], i.projection_type)])
     error_message = "Every global_secondary_index_map projection_type must be ALL, KEYS_ONLY or INCLUDE."
   }
+
+  validation {
+    condition     = alltrue([for i in var.global_secondary_index_map : i.projection_type != "INCLUDE" || (i.non_key_attributes != null && length(i.non_key_attributes) > 0)])
+    error_message = "Every global_secondary_index_map entry with projection_type INCLUDE must set a non-empty non_key_attributes; DynamoDB requires it."
+  }
+
+  validation {
+    condition     = alltrue([for i in var.global_secondary_index_map : i.projection_type == "INCLUDE" || i.non_key_attributes == null])
+    error_message = "non_key_attributes is only valid with projection_type INCLUDE; DynamoDB rejects it with ALL or KEYS_ONLY."
+  }
 }
 
 variable "local_secondary_index_map" {
@@ -165,6 +175,16 @@ variable "local_secondary_index_map" {
   validation {
     condition     = alltrue([for i in var.local_secondary_index_map : contains(["ALL", "KEYS_ONLY", "INCLUDE"], i.projection_type)])
     error_message = "Every local_secondary_index_map projection_type must be ALL, KEYS_ONLY or INCLUDE."
+  }
+
+  validation {
+    condition     = alltrue([for i in var.local_secondary_index_map : i.projection_type != "INCLUDE" || (i.non_key_attributes != null && length(i.non_key_attributes) > 0)])
+    error_message = "Every local_secondary_index_map entry with projection_type INCLUDE must set a non-empty non_key_attributes; DynamoDB requires it."
+  }
+
+  validation {
+    condition     = alltrue([for i in var.local_secondary_index_map : i.projection_type == "INCLUDE" || i.non_key_attributes == null])
+    error_message = "non_key_attributes is only valid with projection_type INCLUDE; DynamoDB rejects it with ALL or KEYS_ONLY."
   }
 }
 

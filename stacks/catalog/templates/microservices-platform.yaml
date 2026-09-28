@@ -29,12 +29,11 @@
 #   - Secrets Manager secrets for the platform (the Redis AUTH token among them)
 #
 # Encryption: the stack's customer managed key, kms/main, encrypts the EKS
-# secrets, DynamoDB tables, the EventBridge bus, archive and log groups, the
-# SQS queues, the Lambda's environment and log group, the API Gateway log
-# group, ElastiCache and the Secrets Manager secrets. Not yet:
-# EKS node EBS volumes use the AWS managed aws/ebs key, the eks and vpc log
-# groups use those components' own keys, and the monitoring SNS topic is
-# unencrypted.
+# secrets, control-plane log group and managed node groups' EBS volumes, the
+# VPC's flow-log group, DynamoDB tables, the EventBridge bus, archive and log
+# groups, the SQS queues, the Lambda's environment and log group, the API
+# Gateway log group, ElastiCache and the Secrets Manager secrets. Not yet: the
+# monitoring SNS topic is unencrypted.
 #
 # Cost Estimates (Monthly):
 #   Development:  ~$200-400/month
@@ -53,10 +52,19 @@
 #    deep-merge over that stack's own alias_name/description. CloudWatch Logs
 #    (the EventBridge, Lambda and API Gateway log groups) and EventBridge (the
 #    bus and archive, and delivery to the encrypted queues) use the key as
-#    service principals, so the stack's kms/main must keep the two scoped
-#    grants that catalog/kms/defaults turns on:
+#    service principals, and the EC2 Auto Scaling service-linked role needs it
+#    for the EKS managed node groups' CMK-encrypted EBS volumes, so the
+#    stack's kms/main must keep the three scoped grants that
+#    catalog/kms/defaults turns on:
 #      allow_cloudwatch_logs: true
 #      allow_eventbridge: true
+#      allow_autoscaling_ebs: true
+#    allow_autoscaling_ebs names the Auto Scaling service-linked role
+#    directly, so the importing stack also needs the role provisioned first:
+#    one of its iam instances sets enable_autoscaling_service_linked_role:
+#    true (see components/terraform/iam/README.md), and kms/main declares a
+#    dependencies.components edge to that instance (every real dev/staging/
+#    prod stack already does both).
 # 2. settings.microservices, read by eks-addons, apigateway and the
 #    welcome-email Lambda:
 #      settings:
@@ -143,6 +151,10 @@ components:
         # Flow logs capture ALL traffic; DNS hostnames and support are always
         # on in the vpc component (EKS needs both).
         vpc_flow_logs_enabled: true
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Subnet tags for EKS load balancer discovery. The cluster tag names
         # the cluster, which the eks component names "<Environment>-<name>":
@@ -157,6 +169,9 @@ components:
         tags:
           Layer: "networking"
           Platform: "microservices"
+      dependencies:
+        components:
+          - component: kms/main
 
     # =========================================================================
     # EKS CLUSTER
@@ -429,10 +444,21 @@ components:
         description: "API Gateway for microservices platform"
         api_type: "HTTP"
 
+        # allow_origins lists explicit origins only. API Gateway HTTP API CORS
+        # accepts exact origins, the literal "*" (refused below by
+        # allow_credentials: true), or the whole-scheme prefix forms
+        # "https://*" / "http://*" -- it has no embedded-subdomain-glob
+        # support, so a 'https://*.<domain>' entry (this template's prior
+        # config) never matches any real browser Origin and silently grants
+        # no subdomain access at all, while looking like it does. The
+        # component's own validation only catches a literal "*" paired with
+        # allow_credentials (components/terraform/apigateway/variables.tf),
+        # not this glob, so it plans clean and fails silently instead. List
+        # every real origin that needs CORS (additional subdomains included)
+        # explicitly here.
         cors_configuration:
           allow_origins:
             - 'https://{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
-            - 'https://*.{{ .settings.microservices.app_domain_name }}'
           allow_methods:
             - "GET"
             - "POST"
@@ -522,7 +548,15 @@ components:
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000
 
-        create_dashboard: true
+        # The dashboard this component would build (create_dashboard) uses the
+        # ApiName dimension from its dashboard.json.tpl, which only REST APIs
+        # publish; an HTTP API (api_type above) publishes AWS/ApiGateway
+        # metrics dimensioned by ApiId instead, so those widgets would render
+        # empty. microservices/monitoring's api-metrics dashboard already
+        # covers this API with the correct ApiId dimension (and the matching
+        # api-5xx-errors/api-latency-high alarms below it), so this stays off
+        # to avoid a second, non-functional API dashboard.
+        create_dashboard: false
         # HTTP APIs have no X-Ray tracing (a REST API stage setting).
         tracing_enabled: false
 
@@ -968,10 +1002,14 @@ components:
         cluster_mode_replicas_per_node_group: 1
         node_type: "cache.r6g.large"
 
-        # Network: private subnets, reachable from the EKS cluster security
-        # group (managed node groups attach it to every node).
+        # Network: the VPC's dedicated database subnets (microservices/vpc sets
+        # database_subnets above), not the pod subnets -- Cloud Posse's
+        # terraform-aws-elasticache-redis examples place the replication
+        # group in isolated data-tier subnets, reachable only from the EKS
+        # cluster security group below (managed node groups attach it to
+        # every node), never from the pod subnets directly.
         vpc_id: !terraform.state microservices/vpc .vpc_id
-        subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
+        subnet_ids: !terraform.state microservices/vpc .database_subnet_ids
         allowed_security_group_ids: !terraform.state microservices/eks '.eks_cluster_managed_security_group_id | [.]'
 
         # Security: encryption at rest (stack key) and in transit, AUTH token
@@ -1064,20 +1102,45 @@ components:
                     metric: "Latency"
                     dimensions:
                       ApiId: !terraform.state microservices/apigateway .http_api_id
+          # Both rules sit on the custom bus "<Environment>-microservices"
+          # (microservices/eventbridge, create_event_bus: true), not the
+          # account's default bus. Per AWS's EventBridge monitoring docs:
+          # "Metrics that specify only the RuleName dimension refer to the
+          # default event bus. Metrics that specify both the EventBusName
+          # and RuleName dimensions refer to a Custom Event Bus - Classic."
+          # so both dimensions are required for these series to have data.
+          # RuleName's value is each rule's own name, "<Environment>-<name>"
+          # (the eventbridge instances' cloudwatch_event_rule_name output).
           eventbridge-metrics:
             widgets:
-              - title: "EventBridge Metrics"
+              - title: "EventBridge Metrics: order-created"
                 period: 60
                 stat: "Sum"
                 metrics:
                   - namespace: "AWS/Events"
                     metric: "Invocations"
                     dimensions:
-                      EventBusName: !terraform.state microservices/eventbridge .event_bus_name
+                      RuleName: !terraform.state microservices/eventbridge/order-created .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/order-created .event_bus_name
                   - namespace: "AWS/Events"
                     metric: "FailedInvocations"
                     dimensions:
-                      EventBusName: !terraform.state microservices/eventbridge .event_bus_name
+                      RuleName: !terraform.state microservices/eventbridge/order-created .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/order-created .event_bus_name
+              - title: "EventBridge Metrics: user-registered"
+                period: 60
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/Events"
+                    metric: "Invocations"
+                    dimensions:
+                      RuleName: !terraform.state microservices/eventbridge/user-registered .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/user-registered .event_bus_name
+                  - namespace: "AWS/Events"
+                    metric: "FailedInvocations"
+                    dimensions:
+                      RuleName: !terraform.state microservices/eventbridge/user-registered .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/user-registered .event_bus_name
 
         # Alarms on metrics the fixed-purpose inputs cannot express. HTTP APIs
         # publish 5xx/Latency by ApiId (REST uses ApiName and 5XXError).
@@ -1112,19 +1175,38 @@ components:
             evaluation_periods: 3
             period: 300
             extended_statistic: "p99"
-          eventbridge-failures:
+          # Both rules sit on the custom bus (see the eventbridge-metrics
+          # dashboard note above), so FailedInvocations needs EventBusName
+          # alongside RuleName -- one alarm per rule that has consumers, so a
+          # delivery failure to either is caught.
+          eventbridge-order-created-failures:
             namespace: "AWS/Events"
             metric_name: "FailedInvocations"
             dimensions:
-              EventBusName: !terraform.state microservices/eventbridge .event_bus_name
+              RuleName: !terraform.state microservices/eventbridge/order-created .cloudwatch_event_rule_name
+              EventBusName: !terraform.state microservices/eventbridge/order-created .event_bus_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 5
             evaluation_periods: 2
             period: 300
             statistic: "Sum"
-          # Per-table throttling is published as Read/WriteThrottleEvents by
-          # TableName (ThrottledRequests also needs an Operation dimension).
-          dynamodb-read-throttled:
+          eventbridge-user-registered-failures:
+            namespace: "AWS/Events"
+            metric_name: "FailedInvocations"
+            dimensions:
+              RuleName: !terraform.state microservices/eventbridge/user-registered .cloudwatch_event_rule_name
+              EventBusName: !terraform.state microservices/eventbridge/user-registered .event_bus_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 5
+            evaluation_periods: 2
+            period: 300
+            statistic: "Sum"
+          # Per-table throttling and system errors, on every DynamoDB table
+          # (all three, per #191's review): ReadThrottleEvents and
+          # WriteThrottleEvents publish by TableName alone (ThrottledRequests
+          # would also need an Operation dimension, so it is not used here);
+          # SystemErrors (5xx responses from DynamoDB itself) does too.
+          dynamodb-service-state-read-throttled:
             namespace: "AWS/DynamoDB"
             metric_name: "ReadThrottleEvents"
             dimensions:
@@ -1134,11 +1216,81 @@ components:
             evaluation_periods: 1
             period: 60
             statistic: "Sum"
-          dynamodb-write-throttled:
+          dynamodb-service-state-write-throttled:
             namespace: "AWS/DynamoDB"
             metric_name: "WriteThrottleEvents"
             dimensions:
               TableName: !terraform.state microservices/dynamodb/service-state .table_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+          dynamodb-service-state-system-errors:
+            namespace: "AWS/DynamoDB"
+            metric_name: "SystemErrors"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/service-state .table_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+          dynamodb-distributed-locks-read-throttled:
+            namespace: "AWS/DynamoDB"
+            metric_name: "ReadThrottleEvents"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/distributed-locks .table_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+          dynamodb-distributed-locks-write-throttled:
+            namespace: "AWS/DynamoDB"
+            metric_name: "WriteThrottleEvents"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/distributed-locks .table_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+          dynamodb-distributed-locks-system-errors:
+            namespace: "AWS/DynamoDB"
+            metric_name: "SystemErrors"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/distributed-locks .table_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+          dynamodb-saga-state-read-throttled:
+            namespace: "AWS/DynamoDB"
+            metric_name: "ReadThrottleEvents"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/saga-state .table_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+          dynamodb-saga-state-write-throttled:
+            namespace: "AWS/DynamoDB"
+            metric_name: "WriteThrottleEvents"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/saga-state .table_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 60
+            statistic: "Sum"
+          dynamodb-saga-state-system-errors:
+            namespace: "AWS/DynamoDB"
+            metric_name: "SystemErrors"
+            dimensions:
+              TableName: !terraform.state microservices/dynamodb/saga-state .table_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 1
@@ -1218,7 +1370,11 @@ components:
           - component: microservices/eks
           - component: microservices/apigateway
           - component: microservices/eventbridge
+          - component: microservices/eventbridge/order-created
+          - component: microservices/eventbridge/user-registered
           - component: microservices/dynamodb/service-state
+          - component: microservices/dynamodb/distributed-locks
+          - component: microservices/dynamodb/saga-state
           - component: microservices/elasticache
           - component: microservices/sqs/event-bus-dlq
           - component: microservices/sqs/order-inventory
@@ -1228,9 +1384,26 @@ components:
     # =========================================================================
     # SECRETS MANAGEMENT
     # =========================================================================
-    # Secrets are "microservices/<stage>/<path>/<name>", encrypted with kms/main
-    # (default_kms_key_id, from secretsmanager/defaults). Rotation is off
-    # (default_rotation_automatically: false): no rotation function exists.
+    # Secrets are "microservices/<environment>/<path>/<name>", encrypted with
+    # kms/main (default_kms_key_id, from secretsmanager/defaults). Rotation is
+    # off (default_rotation_automatically: false): no rotation function
+    # exists.
+    #
+    # secretsmanager/defaults sets var.environment from
+    # settings.context.stage (dev/staging/prod), which two stacks sharing an
+    # AWS account but differing only in settings.context.environment (e.g.
+    # testenv-01 and testenv-02, both stage: dev) would both resolve to the
+    # same full_path -- a name collision Secrets Manager would reject at
+    # apply. This instance overrides it to the stack's full, unique
+    # environment name instead, matching apigateway's stage_name above.
+    #
+    # Side effect: the component's prod recovery-window guard
+    # (components/terraform/secretsmanager/main.tf) compares var.environment
+    # against "prod"/"production" literally, so it now keys on this
+    # environment name rather than the stage. It matches today because the
+    # prod stack's environment happens to be "production"; every secret below
+    # sets recovery_window_in_days >= 7 regardless, so there is no current
+    # impact, but a differently-named prod stack would skip the guard.
 
     microservices/secrets:
       metadata:
@@ -1240,6 +1413,7 @@ components:
           - secretsmanager/defaults
       vars:
         context_name: "microservices"
+        environment: "{{ .settings.context.environment }}"
         secrets:
           # Database credentials
           database:

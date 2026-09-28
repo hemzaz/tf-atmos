@@ -110,6 +110,16 @@ components:
         # true everywhere else.
         manage_network_acls: false
         manage_default_security_group: false
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key. Flow logs are off here
+        # (vpc_flow_logs_enabled: false above), but the value is still
+        # resolved, so kms/main must still be applied first - the sandbox
+        # workflow already does (kms/main before vpc/main).
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main
 
     kms/main:
       metadata:
@@ -122,6 +132,9 @@ components:
         enable_key_rotation: true
         deletion_window_in_days: 7
         alias_name: "alias/sandbox"
+        # This lane runs no Auto Scaling or EKS node groups, so the grant
+        # (kms/defaults default: true) would do nothing here.
+        allow_autoscaling_ebs: false
         tags:
           Environment: sandbox
           Tenant: fnx

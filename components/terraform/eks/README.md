@@ -1,13 +1,17 @@
 # eks
 
 Creates **one** EKS cluster per component instance, the model of
-`cloudposse-terraform-components/aws-eks-cluster`: the cluster with its own KMS key
-(always for the control-plane log group; for Kubernetes secrets too unless
-`cluster_encryption_config_kms_key_id` names a caller key, as prod does), an IAM cluster role and
-node-group role (worker/CNI/ECR-read-only policies attached), EKS managed node groups
-(`aws_eks_node_group`) behind one launch template per group, and an IAM OIDC provider
-for IRSA. Every resource is `count = enabled ? 1 : 0` (node groups: one per
-`node_groups` entry), so `enabled = false` plans nothing.
+`cloudposse-terraform-components/aws-eks-cluster`: the cluster with its own KMS key,
+created only when `cluster_encryption_config_kms_key_id` names no caller key (all 3
+stacks now pass `kms/main`, so this component key goes uncreated everywhere in
+practice) — that key, or the caller's, encrypts both Kubernetes secrets and the
+control-plane log group; an IAM cluster role and node-group role
+(worker/CNI/ECR-read-only policies attached); EKS managed node groups
+(`aws_eks_node_group`) behind one launch template per group, whose block devices
+default to `node_group_ebs_kms_key_id` (also `kms/main`) unless a device sets its own
+`ebs.kms_key_id`; and an IAM OIDC provider for IRSA. Every resource is
+`count = enabled ? 1 : 0` (node groups: one per `node_groups` entry), so
+`enabled = false` plans nothing.
 
 ## Deployed instances
 
@@ -43,7 +47,8 @@ Cloud Posse names where `aws-eks-cluster` has the setting.
 | `cluster_endpoint_public_access` | `false` | a public endpoint must set `public_access_cidrs` |
 | `public_access_cidrs` | `null` | who may reach the API server (inbound). With a public endpoint: non-empty (AWS reads `[]` as `0.0.0.0/0`), valid CIDRs, never a `/0` (`0.0.0.0/0` is Cloud Posse's default; `::/0` too), because the repo never opens inbound access to everywhere. All are variable validations, so they fail without credentials |
 | `associated_security_group_ids` | `[]` | extra security groups on the cluster ENIs |
-| `cluster_encryption_config_kms_key_id` | `""` | secrets key; empty: the component's own key. The log group always uses the component key (a caller key would need a CloudWatch Logs grant for it) |
+| `cluster_encryption_config_kms_key_id` | `""` | secrets key; empty creates and uses the component's own key. All 3 stacks pass `kms/main` here, so the log group (which always follows this same key) uses it too, and the component's own key is not created at all — `kms/main`'s `allow_cloudwatch_logs` already grants every log group in the account and region, so no per-log-group grant is needed |
+| `node_group_ebs_kms_key_id` | `""` | default key for a node group's `block_device_map` volumes that set no `ebs.kms_key_id` of their own; empty leaves them on the AWS managed `aws/ebs` key. `eks/defaults` sets this to `kms/main`, whose `allow_autoscaling_ebs` grants the AWS Auto Scaling service-linked role the `kms:CreateGrant` (`kms:GrantIsForAWSResource`) and crypto actions EC2 needs to launch encrypted volumes from it |
 | `enabled_cluster_log_types` | all five | Cloud Posse defaults to `[]` |
 | `cluster_log_retention_period` | `7` | prod pins 90 in its stack file |
 | `enable_cluster_protection` | `true` | deletion protection when `tags.Environment` is `prod`/`production` |
@@ -113,8 +118,9 @@ Cloud Posse names and formats (`one(<resource>[*].<attr>)`, null when disabled):
 
 ## Dependencies
 
-- `eks/main` depends on `vpc/main` (and `kms/main` in prod); `eks/data` on
-  `vpc/services` (and `kms/main` in prod).
+- `eks/main` depends on `vpc/main` and `kms/main` (`cluster_encryption_config_kms_key_id`
+  and `node_group_ebs_kms_key_id`, both set from `kms/main` in every stack); `eks/data`
+  on `vpc/services` and `kms/main`.
 - `external-secrets/main` and `external-secrets/data` read `eks_cluster_id`,
   `eks_cluster_endpoint`, `eks_cluster_certificate_authority_data`,
   `eks_cluster_identity_oidc_issuer_arn` and `eks_cluster_identity_oidc_issuer`.
@@ -125,7 +131,9 @@ Cloud Posse names and formats (`one(<resource>[*].<attr>)`, null when disabled):
 `tests/eks.tftest.hcl` runs with mock providers (no credentials): names per
 Environment, no doubled Environment (and no false positives), IAM and node group
 length limits at their boundaries, the output formats consumers rely on, the
-endpoint rules, the KMS split, the AL2023 default for 1.36, and `enabled = false`.
+endpoint rules, the KMS split (including that a caller key leaves the component key
+uncreated), `node_group_ebs_kms_key_id` defaulting and being overridden per device,
+the AL2023 default for 1.36, and `enabled = false`.
 
 ```
 terraform init -backend=false && terraform test

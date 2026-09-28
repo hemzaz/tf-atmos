@@ -40,8 +40,24 @@ locals {
   # here; otherwise a change to it rolls in place instead of replacing the group.
   launch_template_configs = {
     for k, ng in local.node_groups : k => {
-      block_device_mappings = ng.block_device_map
-      tag_specifications    = ["instance", "volume", "network-interface"]
+      # A device's own ebs.kms_key_id always wins; otherwise fall back to
+      # var.node_group_ebs_kms_key_id (kms/main, when the stack sets it) so
+      # every EBS volume a node group launches is encrypted with a key this
+      # repo controls rather than the AWS managed aws/ebs key. Only when the
+      # device is actually encrypted: EC2 rejects a launch template that sets
+      # KmsKeyId on a device with encrypted = false.
+      block_device_mappings = {
+        for device_name, device in ng.block_device_map : device_name => (
+          device.ebs == null ? device : merge(device, {
+            ebs = merge(device.ebs, {
+              kms_key_id = device.ebs.kms_key_id != null ? device.ebs.kms_key_id : (
+                device.ebs.encrypted && var.node_group_ebs_kms_key_id != "" ? var.node_group_ebs_kms_key_id : null
+              )
+            })
+          })
+        )
+      }
+      tag_specifications = ["instance", "volume", "network-interface"]
       # http_endpoint is documented as optional but is required whenever
       # http_put_response_hop_limit is set.
       metadata_options = {
@@ -63,7 +79,9 @@ locals {
     for k, ng in local.node_groups : k => coalesce(ng.immediately_apply_lt_changes, true)
   }
 
-  # The caller's key when set, otherwise the key this component creates.
+  # The caller's key when set, otherwise the key this component creates. Both
+  # the cluster's secrets (encryption_config below) and its control-plane log
+  # group (aws_cloudwatch_log_group.default) use this same key.
   kms_key_arn = var.cluster_encryption_config_kms_key_id != "" ? var.cluster_encryption_config_kms_key_id : one(aws_kms_key.cluster[*].arn)
 }
 
@@ -73,9 +91,10 @@ resource "aws_cloudwatch_log_group" "default" {
 
   name              = local.cluster_log_group_name
   retention_in_days = var.cluster_log_retention_period
-  # The cluster's own key, the one already encrypting its secrets, so the
-  # control-plane logs (which carry the audit trail) are encrypted too.
-  kms_key_id = aws_kms_key.cluster[0].arn
+  # The caller's key when one is given (kms/main's allow_cloudwatch_logs
+  # already grants every log group in this account and region), otherwise the
+  # component's own key, the one already encrypting the cluster's secrets.
+  kms_key_id = local.kms_key_arn
 
   tags = merge(var.tags, {
     Name        = local.cluster_log_group_name
@@ -139,19 +158,17 @@ resource "aws_eks_cluster" "default" {
   # and public_access_cidrs, so they also run in a credential-less plan.
 }
 
-# The component's own key. It always encrypts the control-plane log group, and
-# it encrypts Kubernetes secrets only when cluster_encryption_config_kms_key_id
-# is empty (prod passes kms/main's key for secrets, so there this key serves
-# the log group alone). Kept for the log group either way: a caller's key would
-# need a CloudWatch Logs statement scoped to this log group, which kms/main
-# does not grant.
+# The component's own key, created only when the caller supplies none of its
+# own: local.kms_key_arn then routes both the cluster's secrets
+# (encryption_config) and its control-plane log group to this key. When a
+# caller key is given (e.g. kms/main, whose allow_cloudwatch_logs already
+# grants every log group in this account and region), that key encrypts both
+# instead and this component key would sit completely unused, so it is not
+# created at all.
 resource "aws_kms_key" "cluster" {
-  count = local.enabled ? 1 : 0
+  count = local.enabled && var.cluster_encryption_config_kms_key_id == "" ? 1 : 0
 
-  description = (var.cluster_encryption_config_kms_key_id == ""
-    ? "KMS key for EKS ${local.cluster_name} secrets and control-plane log encryption"
-    : "KMS key for EKS ${local.cluster_name} control-plane log encryption (secrets use the caller's key)"
-  )
+  description             = "KMS key for EKS ${local.cluster_name} secrets and control-plane log encryption"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 

@@ -46,6 +46,15 @@ output "replica_count" {
   value       = length(aws_kms_replica_key.replicas)
 }
 
+# Exposed for the same reason key_policy is: so tests (and anyone auditing a
+# replica's grants) can read the exact policy JSON applied to it, which is
+# generated per region (default_policy_by_region), never a copy of the
+# primary's (#186).
+output "replica_key_policies" {
+  description = "Map of replica region to the key policy JSON applied to that replica"
+  value       = { for region, key in aws_kms_replica_key.replicas : region => key.policy }
+}
+
 ##############################################
 # Configuration
 ##############################################

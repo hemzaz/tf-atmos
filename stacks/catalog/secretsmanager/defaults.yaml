@@ -19,8 +19,14 @@ components:
         components:
           - component: kms/main
       vars:
-        # The lifecycle tier the component validates (dev/staging/prod).
-        # context.environment is the instance name (`testenv-01`) and fails it.
+        # The default is the lifecycle tier (dev/staging/prod), used for
+        # tier-scoped secret naming. An instance may override this to
+        # context.environment (the stack's instance name, e.g. `testenv-01`)
+        # for per-stack uniqueness when two stacks share an account and stage
+        # -- see microservices/secrets in microservices-platform.yaml. Either
+        # value passes the component's own validation
+        # (components/terraform/secretsmanager/variables.tf), which only
+        # requires lowercase letters, numbers and hyphens.
         environment: "{{ .settings.context.stage }}"
         enabled: true
         context_name: "common"

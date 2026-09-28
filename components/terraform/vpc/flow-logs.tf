@@ -1,9 +1,19 @@
 # VPC Flow Logs for network traffic monitoring and security analysis
 # Captures ALL traffic (ACCEPT and REJECT) with comprehensive logging
 
-# KMS key for CloudWatch Logs encryption
+locals {
+  # The caller's key when supplied (kms/main, whose allow_cloudwatch_logs
+  # already grants every log group in this account and region), otherwise
+  # this component's own key.
+  flow_logs_kms_key_arn = var.flow_logs_kms_key_arn != "" ? var.flow_logs_kms_key_arn : one(aws_kms_key.flow_logs[*].arn)
+}
+
+# KMS key for CloudWatch Logs encryption, created only when the caller
+# supplies none of its own: with a caller key, this key would otherwise sit
+# unused (the log group and, if flow_logs_s3_backup is enabled, the archive
+# bucket both use local.flow_logs_kms_key_arn instead).
 resource "aws_kms_key" "flow_logs" {
-  count = var.vpc_flow_logs_enabled ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.flow_logs_kms_key_arn == "" ? 1 : 0
 
   description             = "KMS key for VPC Flow Logs encryption"
   deletion_window_in_days = 30
@@ -52,7 +62,7 @@ resource "aws_kms_key" "flow_logs" {
 }
 
 resource "aws_kms_alias" "flow_logs" {
-  count = var.vpc_flow_logs_enabled ? 1 : 0
+  count = var.vpc_flow_logs_enabled && var.flow_logs_kms_key_arn == "" ? 1 : 0
 
   name          = "alias/${var.tags["Environment"]}-vpc-flow-logs"
   target_key_id = aws_kms_key.flow_logs[0].key_id
@@ -64,7 +74,7 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 
   name              = "/aws/vpc/flowlogs/${aws_vpc.main.id}"
   retention_in_days = var.flow_logs_retention_days
-  kms_key_id        = aws_kms_key.flow_logs[0].arn
+  kms_key_id        = local.flow_logs_kms_key_arn
 
   tags = merge(
     var.tags,
@@ -358,7 +368,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "flow_logs" {
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.flow_logs[0].arn
+      kms_master_key_id = local.flow_logs_kms_key_arn
     }
   }
 }

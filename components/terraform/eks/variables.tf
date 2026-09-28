@@ -154,6 +154,22 @@ variable "cluster_encryption_config_kms_key_id" {
   }
 }
 
+# cloudposse/terraform-aws-eks-node-group: a launch template's block_device_map
+# is the only way to control a managed node group's root-volume encryption
+# key. This is the *default* for a device that sets no ebs.kms_key_id of its
+# own; a device-level value always wins.
+variable "node_group_ebs_kms_key_id" {
+  type        = string
+  description = "Default KMS key ARN for a node group's block_device_map EBS volumes whose ebs.kms_key_id is not set. Empty leaves such volumes on the AWS managed aws/ebs key. Whichever key is used needs a policy granting the AWSServiceRoleForAutoScaling service-linked role kms:CreateGrant (kms:GrantIsForAWSResource) plus Encrypt/Decrypt/ReEncrypt*/GenerateDataKey*/DescribeKey (kms/main's allow_autoscaling_ebs), or new instances fail to launch."
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition     = var.node_group_ebs_kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.node_group_ebs_kms_key_id))
+    error_message = "node_group_ebs_kms_key_id must be a valid KMS key ARN (e.g., arn:aws:kms:region:account-id:key/key-id)."
+  }
+}
+
 # Divergence from Cloud Posse, whose default is []: all control-plane logs on.
 variable "enabled_cluster_log_types" {
   type        = list(string)
