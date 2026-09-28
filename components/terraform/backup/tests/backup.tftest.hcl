@@ -587,3 +587,96 @@ run "no_backup_notifications_topic_policy_when_notifications_disabled" {
     error_message = "The SNS topic policy is opt-in via enable_backup_notifications, same as the topic itself."
   }
 }
+
+run "daily_retention_days_rejects_zero" {
+  command = plan
+
+  variables {
+    daily_retention_days = 0
+  }
+
+  expect_failures = [var.daily_retention_days]
+}
+
+run "weekly_retention_days_rejects_fractional" {
+  command = plan
+
+  variables {
+    weekly_retention_days = 30.5
+  }
+
+  expect_failures = [var.weekly_retention_days]
+}
+
+run "vault_lock_max_below_min_is_rejected" {
+  command = plan
+
+  variables {
+    vault_lock_min_retention_days = 30
+    vault_lock_max_retention_days = 7
+  }
+
+  expect_failures = [var.vault_lock_max_retention_days]
+}
+
+run "vault_lock_changeable_days_below_aws_minimum_is_rejected" {
+  command = plan
+
+  variables {
+    vault_lock_changeable_days = 1
+  }
+
+  expect_failures = [var.vault_lock_changeable_days]
+}
+
+# Defaults: daily 7 / weekly 30 / monthly 365 against a 7-365 lock -- all in range.
+run "vault_lock_with_retention_in_range_plans" {
+  command = plan
+
+  variables {
+    enable_vault_lock = true
+  }
+
+  assert {
+    condition     = aws_backup_vault_lock_configuration.main[0].min_retention_days == 7 && aws_backup_vault_lock_configuration.main[0].max_retention_days == 365
+    error_message = "The vault lock should carry the configured retention range."
+  }
+}
+
+# Prod's 2555-day monthly retention against the default 365-day lock maximum.
+run "vault_lock_rejects_retention_above_its_maximum" {
+  command = plan
+
+  variables {
+    enable_vault_lock      = true
+    monthly_retention_days = 2555
+  }
+
+  expect_failures = [aws_backup_vault_lock_configuration.main]
+}
+
+run "vault_lock_rejects_retention_below_its_minimum" {
+  command = plan
+
+  variables {
+    enable_vault_lock             = true
+    vault_lock_min_retention_days = 14
+  }
+
+  expect_failures = [aws_backup_vault_lock_configuration.main]
+}
+
+# The lock preconditions only exist on the counted resource, so an out-of-range
+# retention is fine while the lock is off (every real instance today).
+run "retention_outside_lock_range_is_fine_without_a_lock" {
+  command = plan
+
+  variables {
+    monthly_retention_days = 2555
+  }
+
+  assert {
+    condition     = length(aws_backup_vault_lock_configuration.main) == 0
+    error_message = "No vault lock should be created when enable_vault_lock is false."
+  }
+}
