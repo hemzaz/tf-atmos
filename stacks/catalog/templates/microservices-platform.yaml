@@ -1546,17 +1546,24 @@ components:
           # and ModifyReplicationGroup/DescribeReplicationGroups both resolve
           # (private_dns_enabled) to the Interface VPC endpoints
           # microservices/vpc creates for secretsmanager and elasticache, so
-          # this egress rule is scoped to the VPC CIDR, not 0.0.0.0/0 -- the
-          # whole point of the endpoints is to keep these calls, and their
-          # replies, off the NAT gateway's public /0 path (see
+          # this egress rule is scoped to those endpoints' own shared security
+          # group (vpc_endpoint_security_group_id), not the whole VPC CIDR --
+          # the same security-group-referencing shape as the Redis AUTH rule
+          # above, and narrower than a CIDR block since only traffic actually
+          # destined for an ENI in that group is admitted. Non-null here
+          # because enable_vpc_endpoints: true and vpc_endpoints (above) is
+          # non-empty, so microservices/vpc always creates
+          # aws_security_group.vpc_endpoints for this instance. Egress to
+          # anywhere is allowed by this repo's rules regardless, so this is
+          # least-privilege tightening, not a required fix -- see
           # components/terraform/vpc/network-acls.tf and this template's
-          # microservices/vpc comment).
+          # microservices/vpc comment for why the endpoints exist at all.
           - description: "HTTPS to the secretsmanager/elasticache VPC endpoints"
             from_port: 443
             to_port: 443
             protocol: "tcp"
-            cidr_blocks:
-              - !terraform.state microservices/vpc .vpc_cidr
+            security_groups:
+              - !terraform.state microservices/vpc .vpc_endpoint_security_group_id
         secretsmanager_source_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_secret_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_days: 30

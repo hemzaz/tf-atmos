@@ -127,6 +127,10 @@ SYNTH = [
     (r'^http_api_id$',                'a1b2c3d4e5'),
     (r'^event_bus_name$',             'example-bus'),
     (r'^cloudwatch_event_rule_name$', 'example-rule'),
+    # vpc's vpc_endpoint_security_group_id, read by redis-auth-rotation's
+    # custom_egress_rules[].security_groups to scope its HTTPS-to-endpoints
+    # rule to the endpoints' own security group instead of the VPC CIDR.
+    (r'^vpc_endpoint_security_group_id$', 'sg-0123456789abcdef2'),
     (r'^(cloudwatch_)?log_group_name$', '/aws/example/log-group'),
     (r'^eks_cluster_managed_security_group_id$', 'sg-0123456789abcdef1'),
     (r'^member_clusters$',            ['example-cache-0001-001', 'example-cache-0002-001']),

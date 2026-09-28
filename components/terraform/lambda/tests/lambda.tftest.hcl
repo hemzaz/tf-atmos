@@ -327,6 +327,45 @@ run "additional_security_group_ids_are_attached_alongside_the_own_sg" {
   }
 }
 
+run "custom_egress_rule_security_groups_renders_no_cidr_blocks" {
+  command = plan
+
+  # Mirrors redis-auth-rotation's HTTPS-to-VPC-endpoints rule in
+  # stacks/catalog/templates/microservices-platform.yaml: a custom_egress_rules
+  # entry that sets security_groups and omits cidr_blocks entirely must render
+  # a security_groups-only egress block, not fall back to an open or CIDR rule.
+  variables {
+    vpc_id     = "vpc-0123456789abcdef0"
+    subnet_ids = ["subnet-0123456789abcdef0"]
+    # Set to avoid the real AWS lookup data.aws_ec2_managed_prefix_list.s3
+    # would otherwise make for an empty vpc_endpoint_prefix_list_ids (see
+    # this file's own header comment on why every run here is offline).
+    vpc_endpoint_prefix_list_ids = ["pl-0123456789abcdef0"]
+    custom_egress_rules = [
+      {
+        description     = "HTTPS to the secretsmanager/elasticache VPC endpoints"
+        from_port       = 443
+        to_port         = 443
+        protocol        = "tcp"
+        security_groups = ["sg-0123456789abcdef2"]
+      }
+    ]
+  }
+
+  assert {
+    condition = anytrue([
+      for eg in aws_security_group.lambda[0].egress : (
+        eg.from_port == 443
+        && eg.to_port == 443
+        && eg.protocol == "tcp"
+        && eg.security_groups == toset(["sg-0123456789abcdef2"])
+        && length(eg.cidr_blocks) == 0
+      )
+    ])
+    error_message = "A custom_egress_rules entry with only security_groups set must render an egress rule whose security_groups contains that SG and whose cidr_blocks is empty, not populated from the security_groups value."
+  }
+}
+
 run "rejects_two_packaging_sources_at_once" {
   command = plan
 
