@@ -445,16 +445,17 @@ components:
         api_type: "HTTP"
 
         # allow_origins lists explicit origins only. API Gateway HTTP API CORS
-        # compares an incoming Origin header against this list as an exact
-        # string match (or the single literal "*", refused below by
-        # allow_credentials: true) -- it has no subdomain-wildcard support, so
-        # a 'https://*.<domain>' entry (this template's prior config) never
-        # matches any real browser Origin and silently grants no subdomain
-        # access at all, while looking like it does. The component's own
-        # validation only catches a literal "*" paired with allow_credentials
-        # (components/terraform/apigateway/variables.tf), not this glob, so it
-        # plans clean and fails silently instead. List every real origin that
-        # needs CORS (additional subdomains included) explicitly here.
+        # accepts exact origins, the literal "*" (refused below by
+        # allow_credentials: true), or the whole-scheme prefix forms
+        # "https://*" / "http://*" -- it has no embedded-subdomain-glob
+        # support, so a 'https://*.<domain>' entry (this template's prior
+        # config) never matches any real browser Origin and silently grants
+        # no subdomain access at all, while looking like it does. The
+        # component's own validation only catches a literal "*" paired with
+        # allow_credentials (components/terraform/apigateway/variables.tf),
+        # not this glob, so it plans clean and fails silently instead. List
+        # every real origin that needs CORS (additional subdomains included)
+        # explicitly here.
         cors_configuration:
           allow_origins:
             - 'https://{{ required "settings.microservices.app_domain_name is required" .settings.microservices.app_domain_name }}'
@@ -1101,9 +1102,13 @@ components:
                     metric: "Latency"
                     dimensions:
                       ApiId: !terraform.state microservices/apigateway .http_api_id
-          # AWS/Events only publishes Invocations and FailedInvocations by
-          # RuleName -- there is no bus-wide aggregate for either metric, so
-          # EventBusName (this widget's prior dimension) never has data.
+          # Both rules sit on the custom bus "<Environment>-microservices"
+          # (microservices/eventbridge, create_event_bus: true), not the
+          # account's default bus. Per AWS's EventBridge monitoring docs:
+          # "Metrics that specify only the RuleName dimension refer to the
+          # default event bus. Metrics that specify both the EventBusName
+          # and RuleName dimensions refer to a Custom Event Bus - Classic."
+          # so both dimensions are required for these series to have data.
           # RuleName's value is each rule's own name, "<Environment>-<name>"
           # (the eventbridge instances' cloudwatch_event_rule_name output).
           eventbridge-metrics:
@@ -1116,10 +1121,12 @@ components:
                     metric: "Invocations"
                     dimensions:
                       RuleName: !terraform.state microservices/eventbridge/order-created .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/order-created .event_bus_name
                   - namespace: "AWS/Events"
                     metric: "FailedInvocations"
                     dimensions:
                       RuleName: !terraform.state microservices/eventbridge/order-created .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/order-created .event_bus_name
               - title: "EventBridge Metrics: user-registered"
                 period: 60
                 stat: "Sum"
@@ -1128,10 +1135,12 @@ components:
                     metric: "Invocations"
                     dimensions:
                       RuleName: !terraform.state microservices/eventbridge/user-registered .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/user-registered .event_bus_name
                   - namespace: "AWS/Events"
                     metric: "FailedInvocations"
                     dimensions:
                       RuleName: !terraform.state microservices/eventbridge/user-registered .cloudwatch_event_rule_name
+                      EventBusName: !terraform.state microservices/eventbridge/user-registered .event_bus_name
 
         # Alarms on metrics the fixed-purpose inputs cannot express. HTTP APIs
         # publish 5xx/Latency by ApiId (REST uses ApiName and 5XXError).
@@ -1166,14 +1175,16 @@ components:
             evaluation_periods: 3
             period: 300
             extended_statistic: "p99"
-          # FailedInvocations is only published by RuleName (see the
-          # eventbridge-metrics dashboard note above) -- one alarm per rule
-          # that has consumers, so a delivery failure to either is caught.
+          # Both rules sit on the custom bus (see the eventbridge-metrics
+          # dashboard note above), so FailedInvocations needs EventBusName
+          # alongside RuleName -- one alarm per rule that has consumers, so a
+          # delivery failure to either is caught.
           eventbridge-order-created-failures:
             namespace: "AWS/Events"
             metric_name: "FailedInvocations"
             dimensions:
               RuleName: !terraform.state microservices/eventbridge/order-created .cloudwatch_event_rule_name
+              EventBusName: !terraform.state microservices/eventbridge/order-created .event_bus_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 5
             evaluation_periods: 2
@@ -1184,6 +1195,7 @@ components:
             metric_name: "FailedInvocations"
             dimensions:
               RuleName: !terraform.state microservices/eventbridge/user-registered .cloudwatch_event_rule_name
+              EventBusName: !terraform.state microservices/eventbridge/user-registered .event_bus_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 5
             evaluation_periods: 2
@@ -1384,6 +1396,14 @@ components:
     # same full_path -- a name collision Secrets Manager would reject at
     # apply. This instance overrides it to the stack's full, unique
     # environment name instead, matching apigateway's stage_name above.
+    #
+    # Side effect: the component's prod recovery-window guard
+    # (components/terraform/secretsmanager/main.tf) compares var.environment
+    # against "prod"/"production" literally, so it now keys on this
+    # environment name rather than the stage. It matches today because the
+    # prod stack's environment happens to be "production"; every secret below
+    # sets recovery_window_in_days >= 7 regardless, so there is no current
+    # impact, but a differently-named prod stack would skip the guard.
 
     microservices/secrets:
       metadata:
