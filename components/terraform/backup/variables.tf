@@ -115,6 +115,11 @@ variable "daily_cold_storage_days" {
   type        = number
   description = "Days until daily backups move to cold storage"
   default     = null
+
+  validation {
+    condition     = var.daily_cold_storage_days == null || (var.daily_cold_storage_days >= 1 && var.daily_cold_storage_days == floor(var.daily_cold_storage_days))
+    error_message = "daily_cold_storage_days must be null (no cold storage transition) or a positive whole number of days."
+  }
 }
 
 variable "weekly_retention_days" {
@@ -127,6 +132,11 @@ variable "weekly_cold_storage_days" {
   type        = number
   description = "Days until weekly backups move to cold storage"
   default     = null
+
+  validation {
+    condition     = var.weekly_cold_storage_days == null || (var.weekly_cold_storage_days >= 1 && var.weekly_cold_storage_days == floor(var.weekly_cold_storage_days))
+    error_message = "weekly_cold_storage_days must be null (no cold storage transition) or a positive whole number of days."
+  }
 }
 
 variable "monthly_retention_days" {
@@ -148,6 +158,11 @@ variable "monthly_cold_storage_days" {
   # is long enough to turn cold storage on (see the lifecycle.precondition
   # below and stacks/catalog/backup/defaults.yaml).
   default = null
+
+  validation {
+    condition     = var.monthly_cold_storage_days == null || (var.monthly_cold_storage_days >= 1 && var.monthly_cold_storage_days == floor(var.monthly_cold_storage_days))
+    error_message = "monthly_cold_storage_days must be null (no cold storage transition) or a positive whole number of days."
+  }
 }
 
 variable "enable_archive_tier" {

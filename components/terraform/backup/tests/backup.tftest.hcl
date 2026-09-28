@@ -370,6 +370,42 @@ run "monthly_cold_storage_days_explicit_90_sets_transition" {
   }
 }
 
+# LOW fix (independent reviewer, round 1): none of the three
+# *_cold_storage_days variables had a validation block, so a non-null value
+# that is 0, negative or fractional (e.g. 0.5) passed straight through to
+# `terraform plan` and was only ever rejected by AWS at apply time. These
+# three runs exercise each variable's new validation block directly.
+run "daily_cold_storage_days_rejects_zero" {
+  command = plan
+
+  variables {
+    daily_cold_storage_days = 0
+  }
+
+  expect_failures = [var.daily_cold_storage_days]
+}
+
+run "weekly_cold_storage_days_rejects_negative" {
+  command = plan
+
+  variables {
+    weekly_cold_storage_days = -1
+  }
+
+  expect_failures = [var.weekly_cold_storage_days]
+}
+
+run "monthly_cold_storage_days_rejects_fractional" {
+  command = plan
+
+  variables {
+    monthly_cold_storage_days = 0.5
+    monthly_retention_days    = 365
+  }
+
+  expect_failures = [var.monthly_cold_storage_days]
+}
+
 run "rds_tag_based_selection_is_and_scoped_to_rds_and_this_environment" {
   command = plan
 
