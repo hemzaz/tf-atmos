@@ -17,7 +17,6 @@ The stack configuration still contains placeholders. Replace every item below be
 | Domains and hosted zones | `domain_name`/`hosted_zone_id` in each stack's `components/globals.yaml`; `root_domain` and zone names in `components/networking.yaml` | `example.com`, `Z1234567890EXAMPLE` |
 | Alert recipients | `alarm_email_subscriptions` on the monitoring instances, and notification lists in `components/globals.yaml`; every address must confirm its SNS subscription | `*@example.com` |
 | Prod alarm SNS topic ARNs | Prod alarms that must reach an existing paging/on-call topic, e.g. `rds`'s `sns_topic_arn` | not set |
-| KMS key users | `key_users`/`key_administrators` of `kms/main` in `stacks/orgs/fnx/prod/eu-west-2/production/components/security.yaml`; the roles must exist first (`iam/ci` and `iam/eks-node` are disabled, so use the real role ARNs) | placeholder role names |
 | Backend role | `fnx-terraform-backend-role` in the management account; every backend config assumes it, so it must exist and trust the deploy/plan roles before the first `terraform init` | created by the `backend` component |
 | GitHub Environments | One per stack, named exactly like the stack, with `vars.AWS_ROLE_ARN` (deploy role); deployment branches: default branch only; add required reviewers to `fnx-prod-production` | none |
 | GitHub repo variables | `AWS_PLAN_ROLE_ARN` (read-only plan role for PR plans, drift detection, DR checks); optional `ATMOS_VERSION`, `AWS_REGION` | none |
@@ -148,6 +147,21 @@ atmos workflow deploy-serverless -f deploy-template -s <stack>   # quick deploy,
 atmos workflow deploy-parallel -f deploy-template -s <stack>     # independent components concurrently
 ```
 
+Only `microservices-platform` can be deployed end to end today — every `component:` it names
+under `components/terraform/` exists. The other four templates name instances of components that
+have not been built yet, so `deploy-template` cannot find their component directory:
+
+| Template | Missing component(s) |
+|----------|-----------------------|
+| `web-application` | `cloudfront`, `ecs-service` (`stacks/catalog/templates/web-application.yaml:619`, `:373`) |
+| `serverless-api` | `cloudfront` (`stacks/catalog/templates/serverless-api.yaml:792`) |
+| `data-pipeline` | `firehose`, `step-functions` — the implemented component is `stepfunctions` (`stacks/catalog/templates/data-pipeline.yaml:445`, `:1121`) |
+| `batch-processing` | `batch`, `batch-job-definition`, `batch-job-queue`, `step-functions` — the implemented component is `stepfunctions` (`stacks/catalog/templates/batch-processing.yaml:469`, `:630`, `:573`, `:801`) |
+
+Building these components (or renaming `step-functions` to `stepfunctions` in the two templates
+that use it) is out of scope here — the templates under `stacks/catalog/templates/` are owned by
+other tasks.
+
 ## CI across several AWS accounts
 
 The prerequisites above assume the CI roles live in the account being deployed. If you run more
@@ -164,9 +178,12 @@ the bootstrap order: [examples/github-oidc-hub-spoke](../examples/github-oidc-hu
 
 After the GitHub prerequisites above are in place:
 
-- **Pull requests** (`terraform-ci.yml`): lint, validation, a security gate (fails only on new
-  HIGH/CRITICAL Trivy/Checkov findings not already in `.trivyignore.yaml`/`.checkov.baseline`), and
-  a plan of every affected component with the read-only plan role, posted as PR comments.
+- **Pull requests** (`terraform-ci.yml`): lint, validation, plan-sweep, a security gate (fails only
+  on new HIGH/CRITICAL Trivy/Checkov findings not already in `.trivyignore.yaml`/`.checkov.baseline`),
+  `terraform test` for components with a `tests/` directory that the change affects, and a plan of
+  every affected component with the read-only plan role, posted as PR comments. See the
+  [CI/CD table](../README.md#cicd) for the full job list, including the `emulator.yml` LocalEmu
+  lane, which also runs on PRs.
 - **Merges to the default branch** (`terraform-cd.yml`): for each stack in turn (dev, staging,
   prod), runs `atmos terraform deploy --affected` against the stack's `deployed/<stack>` tag inside
   its GitHub Environment, then moves the tag.

@@ -56,7 +56,7 @@ install Terraform — Atmos downloads the pinned version the first time a compon
 
 ```bash
 atmos version                     # must be >= 1.229.0
-atmos list stacks                 # the three real stacks plus fnx-local-sandbox
+atmos list stacks                 # the three real stacks plus fnx-local-sandbox and fnx-local-localemu
 atmos list components             # component instances and how many stacks use each
 atmos list workflows              # every workflow with its file and description
 
@@ -159,8 +159,12 @@ Two things to know:
 `sqs`, `stepfunctions`, `vpc`, `waf`.
 
 `idp-platform` is unsupported (no stack deploys it; `plan` fails unless
-`acknowledge_unsupported = true`). Every other component has at least one enabled instance —
-there are no `metadata.enabled: false` instances left in `stacks/orgs/`.
+`acknowledge_unsupported = true`). There are no `metadata.enabled: false` instances left in
+`stacks/orgs/`, but not every component has an instance: `alb`, `alb-controller-ingress-group`,
+`athena`, `dynamodb`, `eventbridge`, `glue`, `kinesis`, `s3`, `ses`, `sns`, `sqs`, `stepfunctions`
+and `waf` are used only by the opt-in [stack templates](./stacks/README.md#stack-templates),
+`securitygroup` is deployed only in `fnx-local-sandbox`, and every other component except
+`idp-platform` has an instance in the three real stacks.
 
 An instance name does not have to match its component: `metadata.component` decides which module
 runs. `network/main` and `network/services` are `dns` instances, while `network/vpc-peering` is
@@ -198,7 +202,7 @@ atmos workflow lint -f lint          # terraform fmt, yamllint, TFLint (instance
 atmos workflow validate-all -f validate-enhanced   # schema, stacks, dependencies, yamllint, fmt, terraform validate
 atmos workflow validate -f validate -s <stack>     # same, scoped to one stack
 atmos workflow sandbox -f sandbox                  # applies real resources against Floci (local only, not yet in CI)
-atmos workflow localemu -f localemu                # applies real resources against LocalEmu (rds, monitoring, iam); also runs in CI's emulator.yml
+atmos workflow localemu -f localemu                # applies real resources against LocalEmu (vpc, lambda, rds, monitoring, iam); also runs in CI's emulator.yml
 ```
 
 Two gates are worth understanding, because both were added after they let real bugs through:
@@ -222,8 +226,8 @@ authenticate to AWS with OIDC, not stored keys.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep, Trivy/Checkov security gate, `terraform test` for every component with a `tests/` directory, plans affected components with the read-only role and comments on the PR (PR/merge-queue only; `terraform test` also runs on push, so a component's tests stay green on master) |
-| `emulator.yml` | PR, push to default branch, manual | Runs the LocalEmu lane (`rds`, `monitoring`, `iam`) against a real LocalEmu instance and destroys it — the only CI gate that actually provisions. The Floci [sandbox](#sandbox) lane is not wired into CI yet; it still runs locally |
+| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep, Trivy/Checkov security gate, `terraform test` for components with a `tests/` directory that the change affects (all of them on push and merge queue), plans affected components with the read-only role and comments on the PR (PR/merge-queue only) |
+| `emulator.yml` | PR, push to default branch, manual | Runs the LocalEmu lane (`vpc`, `lambda`, `rds`, `monitoring`, `iam`) against a real LocalEmu instance and destroys it — the only CI gate that actually provisions. The Floci [sandbox](#sandbox) lane is not wired into CI yet; it still runs locally |
 | `terraform-cd.yml` | push to default branch, manual | Deploys each stack in turn (dev, staging, prod) since its `deployed/<stack>` tag, then moves the tag |
 | `drift-detection.yml` | hourly, manual | Plans every stack read-only; drift fails the job |
 | `security-scan.yml` | nightly | Report-only Trivy + Checkov scan |
