@@ -56,7 +56,7 @@ install Terraform — Atmos downloads the pinned version the first time a compon
 
 ```bash
 atmos version                     # must be >= 1.229.0
-atmos list stacks                 # the three real stacks plus fnx-local-sandbox
+atmos list stacks                 # the three real stacks plus fnx-local-sandbox and fnx-local-localemu
 atmos list components             # component instances and how many stacks use each
 atmos list workflows              # every workflow with its file and description
 
@@ -120,8 +120,9 @@ atmos workflow sandbox -f sandbox     # up, apply, destroy, down
 
 That starts a [Floci](https://github.com/floci-dev/floci) container (MIT-licensed, a drop-in for
 LocalStack CE, which was end-of-lifed in March 2026), applies `kms`, `vpc`, `dns`,
-`secretsmanager` and `ecs` against it for real, then destroys them in reverse and stops the
-container. Docker is the only prerequisite. Individual steps:
+`secretsmanager`, `ecs`, `lambda`, `cognito` and `securitygroup` against it for real, then
+destroys them in reverse and stops the container. Docker is the only prerequisite. Individual
+steps:
 
 ```bash
 atmos emulator up aws -s fnx-local-sandbox
@@ -129,10 +130,11 @@ atmos terraform apply vpc/main -s fnx-local-sandbox --identity local-aws
 atmos emulator down aws -s fnx-local-sandbox
 ```
 
-This is the only gate that **executes** Terraform rather than analyzing it, and it has caught
-bugs every static check missed — a NAT gateway created despite `nat_gateway_enabled = false`, a
-`coalesce()` that would have failed every `iam` plan, and a missing `database_subnet_ids` output
-that would have broken all three `rds` instances at plan time.
+Together with the LocalEmu lane below, this is how the repo **executes** Terraform rather than
+just analyzing it, and it has caught bugs every static check missed — a NAT gateway created
+despite `nat_gateway_enabled = false`, a `coalesce()` that would have failed every `iam` plan, and
+a missing `database_subnet_ids` output that would have broken all three `rds` instances at plan
+time.
 
 Two things to know:
 
@@ -148,15 +150,23 @@ Two things to know:
 
 ## Components
 
-`components/terraform/` holds 27 root modules, plus `_library/` (shared modules): `acm`,
-`apigateway`, `backend`, `backup`, `cognito`, `cost-optimization`, `dns`, `ec2`, `ecs`, `eks`,
-`eks-addons`, `eks-backend-services`, `elasticache`, `external-secrets`, `guardduty`, `iam`,
-`idp-platform`, `kms`, `lambda`, `monitoring`, `network`, `rds`, `secretsmanager`,
-`security-monitoring`, `securitygroup`, `securityhub`, `vpc`.
+`components/terraform/` holds 42 root modules, plus `_library/` (shared modules): `acm`, `alb`,
+`alb-controller-ingress-group`, `apigateway`, `athena`, `awsconfig`, `backend`, `backup`,
+`cloudtrail`, `cognito`, `cost-optimization`, `dns`, `dynamodb`, `ec2`, `ecs`, `eks`,
+`eks-addons`, `eks-backend-services`, `elasticache`, `eventbridge`, `external-secrets`, `glue`,
+`guardduty`, `iam`, `idp-platform`, `kinesis`, `kms`, `lambda`, `monitoring`, `network`, `rds`,
+`s3`, `secretsmanager`, `security-monitoring`, `securitygroup`, `securityhub`, `ses`, `sns`,
+`sqs`, `stepfunctions`, `vpc`, `waf`.
 
 `idp-platform` is unsupported (no stack deploys it; `plan` fails unless
-`acknowledge_unsupported = true`). Every other component has at least one enabled instance —
-there are no `metadata.enabled: false` instances left in `stacks/orgs/`.
+`acknowledge_unsupported = true`). There are no `metadata.enabled: false` instances left in
+`stacks/orgs/`, but not every component has an instance: `alb`, `alb-controller-ingress-group`,
+`athena`, `dynamodb`, `eventbridge`, `glue`, `kinesis`, `s3`, `ses`, `sqs` and `waf` are used only
+by the opt-in [stack templates](./stacks/README.md#stack-templates). `sns` and `stepfunctions`
+have only a catalog base (`stacks/catalog/<component>/defaults.yaml`) and no instance or template
+reference yet. `securitygroup` is deployed only in `fnx-local-sandbox`, and every other component
+except `idp-platform` has an instance in at least one of the three real stacks (`elasticache` and
+`network` only in prod).
 
 An instance name does not have to match its component: `metadata.component` decides which module
 runs. `network/main` and `network/services` are `dns` instances, while `network/vpc-peering` is
@@ -193,7 +203,8 @@ atmos workflow tflint-init -f lint   # once: installs TFLint and the rulesets in
 atmos workflow lint -f lint          # terraform fmt, yamllint, TFLint (instances + directories), Trivy
 atmos workflow validate-all -f validate-enhanced   # schema, stacks, dependencies, yamllint, fmt, terraform validate
 atmos workflow validate -f validate -s <stack>     # same, scoped to one stack
-atmos workflow sandbox -f sandbox                  # the only gate that actually executes Terraform
+atmos workflow sandbox -f sandbox                  # applies real resources against Floci (local only, not yet in CI)
+atmos workflow localemu -f localemu                # applies real resources against LocalEmu (vpc, lambda, rds, monitoring, iam); also runs in CI's emulator.yml
 ```
 
 Two gates are worth understanding, because both were added after they let real bugs through:
@@ -217,7 +228,8 @@ authenticate to AWS with OIDC, not stored keys.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue | Lint + validate-all, Trivy/Checkov security gate, plans affected components with the read-only role, comments on the PR |
+| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep and the Trivy/Checkov security gate run PR/merge-queue only; `terraform test` covers every component with a `tests/` directory on push and merge queue, and only the components a PR changes on pull_request; affected components are planned with the read-only role (PR/merge-queue) and the plan is commented on the PR (pull_request only) |
+| `emulator.yml` | PR, push to default branch, manual | Runs the LocalEmu lane (`vpc`, `lambda`, `rds`, `monitoring`, `iam`) against a real LocalEmu instance and destroys it — the only CI gate that actually provisions. The Floci [sandbox](#sandbox) lane is not wired into CI yet; it still runs locally |
 | `terraform-cd.yml` | push to default branch, manual | Deploys each stack in turn (dev, staging, prod) since its `deployed/<stack>` tag, then moves the tag |
 | `drift-detection.yml` | hourly, manual | Plans every stack read-only; drift fails the job |
 | `security-scan.yml` | nightly | Report-only Trivy + Checkov scan |

@@ -63,13 +63,20 @@ placeholder account IDs, domains and alert addresses.
 `stacks/catalog/templates/` has five opt-in templates. None of the three existing stacks imports
 one today.
 
-| Template | Pattern |
-|----------|---------|
-| `web-application` | 3-tier: ALB, WAF, ECS/EC2, RDS, ElastiCache, CloudFront |
-| `microservices-platform` | EKS, API Gateway + VPC Link, EventBridge, DynamoDB |
-| `serverless-api` | API Gateway, Lambda, DynamoDB, Cognito |
-| `data-pipeline` | Kinesis, Lambda, S3 data lake, Glue, Athena |
-| `batch-processing` | AWS Batch, SQS, Step Functions |
+| Template | Pattern | Deployable today? |
+|----------|---------|--------------------|
+| `web-application` | 3-tier: ALB, WAF, ECS/EC2, RDS, ElastiCache, CloudFront | No — `cloudfront`, `ecs-service` not implemented |
+| `microservices-platform` | EKS, API Gateway + VPC Link, EventBridge, DynamoDB | Yes |
+| `serverless-api` | API Gateway, Lambda, DynamoDB, Cognito | No — `cloudfront` not implemented |
+| `data-pipeline` | Kinesis, Lambda, S3 data lake, Glue, Athena | No — `firehose`, `step-functions` (implemented as `stepfunctions`) not found |
+| `batch-processing` | AWS Batch, SQS, Step Functions | No — `batch`, `batch-job-definition`, `batch-job-queue`, `step-functions` (implemented as `stepfunctions`) not found |
+
+A template deploys only if every `component:` it names resolves to a directory under
+`components/terraform/`; otherwise `deploy-template` cannot find that component. The "Deployable
+today?" column above reflects the current state — re-check it with
+`git grep -n 'component:' stacks/catalog/templates/<template>.yaml` against
+`components/terraform/`, since it changes as missing components land. See
+[Deployment Guide](../docs/DEPLOYMENT.md#deploying-a-stack-template) for more.
 
 Use one by importing it into a stack manifest and setting its required variables (see the
 template's YAML file for the full variable list), then deploy with

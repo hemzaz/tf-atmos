@@ -17,7 +17,6 @@ The stack configuration still contains placeholders. Replace every item below be
 | Domains and hosted zones | `domain_name`/`hosted_zone_id` in each stack's `components/globals.yaml`; `root_domain` and zone names in `components/networking.yaml` | `example.com`, `Z1234567890EXAMPLE` |
 | Alert recipients | `alarm_email_subscriptions` on the monitoring instances, and notification lists in `components/globals.yaml`; every address must confirm its SNS subscription | `*@example.com` |
 | Prod alarm SNS topic ARNs | Prod alarms that must reach an existing paging/on-call topic, e.g. `rds`'s `sns_topic_arn` | not set |
-| KMS key users | `key_users`/`key_administrators` of `kms/main` in `stacks/orgs/fnx/prod/eu-west-2/production/components/security.yaml`; the roles must exist first (`iam/ci` and `iam/eks-node` are disabled, so use the real role ARNs) | placeholder role names |
 | Backend role | `fnx-terraform-backend-role` in the management account; every backend config assumes it, so it must exist and trust the deploy/plan roles before the first `terraform init` | created by the `backend` component |
 | GitHub Environments | One per stack, named exactly like the stack, with `vars.AWS_ROLE_ARN` (deploy role); deployment branches: default branch only; add required reviewers to `fnx-prod-production` | none |
 | GitHub repo variables | `AWS_PLAN_ROLE_ARN` (read-only plan role for PR plans, drift detection, DR checks); optional `ATMOS_VERSION`, `AWS_REGION` | none |
@@ -132,9 +131,8 @@ atmos workflow hot-deploy -f deploy-application -s <stack> # Cognito, Lambda, AP
 a fast path that runs `terraform deploy` (plan and auto-approve per instance, in dependency order)
 without a confirmation. Use `deploy-app` when the change should be reviewed.
 
-Disabled instances (`metadata.enabled: false`) are skipped: `iam/ci`, `iam/eks-node`,
-`iam/eks-cluster`, `infrastructure/*`, `vpc-flow-logs-bucket`, and in prod
-`network/vpc-peering`. No stack deploys `idp-platform`.
+There are no `metadata.enabled: false` instances left in `stacks/orgs/` (see
+[Components](../README.md#components)). No stack deploys `idp-platform`.
 
 ## Deploying a stack template
 
@@ -148,6 +146,13 @@ atmos workflow deploy -f deploy-template -s <stack>              # choose, plan,
 atmos workflow deploy-serverless -f deploy-template -s <stack>   # quick deploy, no confirmation
 atmos workflow deploy-parallel -f deploy-template -s <stack>     # independent components concurrently
 ```
+
+A template deploys only if every `component:` it names resolves to a directory under
+`components/terraform/`; otherwise `deploy-template` cannot find that component. As of this
+writing only `microservices-platform` meets that bar — check
+`git grep -n 'component:' stacks/catalog/templates/<template>.yaml` against
+`components/terraform/` for the current state of the other four, since it changes as their
+missing components land.
 
 ## CI across several AWS accounts
 
@@ -165,9 +170,12 @@ the bootstrap order: [examples/github-oidc-hub-spoke](../examples/github-oidc-hu
 
 After the GitHub prerequisites above are in place:
 
-- **Pull requests** (`terraform-ci.yml`): lint, validation, a security gate (fails only on new
-  HIGH/CRITICAL Trivy/Checkov findings not already in `.trivyignore.yaml`/`.checkov.baseline`), and
-  a plan of every affected component with the read-only plan role, posted as PR comments.
+- **Pull requests** (`terraform-ci.yml`): lint, validation, plan-sweep, a security gate (fails only
+  on new HIGH/CRITICAL Trivy/Checkov findings not already in `.trivyignore.yaml`/`.checkov.baseline`),
+  `terraform test` for components with a `tests/` directory that the change affects, and a plan of
+  every affected component with the read-only plan role, posted as PR comments. See the
+  [CI/CD table](../README.md#cicd) for the full job list, including the `emulator.yml` LocalEmu
+  lane, which also runs on PRs.
 - **Merges to the default branch** (`terraform-cd.yml`): for each stack in turn (dev, staging,
   prod), runs `atmos terraform deploy --affected` against the stack's `deployed/<stack>` tag inside
   its GitHub Environment, then moves the tag.
