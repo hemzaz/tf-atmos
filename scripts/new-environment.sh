@@ -161,14 +161,15 @@ ${BOLD}FILES CREATED:${RESET}
     stacks/orgs/<tenant>/<stage>/<region>/<environment>/components/
     +-- globals.yaml        # Catalog imports, tags, environment settings
     +-- networking.yaml     # vpc/main
-    +-- security.yaml       # backend/main (state bucket)
+    +-- security.yaml       # security components (no state backend: it is shared)
     stacks/orgs/<tenant>/<stage>/_defaults.yaml, mixins/{tenant,stage}/  (only if missing)
 
 ${BOLD}NOTES:${RESET}
     - stacks/orgs/<tenant>/_defaults.yaml (backend, toolchain) must already exist
     - A new stage's _defaults.yaml takes account_id from \$AWS_ACCOUNT_ID
     - VPC CIDR is auto-assigned if not specified based on environment type
-    - The backend is bootstrapped with: atmos workflow backend-only -f bootstrap -s <stack>
+    - All stacks share one state backend (backend/main in fnx-core-root), created once with:
+      atmos workflow backend-cold-start -f bootstrap
 
 EOF
 }
@@ -560,19 +561,16 @@ EOF
 
     write_file "$(components_dir)/security.yaml" << EOF
 ---
-# State backend for $(stack_name)
-# Bootstrap with: atmos workflow backend-only -f bootstrap -s $(stack_name)
+# Security components for $(stack_name).
+# No state backend here: every stack uses the single backend (backend/main in
+# fnx-core-root). Give this stack CI roles (iam/ci, see the existing stacks'
+# security.yaml) and add their ARNs to that instance's access_roles.
 
 import:
   - $(import_prefix)/globals
 
 components:
-  terraform:
-    backend/main:
-      metadata:
-        component: backend
-        inherits:
-          - backend
+  terraform: {}
 EOF
 }
 
@@ -595,16 +593,17 @@ initialize_backend() {
         return 0
     fi
 
-    log_step "Bootstrapping State Backend"
+    log_step "Checking the Shared State Backend"
 
+    # Every stack uses the single backend (backend/main in fnx-core-root); a new
+    # stack creates none. Create it once with `atmos workflow backend-cold-start
+    # -f bootstrap`; here it is only verified.
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY-RUN] Would run: atmos workflow backend-only -f bootstrap -s $(stack_name)"
+        log_info "[DRY-RUN] Would run: atmos workflow verify -f bootstrap"
         return 0
     fi
 
-    # Creates the S3 bucket (native lockfile locking) and brings it under the
-    # backend/main component; the workflow asks for confirmation before applying.
-    atmos --chdir "$REPO_ROOT" workflow backend-only -f bootstrap -s "$(stack_name)"
+    atmos --chdir "$REPO_ROOT" workflow verify -f bootstrap
 }
 
 initialize_workspace() {

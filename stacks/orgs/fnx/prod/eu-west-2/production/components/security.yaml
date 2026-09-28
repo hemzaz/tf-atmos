@@ -9,7 +9,6 @@
 import:
   - orgs/fnx/prod/eu-west-2/production/components/globals
   - catalog/iam/defaults
-  - catalog/backend/defaults
   - catalog/kms/defaults
   - catalog/secretsmanager/defaults
   - catalog/acm/defaults
@@ -51,6 +50,7 @@ components:
       dependencies:
         components:
           - component: backend/main
+            stack: fnx-core-root
     # GitHub Actions OIDC role. This is what repo variable AWS_PLAN_ROLE_ARN
     # must point at before CI can run a real plan; every AWS job currently skips
     # because it is unset. The trust policy is pinned to exact subject claims -
@@ -79,10 +79,20 @@ components:
         ci_apply_role_enabled: false
         ci_apply_role_environments:
           - "fnx-prod-production"
-        # Lets the plan role take the .tflock rather than only read state.
-        # backend/main is already a declared dependency below.
-        ci_state_bucket_name: !terraform.state backend/main .backend_bucket
-        ci_state_kms_key_arn: !terraform.state backend/main .backend_kms_key_arn
+        # Owner decision D3: production is planned from master only. The plan
+        # role trusts the default-branch subject (drift detection, the
+        # terraform-ci.yml plan on push to master) and NOT pull_request, so
+        # PR-controlled code can never assume it. terraform-ci.yml drops this
+        # stack from PR/merge-queue plans (settings.github.pull_request_plans_enabled
+        # in stacks/orgs/fnx/prod/_defaults.yaml).
+        ci_plan_role_subjects:
+          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
+        # State access: sts:AssumeRole on the single state backend's access
+        # roles (backend/main in the management account's fnx-core-root) -
+        # plan -> read-only role, apply -> read/write role. backend/main in
+        # fnx-core-root is declared as a (cross-stack) dependency below.
+        ci_backend_read_role_arn: !terraform.state backend/main fnx-core-root .backend_read_role_arn
+        ci_backend_write_role_arn: !terraform.state backend/main fnx-core-root .backend_role_arn
         # kms/main's key: eks/main's cluster_encryption_config_kms_key_id
         # (compute.yaml) points every EKS cluster this apply role deploys at
         # this key, and AWS requires the calling principal -- not the
@@ -95,21 +105,13 @@ components:
         # on kms/main while kms/main already depends on iam/main below (a
         # layer-order cycle check-deploy-layers.py rejects). Must match
         # kms/main's alias_name below, prefixed with "alias/". Inert while
-        # ci_apply_role_enabled is false, same as ci_state_kms_key_arn above.
+        # ci_apply_role_enabled is false, same as ci_backend_write_role_arn above.
         ci_apply_kms_key_aliases:
           - alias/production-main
       dependencies:
         components:
           - component: backend/main
-    backend/main:
-      metadata:
-        component: backend
-        inherits:
-          - backend
-      vars:
-        bucket_name: "fnx-production-terraform-state"
-        iam_role_name: "fnx-production-terraform-backend-role"
-        enable_access_logging: true
+            stack: fnx-core-root
     kms/main:
       metadata:
         component: kms

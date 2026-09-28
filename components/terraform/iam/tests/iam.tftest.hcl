@@ -153,3 +153,67 @@ run "no_ci_apply_kms_policy_without_the_key_aliases" {
     error_message = "ci_apply_kms_key_aliases defaults to null, so no policy should be created without it."
   }
 }
+
+# State access: the CI roles reach the single state backend (backend/main in
+# fnx-core-root) only through its access roles -- the plan role may assume the
+# READ-only role, the apply role the WRITE role -- and hold no S3/KMS grant on
+# the state bucket themselves (so no lock-object writes from plans either).
+run "ci_state_access_is_sts_assume_role_on_the_backend_roles_only" {
+  command = plan
+
+  variables {
+    github_oidc_enabled        = true
+    github_oidc_repository     = "hemzaz/tf-atmos"
+    github_oidc_provider_arn   = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix        = "test-ci"
+    ci_apply_role_enabled      = true
+    ci_apply_role_environments = ["fnx-prod-production"]
+    ci_apply_policy_arns       = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+    ci_backend_read_role_arn   = "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role"
+    ci_backend_write_role_arn  = "arn:aws:iam::111111111111:role/fnx-terraform-backend-role"
+  }
+
+  assert {
+    condition = (
+      length(jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement) == 1
+      && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Action == "sts:AssumeRole"
+      && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role"
+    )
+    error_message = "The plan role's only state grant is sts:AssumeRole on the backend's read-only role: no s3:PutObject/DeleteObject (lock files) and no KMS."
+  }
+
+  assert {
+    condition = (
+      length(jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement) == 1
+      && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Action == "sts:AssumeRole"
+      && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-role"
+    )
+    error_message = "The apply role's only state grant is sts:AssumeRole on the backend's write role."
+  }
+}
+
+run "no_ci_state_policies_without_the_backend_role_arns" {
+  command = plan
+
+  variables {
+    github_oidc_enabled      = true
+    github_oidc_repository   = "hemzaz/tf-atmos"
+    github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix      = "test-ci"
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.ci_plan_state) == 0 && length(aws_iam_role_policy.ci_apply_state) == 0
+    error_message = "ci_backend_read_role_arn/ci_backend_write_role_arn default to null, so no state policy is created without them."
+  }
+}
+
+run "ci_backend_role_arn_must_be_a_role_arn" {
+  command = plan
+
+  variables {
+    ci_backend_read_role_arn = "arn:aws:s3:::fnx-terraform-state"
+  }
+
+  expect_failures = [var.ci_backend_read_role_arn]
+}

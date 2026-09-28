@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# fnx-core-root - the management account's stack
+# =============================================================================
+# Owns the ONE Terraform state backend every stack uses: bucket
+# fnx-terraform-state, its KMS key, and the read-only / read-write access roles
+# (components/terraform/backend). Workload stacks have no backend instance;
+# their iam/ci reads this instance's role ARNs cross-stack
+# (!terraform.state backend/main fnx-core-root ...).
+#
+# Bootstrap (cold start, once): workflows/bootstrap.yaml `backend-only`, or by
+# hand - see components/terraform/backend/README.md#bootstrap.
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - orgs/fnx/core/_defaults
+  - catalog/backend/defaults
+
+vars:
+  region: eu-west-2
+
+settings:
+  environment:
+    description: "Management account - organization-wide shared infrastructure"
+    namespace: root
+  context:
+    tenant: fnx
+    environment: root
+    stage: core
+
+components:
+  terraform:
+    backend/main:
+      metadata:
+        component: backend
+        inherits:
+          - backend
+      vars:
+        account_id: "{{ .settings.environment.management_account_id }}"
+        enable_access_logging: true
+        # Who may use the state. The CI roles are named from iam/ci's
+        # ci_role_name_prefix ("<tenant>-<account>-<environment>-ci", see each
+        # workload stack's components/security.yaml) in that stack's
+        # settings.environment.account_id - strings, not !terraform.state:
+        # iam/ci reads THIS instance's outputs, so a read back would be a
+        # cycle. The trust is an aws:PrincipalArn condition, so the roles do
+        # not have to exist yet (see components/terraform/backend/iam.tf).
+        # Add a stack's roles here when adding a stack. The administrator who
+        # applies this instance is always trusted as well (Cloud Posse's
+        # caller rule); list any other human/admin role ARN explicitly.
+        # Account IDs are the repository's placeholders - see
+        # docs/DEPLOYMENT.md#manual-prerequisites-before-first-apply.
+        access_roles:
+          read:
+            # The CI plan roles (read-only; PR plans, drift detection)
+            allowed_principal_arns:
+              - "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-plan"
+              - "arn:aws:iam::123456789012:role/fnx-staging-staging-01-ci-plan"
+              - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan"
+          write:
+            # The CI apply roles (protected GitHub Environments only)
+            allowed_principal_arns:
+              - "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-apply"
+              - "arn:aws:iam::123456789012:role/fnx-staging-staging-01-ci-apply"
+              - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply"

@@ -10,6 +10,10 @@
 #   - Plan role trust (AWS_PLAN_ROLE_ARN, read-only): aud = sts.amazonaws.com, sub =
 #     repo:<org>/<repo>:pull_request (plus :ref:refs/heads/<default branch> for the
 #     drift and DR workflows). It must never be the deploy role, since plans run PR code.
+#     Production's plan role trusts only the default-branch sub (owner decision D3):
+#     its instances are planned on push to master, never on a PR (see `affected`).
+#   - State: plans reach the single state backend through its READ-only access role
+#     (TFSTATE_ACCESS=read, -lock=false); see stacks/orgs/fnx/_defaults.yaml.
 #   - Deploy roles trust only repo:<org>/<repo>:environment:<stack>; see terraform-cd.yml.
 #   - Fork PRs get no OIDC token or secrets under `pull_request`; do not switch
 #     this workflow to `pull_request_target`.
@@ -365,9 +369,12 @@ jobs:
         if: steps.components.outputs.list == ''
         run: echo "No component under components/terraform/ with a tests/ directory was affected by this change."
 
+  # Runs on push to master too, but only to plan the stacks that opt out of
+  # pull-request plans (settings.github.pull_request_plans_enabled: false --
+  # production, owner decision D3). Every other stack was already planned on
+  # its PR, so push keeps them out of the matrix.
   affected:
     name: Affected components
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
@@ -398,15 +405,39 @@ jobs:
       # set is computed against what the PR will actually merge into. This
       # context is only present on pull_request events; merge_group keeps the
       # previous (default-branch) behaviour, which is already correct there.
-      # (--sha is a deprecated alias for --base as of Atmos 1.229.0.)
+      # (--sha is a deprecated alias for --base as of Atmos 1.229.0.) On push
+      # the base is the commit master pointed at before the push.
       - id: affected
         shell: python3 {0}
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           import json, os, subprocess
 
           out_file = os.environ["GITHUB_OUTPUT"]
+          on_push = os.environ["EVENT_NAME"] == "push"
+
+          # D3: a stack with settings.github.pull_request_plans_enabled: false
+          # (production) is planned from master only. Its pairs are dropped on
+          # pull_request/merge_group (PR-controlled code) and are the ONLY
+          # pairs kept on push to master.
+          def pr_plans_enabled(spec):
+              github = ((spec or {}).get("settings") or {}).get("github") or {}
+              return github.get("pull_request_plans_enabled") is not False
+
+          def keep_for_event(stack_components, pair):
+              spec = stack_components.get(pair[0], {}).get(pair[1])
+              return pr_plans_enabled(spec) != on_push
+
+          def component_settings():
+              stacks = json.loads(subprocess.check_output(
+                  ["atmos", "describe", "stacks", "--process-functions=false",
+                   "--format", "json", "--sections", "settings"]))
+              return {
+                  stack: (config.get("components") or {}).get("terraform") or {}
+                  for stack, config in stacks.items()
+              }
 
           # fnx-local-* target the Floci/LocalEmu emulators (account_id
           # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have no
@@ -417,13 +448,9 @@ jobs:
           # prefix). Filtered per (stack, component) pair — not per whole
           # stack — so a future per-component opt-out on a real stack only
           # drops that one instance from the matrix, not the entire stack.
-          def disabled_pairs():
-              stacks = json.loads(subprocess.check_output(
-                  ["atmos", "describe", "stacks", "--process-functions=false",
-                   "--format", "json", "--sections", "settings"]))
+          def disabled_pairs(stack_components):
               disabled = set()
-              for stack, config in stacks.items():
-                  components = (config.get("components") or {}).get("terraform") or {}
+              for stack, components in stack_components.items():
                   for component, spec in components.items():
                       github = ((spec or {}).get("settings") or {}).get("github") or {}
                       if github.get("actions_enabled") is False:
@@ -432,9 +459,9 @@ jobs:
 
           cmd = ["atmos", "describe", "affected", "--format=matrix", "--include-dependents",
                  "--process-functions=false", "--output-file", "affected.out"]
-          base_sha = os.environ.get("BASE_SHA")
+          base_sha = os.environ.get("BASE_SHA", "").strip("0")
           if base_sha:
-              cmd += ["--base", base_sha]
+              cmd += ["--base", os.environ["BASE_SHA"]]
           affected = subprocess.run(cmd)
           if affected.returncode == 0:
               matrix = {"include": []}
@@ -442,10 +469,12 @@ jobs:
                   for line in src:
                       if line.startswith("matrix="):
                           matrix = json.loads(line[len("matrix="):])
-              excluded = disabled_pairs()
+              settings = component_settings()
+              excluded = disabled_pairs(settings)
               matrix["include"] = [
                   i for i in matrix["include"]
                   if (i.get("stack"), i.get("component")) not in excluded
+                  and keep_for_event(settings, (i.get("stack"), i.get("component")))
               ]
               with open(out_file, "a") as out:
                   out.write(f"matrix={json.dumps(matrix)}\n")
@@ -467,6 +496,8 @@ jobs:
                       continue
                   if github.get("actions_enabled") is False:
                       continue
+                  if pr_plans_enabled(spec) == on_push:
+                      continue
                   include.append({"stack": stack, "component": component})
           with open(out_file, "a") as out:
               out.write(f"matrix={json.dumps({'include': include})}\n")
@@ -475,12 +506,10 @@ jobs:
   plan:
     name: Plan ${{ matrix.component }} (${{ matrix.stack }})
     needs: affected
-    # github.event_name != 'push' is explicit here, not just inherited from
-    # `affected` skipping on push (which would skip this job too by GitHub's
-    # default "needs a skipped job" propagation): that propagation is
-    # implicit and would silently stop protecting this job the moment
-    # `affected` ever adds its own `if: always()` or similar. Spell it out.
-    if: ${{ github.event_name != 'push' && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
+    # On push this plans only the master-only stacks (production, D3): the
+    # `affected` matrix holds nothing else on push. The ref check is explicit
+    # rather than inherited from the `on.push.branches` filter.
+    if: ${{ (github.event_name != 'push' || github.ref == 'refs/heads/master') && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
@@ -499,12 +528,18 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+      # TFSTATE_ACCESS=read makes the stack backend assume the state backend's
+      # READ-only role (stacks/orgs/fnx/_defaults.yaml), the only state role
+      # the plan role may assume. That role cannot write a .tflock object, so
+      # the plan runs with -lock=false, as drift-detection.yml does: a plan
+      # never needs the lock, and a PR plan must never block an apply.
       - name: Plan
         id: plan
         env:
           COMPONENT: ${{ matrix.component }}
           STACK: ${{ matrix.stack }}
-        run: atmos terraform plan "$COMPONENT" -s "$STACK"
+          TFSTATE_ACCESS: read
+        run: atmos terraform plan "$COMPONENT" -s "$STACK" -- -lock=false
       - name: Comment plan summary on the PR
         if: always() && github.event_name == 'pull_request' && steps.plan.outputs.summary != ''
         shell: python3 {0}

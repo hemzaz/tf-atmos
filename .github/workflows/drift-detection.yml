@@ -115,9 +115,12 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+      # The state backend's READ-only role (stacks/orgs/fnx/_defaults.yaml),
+      # hence -lock=false: it cannot write a .tflock object.
       - name: Plan (detailed exit code)
         env:
           STACK: ${{ matrix.stack }}
+          TFSTATE_ACCESS: read
         run: >-
           atmos terraform plan -s "$STACK" --skip-planfile --failure-mode keep-going
           --hide no-changes -- -detailed-exitcode -lock=false

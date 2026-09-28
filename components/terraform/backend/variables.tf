@@ -38,13 +38,53 @@ variable "region" {
   }
 }
 
-variable "iam_role_name" {
-  type        = string
-  description = "Name of the IAM role to assume for Terraform execution"
+variable "access_roles" {
+  type = map(object({
+    role_name              = string
+    write_enabled          = bool
+    allowed_principal_arns = list(string)
+  }))
+  description = <<-EOT
+    State access roles, after the `access_roles` input of Cloud Posse's aws-tfstate-backend
+    component. One IAM role per entry, named `role_name`. Every role may list the bucket and read
+    state and decrypt with the state key; `write_enabled` also allows writing and deleting objects
+    (state and `.tflock` lock files) and encrypting with the key.
+    `allowed_principal_arns` are the exact IAM role/user ARNs that may assume the role (trusted
+    through an `aws:PrincipalArn` condition, so they need not exist yet); the principal running
+    Terraform is always added, as upstream. By convention the keys are `read` and `write`, which
+    the backend_read_role_arn and backend_role_arn outputs expose.
+  EOT
 
   validation {
-    condition     = can(regex("^[\\w+=,.@-]{1,64}$", var.iam_role_name))
-    error_message = "iam_role_name must be 1-64 characters from [A-Za-z0-9+=,.@_-]."
+    condition     = length(var.access_roles) > 0
+    error_message = "access_roles must define at least one role: every stack's backend configuration assumes one."
+  }
+
+  validation {
+    condition     = alltrue([for role in values(var.access_roles) : can(regex("^[\\w+=,.@-]{1,64}$", role.role_name))])
+    error_message = "Each access_roles role_name must be 1-64 characters from [A-Za-z0-9+=,.@_-]."
+  }
+
+  validation {
+    condition     = length(distinct([for role in values(var.access_roles) : role.role_name])) == length(var.access_roles)
+    error_message = "access_roles role_name values must be unique."
+  }
+
+  validation {
+    condition     = alltrue([for role in values(var.access_roles) : length(role.allowed_principal_arns) > 0])
+    error_message = "Each access_roles entry must list at least one allowed_principal_arns entry."
+  }
+
+  validation {
+    # An IAM role or user ARN with an account ID and no wildcard. "*" and account roots
+    # would trust every principal (in an account); that is what this component replaces.
+    condition = alltrue(flatten([
+      for role in values(var.access_roles) : [
+        for arn in role.allowed_principal_arns :
+        can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[\\w+=,.@/-]+$", arn)) && !strcontains(arn, "*")
+      ]
+    ]))
+    error_message = "allowed_principal_arns entries must be exact IAM role or user ARNs (arn:aws:iam::<account>:role/<name>); \"*\", wildcards and account roots (arn:aws:iam::<account>:root) are rejected."
   }
 }
 

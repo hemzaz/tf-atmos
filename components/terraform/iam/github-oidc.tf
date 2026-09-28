@@ -2,7 +2,9 @@
 # github_oidc_enabled is true, so iam/main instances are unaffected.
 #
 # Two roles, because .github/workflows model two different trust surfaces:
-#   plan  - assumed by terraform-ci.yml (pull_request, i.e. PR-controlled code),
+#   plan  - assumed by terraform-ci.yml (pull_request, i.e. PR-controlled code;
+#           prod's instance trusts the default branch only - see
+#           ci_plan_role_subjects in its security.yaml),
 #           drift-detection.yml and disaster-recovery.yml (default branch).
 #           Read-only; its ARN is the repo variable AWS_PLAN_ROLE_ARN.
 #   apply - assumed by terraform-cd.yml only through a protected GitHub
@@ -31,8 +33,9 @@ locals {
     "repo:${local.github_repository}:environment:${environment}"
   ]
 
-  create_ci_apply_role = var.github_oidc_enabled && var.ci_apply_role_enabled
-  ci_state_policy      = var.github_oidc_enabled && var.ci_state_bucket_name != null
+  create_ci_apply_role  = var.github_oidc_enabled && var.ci_apply_role_enabled
+  ci_plan_state_policy  = var.github_oidc_enabled && var.ci_backend_read_role_arn != null
+  ci_apply_state_policy = local.create_ci_apply_role && var.ci_backend_write_role_arn != null
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -91,47 +94,24 @@ resource "aws_iam_role_policy_attachment" "ci_plan_managed" {
   policy_arn = each.value
 }
 
+# Terraform state lives in the management account's single backend
+# (components/terraform/backend, instance backend/main in stack fnx-core-root).
+# CI reaches it only by assuming that backend's access roles: the plan role the
+# READ-only one (CI plans run with -lock=false, so they write no .tflock), the
+# apply role the WRITE one. No S3 or KMS grant on the state bucket itself.
 data "aws_iam_policy_document" "ci_plan_state" {
-  count = local.ci_state_policy ? 1 : 0
+  count = local.ci_plan_state_policy ? 1 : 0
 
   statement {
-    sid       = "ListStateBucket"
+    sid       = "AssumeStateReadRole"
     effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = ["arn:aws:s3:::${var.ci_state_bucket_name}"]
-  }
-
-  statement {
-    sid       = "ReadState"
-    effect    = "Allow"
-    actions   = ["s3:GetObject"]
-    resources = ["arn:aws:s3:::${var.ci_state_bucket_name}/*"]
-  }
-
-  # The S3 backend uses use_lockfile (stacks/orgs/fnx/_defaults.yaml), so even a
-  # plan writes and removes a <key>.tflock object. Scoped to that suffix so the
-  # plan role still cannot overwrite a state file.
-  statement {
-    sid       = "WriteStateLock"
-    effect    = "Allow"
-    actions   = ["s3:PutObject", "s3:DeleteObject"]
-    resources = ["arn:aws:s3:::${var.ci_state_bucket_name}/*.tflock"]
-  }
-
-  dynamic "statement" {
-    for_each = var.ci_state_kms_key_arn != null ? [var.ci_state_kms_key_arn] : []
-    content {
-      sid    = "StateKms"
-      effect = "Allow"
-      # GenerateDataKey is needed to write the lock object into the SSE-KMS bucket.
-      actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
-      resources = [statement.value]
-    }
+    actions   = ["sts:AssumeRole"]
+    resources = [var.ci_backend_read_role_arn]
   }
 }
 
 resource "aws_iam_role_policy" "ci_plan_state" {
-  count = local.ci_state_policy ? 1 : 0
+  count = local.ci_plan_state_policy ? 1 : 0
 
   name   = "terraform-state"
   role   = aws_iam_role.ci_plan[0].id
@@ -188,35 +168,18 @@ resource "aws_iam_role_policy_attachment" "ci_apply_managed" {
 }
 
 data "aws_iam_policy_document" "ci_apply_state" {
-  count = local.create_ci_apply_role && local.ci_state_policy ? 1 : 0
+  count = local.ci_apply_state_policy ? 1 : 0
 
   statement {
-    sid       = "ListStateBucket"
+    sid       = "AssumeStateWriteRole"
     effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = ["arn:aws:s3:::${var.ci_state_bucket_name}"]
-  }
-
-  statement {
-    sid       = "ReadWriteState"
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["arn:aws:s3:::${var.ci_state_bucket_name}/*"]
-  }
-
-  dynamic "statement" {
-    for_each = var.ci_state_kms_key_arn != null ? [var.ci_state_kms_key_arn] : []
-    content {
-      sid       = "StateKms"
-      effect    = "Allow"
-      actions   = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"]
-      resources = [statement.value]
-    }
+    actions   = ["sts:AssumeRole"]
+    resources = [var.ci_backend_write_role_arn]
   }
 }
 
 resource "aws_iam_role_policy" "ci_apply_state" {
-  count = local.create_ci_apply_role && local.ci_state_policy ? 1 : 0
+  count = local.ci_apply_state_policy ? 1 : 0
 
   name   = "terraform-state"
   role   = aws_iam_role.ci_apply[0].id

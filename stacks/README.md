@@ -14,6 +14,7 @@ Only files under `orgs/` are stack manifests (`included_paths`); `_defaults.yaml
 | `fnx-dev-testenv-01` | `orgs/fnx/dev/eu-west-2/testenv-01.yaml` |
 | `fnx-staging-staging-01` | `orgs/fnx/staging/eu-west-2/staging-01.yaml` |
 | `fnx-prod-production` | `orgs/fnx/prod/eu-west-2/production.yaml` |
+| `fnx-core-root` | `orgs/fnx/core/eu-west-2/root.yaml` — management account: the single state backend (`backend/main`); not planned or applied by CI |
 
 ```bash
 atmos list stacks
@@ -39,7 +40,7 @@ stacks/
 
 `testenv-01` is the reference example of this domain split: `networking.yaml` holds two VPCs
 (`vpc/main`, `vpc/services`) each with a `network/*` (`dns` root module) instance; `security.yaml`
-holds `iam/dev`, ACM, Secrets Manager and `backend/main`; `compute.yaml` holds two EKS clusters
+holds `iam/dev`, `iam/ci`, ACM and Secrets Manager; `compute.yaml` holds two EKS clusters
 (`eks/main`, `eks/data`) and two EC2 instances; `services.yaml` holds API Gateway and monitoring.
 Instances declare order with `dependencies.components` and read each other via `!terraform.state`.
 
@@ -50,7 +51,9 @@ Instances declare order with `dependencies.components` and read each other via `
 - **Cross-component values** use YAML functions (`!terraform.state vpc/main .vpc_id`), never
   `${...}` interpolation.
 - **Backend and Terraform version** are set once in `orgs/fnx/_defaults.yaml`: S3 bucket
-  `fnx-terraform-state`, native lockfiles (`use_lockfile: true`), Terraform 1.16.3.
+  `fnx-terraform-state` (created by `backend/main` in `fnx-core-root`, the only backend instance),
+  reached through its read/write access role, or its read-only role when `TFSTATE_ACCESS=read`;
+  native lockfiles (`use_lockfile: true`), Terraform 1.16.3.
 - **Disabling** an instance: `metadata.enabled: false`.
 - `settings.list_merge_strategy` is `replace` (in `atmos.yaml`): a list in a more specific file
   replaces the inherited list instead of appending to it.

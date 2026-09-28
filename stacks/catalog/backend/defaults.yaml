@@ -1,4 +1,7 @@
 ---
+# The Terraform state backend (bucket, KMS key, access roles). Deployed ONCE,
+# as backend/main in the management account's stack fnx-core-root
+# (stacks/orgs/fnx/core/eu-west-2/root.yaml); workload stacks never create one.
 components:
   terraform:
     backend:
@@ -9,4 +12,13 @@ components:
         tenant: "{{ .settings.context.tenant }}"
         account_id: "{{ .settings.environment.account_id }}"
         bucket_name: "{{ .settings.context.tenant }}-terraform-state"
-        iam_role_name: "{{ .settings.context.tenant }}-terraform-backend-role"
+        # Cloud Posse tfstate-backend access_roles. The role names are what
+        # stacks/orgs/fnx/_defaults.yaml assumes (terraform.backend.s3.assume_role);
+        # the allowed principals are set on the instance.
+        access_roles:
+          read:
+            role_name: "{{ .settings.context.tenant }}-terraform-backend-read-role"
+            write_enabled: false
+          write:
+            role_name: "{{ .settings.context.tenant }}-terraform-backend-role"
+            write_enabled: true
