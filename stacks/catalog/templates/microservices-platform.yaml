@@ -168,6 +168,21 @@ components:
           "kubernetes.io/role/internal-elb": "1"
           "kubernetes.io/cluster/{{ .settings.context.environment }}-microservices": "shared"
 
+        # redis-auth-rotation (below) is VPC-attached and calls the Secrets
+        # Manager and ElastiCache control-plane APIs. Without these, both
+        # calls go out the NAT gateway to a public endpoint, and the reply
+        # comes back to the Lambda's own Hyperplane-ENI source port -- which
+        # can fall anywhere in 1024-65535 -- but the private NACL's only /0
+        # ingress rule admits just 32768-65535 (see
+        # components/terraform/vpc/network-acls.tf). Widening that /0 rule
+        # would need explicit owner sign-off; enabling these Interface
+        # endpoints instead keeps both calls' replies inside the VPC CIDR,
+        # which the existing VPC-CIDR NACL rules already admit.
+        enable_vpc_endpoints: true
+        vpc_endpoints:
+          - secretsmanager
+          - elasticache
+
         tags:
           Layer: "networking"
           Platform: "microservices"
@@ -1469,10 +1484,13 @@ components:
     # third-party Redis client library to vendor for one command), and only
     # once that succeeds does finishSecret call ModifyReplicationGroup again
     # with AuthTokenUpdateStrategy=SET to cut the old token off and move
-    # Secrets Manager's AWSCURRENT label. Runs in the VPC's private subnets
-    # (NAT egress for the Secrets Manager API; the cache itself sits in the
+    # Secrets Manager's AWSCURRENT label. Runs in the VPC's private subnets;
+    # its Secrets Manager and ElastiCache API calls reach the `secretsmanager`
+    # and `elasticache` Interface VPC endpoints microservices/vpc enables
+    # below (see that instance's comment), staying inside the VPC CIDR
+    # instead of round-tripping the NAT gateway. The cache itself sits in the
     # database subnets, whose NACL admits 6379 from the VPC CIDR, and is not
-    # reachable from outside the VPC). The database NACL's egress rule 100
+    # reachable from outside the VPC. The database NACL's egress rule 100
     # spans 1024-65535, not just 32768-65535, so testSecret's TLS/AUTH
     # reply -- addressed to whatever source port this function's Hyperplane
     # ENI picked, which for a VPC-attached Lambda can be anywhere in that
@@ -1524,16 +1542,21 @@ components:
             protocol: "tcp"
             security_groups:
               - !terraform.state microservices/elasticache .security_group_id
-          # No VPC endpoint for Secrets Manager in this stack (see
-          # components/terraform/vpc's README): the SDK calls this function
-          # makes for GetSecretValue/PutSecretValue/... reach the public
-          # endpoint through the VPC's NAT gateway.
-          - description: "HTTPS to Secrets Manager (no VPC endpoint in this stack)"
+          # GetSecretValue/PutSecretValue/DescribeSecret/UpdateSecretVersionStage
+          # and ModifyReplicationGroup/DescribeReplicationGroups both resolve
+          # (private_dns_enabled) to the Interface VPC endpoints
+          # microservices/vpc creates for secretsmanager and elasticache, so
+          # this egress rule is scoped to the VPC CIDR, not 0.0.0.0/0 -- the
+          # whole point of the endpoints is to keep these calls, and their
+          # replies, off the NAT gateway's public /0 path (see
+          # components/terraform/vpc/network-acls.tf and this template's
+          # microservices/vpc comment).
+          - description: "HTTPS to the secretsmanager/elasticache VPC endpoints"
             from_port: 443
             to_port: 443
             protocol: "tcp"
             cidr_blocks:
-              - "0.0.0.0/0"
+              - !terraform.state microservices/vpc .vpc_cidr
         secretsmanager_source_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_secret_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_days: 30

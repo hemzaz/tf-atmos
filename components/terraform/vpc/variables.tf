@@ -140,6 +140,28 @@ variable "ram_resource_share_arn" {
   default     = ""
 }
 
+variable "enable_vpc_endpoints" {
+  type        = bool
+  description = "Create AWS PrivateLink VPC endpoints for the services listed in var.vpc_endpoints"
+  default     = false
+}
+
+# Cloud Posse's aws-vpc splits Gateway and Interface endpoints into two
+# separate inputs (interface_vpc_endpoints, vpc_gateway_endpoints). Here they
+# share one flat list and the component classifies each name itself (see
+# vpc-endpoints.tf): "s3" and "dynamodb" are the only AWS services that use
+# the Gateway type; everything else gets an Interface endpoint.
+variable "vpc_endpoints" {
+  type        = list(string)
+  description = "AWS PrivateLink service names to create VPC endpoints for, without the com.amazonaws.<region>. prefix (e.g. \"secretsmanager\", \"elasticache\", \"s3\"). Has no effect unless enable_vpc_endpoints is true."
+  default     = []
+
+  validation {
+    condition     = alltrue([for s in var.vpc_endpoints : can(regex("^[a-z0-9.-]+$", s))])
+    error_message = "vpc_endpoints entries must be bare AWS PrivateLink service names (e.g. \"secretsmanager\"), not full com.amazonaws.<region>.<service> strings."
+  }
+}
+
 variable "default_sg_ingress_self_only" {
   type        = bool
   description = "Whether to allow only self ingress in the default security group"
