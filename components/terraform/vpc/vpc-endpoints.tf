@@ -26,11 +26,11 @@ locals {
 # -- never 0.0.0.0/0 -- since every caller is inside this VPC. No egress rule:
 # an Interface endpoint's ENI never opens outbound connections of its own, it
 # only answers the inbound 443 above, and security groups are stateful, so
-# the reply flows back without a matching egress rule. Terraform drops AWS's
-# default allow-all egress rule too once any rule (here, the ingress block)
-# is declared on the resource.
-#checkov:skip=CKV2_AWS_5:Attached to aws_vpc_endpoint.interface via security_group_ids; checkov's graph does not follow the count index in aws_security_group.vpc_endpoints[0].id
+# the reply flows back without a matching egress rule. The AWS provider
+# revokes AWS's default allow-all egress rule when it creates a VPC security
+# group.
 resource "aws_security_group" "vpc_endpoints" {
+  #checkov:skip=CKV2_AWS_5:Attached to aws_vpc_endpoint.interface via security_group_ids; checkov's graph does not follow the count index in aws_security_group.vpc_endpoints[0].id
   count       = var.enable_vpc_endpoints && length(local.vpc_endpoint_interface_services) > 0 ? 1 : 0
   name        = "${var.tags["Environment"]}-vpce-sg"
   description = "Allow HTTPS from the VPC CIDR to interface VPC endpoints"
