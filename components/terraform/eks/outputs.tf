@@ -62,3 +62,24 @@ output "cloudwatch_log_group_name" {
   description = "The name of the log group for the cluster's control plane logs"
   value       = one(aws_cloudwatch_log_group.default[*].name)
 }
+
+# cloudposse/terraform-aws-eks-cluster: eks_addons_versions. Only vpc-cni is
+# managed here; eks-addons owns the other addons.
+output "eks_addons_versions" {
+  description = "Map of enabled EKS Addons names and versions"
+  value       = { for addon in aws_eks_addon.vpc_cni : addon.addon_name => addon.addon_version }
+}
+
+# cloudposse/terraform-aws-eks-iam-role's service_account_role_arn, for the
+# vpc-cni role (addons.tf).
+output "vpc_cni_service_account_role_arn" {
+  description = "IRSA role of the vpc-cni addon's aws-node service account, whether created here or passed in vpc_cni_addon.service_account_role_arn"
+  value       = local.vpc_cni_service_account_role_arn
+}
+
+# Cloud Posse has no access-entry output; this lists who can reach the
+# Kubernetes API besides the managed node groups.
+output "eks_access_entry_principal_arns" {
+  description = "IAM principals with an EKS access entry created by this component (access_entry_map keys, then access_entries)"
+  value       = concat([for e in aws_eks_access_entry.map : e.principal_arn], [for e in aws_eks_access_entry.standard : e.principal_arn])
+}

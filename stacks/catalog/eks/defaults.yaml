@@ -24,9 +24,34 @@ components:
         # them. Every instance also lists kms/main in dependencies.components.
         node_group_ebs_kms_key_id: !terraform.state kms/main .key_arn
 
+        # Kubernetes API access: API authentication mode, no hidden
+        # cluster-creator admin (the component defaults, Cloud Posse's
+        # access_config), and one access entry per CI role. The CI plan role
+        # reads (AmazonEKSViewPolicy); the CI apply role, which deploys
+        # eks-addons and the other in-cluster components, administers
+        # (AmazonEKSClusterAdminPolicy). Cloud Posse's list form
+        # (access_entries + access_policy_associations), not access_entry_map:
+        # the role ARNs come from !terraform.state, and an Atmos YAML function
+        # cannot produce a map key. iam/ci returns a null ci_apply_role_arn
+        # while its apply role is disabled; the component skips null
+        # principals. Every instance also lists iam/ci in dependencies.components.
+        access_entries:
+          - principal_arn: !terraform.state iam/ci .ci_plan_role_arn
+          - principal_arn: !terraform.state iam/ci .ci_apply_role_arn
+        access_policy_associations:
+          - principal_arn: !terraform.state iam/ci .ci_plan_role_arn
+            policy_arn: AmazonEKSViewPolicy
+            access_scope:
+              type: cluster
+          - principal_arn: !terraform.state iam/ci .ci_apply_role_arn
+            policy_arn: AmazonEKSClusterAdminPolicy
+            access_scope:
+              type: cluster
+
         tags:
           Component: "EKS"
       dependencies:
         components:
           - component: vpc/main
           - component: kms/main
+          - component: iam/ci

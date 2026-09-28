@@ -309,6 +309,9 @@ components:
         components:
           - component: microservices/vpc
           - component: kms/main
+          # eks/defaults gives the CI roles EKS access entries; every fnx org
+          # stack has an iam/ci instance (components/security.yaml).
+          - component: iam/ci
 
     # =========================================================================
     # EKS ADDONS (Kubernetes-level)
