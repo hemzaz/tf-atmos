@@ -51,10 +51,32 @@ not define a `kms/main`: nothing it runs (rds's `kms_key_id`) requires a CMK.
   though `allow_cloudwatch_logs` already lets the log group itself be
   encrypted. `kms/defaults` turns it on for every stack; stepfunctions is the
   only consumer today.
-- Prod's `key_administrators`/`key_users` are hardcoded ARNs
-  (`.../role/Admin`, `.../role/production-eks-node-role`) that must already
-  exist before apply — the stack comment notes the iam ci/eks-node instances
-  are disabled, so this repo's `iam` component does not create those roles.
+- Prod sets **no** `key_administrators`/`key_users` (as of the KMS-key-
+  principals fix), same as dev and staging: it previously named
+  `.../role/Admin` and `.../role/production-eks-node-role`/
+  `.../role/production-ci-role`, but this repo's IaC creates none of those
+  roles (`iam/ci`'s real role names are `<ci_role_name_prefix>-plan`/`-apply`,
+  and node EBS access needs no key-policy entry — see
+  `allow_autoscaling_ebs` above), and KMS validates every key-policy
+  principal at `CreateKey`/`PutKeyPolicy` time, so naming them failed the
+  first real apply with `MalformedPolicyDocumentException`. Real consumers
+  get least-privilege key use through their own IAM policy scoped to this
+  key instead — `iam`'s `ci_apply_kms_key_aliases` (`../iam/README.md`) for
+  the CI apply role, which AWS requires to hold `kms:DescribeKey`/
+  `CreateGrant`/`Encrypt` on the key named in eks/main's
+  `cluster_encryption_config_kms_key_id` because it is the principal calling
+  `eks:CreateCluster`/`UpdateClusterConfig`, not the EKS cluster's own
+  service role. Scoped by `alias/<this key's alias_name>` rather than the key
+  ARN, because `iam/ci` plans and applies in the layer before `kms/main`
+  (`../../../workflows/deploy-full-stack.yaml`) and so cannot read this key's
+  ARN via `!terraform.state` without creating a layer-order cycle. This is
+  the Cloud Posse pattern of root-account delegation plus a consumer's own
+  scoped IAM policy (`cloudposse/terraform-aws-kms-key`'s default key
+  policy); `cloudposse-terraform-components/aws-eks-cluster`'s
+  `github-actions-iam-policy.mixin.tf` `AllowKMSAccess` statement is prior
+  art for a CI role holding its own KMS IAM statement (there, `kms:Decrypt`/
+  `DescribeKey` via an IAM policy, not a key-policy entry), not the specific
+  EKS-cluster-secrets grant here.
 - `allow_eventbridge` covers four statements: `AllowEventBridge` (bus and
   archive crypto, scoped by `kms:EncryptionContext:aws:events:event-bus:arn`,
   because archive calls carry no `aws:SourceArn`), `AllowEventBridgeDescribeKey`

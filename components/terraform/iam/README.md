@@ -10,15 +10,17 @@ Logs/SNS ARNs. Optionally also the GitHub Actions OIDC CI roles.
 ## Deployed
 
 `iam/main` in fnx-staging-staging-01 and fnx-prod-production; `iam/dev` in
-fnx-dev-testenv-01. The `iam/ci` and `iam/eks-*` stack entries are still
-`enabled: false`. Enabling `iam/ci` (`github_oidc_enabled: true` plus
-`create_cross_account_role: false`) fills the repository variable
-`AWS_PLAN_ROLE_ARN` that gates every AWS job in `.github/workflows`.
+fnx-dev-testenv-01. `iam/ci` is enabled (no `enabled: false` override) in all
+three stacks: `github_oidc_enabled: true` plus `create_cross_account_role:
+false` fills the repository variable `AWS_PLAN_ROLE_ARN` that gates every AWS
+job in `.github/workflows`. There is no `iam/eks-*` instance anywhere in this
+repo; EKS node groups use the managed `aws_iam_role.node` that
+`components/terraform/eks` itself creates, not a separate `iam` instance.
 
 | Inputs (required) | Inputs (behavior) | Outputs |
 |---|---|---|
 | region, cross_account_role_name, trusted_account_ids, policy_name, account_id, environment | create_cross_account_role, require_mfa, trusted_principal_org_id, external_id, managed_s3_bucket_arns / managed_dynamodb_table_arns / managed_sns_topic_arns | cross_account_role_arn/name, cross_account_policy_arn/name — not consumed via `!terraform.state` by any current stack |
-| — (every CI input is optional and inert until `github_oidc_enabled`) | github_oidc_enabled, github_oidc_repository, github_oidc_create_provider / github_oidc_provider_arn, github_oidc_default_branch, ci_role_name_prefix, ci_plan_role_subjects, ci_plan_policy_arns, ci_apply_role_enabled, ci_apply_role_environments, ci_apply_policy_arns, ci_state_bucket_name, ci_state_kms_key_arn, ci_role_max_session_duration, enable_autoscaling_service_linked_role | ci_plan_role_arn/name, ci_apply_role_arn/name, github_oidc_provider_arn, autoscaling_service_linked_role_arn |
+| — (every CI input is optional and inert until `github_oidc_enabled`) | github_oidc_enabled, github_oidc_repository, github_oidc_create_provider / github_oidc_provider_arn, github_oidc_default_branch, ci_role_name_prefix, ci_plan_role_subjects, ci_plan_policy_arns, ci_apply_role_enabled, ci_apply_role_environments, ci_apply_policy_arns, ci_state_bucket_name, ci_state_kms_key_arn, ci_apply_kms_key_aliases, ci_role_max_session_duration, enable_autoscaling_service_linked_role | ci_plan_role_arn/name, ci_apply_role_arn/name, github_oidc_provider_arn, autoscaling_service_linked_role_arn |
 
 ## Dependencies & gotchas
 
@@ -61,6 +63,35 @@ fnx-dev-testenv-01. The `iam/ci` and `iam/eks-*` stack entries are still
   ```
   Once imported, never flip the flag back to `false` afterward — the next
   plan would destroy the imported role.
+- `ci_apply_kms_key_aliases` (default `null`, list of `alias/...` names)
+  grants the apply role `kms:DescribeKey`/`Encrypt`/`Decrypt`/`ReEncrypt*`/
+  `GenerateDataKey*` on the named key(s), plus `CreateGrant`/`ListGrants`/
+  `RevokeGrant` in a second statement scoped by `kms:GrantIsForAWSResource`
+  (AWS's own pattern for AWS-service-managed grants), inert on the same
+  `ci_apply_role_enabled` gate as `ci_state_kms_key_arn` above. Set it to
+  `["alias/<kms/main's alias_name>"]` (e.g. `["alias/production-main"]`),
+  never a key ARN via `!terraform.state kms/main .key_arn`: this component's
+  `iam/ci` instance plans and applies in the layer *before* `kms/main`
+  (`workflows/deploy-full-stack.yaml`), so on a first deploy the key's ARN
+  does not exist yet, and reading it here would make `iam` depend on `kms`
+  while `kms/main` already depends on `iam` (`allow_autoscaling_ebs`'s
+  service-linked role) — a cycle `check-deploy-layers.py` rejects. The
+  policy scopes `resources = ["*"]` with a `kms:ResourceAliases` condition
+  instead: AWS derives that condition key from the KMS key an operation
+  actually acts on, regardless of how the request named it, so this is still
+  an exact-match grant, not a wildcard one. AWS requires the principal that
+  calls `eks:CreateCluster`/`UpdateClusterConfig` — not the EKS cluster's own
+  service role — to hold `DescribeKey`/`CreateGrant`/`Encrypt` on the key
+  named in `cluster_encryption_config_kms_key_id` ("Encrypting Kubernetes
+  secrets", AWS EKS docs); other `kms/main` consumers this role deploys
+  (secretsmanager, rds, elasticache, ec2) need `Encrypt`/`Decrypt`/
+  `GenerateDataKey*` on it too. This is the Cloud Posse pattern of a
+  consumer's own IAM policy, never a key-policy `key_users` entry
+  (`../kms/README.md`; see `cloudposse/terraform-aws-kms-key`'s default
+  root-delegation key policy for the upstream analog — `cloudposse-
+  terraform-components/aws-eks-cluster`'s `github-actions-iam-policy.mixin.tf`
+  `AllowKMSAccess` statement is prior art for a CI role holding its own
+  scoped KMS IAM statement, not for this specific EKS grant).
 
 ## Usage
 

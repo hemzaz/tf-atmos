@@ -222,3 +222,84 @@ resource "aws_iam_role_policy" "ci_apply_state" {
   role   = aws_iam_role.ci_apply[0].id
   policy = data.aws_iam_policy_document.ci_apply_state[0].json
 }
+
+# Least-privilege access to customer-managed key(s) this role deploys
+# resources against (kms/main), scoped by alias rather than key ARN -- the
+# Cloud Posse pattern of a consumer's own IAM policy rather than a kms
+# key-policy key_users entry (see ../kms/README.md; cloudposse-terraform-
+# components/aws-eks-cluster's github-actions-iam-policy.mixin.tf
+# AllowKMSAccess statement is prior art for a CI role holding its own scoped
+# KMS IAM statement, not for the specific EKS grant below). A key ARN is
+# deliberately not used: this component's iam/ci instance plans and applies
+# in the layer BEFORE kms/main (workflows/deploy-full-stack.yaml), so on a
+# first deploy the key does not exist yet, and a !terraform.state read of
+# kms/main here would make iam depend on kms while kms/main already depends
+# on iam (allow_autoscaling_ebs's service-linked role) -- a cycle
+# check-deploy-layers.py rejects. AWS derives the kms:ResourceAliases
+# condition key from the KMS key an operation actually acts on, regardless
+# of how the request named it (key ID, key ARN, alias name or alias ARN), so
+# resources = ["*"] plus that condition is still an exact-match grant.
+#
+# AWS requires the principal that calls eks:CreateCluster/
+# UpdateClusterConfig -- not the EKS cluster's own service role -- to hold
+# DescribeKey/CreateGrant/Encrypt on the key named in
+# cluster_encryption_config_kms_key_id ("Encrypting Kubernetes secrets", AWS
+# EKS docs); Encrypt/Decrypt/GenerateDataKey* additionally cover the other
+# kms/main consumers this role deploys (secretsmanager, rds, elasticache,
+# ec2). CreateGrant/ListGrants/RevokeGrant are split into their own statement
+# under kms:GrantIsForAWSResource, AWS's documented pattern for grant
+# management scoped to AWS-service-managed grants (used in AWS's own default
+# key policies for services like EBS and RDS).
+data "aws_iam_policy_document" "ci_apply_kms" {
+  count = local.create_ci_apply_role && var.ci_apply_kms_key_aliases != null && length(var.ci_apply_kms_key_aliases) > 0 ? 1 : 0
+
+  statement {
+    sid    = "DeployKmsKeyUse"
+    effect = "Allow"
+    actions = [
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "ForAnyValue:StringEquals"
+      variable = "kms:ResourceAliases"
+      values   = var.ci_apply_kms_key_aliases
+    }
+  }
+
+  statement {
+    sid    = "DeployKmsGrants"
+    effect = "Allow"
+    actions = [
+      "kms:CreateGrant",
+      "kms:ListGrants",
+      "kms:RevokeGrant",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "ForAnyValue:StringEquals"
+      variable = "kms:ResourceAliases"
+      values   = var.ci_apply_kms_key_aliases
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "kms:GrantIsForAWSResource"
+      values   = ["true"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "ci_apply_kms" {
+  count = local.create_ci_apply_role && var.ci_apply_kms_key_aliases != null && length(var.ci_apply_kms_key_aliases) > 0 ? 1 : 0
+
+  name   = "deploy-kms"
+  role   = aws_iam_role.ci_apply[0].id
+  policy = data.aws_iam_policy_document.ci_apply_kms[0].json
+}

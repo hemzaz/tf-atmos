@@ -357,6 +357,17 @@ variable "ci_state_kms_key_arn" {
   }
 }
 
+variable "ci_apply_kms_key_aliases" {
+  type        = list(string)
+  description = "KMS alias(es) (with the \"alias/\" prefix, e.g. kms/main's alias_name) the apply role deploys resources against: grants kms:DescribeKey/CreateGrant/ListGrants/RevokeGrant/Encrypt/Decrypt/ReEncrypt*/GenerateDataKey*, scoped via a kms:ResourceAliases condition rather than a key ARN. This component's iam/ci instance plans and applies in the layer BEFORE kms/main (workflows/deploy-full-stack.yaml), so a key ARN is not known yet -- a !terraform.state read of kms/main here would make iam depend on kms while kms/main already depends on iam (allow_autoscaling_ebs's service-linked role), a cycle. AWS derives kms:ResourceAliases from the KMS key the operation actually acts on, regardless of how the request named it, so scoping by alias on resources = [\"*\"] is still an exact-match grant, not a wildcard one."
+  default     = null
+
+  validation {
+    condition     = var.ci_apply_kms_key_aliases == null || alltrue([for a in var.ci_apply_kms_key_aliases : can(regex("^alias/", a))])
+    error_message = "ci_apply_kms_key_aliases entries must include the \"alias/\" prefix."
+  }
+}
+
 variable "ci_role_max_session_duration" {
   type        = number
   description = "Maximum session duration in seconds for the CI roles"
