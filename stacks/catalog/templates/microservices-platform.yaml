@@ -1389,10 +1389,11 @@ components:
         secretsmanager_source_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_secret_arn: !terraform.state microservices/secrets .secret_arns.redis
         rotation_days: 30
-        # See the SECRET ROTATION comment above: setSecret (the step that
-        # pushes a new token onto the replication group) never runs during
-        # rotate_immediately = false's test-only path, so this function's
-        # testSecret would always fail the AUTH check without this.
+        # See the SECRET ROTATION comment above: at rotate_immediately =
+        # false only testSecret runs, against a copy of the current token,
+        # and setSecret never runs; true makes every apply that
+        # (re)configures this resource perform and verify a real rotation
+        # (ModifyReplicationGroup ROTATE -> AUTH test -> SET).
         rotate_immediately: true
         custom_policy: !terraform.state microservices/elasticache .rotation_policy
         tags:
