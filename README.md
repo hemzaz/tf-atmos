@@ -120,8 +120,9 @@ atmos workflow sandbox -f sandbox     # up, apply, destroy, down
 
 That starts a [Floci](https://github.com/floci-dev/floci) container (MIT-licensed, a drop-in for
 LocalStack CE, which was end-of-lifed in March 2026), applies `kms`, `vpc`, `dns`,
-`secretsmanager` and `ecs` against it for real, then destroys them in reverse and stops the
-container. Docker is the only prerequisite. Individual steps:
+`secretsmanager`, `ecs`, `lambda`, `cognito` and `securitygroup` against it for real, then
+destroys them in reverse and stops the container. Docker is the only prerequisite. Individual
+steps:
 
 ```bash
 atmos emulator up aws -s fnx-local-sandbox
@@ -129,10 +130,11 @@ atmos terraform apply vpc/main -s fnx-local-sandbox --identity local-aws
 atmos emulator down aws -s fnx-local-sandbox
 ```
 
-This is the only gate that **executes** Terraform rather than analyzing it, and it has caught
-bugs every static check missed — a NAT gateway created despite `nat_gateway_enabled = false`, a
-`coalesce()` that would have failed every `iam` plan, and a missing `database_subnet_ids` output
-that would have broken all three `rds` instances at plan time.
+Together with the LocalEmu lane below, this is how the repo **executes** Terraform rather than
+just analyzing it, and it has caught bugs every static check missed — a NAT gateway created
+despite `nat_gateway_enabled = false`, a `coalesce()` that would have failed every `iam` plan, and
+a missing `database_subnet_ids` output that would have broken all three `rds` instances at plan
+time.
 
 Two things to know:
 
@@ -148,11 +150,13 @@ Two things to know:
 
 ## Components
 
-`components/terraform/` holds 27 root modules, plus `_library/` (shared modules): `acm`,
-`apigateway`, `backend`, `backup`, `cognito`, `cost-optimization`, `dns`, `ec2`, `ecs`, `eks`,
-`eks-addons`, `eks-backend-services`, `elasticache`, `external-secrets`, `guardduty`, `iam`,
-`idp-platform`, `kms`, `lambda`, `monitoring`, `network`, `rds`, `secretsmanager`,
-`security-monitoring`, `securitygroup`, `securityhub`, `vpc`.
+`components/terraform/` holds 42 root modules, plus `_library/` (shared modules): `acm`, `alb`,
+`alb-controller-ingress-group`, `apigateway`, `athena`, `awsconfig`, `backend`, `backup`,
+`cloudtrail`, `cognito`, `cost-optimization`, `dns`, `dynamodb`, `ec2`, `ecs`, `eks`,
+`eks-addons`, `eks-backend-services`, `elasticache`, `eventbridge`, `external-secrets`, `glue`,
+`guardduty`, `iam`, `idp-platform`, `kinesis`, `kms`, `lambda`, `monitoring`, `network`, `rds`,
+`s3`, `secretsmanager`, `security-monitoring`, `securitygroup`, `securityhub`, `ses`, `sns`,
+`sqs`, `stepfunctions`, `vpc`, `waf`.
 
 `idp-platform` is unsupported (no stack deploys it; `plan` fails unless
 `acknowledge_unsupported = true`). Every other component has at least one enabled instance —
@@ -193,7 +197,8 @@ atmos workflow tflint-init -f lint   # once: installs TFLint and the rulesets in
 atmos workflow lint -f lint          # terraform fmt, yamllint, TFLint (instances + directories), Trivy
 atmos workflow validate-all -f validate-enhanced   # schema, stacks, dependencies, yamllint, fmt, terraform validate
 atmos workflow validate -f validate -s <stack>     # same, scoped to one stack
-atmos workflow sandbox -f sandbox                  # the only gate that actually executes Terraform
+atmos workflow sandbox -f sandbox                  # applies real resources against Floci (local only, not yet in CI)
+atmos workflow localemu -f localemu                # applies real resources against LocalEmu (rds, monitoring, iam); also runs in CI's emulator.yml
 ```
 
 Two gates are worth understanding, because both were added after they let real bugs through:
@@ -217,7 +222,8 @@ authenticate to AWS with OIDC, not stored keys.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue | Lint + validate-all, Trivy/Checkov security gate, plans affected components with the read-only role, comments on the PR |
+| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep, Trivy/Checkov security gate, `terraform test` for every component with a `tests/` directory, plans affected components with the read-only role and comments on the PR (PR/merge-queue only; `terraform test` also runs on push, so a component's tests stay green on master) |
+| `emulator.yml` | PR, push to default branch, manual | Runs the LocalEmu lane (`rds`, `monitoring`, `iam`) against a real LocalEmu instance and destroys it — the only CI gate that actually provisions. The Floci [sandbox](#sandbox) lane is not wired into CI yet; it still runs locally |
 | `terraform-cd.yml` | push to default branch, manual | Deploys each stack in turn (dev, staging, prod) since its `deployed/<stack>` tag, then moves the tag |
 | `drift-detection.yml` | hourly, manual | Plans every stack read-only; drift fails the job |
 | `security-scan.yml` | nightly | Report-only Trivy + Checkov scan |

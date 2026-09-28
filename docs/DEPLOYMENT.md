@@ -132,9 +132,8 @@ atmos workflow hot-deploy -f deploy-application -s <stack> # Cognito, Lambda, AP
 a fast path that runs `terraform deploy` (plan and auto-approve per instance, in dependency order)
 without a confirmation. Use `deploy-app` when the change should be reviewed.
 
-Disabled instances (`metadata.enabled: false`) are skipped: `iam/ci`, `iam/eks-node`,
-`iam/eks-cluster`, `infrastructure/*`, `vpc-flow-logs-bucket`, and in prod
-`network/vpc-peering`. No stack deploys `idp-platform`.
+There are no `metadata.enabled: false` instances left in `stacks/orgs/` (see
+[Components](../README.md#components)). No stack deploys `idp-platform`.
 
 ## Deploying a stack template
 
