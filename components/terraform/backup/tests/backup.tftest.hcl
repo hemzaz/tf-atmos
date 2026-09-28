@@ -680,3 +680,46 @@ run "retention_outside_lock_range_is_fine_without_a_lock" {
     error_message = "No vault lock should be created when enable_vault_lock is false."
   }
 }
+
+run "monthly_retention_days_rejects_above_aws_maximum" {
+  command = plan
+
+  variables {
+    monthly_retention_days = 36501
+  }
+
+  expect_failures = [var.monthly_retention_days]
+}
+
+run "vault_lock_min_retention_days_rejects_zero" {
+  command = plan
+
+  variables {
+    vault_lock_min_retention_days = 0
+  }
+
+  expect_failures = [var.vault_lock_min_retention_days]
+}
+
+run "vault_lock_changeable_days_rejects_fractional" {
+  command = plan
+
+  variables {
+    vault_lock_changeable_days = 3.5
+  }
+
+  expect_failures = [var.vault_lock_changeable_days]
+}
+
+# Weekly 400 is above the default 365 maximum while daily 7 and monthly 365
+# stay in range, so only the weekly precondition can fail this plan.
+run "vault_lock_rejects_weekly_retention_above_its_maximum" {
+  command = plan
+
+  variables {
+    enable_vault_lock     = true
+    weekly_retention_days = 400
+  }
+
+  expect_failures = [aws_backup_vault_lock_configuration.main]
+}
