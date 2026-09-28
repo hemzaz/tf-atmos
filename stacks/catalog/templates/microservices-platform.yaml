@@ -1472,8 +1472,8 @@ components:
     # Secrets Manager's AWSCURRENT label. Runs in the VPC's private subnets
     # (NAT egress for the Secrets Manager API; the cache itself sits in the
     # database subnets, whose NACL admits 6379 from the VPC CIDR, and is not
-    # reachable from outside the VPC). The database NACL's VPC-CIDR ephemeral
-    # rules span 1024-65535, not just 32768-65535, so testSecret's TLS/AUTH
+    # reachable from outside the VPC). The database NACL's egress rule 100
+    # spans 1024-65535, not just 32768-65535, so testSecret's TLS/AUTH
     # reply -- addressed to whatever source port this function's Hyperplane
     # ENI picked, which for a VPC-attached Lambda can be anywhere in that
     # wider range -- is not silently dropped on its way back (see

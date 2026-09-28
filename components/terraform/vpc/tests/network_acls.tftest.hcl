@@ -29,21 +29,23 @@ variables {
 # the private subnets) sources outbound connections to a database-subnet
 # target from its Hyperplane ENI using ports across the full documented
 # 1024-65535 ephemeral range, not the narrower 32768-65535 Linux convention.
-# The database NACL's return-traffic rules must admit the whole range on
-# both legs (ingress: reply routed back into the database subnet on a
-# connection it initiated; egress: reply routed OUT of the database subnet
-# on a connection a client, including a Lambda, initiated into it) or the
-# stateless NACL silently drops roughly half of Lambda's possible source
-# ports.
+# Only the reply leg OUT of the database subnet (egress rule 100) carries
+# that wider range as its destination port, so only that rule needs
+# widening. The reply leg INTO the database subnet (ingress rule 140) is for
+# connections the database subnet itself initiates outbound -- a Lambda's
+# request into this subnet arrives on the target service's fixed port
+# (rules 100-130), never on rule 140 -- so it stays at the standard Linux
+# 32768-65535 range; widening it would also make the per-engine rules
+# 100-130 redundant for any VPC-CIDR host on ports 1024-32767.
 run "database_nacl_admits_full_lambda_ephemeral_range" {
   command = plan
 
   assert {
     condition = anytrue([
       for r in aws_network_acl.database[0].ingress :
-      r.rule_no == 140 && r.from_port == 1024 && r.to_port == 65535
+      r.rule_no == 140 && r.from_port == 32768 && r.to_port == 65535
     ])
-    error_message = "Database NACL ingress rule 140 must admit ports 1024-65535 (AWS Lambda's documented ephemeral range), not only 32768-65535."
+    error_message = "Database NACL ingress rule 140 must stay at 32768-65535 (standard Linux ephemeral range for the database subnet's own outbound connections), not be widened to 1024-65535."
   }
 
   assert {

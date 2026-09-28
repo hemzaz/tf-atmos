@@ -217,31 +217,34 @@ resource "aws_network_acl" "database" {
     to_port    = 27017
   }
 
-  # Allow ephemeral ports for return traffic. Range starts at 1024, not the
-  # usual Linux 32768: AWS Lambda functions attached to a VPC (e.g. the
-  # redis-auth-rotation rotation function in the private subnets, whose
-  # testSecret step opens a TLS/AUTH connection to the cache in this
-  # database subnet) originate outbound connections from their Hyperplane
-  # ENI using source ports across the full documented 1024-65535 ephemeral
-  # range, not just 32768-65535. VPC-CIDR-only, so this does not conflict
-  # with the no-inbound-/0 rule; Cloud Posse's dynamic-subnets does not
-  # restrict NACL ephemeral ranges either.
+  # Allow ephemeral ports for return traffic: replies to connections this
+  # database subnet's own hosts initiate outbound (e.g. the HTTPS/DNS egress
+  # rules below), arriving back with a destination port in the standard
+  # Linux ephemeral range. This is NOT the leg a VPC-attached Lambda's
+  # request to this subnet uses -- that request's destination port is the
+  # target service's fixed port (5432/3306/6379/27017, rules 100-130 above),
+  # regardless of the Lambda's own source port. See egress rule 100 below
+  # for that reply leg, which does need the wider Lambda ephemeral range.
   ingress {
     protocol   = "tcp"
     rule_no    = 140
     action     = "allow"
     cidr_block = var.ipv4_primary_cidr_block
-    from_port  = 1024
+    from_port  = 32768
     to_port    = 65535
   }
 
   # Allow minimal outbound traffic
-  # Database traffic back to application subnets. Same 1024-65535 range as
-  # the ingress rule above and for the same reason: this is the reply leg
-  # of a connection FROM an application-tier client (including a VPC-attached
-  # Lambda) TO this database subnet, so the destination port is that
-  # client's ephemeral source port, which for Lambda can fall anywhere in
-  # 1024-65535, not only 32768-65535.
+  # Database traffic back to application subnets: the reply leg of a
+  # connection FROM an application-tier client (including a VPC-attached
+  # Lambda, e.g. redis-auth-rotation's testSecret step) TO this database
+  # subnet. The destination port here is that client's ephemeral source
+  # port, which for a VPC-attached Lambda's Hyperplane ENI can fall anywhere
+  # in the documented 1024-65535 range, not only the narrower 32768-65535
+  # Linux convention used by the ingress rule above -- so this rule alone
+  # needs the wider range (VPC-CIDR-only, so this does not conflict with the
+  # no-inbound-/0 rule; Cloud Posse's dynamic-subnets does not restrict NACL
+  # ephemeral ranges either).
   egress {
     protocol   = "tcp"
     rule_no    = 100

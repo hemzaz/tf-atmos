@@ -46,12 +46,16 @@ Outputs `vpc_id`, `private_subnet_ids`, `public_subnet_ids` are consumed across
 - The network ACLs allow inbound from `0.0.0.0/0` on the ephemeral ports (stateless
   return traffic) and, on public subnets, 80/443 for internet-facing load balancers.
   This is the documented exception to the "no inbound /0" rule; see `network-acls.tf`.
-- The database NACL's VPC-CIDR ephemeral rules (ingress rule 140, egress rule 100)
-  span `1024-65535`, not the narrower `32768-65535` used elsewhere: AWS Lambda
-  functions attached to the VPC source outbound connections from their Hyperplane
-  ENI across the full documented range, so a database-tier target's stateless reply
-  needs the wider window too. VPC-internal only, so it does not touch the no-inbound-/0
-  rule.
+- The database NACL's VPC-CIDR egress rule 100 (the reply leg back to an
+  application-tier client) spans `1024-65535`, not the narrower `32768-65535`
+  used elsewhere: AWS Lambda functions attached to the VPC (e.g.
+  redis-auth-rotation) source outbound connections from their Hyperplane ENI
+  across the full documented range, so the database subnet's stateless reply
+  needs the wider window. Ingress rule 140 stays at `32768-65535` — it covers
+  replies to connections the database subnet itself initiates outbound, not a
+  Lambda's inbound request, whose destination port is the fixed service port
+  (rules 100-130), not an ephemeral one. VPC-internal only, so it does not
+  touch the no-inbound-/0 rule.
 - `stacks/mixins/stage/*` set stage defaults on the abstract `vpc/defaults`, never on a
   bare `vpc` key (which would create a real, stray instance). An instance's own values
   win over the stage defaults.
