@@ -132,9 +132,8 @@ and leaves the guard unexercised.
 | Setting | Value |
 |---|---|
 | Repo variable `AWS_PLAN_ROLE_ARN` | `arn:aws:iam::111111111111:role/<prefix>-ci-plan` |
-| Environment per stack, `vars.AWS_ROLE_ARN` | `arn:aws:iam::111111111111:role/<prefix>-ci-apply` |
-| Environment deployment branches | default branch only |
-| Prod environment | add required reviewers |
+| GitHub Environments | none: `terraform-cd.yml` uses none, so the apply role's sub is the default-branch ref (Cloud Posse's branch-pinned `trusted_github_repos`; set `ci_apply_role_trusted_github_repos: ["<org>/<repo>:master"]` on the hub). It resolves the apply role from the stack's `iam/ci` (`workflows/scripts/common/ci-apply-role-arn.py`); with a hub, point that at the hub instance, `arn:aws:iam::111111111111:role/<prefix>-ci-apply` |
+| Default branch protection | the only deploy gate: there is no manual approval step |
 
 Both roles live in the **hub**. Nothing in GitHub points at a spoke.
 
@@ -143,13 +142,14 @@ Both roles live in the **hub**. Nothing in GitHub points at a spoke.
 1. Create the single state backend (`backend/main` in `fnx-core-root`,
    `atmos workflow backend-cold-start -f bootstrap`) and add the hub's
    `<prefix>-ci-plan` / `<prefix>-ci-apply` ARNs to its `access_roles`
-   (`read` / `write`) — the hub base reads `ci_backend_read_role_arns` and
-   `ci_backend_write_role_arn` from it.
+   (`read` / `write`, or `prod_read` / `prod_write` for a hub that handles
+   prod) — the hub base names those roles in `ci_backend_read_role_arns` and
+   `ci_backend_write_role_arn` by the stack backend's naming convention.
 2. Apply `iam/oidc-hub`. This creates the provider and the plan role.
 3. Create the assume-spoke policy (step 2) and re-apply the hub so
    `ci_plan_policy_arns` picks it up.
 4. Apply `iam/oidc-spoke` in each workload account.
-5. Set the GitHub repo variable and environments.
+5. Set the GitHub repo variable (no environments are used).
 6. Turn on `ci_apply_role_enabled` only once steps 1–5 are verified.
 
 ## Before you enable the apply role
