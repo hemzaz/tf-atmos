@@ -43,17 +43,31 @@ variable "access_roles" {
     role_name              = string
     write_enabled          = bool
     allowed_principal_arns = list(string)
+    object_key_patterns    = optional(list(string), ["*"])
   }))
   description = <<-EOT
     State access roles, after the `access_roles` input of Cloud Posse's aws-tfstate-backend
-    component. One IAM role per entry, named `role_name`. Every role may list the bucket and read
-    state and decrypt with the state key; `write_enabled` also allows writing and deleting objects
-    (state and `.tflock` lock files) and encrypting with the key.
+    component. One IAM role per entry, named `role_name`. Every role may list the bucket, read the
+    state objects matching `object_key_patterns` (S3 object-key patterns, `*` wildcards, appended to
+    the bucket ARN; default every object) and decrypt with the state key; `write_enabled` also
+    allows writing and deleting those objects (state and `.tflock` lock files) and encrypting with
+    the key.
     `allowed_principal_arns` are the exact IAM role/user ARNs that may assume the role (trusted
     through an `aws:PrincipalArn` condition, so they need not exist yet); the principal running
-    Terraform is always added, as upstream. By convention the keys are `read` and `write`, which
-    the backend_read_role_arn and backend_role_arn outputs expose.
+    Terraform is always added, as upstream. By convention the keys are `read`, `prod_read` and
+    `write`, which the backend_read_role_arn, backend_prod_read_role_arn and backend_role_arn
+    outputs expose.
   EOT
+
+  validation {
+    condition = alltrue(flatten([
+      for role in values(var.access_roles) : [
+        length(role.object_key_patterns) > 0,
+        [for p in role.object_key_patterns : can(regex("^[A-Za-z0-9*._/-]+$", p)) && !startswith(p, "/")],
+      ]
+    ]))
+    error_message = "Each access_roles object_key_patterns must be a non-empty list of S3 object-key patterns ([A-Za-z0-9*._/-], no leading \"/\")."
+  }
 
   validation {
     condition     = length(var.access_roles) > 0

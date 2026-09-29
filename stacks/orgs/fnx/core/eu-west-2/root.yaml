@@ -53,10 +53,18 @@ components:
         # docs/DEPLOYMENT.md#manual-prerequisites-before-first-apply.
         access_roles:
           read:
-            # The CI plan roles (read-only; PR plans, drift detection)
+            # Non-prod (+ fnx-core-root) state: the CI plan roles (PR plans,
+            # dev/staging drift). Prod's plan role is here only because prod's
+            # iam/ci reads backend/main in fnx-core-root, whose backend picks
+            # this role; it grants no prod state.
             allowed_principal_arns:
               - "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-plan"
               - "arn:aws:iam::123456789012:role/fnx-staging-staging-01-ci-plan"
+              - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan"
+          prod_read:
+            # Prod state: ONLY prod's plan role, which trusts the master
+            # branch subject alone (owner decision D3) - never PR code.
+            allowed_principal_arns:
               - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan"
           write:
             # The CI apply roles (protected GitHub Environments only)

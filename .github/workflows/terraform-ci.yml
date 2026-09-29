@@ -4,6 +4,8 @@
 #   vars.AWS_REGION          region for OIDC credentials (defaults to eu-west-2)
 #   vars.AWS_PLAN_ROLE_ARN   read-only IAM role trusted for this repo's GitHub OIDC tokens
 #   (plan jobs are skipped while it is unset)
+#   vars.AWS_PROD_PLAN_ROLE_ARN  production's own plan role (master subject only), used for the
+#                                master-only (prod) plans on push; required once prod is planned
 # Terraform and scanners are installed by the Atmos toolchain (dependencies.tools).
 #
 # GitHub-side controls this file relies on (they cannot be expressed in YAML):
@@ -472,7 +474,9 @@ jobs:
               settings = component_settings()
               excluded = disabled_pairs(settings)
               matrix["include"] = [
-                  i for i in matrix["include"]
+                  dict(i, master_only=not pr_plans_enabled(
+                      settings.get(i.get("stack"), {}).get(i.get("component"))))
+                  for i in matrix["include"]
                   if (i.get("stack"), i.get("component")) not in excluded
                   and keep_for_event(settings, (i.get("stack"), i.get("component")))
               ]
@@ -498,7 +502,8 @@ jobs:
                       continue
                   if pr_plans_enabled(spec) == on_push:
                       continue
-                  include.append({"stack": stack, "component": component})
+                  include.append({"stack": stack, "component": component,
+                                  "master_only": not pr_plans_enabled(spec)})
           with open(out_file, "a") as out:
               out.write(f"matrix={json.dumps({'include': include})}\n")
           print(f"{len(include)} instances")
@@ -524,13 +529,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Master-only stacks (production) are planned with THEIR plan role,
+      # vars.AWS_PROD_PLAN_ROLE_ARN: the only principal the prod read-only
+      # state role trusts, and itself trusted only for the master subject.
+      - name: Require the production plan role
+        if: matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN == ''
+        run: |
+          echo "::error::vars.AWS_PROD_PLAN_ROLE_ARN (fnx-prod-production's iam/ci ci_plan_role_arn) is not set"
+          exit 1
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN || vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
-      # TFSTATE_ACCESS=read makes the stack backend assume the state backend's
-      # READ-only role (stacks/orgs/fnx/_defaults.yaml), the only state role
-      # the plan role may assume. That role cannot write a .tflock object, so
+      # TFSTATE_ACCESS=read makes the stack backend assume a READ-only state
+      # role (stacks/orgs/fnx/_defaults.yaml): the prod one for a prod stack,
+      # the non-prod one otherwise. That role cannot write a .tflock object, so
       # the plan runs with -lock=false, as drift-detection.yml does: a plan
       # never needs the lock, and a PR plan must never block an apply.
       - name: Plan

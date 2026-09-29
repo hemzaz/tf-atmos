@@ -22,14 +22,35 @@ component (`src/iam.tf`, `access_roles`):
 **One** instance, `backend/main` in `fnx-core-root` (`stacks/orgs/fnx/core/eu-west-2/root.yaml`,
 the management account's stack; owner decision D1). Bucket `fnx-terraform-state`, roles:
 
-| `access_roles` key | Role | Trusted principals | Used by |
-|---|---|---|---|
-| `read` | `fnx-terraform-backend-read-role` | the CI **plan** roles of every stack (`<tenant>-<account>-<environment>-ci-plan`) | PR plans (`terraform-ci.yml`) and drift detection, which set `TFSTATE_ACCESS=read` and plan with `-lock=false` |
-| `write` | `fnx-terraform-backend-role` | the CI **apply** roles (`...-ci-apply`) | deploys (`terraform-cd.yml`) and every local run without `TFSTATE_ACCESS` |
+| `access_roles` key | Role | Objects (`object_key_patterns`) | Trusted principals | Used by |
+|---|---|---|---|---|
+| `read` | `fnx-terraform-backend-read-role` | `*/fnx-dev-*`, `*/fnx-staging-*`, `*/fnx-core-*` | the CI **plan** roles of every stack (`<tenant>-<account>-<environment>-ci-plan`); prod's only for `fnx-core-root` reads | PR plans and dev/staging drift (`TFSTATE_ACCESS=read`, `-lock=false`) |
+| `prod_read` | `fnx-terraform-backend-prod-read-role` | `*/fnx-prod-*` | **only** prod's plan role (trusts the master subject alone, D3) | prod plans on push to master and prod drift |
+| `write` | `fnx-terraform-backend-role` | every object | the CI **apply** roles (`...-ci-apply`, GitHub Environment subjects only) | deploys (`terraform-cd.yml`) and every local run without `TFSTATE_ACCESS` |
 
 Every stack's backend (`stacks/orgs/fnx/_defaults.yaml`) assumes
-`arn:aws:iam::<management_account_id>:role/fnx-terraform-backend-role`, or the `-read-role`
-when the environment variable `TFSTATE_ACCESS=read` is set. The principal lists are strings built
+`arn:aws:iam::<management_account_id>:role/fnx-terraform-backend-role`; with
+`TFSTATE_ACCESS=read` it assumes `fnx-terraform-backend-prod-read-role` in a stage-`prod` stack
+and `fnx-terraform-backend-read-role` in any other stack (including `fnx-core-root`, which is why
+prod's plan role is also trusted by the non-prod read role: prod's `iam/ci` reads `backend/main`
+there, and that role grants no prod object).
+
+**Prefix split.** State keys are `<workspace_key_prefix>/<workspace>/terraform.tfstate` (plus
+`.tflock`): Atmos sets `workspace_key_prefix` to the component (`iam`, `eks`, `backend`, ...) and
+the workspace to the stack name `<tenant>-<stage>-<environment>` (`atmos.yaml` `name_template`),
+with `-<instance>` appended for a derived instance (e.g. `iam/fnx-prod-production-iam-ci/...`). So
+`*/fnx-<stage>-*` matches one stage's objects (S3's `*` also spans `/`; no component name contains
+`/fnx-<stage>-`). The patterns are in `stacks/catalog/backend/defaults.yaml`; the tests match them
+against real keys.
+
+**What `s3:ListBucket` still shows.** It is not prefix-scoped. Terraform's S3 backend finds
+workspaces by listing `<workspace_key_prefix>/` — the component prefix that every stack's workspace
+of that component shares — during `init`/workspace selection, so an `s3:prefix` condition per stage
+would break it (the list request's prefix is `iam/`, not `iam/fnx-dev-`). Both read roles can
+therefore see key **names** across stages (component and stack/instance names, e.g.
+`eks/fnx-prod-production-eks-main/terraform.tfstate`), never object contents: `GetObject` and KMS
+use are limited as above (the key is SSE-KMS, but `kms:Decrypt` alone is useless without the
+object). The principal lists are strings built
 from `iam/ci`'s naming pattern, not `!terraform.state`, because `iam/ci` reads this instance's
 role ARNs (`!terraform.state backend/main fnx-core-root .backend_read_role_arn` /
 `.backend_role_arn`); reading back would be a dependency cycle. Adding a stack means adding its
@@ -44,13 +65,15 @@ backend; a management-account administrator does.
 | Input | Notes |
 |---|---|
 | `bucket_name` | required; `-logs`/`-access-logs` bucket names derive from it |
-| `access_roles` | required map of `{ role_name, write_enabled, allowed_principal_arns }`; at least one role, unique names, every principal an exact IAM role/user ARN — `*`, wildcards and `arn:aws:iam::<account>:root` are rejected |
+| `access_roles` | required map of `{ role_name, write_enabled, allowed_principal_arns, object_key_patterns = ["*"] }`; at least one role, unique names, every principal an exact IAM role/user ARN — `*`, wildcards and `arn:aws:iam::<account>:root` are rejected; `object_key_patterns` non-empty |
 | `enable_access_logging` | default true |
 
 Outputs: `backend_bucket`, `backend_bucket_arn`, `backend_kms_key_arn`, `access_role_arns` /
 `access_role_names` (maps by key), `backend_role_arn`/`backend_role_name` (key `write`),
-`backend_read_role_arn`/`backend_read_role_name` (key `read`). `iam/ci` in every workload stack
-reads `backend_read_role_arn` and `backend_role_arn`.
+`backend_read_role_arn`/`backend_read_role_name` (key `read`),
+`backend_prod_read_role_arn`/`backend_prod_read_role_name` (key `prod_read`). `iam/ci` in every
+workload stack reads `backend_read_role_arn` and `backend_role_arn`; prod's also
+`backend_prod_read_role_arn`.
 
 ## Bootstrap
 

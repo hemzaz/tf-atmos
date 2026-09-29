@@ -87,11 +87,16 @@ data "aws_iam_policy_document" "access_role" {
     resources = [aws_s3_bucket.terraform_state.arn]
   }
 
+  # Object access is limited to object_key_patterns: the read roles are split
+  # by stage (non-prod / prod) within the one bucket. ListBucket above is not
+  # prefix-scoped: Terraform's S3 backend lists "<workspace_key_prefix>/" (the
+  # component, shared by every stack's workspaces) to find workspaces, so a
+  # role can see key NAMES across stacks, never object contents.
   statement {
     sid       = each.value.write_enabled ? "ReadWriteStateAndLockFiles" : "ReadState"
     effect    = "Allow"
     actions   = concat(["s3:GetObject"], each.value.write_enabled ? ["s3:PutObject", "s3:DeleteObject"] : [])
-    resources = ["${aws_s3_bucket.terraform_state.arn}/*"]
+    resources = [for pattern in each.value.object_key_patterns : "${aws_s3_bucket.terraform_state.arn}/${pattern}"]
   }
 
   statement {

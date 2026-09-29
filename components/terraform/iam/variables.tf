@@ -335,14 +335,14 @@ variable "ci_apply_policy_arns" {
   }
 }
 
-variable "ci_backend_read_role_arn" {
-  type        = string
-  description = "ARN of the state backend's READ-only access role (backend component output backend_read_role_arn); the plan role gets sts:AssumeRole on it. Null skips the grant."
-  default     = null
+variable "ci_backend_read_role_arns" {
+  type        = list(string)
+  description = "ARNs of the state backend's READ-only access roles the plan role may assume (backend component outputs backend_read_role_arn - non-prod and fnx-core-root state - and, for production's plan role, backend_prod_read_role_arn). Empty skips the grant."
+  default     = []
 
   validation {
-    condition     = var.ci_backend_read_role_arn == null || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\\w+=,.@/-]+$", var.ci_backend_read_role_arn))
-    error_message = "ci_backend_read_role_arn must be an IAM role ARN."
+    condition     = alltrue([for arn in var.ci_backend_read_role_arns : can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\\w+=,.@/-]+$", arn))])
+    error_message = "Each ci_backend_read_role_arns entry must be an IAM role ARN."
   }
 }
 

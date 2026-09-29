@@ -34,7 +34,7 @@ locals {
   ]
 
   create_ci_apply_role  = var.github_oidc_enabled && var.ci_apply_role_enabled
-  ci_plan_state_policy  = var.github_oidc_enabled && var.ci_backend_read_role_arn != null
+  ci_plan_state_policy  = var.github_oidc_enabled && length(var.ci_backend_read_role_arns) > 0
   ci_apply_state_policy = local.create_ci_apply_role && var.ci_backend_write_role_arn != null
 }
 
@@ -97,16 +97,17 @@ resource "aws_iam_role_policy_attachment" "ci_plan_managed" {
 # Terraform state lives in the management account's single backend
 # (components/terraform/backend, instance backend/main in stack fnx-core-root).
 # CI reaches it only by assuming that backend's access roles: the plan role the
-# READ-only one (CI plans run with -lock=false, so they write no .tflock), the
-# apply role the WRITE one. No S3 or KMS grant on the state bucket itself.
+# READ-only ones (non-prod, plus prod for production's plan role; CI plans run
+# with -lock=false, so they write no .tflock), the apply role the WRITE one.
+# No S3 or KMS grant on the state bucket itself.
 data "aws_iam_policy_document" "ci_plan_state" {
   count = local.ci_plan_state_policy ? 1 : 0
 
   statement {
-    sid       = "AssumeStateReadRole"
+    sid       = "AssumeStateReadRoles"
     effect    = "Allow"
     actions   = ["sts:AssumeRole"]
-    resources = [var.ci_backend_read_role_arn]
+    resources = var.ci_backend_read_role_arns
   }
 }
 

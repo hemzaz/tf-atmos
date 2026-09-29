@@ -15,10 +15,30 @@ components:
         # Cloud Posse tfstate-backend access_roles. The role names are what
         # stacks/orgs/fnx/_defaults.yaml assumes (terraform.backend.s3.assume_role);
         # the allowed principals are set on the instance.
+        #
+        # Read access is split by stage within the one bucket. State keys are
+        # "<workspace_key_prefix>/<workspace>/terraform.tfstate" (+ ".tflock"):
+        # Atmos sets workspace_key_prefix to the component (iam, eks, ...) and
+        # the workspace to the stack name, "<tenant>-<stage>-<environment>"
+        # (atmos.yaml name_template), with "-<instance>" appended for a derived
+        # instance (e.g. fnx-prod-production-iam-ci). So "*/<tenant>-<stage>-*"
+        # matches exactly one stage's objects; S3's "*" also spans "/", and no
+        # component name contains "/<tenant>-<stage>-".
         access_roles:
           read:
+            # Non-prod: dev, staging, and fnx-core-root (iam/ci in every stack
+            # reads backend/main there; it holds only bucket/role names).
             role_name: "{{ .settings.context.tenant }}-terraform-backend-read-role"
             write_enabled: false
+            object_key_patterns:
+              - "*/{{ .settings.context.tenant }}-dev-*"
+              - "*/{{ .settings.context.tenant }}-staging-*"
+              - "*/{{ .settings.context.tenant }}-core-*"
+          prod_read:
+            role_name: "{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
+            write_enabled: false
+            object_key_patterns:
+              - "*/{{ .settings.context.tenant }}-prod-*"
           write:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-role"
             write_enabled: true

@@ -17,9 +17,9 @@ The stack configuration still contains placeholders. Replace every item below be
 | Domains and hosted zones | `domain_name`/`hosted_zone_id` in each stack's `components/globals.yaml`; `root_domain` and zone names in `components/networking.yaml` | `example.com`, `Z1234567890EXAMPLE` |
 | Alert recipients | `alarm_email_subscriptions` on the monitoring instances, and notification lists in `components/globals.yaml`; every address must confirm its SNS subscription | `*@example.com` |
 | Prod alarm SNS topic ARNs | Prod alarms that must reach an existing paging/on-call topic, e.g. `rds`'s `sns_topic_arn` | not set |
-| State backend | One bucket, `fnx-terraform-state`, in the management account with two access roles: `fnx-terraform-backend-role` (read/write, trusts the CI apply roles) and `fnx-terraform-backend-read-role` (read-only, trusts the CI plan roles). Every stack's backend config assumes one of them, so they must exist before any other stack's first `terraform init` | created once by `backend/main` in stack `fnx-core-root` (cold start, [below](#bootstrap-the-state-backend)); its trusted role ARNs carry the placeholder account IDs |
+| State backend | One bucket, `fnx-terraform-state`, in the management account with three access roles: `fnx-terraform-backend-role` (read/write, trusts the CI apply roles), `fnx-terraform-backend-read-role` (read-only, dev/staging/core objects, trusts the CI plan roles) and `fnx-terraform-backend-prod-read-role` (read-only, prod objects, trusts only prod's plan role). Every stack's backend config assumes one of them, so they must exist before any other stack's first `terraform init` | created once by `backend/main` in stack `fnx-core-root` (cold start, [below](#bootstrap-the-state-backend)); its trusted role ARNs carry the placeholder account IDs |
 | GitHub Environments | One per stack, named exactly like the stack, with `vars.AWS_ROLE_ARN` (deploy role); deployment branches: default branch only; add required reviewers to `fnx-prod-production` | none |
-| GitHub repo variables | `AWS_PLAN_ROLE_ARN` (read-only plan role for PR plans, drift detection, DR checks); optional `ATMOS_VERSION`, `AWS_REGION` | none |
+| GitHub repo variables | `AWS_PLAN_ROLE_ARN` (read-only plan role for PR plans, dev/staging drift detection, DR checks — a dev or staging `iam/ci` `ci_plan_role_arn`); `AWS_PROD_PLAN_ROLE_ARN` (production's `iam/ci` `ci_plan_role_arn`, for prod plans on push to master and prod drift); optional `ATMOS_VERSION`, `AWS_REGION` | none |
 | OIDC trust | Deploy role: `sub = repo:<org>/<repo>:environment:<stack>`. Plan role: `sub = repo:<org>/<repo>:pull_request` and `...:ref:refs/heads/<default branch>`; production's plan role only the default-branch sub (prod is planned from master, never from a PR). Both: `aud = sts.amazonaws.com` | none |
 | Deploy marker tags | One `deployed/<stack>` tag per stack, so CD knows what's already live | none |
 | Lambda deployment packages | `s3_bucket`/`s3_key` on every `lambda/*` instance in each stack's `components/services.yaml`. The buckets (`fnx-lambda-artifacts`, `fnx-staging-lambda-artifacts`, `fnx-production-lambda-artifacts`) must exist and hold the named key **before** the first apply — `aws_lambda_function` fails at apply without a package, and no static gate catches it | `<function>/latest.zip`, not uploaded |
@@ -76,10 +76,16 @@ How the stacks reach it (`stacks/orgs/fnx/_defaults.yaml`):
 
 | Who | Role assumed by the stack backend | Trusts | Locking |
 |-----|-----------------------------------|--------|---------|
-| CI plans (`terraform-ci.yml`, `drift-detection.yml`: `TFSTATE_ACCESS=read`) | `fnx-terraform-backend-read-role` (read-only) | each stack's `iam/ci` plan role | `-lock=false` |
-| CI deploys (`terraform-cd.yml`) and local runs | `fnx-terraform-backend-role` (read/write) | each stack's `iam/ci` apply role, and the administrator who applied `backend/main` | `.tflock`, `-lock-timeout=10m` in CD |
+| CI plans of dev/staging (and `fnx-core-root` reads): `TFSTATE_ACCESS=read` | `fnx-terraform-backend-read-role` (read-only; objects `*/fnx-dev-*`, `*/fnx-staging-*`, `*/fnx-core-*`) | each stack's `iam/ci` plan role | `-lock=false` |
+| CI plans of prod (push to master, drift): `TFSTATE_ACCESS=read` in a stage-`prod` stack | `fnx-terraform-backend-prod-read-role` (read-only; objects `*/fnx-prod-*`) | only prod's `iam/ci` plan role (`AWS_PROD_PLAN_ROLE_ARN`, master subject only) | `-lock=false` |
+| CI deploys (`terraform-cd.yml`) and local runs | `fnx-terraform-backend-role` (read/write, every object) | each stack's `iam/ci` apply role (enabled; GitHub Environment subject only), and the administrator who applied `backend/main` | `.tflock`, `-lock-timeout=10m` in CD |
 
-`iam/ci` gets `sts:AssumeRole` on those two roles, reading their ARNs cross-stack
+So PR-controlled code (which can only reach a dev/staging plan role) cannot read production state
+contents. `s3:ListBucket` is not prefix-scoped — Terraform lists `<component>/` to find workspaces —
+so key *names* stay visible to every read role; see
+[the backend README](../components/terraform/backend/README.md#deployed-as).
+
+`iam/ci` gets `sts:AssumeRole` on those roles, reading their ARNs cross-stack
 (`!terraform.state backend/main fnx-core-root ...`). The backend trusts the CI roles by their names
 (`<tenant>-<account>-<environment>-ci-plan` / `-apply`), listed in `root.yaml`: a new stack's CI
 roles must be added there. Anyone else who runs Terraform against a stack (an operator's SSO role)
@@ -87,7 +93,13 @@ must be added to `access_roles` too.
 
 Production is planned from master only: its plan role does not trust the `pull_request` OIDC
 subject, and `terraform-ci.yml` plans prod instances on push to master instead of on the PR
-(`settings.github.pull_request_plans_enabled: false` in `stacks/orgs/fnx/prod/_defaults.yaml`).
+(`settings.github.pull_request_plans_enabled: false` in `stacks/orgs/fnx/prod/_defaults.yaml`),
+with `AWS_PROD_PLAN_ROLE_ARN`.
+
+The CI apply role (`<prefix>-apply`) is enabled in every stack with `AdministratorAccess` (it
+deploys every component, `iam` included; it is also the EKS ClusterAdmin access entry). It trusts
+only `repo:<org>/<repo>:environment:<stack>`, so its protection is the GitHub Environment: default
+branch only, required reviewers on `fnx-prod-production`.
 
 ## Deploy the stack
 

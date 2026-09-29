@@ -178,8 +178,9 @@ Every root module has `versions.tf`, `provider.tf` (AWS provider with `default_t
 
 **State backend**: one S3 bucket, `fnx-terraform-state`, in the management account, managed by
 `backend/main` in stack `fnx-core-root` and accessed through its read/write role
-`fnx-terraform-backend-role` or, for CI plans (`TFSTATE_ACCESS=read`), its read-only role
-`fnx-terraform-backend-read-role`. Locking uses Terraform's native S3 lockfiles
+`fnx-terraform-backend-role` or, for CI plans (`TFSTATE_ACCESS=read`), a read-only role split by
+stage: `fnx-terraform-backend-read-role` (dev/staging) or `fnx-terraform-backend-prod-read-role`
+(prod, assumable only by prod's master-only plan role). Locking uses Terraform's native S3 lockfiles
 (`use_lockfile: true`); no DynamoDB lock table. See
 [Bootstrap the state backend](./docs/DEPLOYMENT.md#bootstrap-the-state-backend).
 

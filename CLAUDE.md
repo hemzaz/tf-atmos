@@ -8,7 +8,8 @@ This is a **Terraform/Atmos infrastructure-as-code project** with:
 - **Atmos workflows** in `workflows/` (`atmos list workflows`) and **Atmos Native CI** in `.github/workflows/`
 - Atmos >= 1.229.0 (enforced in `atmos.yaml`); Terraform 1.16.3 is installed by the Atmos toolchain
 - S3 state backend `fnx-terraform-state` with native lockfiles (`use_lockfile`), no DynamoDB;
-  stacks assume its read/write access role, or its read-only role when `TFSTATE_ACCESS=read`
+  stacks assume its read/write access role, or with `TFSTATE_ACCESS=read` a read-only role
+  (prod stacks: the prod-only one; state reads are split by stage prefix in the one bucket)
 
 There is no Python CLI; use `atmos` commands and workflows.
 

@@ -169,17 +169,23 @@ run "ci_state_access_is_sts_assume_role_on_the_backend_roles_only" {
     ci_apply_role_enabled      = true
     ci_apply_role_environments = ["fnx-prod-production"]
     ci_apply_policy_arns       = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-    ci_backend_read_role_arn   = "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role"
-    ci_backend_write_role_arn  = "arn:aws:iam::111111111111:role/fnx-terraform-backend-role"
+    ci_backend_read_role_arns = [
+      "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role",
+      "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role",
+    ]
+    ci_backend_write_role_arn = "arn:aws:iam::111111111111:role/fnx-terraform-backend-role"
   }
 
   assert {
     condition = (
       length(jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement) == 1
       && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Action == "sts:AssumeRole"
-      && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role"
+      && toset(jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Resource) == toset([
+        "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role",
+        "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role",
+      ])
     )
-    error_message = "The plan role's only state grant is sts:AssumeRole on the backend's read-only role: no s3:PutObject/DeleteObject (lock files) and no KMS."
+    error_message = "The plan role's only state grant is sts:AssumeRole on the backend's read-only role(s): no s3:PutObject/DeleteObject (lock files) and no KMS."
   }
 
   assert {
@@ -204,7 +210,7 @@ run "no_ci_state_policies_without_the_backend_role_arns" {
 
   assert {
     condition     = length(aws_iam_role_policy.ci_plan_state) == 0 && length(aws_iam_role_policy.ci_apply_state) == 0
-    error_message = "ci_backend_read_role_arn/ci_backend_write_role_arn default to null, so no state policy is created without them."
+    error_message = "ci_backend_read_role_arns/ci_backend_write_role_arn default to empty/null, so no state policy is created without them."
   }
 }
 
@@ -212,8 +218,8 @@ run "ci_backend_role_arn_must_be_a_role_arn" {
   command = plan
 
   variables {
-    ci_backend_read_role_arn = "arn:aws:s3:::fnx-terraform-state"
+    ci_backend_read_role_arns = ["arn:aws:s3:::fnx-terraform-state"]
   }
 
-  expect_failures = [var.ci_backend_read_role_arn]
+  expect_failures = [var.ci_backend_read_role_arns]
 }

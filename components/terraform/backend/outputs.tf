@@ -34,8 +34,18 @@ output "backend_role_name" {
 }
 
 output "backend_read_role_arn" {
-  description = "ARN of the read-only state role (access_roles key \"read\"): what the stacks' backend assumes for plans; iam/ci grants the CI plan roles sts:AssumeRole on it"
+  description = "ARN of the non-prod read-only state role (access_roles key \"read\"): what non-prod stacks' (and fnx-core-root's) backend assumes for plans; iam/ci grants the CI plan roles sts:AssumeRole on it"
   value       = try(aws_iam_role.access["read"].arn, null)
+}
+
+output "backend_prod_read_role_arn" {
+  description = "ARN of the read-only state role for production state (access_roles key \"prod_read\"): what prod stacks' backend assumes for plans; iam/ci grants the prod CI plan role sts:AssumeRole on it"
+  value       = try(aws_iam_role.access["prod_read"].arn, null)
+}
+
+output "backend_prod_read_role_name" {
+  description = "Name of the production read-only state role (access_roles key \"prod_read\")"
+  value       = try(aws_iam_role.access["prod_read"].name, null)
 }
 
 output "backend_read_role_name" {

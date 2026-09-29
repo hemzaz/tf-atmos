@@ -98,7 +98,7 @@ SYNTH = [
     (r'^oidc_provider_url$',          'oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     # The backend's access role outputs, read cross-stack by iam/ci.
-    (r'^backend(_read)?_role_arn$',   'arn:aws:iam::123456789012:role/example-terraform-backend-role'),
+    (r'^backend(_prod)?(_read)?_role_arn$','arn:aws:iam::123456789012:role/example-terraform-backend-role'),
     (r'(^|_)auth_token$',             'SyntheticAuthToken0123456789abcd'),
     (r'route_table_ids$',             ['rtb-0123456789abcdef0']),
     # apigateway's api_integrations[] carries the Lambda wiring. Without these

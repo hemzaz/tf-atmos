@@ -20,7 +20,7 @@ repo; EKS node groups use the managed `aws_iam_role.node` that
 | Inputs (required) | Inputs (behavior) | Outputs |
 |---|---|---|
 | region, cross_account_role_name, trusted_account_ids, policy_name, account_id, environment | create_cross_account_role, require_mfa, trusted_principal_org_id, external_id, managed_s3_bucket_arns / managed_dynamodb_table_arns / managed_sns_topic_arns | cross_account_role_arn/name, cross_account_policy_arn/name — not consumed via `!terraform.state` by any current stack |
-| — (every CI input is optional and inert until `github_oidc_enabled`) | github_oidc_enabled, github_oidc_repository, github_oidc_create_provider / github_oidc_provider_arn, github_oidc_default_branch, ci_role_name_prefix, ci_plan_role_subjects, ci_plan_policy_arns, ci_apply_role_enabled, ci_apply_role_environments, ci_apply_policy_arns, ci_backend_read_role_arn, ci_backend_write_role_arn, ci_apply_kms_key_aliases, ci_role_max_session_duration, enable_autoscaling_service_linked_role | ci_plan_role_arn/name, ci_apply_role_arn/name, github_oidc_provider_arn, autoscaling_service_linked_role_arn |
+| — (every CI input is optional and inert until `github_oidc_enabled`) | github_oidc_enabled, github_oidc_repository, github_oidc_create_provider / github_oidc_provider_arn, github_oidc_default_branch, ci_role_name_prefix, ci_plan_role_subjects, ci_plan_policy_arns, ci_apply_role_enabled, ci_apply_role_environments, ci_apply_policy_arns, ci_backend_read_role_arns, ci_backend_write_role_arn, ci_apply_kms_key_aliases, ci_role_max_session_duration, enable_autoscaling_service_linked_role | ci_plan_role_arn/name, ci_apply_role_arn/name, github_oidc_provider_arn, autoscaling_service_linked_role_arn |
 
 ## Dependencies & gotchas
 
@@ -29,10 +29,11 @@ repo; EKS node groups use the managed `aws_iam_role.node` that
   account other than the current one requires org ID, external_id, or MFA.
 - State access for the CI roles is only `sts:AssumeRole` on the single state
   backend's access roles (`../backend/README.md`): the plan role on the
-  read-only role (`ci_backend_read_role_arn`), the apply role on the
-  read/write role (`ci_backend_write_role_arn`). Each `iam/ci` reads both from
-  `!terraform.state backend/main fnx-core-root .backend_read_role_arn` /
-  `.backend_role_arn`. There is no S3/KMS grant on the bucket itself, so a
+  read-only role(s) (`ci_backend_read_role_arns` — the non-prod one
+  everywhere, plus the prod one for production's plan role), the apply role on
+  the read/write role (`ci_backend_write_role_arn`). Each `iam/ci` reads them
+  from `!terraform.state backend/main fnx-core-root .backend_read_role_arn` /
+  `.backend_prod_read_role_arn` / `.backend_role_arn`. There is no S3/KMS grant on the bucket itself, so a
   plan cannot write or delete a `.tflock` object: CI plans run with
   `-lock=false`. The backend, in turn, trusts these roles by name
   (`<ci_role_name_prefix>-plan` / `-apply`), not by reading this component's
@@ -45,6 +46,12 @@ repo; EKS node groups use the managed `aws_iam_role.node` that
   `pull_request`, runs PR-controlled code, and must stay read-only
   (AdministratorAccess/PowerUserAccess are rejected); the apply role trusts
   only `repo:<org>/<repo>:environment:<stack>`. Wildcard subjects are rejected.
+- The apply role is enabled in all three stacks (owner decision) with
+  `AdministratorAccess` — it deploys every component, `iam` included, the Cloud
+  Posse "terraform" role model — and is the EKS ClusterAdmin access entry
+  (`stacks/catalog/eks/defaults.yaml`). Its only guard is the environment
+  subject: each stack's GitHub Environment must allow the default branch only
+  (production: plus required reviewers).
 - `iam/rds-monitoring` (prod services.yaml) belongs to the disabled
   `infrastructure` component, not this module.
 - `enable_autoscaling_service_linked_role` (default `false`) provisions the
