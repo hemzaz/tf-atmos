@@ -289,6 +289,8 @@ SCALAR_ATTRS = {
 LIST_SCALAR_ATTRS = {
     # aws_elasticache_replication_group: the node (cache cluster) IDs.
     'member_clusters',
+    # aws_route53_zone: the zone's delegation name servers (dns zone_name_servers).
+    'name_servers',
 }
 FN_CALL = re.compile(r'^([a-z][a-z0-9_]*)\(')
 IDENT = r'[A-Za-z_][A-Za-z0-9_-]*'

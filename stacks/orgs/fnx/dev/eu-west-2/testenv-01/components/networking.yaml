@@ -106,6 +106,14 @@ components:
 
         # Define essential DNS records
         records:
+          # Delegates services.<domain> (network/services, dns-zones layer)
+          # from this zone: ACM validates acm/services' names there.
+          services_delegation:
+            zone_name: "main"
+            name: "services.{{ .settings.environment.domain_name }}"
+            type: "NS"
+            ttl: 300
+            records: !terraform.state network/services .zone_name_servers.services
           www_main:
             zone_name: "main"
             name: "www.{{ .settings.environment.domain_name }}"
@@ -120,6 +128,7 @@ components:
             records: ["10.0.1.50"]
       dependencies:
         components:
+          - component: network/services
           - component: vpc/main
 
     # Network resources for services VPC
@@ -139,6 +148,8 @@ components:
             force_destroy: true
           data:
             name: "data.services.{{ .settings.environment.domain_name }}"
+            # NS record in the services zone (record delegation_data)
+            parent_zone: services
             comment: "Data services DNS zone"
             force_destroy: true
 

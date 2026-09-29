@@ -8,7 +8,7 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: backend, iam, kms, networking, connectivity, security, security-monitoring, compute, platform, data, dns, certificates, addons, services, monitoring
+#   layers: backend, iam, kms, networking, connectivity, security, security-monitoring, compute, platform, data, dns-zones, dns, certificates, addons, services, monitoring
 #
 # A layer plans all its instances before it applies any of them, so an instance
 # that reads another's state (!terraform.state / !terraform.output) must be in a
@@ -21,7 +21,9 @@
 # shares the security layer with securityhub, which only lists it in
 # dependencies.components), lambda (compute) precedes apigateway (services), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
-# acm validates its certificates in the dns instances' zones (zone_ids), so it
+# network/main writes the NS record delegating network/services' zone from
+# its own zone_name_servers, so network/services has a dns-zones layer before
+# dns. acm validates its certificates in the dns instances' zones (zone_ids), so it
 # has its own certificates layer after dns and before services and monitoring,
 # which read its certificate ARNs. eks-addons reads its dns instance's zone_ids,
 # so it has its own addons layer after dns (and after compute, for the cluster
@@ -201,12 +203,30 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
           or .metadata.component == "backup"'
+      # network/services' zones are delegated from network/main's zone by an
+      # NS record that network/main writes from network/services'
+      # zone_name_servers, so network/services has its own dns-zones layer
+      # before dns. (network/services delegates its data zone itself:
+      # zones.data.parent_zone.)
+      - name: plan-dns-zones
+        type: atmos
+        command: terraform plan --query '.atmos_component == "network/services"'
+      - name: confirm_dns_zones
+        type: confirm
+        prompt: Apply the dns-zones layer plan above?
+        default: false
+      - name: guard-dns-zones
+        type: shell
+        command: test "{{ .steps.confirm_dns_zones.value }}" = "true" || { echo "Deployment cancelled before the dns-zones layer."; exit 1; }
+      - name: deploy-dns-zones
+        type: atmos
+        command: terraform deploy --from-plan --query '.atmos_component == "network/services"'
       # DNS records point at data-layer endpoints (prod network/main reads
       # rds/main .instance_address), so dns plans only after the data layer is
       # applied; apigateway (services) reads the zones, so dns precedes it.
       - name: plan-dns
         type: atmos
-        command: terraform plan --query '.metadata.component == "dns"'
+        command: terraform plan --query '.metadata.component == "dns" and .atmos_component != "network/services"'
       - name: confirm_dns
         type: confirm
         prompt: Apply the dns layer plan above?
@@ -216,7 +236,7 @@ workflows:
         command: test "{{ .steps.confirm_dns.value }}" = "true" || { echo "Deployment cancelled before the dns layer."; exit 1; }
       - name: deploy-dns
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "dns"'
+        command: terraform deploy --from-plan --query '.metadata.component == "dns" and .atmos_component != "network/services"'
       # acm writes its DNS validation records into the dns instances' zones
       # (zone_id is !terraform.state network/<x> .zone_ids.<key>), so it
       # follows dns; apigateway (services) and monitoring read its certificate
@@ -482,12 +502,29 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
           or .metadata.component == "backup"'
 
-  deploy-dns:
-    description: "Deploy the dns layer: Route 53 zones and records (after the data layer, whose endpoints they point at)"
+  deploy-dns-zones:
+    description: "Deploy the dns-zones layer: network/services' zones (delegated from network/main's zone in the dns layer)"
     steps:
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "dns"'
+        command: terraform plan --query '.atmos_component == "network/services"'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the dns-zones layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.atmos_component == "network/services"'
+
+  deploy-dns:
+    description: "Deploy the dns layer: Route 53 zones and records other than network/services (after the data layer, whose endpoints they point at, and the dns-zones layer, which they delegate)"
+    steps:
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.metadata.component == "dns" and .atmos_component != "network/services"'
       - name: confirm
         type: confirm
         prompt: Deploy the dns layer?
@@ -497,7 +534,7 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "dns"'
+        command: terraform deploy --from-plan --query '.metadata.component == "dns" and .atmos_component != "network/services"'
 
   deploy-certificates:
     description: "Deploy the certificates layer: ACM certificates, DNS-validated in the dns layer's zones"

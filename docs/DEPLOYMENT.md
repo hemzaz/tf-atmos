@@ -14,7 +14,7 @@ The stack configuration still contains placeholders. Replace every item below be
 | Dev account ID | `testenv-01.yaml` reads it from the `AWS_ACCOUNT_ID` environment variable | export `AWS_ACCOUNT_ID` before running Atmos for dev |
 | Management account ID | `settings.environment.management_account_id` in `stacks/orgs/fnx/_defaults.yaml` (backend role ARN, IAM trust) | `123456789012` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` | `o-xxxxxxxxxx` |
-| Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`: the one source every dns zone/record, acm domain/SAN and apigateway custom domain is derived from (zone ids come from the dns instances' `zone_ids` output). Delegate each stack's public zones (`network/main`'s `main`, `network/services`' `services` and `data`) from their parent domain | `fnx.example.com` (prod), `staging.fnx.example.com`, `dev.fnx.example.com` |
+| Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`: the one source every dns zone/record, acm domain/SAN and apigateway custom domain is derived from (zone ids come from the dns instances' `zone_ids` output). The stack wires `services.<d>` and `data.services.<d>` delegation itself (NS records); only `<d>` needs delegating from its parent, see below | `fnx.example.com` (prod), `staging.fnx.example.com`, `dev.fnx.example.com` |
 | Alert recipients | `alarm_email_subscriptions` on the monitoring instances, and notification lists in `components/globals.yaml`; every address must confirm its SNS subscription | `*@example.com` |
 | Prod alarm SNS topic ARNs | Prod alarms that must reach an existing paging/on-call topic, e.g. `rds`'s `sns_topic_arn` | not set |
 | State backend | One bucket, `fnx-terraform-state`, in the management account with five access roles split by stage: `fnx-terraform-backend-role` / `fnx-terraform-backend-read-role` (read/write / read-only, dev and staging objects, trust the dev/staging CI apply / plan roles), `fnx-terraform-backend-prod-role` / `fnx-terraform-backend-prod-read-role` (prod objects, trust only prod's apply / plan role) and `fnx-terraform-backend-core-role` (`fnx-core-root` objects, trusts only the administrator who applies `backend/main`). Every stack's backend config assumes one of them, so they must exist before any other stack's first `terraform init` | created once by `backend/main` in stack `fnx-core-root` (cold start, [below](#bootstrap-the-state-backend)); its trusted role ARNs carry the placeholder account IDs |
@@ -143,7 +143,8 @@ those planfiles (`terraform deploy --from-plan`).
 | compute | `deploy-compute` | `eks`, `ecs`, `lambda`, `ec2` other than `ec2/bastion` |
 | platform | `deploy-platform` | `external-secrets` |
 | data | `deploy-data` | `rds`, `elasticache`, `backup` |
-| dns | `deploy-dns` | `dns` (after data: records point at RDS endpoints) |
+| dns-zones | `deploy-dns-zones` | `network/services` (its `services` zone, and its `data` zone delegated from it by `parent_zone`) |
+| dns | `deploy-dns` | the other `dns` instances (after data: records point at RDS endpoints; `network/main` writes the NS record delegating `services.<d>` from `network/services`' name servers) |
 | certificates | `deploy-certificates` | `acm` (after dns: validates in its `zone_ids`) |
 | addons | `deploy-addons` | `eks-addons` (after dns: reads its `zone_ids`) |
 | services | `deploy-services` | `apigateway` (reads `lambda` and `cognito`), `eks-backend-services` |
@@ -184,6 +185,8 @@ atmos workflow hot-deploy -f deploy-application -s <stack> # Cognito, Lambda, AP
 `deploy-app` and `hot-deploy` assume the instances they read are already applied: `kms/main`,
 `vpc/*`, `eks/*` (where present), `acm/*` and the dns zones `network/main` and `network/services`
 (deploy-full-stack layers backend through certificates).
+
+Before `deploy-certificates` (manual prerequisite): delegate each stack's top-level `<d>` (`network/main`'s `main` zone, e.g. `dev.fnx.example.com`) from its parent domain at the registrar/parent zone using that zone's name servers (`zone_name_servers.main`), or ACM validation times out after 45 minutes.
 
 `hot-deploy` is the one deliberate exception to reviewing a saved plan before applying it. It is
 a fast path that runs `terraform deploy` (plan and auto-approve per instance, in dependency order)

@@ -19,8 +19,32 @@ locals {
 
   # Default zone name pattern from root domain
 
-  # Get the normalized record list
-  normalized_records = {
+  # Get the normalized record list: var.records plus one NS record per zone
+  # with a parent_zone, delegating it from that parent (Cloud Posse
+  # dns-delegated's pattern, for a subzone whose parent is in this instance).
+  normalized_records = merge(local.explicit_records, local.delegation_records)
+
+  delegation_records = {
+    for k, zone in var.zones : "delegation_${k}" => {
+      zone_id                          = local.managed_zones[zone.parent_zone].zone_id
+      name                             = trimsuffix(zone.name, ".")
+      type                             = "NS"
+      ttl                              = var.zones[zone.parent_zone].default_ttl
+      records                          = local.managed_zones[k].name_servers
+      alias                            = null
+      health_check_id                  = null
+      set_identifier                   = null
+      weighted_routing_policy          = null
+      latency_routing_policy           = null
+      geolocation_routing_policy       = null
+      failover_routing_policy          = null
+      multivalue_answer_routing_policy = null
+      # The NS record lives with the parent zone
+      dns_account = contains(local.dns_account_zone_keys, zone.parent_zone)
+    } if zone.parent_zone != null
+  }
+
+  explicit_records = {
     for id, record in var.records : id => {
       zone_id                          = try(local.managed_zones[record.zone_name].zone_id, try(data.aws_route53_zone.existing_zones[record.zone_name].zone_id))
       name                             = try(trimsuffix(record.name, "."), null)

@@ -196,6 +196,14 @@ components:
         # so an alias here would be a dependency cycle). Re-add once those
         # targets exist.
         records:
+          # Delegates services.<domain> (network/services, dns-zones layer)
+          # from this zone: ACM validates acm/services' names there.
+          services_delegation:
+            zone_name: "main"
+            name: "services.{{ .settings.environment.domain_name }}"
+            type: "NS"
+            ttl: 300
+            records: !terraform.state network/services .zone_name_servers.services
           db_internal:
             zone_name: "internal"
             name: "db.internal.{{ .settings.environment.domain_name }}"
@@ -207,6 +215,7 @@ components:
               - !terraform.state rds/main .instance_address
       dependencies:
         components:
+          - component: network/services
           - component: vpc/main
           - component: rds/main
 
@@ -229,6 +238,8 @@ components:
             enable_query_logging: true
           data:
             name: "data.services.{{ .settings.environment.domain_name }}"
+            # NS record in the services zone (record delegation_data)
+            parent_zone: services
             comment: "Data services DNS"
             force_destroy: false
 

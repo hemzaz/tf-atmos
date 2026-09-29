@@ -120,6 +120,9 @@ SYNTH = [
     # dns records[].records: a CNAME target, so it must be a hostname rather
     # than one of the id shapes above.
     (r'^records$',                    ['synthetic.example.com']),
+    # dns zone_name_servers.<key>: a delegation NS record's records (B3).
+    (r'name_servers$',                ['ns-0001.awsdns-01.org', 'ns-0002.awsdns-02.co.uk',
+                                       'ns-0003.awsdns-03.com', 'ns-0004.awsdns-04.net']),
     # security-monitoring consumes guardduty's detector and securityhub's hub.
     (r'^detector_id$',                '12abc34d567e8fa901bc2d34e56789f0'),
     (r'^account_arn$',                'arn:aws:securityhub:eu-west-2:123456789012:hub/default'),
@@ -1013,6 +1016,10 @@ def self_test(components_dir, tmp):
         'network/main': {'component': 'dns', 'vars': {}},
         'acm/zoned': {'component': 'acm', 'vars': {
             'zone_id': '!terraform.state network/main .zone_ids.main'}},
+        # ...and a parent dns instance's delegation NS record reads its
+        # child's zone_name_servers.
+        'network/parent': {'component': 'dns', 'vars': {
+            'records': {'d': {'records': '!terraform.state network/main .zone_name_servers.main'}}}},
         # A component that is not in components/terraform: an absolute
         # component path wins the os.path.join in Resolver.component.
         'fake/main': {'component': os.path.join(tmp, 'fake'), 'vars': {}},
@@ -1145,6 +1152,12 @@ def self_test(components_dir, tmp):
     check('acm zone_id from dns zone_ids',
           resolve_ref('!terraform.state network/main .zone_ids.main', 'zone_id', res),
           ('shaped', 'Z1234567890ABCDEFGHIJ'))
+    check('dns zone_name_servers shape', shape_of(dns.outputs.get('zone_name_servers', ''), Ctx(dns)),
+          MAP(LIST(SCALAR)))
+    check('NS records from dns zone_name_servers',
+          resolve_ref('!terraform.state network/main .zone_name_servers.main', 'records', res),
+          ('shaped', ['ns-0001.awsdns-01.org', 'ns-0002.awsdns-02.co.uk',
+                      'ns-0003.awsdns-03.com', 'ns-0004.awsdns-04.net']))
     # L3'. Keys read through a pipe or a select() anywhere in the stack are
     # in the synthetic map, so those reads get a value, not null.
     check('keys collected', res.keys(stack, 'acm/main', 'certificate_arns'),
