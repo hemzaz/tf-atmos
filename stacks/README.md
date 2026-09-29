@@ -52,8 +52,8 @@ Instances declare order with `dependencies.components` and read each other via `
   `${...}` interpolation.
 - **Backend and Terraform version** are set once in `orgs/fnx/_defaults.yaml`: S3 bucket
   `fnx-terraform-state` (created by `backend/main` in `fnx-core-root`, the only backend instance),
-  reached through its read/write access role, or its stage-scoped read-only role (prod or
-  non-prod) when `TFSTATE_ACCESS=read`;
+  reached through its stage's read/write access role (dev/staging, prod or core), or the
+  stage's read-only role when `TFSTATE_ACCESS=read`;
   native lockfiles (`use_lockfile: true`), Terraform 1.16.3.
 - **Disabling** an instance: `metadata.enabled: false`.
 - `settings.list_merge_strategy` is `replace` (in `atmos.yaml`): a list in a more specific file

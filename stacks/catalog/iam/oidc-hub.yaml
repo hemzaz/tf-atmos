@@ -114,15 +114,23 @@ components:
         # only), so an unscoped value here is admin across every spoke.
         ci_apply_role_enabled: false
 
-        # State access through the single backend's access roles (backend/main
-        # in the management account's fnx-core-root): the plan role may assume
-        # the non-prod read-only role, the apply role the read/write role. Add
-        # this hub's <prefix>-plan / <prefix>-apply ARNs to that instance's
-        # access_roles allowed_principal_arns. A hub that also plans prod
-        # needs backend_prod_read_role_arn here and a master-only plan subject.
+        # When enabled, trust is Cloud Posse's branch-pinned
+        # trusted_github_repos ("<org>/<repo>:<branch>" -> sub
+        # repo:<org>/<repo>:ref:refs/heads/<branch>); set it in the stack:
+        # ci_apply_role_trusted_github_repos: ["<org>/<repo>:master"]
+
+        # State access through the single backend's stage-split access roles
+        # (backend/main in the management account's fnx-core-root), named by
+        # the stack backend's convention (stacks/orgs/fnx/_defaults.yaml): the
+        # plan role may assume the non-prod read-only role, the apply role the
+        # non-prod read/write role. Add this hub's <prefix>-plan /
+        # <prefix>-apply ARNs to that instance's `read` / `write`
+        # allowed_principal_arns. A hub that also handles prod needs the
+        # -prod-read / -prod roles instead (and the prod_read / prod_write
+        # entries), and a master-only plan subject.
         ci_backend_read_role_arns:
-          - !terraform.state backend/main fnx-core-root .backend_read_role_arn
-        ci_backend_write_role_arn: !terraform.state backend/main fnx-core-root .backend_role_arn
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
       dependencies:
         components:
           - component: backend/main

@@ -299,23 +299,38 @@ variable "ci_plan_policy_arns" {
 
 variable "ci_apply_role_enabled" {
   type        = bool
-  description = "Also create the apply role, assumable only from the GitHub Environments in ci_apply_role_environments"
+  description = "Also create the apply role, assumable only from the branch-pinned repositories in ci_apply_role_trusted_github_repos"
   default     = false
 }
 
-variable "ci_apply_role_environments" {
+variable "ci_apply_role_trusted_github_repos" {
   type        = list(string)
-  description = "GitHub Environment names (the Atmos stack names used by terraform-cd.yml) whose OIDC tokens may assume the apply role"
+  description = <<-EOT
+    GitHub repositories whose OIDC tokens may assume the apply role, each "<org>/<repo>:<branch>".
+    Shape of Cloud Posse's `trusted_github_repos` (cloudposse/terraform-aws-components,
+    modules/account-map/modules/team-assume-role-policy/github-assume-role-policy.mixin.tf), which
+    turns "<org>/<repo>:<branch>" into the subject "repo:<org>/<repo>:ref:refs/heads/<branch>".
+    Unlike upstream, the branch is required and matched with StringEquals: upstream's branch-less
+    form ("repo:<org>/<repo>:*") would also admit pull_request and environment subjects.
+  EOT
   default     = []
 
   validation {
-    condition     = alltrue([for environment in var.ci_apply_role_environments : can(regex("^[A-Za-z0-9._-]+$", environment))])
-    error_message = "Each ci_apply_role_environments entry must be a GitHub Environment name with no wildcard."
+    # org/repo:branch - no "*", no extra ":" (so no environment:<name> or ref: forms)
+    condition = alltrue(flatten([
+      for repo in var.ci_apply_role_trusted_github_repos : [
+        can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:[A-Za-z0-9._/-]+$", repo)),
+        !strcontains(repo, "*"),
+        !strcontains(repo, "environment:"),
+        !endswith(repo, ":pull_request"),
+      ]
+    ]))
+    error_message = "Each ci_apply_role_trusted_github_repos entry must be \"<org>/<repo>:<branch>\" with an exact branch: wildcards, pull_request and environment:<name> subjects are rejected (deploy credentials must never reach PR-controlled code)."
   }
 
   validation {
-    condition     = !var.ci_apply_role_enabled || length(var.ci_apply_role_environments) > 0
-    error_message = "ci_apply_role_environments must name at least one GitHub Environment when ci_apply_role_enabled is true; an empty list would leave the apply role with no subject condition."
+    condition     = !var.ci_apply_role_enabled || length(var.ci_apply_role_trusted_github_repos) > 0
+    error_message = "ci_apply_role_trusted_github_repos must name at least one \"<org>/<repo>:<branch>\" when ci_apply_role_enabled is true; an empty list would leave the apply role with no subject condition."
   }
 }
 
@@ -337,7 +352,7 @@ variable "ci_apply_policy_arns" {
 
 variable "ci_backend_read_role_arns" {
   type        = list(string)
-  description = "ARNs of the state backend's READ-only access roles the plan role may assume (backend component outputs backend_read_role_arn - non-prod and fnx-core-root state - and, for production's plan role, backend_prod_read_role_arn). Empty skips the grant."
+  description = "ARNs of the state backend's READ-only access roles the plan role may assume: its own stage's (backend role fnx-terraform-backend-read-role for dev/staging, fnx-terraform-backend-prod-read-role for prod). Empty skips the grant."
   default     = []
 
   validation {
@@ -348,7 +363,7 @@ variable "ci_backend_read_role_arns" {
 
 variable "ci_backend_write_role_arn" {
   type        = string
-  description = "ARN of the state backend's read/write access role (backend component output backend_role_arn); the apply role gets sts:AssumeRole on it. Null skips the grant."
+  description = "ARN of the state backend's read/write access role for this role's stage (fnx-terraform-backend-role for dev/staging, fnx-terraform-backend-prod-role for prod); the apply role gets sts:AssumeRole on it and on nothing else in the backend. Null skips the grant."
   default     = null
 
   validation {

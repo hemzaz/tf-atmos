@@ -564,7 +564,8 @@ EOF
 # Security components for $(stack_name).
 # No state backend here: every stack uses the single backend (backend/main in
 # fnx-core-root). Give this stack CI roles (iam/ci, see the existing stacks'
-# security.yaml) and add their ARNs to that instance's access_roles.
+# security.yaml) and add their ARNs to that instance's access_roles entries for
+# this stack's stage (read/write for dev and staging, prod_read/prod_write for prod).
 
 import:
   - $(import_prefix)/globals

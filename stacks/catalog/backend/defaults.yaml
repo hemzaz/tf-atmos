@@ -16,24 +16,27 @@ components:
         # stacks/orgs/fnx/_defaults.yaml assumes (terraform.backend.s3.assume_role);
         # the allowed principals are set on the instance.
         #
-        # Read access is split by stage within the one bucket. State keys are
-        # "<workspace_key_prefix>/<workspace>/terraform.tfstate" (+ ".tflock"):
+        # Reads AND writes are split by stage within the one bucket. State keys
+        # are "<workspace_key_prefix>/<workspace>/terraform.tfstate" (+ ".tflock"):
         # Atmos sets workspace_key_prefix to the component (iam, eks, ...) and
         # the workspace to the stack name, "<tenant>-<stage>-<environment>"
         # (atmos.yaml name_template), with "-<instance>" appended for a derived
         # instance (e.g. fnx-prod-production-iam-ci). So "*/<tenant>-<stage>-*"
         # matches exactly one stage's objects; S3's "*" also spans "/", and no
-        # component name contains "/<tenant>-<stage>-".
+        # component name contains "/<tenant>-<stage>-". check-state-keys.py
+        # (validate-all, lint) fails any instance that breaks that layout.
+        #
+        #   stage        read (TFSTATE_ACCESS=read)  write (TFSTATE_ACCESS unset)
+        #   dev/staging  read                        write
+        #   prod         prod_read                   prod_write
+        #   core         core_write                  core_write
         access_roles:
           read:
-            # Non-prod: dev, staging, and fnx-core-root (iam/ci in every stack
-            # reads backend/main there; it holds only bucket/role names).
             role_name: "{{ .settings.context.tenant }}-terraform-backend-read-role"
             write_enabled: false
             object_key_patterns:
               - "*/{{ .settings.context.tenant }}-dev-*"
               - "*/{{ .settings.context.tenant }}-staging-*"
-              - "*/{{ .settings.context.tenant }}-core-*"
           prod_read:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
             write_enabled: false
@@ -42,3 +45,19 @@ components:
           write:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-role"
             write_enabled: true
+            object_key_patterns:
+              - "*/{{ .settings.context.tenant }}-dev-*"
+              - "*/{{ .settings.context.tenant }}-staging-*"
+          prod_write:
+            role_name: "{{ .settings.context.tenant }}-terraform-backend-prod-role"
+            write_enabled: true
+            object_key_patterns:
+              - "*/{{ .settings.context.tenant }}-prod-*"
+          # The backend's own state (fnx-core-root). No allowed_principal_arns:
+          # only the administrator applying backend/main (the caller, always
+          # trusted) may assume it; no CI role can read or write core state.
+          core_write:
+            role_name: "{{ .settings.context.tenant }}-terraform-backend-core-role"
+            write_enabled: true
+            object_key_patterns:
+              - "*/{{ .settings.context.tenant }}-core-*"

@@ -7,9 +7,12 @@
 #           ci_plan_role_subjects in its security.yaml),
 #           drift-detection.yml and disaster-recovery.yml (default branch).
 #           Read-only; its ARN is the repo variable AWS_PLAN_ROLE_ARN.
-#   apply - assumed by terraform-cd.yml only through a protected GitHub
-#           Environment named after the Atmos stack. Its ARN is that
-#           environment's AWS_ROLE_ARN.
+#   apply - assumed by terraform-cd.yml, which runs only on the default branch
+#           and uses no GitHub Environment, so its token's sub is
+#           repo:<org>/<repo>:ref:refs/heads/<branch> - the only subject this
+#           role trusts (Cloud Posse's branch-pinned trusted_github_repos).
+#           terraform-cd.yml derives its ARN from this stack's iam/ci config.
+#           There is no manual approval: every default-branch merge applies.
 # Keeping them separate is what stops a pull request from running deploy
 # credentials; terraform-ci.yml calls that out explicitly.
 
@@ -28,10 +31,14 @@ locals {
     "repo:${local.github_repository}:ref:refs/heads/${var.github_oidc_default_branch}",
   ]
 
-  github_apply_subjects = [
-    for environment in var.ci_apply_role_environments :
-    "repo:${local.github_repository}:environment:${environment}"
-  ]
+  # Cloud Posse's trusted_github_repos -> sub mapping (github-assume-role-policy.mixin.tf):
+  # "<org>/<repo>:<branch>" -> "repo:<org>/<repo>:ref:refs/heads/<branch>". The
+  # variable validation requires the branch, so upstream's "repo:<org>/<repo>:*"
+  # form (which would admit pull_request and environment subjects) never arises.
+  github_apply_subjects = sort(distinct([
+    for repo in var.ci_apply_role_trusted_github_repos :
+    format("repo:%s:ref:refs/heads/%s", split(":", repo)[0], split(":", repo)[1])
+  ]))
 
   create_ci_apply_role  = var.github_oidc_enabled && var.ci_apply_role_enabled
   ci_plan_state_policy  = var.github_oidc_enabled && length(var.ci_backend_read_role_arns) > 0
@@ -96,10 +103,10 @@ resource "aws_iam_role_policy_attachment" "ci_plan_managed" {
 
 # Terraform state lives in the management account's single backend
 # (components/terraform/backend, instance backend/main in stack fnx-core-root).
-# CI reaches it only by assuming that backend's access roles: the plan role the
-# READ-only ones (non-prod, plus prod for production's plan role; CI plans run
-# with -lock=false, so they write no .tflock), the apply role the WRITE one.
-# No S3 or KMS grant on the state bucket itself.
+# CI reaches it only by assuming that backend's access roles, each split by
+# stage: the plan role its stage's READ-only one (CI plans run with
+# -lock=false, so they write no .tflock), the apply role its stage's WRITE
+# one. No S3 or KMS grant on the state bucket itself.
 data "aws_iam_policy_document" "ci_plan_state" {
   count = local.ci_plan_state_policy ? 1 : 0
 
@@ -142,8 +149,9 @@ data "aws_iam_policy_document" "ci_apply_assume_role" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Environment subjects only. A pull_request or bare ref subject here would
-    # hand deploy credentials to PR-controlled code.
+    # Branch-pinned ref subjects only (Cloud Posse model). A pull_request,
+    # environment or wildcard subject here would hand deploy credentials to
+    # PR-controlled code; the variable validation rejects all three.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
@@ -156,7 +164,7 @@ resource "aws_iam_role" "ci_apply" {
   count = local.create_ci_apply_role ? 1 : 0
 
   name                 = "${var.ci_role_name_prefix}-apply"
-  description          = "GitHub Actions OIDC role for terraform apply (protected environments only)"
+  description          = "GitHub Actions OIDC role for terraform apply (pinned branch only)"
   assume_role_policy   = data.aws_iam_policy_document.ci_apply_assume_role[0].json
   max_session_duration = var.ci_role_max_session_duration
 }

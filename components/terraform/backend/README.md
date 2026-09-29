@@ -22,39 +22,50 @@ component (`src/iam.tf`, `access_roles`):
 **One** instance, `backend/main` in `fnx-core-root` (`stacks/orgs/fnx/core/eu-west-2/root.yaml`,
 the management account's stack; owner decision D1). Bucket `fnx-terraform-state`, roles:
 
-| `access_roles` key | Role | Objects (`object_key_patterns`) | Trusted principals | Used by |
+| `access_roles` key | Role | Objects (`object_key_patterns`) | Trusted principals (plus the caller) | Used by |
 |---|---|---|---|---|
-| `read` | `fnx-terraform-backend-read-role` | `*/fnx-dev-*`, `*/fnx-staging-*`, `*/fnx-core-*` | the CI **plan** roles of every stack (`<tenant>-<account>-<environment>-ci-plan`); prod's only for `fnx-core-root` reads | PR plans and dev/staging drift (`TFSTATE_ACCESS=read`, `-lock=false`) |
-| `prod_read` | `fnx-terraform-backend-prod-read-role` | `*/fnx-prod-*` | **only** prod's plan role (trusts the master subject alone, D3) | prod plans on push to master and prod drift |
-| `write` | `fnx-terraform-backend-role` | every object | the CI **apply** roles (`...-ci-apply`, GitHub Environment subjects only) | deploys (`terraform-cd.yml`) and every local run without `TFSTATE_ACCESS` |
+| `read` | `fnx-terraform-backend-read-role` | `*/fnx-dev-*`, `*/fnx-staging-*` | the dev/staging CI **plan** roles (`<tenant>-<account>-<environment>-ci-plan`) | PR plans, dev/staging drift and DR checks (`TFSTATE_ACCESS=read`, `-lock=false`) |
+| `write` | `fnx-terraform-backend-role` | `*/fnx-dev-*`, `*/fnx-staging-*` | the dev/staging CI **apply** roles (`...-ci-apply`) | dev/staging deploys (`terraform-cd.yml`) and local runs without `TFSTATE_ACCESS` |
+| `prod_read` | `fnx-terraform-backend-prod-read-role` | `*/fnx-prod-*` | **only** prod's plan role (master subject alone, D3) | prod plans on push to master, prod drift and DR checks |
+| `prod_write` | `fnx-terraform-backend-prod-role` | `*/fnx-prod-*` | **only** prod's apply role | prod deploys and local runs |
+| `core_write` | `fnx-terraform-backend-core-role` | `*/fnx-core-*` | **nobody listed**: only the administrator who applies `backend/main` (Cloud Posse's caller rule) | `fnx-core-root`'s own backend, read and write |
 
-Every stack's backend (`stacks/orgs/fnx/_defaults.yaml`) assumes
-`arn:aws:iam::<management_account_id>:role/fnx-terraform-backend-role`; with
-`TFSTATE_ACCESS=read` it assumes `fnx-terraform-backend-prod-read-role` in a stage-`prod` stack
-and `fnx-terraform-backend-read-role` in any other stack (including `fnx-core-root`, which is why
-prod's plan role is also trusted by the non-prod read role: prod's `iam/ci` reads `backend/main`
-there, and that role grants no prod object).
+Every stack's backend (`stacks/orgs/fnx/_defaults.yaml`) assumes its stage's role:
+`fnx-terraform-backend[-prod]-role`, or with `TFSTATE_ACCESS=read` `fnx-terraform-backend[-prod]-read-role`
+(`-prod` in a stage-`prod` stack); a stage-`core` stack always assumes
+`fnx-terraform-backend-core-role`. No CI role can read or write `fnx-core-root` state, so no CI
+role reads `backend/main`'s outputs: `iam/ci` names its stage's roles by the same convention.
 
-**Prefix split.** State keys are `<workspace_key_prefix>/<workspace>/terraform.tfstate` (plus
+**Read-only roles and DR.** The read roles also get `s3:ListBucketVersions`,
+`s3:GetBucketVersioning` and `s3:GetReplicationConfiguration` on the bucket: the DR scripts
+(`workflows/scripts/dr`, run by `disaster-recovery.yml` with the plan roles) read the bucket only
+through the stack's read role (`workflows/scripts/common/state-read-role.sh`) - `recover-state`
+lists state object versions to pick one to restore, `dr-status` checks versioning and replication.
+No role gets `s3:GetObjectVersion`, so old versions' contents stay unreadable; restoring one needs
+the stage's write role.
+
+**Prefix split** (reads and writes). State keys are `<workspace_key_prefix>/<workspace>/terraform.tfstate` (plus
 `.tflock`): Atmos sets `workspace_key_prefix` to the component (`iam`, `eks`, `backend`, ...) and
 the workspace to the stack name `<tenant>-<stage>-<environment>` (`atmos.yaml` `name_template`),
 with `-<instance>` appended for a derived instance (e.g. `iam/fnx-prod-production-iam-ci/...`). So
 `*/fnx-<stage>-*` matches one stage's objects (S3's `*` also spans `/`; no component name contains
 `/fnx-<stage>-`). The patterns are in `stacks/catalog/backend/defaults.yaml`; the tests match them
-against real keys.
+against real keys. `workflows/scripts/common/check-state-keys.py` (run by `validate-all` and `lint`)
+fails any s3-backend instance whose workspace does not start with its own stack's `<tenant>-<stage>-`
+or contains `/`, or whose `workspace_key_prefix` contains `/` - the cases that would put a key
+under another stage's pattern.
 
 **What `s3:ListBucket` still shows.** It is not prefix-scoped. Terraform's S3 backend finds
 workspaces by listing `<workspace_key_prefix>/` — the component prefix that every stack's workspace
 of that component shares — during `init`/workspace selection, so an `s3:prefix` condition per stage
-would break it (the list request's prefix is `iam/`, not `iam/fnx-dev-`). Both read roles can
+would break it (the list request's prefix is `iam/`, not `iam/fnx-dev-`). Every role can
 therefore see key **names** across stages (component and stack/instance names, e.g.
 `eks/fnx-prod-production-eks-main/terraform.tfstate`), never object contents: `GetObject` and KMS
 use are limited as above (the key is SSE-KMS, but `kms:Decrypt` alone is useless without the
 object). The principal lists are strings built
-from `iam/ci`'s naming pattern, not `!terraform.state`, because `iam/ci` reads this instance's
-role ARNs (`!terraform.state backend/main fnx-core-root .backend_read_role_arn` /
-`.backend_role_arn`); reading back would be a dependency cycle. Adding a stack means adding its
-two CI role ARNs here. Any human/admin role other than the applying administrator must be listed
+from `iam/ci`'s naming pattern, not `!terraform.state` (`iam/ci` deploys after this instance and
+names these roles by convention in turn). Adding a stack means adding its two CI role ARNs to its
+stage's entries here. Any human/admin role other than the applying administrator must be listed
 explicitly.
 
 `fnx-core-root` sets `settings.github.actions_enabled: false`: CI never plans or applies the
@@ -65,15 +76,16 @@ backend; a management-account administrator does.
 | Input | Notes |
 |---|---|
 | `bucket_name` | required; `-logs`/`-access-logs` bucket names derive from it |
-| `access_roles` | required map of `{ role_name, write_enabled, allowed_principal_arns, object_key_patterns = ["*"] }`; at least one role, unique names, every principal an exact IAM role/user ARN — `*`, wildcards and `arn:aws:iam::<account>:root` are rejected; `object_key_patterns` non-empty |
+| `access_roles` | required map of `{ role_name, write_enabled, allowed_principal_arns = [], object_key_patterns = ["*"] }`; at least one role, unique names, every principal an exact IAM role/user ARN (an empty list, upstream's default, trusts only the caller; a root-user caller then fails the role's precondition) — `*`, wildcards and `arn:aws:iam::<account>:root` are rejected; `object_key_patterns` non-empty |
 | `enable_access_logging` | default true |
 
 Outputs: `backend_bucket`, `backend_bucket_arn`, `backend_kms_key_arn`, `access_role_arns` /
 `access_role_names` (maps by key), `backend_role_arn`/`backend_role_name` (key `write`),
 `backend_read_role_arn`/`backend_read_role_name` (key `read`),
-`backend_prod_read_role_arn`/`backend_prod_read_role_name` (key `prod_read`). `iam/ci` in every
-workload stack reads `backend_read_role_arn` and `backend_role_arn`; prod's also
-`backend_prod_read_role_arn`.
+`backend_prod_role_arn`/`backend_prod_role_name` (key `prod_write`),
+`backend_prod_read_role_arn`/`backend_prod_read_role_name` (key `prod_read`),
+`backend_core_role_arn`/`backend_core_role_name` (key `core_write`). No stack reads them
+cross-stack today (`iam/ci` names the roles by convention); they are for operators and `verify`.
 
 ## Bootstrap
 
@@ -91,8 +103,11 @@ atmos terraform deploy backend/main -s fnx-core-root --auto-generate-backend-fil
 atmos terraform init backend/main -s fnx-core-root --init-reconfigure=never -- -migrate-state -force-copy
 ```
 
-The first apply trusts the caller in both roles, so the second command can assume the write role
-and copy the local state into the bucket. Delete `terraform.tfstate.d/` afterwards. Later changes:
+The first apply trusts the caller in every role and makes it the only principal of the core role
+(`fnx-terraform-backend-core-role`), which `fnx-core-root`'s backend assumes, so the second command
+can copy the local state into the bucket. The workflow's `wait-for-core-role` step first polls
+`sts:AssumeRole` on that role (backoff, up to ~60s): IAM is eventually consistent, and a role
+created seconds ago can refuse the migration. Delete `terraform.tfstate.d/` afterwards. Later changes:
 `atmos workflow backend-only -f bootstrap`.
 
 **If the bucket already exists** — created by `atmos terraform backend create backend/main -s
@@ -121,6 +136,10 @@ fnx-core-root --auto-generate-backend-file=false`.
 - A read-only plan cannot create a workspace: the S3 backend writes an empty state object (and a
   lock) the first time a workspace is selected, so a CI plan of an instance that has never been
   applied fails at `workspace new` until its first deploy creates that workspace.
+- A stack of a NEW stage (anything but dev, staging, prod, core) gets the non-prod roles from the
+  backend template, whose patterns cover only `*/fnx-dev-*` and `*/fnx-staging-*`: add its
+  `*/fnx-<stage>-*` pattern to `read`/`write` (or give it its own roles and template branch)
+  before its first `init`.
 - Every principal in `allowed_principal_arns` must name the account its role lives in; the
   committed ARNs use the repository's placeholder account IDs (docs/DEPLOYMENT.md).
 

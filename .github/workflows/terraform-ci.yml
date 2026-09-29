@@ -16,7 +16,8 @@
 #     its instances are planned on push to master, never on a PR (see `affected`).
 #   - State: plans reach the single state backend through its READ-only access role
 #     (TFSTATE_ACCESS=read, -lock=false); see stacks/orgs/fnx/_defaults.yaml.
-#   - Deploy roles trust only repo:<org>/<repo>:environment:<stack>; see terraform-cd.yml.
+#   - Deploy roles trust only repo:<org>/<repo>:ref:refs/heads/<default branch>
+#     (Cloud Posse's branch-pinned model), never pull_request; see terraform-cd.yml.
 #   - Fork PRs get no OIDC token or secrets under `pull_request`; do not switch
 #     this workflow to `pull_request_target`.
 #

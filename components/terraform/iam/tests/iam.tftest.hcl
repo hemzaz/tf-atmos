@@ -90,14 +90,14 @@ run "ci_apply_kms_policy_scoped_to_the_key_aliases" {
   command = plan
 
   variables {
-    github_oidc_enabled        = true
-    github_oidc_repository     = "hemzaz/tf-atmos"
-    github_oidc_provider_arn   = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix        = "test-ci"
-    ci_apply_role_enabled      = true
-    ci_apply_role_environments = ["fnx-prod-production"]
-    ci_apply_policy_arns       = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-    ci_apply_kms_key_aliases   = ["alias/production-main"]
+    github_oidc_enabled                = true
+    github_oidc_repository             = "hemzaz/tf-atmos"
+    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                = "test-ci"
+    ci_apply_role_enabled              = true
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
+    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+    ci_apply_kms_key_aliases           = ["alias/production-main"]
   }
 
   assert {
@@ -139,13 +139,13 @@ run "no_ci_apply_kms_policy_without_the_key_aliases" {
   command = plan
 
   variables {
-    github_oidc_enabled        = true
-    github_oidc_repository     = "hemzaz/tf-atmos"
-    github_oidc_provider_arn   = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix        = "test-ci"
-    ci_apply_role_enabled      = true
-    ci_apply_role_environments = ["fnx-prod-production"]
-    ci_apply_policy_arns       = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+    github_oidc_enabled                = true
+    github_oidc_repository             = "hemzaz/tf-atmos"
+    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                = "test-ci"
+    ci_apply_role_enabled              = true
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
+    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
   }
 
   assert {
@@ -155,47 +155,114 @@ run "no_ci_apply_kms_policy_without_the_key_aliases" {
 }
 
 # State access: the CI roles reach the single state backend (backend/main in
-# fnx-core-root) only through its access roles -- the plan role may assume the
-# READ-only role, the apply role the WRITE role -- and hold no S3/KMS grant on
-# the state bucket themselves (so no lock-object writes from plans either).
-run "ci_state_access_is_sts_assume_role_on_the_backend_roles_only" {
+# fnx-core-root) only through its stage-split access roles -- prod's plan role
+# may assume only the prod READ-only role, prod's apply role only the prod
+# WRITE role -- and hold no S3/KMS grant on the state bucket themselves (so no
+# lock-object writes from plans either). The values are prod's security.yaml.
+run "ci_state_access_is_sts_assume_role_on_the_stage_backend_roles_only" {
   command = plan
 
   variables {
-    github_oidc_enabled        = true
-    github_oidc_repository     = "hemzaz/tf-atmos"
-    github_oidc_provider_arn   = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix        = "test-ci"
-    ci_apply_role_enabled      = true
-    ci_apply_role_environments = ["fnx-prod-production"]
-    ci_apply_policy_arns       = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-    ci_backend_read_role_arns = [
-      "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role",
-      "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role",
-    ]
-    ci_backend_write_role_arn = "arn:aws:iam::111111111111:role/fnx-terraform-backend-role"
+    github_oidc_enabled                = true
+    github_oidc_repository             = "hemzaz/tf-atmos"
+    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                = "test-ci"
+    ci_apply_role_enabled              = true
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
+    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+    ci_backend_read_role_arns          = ["arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role"]
+    ci_backend_write_role_arn          = "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-role"
   }
 
   assert {
     condition = (
       length(jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement) == 1
       && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Action == "sts:AssumeRole"
-      && toset(jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Resource) == toset([
-        "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role",
-        "arn:aws:iam::111111111111:role/fnx-terraform-backend-read-role",
-      ])
+      && jsondecode(aws_iam_role_policy.ci_plan_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-read-role"
     )
-    error_message = "The plan role's only state grant is sts:AssumeRole on the backend's read-only role(s): no s3:PutObject/DeleteObject (lock files) and no KMS."
+    error_message = "The prod plan role's only state grant is sts:AssumeRole on the prod read-only role: no non-prod read role, no s3:PutObject/DeleteObject (lock files), no KMS."
   }
 
   assert {
     condition = (
       length(jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement) == 1
       && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Action == "sts:AssumeRole"
-      && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-role"
+      && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-role"
     )
-    error_message = "The apply role's only state grant is sts:AssumeRole on the backend's write role."
+    error_message = "The prod apply role's only state grant is sts:AssumeRole on the prod write role (never the non-prod or core one)."
   }
+}
+
+# Apply-role trust: Cloud Posse's branch-pinned trusted_github_repos
+# (github-assume-role-policy.mixin.tf). "<org>/<repo>:<branch>" becomes exactly
+# one sub, repo:<org>/<repo>:ref:refs/heads/<branch>, matched with StringEquals.
+run "ci_apply_role_trusts_only_the_pinned_branch" {
+  command = plan
+
+  variables {
+    github_oidc_enabled                = true
+    github_oidc_repository             = "hemzaz/tf-atmos"
+    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                = "test-ci"
+    ci_apply_role_enabled              = true
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
+    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/AdministratorAccess"]
+  }
+
+  assert {
+    condition = (
+      length(jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement) == 1
+      && jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Action == "sts:AssumeRoleWithWebIdentity"
+      && jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Principal.Federated == "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+      && keys(jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Condition) == ["StringEquals"]
+      && jsondecode(aws_iam_role.ci_apply[0].assume_role_policy).Statement[0].Condition.StringEquals == {
+        "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+        "token.actions.githubusercontent.com:sub" = "repo:hemzaz/tf-atmos:ref:refs/heads/master"
+      }
+    )
+    error_message = "The apply role must trust exactly sub = repo:hemzaz/tf-atmos:ref:refs/heads/master and aud = sts.amazonaws.com (StringEquals), nothing else."
+  }
+}
+
+run "ci_apply_role_rejects_pull_request_subject" {
+  command = plan
+
+  variables {
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:pull_request"]
+  }
+
+  expect_failures = [var.ci_apply_role_trusted_github_repos]
+}
+
+run "ci_apply_role_rejects_environment_subject" {
+  command = plan
+
+  variables {
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:environment:fnx-prod-production"]
+  }
+
+  expect_failures = [var.ci_apply_role_trusted_github_repos]
+}
+
+run "ci_apply_role_rejects_wildcards" {
+  command = plan
+
+  variables {
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:*", "hemzaz/*:master", "hemzaz/tf-atmos:release/*"]
+  }
+
+  expect_failures = [var.ci_apply_role_trusted_github_repos]
+}
+
+run "ci_apply_role_rejects_a_repo_without_a_pinned_branch" {
+  command = plan
+
+  variables {
+    # Upstream would render repo:hemzaz/tf-atmos:* for this
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos"]
+  }
+
+  expect_failures = [var.ci_apply_role_trusted_github_repos]
 }
 
 run "no_ci_state_policies_without_the_backend_role_arns" {

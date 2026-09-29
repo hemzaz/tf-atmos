@@ -34,7 +34,7 @@ output "ci_plan_role_name" {
 }
 
 output "ci_apply_role_arn" {
-  description = "ARN of the GitHub Actions apply role; set it as AWS_ROLE_ARN on each stack's GitHub Environment"
+  description = "ARN of the GitHub Actions apply role (terraform-cd.yml derives the same ARN from this instance's config; no GitHub Environment is used)"
   value       = one(aws_iam_role.ci_apply[*].arn)
 }
 

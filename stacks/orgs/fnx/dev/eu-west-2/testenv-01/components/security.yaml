@@ -61,29 +61,34 @@ components:
         # is the right key here -- unlike the `environment` variable, a tier.
         ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci"
         # Owner decision: the APPLY role is enabled; it is terraform-cd.yml's
-        # deploy role (this stack's GitHub Environment AWS_ROLE_ARN) and the
-        # EKS ClusterAdmin access entry (catalog/eks/defaults.yaml). Its trust
-        # is ONLY the GitHub Environment subject below
-        # (repo:<repo>:environment:<stack>) - never pull_request or a bare
-        # ref; the environment itself is restricted to the default branch
-        # (docs/DEPLOYMENT.md). It deploys every component, the iam component
-        # included, so it holds AdministratorAccess: the Cloud Posse model
-        # (aws-team-roles' "terraform" role, which their GitOps applies
-        # assume). Anything narrower that can still manage IAM is admin with
-        # extra steps.
+        # deploy role (the ARN is derived from this instance) and the EKS
+        # ClusterAdmin access entry (catalog/eks/defaults.yaml). Its trust is
+        # Cloud Posse's branch-pinned trusted_github_repos
+        # (account-map/modules/team-assume-role-policy/github-assume-role-policy.mixin.tf):
+        # ONLY sub = repo:hemzaz/tf-atmos:ref:refs/heads/master - never
+        # pull_request, an environment or a wildcard (rejected by validation).
+        # No GitHub Environment gates it: every merge to master applies, with
+        # no manual approval (owner decision). It deploys every component, the
+        # iam component included, so it holds AdministratorAccess: the Cloud
+        # Posse model (aws-team-roles' "terraform" role, which their GitOps
+        # applies assume). Anything narrower that can still manage IAM is
+        # admin with extra steps.
         ci_apply_role_enabled: true
-        ci_apply_role_environments:
-          - "fnx-dev-testenv-01"
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
         ci_apply_policy_arns:
           - "arn:aws:iam::aws:policy/AdministratorAccess"
-        # State access: sts:AssumeRole on the single state backend's access
-        # roles (backend/main in the management account's fnx-core-root) -
-        # plan -> the non-prod read-only role, apply -> the read/write role.
-        # backend/main in fnx-core-root is declared as a (cross-stack)
-        # dependency below.
+        # State access: sts:AssumeRole on the single state backend's NON-PROD
+        # access roles only (backend/main in the management account's
+        # fnx-core-root; objects "*/fnx-dev-*", "*/fnx-staging-*") - plan ->
+        # the read-only role, apply -> the read/write role. Named by the same
+        # convention as this stack's own backend (stacks/orgs/fnx/_defaults.yaml),
+        # not read from backend/main's state: CI roles never read fnx-core-root
+        # state (core_write, the only role that can, trusts the administrator
+        # alone). The backend/main dependency below orders the deploys.
         ci_backend_read_role_arns:
-          - !terraform.state backend/main fnx-core-root .backend_read_role_arn
-        ci_backend_write_role_arn: !terraform.state backend/main fnx-core-root .backend_role_arn
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
         # kms/main's key: eks/main's cluster_encryption_config_kms_key_id
         # (compute.yaml) points every EKS cluster this apply role deploys at
         # this key, and AWS requires the calling principal -- not the

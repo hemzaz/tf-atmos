@@ -17,10 +17,11 @@ The stack configuration still contains placeholders. Replace every item below be
 | Domains and hosted zones | `domain_name`/`hosted_zone_id` in each stack's `components/globals.yaml`; `root_domain` and zone names in `components/networking.yaml` | `example.com`, `Z1234567890EXAMPLE` |
 | Alert recipients | `alarm_email_subscriptions` on the monitoring instances, and notification lists in `components/globals.yaml`; every address must confirm its SNS subscription | `*@example.com` |
 | Prod alarm SNS topic ARNs | Prod alarms that must reach an existing paging/on-call topic, e.g. `rds`'s `sns_topic_arn` | not set |
-| State backend | One bucket, `fnx-terraform-state`, in the management account with three access roles: `fnx-terraform-backend-role` (read/write, trusts the CI apply roles), `fnx-terraform-backend-read-role` (read-only, dev/staging/core objects, trusts the CI plan roles) and `fnx-terraform-backend-prod-read-role` (read-only, prod objects, trusts only prod's plan role). Every stack's backend config assumes one of them, so they must exist before any other stack's first `terraform init` | created once by `backend/main` in stack `fnx-core-root` (cold start, [below](#bootstrap-the-state-backend)); its trusted role ARNs carry the placeholder account IDs |
-| GitHub Environments | One per stack, named exactly like the stack, with `vars.AWS_ROLE_ARN` (deploy role); deployment branches: default branch only; add required reviewers to `fnx-prod-production` | none |
+| State backend | One bucket, `fnx-terraform-state`, in the management account with five access roles split by stage: `fnx-terraform-backend-role` / `fnx-terraform-backend-read-role` (read/write / read-only, dev and staging objects, trust the dev/staging CI apply / plan roles), `fnx-terraform-backend-prod-role` / `fnx-terraform-backend-prod-read-role` (prod objects, trust only prod's apply / plan role) and `fnx-terraform-backend-core-role` (`fnx-core-root` objects, trusts only the administrator who applies `backend/main`). Every stack's backend config assumes one of them, so they must exist before any other stack's first `terraform init` | created once by `backend/main` in stack `fnx-core-root` (cold start, [below](#bootstrap-the-state-backend)); its trusted role ARNs carry the placeholder account IDs |
+| GitHub Environments | None. CD uses no environment (Cloud Posse model): the apply roles trust the default-branch ref, and `terraform-cd.yml` derives each stack's apply role ARN from its `iam/ci`. There is no manual approval step - see [below](#bootstrap-the-state-backend) | n/a |
+| Default-branch protection | The deploy gate: every merge to the default branch applies every affected stack, production included. Require pull requests and reviews on it | none |
 | GitHub repo variables | `AWS_PLAN_ROLE_ARN` (read-only plan role for PR plans, dev/staging drift detection, DR checks — a dev or staging `iam/ci` `ci_plan_role_arn`); `AWS_PROD_PLAN_ROLE_ARN` (production's `iam/ci` `ci_plan_role_arn`, for prod plans on push to master and prod drift); optional `ATMOS_VERSION`, `AWS_REGION` | none |
-| OIDC trust | Deploy role: `sub = repo:<org>/<repo>:environment:<stack>`. Plan role: `sub = repo:<org>/<repo>:pull_request` and `...:ref:refs/heads/<default branch>`; production's plan role only the default-branch sub (prod is planned from master, never from a PR). Both: `aud = sts.amazonaws.com` | none |
+| OIDC trust | Deploy (apply) role: `sub = repo:<org>/<repo>:ref:refs/heads/<default branch>` only (`iam/ci` `ci_apply_role_trusted_github_repos`, Cloud Posse's branch-pinned `trusted_github_repos`). Plan role: `sub = repo:<org>/<repo>:pull_request` and `...:ref:refs/heads/<default branch>`; production's plan role only the default-branch sub (prod is planned from master, never from a PR). Both: `aud = sts.amazonaws.com` | none |
 | Deploy marker tags | One `deployed/<stack>` tag per stack, so CD knows what's already live | none |
 | Lambda deployment packages | `s3_bucket`/`s3_key` on every `lambda/*` instance in each stack's `components/services.yaml`. The buckets (`fnx-lambda-artifacts`, `fnx-staging-lambda-artifacts`, `fnx-production-lambda-artifacts`) must exist and hold the named key **before** the first apply — `aws_lambda_function` fails at apply without a package, and no static gate catches it | `<function>/latest.zip`, not uploaded |
 | Existing state | If state exists under an older bucket/key layout, migrate it first (below) | n/a |
@@ -57,8 +58,8 @@ different **address** — a rename, a module move, a `count`-to-`for_each` chang
 
 ## Bootstrap the state backend
 
-There is one state backend for every stack: bucket `fnx-terraform-state`, its KMS key and two
-access roles, managed by the only `backend` instance, `backend/main` in the management account's
+There is one state backend for every stack: bucket `fnx-terraform-state`, its KMS key and five
+stage-split access roles, managed by the only `backend` instance, `backend/main` in the management account's
 stack `fnx-core-root` (`stacks/orgs/fnx/core/eu-west-2/root.yaml`). Workload stacks have no
 backend instance. Create it once, first, with management-account administrator credentials:
 
@@ -76,20 +77,37 @@ How the stacks reach it (`stacks/orgs/fnx/_defaults.yaml`):
 
 | Who | Role assumed by the stack backend | Trusts | Locking |
 |-----|-----------------------------------|--------|---------|
-| CI plans of dev/staging (and `fnx-core-root` reads): `TFSTATE_ACCESS=read` | `fnx-terraform-backend-read-role` (read-only; objects `*/fnx-dev-*`, `*/fnx-staging-*`, `*/fnx-core-*`) | each stack's `iam/ci` plan role | `-lock=false` |
-| CI plans of prod (push to master, drift): `TFSTATE_ACCESS=read` in a stage-`prod` stack | `fnx-terraform-backend-prod-read-role` (read-only; objects `*/fnx-prod-*`) | only prod's `iam/ci` plan role (`AWS_PROD_PLAN_ROLE_ARN`, master subject only) | `-lock=false` |
-| CI deploys (`terraform-cd.yml`) and local runs | `fnx-terraform-backend-role` (read/write, every object) | each stack's `iam/ci` apply role (enabled; GitHub Environment subject only), and the administrator who applied `backend/main` | `.tflock`, `-lock-timeout=10m` in CD |
+| CI plans of dev/staging: `TFSTATE_ACCESS=read` | `fnx-terraform-backend-read-role` (read-only; objects `*/fnx-dev-*`, `*/fnx-staging-*`) | the dev and staging `iam/ci` plan roles | `-lock=false` |
+| CI deploys (`terraform-cd.yml`) of dev/staging, local runs | `fnx-terraform-backend-role` (read/write; objects `*/fnx-dev-*`, `*/fnx-staging-*`) | the dev and staging `iam/ci` apply roles, and the administrator who applied `backend/main` | `.tflock`, `-lock-timeout=10m` in CD |
+| CI plans of prod (push to master, drift, DR): `TFSTATE_ACCESS=read` in a stage-`prod` stack | `fnx-terraform-backend-prod-read-role` (read-only; objects `*/fnx-prod-*`) | only prod's `iam/ci` plan role (`AWS_PROD_PLAN_ROLE_ARN`, master subject only), and the administrator | `-lock=false` |
+| CI deploys of prod, local runs | `fnx-terraform-backend-prod-role` (read/write; objects `*/fnx-prod-*`) | only prod's `iam/ci` apply role, and the administrator | `.tflock`, `-lock-timeout=10m` in CD |
+| `fnx-core-root` (the backend itself), read or write | `fnx-terraform-backend-core-role` (read/write; objects `*/fnx-core-*`) | only the administrator who applies `backend/main` - no CI role | `.tflock` |
 
-So PR-controlled code (which can only reach a dev/staging plan role) cannot read production state
-contents. `s3:ListBucket` is not prefix-scoped — Terraform lists `<component>/` to find workspaces —
-so key *names* stay visible to every read role; see
-[the backend README](../components/terraform/backend/README.md#deployed-as).
+What this does and does not protect:
 
-`iam/ci` gets `sts:AssumeRole` on those roles, reading their ARNs cross-stack
-(`!terraform.state backend/main fnx-core-root ...`). The backend trusts the CI roles by their names
-(`<tenant>-<account>-<environment>-ci-plan` / `-apply`), listed in `root.yaml`: a new stack's CI
-roles must be added there. Anyone else who runs Terraform against a stack (an operator's SSO role)
-must be added to `access_roles` too.
+- **PR code cannot read production state contents.** A `pull_request` workflow gets an OIDC token
+  whose sub is `repo:<org>/<repo>:pull_request`, which only the dev/staging plan roles trust; they
+  can assume only `fnx-terraform-backend-read-role`, whose `GetObject` is limited to
+  `*/fnx-dev-*` and `*/fnx-staging-*`. The prod plan role and every apply role trust the
+  default-branch ref alone, so this holds even if the PR edits the workflow files.
+- **It can see key names.** `s3:ListBucket` (and, for the DR checks, `s3:ListBucketVersions`) is
+  not prefix-scoped - Terraform lists `<component>/` to find workspaces - so every read role sees
+  key *names* (component and stack/instance names) across stages; see
+  [the backend README](../components/terraform/backend/README.md#deployed-as).
+- **Merged code is trusted everywhere.** Once merged, code runs with the default-branch sub, which
+  the prod plan role and every apply role (AdministratorAccess) trust. The default branch's
+  protection is the only gate.
+- **Writes are split the same way.** A dev/staging apply role cannot touch prod or core state,
+  prod's apply role cannot touch dev/staging or core state, and no CI role can read or write
+  `fnx-core-root` state. `check-state-keys.py` (`validate-all`, `lint`) keeps every instance's
+  state key inside its stage's prefix, which these patterns rely on.
+
+`iam/ci` gets `sts:AssumeRole` on its own stage's read role (plan) and write role (apply) only,
+naming them by the same convention as the stack backend (`stacks/orgs/fnx/_defaults.yaml`) rather
+than reading `backend/main`'s state, which no CI role can read. The backend trusts the CI roles by
+their names (`<tenant>-<account>-<environment>-ci-plan` / `-apply`), listed in `root.yaml`: a new
+stack's CI roles must be added there. Anyone else who runs Terraform against a stack (an operator's
+SSO role) must be added to that stage's `access_roles` entries too.
 
 Production is planned from master only: its plan role does not trust the `pull_request` OIDC
 subject, and `terraform-ci.yml` plans prod instances on push to master instead of on the PR
@@ -97,9 +115,14 @@ subject, and `terraform-ci.yml` plans prod instances on push to master instead o
 with `AWS_PROD_PLAN_ROLE_ARN`.
 
 The CI apply role (`<prefix>-apply`) is enabled in every stack with `AdministratorAccess` (it
-deploys every component, `iam` included; it is also the EKS ClusterAdmin access entry). It trusts
-only `repo:<org>/<repo>:environment:<stack>`, so its protection is the GitHub Environment: default
-branch only, required reviewers on `fnx-prod-production`.
+deploys every component, `iam` included; it is also the EKS ClusterAdmin access entry). Its trust
+is Cloud Posse's branch-pinned model
+([`github-assume-role-policy.mixin.tf`](https://github.com/cloudposse/terraform-aws-components/blob/main/modules/account-map/modules/team-assume-role-policy/github-assume-role-policy.mixin.tf)):
+only `sub = repo:<org>/<repo>:ref:refs/heads/<default branch>`; `pull_request`, `environment:`
+and wildcard subjects are rejected by validation. `terraform-cd.yml` uses no GitHub Environment.
+**There is no manual approval before a deploy, production included: every merge to the default
+branch that affects a stack applies it.** Review happens on the pull request (with the plans CI
+posts there; prod's plan runs on the push to master), and merging is the approval.
 
 ## Deploy the stack
 
@@ -111,7 +134,7 @@ those planfiles (`terraform deploy --from-plan`).
 | Layer | Workflow | Selects |
 |-------|----------|---------|
 | backend | `deploy-backend` | `backend` (only `fnx-core-root` has one) |
-| iam | `deploy-iam` | `iam` (`iam/ci` reads `backend/main` in `fnx-core-root`) |
+| iam | `deploy-iam` | `iam` (`iam/ci` depends on `backend/main` in `fnx-core-root`) |
 | kms | `deploy-kms` | `kms` |
 | networking | `deploy-networking` | `vpc` |
 | connectivity | `deploy-connectivity` | `securitygroup`, `network` (VPC peering), `ec2/bastion` |
@@ -211,8 +234,8 @@ After the GitHub prerequisites above are in place:
   [CI/CD table](../README.md#cicd) for the full job list, including the `emulator.yml` LocalEmu
   lane, which also runs on PRs.
 - **Merges to the default branch** (`terraform-cd.yml`): for each stack in turn (dev, staging,
-  prod), runs `atmos terraform deploy --affected` against the stack's `deployed/<stack>` tag inside
-  its GitHub Environment, then moves the tag.
+  prod), runs `atmos terraform deploy --affected` against the stack's `deployed/<stack>` tag with
+  that stack's `iam/ci` apply role (no GitHub Environment, no manual approval), then moves the tag.
 - **Manual runs**: `terraform-cd.yml` can plan or deploy one stack (optionally one component) from
   the default branch.
 
@@ -250,7 +273,7 @@ atmos workflow drift-detection -f drift-detection -s <stack>   # should report n
 | Symptom | Cause and fix |
 |---------|---------------|
 | `This repository requires Atmos >= 1.229.0` | Upgrade Atmos |
-| `init` fails to assume `fnx-terraform-backend-role` (or `-read-role` with `TFSTATE_ACCESS=read`) | Backend not bootstrapped yet (`backend-cold-start`), or the caller's role ARN is not in `backend/main`'s `access_roles` in `fnx-core-root` — see [Bootstrap the state backend](#bootstrap-the-state-backend) |
+| `init` fails to assume `fnx-terraform-backend[-prod\|-core][-read]-role` | Backend not bootstrapped yet (`backend-cold-start`), or the caller's role ARN is not in that stage's entry of `backend/main`'s `access_roles` in `fnx-core-root` (`fnx-core-root` itself: only the administrator who applied `backend/main`) — see [Bootstrap the state backend](#bootstrap-the-state-backend) |
 | A CI plan fails creating the workspace (`workspace new`, AccessDenied on `PutObject`) | The read-only state role cannot create a workspace's first (empty) state object; the instance's first deploy creates it |
 | `Error acquiring the state lock` | Another run holds the lockfile; see [Operations Guide](./OPERATIONS.md#state-locks) |
 | `!terraform.state` returns nothing | Referenced component hasn't been deployed in that stack yet; deploy in layer order |

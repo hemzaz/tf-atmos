@@ -71,10 +71,13 @@ variables {
   bucket_name = "fnx-terraform-state"
   access_roles = {
     read = {
-      role_name              = "fnx-terraform-backend-read-role"
-      write_enabled          = false
-      allowed_principal_arns = ["arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan"]
-      object_key_patterns    = ["*/fnx-dev-*", "*/fnx-staging-*", "*/fnx-core-*"]
+      role_name = "fnx-terraform-backend-read-role"
+      allowed_principal_arns = [
+        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan",
+        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-plan",
+      ]
+      write_enabled       = false
+      object_key_patterns = ["*/fnx-dev-*", "*/fnx-staging-*"]
     }
     prod_read = {
       role_name              = "fnx-terraform-backend-prod-read-role"
@@ -83,9 +86,24 @@ variables {
       object_key_patterns    = ["*/fnx-prod-*"]
     }
     write = {
-      role_name              = "fnx-terraform-backend-role"
+      role_name = "fnx-terraform-backend-role"
+      allowed_principal_arns = [
+        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-apply",
+        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-apply",
+      ]
+      write_enabled       = true
+      object_key_patterns = ["*/fnx-dev-*", "*/fnx-staging-*"]
+    }
+    prod_write = {
+      role_name              = "fnx-terraform-backend-prod-role"
       write_enabled          = true
-      allowed_principal_arns = ["arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-apply"]
+      allowed_principal_arns = ["arn:aws:iam::444444444444:role/fnx-prod-production-ci-apply"]
+      object_key_patterns    = ["*/fnx-prod-*"]
+    }
+    core_write = {
+      role_name           = "fnx-terraform-backend-core-role"
+      write_enabled       = true
+      object_key_patterns = ["*/fnx-core-*"]
     }
   }
 }
@@ -94,8 +112,25 @@ run "roles_are_named_as_the_stack_backend_expects" {
   command = plan
 
   assert {
-    condition     = aws_iam_role.access["write"].name == "fnx-terraform-backend-role" && aws_iam_role.access["read"].name == "fnx-terraform-backend-read-role"
-    error_message = "The write role keeps the name stacks/orgs/fnx/_defaults.yaml assumes; the read role gets its own name."
+    condition = (
+      aws_iam_role.access["write"].name == "fnx-terraform-backend-role"
+      && aws_iam_role.access["read"].name == "fnx-terraform-backend-read-role"
+      && aws_iam_role.access["prod_write"].name == "fnx-terraform-backend-prod-role"
+      && aws_iam_role.access["prod_read"].name == "fnx-terraform-backend-prod-read-role"
+      && aws_iam_role.access["core_write"].name == "fnx-terraform-backend-core-role"
+    )
+    error_message = "The role names are the ones stacks/orgs/fnx/_defaults.yaml's backend template assumes."
+  }
+
+  assert {
+    condition = (
+      output.backend_role_name == "fnx-terraform-backend-role"
+      && output.backend_read_role_name == "fnx-terraform-backend-read-role"
+      && output.backend_prod_role_name == "fnx-terraform-backend-prod-role"
+      && output.backend_prod_read_role_name == "fnx-terraform-backend-prod-read-role"
+      && output.backend_core_role_name == "fnx-terraform-backend-core-role"
+    )
+    error_message = "Every conventional access_roles key has its output (names known at plan; the ARN outputs read the same keys)."
   }
 }
 
@@ -136,15 +171,32 @@ run "trust_is_limited_to_named_principals_and_the_caller" {
 
   assert {
     condition = (
-      local.access_role_principal_arns["read"] == tolist(["arn:aws:iam::111111111111:role/admin", "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan"])
-      && local.access_role_principal_arns["write"] == tolist(["arn:aws:iam::111111111111:role/admin", "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-apply"])
+      local.access_role_principal_arns["read"] == tolist([
+        "arn:aws:iam::111111111111:role/admin",
+        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan",
+        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-plan",
+      ])
+      && local.access_role_principal_arns["write"] == tolist([
+        "arn:aws:iam::111111111111:role/admin",
+        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-apply",
+        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-apply",
+      ])
+      && local.access_role_principal_arns["prod_read"] == tolist([
+        "arn:aws:iam::111111111111:role/admin",
+        "arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan",
+      ])
+      && local.access_role_principal_arns["prod_write"] == tolist([
+        "arn:aws:iam::111111111111:role/admin",
+        "arn:aws:iam::444444444444:role/fnx-prod-production-ci-apply",
+      ])
+      && local.access_role_principal_arns["core_write"] == tolist(["arn:aws:iam::111111111111:role/admin"])
     )
-    error_message = "Each role trusts its allowed_principal_arns plus the caller (Cloud Posse behaviour), nothing else."
+    error_message = "Each role trusts exactly its allowed_principal_arns plus the caller (Cloud Posse behaviour): dev/staging CI roles only the non-prod roles, prod's only the prod ones, and the core role the caller alone."
   }
 
   assert {
     condition = alltrue([
-      for key in ["read", "write"] :
+      for key in keys(var.access_roles) :
       one(data.aws_iam_policy_document.access_role_assume[key].statement).condition != null
       && one(one(data.aws_iam_policy_document.access_role_assume[key].statement).condition).test == "ArnEquals"
       && one(one(data.aws_iam_policy_document.access_role_assume[key].statement).condition).variable == "aws:PrincipalArn"
@@ -153,7 +205,7 @@ run "trust_is_limited_to_named_principals_and_the_caller" {
   }
 
   assert {
-    condition     = local.access_role_principal_accounts["read"] == tolist(["arn:aws:iam::111111111111:root", "arn:aws:iam::222222222222:root"])
+    condition     = local.access_role_principal_accounts["read"] == tolist(["arn:aws:iam::111111111111:root", "arn:aws:iam::222222222222:root", "arn:aws:iam::333333333333:root"]) && local.access_role_principal_accounts["core_write"] == tolist(["arn:aws:iam::111111111111:root"])
     error_message = "The trust policy's principals are the accounts of the allowed ARNs."
   }
 }
@@ -169,10 +221,36 @@ run "root_user_caller_is_not_trusted" {
     }
   }
 
+  variables {
+    access_roles = {
+      read = {
+        role_name              = "fnx-terraform-backend-read-role"
+        write_enabled          = false
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan"]
+      }
+    }
+  }
+
   assert {
     condition     = local.access_role_principal_arns["read"] == tolist(["arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan"])
     error_message = "A root-user caller must never be added to a role's trust."
   }
+}
+
+# The core role lists no principals (Cloud Posse's default): with a root-user
+# caller it would trust nobody, which the role's precondition refuses.
+run "caller_only_role_fails_for_a_root_user_caller" {
+  command = plan
+
+  override_data {
+    target          = data.aws_iam_session_context.current
+    override_during = plan
+    values = {
+      issuer_arn = "arn:aws:iam::111111111111:root"
+    }
+  }
+
+  expect_failures = [aws_iam_role.access["core_write"]]
 }
 
 run "rejects_wildcard_principal" {
@@ -223,94 +301,155 @@ run "rejects_account_root_principal" {
   expect_failures = [var.access_roles]
 }
 
-run "rejects_empty_principal_list" {
-  command = plan
-
-  variables {
-    access_roles = {
-      write = {
-        role_name              = "fnx-terraform-backend-role"
-        write_enabled          = true
-        allowed_principal_arns = []
-      }
-    }
-  }
-
-  expect_failures = [var.access_roles]
-}
-
-# Prefix split (owner decision): one bucket, but the non-prod read role can get
-# only dev/staging (and fnx-core-root) state objects and the prod read role
-# only prod ones. The object ARNs each role's GetObject statement allows are
+# Prefix split (owner decisions): one bucket, but every role reaches only its
+# stage's state objects - reads AND writes (non-prod: dev/staging; prod; core).
+# The object ARNs each role's GetObject / PutObject statement allows are
 # matched against real keys with S3's wildcard semantics ("*" spans "/").
-run "non_prod_read_role_cannot_get_prod_objects" {
+run "non_prod_roles_reach_only_dev_and_staging_objects" {
   command = plan
 
   assert {
     condition = alltrue([
-      for key in [
+      for pair in setproduct(["s3:GetObject"], [
+        "vpc/fnx-dev-testenv-01/terraform.tfstate",
+        "vpc/fnx-dev-testenv-01/terraform.tfstate.tflock",
+        "iam/fnx-staging-staging-01-iam-ci/terraform.tfstate",
+        ]) : anytrue([
+        for statement in data.aws_iam_policy_document.access_role["read"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
+      ])
+    ])
+    error_message = "The non-prod read role must read dev and staging state."
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], concat([
         "iam/fnx-prod-production/terraform.tfstate",
         "iam/fnx-prod-production-iam-ci/terraform.tfstate",
         "eks/fnx-prod-production-eks-main/terraform.tfstate.tflock",
-        ] : !anytrue([
-          for statement in data.aws_iam_policy_document.access_role["read"].statement : anytrue([
-            for arn in tolist(statement.resources) :
-            can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${key}"))
-          ]) if contains(tolist(statement.actions), "s3:GetObject")
+        ], [
+        "backend/fnx-core-root/terraform.tfstate",
+        "backend/fnx-core-root/terraform.tfstate.tflock",
+        ])) : !anytrue([
+        for statement in data.aws_iam_policy_document.access_role["read"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
       ])
     ])
-    error_message = "The non-prod read role (used by PR plans) must not be able to read any production state object."
+    error_message = "The non-prod read role (used by PR plans) must not touch any production or fnx-core-root state object."
   }
 
   assert {
     condition = alltrue([
-      for key in [
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], [
         "vpc/fnx-dev-testenv-01/terraform.tfstate",
+        "vpc/fnx-dev-testenv-01/terraform.tfstate.tflock",
         "iam/fnx-staging-staging-01-iam-ci/terraform.tfstate",
-        "backend/fnx-core-root-backend-main/terraform.tfstate",
-        ] : anytrue([
-          for statement in data.aws_iam_policy_document.access_role["read"].statement : anytrue([
-            for arn in tolist(statement.resources) :
-            can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${key}"))
-          ]) if contains(tolist(statement.actions), "s3:GetObject")
+        ]) : anytrue([
+        for statement in data.aws_iam_policy_document.access_role["write"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
       ])
     ])
-    error_message = "The non-prod read role must read dev, staging and fnx-core-root state (iam/ci reads backend/main there)."
+    error_message = "The non-prod write role must read, write and delete dev and staging state and .tflock objects."
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], concat([
+        "iam/fnx-prod-production/terraform.tfstate",
+        "iam/fnx-prod-production-iam-ci/terraform.tfstate",
+        "eks/fnx-prod-production-eks-main/terraform.tfstate.tflock",
+        ], [
+        "backend/fnx-core-root/terraform.tfstate",
+        "backend/fnx-core-root/terraform.tfstate.tflock",
+        ])) : !anytrue([
+        for statement in data.aws_iam_policy_document.access_role["write"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
+      ])
+    ])
+    error_message = "The non-prod write role (dev/staging apply roles) must not read, write or delete any production or fnx-core-root object."
   }
 }
 
-run "prod_read_role_cannot_get_non_prod_objects" {
+run "prod_roles_reach_only_prod_objects" {
   command = plan
 
   assert {
     condition = alltrue([
-      for key in [
-        "vpc/fnx-dev-testenv-01/terraform.tfstate",
-        "iam/fnx-staging-staging-01-iam-ci/terraform.tfstate",
-        "backend/fnx-core-root/terraform.tfstate",
-        ] : !anytrue([
-          for statement in data.aws_iam_policy_document.access_role["prod_read"].statement : anytrue([
-            for arn in tolist(statement.resources) :
-            can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${key}"))
-          ]) if contains(tolist(statement.actions), "s3:GetObject")
+      for pair in setproduct(["s3:GetObject"], [
+        "iam/fnx-prod-production/terraform.tfstate",
+        "iam/fnx-prod-production-iam-ci/terraform.tfstate",
+        "eks/fnx-prod-production-eks-main/terraform.tfstate.tflock",
+        ]) : anytrue([
+        for statement in data.aws_iam_policy_document.access_role["prod_read"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
       ])
     ])
-    error_message = "The prod read role must not be able to read non-prod state objects."
+    error_message = "The prod read role must read production state."
   }
 
   assert {
     condition = alltrue([
-      for key in [
-        "iam/fnx-prod-production/terraform.tfstate",
-        "eks/fnx-prod-production-eks-main/terraform.tfstate",
-        ] : anytrue([
-          for statement in data.aws_iam_policy_document.access_role["prod_read"].statement : anytrue([
-            for arn in tolist(statement.resources) :
-            can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${key}"))
-          ]) if contains(tolist(statement.actions), "s3:GetObject")
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], concat([
+        "vpc/fnx-dev-testenv-01/terraform.tfstate",
+        "vpc/fnx-dev-testenv-01/terraform.tfstate.tflock",
+        "iam/fnx-staging-staging-01-iam-ci/terraform.tfstate",
+        ], [
+        "backend/fnx-core-root/terraform.tfstate",
+        "backend/fnx-core-root/terraform.tfstate.tflock",
+        ])) : !anytrue([
+        for statement in data.aws_iam_policy_document.access_role["prod_read"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
       ])
     ])
-    error_message = "The prod read role must read production state."
+    error_message = "The prod read role must not touch non-prod or fnx-core-root state objects."
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], [
+        "iam/fnx-prod-production/terraform.tfstate",
+        "iam/fnx-prod-production-iam-ci/terraform.tfstate",
+        "eks/fnx-prod-production-eks-main/terraform.tfstate.tflock",
+        ]) : anytrue([
+        for statement in data.aws_iam_policy_document.access_role["prod_write"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
+      ])
+    ])
+    error_message = "The prod write role must read, write and delete production state and .tflock objects."
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], concat([
+        "vpc/fnx-dev-testenv-01/terraform.tfstate",
+        "vpc/fnx-dev-testenv-01/terraform.tfstate.tflock",
+        "iam/fnx-staging-staging-01-iam-ci/terraform.tfstate",
+        ], [
+        "backend/fnx-core-root/terraform.tfstate",
+        "backend/fnx-core-root/terraform.tfstate.tflock",
+        ])) : !anytrue([
+        for statement in data.aws_iam_policy_document.access_role["prod_write"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
+      ])
+    ])
+    error_message = "The prod write role must not read, write or delete non-prod or fnx-core-root objects."
   }
 
   assert {
@@ -322,27 +461,74 @@ run "prod_read_role_cannot_get_non_prod_objects" {
   }
 }
 
-run "each_read_role_trusts_only_its_principals" {
+run "core_role_reaches_only_core_objects" {
   command = plan
 
   assert {
-    condition = (
-      local.access_role_principal_arns["prod_read"] == tolist(["arn:aws:iam::111111111111:role/admin", "arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan"])
-      && !contains(local.access_role_principal_arns["read"], "arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan")
-    )
-    error_message = "The prod read role trusts only the prod plan role (and the caller); PR-assumable plan roles are never in it."
+    condition = alltrue([
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], [
+        "backend/fnx-core-root/terraform.tfstate",
+        "backend/fnx-core-root/terraform.tfstate.tflock",
+        ]) : anytrue([
+        for statement in data.aws_iam_policy_document.access_role["core_write"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
+      ])
+    ])
+    error_message = "The core role must read, write and delete the backend's own (fnx-core-root) state."
+  }
+
+  assert {
+    condition = alltrue([
+      for pair in setproduct(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], concat([
+        "vpc/fnx-dev-testenv-01/terraform.tfstate",
+        "vpc/fnx-dev-testenv-01/terraform.tfstate.tflock",
+        "iam/fnx-staging-staging-01-iam-ci/terraform.tfstate",
+        ], [
+        "iam/fnx-prod-production/terraform.tfstate",
+        "iam/fnx-prod-production-iam-ci/terraform.tfstate",
+        "eks/fnx-prod-production-eks-main/terraform.tfstate.tflock",
+        ])) : !anytrue([
+        for statement in data.aws_iam_policy_document.access_role["core_write"].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), pair[0])
+      ])
+    ])
+    error_message = "The core role must not touch workload state."
   }
 }
 
-run "write_role_keeps_whole_bucket_access" {
+run "read_roles_get_the_disaster_recovery_listing_and_write_roles_do_not" {
   command = plan
 
   assert {
-    condition = anytrue([
-      for statement in data.aws_iam_policy_document.access_role["write"].statement :
-      contains(tolist(statement.resources), "arn:aws:s3:::fnx-terraform-state/*") if contains(tolist(statement.actions), "s3:PutObject")
+    condition = alltrue([
+      for key in ["read", "prod_read"] : length(setintersection(
+        toset(flatten([for s in data.aws_iam_policy_document.access_role[key].statement : tolist(s.actions)])),
+        toset(["s3:ListBucketVersions", "s3:GetBucketVersioning", "s3:GetReplicationConfiguration"])
+      )) == 3
     ])
-    error_message = "The one write role (object_key_patterns default) covers every state object."
+    error_message = "The DR checks (workflows/scripts/dr) list state versions and read the bucket's versioning/replication through the read roles."
+  }
+
+  assert {
+    condition = alltrue([
+      for key in ["read", "prod_read", "write", "prod_write", "core_write"] : !contains(
+        flatten([for s in data.aws_iam_policy_document.access_role[key].statement : tolist(s.actions)]), "s3:GetObjectVersion"
+      )
+    ])
+    error_message = "No role may read an old object version: ListBucketVersions shows names and version IDs only."
+  }
+
+  assert {
+    condition = alltrue([
+      for key in ["write", "prod_write", "core_write"] : !contains(
+        flatten([for s in data.aws_iam_policy_document.access_role[key].statement : tolist(s.actions)]), "s3:ListBucketVersions"
+      )
+    ])
+    error_message = "Only the read-only roles carry the DR listing statement."
   }
 }
 
