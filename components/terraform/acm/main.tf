@@ -3,6 +3,36 @@ locals {
 
   # Validate that if tags contains an Environment key, we can use it
   environment = try(var.tags["Environment"], "unknown")
+
+  # One Route53 validation record per distinct validation name. ACM gives a
+  # name and its wildcard (x and *.x) the same CNAME, and the same name the
+  # same CNAME in every certificate, so the records are keyed by the name
+  # without its "*." -- one key per resource_record_name. The record names
+  # themselves are only known once a certificate exists, so they cannot be
+  # for_each keys; these come from configuration. Cloud Posse's
+  # acm-request-certificate does the same (count over the distinct names).
+  # Value: the first DNS-validated certificate that carries the name.
+  validation_names = {
+    for name in distinct(flatten([
+      for key, domain in local.dns_domains : [
+        for n in concat([domain.domain_name], domain.subject_alternative_names) : trimprefix(lower(n), "*.")
+      ] if domain.validation_method == "DNS"
+    ])) :
+    name => [
+      for key, domain in local.dns_domains : key
+      if domain.validation_method == "DNS" && contains([
+        for n in concat([domain.domain_name], domain.subject_alternative_names) : trimprefix(lower(n), "*.")
+      ], name)
+    ][0]
+  }
+
+  # That certificate's validation option for the name (x and *.x share it).
+  validation_options = {
+    for name, key in local.validation_names : name => [
+      for dvo in aws_acm_certificate.main[key].domain_validation_options : dvo
+      if trimprefix(lower(dvo.domain_name), "*.") == name
+    ][0]
+  }
 }
 
 resource "aws_acm_certificate" "main" {
@@ -45,22 +75,13 @@ resource "aws_acm_certificate" "main" {
 }
 
 resource "aws_route53_record" "validation" {
-  for_each = {
-    for dvo in flatten([
-      for domain_key, domain in local.dns_domains : [
-        for dvo in aws_acm_certificate.main[domain_key].domain_validation_options : {
-          domain_key = domain_key
-          dvo        = dvo
-        }
-      ] if domain.validation_method == "DNS"
-    ]) : "${dvo.domain_key}.${dvo.dvo.domain_name}" => dvo
-  }
+  for_each = local.validation_names
 
   zone_id         = var.zone_id
-  name            = each.value.dvo.resource_record_name
-  type            = each.value.dvo.resource_record_type
+  name            = local.validation_options[each.key].resource_record_name
+  type            = local.validation_options[each.key].resource_record_type
   ttl             = 60
-  records         = [each.value.dvo.resource_record_value]
+  records         = [local.validation_options[each.key].resource_record_value]
   allow_overwrite = true
 
   lifecycle {
@@ -94,17 +115,14 @@ resource "aws_acm_certificate_validation" "main" {
       error_message = "No validation records found for certificate ${each.key}. Check that the domain is configured correctly."
     }
 
-    # Verify every validation record of THIS certificate has been created.
-    # aws_route53_record.validation is keyed "<certificate key>.<dvo domain_name>",
-    # one key per DVO (a domain and its wildcard share one record name but keep
-    # separate keys), so each of this certificate's DVOs must have its own key.
-    # The previous check counted every record in the instance, so any instance
-    # with two or more certificates failed here.
+    # Verify every distinct validation record name of THIS certificate has a
+    # record. (The previous check counted every record in the instance, so any
+    # instance with two or more certificates failed here.)
     precondition {
-      condition = alltrue([
-        for dvo in aws_acm_certificate.main[each.key].domain_validation_options :
-        contains(keys(aws_route53_record.validation), "${each.key}.${dvo.domain_name}")
-      ])
+      condition = length(setsubtract(
+        toset([for dvo in aws_acm_certificate.main[each.key].domain_validation_options : trimsuffix(lower(dvo.resource_record_name), ".")]),
+        toset([for record in aws_route53_record.validation : trimsuffix(lower(record.name), ".")])
+      )) == 0
       error_message = "Not all validation records have been created for certificate ${each.key}. DNS validation may fail."
     }
 

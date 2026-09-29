@@ -40,19 +40,26 @@ Output `certificate_arns` is consumed by `apigateway/main`, `apigateway/data`,
   A name that belongs to a more specific public zone of the stack (for example
   `data.services.<d>`, the apex of `network/services`' `data` zone) cannot be a SAN of a
   certificate validated in its parent zone; `check-domains.py` rejects it.
-- `aws_acm_certificate_validation`'s precondition checks that each of the certificate's own
-  domain validation options has its record (`aws_route53_record.validation` is keyed
-  `<certificate key>.<DVO domain>`). It used to count every record in the instance, so any
-  instance with two or more certificates failed at apply.
+- `aws_route53_record.validation` has one record per distinct validation name: keyed by the
+  domain without `*.` across all DNS-validated certificates, which is one key per
+  `resource_record_name` (`x` and `*.x` share a CNAME, as does the same name in two
+  certificates). The record names themselves are unknown until the certificate exists, so they
+  cannot be `for_each` keys; Cloud Posse's `acm-request-certificate` counts distinct names the
+  same way. One resource per record, so destroying one no longer deletes a record another
+  still uses.
+- `aws_acm_certificate_validation`'s precondition requires a record for every distinct
+  `resource_record_name` of that certificate's validation options. It used to count every
+  record in the instance, so any instance with two or more certificates failed at apply.
 - `certificate_keys` / `certificate_crts` outputs are placeholder strings only — ACM's
   API cannot export private keys or cert bodies; use `scripts/certificates/export-cert.sh`.
 - `tags` without an `Environment` key fails validation before any plan.
 
 ## Tests
 
-`tests/validation.tftest.hcl` plans one certificate, two certificates, and a DNS + EMAIL
-mix against a mock provider (`override_during = plan` with mocked
-`domain_validation_options`), so the per-certificate precondition is evaluated:
+`tests/validation.tftest.hcl` plans one certificate, two certificates, a wildcard + apex
+certificate (one shared record), a DNS + EMAIL mix, and a validation option without a record
+(the precondition fails) against a mock provider (`override_during = plan`, per-certificate
+`domain_validation_options` overrides), so the precondition is evaluated:
 `terraform init -backend=false && terraform test`.
 
 ## Usage
