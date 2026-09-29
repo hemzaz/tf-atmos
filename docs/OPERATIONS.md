@@ -168,8 +168,7 @@ STACK=<stack> atmos workflow dr-failback -f disaster-recovery
 
 ## Deploys green, does not serve
 
-Prod `elasticache/main` admits only `eks/main`'s cluster security group; `cognito/main`
-has no users or identity provider, so `/api` rejects every request; `apigateway` `/` is a `MOCK`
+`cognito/main` has no users or identity provider, so `/api` rejects every request; `apigateway` `/` is a `MOCK`
 liveness endpoint by design.
 
 ## Troubleshooting

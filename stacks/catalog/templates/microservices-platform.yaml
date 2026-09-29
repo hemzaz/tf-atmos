@@ -531,7 +531,7 @@ components:
         # Every member Ingress must set alb.ingress.kubernetes.io/listen-ports
         # explicitly to microservices/alb-ingress-group's
         # member_listen_ports_annotation output -- see that component's
-        # README "Dependencies / gotchas" for the full annotation-merge
+        # README "Notes" for the full annotation-merge
         # rules (scheme/security-groups/ssl-policy are exclusive instead;
         # members must omit those, never set a different value).
         http_routes:

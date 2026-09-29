@@ -83,10 +83,7 @@ variable "custom_dashboards" {
   # certificates, backend-services. A custom_dashboards key equal to one of
   # these would build the exact same CloudWatch dashboard name as the
   # built-in resource, and both Terraform resources would then manage the
-  # same AWS object, each apply overwriting the other's state - the same
-  # duplicate-resource collision the Dashboard dimensions section of the
-  # README documents for the dashboards this component used to duplicate
-  # internally.
+  # same AWS object, each apply overwriting the other's state.
   validation {
     condition = alltrue([
       for k in keys(var.custom_dashboards) : !contains([

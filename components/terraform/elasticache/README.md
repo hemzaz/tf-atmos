@@ -1,96 +1,27 @@
 # elasticache
 
-Creates an `aws_elasticache_replication_group` (Redis/Valkey) with its subnet
-group and a security group. Encryption at rest and in transit are on by
-default and validated to stay on; the AUTH token is required whenever transit
-encryption is enabled, so the cache is never reachable unauthenticated.
-`num_cache_nodes` + `automatic_failover_enabled` + `multi_az_enabled` describe
-a replicated cache, so this is a replication group, not an
-`aws_elasticache_cluster` — that resource has neither failover nor Multi-AZ.
+A Redis/Valkey `aws_elasticache_replication_group` (failover and Multi-AZ need a replication group,
+not `aws_elasticache_cluster`) with subnet group, security group, optional parameter group, and a
+Secrets Manager copy of the AUTH token. Encryption at rest and in transit are forced on, and the
+AUTH token is required.
 
-## Deployed instances
+## Wiring
 
-`elasticache/main` in `fnx-prod-production` only
-(`stacks/orgs/fnx/prod/eu-west-2/production/components/services.yaml`), the
-only stack with a real cache workload today; dev and staging run no instance
-(see `stacks/catalog/elasticache/defaults.yaml`). `eks-backend-services/main`
-in prod reads `auth_token_secret_arn` below to populate its redis
-`ExternalSecret` (its `redis_enabled` flag is off in dev/staging for the same
-reason). `allowed_security_group_ids` is `eks/main`'s
-`eks_cluster_managed_security_group_id` (`eks-backend-services/main`'s pods
-are the consumer), and `auth_token_secret_kms_key_id` is `kms/main`'s
-`key_arn` — `external-secrets/main`'s IAM policy already grants `kms:Decrypt`
-on that key, gated by `kms:ViaService=secretsmanager`.
+- Instance: `elasticache/main` in `fnx-prod-production` only. Reads `vpc/main .vpc_id` /
+  `.private_subnet_ids` and `kms/main .key_arn`, admits `eks/main
+  .eks_cluster_managed_security_group_id`. `auth_token` comes from `!env PROD_ELASTICACHE_AUTH_TOKEN`.
+- Used by: `eks-backend-services` (`.auth_token_secret_arn`, `.primary_endpoint_address`, `.port`),
+  `monitoring/main` (`.member_clusters`).
 
-## Inputs / outputs
+## Notes
 
-| Key | Notes |
-|---|---|
-| `region`, `tags`, `cluster_id`, `vpc_id`, `subnet_ids` (required) | `tags` must include a non-empty `Environment`; it prefixes every resource name |
-| `at_rest_encryption_enabled`, `transit_encryption_enabled` | default `true`; validation forces `true` |
-| `auth_token` | sensitive, 16-128 chars, no `/ " @` or spaces; required when transit encryption is on; never exported directly |
-| `store_auth_token_in_secrets_manager` (`true`), `auth_token_secret_kms_key_id` (null), `auth_token_secret_recovery_window_in_days` (30) | mirrors `ec2`'s ssh-key pattern: `auth_token` is also written to a Secrets Manager secret (`redis-auth/<Environment>/<cluster_id>`, JSON key `auth_token`) so a consumer can read it back via an `ExternalSecret` instead of a Terraform variable — `auth_token` itself only ever flows into `aws_elasticache_replication_group` and this secret, never a plain output |
-| `num_cache_nodes` (2) | maps to `num_cache_clusters`; `automatic_failover_enabled` requires >= 2, `multi_az_enabled` requires failover |
-| `allowed_security_group_ids`, `allowed_cidr_blocks` | ingress on `port` (6379); `0.0.0.0/0` is rejected by validation. A resource that itself reads this component's outputs (e.g. a rotation Lambda reading `replication_group_id`) should attach to `client_security_group_id` (out, below) instead of being added here -- adding IT here would mean this component reading THAT resource's own security group back, a dependency cycle |
-| `kms_key_id` (null), `snapshot_retention_limit` (7) | null KMS key falls back to the AWS-owned key; backups cannot be turned off |
-| `cluster_mode_enabled` (false), `cluster_mode_num_node_groups` (1), `cluster_mode_replicas_per_node_group` (1) | Cloud Posse's names. On: shards replace `num_cache_nodes`, failover is required. `0` replicas per shard is allowed, as AWS does, for cheaper dev/test shards with no failover target. **Toggling `cluster_mode_enabled` on an existing cache is not an in-place migration** — this component has no online-migration path between the two topologies (or for flipping `cluster-enabled` on an attached, in-use parameter group), so treat a change as replacing the cache |
-| `family` (null), `parameters` ([]), `parameter_group_name` (null) | with `parameters` or cluster mode, a group `<Environment>-<cluster_id>-<family>` (family in the name so a family change, which forces replacement, doesn't collide with the old group under `create_before_destroy`) is created in `family` (required then, and validated to start with `engine`, e.g. `redis6.x`/`redis7`/`redis5.0` for `redis`, `valkey8` for `valkey`) and attached; cluster mode forces `cluster-enabled=yes`. Setting `cluster-enabled` directly in `parameters` is rejected by validation — use `cluster_mode_enabled` instead. `parameter_group_name` attaches an existing group instead and excludes `parameters`; **when `cluster_mode_enabled` is true, that named group must itself be cluster-enabled** (e.g. `default.<family>.cluster.on`) — not validated, only documented |
-| `additional_policy_json` | an IAM policy document (JSON, `{Version, Statement}`) whose `Statement` entries are folded into `rotation_policy`, mirroring `kinesis`'s `additional_policy_json`/`combined_policy` -- see that variable's description for why |
-| out: `primary_endpoint_address` (null in cluster mode), `configuration_endpoint_address` (cluster mode), `reader_endpoint_address`, `replication_group_id`/`_arn`, `member_clusters`, `parameter_group_name`, `port`, `security_group_id`, `client_security_group_id`, `subnet_group_name`, `auth_token_secret_arn`, `rotation_policy` | `member_clusters` are the node IDs, the `CacheClusterId` dimension of per-node CloudWatch metrics; `client_security_group_id` is a rule-less security group a consumer attaches ITSELF to for cache access (see `allowed_security_group_ids`'s note on why, above); `auth_token_secret_arn` is null when `store_auth_token_in_secrets_manager` is false; `rotation_policy` is a ready-made IAM policy document (`elasticache:ModifyReplicationGroup`/`DescribeReplicationGroups` on this replication group, plus `additional_policy_json` folded in) for a Secrets Manager rotation Lambda's `custom_policy` |
-
-## Dependencies / gotchas
-
-- Needs a VPC for `vpc_id` and private `subnet_ids`. `vpc/main` exports no
-  `elasticache_subnet_ids` today, so prod's `!terraform.state vpc/main
-  .elasticache_subnet_ids` will not resolve until vpc adds that output.
-- Egress is restricted to node-to-node replication.
-- One `#checkov:skip=CKV2_AWS_5`: checkov's graph does not follow
-  `aws_security_group.main[0].id` through the `count` index. The identical
-  config passes with `count` removed.
-- One `#checkov:skip=CKV2_AWS_57` on `aws_secretsmanager_secret.auth_token`:
-  that secret only ever mirrors the replication group's `auth_token` input
-  (`!env PROD_ELASTICACHE_AUTH_TOKEN` today); rotating the secret alone, with
-  no matching update to `aws_elasticache_replication_group.main`, would
-  desync the two. Rotate by changing `auth_token`.
-- If a real Secrets Manager rotation Lambda ever drives `auth_token` directly
-  against AWS (as `microservices/lambda/redis-auth-rotation` does for the
-  `microservices-platform` template), that Lambda's changes to the
-  replication group happen out of band from Terraform. The AWS provider only
-  sends `AuthToken` to `ModifyReplicationGroup` when its **configured value
-  changes** -- `auth_token` here keeps flowing from wherever it always did
-  (typically a secret's Terraform-side `random_password`, itself never
-  recomputed by a later apply, via `generated_passwords`), so an ordinary
-  `terraform apply` of THIS instance with nothing else changed makes no
-  `ModifyReplicationGroup` call at all and is a no-op for the token. The risk
-  is narrower than "any later apply": it is a later apply where `auth_token`'s
-  own **config value** changes (e.g. the secretsmanager instance's
-  `random_password` is replaced, or a different secret entirely is wired in)
-  -- THAT re-applies the new config value with `AuthTokenUpdateStrategy =
-  "ROTATE"` -- it re-adds that value as a second valid credential rather than
-  outright locking out the Lambda-rotated one (that strategy is never
-  `"SET"`), but it does undo the cutover the rotation's own `finishSecret`
-  step already made. There is no
-  `ignore_changes` escape hatch wired into this component for that
-  (`ignore_changes` cannot be conditioned on a variable on a single
-  resource, and splitting `aws_elasticache_replication_group.main` in two
-  the way `secretsmanager`'s `aws_secretsmanager_secret_version` is split
-  would touch every output in this file) -- avoid re-applying an instance
-  with Lambda-managed rotation, or read the real current token back out of
-  Secrets Manager into `auth_token` first.
-- `store_auth_token_in_secrets_manager` defaulting to `true` means an
-  instance with no `ExternalSecret`-style consumer, and with rotation wired
-  the way above, ends up with a second, Terraform-managed secret that goes
-  just as stale as `auth_token` itself, with no Lambda step keeping it
-  current either -- turn it off for such an instance (see
-  `microservices-platform.yaml`'s `microservices/elasticache`).
-
-## Tests
-
-`tests/elasticache.tftest.hcl`, run against a mock provider:
-`terraform init -backend=false && terraform test`.
-
-## Usage
-
-```
-atmos terraform plan elasticache/main -s fnx-prod-production   # after adding an instance
-```
+- `0.0.0.0/0` is rejected in `allowed_cidr_blocks`. A resource that reads this component's outputs
+  (for example a rotation Lambda) attaches `client_security_group_id` instead of being added to
+  `allowed_security_group_ids`, which would be a cycle.
+- Toggling `cluster_mode_enabled` replaces the cache (no online migration). With cluster mode on, a
+  named `parameter_group_name` must itself be cluster-enabled (not validated).
+- Rotate the token by changing `auth_token`; rotating the stored secret alone desyncs the two.
+- With a rotation Lambda managing the token out of band (the `microservices-platform` template),
+  an apply that changes `auth_token`'s value re-adds it and undoes the Lambda's cutover. Turn off
+  `store_auth_token_in_secrets_manager` there: the Terraform copy would go stale.
+- `rotation_policy` is a ready-made IAM policy for such a Lambda's `custom_policy`.
