@@ -114,9 +114,16 @@ components:
         # only), so an unscoped value here is admin across every spoke.
         ci_apply_role_enabled: false
 
-        # Lets the CI roles take the state lockfile rather than only read state.
-        ci_state_bucket_name: !terraform.state backend/main .backend_bucket
-        ci_state_kms_key_arn: !terraform.state backend/main .backend_kms_key_arn
+        # State access through the single backend's access roles (backend/main
+        # in the management account's fnx-core-root): the plan role may assume
+        # the non-prod read-only role, the apply role the read/write role. Add
+        # this hub's <prefix>-plan / <prefix>-apply ARNs to that instance's
+        # access_roles allowed_principal_arns. A hub that also plans prod
+        # needs backend_prod_read_role_arn here and a master-only plan subject.
+        ci_backend_read_role_arns:
+          - !terraform.state backend/main fnx-core-root .backend_read_role_arn
+        ci_backend_write_role_arn: !terraform.state backend/main fnx-core-root .backend_role_arn
       dependencies:
         components:
           - component: backend/main
+            stack: fnx-core-root

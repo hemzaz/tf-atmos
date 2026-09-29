@@ -335,25 +335,25 @@ variable "ci_apply_policy_arns" {
   }
 }
 
-variable "ci_state_bucket_name" {
-  type        = string
-  description = "Terraform state bucket the CI roles may read (the apply role may also write). Null skips the state policy."
-  default     = null
+variable "ci_backend_read_role_arns" {
+  type        = list(string)
+  description = "ARNs of the state backend's READ-only access roles the plan role may assume (backend component outputs backend_read_role_arn - non-prod and fnx-core-root state - and, for production's plan role, backend_prod_read_role_arn). Empty skips the grant."
+  default     = []
 
   validation {
-    condition     = var.ci_state_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.ci_state_bucket_name))
-    error_message = "ci_state_bucket_name must be a valid S3 bucket name."
+    condition     = alltrue([for arn in var.ci_backend_read_role_arns : can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\\w+=,.@/-]+$", arn))])
+    error_message = "Each ci_backend_read_role_arns entry must be an IAM role ARN."
   }
 }
 
-variable "ci_state_kms_key_arn" {
+variable "ci_backend_write_role_arn" {
   type        = string
-  description = "KMS key encrypting the state bucket; the CI roles get Decrypt and GenerateDataKey on it, the apply role also Encrypt"
+  description = "ARN of the state backend's read/write access role (backend component output backend_role_arn); the apply role gets sts:AssumeRole on it. Null skips the grant."
   default     = null
 
   validation {
-    condition     = var.ci_state_kms_key_arn == null || can(regex("^arn:aws:kms:", var.ci_state_kms_key_arn))
-    error_message = "ci_state_kms_key_arn must be a KMS key ARN."
+    condition     = var.ci_backend_write_role_arn == null || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\\w+=,.@/-]+$", var.ci_backend_write_role_arn))
+    error_message = "ci_backend_write_role_arn must be an IAM role ARN."
   }
 }
 

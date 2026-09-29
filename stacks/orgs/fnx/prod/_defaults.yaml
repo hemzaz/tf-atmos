@@ -36,3 +36,11 @@ settings:
     min_availability_zones: 3
   context:
     stage: prod
+  # Owner decision D3: production is planned from master only. terraform-ci.yml
+  # drops this stack's instances from pull_request and merge_group plans and
+  # plans them on push to master instead; the prod plan role does not trust the
+  # pull_request OIDC subject (iam/ci ci_plan_role_subjects). Same key family
+  # as settings.github.actions_enabled (stacks/orgs/fnx/local/_defaults.yaml);
+  # a missing value means enabled.
+  github:
+    pull_request_plans_enabled: false

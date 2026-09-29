@@ -3,10 +3,13 @@
 This is a **Terraform/Atmos infrastructure-as-code project** with:
 - **42 Terraform root modules** in `components/terraform/` (plus `_library/`, shared modules)
 - **3 AWS stacks**: `fnx-dev-testenv-01`, `fnx-staging-staging-01`, `fnx-prod-production` (eu-west-2)
-  plus 2 local emulator stacks (`fnx-local-sandbox`, `fnx-local-localemu`)
+  plus `fnx-core-root` (management account: the single state backend, `backend/main`; not run by CI)
+  and 2 local emulator stacks (`fnx-local-sandbox`, `fnx-local-localemu`)
 - **Atmos workflows** in `workflows/` (`atmos list workflows`) and **Atmos Native CI** in `.github/workflows/`
 - Atmos >= 1.229.0 (enforced in `atmos.yaml`); Terraform 1.16.3 is installed by the Atmos toolchain
-- S3 state backend `fnx-terraform-state` with native lockfiles (`use_lockfile`), no DynamoDB
+- S3 state backend `fnx-terraform-state` with native lockfiles (`use_lockfile`), no DynamoDB;
+  stacks assume its read/write access role, or with `TFSTATE_ACCESS=read` a read-only role
+  (prod stacks: the prod-only one; state reads are split by stage prefix in the one bucket)
 
 There is no Python CLI; use `atmos` commands and workflows.
 

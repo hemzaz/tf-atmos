@@ -8,7 +8,6 @@
 import:
   - orgs/fnx/staging/eu-west-2/staging-01/components/globals
   - catalog/iam/defaults
-  - catalog/backend/defaults
   - catalog/kms/defaults
   - catalog/secretsmanager/defaults
   - catalog/acm/defaults
@@ -47,6 +46,7 @@ components:
       dependencies:
         components:
           - component: backend/main
+            stack: fnx-core-root
     # GitHub Actions OIDC role. This is what repo variable AWS_PLAN_ROLE_ARN
     # must point at before CI can run a real plan; every AWS job currently skips
     # because it is unset. The trust policy is pinned to exact subject claims -
@@ -66,19 +66,30 @@ components:
         # catalog/iam/defaults.yaml, so context.environment (the instance name)
         # is the right key here -- unlike the `environment` variable, a tier.
         ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci"
-        # Deliberately OFF. AWS_PLAN_ROLE_ARN needs only the PLAN role, which
-        # ships safe: ReadOnlyAccess by default, admin policies rejected at
-        # variables.tf:295. The APPLY role has no such guardrail and no
-        # defensible default -- it deploys the iam component itself, so
-        # PowerUserAccess+IAMFullAccess is admin with extra steps. Enable it
-        # only with a scoped customer-managed policy and a permissions boundary.
-        ci_apply_role_enabled: false
+        # Owner decision: the APPLY role is enabled; it is terraform-cd.yml's
+        # deploy role (this stack's GitHub Environment AWS_ROLE_ARN) and the
+        # EKS ClusterAdmin access entry (catalog/eks/defaults.yaml). Its trust
+        # is ONLY the GitHub Environment subject below
+        # (repo:<repo>:environment:<stack>) - never pull_request or a bare
+        # ref; the environment itself is restricted to the default branch
+        # (docs/DEPLOYMENT.md). It deploys every component, the iam component
+        # included, so it holds AdministratorAccess: the Cloud Posse model
+        # (aws-team-roles' "terraform" role, which their GitOps applies
+        # assume). Anything narrower that can still manage IAM is admin with
+        # extra steps.
+        ci_apply_role_enabled: true
         ci_apply_role_environments:
           - "fnx-staging-staging-01"
-        # Lets the plan role take the .tflock rather than only read state.
-        # backend/main is already a declared dependency below.
-        ci_state_bucket_name: !terraform.state backend/main .backend_bucket
-        ci_state_kms_key_arn: !terraform.state backend/main .backend_kms_key_arn
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        # State access: sts:AssumeRole on the single state backend's access
+        # roles (backend/main in the management account's fnx-core-root) -
+        # plan -> the non-prod read-only role, apply -> the read/write role.
+        # backend/main in fnx-core-root is declared as a (cross-stack)
+        # dependency below.
+        ci_backend_read_role_arns:
+          - !terraform.state backend/main fnx-core-root .backend_read_role_arn
+        ci_backend_write_role_arn: !terraform.state backend/main fnx-core-root .backend_role_arn
         # kms/main's key: eks/main's cluster_encryption_config_kms_key_id
         # (compute.yaml) points every EKS cluster this apply role deploys at
         # this key, and AWS requires the calling principal -- not the
@@ -87,21 +98,13 @@ components:
         # .key_arn: iam/ci plans and applies in the deploy-full-stack "iam"
         # layer, BEFORE the "kms" layer (workflows/deploy-full-stack.yaml), so
         # the key's ARN does not exist yet on a first deploy. Must match
-        # kms/main's alias_name below, prefixed with "alias/". Inert while
-        # ci_apply_role_enabled is false, same as ci_state_kms_key_arn above.
+        # kms/main's alias_name below, prefixed with "alias/".
         ci_apply_kms_key_aliases:
           - alias/staging-01-main
       dependencies:
         components:
           - component: backend/main
-    backend/main:
-      metadata:
-        component: backend
-        inherits:
-          - backend
-      vars:
-        bucket_name: "fnx-staging-terraform-state"
-        iam_role_name: "fnx-staging-terraform-backend-role"
+            stack: fnx-core-root
 
     # ==========================================================================
     # KMS - customer-managed key for Secrets Manager and other encrypted services

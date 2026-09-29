@@ -11,11 +11,12 @@ workflows:
         type: alert
         level: error
         content: >-
-          This destroys the Terraform backend for the stack, including ALL state
-          files. Make sure every other component in the stack is destroyed first.
+          This destroys the Terraform state backend, including ALL state files of
+          EVERY stack (there is one shared backend). Make sure every component in
+          every stack is destroyed first.
       - name: stack
         type: input
-        prompt: Stack whose backend to destroy (e.g. fnx-dev-testenv-01)
+        prompt: Stack whose backend to destroy (the only one is fnx-core-root)
       - name: preview
         type: atmos
         command: terraform destroy backend/main -s {{ .steps.stack.value }} --dry-run

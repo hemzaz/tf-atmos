@@ -492,28 +492,35 @@ prod: ## Switch to production environment
 # =============================================================================
 # AWS Backend Setup and Management
 # =============================================================================
-# State lives in the S3 bucket <tenant>-terraform-state (native lockfile
-# locking, no DynamoDB), created and managed by the backend/main component.
+# State lives in ONE S3 bucket, <tenant>-terraform-state (native lockfile
+# locking, no DynamoDB), created and managed by backend/main in the management
+# account's stack fnx-core-root. First creation: make setup-aws-backend-cold-start.
 
-setup-aws-backend: ## Create the state bucket and apply backend/main (usage: make setup-aws-backend STACK=fnx-dev-testenv-01)
-	@echo "$(BLUE)Setting up AWS backend infrastructure for $(STACK)...$(NC)"
-	@atmos workflow backend-only -f bootstrap -s "$(STACK)"
+BACKEND_STACK := fnx-core-root
+
+setup-aws-backend-cold-start: ## Create the single state backend (once, management-account admin credentials)
+	@echo "$(BLUE)Creating the state backend in $(BACKEND_STACK)...$(NC)"
+	@atmos workflow backend-cold-start -f bootstrap
+
+setup-aws-backend: ## Plan and apply the single state backend (backend/main in fnx-core-root)
+	@echo "$(BLUE)Updating the state backend in $(BACKEND_STACK)...$(NC)"
+	@atmos workflow backend-only -f bootstrap
 
 setup-aws-backend-dry-run: ## Show the backend configuration and plan without applying
-	@atmos terraform backend describe backend/main -s "$(STACK)"
-	@atmos terraform plan backend/main -s "$(STACK)"
+	@atmos terraform backend describe backend/main -s "$(BACKEND_STACK)"
+	@atmos terraform plan backend/main -s "$(BACKEND_STACK)"
 
-validate-aws-setup: ## Validate existing AWS backend setup
-	@echo "$(BLUE)Validating AWS backend setup for $(STACK)...$(NC)"
-	@atmos workflow verify -f bootstrap -s "$(STACK)"
+validate-aws-setup: ## Validate the existing state backend
+	@echo "$(BLUE)Validating the state backend in $(BACKEND_STACK)...$(NC)"
+	@atmos workflow verify -f bootstrap
 
-bootstrap-environment: ## Complete environment bootstrap (backend + validation)
+bootstrap-environment: ## Complete environment bootstrap (IAM + VPCs, backend check, validation)
 	@echo "$(BLUE)Bootstrapping complete environment: $(STACK)$(NC)"
-	@echo "Step 1/3: Setting up AWS backend infrastructure..."
-	@$(MAKE) --no-print-directory setup-aws-backend STACK=$(STACK)
+	@echo "Step 1/3: IAM (CI roles) and networking (needs the state backend: make setup-aws-backend-cold-start)..."
+	@atmos workflow full -f bootstrap -s "$(STACK)"
 	@echo
 	@echo "Step 2/3: Validating backend setup..."
-	@$(MAKE) --no-print-directory validate-aws-setup STACK=$(STACK)
+	@$(MAKE) --no-print-directory validate-aws-setup
 	@echo
 	@echo "Step 3/3: Running configuration validation..."
 	@$(MAKE) --no-print-directory validate STACK=$(STACK)
@@ -527,15 +534,16 @@ cleanup-aws-backend: ## Destroy the backend/main component (DANGEROUS; the workf
 	@echo "$(RED)⚠️  WARNING: This destroys the Terraform state backend component!$(NC)"
 	@atmos workflow destroy -f destroy-backend
 
-# AWS Backend Quick Commands for Common Environments
-setup-aws-dev: ## Quick setup for development backend
-	@$(MAKE) setup-aws-backend STACK=fnx-dev-testenv-01
+# Quick bootstrap per environment. There is no per-environment backend: all
+# stacks share the one in fnx-core-root (make setup-aws-backend-cold-start).
+setup-aws-dev: ## Quick bootstrap (IAM + VPCs) for development
+	@$(MAKE) bootstrap-environment STACK=fnx-dev-testenv-01
 
-setup-aws-staging: ## Quick setup for staging backend  
-	@$(MAKE) setup-aws-backend STACK=fnx-staging-staging-01
+setup-aws-staging: ## Quick bootstrap (IAM + VPCs) for staging
+	@$(MAKE) bootstrap-environment STACK=fnx-staging-staging-01
 
-setup-aws-prod: ## Quick setup for production backend
-	@$(MAKE) setup-aws-backend STACK=fnx-prod-production
+setup-aws-prod: ## Quick bootstrap (IAM + VPCs) for production
+	@$(MAKE) bootstrap-environment STACK=fnx-prod-production
 
 # =============================================================================
 # Advanced Operations

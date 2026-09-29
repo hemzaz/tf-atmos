@@ -140,8 +140,11 @@ Both roles live in the **hub**. Nothing in GitHub points at a spoke.
 
 ## 5. Order of operations
 
-1. Create the hub account's state backend (`backend/main`) — the bases read
-   `ci_state_bucket_name` and `ci_state_kms_key_arn` from it.
+1. Create the single state backend (`backend/main` in `fnx-core-root`,
+   `atmos workflow backend-cold-start -f bootstrap`) and add the hub's
+   `<prefix>-ci-plan` / `<prefix>-ci-apply` ARNs to its `access_roles`
+   (`read` / `write`) — the hub base reads `ci_backend_read_role_arns` and
+   `ci_backend_write_role_arn` from it.
 2. Apply `iam/oidc-hub`. This creates the provider and the plan role.
 3. Create the assume-spoke policy (step 2) and re-apply the hub so
    `ci_plan_policy_arns` picks it up.

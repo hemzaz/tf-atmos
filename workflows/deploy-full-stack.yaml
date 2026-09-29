@@ -14,17 +14,18 @@
 # that reads another's state (!terraform.state / !terraform.output) must be in a
 # later layer than that instance: on the first deploy the state does not exist
 # yet. A dependency only declared in dependencies.components may share a layer
-# (Atmos applies a layer in dependency order). That is why iam follows backend
-# (iam/ci reads backend/main), connectivity follows networking, security-monitoring
+# (Atmos applies a layer in dependency order). The backend layer has an instance
+# only in fnx-core-root (the single state backend), which is deployed before any
+# workload stack; iam/ci reads it cross-stack. Connectivity follows networking, security-monitoring
 # follows security (it reads guardduty, securityhub and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
 # dependencies.components), lambda (compute) precedes apigateway (services), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
 # eks-addons reads its dns instance's zone_ids, so it has its own addons layer
 # after dns (and after compute, for the cluster it installs into).
-# Every layer's root modules have at least one enabled instance in every
-# stack (eks-backend-services/main, the last to gain instances, joined the
-# compute layer in all 3 stacks).
+# Every layer except backend has at least one enabled instance in every
+# workload stack (eks-backend-services/main, the last to gain instances, joined
+# the compute layer in all 3 stacks); fnx-core-root has only the backend layer.
 #
 # Every enabled, non-abstract instance of every stack must be selected by exactly
 # one layer, in that order. validate-all enforces it with
@@ -266,7 +267,7 @@ workflows:
         content: All layers deployed
 
   deploy-backend:
-    description: "Deploy the backend layer: the Terraform state backend"
+    description: "Deploy the backend layer: the Terraform state backend (only fnx-core-root has one)"
     steps:
       - name: plan
         type: atmos
@@ -283,7 +284,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
 
   deploy-iam:
-    description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main)"
+    description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main in fnx-core-root)"
     steps:
       - name: plan
         type: atmos

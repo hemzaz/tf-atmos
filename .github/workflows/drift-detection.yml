@@ -7,6 +7,7 @@
 # history, remediation workflows and dependency-ordered applies.
 #
 # Required configuration: vars.AWS_PLAN_ROLE_ARN (read-only OIDC role),
+# vars.AWS_PROD_PLAN_ROLE_ARN (production's own plan role, for prod stacks),
 # optional vars.ATMOS_VERSION / vars.AWS_REGION.
 name: Drift detection
 # AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
@@ -88,9 +89,22 @@ jobs:
                       "(local/emulator stack); drift detection only runs against real AWS "
                       "stacks. Use the Emulator workflow for local stacks."
                   )
-              matrix = {"stack": [only_stack]}
+              selected = [only_stack]
           else:
-              matrix = {"stack": sorted(s for s in stacks if s not in disabled)}
+              selected = sorted(s for s in stacks if s not in disabled)
+
+          # A master-only stack (settings.github.pull_request_plans_enabled:
+          # false - production, D3) is planned with its own plan role,
+          # vars.AWS_PROD_PLAN_ROLE_ARN: the only principal its read-only
+          # state role trusts.
+          def master_only(stack):
+              components = (stacks[stack].get("components") or {}).get("terraform") or {}
+              return any(
+                  (((spec or {}).get("settings") or {}).get("github") or {}).get("pull_request_plans_enabled") is False
+                  for spec in components.values()
+              )
+
+          matrix = {"include": [{"stack": s, "master_only": master_only(s)} for s in selected]}
 
           with open(out_file, "a") as out:
               out.write(f"matrix={json.dumps(matrix)}\n")
@@ -111,13 +125,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Require the production plan role
+        if: matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN == ''
+        run: |
+          echo "::error::vars.AWS_PROD_PLAN_ROLE_ARN (fnx-prod-production's iam/ci ci_plan_role_arn) is not set"
+          exit 1
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN || vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+      # A READ-only state role (stacks/orgs/fnx/_defaults.yaml: the prod one
+      # for prod stacks), hence -lock=false: it cannot write a .tflock object.
       - name: Plan (detailed exit code)
         env:
           STACK: ${{ matrix.stack }}
+          TFSTATE_ACCESS: read
         run: >-
           atmos terraform plan -s "$STACK" --skip-planfile --failure-mode keep-going
           --hide no-changes -- -detailed-exitcode -lock=false

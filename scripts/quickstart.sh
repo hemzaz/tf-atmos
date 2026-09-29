@@ -462,13 +462,16 @@ setup_backend() {
 
     cd "$PROJECT_ROOT"
 
-    # S3 state bucket with native lockfile locking (no DynamoDB), managed by backend/main
+    # One S3 state bucket (native lockfile locking, no DynamoDB) for every stack,
+    # managed by backend/main in fnx-core-root; created once, never per stack.
+    # The workflow asks for confirmation and refuses to run when the bucket
+    # already exists (use `atmos workflow backend-only -f bootstrap` then).
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo "[DRY RUN] Would run: atmos workflow backend-only -f bootstrap -s $STACK_NAME"
+        echo "[DRY RUN] Would run: atmos workflow backend-cold-start -f bootstrap"
         return 0
     fi
 
-    atmos workflow backend-only -f bootstrap -s "$STACK_NAME"
+    atmos workflow backend-cold-start -f bootstrap
 
     log_success "Backend infrastructure ready"
 }

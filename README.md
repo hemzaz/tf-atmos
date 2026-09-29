@@ -83,7 +83,7 @@ atmos.yaml                  Atmos CLI config (version constraint, paths, name_te
 components/terraform/       Terraform root modules (+ _library/ shared modules)
 modules/terraform/          Provider-less shared modules
 stacks/
-  orgs/fnx/                 Org, account and region defaults, and the three stacks
+  orgs/fnx/                 Org, account and region defaults, the three workload stacks and fnx-core-root (state backend)
   catalog/                  Abstract component defaults, disabled variants, stack templates
   mixins/                   Tenant, stage and region mixins
 workflows/                  Atmos workflows (+ scripts/ they call)
@@ -176,9 +176,13 @@ Every root module has `versions.tf`, `provider.tf` (AWS provider with `default_t
 `var.tags`) and a `README.md`. Tags come from `stacks/orgs/fnx/_defaults.yaml`: `Tenant`,
 `Account`, `Environment`, `ManagedBy = "Terraform"`.
 
-**State backend**: S3 bucket `fnx-terraform-state`, accessed through `fnx-terraform-backend-role`
-in the management account. Locking uses Terraform's native S3 lockfiles (`use_lockfile: true`); no
-DynamoDB lock table.
+**State backend**: one S3 bucket, `fnx-terraform-state`, in the management account, managed by
+`backend/main` in stack `fnx-core-root` and accessed through its read/write role
+`fnx-terraform-backend-role` or, for CI plans (`TFSTATE_ACCESS=read`), a read-only role split by
+stage: `fnx-terraform-backend-read-role` (dev/staging) or `fnx-terraform-backend-prod-read-role`
+(prod, assumable only by prod's master-only plan role). Locking uses Terraform's native S3 lockfiles
+(`use_lockfile: true`); no DynamoDB lock table. See
+[Bootstrap the state backend](./docs/DEPLOYMENT.md#bootstrap-the-state-backend).
 
 ## Adding a component
 

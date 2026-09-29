@@ -1,39 +1,101 @@
-# Bootstrap a new stack: create the S3 state bucket (Atmos backend provisioning:
-# versioning, encryption, public-access block; native S3 lockfiles, no
-# DynamoDB), bring it under Terraform via the `backend` component, then deploy
-# IAM and the VPCs.
+# Bootstrap. There is ONE Terraform state backend (bucket fnx-terraform-state,
+# its KMS key and its read-only / read-write access roles), the `backend`
+# component's single instance backend/main in the management account's stack
+# fnx-core-root. Every stack's S3 backend assumes one of its access roles
+# (stacks/orgs/fnx/_defaults.yaml), so it is bootstrapped once, first, with
+# management-account administrator credentials; then each workload stack.
 #
 # Usage:
-#   atmos workflow full -f bootstrap -s <stack>
-#   atmos workflow backend-only -f bootstrap -s <stack>
-#   atmos workflow verify -f bootstrap -s <stack>
+#   atmos workflow backend-cold-start -f bootstrap   # once: create the backend, move its state into it
+#   atmos workflow backend-only -f bootstrap         # later changes to the backend
+#   atmos workflow verify -f bootstrap               # backend describe + outputs
+#   atmos workflow full -f bootstrap -s <stack>      # a workload stack: IAM (CI roles) and VPCs
 workflows:
+  backend-cold-start:
+    description: Create the state backend with local state (Cloud Posse cold start), then migrate its state into the new bucket
+    # The backend-* workflows pin their stack: the backend exists only here.
+    stack: fnx-core-root
+    dependencies:
+      tools:
+        aws/aws-cli: "2.36.49"
+    steps:
+      # A second cold start would fail at bucket creation after creating some
+      # of the other resources in a fresh local state. Refuse up front.
+      - name: refuse-if-bucket-exists
+        type: shell
+        command: >-
+          if aws s3api head-bucket --bucket fnx-terraform-state 2>/dev/null; then
+          echo "fnx-terraform-state already exists: use 'atmos workflow backend-only -f bootstrap',
+          or import the bucket first (components/terraform/backend/README.md#bootstrap)."; exit 1; fi
+      - name: warning
+        type: alert
+        level: warning
+        content: >-
+          Cold start: applies backend/main with LOCAL state, then copies that state into the new
+          bucket. Run it once, with management-account administrator credentials, before any
+          other stack. On a backend that already exists use `backend-only`: a second cold start
+          would try to create the bucket again. If the bucket already exists (e.g. created by
+          `atmos terraform backend create`), import it first - see
+          components/terraform/backend/README.md#bootstrap.
+      - name: confirm_cold_start
+        type: confirm
+        prompt: Create the state backend now (cold start)?
+        default: false
+      - name: guard-cold-start
+        type: shell
+        command: test "{{ .steps.confirm_cold_start.value }}" = "true" || { echo "Cold start cancelled."; exit 1; }
+      # A backend.tf.json left by an earlier run would win over
+      # --auto-generate-backend-file=false and point init at the bucket that
+      # does not exist yet.
+      - name: clean-backend-file
+        type: shell
+        command: rm -f components/terraform/backend/backend.tf.json
+      # Local state: nothing to assume yet. The caller (this administrator) is
+      # added to both access roles' trust, as in Cloud Posse's tfstate-backend.
+      - name: apply-local-state
+        type: atmos
+        command: terraform deploy backend/main --auto-generate-backend-file=false
+      # Generates the S3 backend (write role, which now trusts the caller) and
+      # copies the local state into the bucket. -reconfigure would discard the
+      # local state instead of migrating it, hence --init-reconfigure=never.
+      - name: migrate-state
+        type: atmos
+        command: terraform init backend/main --init-reconfigure=never -- -migrate-state -force-copy
+      - type: markdown
+        content: |
+          **State backend created.** Its state now lives in the bucket; delete the
+          local copy, `components/terraform/backend/terraform.tfstate.d/`.
+          Next: `atmos workflow full -f bootstrap -s <stack>` for each workload stack.
+
+  backend-only:
+    description: Plan and apply the state backend (backend/main in fnx-core-root) after its cold start
+    stack: fnx-core-root
+    steps:
+      - name: plan
+        type: atmos
+        command: terraform plan backend/main
+      - name: confirm
+        type: confirm
+        prompt: Apply the backend plan above?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Backend deploy cancelled."; exit 1; }
+      - name: deploy-backend
+        type: atmos
+        command: terraform deploy backend/main --from-plan
+
   full:
-    description: Complete bootstrap sequence - state backend, IAM, networking
+    description: Bootstrap a workload stack - IAM (including the CI roles) and networking. Needs the state backend (backend-cold-start) first.
     steps:
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.
         type: shell
         command: atmos validate stacks
-      - name: create-backend
-        type: atmos
-        command: terraform backend create backend/main
-      # backend/main is applied before IAM is planned: iam/ci reads its bucket
-      # and key through !terraform.state, which has no state until it is applied.
-      - name: plan-backend
-        type: atmos
-        command: terraform plan --log-order grouped --query '.metadata.component == "backend"'
-      - name: confirm_backend
-        type: confirm
-        prompt: Apply the backend plan above?
-        default: false
-      - name: guard-backend
-        type: shell
-        command: test "{{ .steps.confirm_backend.value }}" = "true" || { echo "Bootstrap cancelled after backend creation."; exit 1; }
-      - name: deploy-backend
-        type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "backend"'
+      # iam/ci reads the backend's access role ARNs cross-stack
+      # (!terraform.state backend/main fnx-core-root ...), so backend-cold-start
+      # must have run.
       - name: plan-foundation
         type: atmos
         command: terraform plan --log-order grouped --query '.metadata.component == "iam" or .metadata.component == "vpc"'
@@ -43,7 +105,7 @@ workflows:
         default: false
       - name: guard-foundation
         type: shell
-        command: test "{{ .steps.confirm_foundation.value }}" = "true" || { echo "Bootstrap cancelled after the backend."; exit 1; }
+        command: test "{{ .steps.confirm_foundation.value }}" = "true" || { echo "Bootstrap cancelled before IAM and networking."; exit 1; }
       - name: deploy-iam
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "iam"'
@@ -54,30 +116,11 @@ workflows:
         content: |
           **Bootstrap complete.** Next steps:
           - `atmos workflow deploy -f deploy-full-stack -s <stack>`
-          - `atmos workflow verify -f bootstrap -s <stack>`
-
-  backend-only:
-    description: Create the Terraform state bucket and manage it with the backend component
-    steps:
-      - name: create-backend
-        type: atmos
-        command: terraform backend create backend/main
-      - name: plan
-        type: atmos
-        command: terraform plan backend/main
-      - name: confirm
-        type: confirm
-        prompt: Apply the backend plan above?
-        default: false
-      - name: guard
-        type: shell
-        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Backend deploy cancelled after backend creation."; exit 1; }
-      - name: deploy-backend
-        type: atmos
-        command: terraform deploy backend/main --from-plan
+          - `atmos workflow verify -f bootstrap`
 
   verify:
     description: Verify the state backend exists and is configured as expected
+    stack: fnx-core-root
     steps:
       - name: describe-backend
         type: atmos

@@ -1,0 +1,36 @@
+---
+# =============================================================================
+# Management ("core") Account Defaults
+# =============================================================================
+# The management account holds shared, organization-wide infrastructure that
+# no single workload stage owns. Today that is only the Terraform state
+# backend (stacks/orgs/fnx/core/eu-west-2/root.yaml).
+#
+# Naming follows Cloud Posse's reference architecture, where the management
+# account is the "root" account of the "core" tenant (core-gbl-root). This
+# repository's stack name template is tenant-stage-environment and its tenant
+# is fixed to fnx (the bucket and role names derive from it), so here "core"
+# is the stage and "root" the environment: fnx-core-root.
+# =============================================================================
+
+import:
+  - orgs/fnx/_defaults
+  - mixins/tenant/fnx
+
+# This account IS settings.environment.management_account_id (orgs/fnx/_defaults.yaml).
+# Instances set `account_id: "{{ .settings.environment.management_account_id }}"`
+# themselves: Atmos renders templates in one pass, so a settings value that is
+# itself a template would reach Terraform unrendered.
+settings:
+  environment:
+    account: core
+  context:
+    stage: core
+  # Kept out of the CI plan/deploy/drift matrices (terraform-ci.yml,
+  # terraform-cd.yml, drift-detection.yml), like the local emulator stacks:
+  # the CI roles live in the workload accounts and are trusted only to use the
+  # state, never to manage the bucket and roles that guard it. The backend is
+  # applied by a management-account administrator, as Cloud Posse applies
+  # tfstate-backend in core-gbl-root (see components/terraform/backend/README.md).
+  github:
+    actions_enabled: false

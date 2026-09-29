@@ -19,10 +19,24 @@ terraform:
     tools:
       terraform: "1.16.3"
 
-  # State lives in the bucket created by the `backend` component
-  # (stacks/catalog/backend/defaults.yaml). Native S3 locking replaces DynamoDB.
-  # Atmos derives `workspace_key_prefix` from the component name and the
-  # workspace from the stack name, so every instance gets its own state file.
+  # ONE state backend for every stack: the bucket and access roles created by
+  # the `backend` component's single instance, backend/main in the management
+  # account's stack fnx-core-root (stacks/orgs/fnx/core/eu-west-2/root.yaml).
+  # Native S3 locking replaces DynamoDB. Atmos derives `workspace_key_prefix`
+  # from the component name and the workspace from the stack name, so every
+  # instance gets its own state file.
+  #
+  # Access goes through one of the backend's access roles (Cloud Posse
+  # tfstate-backend access_roles):
+  #   <tenant>-terraform-backend-role            read/write, every object; the CI apply roles
+  #   <tenant>-terraform-backend-read-role       read-only, dev/staging/core objects; the CI plan roles
+  #   <tenant>-terraform-backend-prod-read-role  read-only, prod objects; prod's plan role only
+  # The role is per stack, not per job, so a job picks it with an environment
+  # variable: TFSTATE_ACCESS=read selects a read-only role - the prod one for a
+  # stage "prod" stack, the non-prod one otherwise - and anything else the
+  # read/write one. The plan-only CI jobs (terraform-ci.yml plan,
+  # drift-detection.yml) set it and plan with -lock=false: the read-only roles
+  # cannot write a .tflock object. Applies (terraform-cd.yml) leave it unset.
   backend_type: s3
   backend:
     s3:
@@ -32,7 +46,7 @@ terraform:
       encrypt: true
       use_lockfile: true
       assume_role:
-        role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+        role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend{{ if eq (env "TFSTATE_ACCESS") "read" }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}-read{{ end }}-role'
 settings:
   environment:
     namespace: fnx

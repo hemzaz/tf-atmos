@@ -15,7 +15,11 @@
 #     sub = repo:<org>/<repo>:environment:<stack>. Never a wildcard.
 #   - Plan role trust (repo-level AWS_PLAN_ROLE_ARN, read-only): sub =
 #     repo:<org>/<repo>:pull_request, plus repo:<org>/<repo>:ref:refs/heads/<default
-#     branch> for drift detection and disaster-recovery checks.
+#     branch> for drift detection and disaster-recovery checks (production's plan
+#     role: the default-branch sub only).
+#   - State: deploys leave TFSTATE_ACCESS unset, so the stack backend assumes the
+#     state backend's read/write role, which trusts the stacks' CI apply roles
+#     (stacks/orgs/fnx/_defaults.yaml, stacks/orgs/fnx/core/eu-west-2/root.yaml).
 #   - A tag ruleset allowing only GitHub Actions to create/update/delete
 #     refs/tags/deployed/**, so only this workflow moves the deploy markers.
 #
@@ -171,6 +175,9 @@ jobs:
       matrix: ${{ fromJson(needs.affected-stacks.outputs.matrix) }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Wait up to 10 minutes for a held state lock (another apply, or an
+      # operator) instead of failing the deploy at once.
+      TF_CLI_ARGS_apply: -lock-timeout=10m
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -245,6 +252,7 @@ jobs:
       statuses: write
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TF_CLI_ARGS_apply: -lock-timeout=10m
       ACTION: ${{ inputs.action }}
       COMPONENT: ${{ inputs.component }}
       STACK: ${{ inputs.stack }}
