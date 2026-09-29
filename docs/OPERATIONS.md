@@ -10,12 +10,14 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 
 | Input | Where |
 |-------|-------|
-| Workload account IDs | `settings.environment.account_id` in `stacks/orgs/fnx/{dev,staging,prod}/_defaults.yaml`; `settings.environment.aws_account_id` in `staging-01.yaml` and `production.yaml` (dev reads it from `AWS_ACCOUNT_ID`) |
-| Management account ID | `settings.environment.management_account_id` in `stacks/orgs/fnx/_defaults.yaml`, and the role ARNs in `access_roles` of `stacks/orgs/fnx/core/eu-west-2/root.yaml` |
+| Workload account IDs | `settings.environment.account_id` in `stacks/orgs/fnx/{dev,staging,prod}/_defaults.yaml`; `settings.environment.aws_account_id` in `staging-01.yaml` and `production.yaml` (dev reads it from `AWS_ACCOUNT_ID`); the CI role ARNs in `access_roles` of `stacks/orgs/fnx/core/eu-west-2/root.yaml` |
+| Management account ID | `settings.environment.management_account_id` in `stacks/orgs/fnx/_defaults.yaml` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it |
 | Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml`; each address must confirm its SNS subscription |
+| Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main`: unset, so its CloudWatch alarms have no action |
 | Lambda packages | `s3_bucket`/`s3_key` of every `lambda/*` instance in `components/services.yaml`; the object must exist before the first apply |
+| GitHub | default-branch protection (PR + review), and a tag ruleset letting only GitHub Actions move `refs/tags/deployed/**` (`terraform-cd.yml` relies on both) |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
 
 Every workload `account_id` must differ from `management_account_id`. The stage split of state
@@ -38,17 +40,19 @@ atmos workflow verify -f bootstrap               # backend describe + outputs
 
 An existing bucket must be imported first: see `components/terraform/backend/README.md`.
 
-| Role | Access | Assumed by |
-|------|--------|------------|
-| `fnx-terraform-backend-read-role` | read, dev/staging state | dev/staging CI plan roles (`TFSTATE_ACCESS=read`) |
-| `fnx-terraform-backend-role` | read/write, dev/staging state | dev/staging CI apply roles, local runs |
-| `fnx-terraform-backend-prod-read-role` | read, prod state | prod's CI plan role only (`TFSTATE_ACCESS=read`) |
-| `fnx-terraform-backend-prod-role` | read/write, prod state | prod's CI apply role only |
-| `fnx-terraform-backend-core-role` | read/write, `fnx-core-root` state | the administrator only; no CI role |
+Every role also trusts the administrator who applied `backend/main`; the stack backend picks the
+role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
+
+| Role (`access_roles` key) | Access | Trusted CI role |
+|---------------------------|--------|-----------------|
+| `fnx-terraform-backend-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
+| `fnx-terraform-backend-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
+| `fnx-terraform-backend-prod-read-role` (`prod_read`) | read, prod state | prod's CI plan role |
+| `fnx-terraform-backend-prod-role` (`prod_write`) | read/write, prod state | prod's CI apply role |
+| `fnx-terraform-backend-core-role` (`core_write`) | read/write, `fnx-core-root` state | none |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
-- Trust is by role ARN, listed in `access_roles` in `root.yaml`; the administrator who applied
-  `backend/main` is trusted by every role. Add a new stack's
+- Trust is by role ARN, listed in `access_roles` in `root.yaml`. Add a new stack's
   `<tenant>-<account>-<environment>-ci-plan`/`-apply` roles there, and any operator role that
   runs Terraform against a stage.
 - `check-state-keys.py` (in `lint` and `validate-all`) keeps every state key inside its stage's
@@ -132,6 +136,8 @@ switched to a different root module (import instead).
 | Rotate a Secrets Manager/Kubernetes certificate | `atmos workflow rotate -f rotate-certificate` (ACM certificates are Terraform-managed) |
 | Destroy a stack / the backend | `atmos workflow destroy -f destroy-environment` / `-f destroy-backend`; both prompt for the stack name, do not pass `-s` |
 
+Destroying the backend is irreversible: it deletes the bucket and every stack's state in it.
+
 Drift fix: codify an intended manual change in the stack, then `atmos terraform deploy`; otherwise
 re-apply; import resources created outside Terraform.
 
@@ -162,7 +168,7 @@ STACK=<stack> atmos workflow dr-failback -f disaster-recovery
 
 ## Deploys green, does not serve
 
-Prod `elasticache/main` admits no security group or CIDR until a consumer exists; `cognito/main`
+Prod `elasticache/main` admits only `eks/main`'s cluster security group; `cognito/main`
 has no users or identity provider, so `/api` rejects every request; `apigateway` `/` is a `MOCK`
 liveness endpoint by design.
 

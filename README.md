@@ -50,7 +50,8 @@ An instance name need not match its module: `metadata.component` decides. `netwo
 
 - Atmos >= 1.229.0 (fatal constraint in `atmos.yaml`). Atmos installs Terraform 1.16.3
   (`stacks/orgs/fnx/_defaults.yaml`) and the lint/scan tools pinned in each workflow.
-- Docker, for the emulator lanes. AWS credentials only for plans/applies against real accounts.
+- Emulator lanes: Docker for the sandbox (Floci); Python 3.13 exactly for LocalEmu (a pip
+  package, no Docker). AWS credentials only for plans/applies against real accounts.
 - The stacks still hold placeholder account IDs, domains and alert addresses: see
   [first-deploy inputs](./docs/OPERATIONS.md#first-deploy-inputs).
 
@@ -65,13 +66,15 @@ atmos workflow lint -f lint                         # fmt, yamllint, state-key c
 atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
 bash scripts/plan-sweep.sh fnx-dev-testenv-01       # plan with resolved variables, no AWS account needed
 atmos workflow sandbox -f sandbox                   # apply against Floci, then destroy (Docker only)
-atmos workflow localemu -f localemu                 # the same against LocalEmu
+atmos workflow localemu -f localemu                 # the same against LocalEmu (Python 3.13)
 atmos terraform plan vpc/main -s fnx-dev-testenv-01 # needs AWS credentials
 ```
 
 `terraform validate` never evaluates `variable` validation blocks; plan-sweep and the emulator
-lanes do. Emulator runs need `--identity local-aws` (sandbox) or `--identity local-emu`
-(localemu) when run by hand; neither identity is a default, so no real stack can hit an emulator.
+lanes do. Run the emulator lanes through their workflows: by hand, sandbox commands need
+`--identity local-aws`, and LocalEmu commands need `--identity local-emu` plus
+`LOCALEMU_ACCESS_KEY_ID`, `LOCALEMU_SECRET_ACCESS_KEY` and `AWS_ENDPOINT_URL`, or the apply reaches
+real AWS (`workflows/localemu.yaml`).
 
 **Add a component:** `atmos scaffold generate component . --force` (run from the repo root; it
 also writes the catalog entry). `atmos scaffold generate catalog-entry . --force` adds catalog
@@ -80,8 +83,8 @@ defaults for an existing component.
 **Add an instance:** add it under `components.terraform` in the stack's domain file, with
 `metadata.component` (and `inherits` for the catalog base), then list every instance it reads
 in `dependencies.components` and make sure a layer in `workflows/deploy-full-stack.yaml` deploys
-it after them. validate-all fails otherwise. A new stack's CI roles must also be added to
-`access_roles` in `stacks/orgs/fnx/core/eu-west-2/root.yaml`.
+it after them. validate-all fails otherwise. A new stack also needs its CI roles in the state
+backend's trust: see [State backend](./docs/OPERATIONS.md#state-backend).
 
 ## Conventions
 
@@ -94,9 +97,11 @@ it after them. validate-all fails otherwise. A new stack's CI roles must also be
 - Tags (`Tenant`, `Account`, `Environment`, `ManagedBy`) come from `stacks/orgs/fnx/_defaults.yaml`
   and are applied once through `default_tags` in each `provider.tf`, not per resource.
 - `settings.list_merge_strategy: replace`: a list in a more specific file replaces the inherited one.
-- Inbound access never allows `0.0.0.0/0` or `::/0`; egress is unrestricted.
-- Component READMEs cover purpose, wiring and gotchas; `variables.tf` and `outputs.tf` are the
-  interface reference.
+- Each component has `variables.tf` (with validation blocks), `outputs.tf` (`sensitive = true`
+  where needed), `versions.tf` (`>= 1.16.0, < 2.0.0`), `provider.tf` and a `README.md` covering
+  purpose, wiring and gotchas only; `variables.tf` and `outputs.tf` are the interface reference.
+- Encrypt at rest and in transit; least-privilege IAM; secrets in Secrets Manager, never committed.
+  Inbound access never allows `0.0.0.0/0` or `::/0`; egress is unrestricted.
 
 ## CI/CD
 
@@ -105,9 +110,9 @@ until the repository variable `AWS_PLAN_ROLE_ARN` is set.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to master | Lint + validate-all, plan-sweep, Trivy/Checkov gate (new HIGH/CRITICAL only, baselines in `.trivyignore.yaml`/`.checkov.baseline`), `terraform test` for components with `tests/`, plan of affected instances with the read-only role and a PR comment. Prod is planned on push to master only |
+| `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, plan-sweep, Trivy/Checkov gate (new HIGH/CRITICAL only, baselines in `.trivyignore.yaml`/`.checkov.baseline`), plan of affected non-prod instances with the read-only role (PR comment). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan |
 | `emulator.yml` | PR, push to master, manual | LocalEmu lane: applies and destroys real resources |
-| `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag. No manual approval |
+| `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag. No manual approval ([details](./docs/OPERATIONS.md#state-backend)) |
 | `drift-detection.yml` | hourly, manual | Read-only plan of every stack; drift fails the job |
 | `security-scan.yml` | nightly, manual | Report-only Trivy + Checkov |
 | `disaster-recovery.yml` | manual | Read-only DR checks (`dr-status`, `recover-state`, `recover-database`) |

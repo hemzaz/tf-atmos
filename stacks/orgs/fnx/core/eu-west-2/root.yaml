@@ -9,7 +9,7 @@
 # convention the stack backend uses (stacks/orgs/fnx/_defaults.yaml), so no CI
 # role ever reads this stack's state.
 #
-# Bootstrap (cold start, once): workflows/bootstrap.yaml `backend-only`, or by
+# Bootstrap (cold start, once): workflows/bootstrap.yaml `backend-cold-start`, or by
 # hand - see components/terraform/backend/README.md#bootstrap.
 # =============================================================================
 
