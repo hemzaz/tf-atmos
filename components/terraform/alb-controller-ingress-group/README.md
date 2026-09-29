@@ -25,7 +25,12 @@ routing rules.
   `scheme`, `security-groups` and `ssl-policy`.
 - The controller-created ALB does not get the `alb` component's hardening automatically: this
   component sets `drop_invalid_header_fields` through `load-balancer-attributes`; access logs are
-  opt-in and need a caller-provided bucket.
+  opt-in and need a caller-provided bucket. The controller merges `load-balancer-attributes` across
+  the group: a member Ingress may add keys but must not set a different value for one this component
+  sets (`routing.http.drop_invalid_header_fields.enabled`, `access_logs.s3.*`), or the group build
+  conflicts.
+- Install eks-addons' load balancer controller and its default `alb` IngressClass first
+  (`microservices/eks-addons` is a dependency of the template instance).
 - Listener lookups are unknown at plan on the first apply (no ALB yet), as in Cloud Posse.
 - Uses `data.aws_eks_cluster_auth` for the provider token; with private endpoints, plan and apply
   from inside the VPC.

@@ -12,9 +12,9 @@ Instances are named `network/main` and `network/services` (`metadata.component: 
 three AWS stacks; `network/main` also in `fnx-local-sandbox`. `network/vpc-peering` is a
 different component (`network`).
 
-- `network/main` reads `vpc/main .vpc_id` (private `internal` zone), `rds/main .instance_address`
-  (`db.internal.<d>` CNAME) and `network/services .zone_name_servers.services` (NS record
-  delegating `services.<d>`).
+- In the AWS stacks, `network/main` reads `vpc/main .vpc_id` (private `internal` zone) and
+  `network/services .zone_name_servers.services` (NS record delegating `services.<d>`); in prod
+  also `rds/main .instance_address` (`db.internal.<d>` CNAME).
 - Used by: `acm` (`zone_ids`, validation zone), `apigateway` (`zone_ids`, alias records),
   `eks-addons` (`zone_ids`, external-dns and cert-manager).
 

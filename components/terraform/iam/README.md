@@ -7,8 +7,8 @@ optionally the GitHub Actions OIDC provider with separate CI plan and apply role
 ## Wiring
 
 - Instances: `iam/ci` in the three AWS stacks (OIDC roles only, `create_cross_account_role:
-  false`); `iam/dev` in dev; `iam/main` in staging, prod and `fnx-local-localemu`. All depend on
-  `backend/main` in `fnx-core-root` for ordering only.
+  false`); `iam/dev` in dev; `iam/main` in staging, prod and `fnx-local-localemu`. The AWS-stack
+  instances depend on `backend/main` in `fnx-core-root` for ordering only (localemu's does not).
 - Used by: `eks` (`iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` as access entries), `kms/main`
   (dependency on the instance that creates the Auto Scaling service-linked role). The backend
   trusts the CI roles by name (`<ci_role_name_prefix>-plan` / `-apply`), not by reading state.

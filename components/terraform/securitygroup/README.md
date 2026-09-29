@@ -25,6 +25,8 @@ One security group per `security_groups` entry, with each rule a separate
 - `allow_all_egress` defaults to `true` (Cloud Posse). Set it `false` on a group that already has
   its own all-outbound rule, or apply fails with a duplicate. Overlapping CIDRs across two rules
   on the same ports fail the same way.
+- The group has no inline egress, so the provider removes AWS's default allow-all egress rule. With
+  `allow_all_egress: false` and no `egress_rules`, the group can send nothing.
 - `enforce_no_public_ingress` defaults to `true`: apply fails on ingress from `0.0.0.0/0` or `::/0`.
   Egress is not checked.
 - Validation rejects a group `name` (names are generated), protocol aliases such as `"6"` or

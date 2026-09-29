@@ -77,7 +77,7 @@ locals {
   # load-balancer-attributes is a StringMap annotation the controller merges
   # (unions) across every Ingress in the IngressGroup, the same as
   # alb.ingress.kubernetes.io/tags and /listen-ports above (see README
-  # "Group-wide annotations fall into two categories"): a member Ingress may
+  # "Notes"): a member Ingress may
   # add its own keys, but must not set a different value for a key this
   # component already sets here, or the group build conflicts.
   load_balancer_attributes_annotation = join(",", concat(

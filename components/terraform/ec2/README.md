@@ -10,7 +10,7 @@ generated key pair whose private key is stored in Secrets Manager. IMDSv2 is req
 
 - Instances: `ec2/bastion` in the three AWS stacks (reads `vpc/main` subnets and `kms/main
   .key_arn`); `ec2/app-server` in dev and staging (reads `vpc/main` and `ec2/bastion
-  .ssh_key_pair` / `.security_group_id`).
+  .ssh_key_pair`; staging also `ec2/bastion .security_group_id`).
 - Apply order: `kms/main`, `ec2/bastion`, `ec2/app-server`.
 
 ## Notes

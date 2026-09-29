@@ -28,4 +28,5 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
 - `cors_configuration` and `http_routes` apply to HTTP APIs only; a REST API ignores them silently
   (staging and prod set CORS on REST instances, a known gap).
 - `api_name` output is null for an HTTP API.
-- `enable_waf` and `tracing_enabled` default to `false`; prod opts in per instance.
+- `enable_waf` and `tracing_enabled` default to `false`. WAF is on for `apigateway/data` in every
+  stack and for prod's `apigateway/main`; X-Ray tracing is on in prod only.
