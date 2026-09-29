@@ -30,11 +30,6 @@ components:
         tags:
           Component: "IAM"
 
-      providers:
-        aws:
-          assume_role:
-            role_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-TerraformExecutionRole"
-
       # The single state backend lives in the management account's stack.
       dependencies:
         components:

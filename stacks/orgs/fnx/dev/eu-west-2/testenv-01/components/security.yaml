@@ -21,8 +21,7 @@ components:
         inherits:
           - iam
       vars:
-        # AWS account and role settings
-        account_id: "234567890123"
+        # Role and policy names
         cross_account_role_name: "testenv-01-dev-fnx-CrossAccountRole"
         policy_name: "testenv-01-dev-fnx-CrossAccountPolicy"
         trusted_account_ids:
@@ -33,10 +32,6 @@ components:
         # that provisions it.
         enable_autoscaling_service_linked_role: true
 
-      providers:
-        aws:
-          assume_role:
-            role_arn: arn:aws:iam::234567890123:role/{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-TerraformExecutionRole
       dependencies:
         components:
           - component: backend/main
