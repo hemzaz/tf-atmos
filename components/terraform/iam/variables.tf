@@ -317,13 +317,14 @@ variable "ci_apply_role_trusted_github_repos" {
 
   validation {
     # org/repo:branch - no "*", no extra ":" (so no environment:<name> or ref: forms)
-    condition = alltrue([
-      for repo in var.ci_apply_role_trusted_github_repos :
-      can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:[A-Za-z0-9._/-]+$", repo))
-      && !strcontains(repo, "*")
-      && !strcontains(repo, "environment:")
-      && !endswith(repo, ":pull_request")
-    ])
+    condition = alltrue(flatten([
+      for repo in var.ci_apply_role_trusted_github_repos : [
+        can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:[A-Za-z0-9._/-]+$", repo)),
+        !strcontains(repo, "*"),
+        !strcontains(repo, "environment:"),
+        !endswith(repo, ":pull_request"),
+      ]
+    ]))
     error_message = "Each ci_apply_role_trusted_github_repos entry must be \"<org>/<repo>:<branch>\" with an exact branch: wildcards, pull_request and environment:<name> subjects are rejected (deploy credentials must never reach PR-controlled code)."
   }
 
