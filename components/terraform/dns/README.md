@@ -21,7 +21,17 @@ written) `network` component — unrelated to this `dns` folder.
 | `records` | keyed record map; `zone_name` must match a key in `zones` |
 | `multi_account_dns_delegation` | routes zones with no `vpc_associations` to `aws.dns_account` |
 
-Output `zone_ids` is consumed by `apigateway/main`/`apigateway/data` (`.zone_ids.main` / `network/services .zone_ids.data`).
+Output `zone_ids` is consumed by `apigateway/main`/`apigateway/data` (`network/main .zone_ids.main` /
+`network/services .zone_ids.data`), `acm/main`/`acm/services` (`network/main .zone_ids.main` /
+`network/services .zone_ids.services`, for DNS validation) and `eks-addons`.
+
+Every zone and record name derives from `settings.environment.domain_name` (`<d>`):
+`network/main` has `main` = `<d>` (public) and `internal` = `internal.<d>` (private);
+`network/services` has `services` = `services.<d>` and `data` = `data.services.<d>` (both
+public). `<d>` is `fnx.example.com` (prod), `staging.fnx.example.com` (staging) and
+`dev.fnx.example.com` (dev), placeholders until the real domain is set. The public zones
+are not delegated to each other or from a parent here (`create_root_zone: false`,
+`multi_account_dns_delegation: false`): delegation is the owner's to set up.
 
 ## Dependencies / gotchas
 
@@ -31,6 +41,10 @@ Output `zone_ids` is consumed by `apigateway/main`/`apigateway/data` (`.zone_ids
 - `enable_query_logging` is rejected by validation for zones that also set
   `vpc_associations` (private zones need Resolver query logging instead).
 - Records in a DNS-account zone can only reference health checks from the main account.
+- Each record's `name` must be its zone's name or below it, and not inside a more specific
+  public zone of the same stack; `workflows/scripts/common/check-domains.py` (run by
+  `validate-all`) enforces it, together with the acm and apigateway names written into these
+  zones.
 
 ## Usage
 

@@ -123,17 +123,17 @@ components:
         inherits:
           - dns
       vars:
-        root_domain: staging.fnx.example.com
+        root_domain: "{{ .settings.environment.domain_name }}"
         create_root_zone: false
         multi_account_dns_delegation: false
         zones:
           main:
-            name: "staging.fnx.example.com"
+            name: "{{ .settings.environment.domain_name }}"
             comment: "Main zone for staging environment"
             force_destroy: true
             enable_query_logging: true
           internal:
-            name: "internal.staging.fnx.example.com"
+            name: "internal.{{ .settings.environment.domain_name }}"
             comment: "Internal DNS for staging"
             force_destroy: true
             vpc_associations:
@@ -141,13 +141,13 @@ components:
         records:
           www_main:
             zone_name: "main"
-            name: "www.staging.fnx.example.com"
+            name: "www.{{ .settings.environment.domain_name }}"
             type: "A"
             ttl: 300
             records: ["10.10.101.100"]
           db_internal:
             zone_name: "internal"
-            name: "db.internal.staging.fnx.example.com"
+            name: "db.internal.{{ .settings.environment.domain_name }}"
             type: "A"
             ttl: 60
             records: ["10.10.201.50"]
@@ -164,22 +164,22 @@ components:
         inherits:
           - dns
       vars:
-        root_domain: staging.fnx.example.com
+        root_domain: "{{ .settings.environment.domain_name }}"
         create_root_zone: false
         zones:
           services:
-            name: "services.staging.fnx.example.com"
+            name: "services.{{ .settings.environment.domain_name }}"
             comment: "Services zone for staging"
             force_destroy: true
           data:
-            name: "data.services.staging.fnx.example.com"
+            name: "data.services.{{ .settings.environment.domain_name }}"
             comment: "Data services DNS"
             force_destroy: true
 
         records:
           api_services:
             zone_name: "services"
-            name: "api.services.staging.fnx.example.com"
+            name: "api.services.{{ .settings.environment.domain_name }}"
             type: "CNAME"
             ttl: 300
-            records: ["api-internal.services.staging.fnx.example.com"]
+            records: ["api-internal.services.{{ .settings.environment.domain_name }}"]

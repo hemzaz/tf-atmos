@@ -137,14 +137,19 @@ components:
         inherits:
           - acm/defaults
       vars:
-        zone_id: "{{ .settings.environment.hosted_zone_id }}"
+        # Validation records go in the dns zone holding every name below
+        # (workflows/scripts/common/check-domains.py enforces it).
+        zone_id: !terraform.state network/main .zone_ids.main
         dns_domains:
           main_wildcard:
-            domain_name: "*.staging.{{ .settings.environment.domain_name }}"
+            domain_name: "*.{{ .settings.environment.domain_name }}"
             subject_alternative_names:
-              - "staging.{{ .settings.environment.domain_name }}"
+              - "{{ .settings.environment.domain_name }}"
             validation_method: "DNS"
             wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/main
 
     acm/services:
       metadata:
@@ -152,14 +157,19 @@ components:
         inherits:
           - acm/defaults
       vars:
-        zone_id: "{{ .settings.environment.hosted_zone_id }}"
+        # Validation records go in the dns zone holding every name below
+        # (workflows/scripts/common/check-domains.py enforces it).
+        zone_id: !terraform.state network/services .zone_ids.services
         dns_domains:
           services_wildcard:
-            domain_name: "*.services.staging.{{ .settings.environment.domain_name }}"
+            domain_name: "*.services.{{ .settings.environment.domain_name }}"
             subject_alternative_names:
-              - "api.services.staging.{{ .settings.environment.domain_name }}"
+              - "api.services.{{ .settings.environment.domain_name }}"
             validation_method: "DNS"
             wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/services
 
     # ==========================================================================
     # Secrets Manager

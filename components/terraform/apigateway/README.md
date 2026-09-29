@@ -34,7 +34,11 @@ its custom domain the same way).
 ## Dependencies / gotchas
 
 - `apigateway/main` depends on `acm/main`, `network/main`; `apigateway/data` depends on
-  `acm/services`, `network/services`.
+  `acm/services`, `network/services`. Their custom domains are `api.<d>` (alias in
+  `network/main`'s `main` zone, `<d>`) and `data.services.<d>` (alias at the apex of
+  `network/services`' `data` zone), where `<d>` is `settings.environment.domain_name`;
+  `workflows/scripts/common/check-domains.py` checks that `domain_name` is inside the
+  `zone_id`'s zone.
 - Custom-domain resources are silently skipped if only one of `domain_name` /
   `certificate_arn` is set; `zone_id` must be non-null or the alias record is skipped too.
 - The REST custom domain always uses `regional_certificate_arn` and `security_policy =

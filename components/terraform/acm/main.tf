@@ -94,9 +94,17 @@ resource "aws_acm_certificate_validation" "main" {
       error_message = "No validation records found for certificate ${each.key}. Check that the domain is configured correctly."
     }
 
-    # Verify all validation records have been created
+    # Verify every validation record of THIS certificate has been created.
+    # aws_route53_record.validation is keyed "<certificate key>.<dvo domain_name>",
+    # one key per DVO (a domain and its wildcard share one record name but keep
+    # separate keys), so each of this certificate's DVOs must have its own key.
+    # The previous check counted every record in the instance, so any instance
+    # with two or more certificates failed here.
     precondition {
-      condition     = length([for dvo in aws_acm_certificate.main[each.key].domain_validation_options : dvo.resource_record_name]) == length([for record in aws_route53_record.validation : record.name if contains(keys(aws_route53_record.validation), "${each.key}.${aws_acm_certificate.main[each.key].domain_name}")])
+      condition = alltrue([
+        for dvo in aws_acm_certificate.main[each.key].domain_validation_options :
+        contains(keys(aws_route53_record.validation), "${each.key}.${dvo.domain_name}")
+      ])
       error_message = "Not all validation records have been created for certificate ${each.key}. DNS validation may fail."
     }
 

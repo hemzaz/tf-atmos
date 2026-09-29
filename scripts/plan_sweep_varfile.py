@@ -1009,6 +1009,10 @@ def self_test(components_dir, tmp):
                   'map(select(.key == "selected_key")) | .[0].value']}},
         'vpc/main': {'component': 'vpc', 'vars': {}},
         'kms/main': {'component': 'kms', 'vars': {}},
+        # acm's zone_id reads its dns instance's zone_ids map (B3).
+        'network/main': {'component': 'dns', 'vars': {}},
+        'acm/zoned': {'component': 'acm', 'vars': {
+            'zone_id': '!terraform.state network/main .zone_ids.main'}},
         # A component that is not in components/terraform: an absolute
         # component path wins the os.path.join in Resolver.component.
         'fake/main': {'component': os.path.join(tmp, 'fake'), 'vars': {}},
@@ -1135,6 +1139,12 @@ def self_test(components_dir, tmp):
           ('shaped', True))
     check('map key accessor', ref('.certificate_arns.main_wildcard', 'certificate_arn')[1],
           'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012')
+    dns = res.component('dns')
+    check('dns zone_ids shape', shape_of(dns.outputs.get('zone_ids', ''), Ctx(dns)), MAP(SCALAR))
+    # acm's zone_id is validated ^Z[A-Z0-9]{1,32}$: the synthetic leaf must match.
+    check('acm zone_id from dns zone_ids',
+          resolve_ref('!terraform.state network/main .zone_ids.main', 'zone_id', res),
+          ('shaped', 'Z1234567890ABCDEFGHIJ'))
     # L3'. Keys read through a pipe or a select() anywhere in the stack are
     # in the synthetic map, so those reads get a value, not null.
     check('keys collected', res.keys(stack, 'acm/main', 'certificate_arns'),

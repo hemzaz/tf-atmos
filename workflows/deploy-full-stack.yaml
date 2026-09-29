@@ -8,7 +8,7 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: backend, iam, kms, networking, connectivity, security, security-monitoring, compute, platform, data, dns, addons, services, monitoring
+#   layers: backend, iam, kms, networking, connectivity, security, security-monitoring, compute, platform, data, dns, certificates, addons, services, monitoring
 #
 # A layer plans all its instances before it applies any of them, so an instance
 # that reads another's state (!terraform.state / !terraform.output) must be in a
@@ -21,8 +21,11 @@
 # shares the security layer with securityhub, which only lists it in
 # dependencies.components), lambda (compute) precedes apigateway (services), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
-# eks-addons reads its dns instance's zone_ids, so it has its own addons layer
-# after dns (and after compute, for the cluster it installs into).
+# acm validates its certificates in the dns instances' zones (zone_ids), so it
+# has its own certificates layer after dns and before services and monitoring,
+# which read its certificate ARNs. eks-addons reads its dns instance's zone_ids,
+# so it has its own addons layer after dns (and after compute, for the cluster
+# it installs into).
 # Every layer except backend has at least one enabled instance in every
 # workload stack (eks-backend-services/main, the last to gain instances, joined
 # the compute layer in all 3 stacks); fnx-core-root has only the backend layer.
@@ -119,10 +122,9 @@ workflows:
       - name: plan-security
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager"
-          or .metadata.component == "guardduty" or .metadata.component == "securityhub"
-          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
-          or .metadata.component == "cognito"'
+          terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
+          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
+          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
       - name: confirm_security
         type: confirm
         prompt: Apply the security layer plan above?
@@ -133,10 +135,10 @@ workflows:
       - name: deploy-security
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "acm"
-          or .metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
+          terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
+          or .metadata.component == "guardduty" or .metadata.component == "securityhub"
+          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
+          or .metadata.component == "cognito"'
       - name: plan-security-monitoring
         type: atmos
         command: terraform plan --query '.metadata.component == "security-monitoring"'
@@ -215,6 +217,23 @@ workflows:
       - name: deploy-dns
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "dns"'
+      # acm writes its DNS validation records into the dns instances' zones
+      # (zone_id is !terraform.state network/<x> .zone_ids.<key>), so it
+      # follows dns; apigateway (services) and monitoring read its certificate
+      # ARNs, so it precedes them.
+      - name: plan-certificates
+        type: atmos
+        command: terraform plan --query '.metadata.component == "acm"'
+      - name: confirm_certificates
+        type: confirm
+        prompt: Apply the certificates layer plan above?
+        default: false
+      - name: guard-certificates
+        type: shell
+        command: test "{{ .steps.confirm_certificates.value }}" = "true" || { echo "Deployment cancelled before the certificates layer."; exit 1; }
+      - name: deploy-certificates
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "acm"'
       # eks-addons reads the dns instances' zone_ids (external-dns and
       # cert-manager are scoped to those zones), so it follows dns.
       - name: plan-addons
@@ -362,15 +381,14 @@ workflows:
           or .metadata.component == "network" or .atmos_component == "ec2/bastion"'
 
   deploy-security:
-    description: "Deploy the security layer: certificates, secrets, GuardDuty, Security Hub and Cognito"
+    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, CloudTrail, AWS Config and Cognito"
     steps:
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "acm" or .metadata.component == "secretsmanager"
-          or .metadata.component == "guardduty" or .metadata.component == "securityhub"
-          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
-          or .metadata.component == "cognito"'
+          terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
+          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
+          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
       - name: confirm
         type: confirm
         prompt: Deploy the security layer?
@@ -381,10 +399,10 @@ workflows:
       - name: deploy
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "acm"
-          or .metadata.component == "secretsmanager" or .metadata.component == "guardduty"
-          or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
+          terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
+          or .metadata.component == "guardduty" or .metadata.component == "securityhub"
+          or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
+          or .metadata.component == "cognito"'
 
   deploy-security-monitoring:
     description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector and Security Hub)"
@@ -480,6 +498,23 @@ workflows:
       - name: deploy
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "dns"'
+
+  deploy-certificates:
+    description: "Deploy the certificates layer: ACM certificates, DNS-validated in the dns layer's zones"
+    steps:
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.metadata.component == "acm"'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the certificates layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "acm"'
 
   deploy-addons:
     description: "Deploy the addons layer: EKS add-ons (after the dns layer, whose zones they read)"
