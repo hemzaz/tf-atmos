@@ -24,17 +24,37 @@ output "access_role_names" {
 }
 
 output "backend_role_arn" {
-  description = "ARN of the read/write state role (access_roles key \"write\"): what the stacks' backend assumes for apply; iam/ci grants the CI apply roles sts:AssumeRole on it"
+  description = "ARN of the non-prod read/write state role (access_roles key \"write\"): what dev/staging stacks' backend assumes for apply; iam/ci grants the dev/staging CI apply roles sts:AssumeRole on it"
   value       = try(aws_iam_role.access["write"].arn, null)
 }
 
 output "backend_role_name" {
-  description = "Name of the read/write state role (access_roles key \"write\")"
+  description = "Name of the non-prod read/write state role (access_roles key \"write\")"
   value       = try(aws_iam_role.access["write"].name, null)
 }
 
+output "backend_prod_role_arn" {
+  description = "ARN of the production read/write state role (access_roles key \"prod_write\"): what prod stacks' backend assumes for apply; iam/ci grants the prod CI apply role sts:AssumeRole on it"
+  value       = try(aws_iam_role.access["prod_write"].arn, null)
+}
+
+output "backend_prod_role_name" {
+  description = "Name of the production read/write state role (access_roles key \"prod_write\")"
+  value       = try(aws_iam_role.access["prod_write"].name, null)
+}
+
+output "backend_core_role_arn" {
+  description = "ARN of the fnx-core-root state role (access_roles key \"core_write\"): what fnx-core-root's backend assumes; trusted only by the administrator who applies backend/main"
+  value       = try(aws_iam_role.access["core_write"].arn, null)
+}
+
+output "backend_core_role_name" {
+  description = "Name of the fnx-core-root state role (access_roles key \"core_write\")"
+  value       = try(aws_iam_role.access["core_write"].name, null)
+}
+
 output "backend_read_role_arn" {
-  description = "ARN of the non-prod read-only state role (access_roles key \"read\"): what non-prod stacks' (and fnx-core-root's) backend assumes for plans; iam/ci grants the CI plan roles sts:AssumeRole on it"
+  description = "ARN of the non-prod read-only state role (access_roles key \"read\"): what dev/staging stacks' backend assumes for plans; iam/ci grants the dev/staging CI plan roles sts:AssumeRole on it"
   value       = try(aws_iam_role.access["read"].arn, null)
 }
 

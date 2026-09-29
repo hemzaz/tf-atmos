@@ -18,7 +18,9 @@
  * to manage it afterwards. The aws_iam_session_context data source turns an
  * assumed-role session ARN into its role ARN, path included (upstream uses
  * awsutils' eks_role_arn, which drops the path). A root-user caller is never
- * added.
+ * added. An entry with no allowed_principal_arns (upstream's default) is
+ * therefore trusted by the caller alone: that is the core_write role, the
+ * only one that can write the backend's own (fnx-core-*) state.
  *
  * KMS: the state key's policy delegates to IAM (account root only), so the
  * roles' own policies grant key use. Read: Decrypt. Write: also Encrypt and
@@ -74,6 +76,16 @@ resource "aws_iam_role" "access" {
   name               = each.value.role_name
   description        = "${each.value.write_enabled ? "Read/write" : "Read-only"} access to the Terraform state in ${var.bucket_name}"
   assume_role_policy = data.aws_iam_policy_document.access_role_assume[each.key].json
+
+  lifecycle {
+    # An empty allowed_principal_arns trusts only the caller (the core_write
+    # role), and a root-user caller is never added: that would leave a trust
+    # policy with no principal at all.
+    precondition {
+      condition     = length(local.access_role_principal_arns[each.key]) > 0
+      error_message = "access_roles[\"${each.key}\"] would trust nobody: allowed_principal_arns is empty and the caller is the account root user. Apply as an IAM role/user, or list a principal."
+    }
+  }
 }
 
 # State read (plus write and S3-native lock files "<key>.tflock" when write_enabled)
@@ -87,8 +99,25 @@ data "aws_iam_policy_document" "access_role" {
     resources = [aws_s3_bucket.terraform_state.arn]
   }
 
-  # Object access is limited to object_key_patterns: the read roles are split
-  # by stage (non-prod / prod) within the one bucket. ListBucket above is not
+  # Read-only roles only: what the disaster-recovery checks (workflows/scripts/dr,
+  # run with the CI plan roles) read through them. recover-state lists state
+  # object VERSIONS to pick one to restore (ListBucketVersions; names and version
+  # IDs only - GetObjectVersion is not granted); dr-status reads the bucket's
+  # versioning and replication settings. Like ListBucket, bucket-level: the key
+  # layout puts the component first, so no per-stage s3:prefix exists.
+  dynamic "statement" {
+    for_each = each.value.write_enabled ? [] : [true]
+
+    content {
+      sid       = "DisasterRecoveryChecks"
+      effect    = "Allow"
+      actions   = ["s3:ListBucketVersions", "s3:GetBucketVersioning", "s3:GetReplicationConfiguration"]
+      resources = [aws_s3_bucket.terraform_state.arn]
+    }
+  }
+
+  # Object access is limited to object_key_patterns: every role is split by
+  # stage (non-prod / prod / core) within the one bucket. ListBucket above is not
   # prefix-scoped: Terraform's S3 backend lists "<workspace_key_prefix>/" (the
   # component, shared by every stack's workspaces) to find workspaces, so a
   # role can see key NAMES across stacks, never object contents.

@@ -42,7 +42,7 @@ variable "access_roles" {
   type = map(object({
     role_name              = string
     write_enabled          = bool
-    allowed_principal_arns = list(string)
+    allowed_principal_arns = optional(list(string), [])
     object_key_patterns    = optional(list(string), ["*"])
   }))
   description = <<-EOT
@@ -51,12 +51,14 @@ variable "access_roles" {
     state objects matching `object_key_patterns` (S3 object-key patterns, `*` wildcards, appended to
     the bucket ARN; default every object) and decrypt with the state key; `write_enabled` also
     allows writing and deleting those objects (state and `.tflock` lock files) and encrypting with
-    the key.
+    the key. A read-only role may also list object versions and read the bucket's versioning and
+    replication settings (the disaster-recovery checks, workflows/scripts/dr).
     `allowed_principal_arns` are the exact IAM role/user ARNs that may assume the role (trusted
     through an `aws:PrincipalArn` condition, so they need not exist yet); the principal running
-    Terraform is always added, as upstream. By convention the keys are `read`, `prod_read` and
-    `write`, which the backend_read_role_arn, backend_prod_read_role_arn and backend_role_arn
-    outputs expose.
+    Terraform is always added, as upstream, so an empty list (upstream's default) trusts only
+    that caller. By convention the keys are `read`, `prod_read`, `write`, `prod_write` and
+    `core_write`, which the backend_read_role_arn, backend_prod_read_role_arn, backend_role_arn,
+    backend_prod_role_arn and backend_core_role_arn outputs expose.
   EOT
 
   validation {
@@ -82,11 +84,6 @@ variable "access_roles" {
   validation {
     condition     = length(distinct([for role in values(var.access_roles) : role.role_name])) == length(var.access_roles)
     error_message = "access_roles role_name values must be unique."
-  }
-
-  validation {
-    condition     = alltrue([for role in values(var.access_roles) : length(role.allowed_principal_arns) > 0])
-    error_message = "Each access_roles entry must list at least one allowed_principal_arns entry."
   }
 
   validation {
