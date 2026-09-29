@@ -3,23 +3,30 @@
 #     that stack's last successful deploy, in dependency order.
 #   workflow_dispatch (default branch only): plan or deploy one known stack
 #     (optionally one component).
-# Approvals and credentials come from GitHub Environments named after the Atmos
-# stack (e.g. fnx-prod-production); give production environments required
-# reviewers. Each environment defines vars.AWS_ROLE_ARN (OIDC-trusted deploy role).
+# Credentials: Cloud Posse's GitOps model. The jobs use NO GitHub Environment,
+# so the OIDC token's sub is repo:<org>/<repo>:ref:refs/heads/<default branch> -
+# the only subject each stack's CI apply role trusts (iam/ci
+# ci_apply_role_trusted_github_repos, after Cloud Posse's branch-pinned
+# trusted_github_repos). The role ARN is derived from the stack's iam/ci
+# instance (account ID + ci_role_name_prefix), so no environment- or
+# repo-scoped role variable is needed.
+# THERE IS NO MANUAL APPROVAL: every push to the default branch that affects a
+# stack deploys it, production included (owner decision). Review happens on the
+# pull request; merging is the approval.
 # Destroy is intentionally not exposed here: use
 # `atmos workflow destroy -f destroy-environment` (typed confirmation).
 #
 # GitHub-side controls this file relies on (they cannot be expressed in YAML):
-#   - Every stack environment: deployment branches = the default branch only.
-#   - Deploy role trust (each environment's AWS_ROLE_ARN): aud = sts.amazonaws.com,
-#     sub = repo:<org>/<repo>:environment:<stack>. Never a wildcard.
+#   - Branch protection on the default branch: it is the deploy gate.
 #   - Plan role trust (repo-level AWS_PLAN_ROLE_ARN, read-only): sub =
 #     repo:<org>/<repo>:pull_request, plus repo:<org>/<repo>:ref:refs/heads/<default
 #     branch> for drift detection and disaster-recovery checks (production's plan
 #     role: the default-branch sub only).
-#   - State: deploys leave TFSTATE_ACCESS unset, so the stack backend assumes the
-#     state backend's read/write role, which trusts the stacks' CI apply roles
-#     (stacks/orgs/fnx/_defaults.yaml, stacks/orgs/fnx/core/eu-west-2/root.yaml).
+#   - State: deploys leave TFSTATE_ACCESS unset, so the stack backend assumes its
+#     stage's read/write state role (dev/staging: fnx-terraform-backend-role,
+#     prod: fnx-terraform-backend-prod-role), each trusted only by that stage's
+#     CI apply roles (stacks/orgs/fnx/_defaults.yaml,
+#     stacks/orgs/fnx/core/eu-west-2/root.yaml).
 #   - A tag ruleset allowing only GitHub Actions to create/update/delete
 #     refs/tags/deployed/**, so only this workflow moves the deploy markers.
 #
@@ -104,7 +111,7 @@ jobs:
 
           # fnx-local-* target the Floci/LocalEmu emulators (account_id
           # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have no
-          # AWS_ROLE_ARN deploy-role trust for their GitHub Environment;
+          # CI apply role;
           # emulator.yml covers them instead. Excluded via
           # settings.github.actions_enabled (the same key Cloud Posse's own
           # atmos-terraform-plan/-apply actions read; data-driven, survives a
@@ -164,7 +171,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
-    environment: ${{ matrix.stack }}
+    # No `environment:` - it would change the OIDC sub to
+    # repo:<org>/<repo>:environment:<stack>, which the apply roles do not trust.
     permissions:
       contents: read
       id-token: write
@@ -175,6 +183,7 @@ jobs:
       matrix: ${{ fromJson(needs.affected-stacks.outputs.matrix) }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      STACK: ${{ matrix.stack }}
       # Wait up to 10 minutes for a held state lock (another apply, or an
       # operator) instead of failing the deploy at once.
       TF_CLI_ARGS_apply: -lock-timeout=10m
@@ -183,9 +192,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - id: role
+        name: Resolve the stack's CI apply role
+        run: python3 workflows/scripts/common/ci-apply-role-arn.py
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
       - name: Deploy affected components
         env:
@@ -236,7 +248,8 @@ jobs:
   dispatch:
     name: ${{ inputs.action }} ${{ inputs.stack }} ${{ inputs.component }}
     # Re-check the stack against the known list: API callers are not bound to the
-    # choice options, and `environment:` would auto-create an unprotected environment.
+    # choice options. No `environment:` (see deploy-affected): the sub stays the
+    # default-branch ref, which the apply roles trust.
     if: >-
       vars.AWS_PLAN_ROLE_ARN != '' &&
       github.event_name == 'workflow_dispatch' &&
@@ -245,7 +258,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
-    environment: ${{ inputs.stack }}
     permissions:
       contents: read
       id-token: write
@@ -260,9 +272,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - id: role
+        name: Resolve the stack's CI apply role
+        run: python3 workflows/scripts/common/ci-apply-role-arn.py
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
       - name: Validate stacks
         run: atmos validate stacks

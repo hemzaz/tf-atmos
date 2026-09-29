@@ -3,9 +3,12 @@
 # interactive runbooks and are intentionally run by an operator, not CI.
 #
 # Runs only on the default branch, only for a known stack, with the read-only
-# plan role (repo-level vars.AWS_PLAN_ROLE_ARN). It uses no GitHub Environment, so
-# its OIDC sub is repo:<org>/<repo>:ref:refs/heads/<default branch>; the plan
-# role's trust policy must allow that sub (see .github/workflows/terraform-cd.yml).
+# plan role: repo-level vars.AWS_PLAN_ROLE_ARN, or for fnx-prod-production
+# production's own vars.AWS_PROD_PLAN_ROLE_ARN (the only principal the prod
+# read-only state role trusts). It uses no GitHub Environment, so its OIDC sub
+# is repo:<org>/<repo>:ref:refs/heads/<default branch>, which both plan roles
+# trust. The scripts read the state bucket (management account) only through
+# the stack's read-only backend role (workflows/scripts/common/state-read-role.sh).
 # Optional: vars.ATMOS_VERSION / vars.AWS_REGION.
 name: Disaster recovery
 # AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
@@ -53,9 +56,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Require the production plan role
+        if: inputs.stack == 'fnx-prod-production' && vars.AWS_PROD_PLAN_ROLE_ARN == ''
+        run: |
+          echo "::error::vars.AWS_PROD_PLAN_ROLE_ARN (fnx-prod-production's iam/ci ci_plan_role_arn) is not set"
+          exit 1
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ inputs.stack == 'fnx-prod-production' && vars.AWS_PROD_PLAN_ROLE_ARN || vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
       - name: Run DR workflow
         run: atmos workflow "$ACTION" -f disaster-recovery

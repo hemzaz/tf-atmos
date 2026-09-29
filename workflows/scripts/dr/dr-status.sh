@@ -3,6 +3,9 @@
 # Extracted from the inline `dr-status` workflow; run via `atmos workflow dr-status -f disaster-recovery`.
 # shellcheck source=../common/stack-context.sh
 source "$(dirname "$0")/../common/stack-context.sh"
+# The state bucket is read through the stack's read-only backend role (state_aws).
+# shellcheck source=../common/state-read-role.sh
+source "$(dirname "$0")/../common/state-read-role.sh"
 
 # --- check-dr-status ---
 # Colors
@@ -38,12 +41,12 @@ echo -e "${WHITE}1. Terraform State Backend${NC}"
 BUCKET_NAME="${STATE_BUCKET}"
 
 echo -n "   S3 bucket exists: "
-if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+if state_aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
   log_success "Yes"
   ((DR_SCORE+=10))
 
   echo -n "   Versioning enabled: "
-  VERSIONING=$(aws s3api get-bucket-versioning --bucket "$BUCKET_NAME" --query 'Status' --output text 2>/dev/null || echo "None")
+  VERSIONING=$(state_aws s3api get-bucket-versioning --bucket "$BUCKET_NAME" --query 'Status' --output text 2>/dev/null || echo "None")
   if [[ "$VERSIONING" == "Enabled" ]]; then
     log_success "Yes"
     ((DR_SCORE+=10))
@@ -52,7 +55,7 @@ if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
   fi
 
   echo -n "   Cross-region replication: "
-  if aws s3api get-bucket-replication --bucket "$BUCKET_NAME" >/dev/null 2>&1; then
+  if state_aws s3api get-bucket-replication --bucket "$BUCKET_NAME" >/dev/null 2>&1; then
     log_success "Configured"
     ((DR_SCORE+=15))
   else
