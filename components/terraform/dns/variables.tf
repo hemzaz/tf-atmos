@@ -54,9 +54,26 @@ variable "zones" {
     query_logging_config = optional(map(string), {})
     vpc_associations     = optional(list(string), [])
     tags                 = optional(map(string), {})
+    # Key of another public zone in this map. The component writes this
+    # zone's NS record (record id delegation_<key>) into it, delegating the
+    # subdomain.
+    parent_zone = optional(string)
   }))
   description = "Map of Route53 zones to create"
   default     = {}
+
+  validation {
+    condition = alltrue([
+      for k, z in var.zones : z.parent_zone == null || (
+        z.parent_zone != k
+        && contains(keys(var.zones), coalesce(z.parent_zone, "-"))
+        && endswith(trimsuffix(lower(z.name), "."), ".${trimsuffix(lower(try(var.zones[z.parent_zone].name, "")), ".")}")
+        && length(z.vpc_associations) == 0
+        && length(try(var.zones[z.parent_zone].vpc_associations, [])) == 0
+      )
+    ])
+    error_message = "parent_zone must be the key of another public zone in zones, and this public zone's name must be below that zone's name."
+  }
 
   validation {
     condition = alltrue([

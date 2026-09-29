@@ -43,7 +43,11 @@ vars:
 # as {{ .settings.environment.<key> }}.
 settings:
   environment:
-    domain_name: "example.com"
+    # The stack's one domain. Every dns zone/record, acm domain/SAN and
+    # apigateway custom domain derives from it; the Route 53 zone ids come from
+    # the dns instances' zone_ids output, never from settings. example.com is a
+    # placeholder base until the owner sets the real domain.
+    domain_name: "fnx.example.com"
     description: "Production Environment - Business Critical Infrastructure"
     owner: "Platform Team"
     version: "1.0.0"
@@ -82,7 +86,6 @@ settings:
       rpo: "1 hour"
       rto: "4 hours"
     tenant_name: production
-    hosted_zone_id: "Z1234567890PROD"
     eks_kubernetes_version: "1.36"
     eks_public_access: false
     rds_engine: "postgres"

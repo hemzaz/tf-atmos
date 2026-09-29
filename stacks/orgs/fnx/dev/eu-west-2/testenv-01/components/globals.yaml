@@ -35,7 +35,11 @@ vars:
 # as {{ .settings.environment.<key> }}.
 settings:
   environment:
-    domain_name: "example.com"
+    # The stack's one domain. Every dns zone/record, acm domain/SAN and
+    # apigateway custom domain derives from it; the Route 53 zone ids come from
+    # the dns instances' zone_ids output, never from settings. example.com is a
+    # placeholder base until the owner sets the real domain.
+    domain_name: "dev.fnx.example.com"
     description: "Development test environment for infrastructure validation"
     owner: "DevOps Team"
     version: "1.0.0"
@@ -53,7 +57,6 @@ settings:
       # components/terraform/cost-optimization/variables.tf).
       budget_monthly_limit: "500"
     tenant_name: testenv-01
-    hosted_zone_id: "Z1234567890EXAMPLE"
     eks_kubernetes_version: "1.36"
     eks_public_access: false
     rds_engine: "postgres"
