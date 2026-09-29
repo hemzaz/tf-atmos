@@ -223,7 +223,7 @@ components:
         handler: "main.handler"
         runtime: "python3.13"
         # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
         s3_bucket: "fnx-lambda-artifacts"
         s3_key: "data-processor/latest.zip"
         memory_size: 512

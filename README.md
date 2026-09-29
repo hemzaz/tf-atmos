@@ -1,255 +1,116 @@
 # Terraform Atmos Infrastructure
 
-AWS infrastructure for the `fnx` tenant, defined as Terraform root modules and composed into
-stacks with [Atmos](https://atmos.tools/). Deployments run through Atmos workflows locally and
-Atmos Native CI in GitHub Actions.
+AWS infrastructure for the `fnx` tenant: Terraform root modules composed into stacks with
+[Atmos](https://atmos.tools/), deployed by Atmos workflows locally and Atmos Native CI in GitHub
+Actions. Operating it (bootstrap, deploy, state, DR) is in [docs/OPERATIONS.md](./docs/OPERATIONS.md).
 
-> Before the first `apply`, replace the placeholder account IDs, organization ID, domains and
-> alert recipients. The list is in
-> [Manual prerequisites before first apply](./docs/DEPLOYMENT.md#manual-prerequisites-before-first-apply).
-
-## This repository is opinionated: it follows Cloudposse
-
-Atmos is a Cloudposse utility, engineered around a particular way of working. Cloudposse know
-their product best, and they define how it should consume Terraform, Helm and other modules.
-So this repository follows Cloudposse all the way rather than inventing its own conventions.
-
-In practice that means:
-
-- **Component variables copy the upstream shape.** When a Cloudposse module or reference
-  component already models something, its variable names, types and defaults are copied
-  verbatim — defensive extras included. `clusters[*].node_groups.block_device_map` in
-  `components/terraform/eks` is copied from
-  [`cloudposse-terraform-components/aws-eks-cluster`](https://github.com/cloudposse-terraform-components/aws-eks-cluster),
-  down to the camel-case decoy attributes that turn a silently-dropped typo into a loud error.
-- **Typed objects, never `map(any)`.** `map(any)` forces every element to converge on one type,
-  so two entries differing by a single optional key cannot coexist, and any key the component
-  does not read is discarded without a warning.
-- **Upstream removals are respected.** Cloudposse deleted `disk_size`, `disk_type` and
-  `disk_encryption_enabled` from their node-group module because those are launch-template-only
-  settings that AWS rejects alongside a node group's own `disk_size`. This repository does not
-  reintroduce them.
-- **Deviations are documented.** Where this repository departs from upstream it says so in a
-  comment beside the code, with the reason.
-
-When a design question has no obvious answer, the tiebreaker is: do what Cloudposse does, and
-keep a comment naming the upstream source so the code can be re-synced later. Note that the old
-`cloudposse/terraform-aws-components` monorepo is archived — current reference components live
-under [`cloudposse-terraform-components`](https://github.com/cloudposse-terraform-components).
-
-## Versions
-
-| Tool | Version | Where it's pinned |
-|------|---------|--------------------|
-| Atmos | >= 1.229.0 | `atmos.yaml` (`version.constraint`, fatal) |
-| Terraform | 1.16.3 | `stacks/orgs/fnx/_defaults.yaml` (`terraform.dependencies.tools`); Atmos installs it |
-| AWS provider | `~> 6.65` in root modules, `>= 6.0, < 7.0` in shared modules | each `versions.tf` |
-| Kubernetes / Helm providers | 3.x | `versions.tf` of the EKS-related components |
-
-Lint, scan and AWS CLI tools (tflint, yamllint, trivy, checkov, aws-cli, jq) are pinned in the
-workflows that use them and installed by the Atmos toolchain — no separate install step.
-
-## Quick start
-
-Prerequisites: Atmos >= 1.229.0 and AWS credentials for the target account. You do not need to
-install Terraform — Atmos downloads the pinned version the first time a component runs.
-
-```bash
-atmos version                     # must be >= 1.229.0
-atmos list stacks                 # the three real stacks plus fnx-local-sandbox and fnx-local-localemu
-atmos list components             # component instances and how many stacks use each
-atmos list workflows              # every workflow with its file and description
-
-# Offline checks (no AWS credentials needed)
-atmos validate stacks
-atmos workflow validate-all -f validate-enhanced
-
-# Run it for real with no AWS account (Docker only) - see Sandbox below
-atmos workflow sandbox -f sandbox
-
-# First deployment of a stack (creates the state bucket, then IAM and VPCs)
-atmos workflow full -f bootstrap -s fnx-dev-testenv-01
-
-# Everything else, layer by layer (each layer is planned, confirmed, then applied)
-atmos workflow deploy -f deploy-full-stack -s fnx-dev-testenv-01
-```
-
-The full procedure is in the [Deployment Guide](./docs/DEPLOYMENT.md).
+The repository follows Cloud Posse: when a
+[Cloud Posse component](https://github.com/cloudposse-terraform-components) or module already
+models something, copy its variable names, types and defaults; use typed objects, never
+`map(any)`; document every deviation in a comment beside the code, naming the upstream source.
 
 ## Layout
 
 ```
-atmos.yaml                  Atmos CLI config (version constraint, paths, name_template, Native CI)
-components/terraform/       Terraform root modules (+ _library/ shared modules)
-modules/terraform/          Provider-less shared modules
-stacks/
-  orgs/fnx/                 Org, account and region defaults, the three workload stacks and fnx-core-root (state backend)
-  catalog/                  Abstract component defaults, disabled variants, stack templates
-  mixins/                   Tenant, stage and region mixins
-workflows/                  Atmos workflows (+ scripts/ they call)
-.github/workflows/          CI, CD, drift detection, security scan, DR checks
-docs/                       Deployment and operations guides
+atmos.yaml               Atmos config: version constraint, paths, name_template, Native CI, scaffolds
+components/terraform/    42 root modules (+ _library/ shared modules); each has a README
+modules/terraform/       provider-less shared modules
+stacks/orgs/fnx/         org defaults (_defaults.yaml: tags, Terraform version, S3 backend) and the stacks
+stacks/catalog/          abstract component defaults; templates/ holds opt-in stack templates
+stacks/mixins/           tenant, stage and region mixins
+workflows/               Atmos workflows (atmos list workflows); scripts/ holds the checks they run
+scripts/                 helpers: plan-sweep.sh, new-environment.sh, certificates/, dr/
+scaffolds/               templates for `atmos scaffold generate`
+templates/, examples/    copy-in component template, stack/config samples, the OIDC hub/spoke example
+integrations/            Atlantis and Jenkins alternatives to GitHub Actions (not used by CI)
+.github/workflows/       CI/CD (below)
 ```
+
+`make help` lists Makefile shortcuts around the same Atmos commands.
 
 ## Stacks
 
-Stack names come from `name_template` in `atmos.yaml`:
-`{{ .settings.context.tenant }}-{{ .settings.context.stage }}-{{ .settings.context.environment }}`.
+Names come from `name_template` in `atmos.yaml`: `<tenant>-<stage>-<environment>`. Only files
+under `stacks/orgs/` are stack manifests; each real stack imports its `<env>/components/`
+domain files (`globals`, `networking`, `security`, `compute`, `services`).
 
-| Stack | Manifest | Region |
-|-------|----------|--------|
-| `fnx-dev-testenv-01` | `stacks/orgs/fnx/dev/eu-west-2/testenv-01.yaml` | eu-west-2 |
-| `fnx-staging-staging-01` | `stacks/orgs/fnx/staging/eu-west-2/staging-01.yaml` | eu-west-2 |
-| `fnx-prod-production` | `stacks/orgs/fnx/prod/eu-west-2/production.yaml` | eu-west-2 |
-| `fnx-local-sandbox` | `stacks/orgs/fnx/local/eu-west-2/sandbox.yaml` | eu-west-2 (emulated) |
-| `fnx-local-localemu` | `stacks/orgs/fnx/local/eu-west-2/localemu.yaml` | eu-west-2 (emulated) |
+| Stack | Manifest (`stacks/orgs/fnx/...`) | Purpose |
+|-------|----------------------------------|---------|
+| `fnx-dev-testenv-01` | `dev/eu-west-2/testenv-01.yaml` | dev |
+| `fnx-staging-staging-01` | `staging/eu-west-2/staging-01.yaml` | staging |
+| `fnx-prod-production` | `prod/eu-west-2/production.yaml` | production |
+| `fnx-core-root` | `core/eu-west-2/root.yaml` | management account: the state backend (`backend/main`); not run by CI |
+| `fnx-local-sandbox` | `local/eu-west-2/sandbox.yaml` | Floci emulator lane, no AWS account needed |
+| `fnx-local-localemu` | `local/eu-west-2/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
 
-The three real stacks each import five domain files from their `components/` directory
-(`globals`, `networking`, `security`, `compute`, `services`). See
-[stacks/README.md](./stacks/README.md). The two `fnx-local-*` stacks are local emulator lanes —
-`fnx-local-sandbox` runs against Floci, `fnx-local-localemu` against LocalEmu for the components
-Floci cannot provision. See [Sandbox](#sandbox).
+An instance name need not match its module: `metadata.component` decides. `network/main` and
+`network/services` are `dns` instances; `network/vpc-peering` is the `network` module.
 
-## Sandbox
+## Prerequisites
 
-The repository runs end to end with no AWS account, no credentials and no cost:
+- Atmos >= 1.229.0 (fatal constraint in `atmos.yaml`). Atmos installs Terraform 1.16.3
+  (`stacks/orgs/fnx/_defaults.yaml`) and the lint/scan tools pinned in each workflow.
+- Docker, for the emulator lanes. AWS credentials only for plans/applies against real accounts.
+- The stacks still hold placeholder account IDs, domains and alert addresses: see
+  [first-deploy inputs](./docs/OPERATIONS.md#first-deploy-inputs).
 
-```bash
-atmos workflow sandbox -f sandbox     # up, apply, destroy, down
-```
-
-That starts a [Floci](https://github.com/floci-dev/floci) container (MIT-licensed, a drop-in for
-LocalStack CE, which was end-of-lifed in March 2026), applies `kms`, `vpc`, `dns`,
-`secretsmanager`, `ecs`, `lambda`, `cognito` and `securitygroup` against it for real, then
-destroys them in reverse and stops the container. Docker is the only prerequisite. Individual
-steps:
+## Developer quickstart
 
 ```bash
-atmos emulator up aws -s fnx-local-sandbox
-atmos terraform apply vpc/main -s fnx-local-sandbox --identity local-aws
-atmos emulator down aws -s fnx-local-sandbox
+atmos list stacks                                   # also: list components, list workflows
+atmos describe component vpc/main -s fnx-dev-testenv-01 --process-functions=false
+atmos validate stacks                               # offline
+atmos workflow tflint-init -f lint                  # once
+atmos workflow lint -f lint                         # fmt, yamllint, state-key check, TFLint, Trivy
+atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
+bash scripts/plan-sweep.sh fnx-dev-testenv-01       # plan with resolved variables, no AWS account needed
+atmos workflow sandbox -f sandbox                   # apply against Floci, then destroy (Docker only)
+atmos workflow localemu -f localemu                 # the same against LocalEmu
+atmos terraform plan vpc/main -s fnx-dev-testenv-01 # needs AWS credentials
 ```
 
-Together with the LocalEmu lane below, this is how the repo **executes** Terraform rather than
-just analyzing it, and it has caught bugs every static check missed — a NAT gateway created
-despite `nat_gateway_enabled = false`, a `coalesce()` that would have failed every `iam` plan, and
-a missing `database_subnet_ids` output that would have broken all three `rds` instances at plan
-time.
+`terraform validate` never evaluates `variable` validation blocks; plan-sweep and the emulator
+lanes do. Emulator runs need `--identity local-aws` (sandbox) or `--identity local-emu`
+(localemu) when run by hand; neither identity is a default, so no real stack can hit an emulator.
 
-Two things to know:
+**Add a component:** `atmos scaffold generate component . --force` (run from the repo root; it
+also writes the catalog entry). `atmos scaffold generate catalog-entry . --force` adds catalog
+defaults for an existing component.
 
-- The `local-aws` identity is deliberately **not** `default: true`, so no real environment can be
-  pointed at the emulator by accident. Pass `--identity local-aws` explicitly.
-- The emulator does not implement everything. `CreateNetworkAcl` is missing, and there is
-  no VPC default security group to adopt, which is why the sandbox stack sets
-  `manage_network_acls: false` and `manage_default_security_group: false`. `CreateDBSubnetGroup` is missing too, so `rds` cannot run against
-  Floci — it is exercised against LocalEmu instead, in the `fnx-local-localemu` lane, which is
-  what caught the overlapping backup and maintenance windows that would have failed
-  `CreateDBInstance` in staging and prod. Components with an instance in neither lane are covered
-  by validation and scanners only — their READMEs say so.
+**Add an instance:** add it under `components.terraform` in the stack's domain file, with
+`metadata.component` (and `inherits` for the catalog base), then list every instance it reads
+in `dependencies.components` and make sure a layer in `workflows/deploy-full-stack.yaml` deploys
+it after them. validate-all fails otherwise. A new stack's CI roles must also be added to
+`access_roles` in `stacks/orgs/fnx/core/eu-west-2/root.yaml`.
 
-## Components
+## Conventions
 
-`components/terraform/` holds 42 root modules, plus `_library/` (shared modules): `acm`, `alb`,
-`alb-controller-ingress-group`, `apigateway`, `athena`, `awsconfig`, `backend`, `backup`,
-`cloudtrail`, `cognito`, `cost-optimization`, `dns`, `dynamodb`, `ec2`, `ecs`, `eks`,
-`eks-addons`, `eks-backend-services`, `elasticache`, `eventbridge`, `external-secrets`, `glue`,
-`guardduty`, `iam`, `idp-platform`, `kinesis`, `kms`, `lambda`, `monitoring`, `network`, `rds`,
-`s3`, `secretsmanager`, `security-monitoring`, `securitygroup`, `securityhub`, `ses`, `sns`,
-`sqs`, `stepfunctions`, `vpc`, `waf`.
-
-`idp-platform` is unsupported (no stack deploys it; `plan` fails unless
-`acknowledge_unsupported = true`). There are no `metadata.enabled: false` instances left in
-`stacks/orgs/`, but not every component has an instance: `alb`, `alb-controller-ingress-group`,
-`athena`, `dynamodb`, `eventbridge`, `glue`, `kinesis`, `s3`, `ses`, `sqs` and `waf` are used only
-by the opt-in [stack templates](./stacks/README.md#stack-templates). `sns` and `stepfunctions`
-have only a catalog base (`stacks/catalog/<component>/defaults.yaml`) and no instance or template
-reference yet. `securitygroup` is deployed only in `fnx-local-sandbox`, and every other component
-except `idp-platform` has an instance in at least one of the three real stacks (`elasticache` and
-`network` only in prod).
-
-An instance name does not have to match its component: `metadata.component` decides which module
-runs. `network/main` and `network/services` are `dns` instances, while `network/vpc-peering` is
-the `network` module. Read `metadata.component` before assuming.
-
-Every root module has `versions.tf`, `provider.tf` (AWS provider with `default_tags` from
-`var.tags`) and a `README.md`. Tags come from `stacks/orgs/fnx/_defaults.yaml`: `Tenant`,
-`Account`, `Environment`, `ManagedBy = "Terraform"`.
-
-**State backend**: one S3 bucket, `fnx-terraform-state`, in the management account, managed by
-`backend/main` in stack `fnx-core-root` and accessed through access roles split by stage, for
-reads and writes: `fnx-terraform-backend-role` / `fnx-terraform-backend-read-role` (dev/staging),
-`fnx-terraform-backend-prod-role` / `fnx-terraform-backend-prod-read-role` (prod, assumable only by
-prod's apply / master-only plan role) and `fnx-terraform-backend-core-role` (`fnx-core-root`, the
-administrator only). CI plans set `TFSTATE_ACCESS=read` to pick the read-only one. Locking uses Terraform's native S3 lockfiles
-(`use_lockfile: true`); no DynamoDB lock table. See
-[Bootstrap the state backend](./docs/DEPLOYMENT.md#bootstrap-the-state-backend).
-
-## Adding a component
-
-Components are scaffolded, not hand-written, so a new one satisfies the house rules (required
-`tags` with a non-empty `Environment`, `enabled` gating, `versions.tf`, `provider.tf` with
-`default_tags`, a README) before it is first linted:
-
-```bash
-atmos scaffold generate component . --force          # prompts for name, description, category
-atmos scaffold generate catalog-entry . --force      # catalog defaults for an existing component
-```
-
-The target is the **repository root**, not the component directory: the template's `files[].target`
-paths place each file, which is what lets one run emit both the component and its catalog entry.
-Templates live in `scaffolds/` and are registered in `atmos.yaml` under `scaffold.templates`.
-`--update` re-runs a template over existing files with a 3-way merge.
-
-## Checks
-
-```bash
-atmos workflow tflint-init -f lint   # once: installs TFLint and the rulesets in .tflint.hcl
-atmos workflow lint -f lint          # terraform fmt, yamllint, TFLint (instances + directories), Trivy
-atmos workflow validate-all -f validate-enhanced   # schema, stacks, dependencies, yamllint, fmt, terraform validate
-atmos workflow validate -f validate -s <stack>     # same, scoped to one stack
-atmos workflow sandbox -f sandbox                  # applies real resources against Floci (local only, not yet in CI)
-atmos workflow localemu -f localemu                # applies real resources against LocalEmu (vpc, lambda, rds, monitoring, iam); also runs in CI's emulator.yml
-```
-
-Two gates are worth understanding, because both were added after they let real bugs through:
-
-- **TFLint runs twice.** The instance pass resolves stack variables and catches what only appears
-  with real inputs; the directory pass walks `components/terraform/*/` so a component with no
-  stack instance cannot go unlinted. Ten of the components were unlinted before the second pass
-  existed, while the gate reported "passed".
-- **`check-dependencies.py` maps instances back to directories.** A deployable instance naming a
-  component that does not exist used to pass every gate, because neither `atmos validate stacks`
-  nor validate-all checks that the directory is there.
-
-Note that `terraform validate` does **not** evaluate `variable` validation blocks, so validate-all
-never exercises them. Changes to a validation block need a plan against real values to prove it
-behaves — including a deliberately-bad case, to prove the check is reached at all.
+- Cross-component values use YAML functions (`!terraform.state vpc/main .vpc_id`), never
+  `${...}`. Every instance read must be in the reader's `dependencies.components`
+  (`workflows/scripts/common/check-dependencies.py`).
+- Disable an instance with `metadata.enabled: false`, never by deleting it.
+- Component names are singular without hyphens (`securitygroup`); snake_case everywhere;
+  boolean variables start with `is_`, `has_` or `enable_`.
+- Tags (`Tenant`, `Account`, `Environment`, `ManagedBy`) come from `stacks/orgs/fnx/_defaults.yaml`
+  and are applied once through `default_tags` in each `provider.tf`, not per resource.
+- `settings.list_merge_strategy: replace`: a list in a more specific file replaces the inherited one.
+- Inbound access never allows `0.0.0.0/0` or `::/0`; egress is unrestricted.
+- Component READMEs cover purpose, wiring and gotchas; `variables.tf` and `outputs.tf` are the
+  interface reference.
 
 ## CI/CD
 
-GitHub Actions run Atmos Native CI inside the `ghcr.io/cloudposse/atmos` container and
-authenticate to AWS with OIDC, not stored keys.
+Jobs run in the `ghcr.io/cloudposse/atmos` container and use GitHub OIDC. AWS jobs are skipped
+until the repository variable `AWS_PLAN_ROLE_ARN` is set.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to default branch | Lint + validate-all, plan-sweep and the Trivy/Checkov security gate run PR/merge-queue only; `terraform test` covers every component with a `tests/` directory on push and merge queue, and only the components a PR changes on pull_request; affected components are planned with the read-only role on PR/merge-queue, except prod's (master-only), which are planned on push to the default branch with the prod plan role; the plan is commented on the PR (pull_request only) |
-| `emulator.yml` | PR, push to default branch, manual | Runs the LocalEmu lane (`vpc`, `lambda`, `rds`, `monitoring`, `iam`) against a real LocalEmu instance and destroys it — the only CI gate that actually provisions. The Floci [sandbox](#sandbox) lane is not wired into CI yet; it still runs locally |
-| `terraform-cd.yml` | push to default branch, manual | Deploys each stack in turn (dev, staging, prod) since its `deployed/<stack>` tag with that stack's `iam/ci` apply role (trusts the default-branch ref only; no GitHub Environment, **no manual approval** — every merge deploys, prod included), then moves the tag |
-| `drift-detection.yml` | hourly, manual | Plans every stack read-only; drift fails the job |
-| `security-scan.yml` | nightly | Report-only Trivy + Checkov scan |
-| `disaster-recovery.yml` | manual, default branch | Read-only DR checks |
-
-The AWS jobs above skip until the repository variable `AWS_PLAN_ROLE_ARN` is set — there is no AWS
-account wired up yet. The PR security gate fails only on HIGH/CRITICAL findings not already in the
-committed baselines (`.trivyignore.yaml`, `.checkov.baseline`).
-
-## Documentation
-
-- [Deployment Guide](./docs/DEPLOYMENT.md): prerequisites, bootstrap, layered deployment, rollback
-- [Operations Guide](./docs/OPERATIONS.md): drift, locks, state recovery, DR, security checks
-- [Stacks](./stacks/README.md)
-- Component READMEs: `components/terraform/<component>/README.md`, `components/terraform/_library/README.md`
+| `terraform-ci.yml` | PR, merge queue, push to master | Lint + validate-all, plan-sweep, Trivy/Checkov gate (new HIGH/CRITICAL only, baselines in `.trivyignore.yaml`/`.checkov.baseline`), `terraform test` for components with `tests/`, plan of affected instances with the read-only role and a PR comment. Prod is planned on push to master only |
+| `emulator.yml` | PR, push to master, manual | LocalEmu lane: applies and destroys real resources |
+| `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag. No manual approval |
+| `drift-detection.yml` | hourly, manual | Read-only plan of every stack; drift fails the job |
+| `security-scan.yml` | nightly, manual | Report-only Trivy + Checkov |
+| `disaster-recovery.yml` | manual | Read-only DR checks (`dr-status`, `recover-state`, `recover-database`) |
 
 ## License
 

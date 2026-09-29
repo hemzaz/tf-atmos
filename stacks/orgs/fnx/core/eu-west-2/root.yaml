@@ -51,7 +51,7 @@ components:
         # applies this instance is always trusted as well (Cloud Posse's
         # caller rule); list any other human/admin role ARN explicitly.
         # Account IDs are the repository's placeholders - see
-        # docs/DEPLOYMENT.md#manual-prerequisites-before-first-apply.
+        # docs/OPERATIONS.md#first-deploy-inputs.
         access_roles:
           read:
             # Dev/staging state: their CI plan roles (PR plans, drift).

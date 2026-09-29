@@ -1,69 +1,65 @@
-# CLAUDE.md - Terraform/Atmos Infrastructure Project
+# CLAUDE.md - tf-atmos
 
-This is a **Terraform/Atmos infrastructure-as-code project** with:
-- **42 Terraform root modules** in `components/terraform/` (plus `_library/`, shared modules)
-- **3 AWS stacks**: `fnx-dev-testenv-01`, `fnx-staging-staging-01`, `fnx-prod-production` (eu-west-2)
-  plus `fnx-core-root` (management account: the single state backend, `backend/main`; not run by CI)
-  and 2 local emulator stacks (`fnx-local-sandbox`, `fnx-local-localemu`)
-- **Atmos workflows** in `workflows/` (`atmos list workflows`) and **Atmos Native CI** in `.github/workflows/`
-- Atmos >= 1.229.0 (enforced in `atmos.yaml`); Terraform 1.16.3 is installed by the Atmos toolchain
-- S3 state backend `fnx-terraform-state` with native lockfiles (`use_lockfile`), no DynamoDB;
-  stacks assume their stage's read/write access role, or with `TFSTATE_ACCESS=read` its read-only
-  role; reads and writes are split by stage prefix in the one bucket (dev/staging, prod, core), and
-  `check-state-keys.py` keeps every instance's state key inside its stage's prefix
-
-There is no Python CLI; use `atmos` commands and workflows.
+Terraform/Atmos IaC for the `fnx` tenant: 42 root modules in `components/terraform/` (plus
+`_library/`), stacks `fnx-dev-testenv-01`, `fnx-staging-staging-01`, `fnx-prod-production`,
+`fnx-core-root` (state backend, not run by CI) and the emulator stacks `fnx-local-sandbox`,
+`fnx-local-localemu`. Atmos >= 1.229.0 installs Terraform 1.16.3. No Python CLI: use `atmos`.
+Layout and conventions: [README.md](./README.md). Operating: [docs/OPERATIONS.md](./docs/OPERATIONS.md).
 
 ## Essential commands
 
 ```bash
 atmos list stacks / components / workflows
-atmos describe component <component> -s <stack>       # resolved config for one instance
+atmos describe component <component> -s <stack> --process-functions=false
 
-atmos validate stacks                                  # offline, no AWS credentials
-atmos workflow validate-all -f validate-enhanced        # schema, stacks, dependencies, yamllint, fmt, terraform validate
-atmos workflow lint -f lint                             # fmt, yamllint, tflint, trivy — run before committing
+atmos validate stacks                                  # offline
+atmos workflow lint -f lint                            # fmt, yamllint, state keys, tflint, trivy
+atmos workflow validate-all -f validate-enhanced       # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
+bash scripts/plan-sweep.sh [<stack>...]                # plans with resolved vars, no AWS account
 
 atmos terraform plan <component> -s <stack>
-atmos terraform deploy <component> -s <stack>           # plan + apply one instance
-atmos workflow deploy -f deploy-full-stack -s <stack>    # layered, confirmed per layer
+atmos terraform deploy <component> -s <stack>          # plan + apply one instance
+atmos workflow deploy -f deploy-full-stack -s <stack>  # layered, confirmed per layer
 ```
 
 ## Gotchas
 
-- `atmos describe stacks`/`describe component` calls must pass `--process-functions=false`
-  (`--format json`) — without it Atmos evaluates `!terraform.state` etc. and needs live AWS state.
-- The `validate-all` workflow (`validate-root-modules` step) runs `terraform init`/`validate`
-  **serially** across every root module in a `for` loop. Set `TF_PLUGIN_CACHE_DIR` first or each
-  module redownloads providers.
-- Tags must include `Tenant`, `Account`, `Environment`, `ManagedBy = "Terraform"` (set once via
-  `default_tags` in each `provider.tf`, sourced from `stacks/orgs/fnx/_defaults.yaml`) — don't
-  repeat them per resource.
-- Cross-component values use YAML functions (`!terraform.state <component> .<output>`), never
-  `${...}` interpolation.
-  Every such target must be listed in the reader's `dependencies.components`; `validate-all`
-  enforces it (`workflows/scripts/common/check-dependencies.py`).
-- Component naming is singular, no hyphens (`securitygroup`, not `security-groups`). Boolean
-  variables prefix with `is_`, `has_`, or `enable_`.
-- Disable an instance with `metadata.enabled: false`, not by deleting it.
-- `var.tags` must contain a non-empty `Environment` (validated) in vpc, monitoring, external-secrets,
-  rds, lambda and securitygroup: it is used in resource names. `atmos terraform lint` runs tflint
-  without stack vars, so these variables stay required (no `{}` default) to keep tflint from crashing.
-- `idp-platform` calls `../eks`, `../rds` and `../acm` as modules. Before changing their variables,
-  grep for `source = "../<component>"`; `validate-all` catches the breakage, per-component checks don't.
+- `atmos describe stacks`/`describe component` need `--process-functions=false`; otherwise Atmos
+  evaluates `!terraform.state` and needs live AWS state.
+- validate-all runs `terraform init`/`validate` serially over every root module: set
+  `TF_PLUGIN_CACHE_DIR` first.
+- `terraform validate` skips `variable` validation blocks. Prove a validation change with
+  plan-sweep or an emulator lane, including a deliberately bad value.
+- Cross-component values: `!terraform.state <instance> .<output>`, never `${...}`. Each target
+  must be in the reader's `dependencies.components` (`check-dependencies.py`) and in an earlier
+  layer of `workflows/deploy-full-stack.yaml` (`check-deploy-layers.py`).
+- `metadata.component` decides the module: `network/main` is a `dns` instance.
+- State keys must stay in their stage's prefix (`check-state-keys.py`); state roles are split by
+  stage.
+- 36 of the 42 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,
+  `iam`, `idp-platform`, `kms`, `secretsmanager`); many use it in resource names.
+- `idp-platform` calls `../eks`, `../rds`, `../acm` as modules: grep for `source = "../<component>"`
+  before changing their variables.
+- CI runs in the `ghcr.io/cloudposse/atmos` Linux container; shell that works on macOS may not.
 
 ## Conventions
 
-- Per-component files: `main.tf` (or split into `iam.tf`, `locals.tf`, ...), `variables.tf`,
-  `outputs.tf`, `versions.tf` (`>= 1.16.0, < 2.0.0` + `required_providers`), `provider.tf`,
-  `README.md` — every component needs one.
-- snake_case for resources/variables/outputs; `sensitive = true` on sensitive outputs; validation
-  blocks on variable definitions.
-- Encrypt at rest and in transit; least-privilege IAM; secrets in Secrets Manager, never committed;
-  inbound access uses specific CIDRs and never `0.0.0.0/0` or `::/0`; outbound is unrestricted.
+- Follow Cloud Posse: copy upstream variable names, types and defaults; typed objects, never
+  `map(any)`; comment every deviation with the upstream source.
+- Component files: `main.tf` (or split), `variables.tf`, `outputs.tf`, `versions.tf`
+  (`>= 1.16.0, < 2.0.0`), `provider.tf` (`default_tags` from `var.tags`), `README.md`.
+  New components: `atmos scaffold generate component . --force`.
+- READMEs are purpose + wiring + gotchas only, no input/output tables; `variables.tf` and
+  `outputs.tf` are the reference.
+- Singular component names without hyphens; snake_case; booleans prefixed `is_`/`has_`/`enable_`;
+  validation blocks on variables; `sensitive = true` on sensitive outputs.
+- Tags come once from `default_tags` (`stacks/orgs/fnx/_defaults.yaml`), not per resource.
+- Disable an instance with `metadata.enabled: false`, never by deleting it.
+- Encrypt at rest and in transit; least-privilege IAM; secrets in Secrets Manager; ingress never
+  `0.0.0.0/0` or `::/0` (egress is unrestricted).
 
 ## Before marking work complete
 
 - [ ] `atmos workflow lint -f lint` and `atmos workflow validate-all -f validate-enhanced` pass
-- [ ] Tags, naming and validation conventions above followed
-- [ ] Component `README.md` updated if its interface changed
+- [ ] Naming, tag and validation conventions followed
+- [ ] Docs that name a changed command, workflow, role or path are updated

@@ -246,7 +246,7 @@ workflows:
         command: terraform plan --query '.metadata.component == "acm"'
       - name: confirm_certificates
         type: confirm
-        prompt: Apply the certificates layer plan above?
+        prompt: Apply the certificates layer plan above? (The stack's domain must already be delegated, or ACM validation times out.)
         default: false
       - name: guard-certificates
         type: shell
