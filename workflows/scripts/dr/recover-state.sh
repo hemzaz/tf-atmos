@@ -28,7 +28,7 @@ state_aws s3api list-object-versions \
   --output table
 
 echo
-echo "To restore a specific version (bucket versioning must be enabled), with credentials that"
-echo "can assume the stage's read/write backend role (the listing role above is read-only):"
+echo "To restore a specific version (bucket versioning must be enabled), use management-account"
+echo "administrator credentials: no backend access role has s3:GetObjectVersion, by design."
 echo "  aws s3api copy-object --bucket $BUCKET_NAME --key <key> \\"
 echo "    --copy-source \"$BUCKET_NAME/<key>?versionId=<version-id>\""

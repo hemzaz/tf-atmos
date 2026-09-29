@@ -124,7 +124,7 @@ ${WHITE}Environment Variables:${NC}
     AWS_REGION                  AWS region (overridden by --region)
 
 ${WHITE}For more information:${NC}
-    See docs/DEPLOYMENT.md
+    See docs/OPERATIONS.md
 EOF
 }
 
@@ -682,9 +682,8 @@ print_summary() {
     echo
 
     echo -e "${WHITE}Documentation:${NC}"
-    echo "  - Deployment Guide:  docs/DEPLOYMENT.md"
-    echo "  - Operations Guide:  docs/OPERATIONS.md"
-    echo "  - Runbooks:          workflows/disaster-recovery.yaml (see docs/OPERATIONS.md)"
+    echo "  - Developer guide:   README.md"
+    echo "  - Operations guide:  docs/OPERATIONS.md"
     echo
 
     echo -e "${GREEN}${BOLD}Quickstart completed successfully!${NC}"

@@ -346,7 +346,7 @@ components:
         handler: "main.handler"
         runtime: "python3.13"
         # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
         s3_bucket: "fnx-production-lambda-artifacts"
         s3_key: "production-data-processor/latest.zip"
         memory_size: 1024
@@ -369,7 +369,7 @@ components:
         handler: "transform.handler"
         runtime: "python3.13"
         # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
         s3_bucket: "fnx-production-lambda-artifacts"
         s3_key: "production-data-transformer/latest.zip"
         memory_size: 2048
@@ -389,7 +389,7 @@ components:
         handler: "reports.handler"
         runtime: "python3.13"
         # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
         s3_bucket: "fnx-production-lambda-artifacts"
         s3_key: "production-report-generator/latest.zip"
         memory_size: 3008

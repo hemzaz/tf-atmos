@@ -262,7 +262,7 @@ components:
         handler: "main.handler"
         runtime: "python3.13"
         # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
         s3_bucket: "fnx-staging-lambda-artifacts"
         s3_key: "staging-data-processor/latest.zip"
         memory_size: 512
@@ -281,7 +281,7 @@ components:
         handler: "transform.handler"
         runtime: "python3.13"
         # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/DEPLOYMENT.md.
+        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
         s3_bucket: "fnx-staging-lambda-artifacts"
         s3_key: "staging-data-transformer/latest.zip"
         memory_size: 1024
