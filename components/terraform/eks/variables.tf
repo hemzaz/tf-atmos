@@ -212,6 +212,10 @@ variable "enable_cluster_protection" {
 # The disk_* and camel-case block_device_map attributes are declared only so
 # the validations below can reject them; an undeclared attribute would be
 # dropped silently by the type constraint.
+# Deviation from Cloud Posse (2): metadata_http_put_response_hop_limit
+# defaults to 1, as the ec2 component's does. Pods reach AWS through IRSA
+# (vpc-cni included, addons.tf), so no container off the host network needs
+# IMDS; a node group that does sets 2.
 # Deviation from Cloud Posse: cloudposse/terraform-aws-eks-node-group defaults
 # ami_type to AL2_x86_64 (aws-eks-cluster leaves it null). AWS publishes no AL2
 # EKS AMIs for Kubernetes 1.33 and later, and the stacks pin 1.36, so the
@@ -240,7 +244,7 @@ variable "node_groups" {
 
     detailed_monitoring_enabled          = optional(bool, false)
     metadata_http_endpoint_enabled       = optional(bool, true)
-    metadata_http_put_response_hop_limit = optional(number, 2)
+    metadata_http_put_response_hop_limit = optional(number, 1)
     metadata_http_tokens_required        = optional(bool, true)
     random_pet_length                    = optional(number, 1)
     immediately_apply_lt_changes         = optional(bool, null)
@@ -347,6 +351,210 @@ variable "node_groups" {
       if ng.enabled
     ])
     error_message = "Node group names are limited to 63 characters by EKS including the random_pet suffix: shorten name or the node group key."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Access: cloudposse/terraform-aws-eks-cluster's access_config,
+# access_entry_map, access_entries and access_policy_associations, same types
+# and defaults. See auth.tf.
+# The access policies the validations accept are the EKS access policies for
+# people and CI (`aws eks list-access-policies`); extend the lists when one
+# is needed. A policy may be given as its short name (Admin, ClusterAdmin,
+# Edit, View), its full name, or its ARN.
+# ---------------------------------------------------------------------------
+
+variable "access_config" {
+  type = object({
+    authentication_mode                         = optional(string, "API")
+    bootstrap_cluster_creator_admin_permissions = optional(bool, false)
+  })
+  description = "Access configuration for the EKS cluster: API authentication mode (access entries) and no implicit cluster-creator admin by default"
+  default     = {}
+  nullable    = false
+
+  # Cloud Posse rejects CONFIG_MAP; this also rejects anything else AWS would.
+  validation {
+    condition     = contains(["API", "API_AND_CONFIG_MAP"], var.access_config.authentication_mode)
+    error_message = "access_config.authentication_mode must be API or API_AND_CONFIG_MAP; the CONFIG_MAP authentication_mode is not supported."
+  }
+}
+
+variable "access_entry_map" {
+  type = map(object({
+    # key is principal_arn
+    user_name = optional(string)
+    # Cannot assign "system:*" groups to IAM users, use ClusterAdmin and Admin instead
+    kubernetes_groups = optional(list(string), [])
+    type              = optional(string, "STANDARD")
+    access_policy_associations = optional(map(object({
+      # key is policy_arn or policy_name
+      access_scope = optional(object({
+        type       = optional(string, "cluster")
+        namespaces = optional(list(string))
+      }), {}) # access_scope
+    })), {})  # access_policy_associations
+  }))         # access_entry_map
+  description = <<-EOT
+    Map of IAM Principal ARNs to access configuration.
+    Preferred over the list inputs as this configuration remains stable when
+    elements are added or removed, but the keys must be known at plan time and
+    written literally: an Atmos YAML function cannot produce a map key, so a
+    principal read with !terraform.state goes in access_entries instead.
+    Map `access_policy_associations` keys are policy ARNs, policy
+    full name (AmazonEKSViewPolicy), or short name (View).
+    Membership in `system:masters` becomes an association with the ClusterAdmin
+    policy; any other `system:*` group is rejected.
+    EOT
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for k, v in var.access_entry_map : contains(["STANDARD", "EC2_LINUX", "EC2_WINDOWS"], v.type)])
+    error_message = "access_entry_map type must be STANDARD, EC2_LINUX or EC2_WINDOWS."
+  }
+
+  validation {
+    condition = alltrue([for k, v in var.access_entry_map : alltrue([
+      for g in v.kubernetes_groups : g == "system:masters" || !startswith(g, "system:")
+    ])])
+    error_message = "access_entry_map kubernetes_groups may not contain system:* groups other than system:masters; use the Admin or ClusterAdmin access policy."
+  }
+
+  validation {
+    condition = alltrue(flatten([for k, v in var.access_entry_map : [
+      for p, a in v.access_policy_associations : contains(concat(
+        ["Admin", "ClusterAdmin", "Edit", "View"],
+        ["AmazonEKSAdminPolicy", "AmazonEKSAdminViewPolicy", "AmazonEKSClusterAdminPolicy", "AmazonEKSEditPolicy", "AmazonEKSViewPolicy", "AmazonEMRJobPolicy"],
+        [for n in ["AmazonEKSAdminPolicy", "AmazonEKSAdminViewPolicy", "AmazonEKSClusterAdminPolicy", "AmazonEKSEditPolicy", "AmazonEKSViewPolicy", "AmazonEMRJobPolicy"] : "arn:aws:eks::aws:cluster-access-policy/${n}"],
+      ), p)
+    ]]))
+    error_message = "access_entry_map access_policy_associations keys must be EKS access policies: Admin, ClusterAdmin, Edit, View, AmazonEKSAdminPolicy, AmazonEKSAdminViewPolicy, AmazonEKSClusterAdminPolicy, AmazonEKSEditPolicy, AmazonEKSViewPolicy or AmazonEMRJobPolicy (name or arn:aws:eks::aws:cluster-access-policy/<name>)."
+  }
+
+  validation {
+    condition = alltrue(flatten([for k, v in var.access_entry_map : [
+      for p, a in v.access_policy_associations : contains(["cluster", "namespace"], a.access_scope.type)
+    ]]))
+    error_message = "access_scope.type must be cluster or namespace."
+  }
+
+  validation {
+    condition = alltrue(flatten([for k, v in var.access_entry_map : [
+      for p, a in v.access_policy_associations : a.access_scope.type == "namespace" ? length(coalesce(a.access_scope.namespaces, [])) > 0 : length(coalesce(a.access_scope.namespaces, [])) == 0
+    ]]))
+    error_message = "An access_scope of type namespace must list its namespaces; one of type cluster must not."
+  }
+}
+
+variable "access_entries" {
+  type = list(object({
+    principal_arn     = string
+    user_name         = optional(string, null)
+    kubernetes_groups = optional(list(string), null)
+  }))
+  description = <<-EOT
+    List of IAM principals to allow to access the EKS cluster (STANDARD access entries).
+    Use when the Principal ARN is not known at plan time or comes from an Atmos
+    YAML function. An entry whose principal_arn is null (an optional role that
+    is not created) is skipped.
+    EOT
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([for e in var.access_entries : alltrue([
+      for g in coalesce(e.kubernetes_groups, []) : !startswith(g, "system:")
+    ])])
+    error_message = "access_entries kubernetes_groups may not contain system:* groups; use the Admin or ClusterAdmin access policy."
+  }
+}
+
+variable "access_policy_associations" {
+  type = list(object({
+    principal_arn = string
+    policy_arn    = string
+    access_scope = optional(object({
+      type       = optional(string, "cluster")
+      namespaces = optional(list(string))
+    }), {})
+  }))
+  description = <<-EOT
+    List of AWS managed EKS access policies to associate with IAM principals.
+    Use when the Principal ARN or Policy ARN is not known at plan time.
+    `policy_arn` can be the full ARN, the full name (AmazonEKSViewPolicy) or short name (View).
+    An association whose principal_arn is null is skipped, as in access_entries.
+    EOT
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([for a in var.access_policy_associations : contains(concat(
+      ["Admin", "ClusterAdmin", "Edit", "View"],
+      ["AmazonEKSAdminPolicy", "AmazonEKSAdminViewPolicy", "AmazonEKSClusterAdminPolicy", "AmazonEKSEditPolicy", "AmazonEKSViewPolicy", "AmazonEMRJobPolicy"],
+      [for n in ["AmazonEKSAdminPolicy", "AmazonEKSAdminViewPolicy", "AmazonEKSClusterAdminPolicy", "AmazonEKSEditPolicy", "AmazonEKSViewPolicy", "AmazonEMRJobPolicy"] : "arn:aws:eks::aws:cluster-access-policy/${n}"],
+    ), a.policy_arn)])
+    error_message = "access_policy_associations policy_arn must be an EKS access policy: Admin, ClusterAdmin, Edit, View, AmazonEKSAdminPolicy, AmazonEKSAdminViewPolicy, AmazonEKSClusterAdminPolicy, AmazonEKSEditPolicy, AmazonEKSViewPolicy or AmazonEMRJobPolicy (name or arn:aws:eks::aws:cluster-access-policy/<name>)."
+  }
+
+  validation {
+    condition     = alltrue([for a in var.access_policy_associations : contains(["cluster", "namespace"], a.access_scope.type)])
+    error_message = "access_scope.type must be cluster or namespace."
+  }
+
+  validation {
+    condition = alltrue([for a in var.access_policy_associations :
+      a.access_scope.type == "namespace" ? length(coalesce(a.access_scope.namespaces, [])) > 0 : length(coalesce(a.access_scope.namespaces, [])) == 0
+    ])
+    error_message = "An access_scope of type namespace must list its namespaces; one of type cluster must not."
+  }
+}
+
+# cloudposse/terraform-aws-eks-cluster: upgrade_policy. Divergence: Cloud
+# Posse defaults to null, which AWS treats as EXTENDED; STANDARD fails closed
+# against extended-support charges once a version leaves standard support.
+variable "upgrade_policy" {
+  type = object({
+    support_type = optional(string, "STANDARD")
+  })
+  description = "Support policy for the cluster: STANDARD (default; the cluster is auto-upgraded at the end of standard support) or EXTENDED (paid extended support)"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = contains(["STANDARD", "EXTENDED"], var.upgrade_policy.support_type)
+    error_message = "upgrade_policy.support_type must be STANDARD or EXTENDED."
+  }
+}
+
+# The vpc-cni managed addon (addons.tf). Fields are an entry of Cloud Posse's
+# aws-eks-cluster `addons` map; vpc-cni is always installed, because the node
+# role carries no CNI policy. service_account_role_arn null (the default)
+# makes this component create the IRSA role, as Cloud Posse does.
+variable "vpc_cni_addon" {
+  type = object({
+    addon_version               = optional(string, null)
+    configuration_values        = optional(string, null)
+    resolve_conflicts_on_create = optional(string, "OVERWRITE")
+    resolve_conflicts_on_update = optional(string, "OVERWRITE")
+    service_account_role_arn    = optional(string, null)
+    create_timeout              = optional(string, null)
+    update_timeout              = optional(string, null)
+    delete_timeout              = optional(string, null)
+    preserve                    = optional(bool, true)
+  })
+  description = "The vpc-cni EKS managed addon: version (null: the EKS default for the cluster version), configuration JSON, conflict resolution, and an optional existing IRSA role"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = contains(["NONE", "OVERWRITE"], var.vpc_cni_addon.resolve_conflicts_on_create) && contains(["NONE", "OVERWRITE", "PRESERVE"], var.vpc_cni_addon.resolve_conflicts_on_update)
+    error_message = "vpc_cni_addon.resolve_conflicts_on_create must be NONE or OVERWRITE; resolve_conflicts_on_update NONE, OVERWRITE or PRESERVE."
+  }
+
+  validation {
+    condition     = var.vpc_cni_addon.service_account_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/.+$", var.vpc_cni_addon.service_account_role_arn))
+    error_message = "vpc_cni_addon.service_account_role_arn must be an IAM role ARN."
   }
 }
 

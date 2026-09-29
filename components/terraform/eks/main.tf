@@ -130,6 +130,20 @@ resource "aws_eks_cluster" "default" {
 
   enabled_cluster_log_types = var.enabled_cluster_log_types
 
+  # cloudposse/terraform-aws-eks-cluster access_config: API mode (access
+  # entries, auth.tf), and no hidden cluster-creator admin by default.
+  access_config {
+    authentication_mode                         = var.access_config.authentication_mode
+    bootstrap_cluster_creator_admin_permissions = var.access_config.bootstrap_cluster_creator_admin_permissions
+  }
+
+  # STANDARD by default (Cloud Posse leaves it null, which AWS reads as
+  # EXTENDED): a version past standard support fails closed instead of
+  # silently moving to paid extended support.
+  upgrade_policy {
+    support_type = var.upgrade_policy.support_type
+  }
+
   # Add timeouts to allow for longer cluster creation/update
   timeouts {
     create = "45m"
@@ -153,6 +167,12 @@ resource "aws_eks_cluster" "default" {
 
   # prevent_destroy only accepts literals, so production protection uses EKS deletion protection instead
   deletion_protection = var.enable_cluster_protection && contains(["prod", "production"], lower(local.environment))
+
+  lifecycle {
+    # As in cloudposse/terraform-aws-eks-cluster: bootstrap_cluster_creator_admin_permissions
+    # only applies when the cluster is created.
+    ignore_changes = [access_config[0].bootstrap_cluster_creator_admin_permissions]
+  }
 
   # The endpoint rules are variable validations on cluster_endpoint_public_access
   # and public_access_cidrs, so they also run in a credential-less plan.
@@ -302,11 +322,10 @@ resource "aws_launch_template" "default" {
   # checkov:skip=CKV_AWS_79: http_tokens is "required" unless a stack sets
   #   metadata_http_tokens_required = false. Checkov cannot evaluate the
   #   conditional below and flags the resource whatever the value resolves to.
-  # checkov:skip=CKV_AWS_341: the hop limit defaults to 2 because AWS requires at
-  #   least 2 for a container off the host network to reach IMDSv2
-  #   (https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html),
-  #   which is also cloudposse/terraform-aws-eks-node-group's default. Prefer IRSA
-  #   over the instance profile and set the limit to 1 where no pod needs IMDS.
+  # checkov:skip=CKV_AWS_341: the hop limit defaults to 1, but a node group may
+  #   set metadata_http_put_response_hop_limit = 2 (AWS's minimum for a
+  #   container off the host network to reach IMDSv2), and Checkov cannot
+  #   evaluate the per-node-group value.
   for_each = local.node_groups
 
   # A launch template name_prefix may be up to 102 characters (128 minus the
@@ -460,8 +479,10 @@ resource "aws_eks_node_group" "default" {
   # Explicit dependencies to avoid race conditions during creation and destruction
   depends_on = [
     aws_iam_role_policy_attachment.amazon_eks_worker_node_policy,
-    aws_iam_role_policy_attachment.amazon_eks_cni_policy,
     aws_iam_role_policy_attachment.amazon_ec2_container_registry_read_only,
+    # The node role has no CNI policy: aws-node must already run with its
+    # IRSA role when the first node starts (addons.tf).
+    aws_eks_addon.vpc_cni,
   ]
 
   lifecycle {
@@ -519,12 +540,8 @@ resource "aws_iam_role_policy_attachment" "amazon_eks_worker_node_policy" {
   role       = aws_iam_role.node[0].name
 }
 
-resource "aws_iam_role_policy_attachment" "amazon_eks_cni_policy" {
-  count = local.enabled ? 1 : 0
-
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.node[0].name
-}
+# No AmazonEKS_CNI_Policy on the node role: the vpc-cni addon's IRSA role
+# carries it (addons.tf), as AWS recommends.
 
 resource "aws_iam_role_policy_attachment" "amazon_ec2_container_registry_read_only" {
   count = local.enabled ? 1 : 0

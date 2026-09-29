@@ -68,6 +68,7 @@ components:
         components:
           - component: vpc/main
           - component: kms/main
+          - component: iam/ci
 
     # ==========================================================================
     # EKS Cluster - Data Processing Workloads
@@ -106,6 +107,7 @@ components:
         components:
           - component: vpc/services
           - component: kms/main
+          - component: iam/ci
 
     # ==========================================================================
     # EC2 Bastion Host
