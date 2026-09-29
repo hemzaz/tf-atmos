@@ -22,11 +22,17 @@ Cloud Posse `eks/*` components (cluster-autoscaler follows the upstream AWS docs
 - One cluster per instance: the providers connect to the top-level `cluster_name`/`host`.
 - The load balancer controller installs first (its webhook rejects Services created before it is
   ready); core managed addons install before it, everything else after.
-- The default `alb` IngressClass creates internal ALBs only. An internet-facing ALB needs its own
-  IngressClass and a security group admitting only the CloudFront origin-facing prefix list; never
-  `inbound-cidrs: 0.0.0.0/0`.
 - `dns_zone_ids` takes public zones only. `enable_external_dns` and `enable_cert_manager` need it;
   the load balancer controller needs `vpc_id` and subnets tagged `kubernetes.io/role/(internal-)elb`.
 - A precondition fails the plan when the cluster-autoscaler image minor differs from the cluster's
   Kubernetes version; bump `cluster_autoscaler_image_tag` in `addons.tf` with each upgrade.
 - `vpc-cni` belongs to the `eks` component; External Secrets is the `external-secrets` component.
+
+## Internet-facing load balancers
+
+The default `alb` IngressClass creates internal ALBs only (`scheme: internal` in its
+IngressClassParams, which an Ingress annotation cannot override). An internet-facing ALB needs its
+own IngressClass with `scheme: internet-facing`, and every Ingress of that class must set
+`alb.ingress.kubernetes.io/security-groups` to a group admitting only the CloudFront origin-facing
+prefix list, with `manage-backend-security-group-rules: "true"`. Never use
+`inbound-cidrs: 0.0.0.0/0`.

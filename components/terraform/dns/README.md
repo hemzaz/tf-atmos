@@ -27,7 +27,7 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
 - `network/services` deploys in its own `dns-zones` layer before the `dns` layer
   (`deploy-full-stack`), because `network/main` reads its name servers.
 - `<d>` itself must be delegated from its parent domain manually, by the owner, before the first
-  `deploy-certificates`; ACM validation hangs otherwise. See [docs/OPERATIONS.md](../../../docs/OPERATIONS.md).
+  `deploy-certificates`; ACM validation hangs otherwise. See [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#deploying-a-stack).
 - `enable_query_logging` is rejected for private zones (use Resolver query logging).
 - Records in a DNS-account zone can only reference health checks from the main account.
 - `workflows/scripts/common/check-domains.py` (run by `validate-all`) requires every record name

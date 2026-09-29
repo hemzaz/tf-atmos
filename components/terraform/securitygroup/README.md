@@ -8,17 +8,16 @@ One security group per `security_groups` entry, with each rule a separate
 ## Wiring
 
 - Instance: `securitygroup/app` in `fnx-local-sandbox` only; reads `vpc/main .vpc_id`.
-- The `web-application`, `batch-processing` and `microservices-platform` templates configure it;
+- The `web-application`, `batch-processing` and `microservices-platform` catalog templates and the
+  `templates/stacks/{minimal,full,microservices}-stack.yaml` stack templates configure it;
   consumers (ALB, ECS, RDS, ElastiCache, Batch) read `.security_group_ids.<key>`.
 
 ## Notes
 
 - A rule's source can be the key of a sibling group in the same map. Give every rule an explicit
   `key` and a single source: unkeyed rules are positional, so removing one renumbers the rest.
-- `preserve_security_group_id = false` (default): any rule change replaces the whole group.
-  Consumers in other components keep the old group until re-applied, so the rollout is three
-  applies (this component fails with `DependencyViolation` on the old group, apply consumers,
-  re-apply). The old group's rules are revoked in step 1, so run step 2 straight away.
+- `preserve_security_group_id = false` (default): any rule change replaces the whole group; see
+  [Replacing a group](#replacing-a-group).
 - `preserve_security_group_id = true`: the group is kept and changed rules are destroyed before
   being recreated (briefly absent). Moving a permission between rule instances in one apply
   fails with `InvalidPermission.Duplicate`; remove it in one apply, add it in the next. The
@@ -30,3 +29,14 @@ One security group per `security_groups` entry, with each rule a separate
   Egress is not checked.
 - Validation rejects a group `name` (names are generated), protocol aliases such as `"6"` or
   `"all"`, a rule sourcing its own group's key (use `self`), and rules without a source.
+
+## Replacing a group
+
+A group is replaced on any rule change under `preserve_security_group_id = false`, and on a
+`description` or `vpc_id` change under either setting. Consumers in other components keep the old
+group attached, so the rollout takes three applies:
+
+1. Apply this component. The new group is created; destroying the old one fails with
+   `DependencyViolation` (expected). The old group's rules are already revoked at this point.
+2. Apply every consumer straight away, so each moves to the new `security_group_ids` value.
+3. Re-apply this component to destroy the old group.

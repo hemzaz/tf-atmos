@@ -26,8 +26,13 @@ generated key pair whose private key is stored in Secrets Manager. IMDSv2 is req
   bastion.
 - Changing `ssh_key_algorithm` or `ssh_key_rsa_bits` replaces the key, the key pair and the
   instance.
-- Security group rules are inline (`allowed_ingress_rules`, `allowed_egress_rules`), unlike Cloud
-  Posse. Ingress rejects any `/0`; egress defaults to all outbound.
 - `disable_api_termination` must be `true` when `environment = "prod"`.
 - With `create_instances_from_templates` the instance launches from the launch template instead of
   standalone; exactly one of the two exists.
+
+## Security group
+
+The instance's own group takes inline rules from `allowed_ingress_rules` and
+`allowed_egress_rules` instead of Cloud Posse's per-rule `security_group_rules`, keeping one
+resource and readable per-instance rules; moving to Cloud Posse's form later replaces the rules.
+Ingress rejects any `/0`; egress defaults to all outbound (Cloud Posse's default).

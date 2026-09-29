@@ -38,7 +38,29 @@ caller is always trusted).
   `workspace new` until its first deploy.
 - A new stage must get its `*/fnx-<stage>-*` pattern (or its own roles) before its first `init`.
   `check-state-keys.py` fails any instance whose workspace would land under another stage's pattern.
-- Cold start (state lives in the bucket it creates): `atmos workflow backend-cold-start -f bootstrap`
-  with management-account admin credentials; later changes: `atmos workflow backend-only -f bootstrap`.
-  If the bucket already exists, import `aws_s3_bucket.terraform_state` first.
+- Every `allowed_principal_arns` entry must name the account its role lives in; the committed ARNs
+  use placeholder account IDs (see [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#first-deploy-inputs)).
 - All three buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.
+
+## Bootstrap
+
+The backend's state lives in the bucket it creates, so the first apply is a cold start (as in Cloud
+Posse's tfstate-backend guide). With management-account admin credentials:
+
+```bash
+atmos workflow backend-cold-start -f bootstrap   # apply with local state, then migrate it into the bucket
+atmos workflow backend-only -f bootstrap         # later changes
+```
+
+The first apply trusts the caller in every role and makes it the core role's only principal; the
+workflow waits for that role to become assumable before migrating. Delete `terraform.tfstate.d/`
+afterwards.
+
+If the bucket already exists (created by `atmos terraform backend create` or by hand), the
+cold-start workflow refuses to run. Import the bucket, then run the workflow's two steps by hand:
+
+```bash
+atmos terraform import backend/main aws_s3_bucket.terraform_state fnx-terraform-state -s fnx-core-root --auto-generate-backend-file=false
+atmos terraform deploy backend/main -s fnx-core-root --auto-generate-backend-file=false
+atmos terraform init backend/main -s fnx-core-root --init-reconfigure=never -- -migrate-state -force-copy
+```
