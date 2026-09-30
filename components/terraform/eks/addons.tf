@@ -15,8 +15,8 @@
 # Divergence from Cloud Posse, whose addons default to installing after the
 # node groups (addons_depends_on = true): CoreDNS needs nodes to go ACTIVE,
 # but vpc-cni does not, and without the node-role policy the nodes need it.
-# vpc-cni is always managed here, and only here: do not also list it in an
-# eks-addons instance's `addons`.
+# vpc-cni is always managed here, and only here: eks-addons rejects it in a
+# clusters entry's `addons`.
 
 locals {
   vpc_cni_sa_needed = local.enabled && var.vpc_cni_addon.service_account_role_arn == null

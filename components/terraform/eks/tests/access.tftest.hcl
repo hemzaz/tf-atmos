@@ -69,6 +69,15 @@ override_resource {
   }
 }
 
+# Likewise for the node role, so the node groups' node_role_arn assertion
+# cannot pass on the shared mock ARN.
+override_resource {
+  target = aws_iam_role.node
+  values = {
+    arn = "arn:aws:iam::123456789012:role/production-main-node-role"
+  }
+}
+
 variables {
   region     = "eu-west-2"
   name       = "main"
@@ -136,14 +145,42 @@ run "node_group_may_raise_the_hop_limit" {
 run "cni_policy_is_on_the_vpc_cni_irsa_role_not_the_node_role" {
   command = apply
 
+  # Every aws_iam_role_policy_attachment in the component (main.tf, addons.tf;
+  # the component has no other policy attachment, inline policy or
+  # managed_policy_arns), matched on the role it attaches to. Role names, not
+  # ARNs: the mock gives every role the same ARN.
   assert {
-    condition = length([
-      for a in [
-        aws_iam_role_policy_attachment.amazon_eks_worker_node_policy[0],
-        aws_iam_role_policy_attachment.amazon_ec2_container_registry_read_only[0],
-      ] : a if a.policy_arn == "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-    ]) == 0
-    error_message = "The node role must not carry AmazonEKS_CNI_Policy."
+    condition = toset([
+      for a in concat(
+        aws_iam_role_policy_attachment.amazon_eks_cluster_policy,
+        aws_iam_role_policy_attachment.amazon_eks_vpc_resource_controller,
+        aws_iam_role_policy_attachment.amazon_eks_worker_node_policy,
+        aws_iam_role_policy_attachment.amazon_ec2_container_registry_read_only,
+        aws_iam_role_policy_attachment.vpc_cni,
+      ) : a.policy_arn if a.role == aws_iam_role.node[0].name
+      ]) == toset([
+      "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+      "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+    ])
+    error_message = "The node role's policy attachments must be exactly AmazonEKSWorkerNodePolicy and AmazonEC2ContainerRegistryReadOnly: no AmazonEKS_CNI_Policy."
+  }
+
+  assert {
+    condition = [
+      for a in concat(
+        aws_iam_role_policy_attachment.amazon_eks_cluster_policy,
+        aws_iam_role_policy_attachment.amazon_eks_vpc_resource_controller,
+        aws_iam_role_policy_attachment.amazon_eks_worker_node_policy,
+        aws_iam_role_policy_attachment.amazon_ec2_container_registry_read_only,
+        aws_iam_role_policy_attachment.vpc_cni,
+      ) : a.role if a.policy_arn == "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+    ] == [aws_iam_role.vpc_cni[0].name]
+    error_message = "AmazonEKS_CNI_Policy must be attached once, to the vpc-cni IRSA role only."
+  }
+
+  assert {
+    condition     = alltrue([for ng in aws_eks_node_group.default : ng.node_role_arn == aws_iam_role.node[0].arn])
+    error_message = "The node groups must run with the node role."
   }
 
   assert {
@@ -565,6 +602,187 @@ run "system_group_on_list_entry_is_rejected" {
   }
 
   expect_failures = [var.access_entries]
+}
+
+# Only STANDARD entries take kubernetes groups, a username or access
+# policies (EKS CreateAccessEntry). A bare node entry is fine.
+run "ec2_linux_map_entry_without_groups_is_accepted" {
+  command = plan
+
+  variables {
+    access_entry_map = {
+      "arn:aws:iam::123456789012:role/self-managed-nodes" = {
+        type = "EC2_LINUX"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/self-managed-nodes"].type == "EC2_LINUX" &&
+      length(aws_eks_access_entry.map["arn:aws:iam::123456789012:role/self-managed-nodes"].kubernetes_groups) == 0 &&
+      length(aws_eks_access_policy_association.map) == 0
+    )
+    error_message = "An EC2_LINUX entry must be created with no groups and no policy association."
+  }
+}
+
+run "ec2_linux_map_entry_with_groups_is_rejected" {
+  command = plan
+
+  variables {
+    access_entry_map = {
+      "arn:aws:iam::123456789012:role/self-managed-nodes" = {
+        type              = "EC2_LINUX"
+        kubernetes_groups = ["nodes"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_entry_map]
+}
+
+# system:masters is only translated for STANDARD entries, so on a node entry
+# it stays a group and is rejected too.
+run "ec2_windows_map_entry_with_system_masters_is_rejected" {
+  command = plan
+
+  variables {
+    access_entry_map = {
+      "arn:aws:iam::123456789012:role/windows-nodes" = {
+        type              = "EC2_WINDOWS"
+        kubernetes_groups = ["system:masters"]
+      }
+    }
+  }
+
+  expect_failures = [var.access_entry_map]
+}
+
+run "ec2_linux_map_entry_with_user_name_is_rejected" {
+  command = plan
+
+  variables {
+    access_entry_map = {
+      "arn:aws:iam::123456789012:role/self-managed-nodes" = {
+        type      = "EC2_LINUX"
+        user_name = "system:node:{{EC2PrivateDNSName}}"
+      }
+    }
+  }
+
+  expect_failures = [var.access_entry_map]
+}
+
+run "ec2_linux_map_entry_with_access_policy_is_rejected" {
+  command = plan
+
+  variables {
+    access_entry_map = {
+      "arn:aws:iam::123456789012:role/self-managed-nodes" = {
+        type                       = "EC2_LINUX"
+        access_policy_associations = { View = {} }
+      }
+    }
+  }
+
+  expect_failures = [var.access_entry_map]
+}
+
+# One access entry per principal: a principal in the map form (or
+# map_additional_iam_roles) and in the list form would be two
+# aws_eks_access_entry resources and a 409 at apply. Checked by a
+# precondition on aws_eks_access_entry.standard, which also holds when the
+# list ARN is only known at apply.
+run "principal_in_map_and_list_is_rejected" {
+  command = plan
+
+  variables {
+    access_entry_map = {
+      "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply" = {
+        access_policy_associations = { ClusterAdmin = {} }
+      }
+    }
+    access_entries = [
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply" },
+    ]
+  }
+
+  expect_failures = [aws_eks_access_entry.standard]
+}
+
+run "admin_role_also_in_list_is_rejected" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role/platform-admin"
+      groups  = ["system:masters"]
+    }]
+    access_entries = [
+      { principal_arn = "arn:aws:iam::123456789012:role/platform-admin" },
+    ]
+  }
+
+  expect_failures = [aws_eks_access_entry.standard]
+}
+
+run "principal_twice_in_list_is_rejected" {
+  command = plan
+
+  variables {
+    access_entries = [
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan" },
+    ]
+  }
+
+  expect_failures = [aws_eks_access_entry.standard]
+}
+
+# EKS associates access policies with existing access entries only.
+run "association_without_access_entry_is_rejected" {
+  command = plan
+
+  variables {
+    access_entries = [
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan" },
+    ]
+    access_policy_associations = [
+      {
+        principal_arn = "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan"
+        policy_arn    = "View"
+      },
+      {
+        principal_arn = "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply"
+        policy_arn    = "ClusterAdmin"
+      },
+    ]
+  }
+
+  expect_failures = [aws_eks_access_policy_association.list]
+}
+
+# A list association may name a principal whose entry is in the map form.
+run "list_association_for_a_map_entry_is_accepted" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role/platform-viewer"
+      groups  = []
+    }]
+    access_policy_associations = [{
+      principal_arn = "arn:aws:iam::123456789012:role/platform-viewer"
+      policy_arn    = "View"
+    }]
+  }
+
+  assert {
+    condition     = aws_eks_access_policy_association.list[0].principal_arn == "arn:aws:iam::123456789012:role/platform-viewer"
+    error_message = "An association for a principal with a map entry must be planned."
+  }
 }
 
 run "config_map_mode_is_rejected" {

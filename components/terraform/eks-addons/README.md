@@ -27,7 +27,9 @@ Cloud Posse `eks/*` components (cluster-autoscaler follows the upstream AWS docs
   the load balancer controller needs `vpc_id` and subnets tagged `kubernetes.io/role/(internal-)elb`.
 - A precondition fails the plan when the cluster-autoscaler image minor differs from the cluster's
   Kubernetes version; bump `cluster_autoscaler_image_tag` in `addons.tf` with each upgrade.
-- `vpc-cni` belongs to the `eks` component; External Secrets is the `external-secrets` component.
+- `vpc-cni` belongs to the `eks` component (`vpc_cni_addon`, with its IRSA role; the node role has
+  no CNI policy), and `clusters` rejects it in `addons`. External Secrets is the
+  `external-secrets` component.
 
 ## Internet-facing load balancers
 

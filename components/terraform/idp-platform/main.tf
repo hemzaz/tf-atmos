@@ -22,8 +22,8 @@ resource "terraform_data" "unsupported" {
 }
 
 # EKS cluster for IDP platform (via the eks component, one cluster named
-# "<Environment>-idp"; EKS addons are not part of that component and are managed by
-# eks-addons instead)
+# "<Environment>-idp"). The eks component installs the vpc-cni addon with its IRSA
+# role (its vpc_cni_addon default); every other addon belongs to eks-addons.
 module "eks_cluster" {
   source = "../eks"
 

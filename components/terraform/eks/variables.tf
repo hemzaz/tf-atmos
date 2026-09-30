@@ -450,6 +450,18 @@ variable "access_entry_map" {
     error_message = "access_entry_map type must be STANDARD, EC2_LINUX or EC2_WINDOWS."
   }
 
+  # EKS (CreateAccessEntry API reference; user guide "Create access
+  # entries"): only a STANDARD entry may set kubernetesGroups or a username,
+  # or have access policies associated. Cloud Posse's access_entry_map passes
+  # such an entry through and the apply fails; here the plan does. (Its node
+  # entries, access_entries_for_nodes, set none of them.)
+  validation {
+    condition = alltrue([for k, v in var.access_entry_map :
+      v.type == "STANDARD" || (length(v.kubernetes_groups) == 0 && v.user_name == null && length(v.access_policy_associations) == 0)
+    ])
+    error_message = "An access_entry_map entry whose type is not STANDARD (EC2_LINUX, EC2_WINDOWS) may not set kubernetes_groups, user_name or access_policy_associations: EKS rejects them."
+  }
+
   validation {
     condition = alltrue([for k, v in var.access_entry_map : alltrue([
       for g in v.kubernetes_groups : g == "system:masters" || !startswith(g, "system:")

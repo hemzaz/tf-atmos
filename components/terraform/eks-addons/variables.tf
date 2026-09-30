@@ -188,6 +188,17 @@ variable "clusters" {
     ])
     error_message = "cert_manager_acme_server must be the Let's Encrypt production or staging directory."
   }
+
+  # The eks component owns the vpc-cni managed addon and its IRSA role
+  # (components/terraform/eks/addons.tf, var.vpc_cni_addon); the node role has
+  # no CNI policy. A second aws_eks_addon for it here would fight that one over
+  # the addon's configuration and service account role.
+  validation {
+    condition = alltrue(flatten([
+      for k, v in var.clusters : [for ak, a in v.addons : try(a.name, ak) != "vpc-cni"]
+    ]))
+    error_message = "clusters addons may not list vpc-cni: the eks component manages it (vpc_cni_addon), with its IRSA role."
+  }
 }
 
 # Connection to the cluster the kubernetes and helm providers use
