@@ -37,11 +37,16 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   security group, TCP 443 only where Cloud Posse opens all protocols. A `/0` is rejected.
 - Principals read with `!terraform.state` must go in those lists: `access_entry_map` keys must be
   literal. Null principals are skipped.
+- One access entry per principal: a principal in both `access_entries` and `access_entry_map` /
+  `map_additional_iam_roles` (or twice in the list) fails a precondition, as does a list
+  association whose principal has no entry. The preconditions run at apply when a
+  `!terraform.state` ARN is unknown at plan. Only `STANDARD` entries may set groups, `user_name` or
+  access policies.
 
 ## Notes
 
 - `vpc-cni` is created before the node groups and gets `AmazonEKS_CNI_Policy` through its IRSA role;
-  the node role has no CNI policy. Do not also list `vpc-cni` in eks-addons.
+  the node role has no CNI policy. eks-addons rejects `vpc-cni` in its `addons`.
 - IMDSv2 is required with hop limit 1 (Cloud Posse uses 2): pods use IRSA. A node group whose pods
   need IMDS sets `metadata_http_put_response_hop_limit = 2`.
 - `ami_type` defaults to `AL2023_x86_64_STANDARD`; `AL2_*` is rejected on Kubernetes 1.33+ (the

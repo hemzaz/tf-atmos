@@ -81,11 +81,14 @@ locals {
     )
   }, { for kk, vv in v : kk => vv if kk != "kubernetes_groups" && kk != "access_policy_associations" }) }
 
-  # Divergence: Cloud Posse's for_each reads local.access_entry_map directly,
-  # which fails ("attribute types must all match") as soon as two entries
-  # have different access_policy_associations keys: the merge() above makes
-  # each entry an object of its own type. These two maps give every element
-  # the same shape, the access scope included.
+  # Divergence: Cloud Posse's for_each is
+  # `local.enabled ? local.access_entry_map : {}`. A conditional converts
+  # both results to one map type, and that fails ("Inconsistent conditional
+  # result types ... attribute types must all match for conversion to map")
+  # as soon as two entries have different access_policy_associations keys:
+  # the merge() above makes each entry an object of its own type. These two
+  # maps give every element the same shape, the access scope included, and
+  # filter on local.enabled inside the for expression instead.
   access_entry_resource_map = {
     for k, v in local.access_entry_map : k => {
       kubernetes_groups = tolist(v.kubernetes_groups)
@@ -108,6 +111,17 @@ locals {
 
   access_entries             = local.enabled ? [for e in var.access_entries : e if e.principal_arn != null] : []
   access_policy_associations = local.enabled ? [for a in var.access_policy_associations : a if a.principal_arn != null] : []
+
+  # Every principal that gets an access entry, from both forms. Cloud Posse
+  # only documents "do not duplicate entries"; the preconditions below
+  # enforce it. They are lifecycle preconditions, not check blocks: the list
+  # ARNs come from !terraform.state and may be unknown at plan, and a
+  # precondition that cannot be decided at plan is evaluated again at apply,
+  # before the resource is created, and stops the apply there. A check block
+  # would only warn, and the apply would go on to EKS's 409
+  # (ResourceInUseException) or a policy association without an entry.
+  map_entry_principal_arns = keys(local.access_entry_resource_map)
+  entry_principal_arns     = concat(local.map_entry_principal_arns, [for e in local.access_entries : e.principal_arn])
 }
 
 # The preferred way to keep track of entries is by key, but the list form is
@@ -152,6 +166,18 @@ resource "aws_eks_access_entry" "standard" {
   type              = "STANDARD"
 
   tags = var.tags
+
+  lifecycle {
+    # One access entry per principal (EKS: "An IAM principal can't be
+    # included in more than one access entry").
+    precondition {
+      condition = (
+        !contains(local.map_entry_principal_arns, local.access_entries[count.index].principal_arn) &&
+        length([for e in local.access_entries : e if e.principal_arn == local.access_entries[count.index].principal_arn]) == 1
+      )
+      error_message = "access_entries principal ${local.access_entries[count.index].principal_arn} already has an access entry (access_entry_map, map_additional_iam_roles or another access_entries item); EKS allows one per principal."
+    }
+  }
 }
 
 resource "aws_eks_access_policy_association" "list" {
@@ -169,6 +195,14 @@ resource "aws_eks_access_policy_association" "list" {
   access_scope {
     type       = local.access_policy_associations[count.index].access_scope.type
     namespaces = local.access_policy_associations[count.index].access_scope.namespaces
+  }
+
+  lifecycle {
+    # EKS associates access policies with an existing access entry only.
+    precondition {
+      condition     = contains(local.entry_principal_arns, local.access_policy_associations[count.index].principal_arn)
+      error_message = "access_policy_associations principal ${local.access_policy_associations[count.index].principal_arn} has no access entry: add it to access_entries, access_entry_map or map_additional_iam_roles."
+    }
   }
 
   depends_on = [

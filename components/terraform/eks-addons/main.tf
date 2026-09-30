@@ -196,8 +196,11 @@ resource "aws_iam_role_policy_attachment" "service_account" {
 # - addons: every other managed add-on. They may create Services (adot,
 #   amazon-cloudwatch-observability), which the controller's webhook
 #   (failurePolicy Fail) must admit, so they install after it (addons.tf).
+# vpc-cni is not listed: the eks component manages it, with its IRSA role
+# (components/terraform/eks/addons.tf, var.vpc_cni_addon), and var.clusters
+# rejects it here.
 locals {
-  core_addon_names = ["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver"]
+  core_addon_names = ["kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver"]
 }
 
 resource "aws_eks_addon" "core" {

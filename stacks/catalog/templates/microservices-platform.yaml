@@ -202,11 +202,12 @@ components:
           - eks/defaults
       vars:
         # One cluster per instance (components/terraform/eks): the cluster is
-        # "<Environment>-microservices". Not part of the eks component, and
-        # dropped from this template: vpc_id (derived from subnet_ids), the
-        # extra cluster/node security group rules, cluster_addons (installed by
-        # eks-addons), authentication_mode and access_entries. IRSA (the OIDC
-        # provider) is always on.
+        # "<Environment>-microservices", its VPC derived from subnet_ids. The
+        # eks component installs the vpc-cni addon with its IRSA role
+        # (vpc_cni_addon); every other addon is microservices/eks-addons'.
+        # Kubernetes API access (API authentication mode, the CI roles' access
+        # entries) comes from eks/defaults; human admins are the stack's
+        # map_additional_iam_roles. IRSA (the OIDC provider) is always on.
         name: microservices
         cluster_kubernetes_version: "1.36"
 

@@ -460,23 +460,42 @@ run "managed_addons_split_around_the_load_balancer_controller" {
     clusters = {
       main = {
         addons = {
-          vpc-cni = { name = "vpc-cni" }
-          coredns = { name = "coredns" }
-          adot    = { name = "adot" }
+          kube-proxy = { name = "kube-proxy" }
+          coredns    = { name = "coredns" }
+          adot       = { name = "adot" }
         }
       }
     }
   }
 
   assert {
-    condition     = toset(keys(aws_eks_addon.core)) == toset(["main.vpc-cni", "main.coredns"]) && keys(aws_eks_addon.addons) == ["main.adot"]
-    error_message = "vpc-cni and coredns must be core add-ons; adot must install after the load balancer controller."
+    condition     = toset(keys(aws_eks_addon.core)) == toset(["main.kube-proxy", "main.coredns"]) && keys(aws_eks_addon.addons) == ["main.adot"]
+    error_message = "kube-proxy and coredns must be core add-ons; adot must install after the load balancer controller."
   }
 
   assert {
-    condition     = toset(keys(output.addon_arns)) == toset(["main.vpc-cni", "main.coredns", "main.adot"])
+    condition     = toset(keys(output.addon_arns)) == toset(["main.kube-proxy", "main.coredns", "main.adot"])
     error_message = "addon_arns must report both groups."
   }
+}
+
+# vpc-cni belongs to the eks component (its addons.tf, with the IRSA role the
+# node role no longer replaces); listing it here is rejected, whatever its key.
+run "vpc_cni_is_rejected" {
+  command = plan
+
+  variables {
+    clusters = {
+      main = {
+        addons = {
+          coredns = { name = "coredns" }
+          cni     = { name = "vpc-cni" }
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.clusters]
 }
 
 run "acme_staging_directory_for_non_production" {
