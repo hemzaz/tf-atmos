@@ -538,9 +538,9 @@ variable "map_additional_iam_roles" {
 
   validation {
     condition = alltrue([for r in var.map_additional_iam_roles :
-      can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\\w+=,.@/-]+$", r.rolearn))
+      can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/([\\w+=,.@-]+/)*[\\w+=,.@-]+$", r.rolearn))
     ])
-    error_message = "map_additional_iam_roles rolearn must be an IAM role ARN, arn:aws:iam::<12-digit account>:role/[<path>/]<name>; not an sts assumed-role ARN, a user or a wildcard."
+    error_message = "map_additional_iam_roles rolearn must be an IAM role ARN, arn:aws:iam::<12-digit account>:role/[<path>/]<name> (no empty path segment or trailing /); not an sts assumed-role ARN, a user or a wildcard."
   }
 
   validation {

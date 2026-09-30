@@ -33,6 +33,13 @@ def admin_eks(arn, stage="dev"):
     return eks
 
 
+def addon(component, cluster):
+    """An opted-out in-cluster instance whose dependencies.components names its eks instance."""
+    i = instance(component, actions_enabled=False)
+    i["dependencies"] = {"components": [{"component": cluster}, {"component": "kms/main"}]}
+    return i
+
+
 def with_backend(stacks, **allowed):
     backend = instance("backend")
     backend["vars"]["access_roles"] = {key: {"allowed_principal_arns": arns} for key, arns in allowed.items()}
@@ -85,23 +92,22 @@ class CheckClusterApiCiTest(unittest.TestCase):
             "eks/off": instance("eks", enabled=False),
         }))
 
-    def test_private_stack_without_admin_role_warns_only(self):
-        stacks = stacks_with(**{
+    def test_clusters_without_admin_role_warn_once_per_stack_with_their_own_dependents(self):
+        stacks = with_backend(stacks_with(**{
             "eks/main": instance("eks"),
-            "eks-addons/main": instance("eks-addons", actions_enabled=False),
-        })
+            "eks/data": instance("eks"),
+            "eks-addons/main": addon("eks-addons", "eks/main"),
+            "external-secrets/main": addon("external-secrets", "eks/main"),
+            "eks-addons/data": addon("eks-addons", "eks/data"),
+        }))
         errors, warnings = check_cluster_api_ci.check_operators(stacks, CLUSTER)
         self.assertEqual(errors, [])
         self.assertEqual(len(warnings), 1, warnings)
-        self.assertIn("eks/main has no map_additional_iam_roles", warnings[0])
-        self.assertIn("eks-addons/main", warnings[0])
+        self.assertIn("eks/data (eks-addons/data); eks/main (eks-addons/main, external-secrets/main)", warnings[0])
 
     def test_admin_role_trusted_by_the_stage_write_role_passes(self):
         stacks = with_backend(
-            stacks_with(**{
-                "eks/main": admin_eks(ADMIN),
-                "eks-addons/main": instance("eks-addons", actions_enabled=False),
-            }),
+            stacks_with(**{"eks/main": admin_eks(ADMIN), "eks-addons/main": addon("eks-addons", "eks/main")}),
             write=[ADMIN],
         )
         self.assertEqual(check_cluster_api_ci.check_operators(stacks, CLUSTER), ([], []))
@@ -109,10 +115,7 @@ class CheckClusterApiCiTest(unittest.TestCase):
     def test_admin_role_missing_from_the_stage_write_role_fails(self):
         # Trusted by prod's write role only: dev state is still out of reach.
         stacks = with_backend(
-            stacks_with(**{
-                "eks/main": admin_eks(ADMIN),
-                "eks-addons/main": instance("eks-addons", actions_enabled=False),
-            }),
+            stacks_with(**{"eks/main": admin_eks(ADMIN), "eks-addons/main": addon("eks-addons", "eks/main")}),
             write=[],
             prod_write=[ADMIN],
         )
@@ -125,7 +128,7 @@ class CheckClusterApiCiTest(unittest.TestCase):
         stacks = with_backend(
             {"fnx-prod-production": {"components": {"terraform": {
                 "eks/main": admin_eks(ADMIN, stage="prod"),
-                "eks-addons/main": instance("eks-addons", actions_enabled=False),
+                "eks-addons/main": addon("eks-addons", "eks/main"),
             }}}},
             write=[ADMIN],
         )
@@ -133,10 +136,21 @@ class CheckClusterApiCiTest(unittest.TestCase):
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("access_roles.prod_write", errors[0])
 
+    def test_missing_backend_fails_closed(self):
+        stacks = stacks_with(**{"eks/main": admin_eks(ADMIN), "eks-addons/main": addon("eks-addons", "eks/main")})
+        errors, _ = check_cluster_api_ci.check_operators(stacks, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("no deployable backend/main", errors[0])
+        # A disabled backend/main counts as missing.
+        off = with_backend(stacks, write=[ADMIN])
+        off["fnx-core-root"]["components"]["terraform"]["backend/main"]["metadata"] = {"enabled": False}
+        errors, _ = check_cluster_api_ci.check_operators(off, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+
     def test_non_admin_roles_and_stacks_without_in_cluster_components_are_ignored(self):
         viewer = admin_eks(ADMIN)
         viewer["vars"]["map_additional_iam_roles"][0]["groups"] = ["viewers"]
-        stacks = stacks_with(**{"eks/main": viewer, "eks-addons/main": instance("eks-addons", actions_enabled=False)})
+        stacks = with_backend(stacks_with(**{"eks/main": viewer, "eks-addons/main": addon("eks-addons", "eks/main")}))
         errors, warnings = check_cluster_api_ci.check_operators(stacks, CLUSTER)
         self.assertEqual(errors, [])
         self.assertEqual(len(warnings), 1, warnings)

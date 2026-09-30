@@ -415,6 +415,32 @@ run "placeholder_admin_role_is_rejected" {
   expect_failures = [var.map_additional_iam_roles]
 }
 
+run "admin_role_with_an_empty_path_segment_is_rejected" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role//platform-admin"
+      groups  = ["system:masters"]
+    }]
+  }
+
+  expect_failures = [var.map_additional_iam_roles]
+}
+
+run "admin_role_with_a_trailing_slash_is_rejected" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role/platform-admin/"
+      groups  = ["system:masters"]
+    }]
+  }
+
+  expect_failures = [var.map_additional_iam_roles]
+}
+
 run "service_linked_admin_role_is_rejected" {
   command = plan
 

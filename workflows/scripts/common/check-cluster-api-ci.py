@@ -16,10 +16,11 @@ That operator is an eks map_additional_iam_roles role with system:masters (a
 cluster-scoped AmazonEKSClusterAdminPolicy access entry, set in each stack's
 components/globals.yaml). In such a stack, every one of those roles must also be
 trusted by the stage's state write role (backend/main access_roles.write for
-dev/staging, .prod_write for prod), or it cannot write the state: an ERROR. An
-eks instance with no such role leaves nobody able to apply the in-cluster
-components: a WARN only, while the owner has not supplied the real ARNs (an
-access entry for a placeholder role would fail eks/main's apply).
+dev/staging, .prod_write for prod), or it cannot write the state: an ERROR, as
+is a missing deployable backend/main (nothing to check against). An eks
+instance with no such role leaves nobody able to apply the in-cluster instances
+that depend on it: one WARN per stack, while the owner has not supplied the real
+ARNs (an access entry for a placeholder role would fail eks/main's apply).
 
 Exits 1 on any ERROR; WARN lines never fail.
 """
@@ -95,13 +96,25 @@ def admin_role_arns(eks_instance: dict) -> list[str]:
 
 
 def backend_write_principals(stacks: dict) -> "dict | None":
-    """access_roles key -> allowed_principal_arns of the one backend instance; None if absent."""
+    """access_roles key -> allowed_principal_arns of the deployable backend/main; None if absent."""
     for stack in stacks.values():
-        for instance in deployable_instances(stack).values():
-            if instance.get("component") == "backend":
-                roles = (instance.get("vars") or {}).get("access_roles") or {}
-                return {key: set(role.get("allowed_principal_arns") or []) for key, role in roles.items()}
+        instance = deployable_instances(stack).get("backend/main")
+        if instance is not None and instance.get("component") == "backend":
+            roles = (instance.get("vars") or {}).get("access_roles") or {}
+            return {key: set(role.get("allowed_principal_arns") or []) for key, role in roles.items()}
     return None
+
+
+def cluster_dependents(instances: dict, cluster: set[str]) -> dict[str, list[str]]:
+    """eks instance -> the in-cluster instances whose dependencies.components name it."""
+    dependents = {name: [] for name, i in instances.items() if i.get("component") == "eks"}
+    for name, instance in sorted(instances.items()):
+        if instance.get("component") not in cluster:
+            continue
+        for dep in (instance.get("dependencies") or {}).get("components") or []:
+            if not dep.get("stack") and dep.get("component") in dependents:
+                dependents[dep["component"]].append(name)
+    return dependents
 
 
 def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[str]]:
@@ -112,19 +125,20 @@ def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[st
         instances = deployable_instances(stack)
         if not is_private(instances):
             continue
-        in_cluster = sorted(name for name, i in instances.items() if i.get("component") in cluster)
-        if not in_cluster:
+        if not any(i.get("component") in cluster for i in instances.values()):
             continue
-        for name, instance in sorted(instances.items()):
-            if instance.get("component") != "eks":
-                continue
+        if backend is None:
+            errors.append(
+                f"{stack_name}: no deployable backend/main instance found, so its cluster admin "
+                "roles cannot be checked against the state write roles"
+            )
+        unmanaged = []
+        for name, dependents in sorted(cluster_dependents(instances, cluster).items()):
+            instance = instances[name]
             arns = admin_role_arns(instance)
             if not arns:
-                warnings.append(
-                    f"{stack_name}: {name} has no map_additional_iam_roles entry with system:masters, "
-                    f"so no operator can apply {', '.join(in_cluster)} (set it in the stack's "
-                    "components/globals.yaml)"
-                )
+                if dependents:
+                    unmanaged.append(f"{name} ({', '.join(dependents)})")
                 continue
             if backend is None:
                 continue
@@ -137,6 +151,12 @@ def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[st
                         f"access_roles.{key} allowed_principal_arns, so it cannot write this "
                         "stack's state"
                     )
+        if unmanaged:
+            warnings.append(
+                f"{stack_name}: no map_additional_iam_roles entry with system:masters on "
+                f"{'; '.join(unmanaged)}, so nobody can apply those in-cluster instances (set it "
+                "in the stack's components/globals.yaml)"
+            )
     return errors, warnings
 
 

@@ -27,7 +27,9 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   `groups: ["system:masters"]` becomes a cluster-scoped `AmazonEKSClusterAdminPolicy` entry. The
   `rolearn` keeps its path (access entries need it, unlike `aws-auth`): an IAM Identity Center role is
   `role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<set>_<hash>`, and a stripped one is
-  rejected. `check-cluster-api-ci.py` warns while a private stack has none.
+  rejected. `check-cluster-api-ci.py` warns while a private stack has none. Their network path to
+  the private endpoint (bastion ingress on the cluster security group, `eks/data`'s VPC) is not
+  wired yet: follow-up B7-g, see docs/OPERATIONS.md "In-cluster components".
 - Principals read with `!terraform.state` must go in those lists: `access_entry_map` keys must be
   literal. Null principals are skipped.
 
