@@ -27,9 +27,11 @@ components:
         # Kubernetes API access: API authentication mode, no hidden
         # cluster-creator admin (the component defaults, Cloud Posse's
         # access_config), and one access entry per CI role. The CI plan role
-        # reads (AmazonEKSViewPolicy); the CI apply role, which deploys
-        # eks-addons and the other in-cluster components, administers
-        # (AmazonEKSClusterAdminPolicy). Cloud Posse's list form
+        # reads (AmazonEKSViewPolicy); the CI apply role administers
+        # (AmazonEKSClusterAdminPolicy). While the endpoint is private, hosted
+        # runners skip the in-cluster components and an operator applies them
+        # from inside the VPC with their own access entry (docs/OPERATIONS.md,
+        # "In-cluster components"). Cloud Posse's list form
         # (access_entries + access_policy_associations), not access_entry_map:
         # the role ARNs come from !terraform.state, and an Atmos YAML function
         # cannot produce a map key. iam/ci returns a null ci_apply_role_arn

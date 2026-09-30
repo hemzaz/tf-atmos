@@ -75,17 +75,32 @@ def atmos_json(*args: str):
     return json.loads(subprocess.check_output(["atmos", *args, "--process-functions=false", "--format", "json"]))
 
 
+def stack_instances(stack: str, describe=None) -> dict:
+    """The stack's terraform instances; LookupError when Atmos does not know the stack.
+
+    `atmos describe stacks -s <unknown>` prints {} on some Atmos versions and
+    exits non-zero on others, so both mean an unknown stack.
+    """
+    try:
+        stacks = (describe or atmos_json)("describe", "stacks", "-s", stack, "--sections", "metadata,settings,dependencies")
+    except subprocess.CalledProcessError as error:
+        raise LookupError(f"Unknown stack '{stack}' (atmos describe stacks exited {error.returncode})") from error
+    if stack not in stacks:
+        raise LookupError(f"Unknown stack '{stack}'")
+    return (stacks[stack].get("components") or {}).get("terraform") or {}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--stack", required=True)
     parser.add_argument("--base", help="only instances affected since this commit")
     args = parser.parse_args()
 
-    stacks = atmos_json("describe", "stacks", "-s", args.stack, "--sections", "metadata,settings,dependencies")
-    if args.stack not in stacks:
-        print(f"::error::Unknown stack '{args.stack}'")
+    try:
+        instances = stack_instances(args.stack)
+    except LookupError as error:
+        print(f"::error::{error}")
         return 1
-    instances = (stacks[args.stack].get("components") or {}).get("terraform") or {}
     affected = None
     if args.base:
         affected = {

@@ -1,6 +1,7 @@
 """Tests for ci-components.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
 import importlib.util
 import pathlib
+import subprocess
 import unittest
 
 _spec = importlib.util.spec_from_file_location("ci_components", pathlib.Path(__file__).with_name("ci-components.py"))
@@ -67,6 +68,36 @@ class SelectTest(unittest.TestCase):
 
     def test_only_disabled_affected_runs_nothing(self):
         self.assertEqual(ci_components.select(self.instances, STACK, {"eks-addons/main"}), ([], ["eks-addons/main"]))
+
+
+class StackInstancesTest(unittest.TestCase):
+    def test_known_stack_returns_terraform_instances(self):
+        described = {STACK: {"components": {"terraform": {"vpc/main": instance()}}}}
+        self.assertEqual(ci_components.stack_instances(STACK, lambda *_: described), {"vpc/main": instance()})
+
+    def test_empty_describe_is_unknown(self):
+        with self.assertRaisesRegex(LookupError, "Unknown stack 'nope'"):
+            ci_components.stack_instances("nope", lambda *_: {})
+
+    def test_atmos_failure_is_unknown(self):
+        def fail(*args):
+            raise subprocess.CalledProcessError(1, ["atmos", *args])
+
+        with self.assertRaisesRegex(LookupError, "Unknown stack 'nope'"):
+            ci_components.stack_instances("nope", fail)
+
+    def test_main_reports_unknown_stack_as_error(self):
+        import contextlib
+        import io
+        import sys
+        from unittest import mock
+
+        out = io.StringIO()
+        with mock.patch.object(ci_components, "atmos_json", side_effect=subprocess.CalledProcessError(1, "atmos")), \
+                mock.patch.object(sys, "argv", ["ci-components.py", "--stack", "nope"]), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(ci_components.main(), 1)
+        self.assertIn("::error::Unknown stack 'nope'", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -114,6 +114,27 @@ atmos workflow deploy -f deploy-template -s <stack>          # a stack template 
 Of the stack templates only `microservices-platform` names components that all exist; the others
 fail at `deploy-template`. No stack deploys `idp-platform`.
 
+## In-cluster components
+
+`eks-addons`, `external-secrets`, `eks-backend-services` and `alb-controller-ingress-group` talk to
+the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint is private
+(`eks_public_access: false`), so GitHub-hosted runners cannot reach it. Their catalog defaults set
+`settings.github.actions_enabled: false`: PR plans, CD (push and dispatch) and drift detection skip
+them with a `::notice::`, and `check-cluster-api-ci.py` (lint, validate-all) fails any such instance
+in a private-endpoint stack that lacks the flag.
+
+An operator applies them from inside the VPC, e.g. on the stack's `ec2/bastion` (SSH with its
+Secrets Manager key, or SSM), after `eks/main` and each instance the component reads:
+
+```bash
+atmos terraform deploy <component> -s <stack>   # e.g. eks-addons/main, then eks-backend-services/main
+atmos workflow deploy-addons -f deploy-full-stack -s <stack>   # or the layer: platform, addons, services
+```
+
+The caller needs the stack's apply permissions and an `eks/main` access entry with
+`AmazonEKSClusterAdminPolicy` (`stacks/catalog/eks/defaults.yaml` grants only the CI roles; the
+creator gets no implicit admin). CD moving `deployed/<stack>` does not mean these were applied.
+
 ## Changing infrastructure
 
 Normal path: a PR (CI plans and comments), then merge (CD deploys). A rename, module move or
@@ -127,7 +148,7 @@ switched to a different root module (import instead).
 
 | Task | Command |
 |------|---------|
-| Drift (hourly in CI) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
+| Drift (hourly in CI, [in-cluster components](#in-cluster-components) excluded) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
 | Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-baseline -f lint` rewrites the baselines: review the diff, never use it to force a PR green |
 | Security Hub findings | `atmos workflow security-audit -f security-hardening -s <stack>` |
 | Compliance | `atmos workflow check -f compliance-check -s <stack>`; `report` writes `compliance-report.md` |

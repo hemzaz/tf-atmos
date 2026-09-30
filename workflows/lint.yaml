@@ -128,6 +128,20 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-state-keys.py < "$stacks_json"
+      # A component that configures a kubernetes/helm/kubectl provider needs
+      # the EKS API, which GitHub-hosted runners cannot reach where the
+      # endpoint is private: each such instance must set
+      # settings.github.actions_enabled: false (docs/OPERATIONS.md,
+      # "In-cluster components"). Also run by validate-all.
+      - name: check-cluster-api-ci
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
       - type: toast
         level: success
         content: Lint checks passed
