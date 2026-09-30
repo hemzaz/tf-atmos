@@ -22,7 +22,6 @@ workflows/               Atmos workflows (atmos list workflows); scripts/ holds 
 scripts/                 helpers: plan-sweep.sh, new-environment.sh, certificates/, dr/
 scaffolds/               templates for `atmos scaffold generate`
 templates/, examples/    copy-in component template, stack/config samples, the OIDC hub/spoke example
-integrations/            Atlantis and Jenkins alternatives to GitHub Actions (not used by CI)
 .github/workflows/       CI/CD (below)
 ```
 
