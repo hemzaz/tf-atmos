@@ -20,7 +20,8 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
 
 - The custom domain is skipped silently unless both `domain_name` and `certificate_arn` are set,
   and the alias record unless `zone_id` is set. `check-domains.py` requires the domain to be
-  inside the zone.
+  inside the zone and covered by the `acm` certificate `certificate_arn` reads; a literal
+  certificate ARN is only a warning.
 - The REST custom domain is REGIONAL with `TLS_1_2`; a precondition rejects `EDGE`/`PRIVATE`
   endpoints with a domain.
 - `api_resources` hang off the API root: paths are one level deep. Methods and integrations are

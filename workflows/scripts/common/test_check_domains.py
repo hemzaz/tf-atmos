@@ -288,8 +288,26 @@ class CheckDomainsTest(unittest.TestCase):
             with self.subTest(arn=arn):
                 self.assert_result(self.api_stacks(f"api.{DOMAIN}", arn), errors=[fragment])
 
-    def test_literal_certificate_arn_is_not_checked(self):
-        self.assert_result(self.api_stacks(f"api.{DOMAIN}", "arn:aws:acm:eu-west-2:1:certificate/x"))
+    def test_literal_certificate_arn_is_a_warning(self):
+        self.assert_result(
+            self.api_stacks(f"api.{DOMAIN}", "arn:aws:acm:eu-west-2:1:certificate/x"),
+            warnings=[
+                "apigateway/main: certificate_arn 'arn:aws:acm:eu-west-2:1:certificate/x' is a literal certificate ARN; "
+                "domain_name api.staging.fnx.example.com is not checked against it"
+            ],
+        )
+
+    def test_no_certificate_arn_is_no_warning(self):
+        for arn in (None, ""):
+            with self.subTest(arn=arn):
+                self.assert_result(self.api_stacks(f"api.{DOMAIN}", arn))
+
+    def test_missing_zone_message_names_zone_id_once(self):
+        stacks = stacks_with(**{"acm/main": acm("!terraform.state network/main .zone_ids.nope", (f"*.{DOMAIN}", []))})
+        errors, _ = check_domains.check(stacks)
+        self.assertEqual(
+            errors, ["s1: acm/main: zone_id reads network/main .zone_ids.nope, but network/main has no zone 'nope'"]
+        )
 
     def test_abstract_and_disabled_instances_are_skipped(self):
         outside = {"www": {"zone_name": "main", "name": "www.example.org"}}
