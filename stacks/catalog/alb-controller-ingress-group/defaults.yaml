@@ -19,6 +19,11 @@ components:
       metadata:
         component: alb-controller-ingress-group
         type: abstract
+      # Talks to the private EKS API: off hosted-runner CI/CD/drift, applied
+      # from inside the VPC (see catalog/eks-addons/defaults.yaml).
+      settings:
+        github:
+          actions_enabled: false
       vars:
         enabled: true
         # kubernetes_namespace defaults to "alb-ingress-group" (never

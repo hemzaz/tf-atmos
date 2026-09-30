@@ -8,6 +8,11 @@ components:
       metadata:
         component: eks-backend-services
         type: abstract
+      # Talks to the private EKS API: off hosted-runner CI/CD/drift, applied
+      # from inside the VPC (see catalog/eks-addons/defaults.yaml).
+      settings:
+        github:
+          actions_enabled: false
       vars:
         # Only fnx-prod-production runs an elasticache/main instance today
         # (stacks/catalog/elasticache/defaults.yaml); every stack starts with
