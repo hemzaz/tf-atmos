@@ -29,8 +29,11 @@
 #     prod: fnx-terraform-backend-prod-role), each trusted only by that stage's
 #     CI apply roles (stacks/orgs/fnx/_defaults.yaml,
 #     stacks/orgs/fnx/core/eu-west-2/root.yaml).
-#   - A tag ruleset allowing only GitHub Actions to create/update/delete
-#     refs/tags/deployed/**, so only this workflow moves the deploy markers.
+#   - Missing, needs an organization-owned repo: a tag ruleset allowing only
+#     GitHub Actions to create/update/delete refs/tags/deployed/**. On a
+#     personal repo Actions cannot be a bypass actor, and without the bypass
+#     the ruleset would block this workflow's own tag moves; until then anyone
+#     with push access can move a deploy marker (docs/OPERATIONS.md).
 #
 # Ordering: the workflow-level concurrency group serializes runs. GitHub keeps
 # only one pending run per group, so a burst of pushes can evict a queued run.

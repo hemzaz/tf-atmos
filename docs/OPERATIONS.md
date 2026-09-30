@@ -17,7 +17,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml`; each address must confirm its SNS subscription |
 | Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main`: unset, so its CloudWatch alarms have no action |
 | Lambda packages | `s3_bucket`/`s3_key` of every `lambda/*` instance in `components/services.yaml`; the object must exist before the first apply |
-| GitHub | default-branch protection (PR + review), and a tag ruleset letting only GitHub Actions move `refs/tags/deployed/**` (`terraform-cd.yml` relies on both) |
+| GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
 
 Every workload `account_id` must differ from `management_account_id`. The stage split of state
