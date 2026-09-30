@@ -203,3 +203,5 @@ liveness endpoint by design.
 | `Error acquiring the state lock` | Another run holds it; `list-locks`, then `force-unlock` if abandoned |
 | `!terraform.state` returns nothing | The referenced instance is not deployed in that stack yet; deploy in layer order |
 | ACM validation times out after 45 minutes | The stack's domain is not delegated; see [Deploying a stack](#deploying-a-stack) |
+
+<!-- scratch: CI gate docs-only proof, do not merge -->
