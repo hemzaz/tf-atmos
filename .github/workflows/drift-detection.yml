@@ -152,16 +152,17 @@ jobs:
           set -uo pipefail
           components="$(python3 workflows/scripts/common/ci-components.py --stack "$STACK")" || exit 1
           drifted=() failed=()
-          for component in $components; do
+          while IFS= read -r component; do
+            [ -n "$component" ] || continue
             rc=0
             atmos terraform plan "$component" -s "$STACK" --skip-planfile --hide no-changes \
-              -- -detailed-exitcode -lock=false || rc=$?
+              -- -detailed-exitcode -lock=false </dev/null || rc=$?
             case "$rc" in
               0) ;;
               2) drifted+=("$component"); echo "::warning title=Drift::$STACK $component has drifted" ;;
               *) failed+=("$component"); echo "::error title=Plan failed::$STACK $component (exit $rc)" ;;
             esac
-          done
+          done <<<"$components"
           if [ "${#failed[@]}" -gt 0 ]; then
             echo "::error::$STACK: plan failed for ${failed[*]}"
             exit 1

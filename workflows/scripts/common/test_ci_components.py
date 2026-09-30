@@ -92,12 +92,29 @@ class StackInstancesTest(unittest.TestCase):
         import sys
         from unittest import mock
 
-        out = io.StringIO()
+        out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(ci_components, "atmos_json", side_effect=subprocess.CalledProcessError(1, "atmos")), \
                 mock.patch.object(sys, "argv", ["ci-components.py", "--stack", "nope"]), \
-                contextlib.redirect_stdout(out):
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(ci_components.main(), 1)
-        self.assertIn("::error::Unknown stack 'nope'", out.getvalue())
+        # stderr: callers capture stdout as the instance list.
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("::error::Unknown stack 'nope'", err.getvalue())
+
+    def test_main_reports_cycle_on_stderr(self):
+        import contextlib
+        import io
+        import sys
+        from unittest import mock
+
+        described = {STACK: {"components": {"terraform": {"a": instance("b"), "b": instance("a")}}}}
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(ci_components, "atmos_json", return_value=described), \
+                mock.patch.object(sys, "argv", ["ci-components.py", "--stack", STACK]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(ci_components.main(), 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("::error::fnx-dev-testenv-01: dependency cycle", err.getvalue())
 
 
 if __name__ == "__main__":

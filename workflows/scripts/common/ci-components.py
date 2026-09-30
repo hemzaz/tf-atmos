@@ -16,7 +16,8 @@ same-stack dependencies.components (the list check-dependencies.py enforces
 for every !terraform.state read), ties broken by name. With --base, only the
 instances `atmos describe affected --base <sha> -s <stack>` reports.
 
-Skipped instances are reported as ::notice:: lines on stderr. Exits 1 on an
+Skipped instances are reported as a ::notice:: and errors as ::error:: on stderr
+(callers capture stdout). Exits 1 on an
 unknown stack or a dependency cycle.
 """
 import argparse
@@ -99,7 +100,7 @@ def main() -> int:
     try:
         instances = stack_instances(args.stack)
     except LookupError as error:
-        print(f"::error::{error}")
+        print(f"::error::{error}", file=sys.stderr)
         return 1
     affected = None
     if args.base:
@@ -111,12 +112,11 @@ def main() -> int:
     try:
         run, skipped = select(instances, args.stack, affected)
     except ValueError as error:
-        print(f"::error::{args.stack}: {error}")
+        print(f"::error::{args.stack}: {error}", file=sys.stderr)
         return 1
     if skipped:
         print(
-            f"::notice::{args.stack}: skipping {', '.join(skipped)} (settings.github.actions_enabled: false; "
-            "applied from inside the VPC, see docs/OPERATIONS.md)",
+            f"::notice::{args.stack}: skipping {', '.join(skipped)} (settings.github.actions_enabled: false)",
             file=sys.stderr,
         )
     for name in run:

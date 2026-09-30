@@ -228,10 +228,11 @@ jobs:
           set -euo pipefail
           components="$(python3 workflows/scripts/common/ci-components.py --stack "$STACK" --base "$BASE_SHA")"
           [ -n "$components" ] || echo "No hosted-runner instance of $STACK is affected"
-          for component in $components; do
+          while IFS= read -r component; do
+            [ -n "$component" ] || continue
             echo "Deploying $component in $STACK"
-            atmos terraform deploy "$component" -s "$STACK"
-          done
+            atmos terraform deploy "$component" -s "$STACK" </dev/null
+          done <<<"$components"
       - name: Record successful deploy
         run: mkdir -p deployed && echo "$GITHUB_SHA" > deployed/sha
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -319,13 +320,21 @@ jobs:
           set -euo pipefail
           components="$(python3 workflows/scripts/common/ci-components.py --stack "$STACK")"
           if [ -n "$COMPONENT" ]; then
-            if ! grep -qxF -- "$COMPONENT" <<<"$components"; then
-              echo "::error::$COMPONENT is not a hosted-runner instance of $STACK (unknown, abstract, disabled, or settings.github.actions_enabled: false; see docs/OPERATIONS.md)"
+            # One exact line of the list; a multi-line API input never matches.
+            listed=false
+            while IFS= read -r component; do
+              [ "$component" = "$COMPONENT" ] && listed=true
+            done <<<"$components"
+            if [ "$listed" != true ]; then
+              echo "::error::'$COMPONENT' is not a hosted-runner instance of $STACK (unknown, abstract, disabled, or settings.github.actions_enabled: false; see docs/OPERATIONS.md)"
               exit 1
             fi
-            components="$COMPONENT"
+            echo "Running $ACTION for $COMPONENT in $STACK"
+            atmos terraform "$ACTION" "$COMPONENT" -s "$STACK"
+            exit 0
           fi
-          for component in $components; do
+          while IFS= read -r component; do
+            [ -n "$component" ] || continue
             echo "Running $ACTION for $component in $STACK"
-            atmos terraform "$ACTION" "$component" -s "$STACK"
-          done
+            atmos terraform "$ACTION" "$component" -s "$STACK" </dev/null
+          done <<<"$components"
