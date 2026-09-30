@@ -69,6 +69,15 @@ override_resource {
   }
 }
 
+# Likewise for the node role, so the node groups' node_role_arn assertion
+# cannot pass on the shared mock ARN.
+override_resource {
+  target = aws_iam_role.node
+  values = {
+    arn = "arn:aws:iam::123456789012:role/production-main-node-role"
+  }
+}
+
 variables {
   region     = "eu-west-2"
   name       = "main"

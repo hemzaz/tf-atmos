@@ -114,11 +114,10 @@ locals {
 
   # Every principal that gets an access entry, from both forms. Cloud Posse
   # only documents "do not duplicate entries"; the preconditions below
-  # enforce it. They are lifecycle preconditions, not check blocks: the list
-  # ARNs come from !terraform.state and may be unknown at plan, and a
-  # precondition that cannot be decided at plan is evaluated again at apply,
-  # before the resource is created, and stops the apply there. A check block
-  # would only warn, and the apply would go on to EKS's 409
+  # enforce it. !terraform.state ARNs are literal by plan time (Atmos resolves
+  # them before Terraform runs), so these preconditions fail the plan; they
+  # are preconditions rather than check blocks so they block instead of
+  # warn. A check block would let the apply go on to EKS's 409
   # (ResourceInUseException) or a policy association without an entry.
   map_entry_principal_arns = keys(local.access_entry_resource_map)
   entry_principal_arns     = concat(local.map_entry_principal_arns, [for e in local.access_entries : e.principal_arn])

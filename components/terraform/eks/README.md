@@ -39,8 +39,7 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   literal. Null principals are skipped.
 - One access entry per principal: a principal in both `access_entries` and `access_entry_map` /
   `map_additional_iam_roles` (or twice in the list) fails a precondition, as does a list
-  association whose principal has no entry. The preconditions run at apply when a
-  `!terraform.state` ARN is unknown at plan. Only `STANDARD` entries may set groups, `user_name` or
+  association whose principal has no entry. Only `STANDARD` entries may set groups, `user_name` or
   access policies.
 
 ## Notes
