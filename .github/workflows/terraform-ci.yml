@@ -41,42 +41,78 @@ on:
   # get the same static-analysis gates as PRs into master. Without this, a
   # stacked PR only gets GitGuardian and the integration PR becomes the first
   # real gate (see #171-#179).
+  #
+  # No `paths:` filter either: the `CI gate` job at the bottom is the required
+  # status check, so this workflow must report on every PR, docs-only ones
+  # included. A path-filtered workflow never starts, and a required check it
+  # would have reported stays "Expected" forever. The `changes` job does the
+  # path filtering instead; the jobs it covers are skipped, not absent.
   pull_request:
-    paths:
-      - atmos.yaml
-      - components/**
-      - stacks/**
-      - workflows/**
-      - scripts/**
-      - .trivyignore.yaml
-      - .checkov.baseline
-      - .github/workflows/terraform-ci.yml
   # master only ever moves by a squash-merged, already-PR-gated commit, so a
   # push here re-running the full static-analysis/plan-sweep/security-scan
   # sweep is pure redundant cost -- those jobs opt back out with
   # `if: github.event_name != 'push'` below. terraform-test does NOT opt out:
-  # it is the one gate that must also run post-merge (see its own `needs`-free
-  # `if`), since a component's tests/ must stay green on master, not just on
+  # it is the one gate that must also run post-merge (its `if` has no event
+  # check), since a component's tests/ must stay green on master, not just on
   # the PR that touched it.
   push:
     branches: [master]
-    paths:
-      - atmos.yaml
-      - components/**
-      - stacks/**
-      - workflows/**
-      - scripts/**
-      - .trivyignore.yaml
-      - .checkov.baseline
-      - .github/workflows/terraform-ci.yml
   merge_group:
 
 permissions: {}
 
 jobs:
+  # The path filter for every job below (see `on:`). Plain git, no third-party
+  # action: diff the checked-out commit against the event's base (the PR base,
+  # the merge-queue base, or the commit master pointed at before the push).
+  # Without a usable base (all-zero `before`, or a commit no longer fetched),
+  # everything counts as changed.
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      terraform: ${{ steps.filter.outputs.terraform }}
+      emulator: ${{ steps.filter.outputs.emulator }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # terraform: the former `paths:` filter of this workflow.
+      # emulator: the former `paths:` filter of emulator.yml, plus this file,
+      # which now calls it.
+      - id: filter
+        name: Match changed files against each job group's paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          set -eu
+          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.trivyignore\.yaml|\.checkov\.baseline|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
+          emulator_re='^(atmos\.yaml|components/terraform/.*|stacks/.*|workflows/.*|\.github/workflows/(emulator|terraform-ci)\.yml)$'
+          if [ -n "${BASE_SHA//0/}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            # --no-renames: a rename lists only its new path, so moving a file out of stacks/ would skip everything.
+            changed=$(git diff --no-renames --name-only "$BASE_SHA" HEAD)
+            printf 'Changed since %s:\n%s\n' "$BASE_SHA" "$changed"
+            match() { if printf '%s\n' "$changed" | grep -Eq "$1"; then echo true; else echo false; fi; }
+            terraform=$(match "$terraform_re")
+            emulator=$(match "$emulator_re")
+          else
+            echo "::notice::No usable base commit (${BASE_SHA:-none}); running every job."
+            terraform=true
+            emulator=true
+          fi
+          echo "terraform=$terraform emulator=$emulator"
+          {
+            echo "terraform=$terraform"
+            echo "emulator=$emulator"
+          } >> "$GITHUB_OUTPUT"
+
   lint:
     name: Lint & validate
-    if: github.event_name != 'push'
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
@@ -114,7 +150,8 @@ jobs:
     # gate in the file, and a lint failure should not hide a sweep failure or
     # the other way round.
     name: Plan sweep
-    if: github.event_name != 'push'
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     # ~9 minutes on a clean run. A hung plan otherwise holds a runner for the
     # 6-hour default before anyone hears about it.
@@ -145,7 +182,8 @@ jobs:
 
   security-scan:
     name: Security scan
-    if: github.event_name != 'push'
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
@@ -176,6 +214,8 @@ jobs:
     # this job does NOT opt out of `push`: a component's unit tests must stay
     # green on master too, not only on the PR that last touched it.
     name: Terraform tests
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
@@ -378,6 +418,8 @@ jobs:
   # its PR, so push keeps them out of the matrix.
   affected:
     name: Affected components
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
@@ -601,3 +643,40 @@ jobs:
               call("PATCH", f"{api}/issues/comments/{existing['id']}", {"body": body})
           else:
               call("POST", comments_url, {"body": body})
+
+  # The LocalEmu lane (emulator.yml, a reusable workflow) runs from here rather
+  # than on its own pull_request trigger so the gate below can `need` it: it is
+  # the only CI job that provisions, so a red lane must block the merge too.
+  emulator:
+    name: Emulator
+    needs: changes
+    if: needs.changes.outputs.emulator == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/emulator.yml
+
+  # The one check master's branch protection requires (context `CI gate`).
+  # It always runs and reports, whatever changed, and passes only when every
+  # job above succeeded or was skipped. Skipped is a pass on purpose: jobs skip
+  # when nothing they cover changed, on push (the PR-only gates), on
+  # merge_group (the AWS plan), and while vars.AWS_PLAN_ROLE_ARN is unset. A
+  # job skipped because a job it needs failed is still caught, since the job
+  # that failed is in this list too. Add every new job to `needs`.
+  gate:
+    name: CI gate
+    needs: [changes, lint, plan-sweep, security-scan, terraform-test, affected, plan, emulator]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require success or skipped from every job
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -eu
+          printf '%s' "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(printf '%s' "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error title=CI gate::Jobs did not pass: $bad"
+            exit 1
+          fi

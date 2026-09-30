@@ -26,23 +26,11 @@
 name: Emulator
 
 on:
-  # No `branches:` filter on pull_request: stacked PRs (PR -> feature branch,
-  # not master) must get the same emulator coverage as PRs into master.
-  pull_request:
-    paths:
-      - "components/terraform/**"
-      - "stacks/**"
-      - "workflows/**"
-      - "atmos.yaml"
-      - ".github/workflows/emulator.yml"
-  push:
-    branches: [main, master]
-    paths:
-      - "components/terraform/**"
-      - "stacks/**"
-      - "workflows/**"
-      - "atmos.yaml"
-      - ".github/workflows/emulator.yml"
+  # PRs (any base, stacked ones included), the merge queue and pushes to master
+  # run this lane through terraform-ci.yml's `emulator` job, which applies the
+  # path filter and puts the result under the required `CI gate` check. A
+  # trigger of its own here would run the lane twice.
+  workflow_call:
   workflow_dispatch:
 
 permissions:
