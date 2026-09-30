@@ -515,7 +515,14 @@ jobs:
     # On push this plans only the master-only stacks (production, D3): the
     # `affected` matrix holds nothing else on push. The ref check is explicit
     # rather than inherited from the `on.push.branches` filter.
-    if: ${{ (github.event_name != 'push' || github.ref == 'refs/heads/master') && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
+    # merge_group is excluded: its OIDC sub is
+    # repo:<org>/<repo>:ref:refs/heads/gh-readonly-queue/master/pr-..., which
+    # no plan role trusts (iam/ci ci_plan_role_subjects: pull_request + master,
+    # prod master only; wildcards are rejected by validation), so every queue
+    # run would fail AssumeRoleWithWebIdentity. The queued PR was already
+    # planned on pull_request. A skipped job counts as passing for a required
+    # check.
+    if: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}

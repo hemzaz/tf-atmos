@@ -110,7 +110,7 @@ until the repository variable `AWS_PLAN_ROLE_ARN` is set.
 
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
-| `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, plan-sweep, Trivy/Checkov gate (new HIGH/CRITICAL only, baselines in `.trivyignore.yaml`/`.checkov.baseline`), plan of affected non-prod instances with the read-only role (PR comment). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan |
+| `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, plan-sweep, Trivy/Checkov gate (new HIGH/CRITICAL only, baselines in `.trivyignore.yaml`/`.checkov.baseline`); PR only: plan of affected non-prod instances with the read-only role (PR comment). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan |
 | `emulator.yml` | PR, push to master, manual | LocalEmu lane: applies and destroys real resources |
 | `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag. No manual approval ([details](./docs/OPERATIONS.md#state-backend)) |
 | `drift-detection.yml` | hourly, manual | Read-only plan of every stack; drift fails the job |
