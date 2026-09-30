@@ -9,7 +9,8 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
 
 - Instances: `eks/main` (reads `vpc/main .private_subnet_ids`) and `eks/data` (reads
   `vpc/services .private_subnet_ids`) in the three AWS stacks. Both read `kms/main .key_arn`
-  (secrets, control-plane logs, node EBS) and `iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn`.
+  (secrets, control-plane logs, node EBS), `iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` and
+  `ec2/bastion .security_group_id` (`allowed_security_group_ids`).
 - Used by: `eks-addons`, `external-secrets`, `eks-backend-services` (cluster ID, endpoint, base64 CA,
   OIDC issuer with `https://` and its provider ARN), `rds/main` and `elasticache/main`
   (`.eks_cluster_managed_security_group_id`), `monitoring` (`.eks_cluster_id`).
@@ -27,9 +28,13 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
   `groups: ["system:masters"]` becomes a cluster-scoped `AmazonEKSClusterAdminPolicy` entry. The
   `rolearn` keeps its path (access entries need it, unlike `aws-auth`): an IAM Identity Center role is
   `role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<set>_<hash>`, and a stripped one is
-  rejected. `check-cluster-api-ci.py` warns while a private stack has none. Their network path to
-  the private endpoint (bastion ingress on the cluster security group, `eks/data`'s VPC) is not
-  wired yet: follow-up B7-g, see docs/OPERATIONS.md "In-cluster components".
+  rejected. `check-cluster-api-ci.py` warns while a private stack has none. They reach the private
+  endpoint through `ec2/bastion`'s SSM port-forward (docs/OPERATIONS.md "In-cluster components"):
+  each instance sets `allowed_security_group_ids` to the bastion's security group, and `eks/data`
+  (in `vpc/services`) is reached over `network/vpc-peering`.
+- `allowed_security_group_ids` / `allowed_cidr_blocks` (Cloud Posse's names; the aws-eks-cluster
+  component calls the first `allowed_security_groups`) add ingress rules on the EKS-managed cluster
+  security group, TCP 443 only where Cloud Posse opens all protocols. A `/0` is rejected.
 - Principals read with `!terraform.state` must go in those lists: `access_entry_map` keys must be
   literal. Null principals are skipped.
 

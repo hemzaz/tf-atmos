@@ -22,6 +22,11 @@ instance with no such role leaves nobody able to apply the in-cluster instances
 that depend on it: one WARN per stack, while the owner has not supplied the real
 ARNs (an access entry for a placeholder role would fail eks/main's apply).
 
+The operator reaches a private endpoint through the bastion's SSM port-forward,
+so such an eks instance (private endpoint, in-cluster instances depending on
+it) must admit it on TCP 443: an empty allowed_security_group_ids and
+allowed_cidr_blocks leaves no network path, an ERROR.
+
 Exits 1 on any ERROR; WARN lines never fail.
 """
 import json
@@ -160,6 +165,27 @@ def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[st
     return errors, warnings
 
 
+def check_network_paths(stacks: dict, cluster: set[str]) -> list[str]:
+    """Private eks instances with in-cluster dependents but no ingress for the operator."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        instances = deployable_instances(stack)
+        if not is_private(instances):
+            continue
+        for name, dependents in sorted(cluster_dependents(instances, cluster).items()):
+            eks_vars = instances[name].get("vars") or {}
+            if not dependents or is_public(eks_vars.get("cluster_endpoint_public_access")):
+                continue
+            if not (eks_vars.get("allowed_security_group_ids") or eks_vars.get("allowed_cidr_blocks")):
+                errors.append(
+                    f"{stack_name}: {name} has a private endpoint and in-cluster instances "
+                    f"({', '.join(dependents)}) but empty allowed_security_group_ids and "
+                    "allowed_cidr_blocks, so no operator can reach its API (allow the bastion's "
+                    "security group)"
+                )
+    return errors
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__.strip().splitlines()[2], file=sys.stderr)
@@ -168,20 +194,23 @@ def main() -> int:
     stacks = json.load(sys.stdin)
     errors = check(stacks, cluster)
     operator_errors, warnings = check_operators(stacks, cluster)
+    network_errors = check_network_paths(stacks, cluster)
     for warning in warnings:
         print(f"WARN {warning}")
-    for error in errors + operator_errors:
+    for error in errors + operator_errors + network_errors:
         print(f"ERROR {error}")
     if errors:
         print(f"{len(errors)} in-cluster instance(s) still run on hosted runners")
     if operator_errors:
         print(f"{len(operator_errors)} cluster admin role(s) cannot write their stack's state")
-    if errors or operator_errors:
+    if network_errors:
+        print(f"{len(network_errors)} private cluster(s) have no operator network path")
+    if errors or operator_errors or network_errors:
         return 1
     print(
         f"every instance of {', '.join(sorted(cluster))} in a stack with a private EKS endpoint "
-        "has settings.github.actions_enabled: false, and every cluster admin role there can "
-        "write its stack's state"
+        "has settings.github.actions_enabled: false, every cluster admin role there can "
+        "write its stack's state, and every private cluster they use admits an operator path"
     )
     return 0
 

@@ -26,6 +26,11 @@ components:
       vars:
         name: main
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # The operator's path to the private endpoint (docs/OPERATIONS.md,
+        # "In-cluster components"): TCP 443 on the cluster security group from
+        # the bastion's own security group, whose SSM port-forward carries it.
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
         tags:
           Cluster: main
           Purpose: "application-workloads"
@@ -69,6 +74,7 @@ components:
           - component: vpc/main
           - component: kms/main
           - component: iam/ci
+          - component: ec2/bastion
 
     # ==========================================================================
     # EKS Cluster - Data Processing Workloads
@@ -81,6 +87,13 @@ components:
       vars:
         name: data
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
+        # The operator's path to the private endpoint (docs/OPERATIONS.md,
+        # "In-cluster components"): TCP 443 on the cluster security group from
+        # the bastion in vpc/main, over network/vpc-peering. A security group
+        # reference works across a same-account, same-region peering, so the
+        # rule names the bastion rather than vpc/main's whole CIDR.
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
         tags:
           Cluster: data
           Purpose: "data-processing"
@@ -108,6 +121,8 @@ components:
           - component: vpc/services
           - component: kms/main
           - component: iam/ci
+          - component: ec2/bastion
+          - component: network/vpc-peering
 
     # ==========================================================================
     # EC2 Bastion Host
@@ -128,7 +143,11 @@ components:
           Role: bastion
           Access: restricted
         instance_type: "t3.small"
-        subnet: !terraform.state vpc/main .public_subnet_ids[0]
+        # A private subnet, as in prod: the SSM agent reaches SSM through the
+        # NAT gateway. In a public subnet the bastion gets no public IP
+        # (map_public_ip_on_launch and associate_public_ip_address are off) and
+        # the VPC has no SSM endpoints, so it could not register with SSM.
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
         ebs_optimized: true
         allowed_ingress_rules:
           - from_port: 22

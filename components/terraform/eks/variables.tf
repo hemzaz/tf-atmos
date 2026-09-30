@@ -142,6 +142,42 @@ variable "associated_security_group_ids" {
   }
 }
 
+# cloudposse/terraform-aws-eks-cluster: allowed_security_group_ids and
+# allowed_cidr_blocks (same names, types and defaults; the aws-eks-cluster
+# component calls the first allowed_security_groups). Each entry becomes an
+# ingress rule on the EKS-managed cluster security group, TCP 443 only
+# (security-group.tf).
+variable "allowed_security_group_ids" {
+  type        = list(string)
+  description = "IDs of security groups allowed to reach the Kubernetes API (TCP 443) through the EKS-managed cluster security group"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for sg in var.allowed_security_group_ids : can(regex("^sg-[0-9a-f]{8,17}$", sg))])
+    error_message = "Every allowed_security_group_ids entry must be a security group ID (e.g., sg-0123456789abcdef0)."
+  }
+}
+
+# IPv4 only, as upstream (cidr_ipv4). The repo forbids inbound 0.0.0.0/0, so
+# any /0 is rejected; the prefix length is compared as a number ("/00" too).
+variable "allowed_cidr_blocks" {
+  type        = list(string)
+  description = "IPv4 CIDRs allowed to reach the Kubernetes API (TCP 443) through the EKS-managed cluster security group. The length must be known at plan time"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for c in var.allowed_cidr_blocks : can(cidrhost(c, 0)) && can(regex("^[0-9.]+/[0-9]+$", c))])
+    error_message = "Every allowed_cidr_blocks entry must be an IPv4 CIDR block (e.g., 10.20.0.0/16)."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.allowed_cidr_blocks : try(tonumber(split("/", c)[1]) != 0, true)])
+    error_message = "allowed_cidr_blocks must not contain a /0 range (0.0.0.0/0)."
+  }
+}
+
 variable "cluster_encryption_config_kms_key_id" {
   type        = string
   description = "KMS key ARN for secrets encryption. Empty uses the key this component creates."

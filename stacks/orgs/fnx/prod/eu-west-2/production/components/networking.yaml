@@ -140,6 +140,8 @@ components:
     # ==========================================================================
     # VPC Peering - Connect Main and Services VPCs
     # ==========================================================================
+    # Also the operator's path from ec2/bastion (a private subnet of vpc/main)
+    # to eks/data's private endpoint (docs/OPERATIONS.md, "In-cluster components").
     network/vpc-peering:
       metadata:
         component: network

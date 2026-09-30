@@ -85,9 +85,9 @@ components:
     # Human cluster admins of every eks instance in this stack (eks/main and
     # eks/data inherit eks/defaults): Cloud Posse's map_additional_iam_roles
     # (components/terraform/eks/variables.tf); groups ["system:masters"] is a
-    # cluster-scoped AmazonEKSClusterAdminPolicy access entry. They will apply
-    # the in-cluster components through the bastion once its network path is
-    # wired (follow-up B7-g; docs/OPERATIONS.md, "In-cluster components"), so
+    # cluster-scoped AmazonEKSClusterAdminPolicy access entry. They apply the
+    # in-cluster components through the bastion's SSM port-forward
+    # (docs/OPERATIONS.md, "In-cluster components"), so
     # each rolearn must also be in backend/main's
     # access_roles.write allowed_principal_arns
     # (stacks/orgs/fnx/core/eu-west-2/root.yaml). check-cluster-api-ci.py fails

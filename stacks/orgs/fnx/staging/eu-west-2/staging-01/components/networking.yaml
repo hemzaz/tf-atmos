@@ -117,6 +117,36 @@ components:
       dependencies:
         components:
           - component: kms/main
+
+    # ==========================================================================
+    # VPC Peering - Connect Main and Services VPCs (as in prod)
+    # ==========================================================================
+    # Also the operator's path from ec2/bastion (vpc/main) to eks/data's
+    # private endpoint (docs/OPERATIONS.md, "In-cluster components").
+    network/vpc-peering:
+      metadata:
+        component: network
+      vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        create_vpc_peering: true
+        requester_vpc_id: !terraform.state vpc/main .vpc_id
+        accepter_vpc_id: !terraform.state vpc/services .vpc_id
+
+        auto_accept: true
+
+        # Private route tables only, as in prod: the application tier and the
+        # bastion (a private subnet) are the callers.
+        requester_routes:
+          - destination_cidr_block: "10.11.0.0/16"
+            route_table_ids: !terraform.state vpc/main .private_route_table_ids
+        accepter_routes:
+          - destination_cidr_block: "10.10.0.0/16"
+            route_table_ids: !terraform.state vpc/services .private_route_table_ids
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: vpc/services
+
     network/main:
       metadata:
         component: dns

@@ -159,6 +159,32 @@ class CheckClusterApiCiTest(unittest.TestCase):
             ([], []),
         )
 
+    def test_private_cluster_with_dependents_needs_an_operator_path(self):
+        open_sg = instance("eks")
+        open_sg["vars"]["allowed_security_group_ids"] = ["!terraform.state ec2/bastion .security_group_id"]
+        open_cidr = instance("eks")
+        open_cidr["vars"]["allowed_cidr_blocks"] = ["10.0.0.0/16"]
+        stacks = stacks_with(**{
+            "eks/main": open_sg,
+            "eks/data": open_cidr,
+            "eks/closed": instance("eks"),
+            "eks/unused": instance("eks"),  # no in-cluster dependents: nothing to reach
+            "eks/public": instance("eks", public="true"),
+            "eks-addons/main": addon("eks-addons", "eks/main"),
+            "eks-addons/data": addon("eks-addons", "eks/data"),
+            "eks-addons/closed": addon("eks-addons", "eks/closed"),
+            "eks-addons/public": addon("eks-addons", "eks/public"),
+        })
+        errors = check_cluster_api_ci.check_network_paths(stacks, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("eks/closed has a private endpoint and in-cluster instances (eks-addons/closed)", errors[0])
+        # A stack whose clusters are all public is not checked.
+        public = stacks_with(**{
+            "eks/main": instance("eks", public=True),
+            "eks-addons/main": addon("eks-addons", "eks/main"),
+        })
+        self.assertEqual(check_cluster_api_ci.check_network_paths(public, CLUSTER), [])
+
     def test_cluster_components_reads_provider_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

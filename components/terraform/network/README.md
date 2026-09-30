@@ -5,10 +5,11 @@ both sides that make it carry traffic.
 
 ## Wiring
 
-- Instance: `network/vpc-peering` in `fnx-prod-production` only, peering `vpc/main` with
-  `vpc/services`.
+- Instance: `network/vpc-peering` in the three AWS stacks, peering `vpc/main` with `vpc/services`.
 - Reads: `vpc/main` and `vpc/services` `.vpc_id` and `.private_route_table_ids`.
-- Used by: nothing.
+- Used by: nothing reads its state; `eks/data` lists it in `dependencies.components`, because the
+  bastion (`vpc/main`) reaches that cluster's private endpoint over it (docs/OPERATIONS.md,
+  "In-cluster components").
 
 ## Notes
 
