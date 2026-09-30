@@ -4,18 +4,22 @@
 Reads `atmos describe stacks --process-functions=false --format json` on stdin.
 The state backend's access roles are split by stage within one bucket with S3
 object-key patterns "*/<tenant>-<stage>-*" (stacks/catalog/backend/defaults.yaml).
-A state key is "<workspace_key_prefix>/<workspace>/terraform.tfstate", so those
-patterns match exactly one stage only while, for every instance with
-backend_type s3:
+A state key is "<workspace_key_prefix>/<workspace>/<backend.key>", and the "*"
+in those patterns spans "/", so they match exactly one stage only while, for
+every instance with backend_type s3:
   - the workspace starts with its own stack's "<tenant>-<stage>-"
     (settings.context), and contains no "/";
-  - backend.workspace_key_prefix contains no "/".
-An instance breaking either lands its state where another stage's role can read
+  - backend.workspace_key_prefix contains no "/";
+  - backend.key is exactly "terraform.tfstate" (every instance uses it; a key
+    like "fnx-dev-x/terraform.tfstate" would put prod state under "*/fnx-dev-*").
+An instance breaking any of these lands its state where another stage's role can read
 or write it (or where its own cannot). Exits 1 on any violation.
 """
 import json
 import sys
 from typing import Optional
+
+STATE_KEY = "terraform.tfstate"
 
 
 def is_deployable(instance: dict) -> bool:
@@ -40,6 +44,7 @@ def check(stacks: dict) -> list[str]:
             prefix = stage_prefix(instance)
             workspace = instance.get("workspace") or ""
             key_prefix = (instance.get("backend") or {}).get("workspace_key_prefix") or ""
+            key = (instance.get("backend") or {}).get("key")
             if prefix is None:
                 errors.append(f"{where} has no settings.context tenant/stage to derive its state prefix from")
             elif not workspace.startswith(prefix):
@@ -50,6 +55,9 @@ def check(stacks: dict) -> list[str]:
                 errors.append(f"{where} has no backend.workspace_key_prefix")
             elif "/" in key_prefix:
                 errors.append(f"{where} workspace_key_prefix {key_prefix!r} contains '/'")
+            if key != STATE_KEY:
+                slash = " (contains '/')" if isinstance(key, str) and "/" in key else ""
+                errors.append(f"{where} backend.key {key!r} is not {STATE_KEY!r}{slash}")
     return errors
 
 
@@ -62,7 +70,7 @@ def main() -> int:
         return 1
     print(
         "every s3-backend instance's workspace starts with its stack's <tenant>-<stage>- "
-        "and its workspace_key_prefix has no '/'"
+        "and its workspace_key_prefix has no '/' and its backend.key is terraform.tfstate"
     )
     return 0
 

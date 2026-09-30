@@ -10,11 +10,11 @@ check_state_keys = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_state_keys)
 
 
-def instance(workspace, key_prefix="vpc", stage="prod", backend_type="s3", **metadata):
+def instance(workspace, key_prefix="vpc", stage="prod", backend_type="s3", key="terraform.tfstate", **metadata):
     return {
         "metadata": metadata,
         "backend_type": backend_type,
-        "backend": {"workspace_key_prefix": key_prefix},
+        "backend": {"workspace_key_prefix": key_prefix, "key": key},
         "workspace": workspace,
         "settings": {"context": {"tenant": "fnx", "stage": stage}},
     }
@@ -66,6 +66,25 @@ class CheckStateKeysTest(unittest.TestCase):
             stacks_with(**{"vpc/main": instance("fnx-prod-production", key_prefix="")}), "no backend.workspace_key_prefix"
         )
 
+    def test_default_state_key_passes(self):
+        self.assert_errors(stacks_with(**{"vpc/main": instance("fnx-prod-production", key="terraform.tfstate")}))
+
+    def test_state_key_with_slash_fails(self):
+        # "vpc/fnx-prod-production/fnx-dev-x/terraform.tfstate" matches the non-prod "*/fnx-dev-*"
+        self.assert_errors(
+            stacks_with(**{"vpc/main": instance("fnx-prod-production", key="fnx-dev-x/terraform.tfstate")}),
+            "backend.key 'fnx-dev-x/terraform.tfstate' is not 'terraform.tfstate' (contains '/')",
+        )
+
+    def test_non_default_state_key_fails(self):
+        self.assert_errors(
+            stacks_with(**{"vpc/main": instance("fnx-prod-production", key="state.tfstate")}),
+            "backend.key 'state.tfstate' is not 'terraform.tfstate'",
+        )
+
+    def test_missing_state_key_fails(self):
+        self.assert_errors(stacks_with(**{"vpc/main": instance("fnx-prod-production", key=None)}), "backend.key None")
+
     def test_missing_context_fails(self):
         bad = instance("fnx-prod-production")
         bad["settings"] = {}
@@ -73,9 +92,9 @@ class CheckStateKeysTest(unittest.TestCase):
 
     def test_non_s3_abstract_and_disabled_instances_are_skipped(self):
         self.assert_errors(stacks_with(**{
-            "local": instance("x/y", key_prefix="a/b", backend_type="local"),
-            "base": instance("x/y", key_prefix="a/b", type="abstract"),
-            "off": instance("x/y", key_prefix="a/b", enabled=False),
+            "local": instance("x/y", key_prefix="a/b", backend_type="local", key="a/b"),
+            "base": instance("x/y", key_prefix="a/b", type="abstract", key="a/b"),
+            "off": instance("x/y", key_prefix="a/b", enabled=False, key="a/b"),
         }))
 
 
