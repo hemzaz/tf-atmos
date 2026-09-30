@@ -28,6 +28,11 @@ components:
         # The cluster is "<Environment>-<name>": production-main.
         name: main
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # The operator's path to the private endpoint (docs/OPERATIONS.md,
+        # "In-cluster components"): TCP 443 on the cluster security group from
+        # the bastion's own security group, whose SSM port-forward carries it.
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
         tags:
           Cluster: production-main
           Purpose: "application-workloads"
@@ -101,6 +106,7 @@ components:
           - component: vpc/main
           - component: kms/main
           - component: iam/ci
+          - component: ec2/bastion
 
     # ==========================================================================
     # EKS Cluster - Data Processing Workloads (Production HA)
@@ -113,6 +119,13 @@ components:
       vars:
         name: data
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
+        # The operator's path to the private endpoint (docs/OPERATIONS.md,
+        # "In-cluster components"): TCP 443 on the cluster security group from
+        # the bastion in vpc/main, over network/vpc-peering. A security group
+        # reference works across a same-account, same-region peering, so the
+        # rule names the bastion rather than vpc/main's whole CIDR.
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
         tags:
           Cluster: production-data
           Purpose: "data-processing"
@@ -160,6 +173,8 @@ components:
           - component: vpc/services
           - component: kms/main
           - component: iam/ci
+          - component: ec2/bastion
+          - component: network/vpc-peering
 
     # ==========================================================================
     # EC2 Bastion Host (Production Hardened)

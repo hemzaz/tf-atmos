@@ -135,15 +135,17 @@ gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master)
    `stacks/orgs/fnx/core/eu-west-2/root.yaml`, so it can write the stack's state. Apply `backend/main`
    (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
    backend and warns while a stack has none.
-**The network path is not wired yet (follow-up B7-g), so steps 2-3 are the target procedure and do
-not work today.** The cluster ENIs carry only the EKS-managed security group, which admits itself
-alone: nothing opens 443 to the API from `ec2/bastion`. `eks/data` is in `vpc/services`, which the
-bastion in `vpc/main` does not reach. B7-g must add ingress on 443 from the bastion (Cloud Posse's
-`allowed_security_group_ids`) and a route to `vpc/services`, or a bastion there.
-
 2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then
-   `export AWS_PROFILE=<profile>`), forward the endpoint through the bastion. The bastion needs only
-   the SSM agent (`enable_ssm`, the default); atmos, terraform and the credentials stay local:
+   `export AWS_PROFILE=<profile>`), forward the endpoint through `ec2/bastion` (a private subnet of
+   `vpc/main`; SSM agent via `enable_ssm`, the default, reaching SSM through the NAT gateway). Every
+   `eks` instance admits the bastion's security group on 443 (`allowed_security_group_ids` in the
+   stack's `components/compute.yaml`); `eks/data` in `vpc/services` is reached over
+   `network/vpc-peering`, whose CIDRs both vpcs' private NACLs admit
+   (`private_network_acl_peer_cidr_blocks`). That relies on a private-only endpoint (public access
+   off): public DNS then returns the private IPs, which is how the bastion in `vpc/main` resolves
+   them; with public access on, public DNS returns public IPs. `check-cluster-api-ci.py` fails a
+   private cluster with in-cluster instances and no such ingress, peering or NACL entry. Atmos,
+   terraform and the credentials stay local:
 
    ```bash
    host=$(aws eks describe-cluster --name <cluster> --query cluster.endpoint --output text | sed 's|https://||')

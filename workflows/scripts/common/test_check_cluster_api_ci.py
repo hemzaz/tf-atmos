@@ -159,6 +159,97 @@ class CheckClusterApiCiTest(unittest.TestCase):
             ([], []),
         )
 
+    def test_private_cluster_with_dependents_needs_an_operator_path(self):
+        open_sg = instance("eks")
+        open_sg["vars"]["allowed_security_group_ids"] = ["!terraform.state ec2/bastion .security_group_id"]
+        open_cidr = instance("eks")
+        open_cidr["vars"]["allowed_cidr_blocks"] = ["10.0.0.0/16"]
+        stacks = stacks_with(**{
+            "eks/main": open_sg,
+            "eks/data": open_cidr,
+            "eks/closed": instance("eks"),
+            "eks/unused": instance("eks"),  # no in-cluster dependents: nothing to reach
+            "eks/public": instance("eks", public="true"),
+            "eks-addons/main": addon("eks-addons", "eks/main"),
+            "eks-addons/data": addon("eks-addons", "eks/data"),
+            "eks-addons/closed": addon("eks-addons", "eks/closed"),
+            "eks-addons/public": addon("eks-addons", "eks/public"),
+        })
+        errors = check_cluster_api_ci.check_network_paths(stacks, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("eks/closed has a private endpoint and in-cluster instances (eks-addons/closed)", errors[0])
+        # A stack whose clusters are all public is not checked.
+        public = stacks_with(**{
+            "eks/main": instance("eks", public=True),
+            "eks-addons/main": addon("eks-addons", "eks/main"),
+        })
+        self.assertEqual(check_cluster_api_ci.check_network_paths(public, CLUSTER), [])
+
+    @staticmethod
+    def peered_stack():
+        """Bastion in vpc/main, eks/main there too, eks/data in vpc/services behind a peering."""
+        def vpc(cidr, peer):
+            v = instance("vpc")
+            v["vars"].update(ipv4_primary_cidr_block=cidr, private_network_acl_peer_cidr_blocks=[peer])
+            return v
+
+        bastion = instance("ec2")
+        bastion["vars"]["vpc_id"] = "!terraform.state vpc/main .vpc_id"
+        peering = instance("network")
+        peering["vars"].update(
+            requester_vpc_id="!terraform.state vpc/main .vpc_id",
+            accepter_vpc_id="!terraform.state vpc/services .vpc_id",
+        )
+        clusters = {}
+        for name, vpc_name in (("eks/main", "vpc/main"), ("eks/data", "vpc/services")):
+            eks = instance("eks")
+            eks["vars"].update(
+                subnet_ids=f"!terraform.state {vpc_name} .private_subnet_ids",
+                allowed_security_group_ids=["!terraform.state ec2/bastion .security_group_id"],
+            )
+            clusters[name] = eks
+        return stacks_with(**{
+            "vpc/main": vpc("10.0.0.0/16", "10.1.0.0/16"),
+            "vpc/services": vpc("10.1.0.0/16", "10.0.0.0/16"),
+            "ec2/bastion": bastion,
+            "network/vpc-peering": peering,
+            **clusters,
+            "eks-addons/main": addon("eks-addons", "eks/main"),
+            "eks-addons/data": addon("eks-addons", "eks/data"),
+        })
+
+    def terraform(self, stacks):
+        return stacks["fnx-dev-testenv-01"]["components"]["terraform"]
+
+    def test_bastion_in_a_peered_vpc_with_open_nacls_passes(self):
+        self.assertEqual(check_cluster_api_ci.check_network_paths(self.peered_stack(), CLUSTER), [])
+
+    def test_bastion_in_another_vpc_needs_a_peering(self):
+        stacks = self.peered_stack()
+        del self.terraform(stacks)["network/vpc-peering"]
+        errors = check_cluster_api_ci.check_network_paths(stacks, CLUSTER)
+        # Only eks/data: eks/main shares the bastion's vpc.
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("eks/data (in vpc/services) admits ec2/bastion (in vpc/main), but no network instance peers", errors[0])
+        # A disabled peering does not count either.
+        stacks = self.peered_stack()
+        self.terraform(stacks)["network/vpc-peering"]["metadata"] = {"enabled": False}
+        self.assertEqual(len(check_cluster_api_ci.check_network_paths(stacks, CLUSTER)), 1)
+
+    def test_bastion_in_another_vpc_needs_both_nacls_to_admit_the_peer(self):
+        for vpc, message in (
+            ("vpc/main", "vpc/main private_network_acl_peer_cidr_blocks lacks vpc/services (10.1.0.0/16)"),
+            ("vpc/services", "vpc/services private_network_acl_peer_cidr_blocks lacks vpc/main (10.0.0.0/16)"),
+        ):
+            stacks = self.peered_stack()
+            self.terraform(stacks)[vpc]["vars"]["private_network_acl_peer_cidr_blocks"] = []
+            errors = check_cluster_api_ci.check_network_paths(stacks, CLUSTER)
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn(message, errors[0])
+            # A vpc whose NACLs are managed elsewhere is not checked.
+            self.terraform(stacks)[vpc]["vars"]["manage_network_acls"] = False
+            self.assertEqual(check_cluster_api_ci.check_network_paths(stacks, CLUSTER), [])
+
     def test_cluster_components_reads_provider_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

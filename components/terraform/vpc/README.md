@@ -29,3 +29,8 @@ names follow Cloud Posse `aws-vpc` where an input maps one to one.
   lose replies; enable `vpc_endpoints` for those services instead (as `microservices/vpc` does
   for `secretsmanager` and `elasticache`). `s3`/`dynamodb` become Gateway endpoints, everything
   else Interface endpoints.
+- The private NACL admits only this VPC's CIDR (plus `/0` return traffic), so a peered VPC's CIDR
+  goes in `private_network_acl_peer_cidr_blocks` on both sides (all traffic in and out, rules
+  200+). The stacks set each from the other vpc's CIDR in the stack's `settings.network.vpc_cidrs`,
+  which also sets `ipv4_primary_cidr_block`; `!terraform.state` would make the two vpcs read each
+  other, a cycle.
