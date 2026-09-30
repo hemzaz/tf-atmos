@@ -30,8 +30,9 @@ components:
         # reads (AmazonEKSViewPolicy); the CI apply role administers
         # (AmazonEKSClusterAdminPolicy). While the endpoint is private, hosted
         # runners skip the in-cluster components and an operator applies them
-        # from inside the VPC with their own access entry (docs/OPERATIONS.md,
-        # "In-cluster components"). Cloud Posse's list form
+        # from inside the VPC with their own access entry: the stack's
+        # map_additional_iam_roles, set in its components/globals.yaml
+        # (docs/OPERATIONS.md, "In-cluster components"). Cloud Posse's list form
         # (access_entries + access_policy_associations), not access_entry_map:
         # the role ARNs come from !terraform.state, and an Atmos YAML function
         # cannot produce a map key. iam/ci returns a null ci_apply_role_arn

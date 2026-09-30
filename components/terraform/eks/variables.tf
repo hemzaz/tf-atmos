@@ -510,6 +510,70 @@ variable "access_policy_associations" {
   }
 }
 
+# Cloud Posse's eks/cluster component input (cloudposse-terraform-components/
+# aws-eks-cluster, src/variables.tf and src/main.tf iam_roles_access_entry_map),
+# same name and type. Each role becomes an access_entry_map entry with `groups`
+# as its kubernetes_groups, so `system:masters` becomes a cluster-scoped
+# AmazonEKSClusterAdminPolicy association (auth.tf). As upstream, `username`
+# is accepted and ignored. The stacks list their human admin roles here
+# (stacks/orgs/fnx/<stage>/<region>/<stack>/components/globals.yaml).
+variable "map_additional_iam_roles" {
+  type = list(object({
+    rolearn  = string
+    username = optional(string)
+    groups   = list(string)
+  }))
+  description = <<-EOT
+    Additional IAM roles to grant access to the cluster, as in Cloud Posse's eks/cluster component.
+    `rolearn` is the full role ARN INCLUDING its path: access entries (unlike the old aws-auth
+    ConfigMap) require it, and the IAM Identity Center role of a permission set lives under
+    /aws-reserved/sso.amazonaws.com/[<region>/], e.g.
+    arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>
+    (`aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`).
+    `groups` = ["system:masters"] grants a cluster-scoped AmazonEKSClusterAdminPolicy association.
+    `username` is ignored. Keys of access_entry_map win over a role listed here.
+    EOT
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([for r in var.map_additional_iam_roles :
+      can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\\w+=,.@/-]+$", r.rolearn))
+    ])
+    error_message = "map_additional_iam_roles rolearn must be an IAM role ARN, arn:aws:iam::<12-digit account>:role/[<path>/]<name>; not an sts assumed-role ARN, a user or a wildcard."
+  }
+
+  validation {
+    condition = alltrue([for r in var.map_additional_iam_roles :
+      !strcontains(r.rolearn, ":role/aws-service-role/")
+    ])
+    error_message = "map_additional_iam_roles rolearn may not be a service-linked role (role/aws-service-role/...): EKS access entries do not support them."
+  }
+
+  # The aws-auth habit of stripping the path names a role that does not
+  # exist: the access entry fails to create and the backend's aws:PrincipalArn
+  # trust never matches.
+  validation {
+    condition = alltrue([for r in var.map_additional_iam_roles :
+      !startswith(element(split("/", r.rolearn), length(split("/", r.rolearn)) - 1), "AWSReservedSSO_") ||
+      can(regex(":role/aws-reserved/sso\\.amazonaws\\.com/([a-z]{2}(-[a-z]+)+-[0-9]/)?AWSReservedSSO_[\\w+=,.@-]+_[0-9a-f]{16}$", r.rolearn))
+    ])
+    error_message = "An IAM Identity Center role (AWSReservedSSO_<permission set>_<16 hex>) must keep its path: arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/[<region>/]AWSReservedSSO_<permission set>_<hash>."
+  }
+
+  validation {
+    condition     = length(distinct([for r in var.map_additional_iam_roles : r.rolearn])) == length(var.map_additional_iam_roles)
+    error_message = "map_additional_iam_roles lists a rolearn more than once."
+  }
+
+  validation {
+    condition = alltrue([for r in var.map_additional_iam_roles : alltrue([
+      for g in r.groups : g == "system:masters" || !startswith(g, "system:")
+    ])])
+    error_message = "map_additional_iam_roles groups may not contain system:* groups other than system:masters."
+  }
+}
+
 # cloudposse/terraform-aws-eks-cluster: upgrade_policy. Divergence: Cloud
 # Posse defaults to null, which AWS treats as EXTENDED; STANDARD fails closed
 # against extended-support charges once a version leaves standard support.

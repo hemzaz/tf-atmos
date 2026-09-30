@@ -132,7 +132,9 @@ workflows:
       # the EKS API, which GitHub-hosted runners cannot reach where the
       # endpoint is private: each such instance must set
       # settings.github.actions_enabled: false (docs/OPERATIONS.md,
-      # "In-cluster components"). Also run by validate-all.
+      # "In-cluster components"), and each eks cluster admin role there
+      # (map_additional_iam_roles) must be trusted by its stage's state write
+      # role; a cluster with none only warns. Also run by validate-all.
       - name: check-cluster-api-ci
         type: shell
         command: |

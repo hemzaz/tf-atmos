@@ -123,17 +123,32 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
 them with a `::notice::`, and `check-cluster-api-ci.py` (lint, validate-all) fails any such instance
 in a private-endpoint stack that lacks the flag.
 
-An operator applies them from inside the VPC, e.g. on the stack's `ec2/bastion` (SSH with its
-Secrets Manager key, or SSM), after `eks/main` and each instance the component reads:
+An operator applies them from inside the VPC with their own role, a named cluster admin (the creator
+gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master):
+
+1. Once per stack, the owner names the role (full ARN, path kept, e.g.
+   `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>`,
+   from `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`) in two places:
+   `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
+   which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
+   `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
+   `stacks/orgs/fnx/core/eu-west-2/root.yaml`, so it can write the stack's state. Apply `backend/main`
+   (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
+   backend and warns while a stack has none.
+2. Open a shell on the stack's `ec2/bastion` with that role's credentials:
+   `aws sso login --profile <profile>`, then
+   `aws ssm start-session --target <instance-id> --profile <profile>` (or SSH with the key in Secrets
+   Manager), and on the host export the same credentials (`aws configure export-credentials
+   --profile <profile> --format env` locally, pasted in) in a checkout of this repository with
+   `atmos`, `terraform` and the AWS CLI (the providers run `aws eks get-token`).
+3. After `eks/<instance>` and each instance the component reads:
 
 ```bash
 atmos terraform deploy <component> -s <stack>   # e.g. eks-addons/main, then eks-backend-services/main
 atmos workflow deploy-addons -f deploy-full-stack -s <stack>   # or the layer: platform, addons, services
 ```
 
-The caller needs the stack's apply permissions and an `eks/main` access entry with
-`AmazonEKSClusterAdminPolicy` (`stacks/catalog/eks/defaults.yaml` grants only the CI roles; the
-creator gets no implicit admin). CD moving `deployed/<stack>` does not mean these were applied.
+CD moving `deployed/<stack>` does not mean these were applied.
 
 ## Changing infrastructure
 

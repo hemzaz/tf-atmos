@@ -324,6 +324,123 @@ run "map_entries_expand_policies_and_translate_system_masters" {
   }
 }
 
+# The stacks' human admins (globals.yaml): Cloud Posse's
+# map_additional_iam_roles with system:masters, next to a map entry of a
+# different shape and the CI roles' list entries.
+run "admin_roles_get_cluster_admin_with_the_sso_path_kept" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
+      groups  = ["system:masters"]
+    }]
+    access_entry_map = {
+      "arn:aws:iam::123456789012:role/team-a" = {
+        access_policy_associations = {
+          Edit = {
+            access_scope = {
+              type       = "namespace"
+              namespaces = ["team-a"]
+            }
+          }
+        }
+      }
+    }
+    access_entries = [
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-apply" },
+    ]
+    access_policy_associations = [{
+      principal_arn = "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-apply"
+      policy_arn    = "AmazonEKSClusterAdminPolicy"
+    }]
+  }
+
+  assert {
+    condition = (
+      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].principal_arn == "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef" &&
+      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].type == "STANDARD" &&
+      length(aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].kubernetes_groups) == 0
+    )
+    error_message = "An admin role must be a STANDARD access entry keyed by its full ARN, path included, with system:masters removed from its groups."
+  }
+
+  assert {
+    condition     = aws_eks_access_policy_association.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef-arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"].access_scope[0].type == "cluster"
+    error_message = "An admin role must get a cluster-scoped AmazonEKSClusterAdminPolicy association."
+  }
+
+  assert {
+    condition     = length(aws_eks_access_entry.map) == 2 && length(aws_eks_access_policy_association.map) == 2 && length(aws_eks_access_entry.standard) == 1
+    error_message = "The admin role, the map entry and the CI list entry must all be created."
+  }
+}
+
+run "sso_admin_role_without_its_path_is_rejected" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
+      groups  = ["system:masters"]
+    }]
+  }
+
+  expect_failures = [var.map_additional_iam_roles]
+}
+
+run "assumed_role_session_arn_is_rejected_as_admin_role" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_AdministratorAccess_0123456789abcdef/jane"
+      groups  = ["system:masters"]
+    }]
+  }
+
+  expect_failures = [var.map_additional_iam_roles]
+}
+
+run "placeholder_admin_role_is_rejected" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>"
+      groups  = ["system:masters"]
+    }]
+  }
+
+  expect_failures = [var.map_additional_iam_roles]
+}
+
+run "service_linked_admin_role_is_rejected" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
+      groups  = ["system:masters"]
+    }]
+  }
+
+  expect_failures = [var.map_additional_iam_roles]
+}
+
+run "admin_role_with_another_system_group_is_rejected" {
+  command = plan
+
+  variables {
+    map_additional_iam_roles = [{
+      rolearn = "arn:aws:iam::123456789012:role/platform-admin"
+      groups  = ["system:nodes"]
+    }]
+  }
+
+  expect_failures = [var.map_additional_iam_roles]
+}
+
 run "namespace_scope_without_namespaces_is_rejected" {
   command = plan
 

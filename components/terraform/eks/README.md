@@ -21,8 +21,13 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
 - `bootstrap_cluster_creator_admin_permissions = false`: whoever creates the cluster gets nothing
   implicitly. Every principal is an access entry in the inputs.
 - `stacks/catalog/eks/defaults.yaml` grants the CI plan role `AmazonEKSViewPolicy` and the CI apply
-  role `AmazonEKSClusterAdminPolicy`, both cluster-scoped. No human or break-glass admin is defined;
-  add one to `access_entries` / `access_policy_associations`.
+  role `AmazonEKSClusterAdminPolicy`, both cluster-scoped.
+- Human admins (the operators of the in-cluster components): Cloud Posse's
+  `map_additional_iam_roles`, set per stack in `components/globals.yaml` on `eks/defaults`;
+  `groups: ["system:masters"]` becomes a cluster-scoped `AmazonEKSClusterAdminPolicy` entry. The
+  `rolearn` keeps its path (access entries need it, unlike `aws-auth`): an IAM Identity Center role is
+  `role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<set>_<hash>`, and a stripped one is
+  rejected. `check-cluster-api-ci.py` warns while a private stack has none.
 - Principals read with `!terraform.state` must go in those lists: `access_entry_map` keys must be
   literal. Null principals are skipped.
 
