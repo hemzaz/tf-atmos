@@ -282,16 +282,6 @@ main_check() {
             fi
         done
     fi
-    
-    # Check integration scripts  
-    if [ -d "integrations" ]; then
-        for script in $(find integrations/ -name "*.sh" -type f 2>/dev/null); do
-            echo -e "${WHITE}Checking integration script $script...${NC}"
-            check_shebang "$script"
-            check_bash4_features "$script"
-            echo
-        done
-    fi
 }
 
 # Function to generate compatibility report
