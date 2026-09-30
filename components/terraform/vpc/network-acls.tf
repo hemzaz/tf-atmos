@@ -165,6 +165,34 @@ resource "aws_network_acl" "private" {
     to_port    = 123
   }
 
+  # Peered VPCs (network/vpc-peering): all traffic from and to each, as for
+  # this VPC's own CIDR (rules 100/130). Both directions, because NACLs are
+  # stateless: e.g. the bastion in vpc/main reaching eks/data's API in
+  # vpc/services, and the reply to the bastion's ephemeral port.
+  dynamic "ingress" {
+    for_each = var.private_network_acl_peer_cidr_blocks
+    content {
+      protocol   = "-1"
+      rule_no    = 200 + ingress.key
+      action     = "allow"
+      cidr_block = ingress.value
+      from_port  = 0
+      to_port    = 0
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.private_network_acl_peer_cidr_blocks
+    content {
+      protocol   = "-1"
+      rule_no    = 200 + egress.key
+      action     = "allow"
+      cidr_block = egress.value
+      from_port  = 0
+      to_port    = 0
+    }
+  }
+
   tags = merge(
     var.tags,
     {

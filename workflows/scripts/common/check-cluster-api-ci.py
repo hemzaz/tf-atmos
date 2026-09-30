@@ -25,7 +25,15 @@ ARNs (an access entry for a placeholder role would fail eks/main's apply).
 The operator reaches a private endpoint through the bastion's SSM port-forward,
 so such an eks instance (private endpoint, in-cluster instances depending on
 it) must admit it on TCP 443: an empty allowed_security_group_ids and
-allowed_cidr_blocks leaves no network path, an ERROR.
+allowed_cidr_blocks leaves no network path, an ERROR. A non-empty
+allowed_cidr_blocks is a smoke check only: nothing checks that its CIDRs hold
+the bastion. For each allowed_security_group_ids entry read from an ec2
+instance (`!terraform.state ec2/<name> .security_group_id`) whose vpc is not
+the cluster's (the vpc its subnet_ids are read from), the stack must also have
+a deployable network instance peering the two vpcs, and each vpc's
+private_network_acl_peer_cidr_blocks must hold the other's
+ipv4_primary_cidr_block (unless manage_network_acls is false): an ERROR
+otherwise. Literal security group IDs and cross-stack reads are not followed.
 
 Exits 1 on any ERROR; WARN lines never fail.
 """
@@ -165,8 +173,62 @@ def check_operators(stacks: dict, cluster: set[str]) -> tuple[list[str], list[st
     return errors, warnings
 
 
+STATE_READ = re.compile(r"^!terraform\.state\s+(\S+)\s+(\S+)\s*$")
+
+
+def state_source(value) -> "str | None":
+    """The same-stack instance a `!terraform.state <instance> <output>` read names, else None."""
+    match = STATE_READ.match(value) if isinstance(value, str) else None
+    return match.group(1) if match else None
+
+
+def is_peered(instances: dict, vpc_a: str, vpc_b: str) -> bool:
+    """A deployable network instance peers the two vpc instances (either direction)."""
+    for instance in instances.values():
+        v = instance.get("vars") or {}
+        if instance.get("component") != "network" or v.get("create_vpc_peering") is False:
+            continue
+        ends = {state_source(v.get("requester_vpc_id")), state_source(v.get("accepter_vpc_id"))}
+        if ends == {vpc_a, vpc_b}:
+            return True
+    return False
+
+
+def nacl_gaps(instances: dict, vpc_a: str, vpc_b: str) -> list[str]:
+    """Each vpc whose private NACL does not admit the other's CIDR."""
+    gaps = []
+    for vpc, peer in ((vpc_a, vpc_b), (vpc_b, vpc_a)):
+        v = (instances.get(vpc) or {}).get("vars") or {}
+        if v.get("manage_network_acls") is False:
+            continue
+        peer_cidr = ((instances.get(peer) or {}).get("vars") or {}).get("ipv4_primary_cidr_block")
+        if peer_cidr not in (v.get("private_network_acl_peer_cidr_blocks") or []):
+            gaps.append(f"{vpc} private_network_acl_peer_cidr_blocks lacks {peer} ({peer_cidr})")
+    return gaps
+
+
+def cross_vpc_errors(stack_name: str, instances: dict, name: str, eks_vars: dict) -> list[str]:
+    """A bastion in another vpc needs a peering and both vpcs' NACLs to admit each other."""
+    errors = []
+    cluster_vpc = state_source(eks_vars.get("subnet_ids"))
+    for sg in eks_vars.get("allowed_security_group_ids") or []:
+        source = state_source(sg)
+        source_vars = (instances.get(source) or {}).get("vars") or {}
+        if cluster_vpc is None or (instances.get(source) or {}).get("component") != "ec2":
+            continue
+        source_vpc = state_source(source_vars.get("vpc_id")) or state_source(source_vars.get("subnet"))
+        if source_vpc is None or source_vpc == cluster_vpc:
+            continue
+        where = f"{stack_name}: {name} (in {cluster_vpc}) admits {source} (in {source_vpc})"
+        if not is_peered(instances, cluster_vpc, source_vpc):
+            errors.append(f"{where}, but no network instance peers {cluster_vpc} and {source_vpc}")
+        for gap in nacl_gaps(instances, cluster_vpc, source_vpc):
+            errors.append(f"{where}, but {gap}, so the private NACLs drop the traffic")
+    return errors
+
+
 def check_network_paths(stacks: dict, cluster: set[str]) -> list[str]:
-    """Private eks instances with in-cluster dependents but no ingress for the operator."""
+    """Private eks instances with in-cluster dependents but no network path for the operator."""
     errors = []
     for stack_name, stack in sorted(stacks.items()):
         instances = deployable_instances(stack)
@@ -183,6 +245,8 @@ def check_network_paths(stacks: dict, cluster: set[str]) -> list[str]:
                     "allowed_cidr_blocks, so no operator can reach its API (allow the bastion's "
                     "security group)"
                 )
+                continue
+            errors.extend(cross_vpc_errors(stack_name, instances, name, eks_vars))
     return errors
 
 

@@ -186,6 +186,35 @@ variable "manage_network_acls" {
   default     = true
 }
 
+# No Cloud Posse equivalent: terraform-aws-dynamic-subnets only offers an
+# all-open NACL (private_open_network_acl_enabled), and aws-vpc nothing for
+# peers. The private NACL admits only this VPC's CIDR and /0 return traffic,
+# and NACLs are stateless, so a peered VPC's CIDR (network/vpc-peering) needs
+# both an ingress and an egress rule here, on each side of the peering.
+variable "private_network_acl_peer_cidr_blocks" {
+  type        = list(string)
+  description = "IPv4 CIDRs of peered VPCs: the private subnet NACL allows all traffic from and to each (rules 200 + index)"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for c in var.private_network_acl_peer_cidr_blocks : can(cidrhost(c, 0)) && can(regex("^[0-9.]+/[0-9]+$", c))])
+    error_message = "Every private_network_acl_peer_cidr_blocks entry must be an IPv4 CIDR block (e.g., 10.21.0.0/16)."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.private_network_acl_peer_cidr_blocks : try(tonumber(split("/", c)[1]) != 0, true)])
+    error_message = "private_network_acl_peer_cidr_blocks must not contain a /0 range (0.0.0.0/0)."
+  }
+
+  # rule_no is 200 + index; NACL rules stop at 32766, and a peer list that
+  # long is a mistake anyway.
+  validation {
+    condition     = length(var.private_network_acl_peer_cidr_blocks) <= 20
+    error_message = "private_network_acl_peer_cidr_blocks allows at most 20 entries (rules 200-219)."
+  }
+}
+
 variable "manage_default_security_group" {
   type        = bool
   description = "Manage the VPC's AWS-created default security group and strip all of its rules. One way: setting this back to false, or destroying the resource, only drops the group from state - the removed rules are not restored"

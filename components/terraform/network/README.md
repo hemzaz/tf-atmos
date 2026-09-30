@@ -16,6 +16,8 @@ both sides that make it carry traffic.
 - `network/main` and `network/services` are `dns` instances, not this component.
 - Route table IDs are passed in through `!terraform.state`, not looked up by a data source, so
   `check-dependencies.py` sees the `vpc -> network` edge. Only private route tables are routed.
+- Routes alone carry nothing through the vpc component's private NACLs: each vpc lists the peer's
+  CIDR in `private_network_acl_peer_cidr_blocks` (vpc README).
 - `auto_accept` works only within one account and region; cross-account peering needs an
   `aws_vpc_peering_connection_accepter`, which this component does not create.
 - `tags` is required (no default) and must contain a non-empty `Environment`.

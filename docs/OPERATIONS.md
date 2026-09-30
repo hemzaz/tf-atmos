@@ -140,8 +140,12 @@ gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master)
    `vpc/main`; SSM agent via `enable_ssm`, the default, reaching SSM through the NAT gateway). Every
    `eks` instance admits the bastion's security group on 443 (`allowed_security_group_ids` in the
    stack's `components/compute.yaml`); `eks/data` in `vpc/services` is reached over
-   `network/vpc-peering`. `check-cluster-api-ci.py` fails a private cluster with in-cluster
-   instances and no such ingress. Atmos, terraform and the credentials stay local:
+   `network/vpc-peering`, whose CIDRs both vpcs' private NACLs admit
+   (`private_network_acl_peer_cidr_blocks`). That relies on a private-only endpoint (public access
+   off): public DNS then returns the private IPs, which is how the bastion in `vpc/main` resolves
+   them; with public access on, public DNS returns public IPs. `check-cluster-api-ci.py` fails a
+   private cluster with in-cluster instances and no such ingress, peering or NACL entry. Atmos,
+   terraform and the credentials stay local:
 
    ```bash
    host=$(aws eks describe-cluster --name <cluster> --query cluster.endpoint --output text | sed 's|https://||')

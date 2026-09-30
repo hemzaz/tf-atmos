@@ -8,6 +8,17 @@ import:
   - catalog/vpc/defaults
   - catalog/network/defaults
 
+# The two VPCs' CIDRs, in one place: each vpc instance's
+# ipv4_primary_cidr_block, the other one's private_network_acl_peer_cidr_blocks
+# and network/vpc-peering's routes all read them. Literals, not
+# !terraform.state <vpc> .vpc_cidr: vpc/main and vpc/services would then
+# read each other, a cycle.
+settings:
+  network:
+    vpc_cidrs:
+      main: "10.0.0.0/16"
+      services: "10.1.0.0/16"
+
 components:
   terraform:
     # VPC instances
@@ -17,7 +28,10 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        ipv4_primary_cidr_block: "10.0.0.0/16"
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+        # The private NACL admits vpc/services, peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.services }}"
         private_subnets:
           - "10.0.1.0/24"
           - "10.0.2.0/24"
@@ -52,7 +66,10 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        ipv4_primary_cidr_block: "10.1.0.0/16"
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
+        # The private NACL admits vpc/main (the bastion), peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.main }}"
         private_subnets:
           - "10.1.1.0/24"
           - "10.1.2.0/24"
@@ -98,10 +115,10 @@ components:
         # Private route tables only, as in prod: the application tier and the
         # bastion (a private subnet) are the callers.
         requester_routes:
-          - destination_cidr_block: "10.1.0.0/16"
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
             route_table_ids: !terraform.state vpc/main .private_route_table_ids
         accepter_routes:
-          - destination_cidr_block: "10.0.0.0/16"
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
             route_table_ids: !terraform.state vpc/services .private_route_table_ids
       dependencies:
         components:

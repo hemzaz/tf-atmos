@@ -56,3 +56,60 @@ run "database_nacl_lambda_reply_leg_ranges" {
     error_message = "Database NACL egress rule 100 must admit ports 1024-65535 (AWS Lambda's documented ephemeral range), not only 32768-65535."
   }
 }
+
+# --- Peered VPCs on the private NACL (private_network_acl_peer_cidr_blocks) ---
+
+run "private_nacl_has_no_peer_rules_by_default" {
+  command = plan
+
+  assert {
+    condition = length([
+      for r in concat(tolist(aws_network_acl.private[0].ingress), tolist(aws_network_acl.private[0].egress)) : r
+      if r.rule_no >= 200
+    ]) == 0
+    error_message = "With no peer CIDRs the private NACL must have no peer rules (200+)."
+  }
+}
+
+# NACLs are stateless: the request in and the reply out both need a rule.
+run "private_nacl_allows_each_peer_cidr_both_ways" {
+  command = plan
+
+  variables {
+    private_network_acl_peer_cidr_blocks = ["10.21.0.0/16", "10.30.0.0/16"]
+  }
+
+  assert {
+    condition = alltrue([
+      for rules in [aws_network_acl.private[0].ingress, aws_network_acl.private[0].egress] :
+      length([for r in rules : r if r.rule_no == 200 && r.cidr_block == "10.21.0.0/16" && r.protocol == "-1" && r.action == "allow"]) == 1 &&
+      length([for r in rules : r if r.rule_no == 201 && r.cidr_block == "10.30.0.0/16" && r.protocol == "-1" && r.action == "allow"]) == 1
+    ])
+    error_message = "Each peer CIDR must get an allow-all ingress and egress rule numbered 200 + index."
+  }
+
+  assert {
+    condition     = length([for r in aws_network_acl.public[0].ingress : r if r.rule_no >= 200]) == 0
+    error_message = "Peer rules belong on the private NACL only."
+  }
+}
+
+run "private_nacl_peer_world_cidr_is_rejected" {
+  command = plan
+
+  variables {
+    private_network_acl_peer_cidr_blocks = ["10.21.0.0/16", "0.0.0.0/0"]
+  }
+
+  expect_failures = [var.private_network_acl_peer_cidr_blocks]
+}
+
+run "private_nacl_peer_malformed_cidr_is_rejected" {
+  command = plan
+
+  variables {
+    private_network_acl_peer_cidr_blocks = ["10.21.0.0"]
+  }
+
+  expect_failures = [var.private_network_acl_peer_cidr_blocks]
+}

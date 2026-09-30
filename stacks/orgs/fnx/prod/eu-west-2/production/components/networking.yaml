@@ -11,6 +11,17 @@ import:
   - catalog/vpc/defaults
   - catalog/network/defaults
 
+# The two VPCs' CIDRs, in one place: each vpc instance's
+# ipv4_primary_cidr_block, the other one's private_network_acl_peer_cidr_blocks
+# and network/vpc-peering's routes all read them. Literals, not
+# !terraform.state <vpc> .vpc_cidr: vpc/main and vpc/services would then
+# read each other, a cycle.
+settings:
+  network:
+    vpc_cidrs:
+      main: "10.20.0.0/16"
+      services: "10.21.0.0/16"
+
 components:
   terraform:
     # ==========================================================================
@@ -22,7 +33,10 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        ipv4_primary_cidr_block: "10.20.0.0/16"
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+        # The private NACL admits vpc/services, peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.services }}"
         availability_zones:
           - eu-west-2a
           - eu-west-2b
@@ -88,7 +102,10 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        ipv4_primary_cidr_block: "10.21.0.0/16"
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
+        # The private NACL admits vpc/main (the bastion), peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.main }}"
         availability_zones:
           - eu-west-2a
           - eu-west-2b
@@ -157,10 +174,10 @@ components:
         # the application tier, and adding it to the public tables would route
         # peer traffic through internet-facing subnets for no gain.
         requester_routes:
-          - destination_cidr_block: "10.21.0.0/16"
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
             route_table_ids: !terraform.state vpc/main .private_route_table_ids
         accepter_routes:
-          - destination_cidr_block: "10.20.0.0/16"
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
             route_table_ids: !terraform.state vpc/services .private_route_table_ids
       dependencies:
         components:
