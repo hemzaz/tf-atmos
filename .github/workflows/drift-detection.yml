@@ -1,6 +1,8 @@
-# Scheduled drift detection: a plan of every component in every stack
-# (Atmos skips abstract and disabled components). Stacks with drift fail the
-# job and show the changes in the job summary (Atmos Native CI).
+# Scheduled drift detection: a plan of every deployable component in every
+# stack, except instances with settings.github.actions_enabled: false (the
+# in-cluster components, which a hosted runner cannot reach; skipped with a
+# ::notice::, see docs/OPERATIONS.md). Stacks with drift fail the job and show
+# the changes in the job summary (Atmos Native CI).
 #
 # Upgrade path: Atmos Pro drift detection (settings.pro.drift_detection +
 # `atmos terraform plan <component> -s <stack> --upload-status`) adds drift
@@ -136,10 +138,37 @@ jobs:
           aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
       # A READ-only state role (stacks/orgs/fnx/_defaults.yaml: the prod one
       # for prod stacks), hence -lock=false: it cannot write a .tflock object.
+      # One plan per instance (ci-components.py) instead of a stack-wide
+      # `plan -s`, which cannot skip the actions_enabled: false instances.
+      # Every instance is planned (keep going); the step fails with exit 1 if
+      # any plan errored, else with 2 if any drifted (terraform's
+      # -detailed-exitcode meanings), and annotates each.
       - name: Plan (detailed exit code)
+        shell: bash
         env:
           STACK: ${{ matrix.stack }}
           TFSTATE_ACCESS: read
-        run: >-
-          atmos terraform plan -s "$STACK" --skip-planfile --failure-mode keep-going
-          --hide no-changes -- -detailed-exitcode -lock=false
+        run: |
+          set -uo pipefail
+          components="$(python3 workflows/scripts/common/ci-components.py --stack "$STACK")" || exit 1
+          drifted=() failed=()
+          while IFS= read -r component; do
+            [ -n "$component" ] || continue
+            rc=0
+            atmos terraform plan "$component" -s "$STACK" --skip-planfile --hide no-changes \
+              -- -detailed-exitcode -lock=false </dev/null || rc=$?
+            case "$rc" in
+              0) ;;
+              2) drifted+=("$component"); echo "::warning title=Drift::$STACK $component has drifted" ;;
+              *) failed+=("$component"); echo "::error title=Plan failed::$STACK $component (exit $rc)" ;;
+            esac
+          done <<<"$components"
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::$STACK: plan failed for ${failed[*]}"
+            exit 1
+          fi
+          if [ "${#drifted[@]}" -gt 0 ]; then
+            echo "::error::$STACK: drift in ${drifted[*]}"
+            exit 2
+          fi
+          echo "$STACK: no drift"

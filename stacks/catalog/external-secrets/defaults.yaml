@@ -11,6 +11,11 @@ components:
       metadata:
         component: external-secrets
         type: abstract
+      # Talks to the private EKS API: off hosted-runner CI/CD/drift, applied
+      # from inside the VPC (see catalog/eks-addons/defaults.yaml).
+      settings:
+        github:
+          actions_enabled: false
       # kms_key_arn below reads kms/main, so the key must be applied first.
       # workflows/scripts/common/check-dependencies.py enforces that every
       # component read via !terraform.state is declared here.

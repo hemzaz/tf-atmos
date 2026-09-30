@@ -474,6 +474,11 @@ jobs:
                           matrix = json.loads(line[len("matrix="):])
               settings = component_settings()
               excluded = disabled_pairs(settings)
+              skipped = sorted(
+                  f"{i.get('stack')} {i.get('component')}" for i in matrix["include"]
+                  if (i.get("stack"), i.get("component")) in excluded)
+              if skipped:
+                  print(f"::notice::Not planned (settings.github.actions_enabled: false): {', '.join(skipped)}")
               matrix["include"] = [
                   dict(i, master_only=not pr_plans_enabled(
                       settings.get(i.get("stack"), {}).get(i.get("component"))))

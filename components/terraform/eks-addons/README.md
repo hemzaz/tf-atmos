@@ -18,7 +18,8 @@ Cloud Posse `eks/*` components (cluster-autoscaler follows the upstream AWS docs
 ## Notes
 
 - The clusters' endpoints are private, so the `helm`/`kubernetes` providers must run from inside
-  the VPC (bastion, in-VPC runner or tunnel). GitHub-hosted runners cannot apply this component.
+  the VPC; hosted-runner CI/CD/drift skip it (`actions_enabled: false`, see
+  [In-cluster components](../../../docs/OPERATIONS.md#in-cluster-components)).
 - One cluster per instance: the providers connect to the top-level `cluster_name`/`host`.
 - The load balancer controller installs first (its webhook rejects Services created before it is
   ready); core managed addons install before it, everything else after.
