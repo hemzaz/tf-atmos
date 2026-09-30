@@ -89,10 +89,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -eu
-          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.trivyignore\.yaml|\.checkov\.baseline|\.github/workflows/terraform-ci\.yml)$'
+          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.trivyignore\.yaml|\.checkov\.baseline|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
           emulator_re='^(atmos\.yaml|components/terraform/.*|stacks/.*|workflows/.*|\.github/workflows/(emulator|terraform-ci)\.yml)$'
           if [ -n "${BASE_SHA//0/}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            changed=$(git diff --name-only "$BASE_SHA" HEAD)
+            # --no-renames: a rename lists only its new path, so moving a file out of stacks/ would skip everything.
+            changed=$(git diff --no-renames --name-only "$BASE_SHA" HEAD)
             printf 'Changed since %s:\n%s\n' "$BASE_SHA" "$changed"
             match() { if printf '%s\n' "$changed" | grep -Eq "$1"; then echo true; else echo false; fi; }
             terraform=$(match "$terraform_re")
