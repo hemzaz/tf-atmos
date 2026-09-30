@@ -83,6 +83,17 @@ variable "zones" {
   }
 }
 
+variable "delegation_ttl" {
+  type        = number
+  description = "TTL in seconds of the NS records that zones.<key>.parent_zone writes into the parent zone. 30 matches Cloud Posse dns-delegated, so a re-created subzone's new name servers propagate within seconds; raise it (AWS suggests up to 172800) once the delegation is stable."
+  default     = 30
+
+  validation {
+    condition     = var.delegation_ttl >= 0 && var.delegation_ttl <= 2147483647 && floor(var.delegation_ttl) == var.delegation_ttl
+    error_message = "delegation_ttl must be a whole number of seconds between 0 and 2147483647."
+  }
+}
+
 variable "records" {
   type = map(object({
     zone_name = string

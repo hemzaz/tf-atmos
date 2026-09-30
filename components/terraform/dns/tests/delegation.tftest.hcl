@@ -3,16 +3,45 @@
 # directory with `terraform init -backend=false && terraform test`.
 #
 # override_during = plan makes the mocked zone ids and name servers known at
-# plan, so the NS record's values can be asserted.
+# plan, so the NS record's values can be asserted. Each zone gets its own zone
+# id and name servers (override_resource below), so a delegation written into
+# the wrong zone, or listing the wrong zone's name servers, fails.
 
 mock_provider "aws" {
   override_during = plan
 
   mock_resource "aws_route53_zone" {
     defaults = {
-      zone_id      = "Z1234567890ABCDEFGHIJ"
-      name_servers = ["ns-1.awsdns-01.org", "ns-2.awsdns-02.co.uk"]
+      zone_id      = "ZDEFAULT0000000000000"
+      name_servers = ["ns-0.awsdns-00.org", "ns-0.awsdns-00.co.uk"]
     }
+  }
+}
+
+override_resource {
+  target          = aws_route53_zone.zones["services"]
+  override_during = plan
+  values = {
+    zone_id      = "ZSERVICES000000000000"
+    name_servers = ["ns-11.awsdns-11.org", "ns-12.awsdns-12.co.uk"]
+  }
+}
+
+override_resource {
+  target          = aws_route53_zone.zones["data"]
+  override_during = plan
+  values = {
+    zone_id      = "ZDATA0000000000000000"
+    name_servers = ["ns-21.awsdns-21.org", "ns-22.awsdns-22.co.uk"]
+  }
+}
+
+override_resource {
+  target          = aws_route53_zone.zones["api"]
+  override_during = plan
+  values = {
+    zone_id      = "ZAPI00000000000000000"
+    name_servers = ["ns-31.awsdns-31.org", "ns-32.awsdns-32.co.uk"]
   }
 }
 
@@ -51,11 +80,65 @@ run "parent_zone_writes_the_ns_record" {
     condition = (
       aws_route53_record.records["delegation_data"].type == "NS"
       && aws_route53_record.records["delegation_data"].name == "data.services.fnx.example.com"
-      && aws_route53_record.records["delegation_data"].zone_id == aws_route53_zone.zones["services"].zone_id
-      && toset(aws_route53_record.records["delegation_data"].records) == toset(aws_route53_zone.zones["data"].name_servers)
+      && aws_route53_record.records["delegation_data"].zone_id == "ZSERVICES000000000000"
+      && toset(aws_route53_record.records["delegation_data"].records) == toset(["ns-21.awsdns-21.org", "ns-22.awsdns-22.co.uk"])
+      && aws_route53_record.records["delegation_data"].ttl == 30
     )
-    error_message = "delegation_data is an NS record for the data zone's name, in the services zone, listing the data zone's name servers."
+    error_message = "delegation_data is an NS record for the data zone's name, in the services zone, listing the data zone's name servers, with the default delegation_ttl (30)."
   }
+}
+
+run "each_delegation_carries_its_own_child_zone" {
+  command = plan
+
+  variables {
+    delegation_ttl = 172800
+    zones = {
+      services = { name = "services.fnx.example.com" }
+      data     = { name = "data.services.fnx.example.com", parent_zone = "services" }
+      api      = { name = "api.data.services.fnx.example.com", parent_zone = "data" }
+    }
+  }
+
+  assert {
+    condition     = toset(keys(aws_route53_record.records)) == toset(["delegation_data", "delegation_api"])
+    error_message = "One NS record per zone with a parent_zone."
+  }
+
+  assert {
+    condition = (
+      aws_route53_record.records["delegation_data"].zone_id == "ZSERVICES000000000000"
+      && toset(aws_route53_record.records["delegation_data"].records) == toset(["ns-21.awsdns-21.org", "ns-22.awsdns-22.co.uk"])
+    )
+    error_message = "delegation_data lives in the services zone and lists the data zone's name servers."
+  }
+
+  assert {
+    condition = (
+      aws_route53_record.records["delegation_api"].name == "api.data.services.fnx.example.com"
+      && aws_route53_record.records["delegation_api"].zone_id == "ZDATA0000000000000000"
+      && toset(aws_route53_record.records["delegation_api"].records) == toset(["ns-31.awsdns-31.org", "ns-32.awsdns-32.co.uk"])
+    )
+    error_message = "delegation_api lives in the data zone (not services) and lists the api zone's name servers (not data's)."
+  }
+
+  assert {
+    condition     = alltrue([for r in values(aws_route53_record.records) : r.ttl == 172800])
+    error_message = "Every delegation NS record uses delegation_ttl."
+  }
+}
+
+run "delegation_ttl_must_be_whole_seconds" {
+  command = plan
+
+  variables {
+    delegation_ttl = -1
+    zones = {
+      services = { name = "services.fnx.example.com" }
+    }
+  }
+
+  expect_failures = [var.delegation_ttl]
 }
 
 run "no_parent_zone_no_delegation" {

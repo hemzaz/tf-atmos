@@ -24,12 +24,13 @@ locals {
   # dns-delegated's pattern, for a subzone whose parent is in this instance).
   normalized_records = merge(local.explicit_records, local.delegation_records)
 
+  # ttl: Cloud Posse dns-delegated hardcodes 30 on root_ns; here it is var.delegation_ttl (default 30).
   delegation_records = {
     for k, zone in var.zones : "delegation_${k}" => {
       zone_id                          = local.managed_zones[zone.parent_zone].zone_id
       name                             = trimsuffix(zone.name, ".")
       type                             = "NS"
-      ttl                              = var.zones[zone.parent_zone].default_ttl
+      ttl                              = var.delegation_ttl
       records                          = local.managed_zones[k].name_servers
       alias                            = null
       health_check_id                  = null

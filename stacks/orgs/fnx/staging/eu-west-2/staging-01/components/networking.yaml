@@ -192,7 +192,7 @@ components:
             zone_name: "main"
             name: "services.{{ .settings.environment.domain_name }}"
             type: "NS"
-            ttl: 300
+            ttl: 30 # Cloud Posse dns-delegated's NS TTL
             records: !terraform.state network/services .zone_name_servers.services
           www_main:
             zone_name: "main"

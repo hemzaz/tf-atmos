@@ -28,6 +28,10 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   (`deploy-full-stack`), because `network/main` reads its name servers.
 - `<d>` itself must be delegated from its parent domain manually, by the owner, before the first
   `deploy-certificates`; ACM validation hangs otherwise. See [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#deploying-a-stack).
+- Delegation NS records (from `parent_zone`, and the stacks' `services_delegation`) use a 30 s
+  TTL, Cloud Posse `dns-delegated`'s value, so a re-created subzone's name servers propagate
+  quickly; `delegation_ttl` sets it for `parent_zone` records. The child zone's own apex NS
+  record keeps Route 53's 172800.
 - `enable_query_logging` is rejected for private zones (use Resolver query logging).
 - Records in a DNS-account zone can only reference health checks from the main account.
 - `workflows/scripts/common/check-domains.py` (run by `validate-all`) requires every record name

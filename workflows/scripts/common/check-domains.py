@@ -12,7 +12,8 @@ For each enabled, non-abstract instance, by root module:
     custom domain's alias record goes into zone_id); and when certificate_arn
     reads `!terraform.state <acm instance> .certificate_arns.<key>`, that
     certificate's domain_name or a SAN must cover domain_name (exactly, or as a
-    `*.` wildcard of exactly one label).
+    `*.` wildcard of exactly one label). A literal certificate_arn cannot be
+    followed offline: it is reported as a warning, not checked.
 An acm/apigateway zone_id must be `!terraform.state <dns instance> [<stack>]
 .zone_ids.<key>`. With --process-functions=false it stays symbolic, so it is
 resolved by following it to that deployable dns instance's zones.<key>.name.
@@ -118,7 +119,7 @@ def resolve_zone(stacks: dict, stack_name: str, zone_id) -> tuple[Optional[dict]
     component, target, key = ref
     zone = dicts((target.get("vars") or {}).get("zones")).get(key) or {}
     if not isinstance(zone.get("name"), str):
-        return None, f"zone_id reads {component} .zone_ids.{key}, but {component} has no zone {key!r}"
+        return None, f"reads {component} .zone_ids.{key}, but {component} has no zone {key!r}"
     return zone, None
 
 
@@ -234,16 +235,24 @@ def zoned_names(module: str, variables: dict) -> list[tuple[str, str]]:
     return []
 
 
-def certificate_error(stacks: dict, stack_name: str, variables: dict) -> Optional[str]:
-    """Why an apigateway's certificate_arn does not cover its domain_name, or None."""
+def certificate_problem(stacks: dict, stack_name: str, variables: dict) -> tuple[Optional[str], Optional[str]]:
+    """(why an apigateway's certificate_arn does not cover its domain_name, or None; a warning, or None)."""
     domain = variables.get("domain_name")
     if not isinstance(domain, str):
-        return None
-    ref = state_reference(stacks, stack_name, variables.get("certificate_arn"), "certificate_arns", "acm")
+        return None, None
+    arn = variables.get("certificate_arn")
+    ref = state_reference(stacks, stack_name, arn, "certificate_arns", "acm")
     if ref is None:
-        return None
+        if isinstance(arn, str) and arn.strip():
+            return None, f"certificate_arn {arn!r} is a literal certificate ARN; domain_name {domain} is not checked against it"
+        return None, None
     if isinstance(ref, str):
-        return f"certificate_arn {ref}"
+        return f"certificate_arn {ref}", None
+    return certificate_error(ref, domain), None
+
+
+def certificate_error(ref: tuple, domain: str) -> Optional[str]:
+    """Why the acm certificate ref reads does not cover domain, or None."""
     component, target, key = ref
     cert = dicts((target.get("vars") or {}).get("dns_domains")).get(key)
     if cert is None:
@@ -271,9 +280,11 @@ def check(stacks: dict) -> tuple[list[str], list[str]]:
                 errors += dns_errors(where, variables, zones)
                 continue
             if module == "apigateway":
-                problem = certificate_error(stacks, stack_name, variables)
+                problem, warning = certificate_problem(stacks, stack_name, variables)
                 if problem:
                     errors.append(f"{where}: {problem}")
+                if warning:
+                    warnings.append(f"{where}: {warning}")
             names = zoned_names(module, variables)
             zone_id = variables.get("zone_id")
             if not names or zone_id in (None, ""):
