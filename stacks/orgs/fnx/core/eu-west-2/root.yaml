@@ -52,6 +52,14 @@ components:
         # caller rule); list any other human/admin role ARN explicitly.
         # Account IDs are the repository's placeholders - see
         # docs/OPERATIONS.md#first-deploy-inputs.
+        #
+        # Human operators: every rolearn in a workload stack's eks
+        # map_additional_iam_roles (its components/globals.yaml) applies that
+        # stack's in-cluster components from inside the VPC, so it goes in the
+        # stage's write role too - `write` for dev/staging, `prod_write` for
+        # prod - with the same full ARN, path included (aws:PrincipalArn
+        # carries the role's path). check-cluster-api-ci.py fails a stack
+        # whose admin role is missing here. None yet: the owner supplies them.
         access_roles:
           read:
             # Dev/staging state: their CI plan roles (PR plans, drift).

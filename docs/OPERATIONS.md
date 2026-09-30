@@ -123,17 +123,48 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
 them with a `::notice::`, and `check-cluster-api-ci.py` (lint, validate-all) fails any such instance
 in a private-endpoint stack that lacks the flag.
 
-An operator applies them from inside the VPC, e.g. on the stack's `ec2/bastion` (SSH with its
-Secrets Manager key, or SSM), after `eks/main` and each instance the component reads:
+An operator applies them through the VPC with their own role, a named cluster admin (the creator
+gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master):
+
+1. Once per stack, the owner names the role (full ARN, path kept, e.g.
+   `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>`,
+   from `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`) in two places:
+   `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
+   which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
+   `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
+   `stacks/orgs/fnx/core/eu-west-2/root.yaml`, so it can write the stack's state. Apply `backend/main`
+   (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
+   backend and warns while a stack has none.
+**The network path is not wired yet (follow-up B7-g), so steps 2-3 are the target procedure and do
+not work today.** The cluster ENIs carry only the EKS-managed security group, which admits itself
+alone: nothing opens 443 to the API from `ec2/bastion`. `eks/data` is in `vpc/services`, which the
+bastion in `vpc/main` does not reach. B7-g must add ingress on 443 from the bastion (Cloud Posse's
+`allowed_security_group_ids`) and a route to `vpc/services`, or a bastion there.
+
+2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then
+   `export AWS_PROFILE=<profile>`), forward the endpoint through the bastion. The bastion needs only
+   the SSM agent (`enable_ssm`, the default); atmos, terraform and the credentials stay local:
+
+   ```bash
+   host=$(aws eks describe-cluster --name <cluster> --query cluster.endpoint --output text | sed 's|https://||')
+   aws ssm start-session --target <bastion-instance-id> \
+     --document-name AWS-StartPortForwardingSessionToRemoteHost \
+     --parameters "host=$host,portNumber=443,localPortNumber=443"
+   echo "127.0.0.1 $host" | sudo tee -a /etc/hosts   # remove when done
+   ```
+
+   The `kubernetes`/`helm` providers take `host` from `eks/<instance>`'s state and `aws eks
+   get-token` for auth, so the hosts entry makes them connect to the forward under the real
+   hostname: TLS verifies against the cluster CA with no provider or kubeconfig override. Local port
+   443 may need root (Linux). One cluster at a time.
+3. After `eks/<instance>` and each instance the component reads:
 
 ```bash
 atmos terraform deploy <component> -s <stack>   # e.g. eks-addons/main, then eks-backend-services/main
 atmos workflow deploy-addons -f deploy-full-stack -s <stack>   # or the layer: platform, addons, services
 ```
 
-The caller needs the stack's apply permissions and an `eks/main` access entry with
-`AmazonEKSClusterAdminPolicy` (`stacks/catalog/eks/defaults.yaml` grants only the CI roles; the
-creator gets no implicit admin). CD moving `deployed/<stack>` does not mean these were applied.
+CD moving `deployed/<stack>` does not mean these were applied.
 
 ## Changing infrastructure
 

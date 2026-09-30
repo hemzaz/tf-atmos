@@ -18,6 +18,12 @@
 #   instead of failing.
 # - No `access_entries_for_nodes`: every node group here is a managed node
 #   group, and EKS creates their EC2_LINUX access entries itself.
+#
+# Human admins: var.map_additional_iam_roles, the Cloud Posse eks/cluster
+# component's input (cloudposse-terraform-components/aws-eks-cluster,
+# src/main.tf iam_roles_access_entry_map). Each role becomes an
+# access_entry_map entry below, merged under var.access_entry_map as upstream
+# merges it under overridable_access_map.
 
 locals {
   # A full policy name that is not in the abbreviation map below (for example
@@ -38,8 +44,20 @@ locals {
     local.eks_policy_short_abbreviation_map,
   )
 
+  # Cloud Posse's iam_roles_access_entry_map, in access_entry_map's full shape
+  # (the object defaults Terraform fills in for var.access_entry_map), so the
+  # two merge into one map. `username` is ignored, as upstream.
+  iam_roles_access_entry_map = {
+    for role in var.map_additional_iam_roles : role.rolearn => {
+      user_name                  = null
+      kubernetes_groups          = role.groups
+      type                       = "STANDARD"
+      access_policy_associations = {}
+    }
+  }
+
   # Expand abbreviated access policies to full ARNs
-  access_entry_expanded_map = { for k, v in var.access_entry_map : k => merge({
+  access_entry_expanded_map = { for k, v in merge(local.iam_roles_access_entry_map, var.access_entry_map) : k => merge({
     access_policy_associations = {
       for kk, vv in v.access_policy_associations :
       try(local.eks_policy_abbreviation_map[kk], startswith(kk, "arn:") ? kk : "${local.eks_access_policy_arn_prefix}${kk}") => vv
