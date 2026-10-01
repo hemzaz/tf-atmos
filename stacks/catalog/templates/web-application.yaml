@@ -536,8 +536,9 @@ components:
 
         # Parameter group
         parameters:
+          # ddl, not all: "all" logs every statement, secrets included
           - name: "log_statement"
-            value: "all"
+            value: "ddl"
           - name: "log_min_duration_statement"
             value: "1000"
           - name: "shared_preload_libraries"

@@ -73,7 +73,7 @@ output "database_password_secret_arn" {
 
 output "database_connection_string" {
   description = "Database connection string (without credentials)"
-  value       = "postgresql://${module.idp_database.instance_address}:5432/${module.idp_database.instance_name}"
+  value       = "postgresql://${module.idp_database.instance_address}:5432/${module.idp_database.instance_name}?${local.database_tls_query}"
   sensitive   = true
 }
 

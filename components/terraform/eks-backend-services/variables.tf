@@ -105,6 +105,17 @@ variable "database_endpoint" {
   }
 }
 
+variable "database_ca_bundle_path" {
+  type        = string
+  description = "Path, inside the service images, of the RDS CA bundle (https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem); database_url verifies the server against it (sslmode=verify-full)"
+  default     = "/etc/ssl/certs/rds-global-bundle.pem"
+
+  validation {
+    condition     = can(regex("^/[A-Za-z0-9._/-]+$", var.database_ca_bundle_path))
+    error_message = "database_ca_bundle_path must be an absolute path of letters, digits, '.', '_', '-' and '/'."
+  }
+}
+
 variable "database_name" {
   type        = string
   description = "Name of the database (rds/main output instance_name)"

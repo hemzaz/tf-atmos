@@ -300,8 +300,10 @@ resource "kubernetes_manifest" "database_external_secret" {
             # urlquery percent-encodes URL-reserved characters (RDS-generated
             # passwords are not restricted to a URL-safe alphabet), so the
             # connection string stays parseable regardless of the generated
-            # value.
-            database_url = "postgres://{{ .username | urlquery }}:{{ .password | urlquery }}@${var.database_endpoint}/${var.database_name}"
+            # value. rds forces TLS (rds.force_ssl = 1); verify-full also checks
+            # the server certificate and host name against the RDS CA bundle,
+            # which the service image must ship at database_ca_bundle_path.
+            database_url = "postgres://{{ .username | urlquery }}:{{ .password | urlquery }}@${var.database_endpoint}/${var.database_name}?sslmode=verify-full&sslrootcert=${var.database_ca_bundle_path}"
           }
         }
       }

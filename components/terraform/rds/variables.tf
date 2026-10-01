@@ -48,20 +48,50 @@ variable "identifier" {
 
 variable "engine" {
   type        = string
-  description = "Database engine type"
+  description = "Database engine: postgres, mysql or mariadb (the engines the parameter-group defaults know)"
   default     = "mysql"
+
+  validation {
+    condition     = contains(["postgres", "mysql", "mariadb"], var.engine)
+    error_message = "engine must be postgres, mysql or mariadb."
+  }
 }
 
 variable "engine_version" {
   type        = string
-  description = "Database engine version"
+  description = "Database engine version (postgres: 14 or 14.12; mysql/mariadb: at least <major>.<minor>, e.g. 8.0 or 10.11)"
   default     = "8.0"
+
+  validation {
+    condition     = can(regex("^[0-9]+(\\.[0-9]+)*$", var.engine_version))
+    error_message = "engine_version must be dotted numbers, e.g. 14, 14.12, 8.0 or 10.11."
+  }
+
+  validation {
+    condition     = var.engine == "postgres" || var.family != null || length(split(".", var.engine_version)) >= 2
+    error_message = "mysql and mariadb need engine_version <major>.<minor> (e.g. 8.0) to derive the parameter group family, or an explicit family."
+  }
+
+  # The TLS default require_secure_transport exists in MariaDB from 10.5 on.
+  validation {
+    condition = var.engine != "mariadb" || try(
+      tonumber(split(".", var.engine_version)[0]) > 10 ||
+      (tonumber(split(".", var.engine_version)[0]) == 10 && tonumber(split(".", var.engine_version)[1]) >= 5),
+      false
+    )
+    error_message = "mariadb needs engine_version 10.5 or later (require_secure_transport)."
+  }
 }
 
 variable "family" {
   type        = string
-  description = "Database parameter group family"
-  default     = "mysql8.0"
+  description = "Parameter group family. Null derives it from engine and engine_version: postgres<major> (postgres14), mysql<major>.<minor> (mysql8.0), mariadb<major>.<minor> (mariadb10.11)"
+  default     = null
+
+  validation {
+    condition     = var.family == null || startswith(coalesce(var.family, "-"), var.engine)
+    error_message = "family must belong to engine (e.g. postgres14 for postgres, mysql8.0 for mysql)."
+  }
 }
 
 variable "instance_class" {
@@ -126,8 +156,8 @@ variable "username" {
 
 variable "port" {
   type        = number
-  description = "Port for the database"
-  default     = 3306
+  description = "Port for the database. Null uses the engine's: 5432 for postgres, 3306 for mysql/mariadb"
+  default     = null
 }
 
 variable "db_name" {
@@ -137,11 +167,22 @@ variable "db_name" {
 
 variable "parameters" {
   type = list(object({
-    name  = string
-    value = string
+    name         = string
+    value        = string
+    apply_method = optional(string, "immediate")
   }))
-  description = "List of DB parameters to set"
+  description = <<-EOT
+    DB parameters, overlaid on the engine defaults (main.tf locals): an entry here wins over a default
+    of the same name, and the last entry per name wins. The defaults enforce TLS (postgres
+    rds.force_ssl = 1, mysql require_secure_transport = ON) and log DDL only (log_statement = ddl).
+    apply_method follows Cloud Posse's db_parameter: "immediate" or "pending-reboot" (static parameters).
+  EOT
   default     = []
+
+  validation {
+    condition     = alltrue([for p in var.parameters : contains(["immediate", "pending-reboot"], p.apply_method)])
+    error_message = "parameters[*].apply_method must be \"immediate\" or \"pending-reboot\"."
+  }
 }
 
 variable "availability_zone" {
@@ -225,6 +266,13 @@ variable "skip_final_snapshot" {
   type        = bool
   description = "Skip final snapshot when deleting the RDS instance"
   default     = false
+}
+
+variable "final_snapshot_identifier" {
+  type        = string
+  description = "Name of the final snapshot taken on destroy when skip_final_snapshot is false (Cloud Posse's name). Empty uses <Environment>-<identifier>-final-snapshot"
+  default     = ""
+  nullable    = false
 }
 
 variable "copy_tags_to_snapshot" {

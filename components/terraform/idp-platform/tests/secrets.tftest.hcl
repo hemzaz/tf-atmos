@@ -97,6 +97,15 @@ run "redis_auth_token_is_generated_and_written_write_only" {
   }
 }
 
+run "database_url_requires_verified_tls" {
+  command = plan
+
+  assert {
+    condition     = local.database_url == "postgresql://dev-idp.example.eu-west-2.rds.amazonaws.com:5432/idp?sslmode=verify-full&sslrootcert=/etc/ssl/certs/rds-global-bundle.pem"
+    error_message = "The config secret's database_url must require verified TLS against the RDS CA bundle."
+  }
+}
+
 run "secrets_version_rotates_both_write_only_values" {
   command = plan
 

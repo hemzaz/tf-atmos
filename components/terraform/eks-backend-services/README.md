@@ -20,6 +20,10 @@ Redis credentials, and optional Prometheus `ServiceMonitor`s.
 - Credentials never pass through Terraform: the ExternalSecrets pull the RDS-managed master secret
   and the ElastiCache AUTH token from Secrets Manager and template `database_url` (`postgres://`)
   and `redis_url` (`rediss://`, TLS only).
+- `database_url` carries `sslmode=verify-full&sslrootcert=<database_ca_bundle_path>`: `rds` forces
+  TLS, so every service image (and `platform_api`'s, which also runs `migrate`) must ship the RDS
+  CA bundle (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) at that path,
+  default `/etc/ssl/certs/rds-global-bundle.pem`. Without it the services cannot connect.
 - The four `*_image` inputs have no default, must look like `repo:tag` or `repo@sha256:...`, and
   reject `:latest`. The stacks take them from `settings.environment.backend_service_images`, which
   the release pipeline owns.
