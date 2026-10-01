@@ -1,10 +1,17 @@
 ---
+# us-east-2 (the DR region). Same shape as mixins/region/us-east-1.yaml. EKS
+# supports clusters in all three AZ IDs here; vpc instances set
+# availability_zone_ids themselves (components/terraform/vpc/README.md).
 import:
-  # Import the `ue2` manifest with `vpc` configuration for `us-east-2` region
-  - catalog/vpc/ue2
+  - catalog/vpc/defaults
 
 vars:
   region: us-east-2
 settings:
+  environment:
+    availability_zone_ids:
+      - use2-az1
+      - use2-az2
+      - use2-az3
   context:
-    environment: ue2
+    environment: us-east-2
