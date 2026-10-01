@@ -43,8 +43,10 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   in the DNS account. CloudWatch Logs allows 10 resource policies per region and account.
 - `<first zone>` is the alphabetically first query-logged zone, so adding a zone that sorts earlier
   renames (replaces) the policy and the alias, briefly cutting Route53's write permission. Set
-  `query_logging_name` once the zones are settled to pin the suffix. A caller-supplied
-  `cloudwatch_log_group_arn` must be in the zone's account (a precondition on the query log).
+  `query_logging_name` once the zones are settled to pin the suffix. Setting it on an existing
+  stack is itself a one-time replace of the policy and the alias, so pin it before the first
+  apply if you want a custom name. A caller-supplied `cloudwatch_log_group_arn` must be in the
+  zone's account (a precondition on the query log).
 - `query_log_retention_in_days` defaults to 7 (prod: 90). A zone's `query_logging_config` may
   set `retention_days`, a us-east-1 `kms_key_id` (no own key is then created for it) or a
   us-east-1 `cloudwatch_log_group_arn` (no log group is created; the policy still names it).

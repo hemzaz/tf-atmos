@@ -144,6 +144,42 @@ class CheckLambdaPackagesTest(unittest.TestCase):
             "is not data-processor/<version>.zip",
         )
 
+    def test_equivalent_bucket_read_spellings_are_still_checked(self):
+        spellings = (
+            "!terraform.state   s3/lambda-artifacts   .bucket_id",
+            "  !terraform.state s3/lambda-artifacts .bucket_id  ",
+            "!terraform.state s3/lambda-artifacts bucket_id",
+            '!terraform.state s3/lambda-artifacts .bucket_id // "default"',
+            '!terraform.state "s3/lambda-artifacts" .bucket_id',
+            "!terraform.output s3/lambda-artifacts bucket_id",
+        )
+        for spelling in spellings:
+            with self.subTest(spelling=spelling):
+                def respell(instance, spelling=spelling):
+                    instance["vars"]["s3_bucket"] = spelling
+                    instance["vars"]["s3_key"] = "data-processor/latest.zip"
+
+                self.assert_errors(stack(lambda__data_processor=respell), "set settings.package_version")
+
+    def test_equivalent_spelling_with_a_released_key_passes(self):
+        self.assert_errors(
+            stack(lambda__data_processor=set_var("s3_bucket", '!terraform.state s3/lambda-artifacts  .bucket_id // ""'))
+        )
+
+    def test_reads_of_other_components_or_literals_are_not_packaged(self):
+        for value in (
+            "!terraform.state s3/other .bucket_id",
+            "!terraform.state s3/lambda-artifacts-2 .bucket_id",
+            "my-literal-bucket",
+            None,
+        ):
+            with self.subTest(value=value):
+                def other(instance, value=value):
+                    instance["vars"]["s3_bucket"] = value
+                    instance["vars"]["s3_key"] = "data-processor/latest.zip"
+
+                self.assert_errors(stack(lambda__data_processor=other))
+
     def test_lambda_not_packaged_from_the_bucket_is_skipped(self):
         def local_file(instance):
             instance["vars"] = {"function_name": "api", "filename": "api.zip"}

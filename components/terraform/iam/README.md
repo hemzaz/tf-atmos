@@ -37,6 +37,8 @@ package uploader role for an application repo's CI.
   `s3/lambda-artifacts` bucket and use `lambda_uploader_kms_key_alias` via S3 only. The bucket
   is named, not read (`<tags.Environment>-lambda-artifacts-<account id>`, the s3 component's
   convention), because `iam/ci` applies before storage; `check-lambda-packages.py` fails lint
-  when the stack's bucket or `kms/main` alias stops matching.
+  when the stack's bucket or `kms/main` alias stops matching. Puts are allowed only when
+  conditional (`If-None-Match: *`, e.g. `aws s3api put-object --if-none-match '*'`), so
+  re-uploading a released version fails by design: ship a new version instead.
 - A resource-management precondition requires at least one managed ARN list, so a CI-only
   instance must set `create_cross_account_role: false`.

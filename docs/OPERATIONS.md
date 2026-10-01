@@ -80,13 +80,14 @@ For CI across several accounts from one OIDC provider, see
 
 After the backend: `atmos workflow full -f bootstrap -s <stack>` (IAM, including the CI roles, and
 VPCs) with administrator credentials in the stack's account, since no CI role exists yet; no
-stack sets a provider role, so every component runs as the caller. Then `atmos workflow deploy -f deploy-full-stack -s <stack>`. It runs these layers in
-order, each planned, confirmed, then applied from the saved plan. Each layer is also its own
-workflow (`atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>`):
+stack sets a provider role, so every component runs as the caller. Then
+`atmos workflow deploy -f deploy-full-stack -s <stack>`. It runs these layers in order, each
+planned, confirmed, then applied from the saved plan. Each layer is also its own workflow
+(`atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>`):
 
 `backend`, `iam`, `kms`, `storage`, `networking`, `connectivity`, `security`,
-`security-monitoring`, `compute`, `platform`, `data`, `dns-zones`, `dns`, `certificates`, `addons`, `services`,
-`monitoring`.
+`security-monitoring`, `compute`, `platform`, `data`, `dns-zones`, `dns`, `certificates`,
+`addons`, `services`, `monitoring`.
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that
