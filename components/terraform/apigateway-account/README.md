@@ -20,9 +20,8 @@ managed policy instead of Cloud Posse's inline `logs:*` grant.
   Two instances overwrite each other's setting on every apply.
 - The role name carries the region (`<Environment>-apigateway-cloudwatch-<region>`), so a second
   region's instance does not collide on the global IAM name.
-- No `aws:SourceAccount` condition on the trust: neither AWS nor Cloud Posse documents one for this
-  role, and API Gateway is not documented to send it.
-- `reset_on_delete` is left at the provider default: destroying this only forgets the setting, so
-  the account keeps pointing at the (now deleted) role and REST logging updates fail until another
-  role is set.
+- No `aws:SourceAccount` condition on the trust: no AWS or Cloud Posse example sets
+  `aws:SourceAccount` on this trust, so it is omitted to avoid breaking logging.
+- Destroying the component clears the account's CloudWatch role, which disables REST execution
+  and access logging for that account and region until another role is set.
 - HTTP APIs do not use this role; their access logs need only the log group.

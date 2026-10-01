@@ -16,10 +16,8 @@ locals {
 
 data "aws_partition" "current" {}
 
-# No aws:SourceAccount/aws:SourceArn condition: neither the AWS guide nor Cloud
-# Posse sets one for this role, and API Gateway does not document passing those
-# keys when it assumes the account's CloudWatch role, so a condition risks
-# breaking every stage's logging.
+# No aws:SourceAccount condition: no AWS or Cloud Posse example sets
+# aws:SourceAccount on this trust, so it is omitted to avoid breaking logging.
 data "aws_iam_policy_document" "assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -48,9 +46,9 @@ resource "aws_iam_role_policy_attachment" "cloudwatch" {
   policy_arn = "arn:${local.partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
 }
 
-# Per-account, per-region singleton. reset_on_delete stays at the provider
-# default, so destroying this only drops it from state; the account keeps the
-# role ARN (and loses logging only if the role itself is gone).
+# Destroy clears cloudwatchRoleArn on the account (the provider's Delete always
+# does; reset_on_delete was removed in v6). The role is destroyed after this
+# resource, so there is no dangling-ARN window.
 resource "aws_api_gateway_account" "this" {
   count = var.enabled ? 1 : 0
 
