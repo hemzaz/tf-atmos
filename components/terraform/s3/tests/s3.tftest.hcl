@@ -184,6 +184,39 @@ run "logging_and_lifecycle_rules" {
   }
 }
 
+# The rule stacks/catalog/s3/lambda-artifacts.yaml sets on every stack's
+# lambda package bucket (s3/lambda-artifacts).
+run "lambda_artifacts_bucket" {
+  command = plan
+
+  variables {
+    name = "lambda-artifacts"
+    lifecycle_configuration_rules = [
+      {
+        id                                     = "noncurrent-packages"
+        abort_incomplete_multipart_upload_days = 7
+        noncurrent_version_expiration          = { newer_noncurrent_versions = 10, noncurrent_days = 30 }
+        expiration                             = { expired_object_delete_marker = true }
+      },
+    ]
+  }
+
+  assert {
+    condition     = aws_s3_bucket.this[0].bucket == "test-lambda-artifacts-123456789012" && one(aws_s3_bucket_versioning.this[0].versioning_configuration).status == "Enabled"
+    error_message = "The package bucket is <Environment>-lambda-artifacts-<account id>, versioned."
+  }
+
+  assert {
+    condition = (
+      one(aws_s3_bucket_lifecycle_configuration.this[0].rule[0].noncurrent_version_expiration).newer_noncurrent_versions == 10 &&
+      one(aws_s3_bucket_lifecycle_configuration.this[0].rule[0].noncurrent_version_expiration).noncurrent_days == 30 &&
+      one(aws_s3_bucket_lifecycle_configuration.this[0].rule[0].expiration).expired_object_delete_marker == true &&
+      one(aws_s3_bucket_lifecycle_configuration.this[0].rule[0].abort_incomplete_multipart_upload).days_after_initiation == 7
+    )
+    error_message = "Noncurrent package versions beyond the newest 10 expire after 30 days; orphan delete markers and stale multipart uploads are removed."
+  }
+}
+
 run "disabled_creates_nothing" {
   command = plan
 

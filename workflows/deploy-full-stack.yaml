@@ -8,7 +8,7 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: backend, iam, kms, networking, connectivity, security, security-monitoring, compute, platform, data, dns-zones, dns, certificates, addons, services, monitoring
+#   layers: backend, iam, kms, storage, networking, connectivity, security, security-monitoring, compute, platform, data, dns-zones, dns, certificates, addons, services, monitoring
 #
 # A layer plans all its instances before it applies any of them, so an instance
 # that reads another's state (!terraform.state / !terraform.output) must be in a
@@ -27,7 +27,8 @@
 # has its own certificates layer after dns and before services and monitoring,
 # which read its certificate ARNs. eks-addons reads its dns instance's zone_ids,
 # so it has its own addons layer after dns (and after compute, for the cluster
-# it installs into).
+# it installs into). The storage layer (s3, reading kms/main) precedes compute,
+# whose lambda instances read s3/lambda-artifacts .bucket_id.
 # Every layer except backend has at least one enabled instance in every
 # workload stack (eks-backend-services/main, the last to gain instances, joined
 # the compute layer in all 3 stacks); fnx-core-root has only the backend layer.
@@ -91,6 +92,19 @@ workflows:
       - name: deploy-kms
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
+      - name: plan-storage
+        type: atmos
+        command: terraform plan --query '.metadata.component == "s3"'
+      - name: confirm_storage
+        type: confirm
+        prompt: Apply the storage layer plan above?
+        default: false
+      - name: guard-storage
+        type: shell
+        command: test "{{ .steps.confirm_storage.value }}" = "true" || { echo "Deployment cancelled before the storage layer."; exit 1; }
+      - name: deploy-storage
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "s3"'
       - name: plan-networking
         type: atmos
         command: terraform plan --query '.metadata.component == "vpc"'
@@ -361,6 +375,23 @@ workflows:
       - name: deploy
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
+
+  deploy-storage:
+    description: "Deploy the storage layer: S3 buckets (they read kms/main), such as the lambda package bucket compute reads"
+    steps:
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.metadata.component == "s3"'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the storage layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "s3"'
 
   deploy-networking:
     description: "Deploy the networking layer: VPCs"

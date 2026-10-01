@@ -10,9 +10,10 @@ rotation configuration.
 
 - Instances: `lambda/data-processor` (all three AWS stacks), `lambda/data-transformer` (staging,
   prod), `lambda/report-generator` (prod), all reading `vpc/services .vpc_id` /
-  `.private_subnet_ids` and packaged from S3 (`s3_bucket` / `s3_key`); `lambda/main` in
-  `fnx-local-sandbox` (applied for real by the sandbox workflow) and `lambda/api` in
-  `fnx-local-localemu`.
+  `.private_subnet_ids` and packaged from S3: `s3_bucket` is `s3/lambda-artifacts .bucket_id`
+  (Cloud Posse's aws-lambda takes its bucket from an s3-bucket component the same way), `s3_key`
+  a fixed path. `lambda/main` in `fnx-local-sandbox` (applied for real by the sandbox workflow)
+  and `lambda/api` in `fnx-local-localemu` use `filename`.
 - Used by: `apigateway` (`lambda/data-processor .function_invoke_arn` / `.function_name`),
   `monitoring` (`.function_name`).
 - The `microservices-platform` template runs two rotation functions from this component
@@ -23,6 +24,11 @@ rotation configuration.
 - A Zip package needs exactly one of `filename`, `s3_bucket` + `s3_key`, or `source_dir` (a
   directory under this component, zipped to `.archives/<function_name>.zip`). There is no
   `image_uri` variable, so `package_type = "Image"` cannot be used.
+- Nothing in this repo builds or uploads the S3 packages, and their sources are not here: each
+  `s3_key` must exist in the stack's `s3/lambda-artifacts` bucket before the first apply. The
+  principal creating the function needs `s3:GetObject` on it and `kms:Decrypt` on `kms/main`
+  (the bucket's key); the CI apply role has both through `AdministratorAccess`. Without
+  `source_code_hash` or `s3_object_version`, overwriting an object does not redeploy the function.
 - There is no `event_source_mappings` input: the mappings the `data-pipeline`, `batch-processing`
   and `serverless-api` templates set are not applied.
 - In a VPC, egress defaults to the region's AWS-managed S3 prefix list; the built-in rules are never

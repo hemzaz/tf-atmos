@@ -16,7 +16,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it |
 | Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml`; each address must confirm its SNS subscription |
 | Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main`: unset, so its CloudWatch alarms have no action |
-| Lambda packages | `s3_bucket`/`s3_key` of every `lambda/*` instance in `components/services.yaml`; the object must exist before the first apply |
+| Lambda packages | the `s3_key` of every `lambda/*` instance in `components/services.yaml`, uploaded to the stack's `s3/lambda-artifacts` bucket (`<Environment>-lambda-artifacts-<account id>`, applied by the `deploy-full-stack` storage layer) before lambda's first apply; nothing in this repo builds or uploads them |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
 
@@ -84,8 +84,8 @@ stack sets a provider role, so every component runs as the caller. Then `atmos w
 order, each planned, confirmed, then applied from the saved plan. Each layer is also its own
 workflow (`atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>`):
 
-`backend`, `iam`, `kms`, `networking`, `connectivity`, `security`, `security-monitoring`,
-`compute`, `platform`, `data`, `dns-zones`, `dns`, `certificates`, `addons`, `services`,
+`backend`, `iam`, `kms`, `storage`, `networking`, `connectivity`, `security`,
+`security-monitoring`, `compute`, `platform`, `data`, `dns-zones`, `dns`, `certificates`, `addons`, `services`,
 `monitoring`.
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads

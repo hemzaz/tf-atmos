@@ -79,6 +79,8 @@ SYNTH = [
     # valued by the output it reads rather than by the consuming variable.
     (r'^key_arn$',                    'arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012'),
     (r'^zone_id$',                    'Z1234567890ABCDEFGHIJ'),
+    # s3's bucket_id / bucket_name: lambda's s3_bucket (s3/lambda-artifacts).
+    (r'^bucket_(id|name)$',           'example-bucket-123456789012'),
     (r'^certificate_arn$',            'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012'),
     (r'^certificate_arns$',           ['arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
     (r'^certificate_names$',          ['main_wildcard']),
