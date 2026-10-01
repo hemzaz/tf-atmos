@@ -133,12 +133,16 @@ run "cross_account_policies_grant_no_exfiltration_actions" {
     error_message = "The cross-account policy must not allow s3:PutBucketPolicy: it could open a bucket to another account."
   }
 
+  # Two asserts, not one `!a && b`: checkov's HCL parser (python-hcl2)
+  # rejects a line-leading && after a negated call.
   assert {
-    condition = (
-      !contains(flatten([for s in jsondecode(aws_iam_policy.resource_management[0].policy).Statement : s.Action]), "sns:Subscribe")
-      && contains(flatten([for s in jsondecode(aws_iam_policy.resource_management[0].policy).Statement : s.Action]), "sns:Publish")
-    )
-    error_message = "The resource-management policy keeps sns:Publish on the managed topics but must not allow sns:Subscribe, which could subscribe an external endpoint."
+    condition     = !contains(flatten([for s in jsondecode(aws_iam_policy.resource_management[0].policy).Statement : s.Action]), "sns:Subscribe")
+    error_message = "The resource-management policy must not allow sns:Subscribe: it could subscribe an external endpoint to a managed topic."
+  }
+
+  assert {
+    condition     = contains(flatten([for s in jsondecode(aws_iam_policy.resource_management[0].policy).Statement : s.Action]), "sns:Publish")
+    error_message = "The resource-management policy keeps sns:Publish on the managed topics."
   }
 }
 
