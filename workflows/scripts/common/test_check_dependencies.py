@@ -132,6 +132,94 @@ class CheckDependenciesTest(unittest.TestCase):
             self.assertEqual(check_dependencies.check(stacks, components), [])
 
 
+class OutputsAndVariablesTest(unittest.TestCase):
+    """Reads of undeclared outputs, and vars the module does not declare (components_dir given)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.components = tmp.name
+        vpc = pathlib.Path(tmp.name, "vpc")
+        vpc.mkdir()
+        (vpc / "outputs.tf").write_text('output "vpc_id" {\n  value = 1\n}\n\noutput "subnet_ids" {\n  value = {}\n}\n')
+        (vpc / "variables.tf").write_text('variable "cidr" {\n  type = string\n}\n')
+        pathlib.Path(tmp.name, "app").mkdir()
+        pathlib.Path(tmp.name, "app", "variables.tf").write_text('variable "x" {}\nvariable "y" {}\n')
+
+    def reader(self, value, *deps):
+        return instance({"x": value}, [{"component": "vpc/main", **dep} for dep in deps or ({},)], component="app")
+
+    def errors(self, reader, **extra_stacks):
+        stacks = {"s1": {"components": {"terraform": {
+            "vpc/main": instance(component="vpc"),
+            "vpc/off": instance(component="vpc", enabled=False),
+            "reader": reader,
+        }}}}
+        for name, components in extra_stacks.items():
+            stacks[name] = {"components": {"terraform": components}}
+        return check_dependencies.check(stacks, self.components)
+
+    def test_declared_output_passes(self):
+        self.assertEqual(self.errors(self.reader("!terraform.state vpc/main .vpc_id")), [])
+
+    def test_missing_output_fails(self):
+        errors = self.errors(self.reader("!terraform.state vpc/main .vpc_idz"))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("reads vpc/main output vpc_idz (.vpc_idz), which", errors[0])
+        self.assertIn("vpc does not declare", errors[0])
+
+    def test_missing_output_behind_default_still_fails(self):
+        self.assertEqual(len(self.errors(self.reader("!terraform.state vpc/main .nope // null"))), 1)
+
+    def test_nested_path_checks_first_segment(self):
+        self.assertEqual(self.errors(self.reader("!terraform.state vpc/main .subnet_ids.private[0]")), [])
+        errors = self.errors(self.reader("!terraform.state vpc/main .subnets.private"))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("output subnets ", errors[0])
+
+    def test_cross_stack_read_checks_target_stack_module(self):
+        reader = self.reader("!terraform.state vpc/main s2 .vpc_idz", {"stack": "s2"})
+        errors = self.errors(reader, s2={"vpc/main": instance(component="vpc")})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("reads vpc/main in s2 output vpc_idz", errors[0])
+
+    def test_terraform_output_bare_name(self):
+        self.assertEqual(self.errors(self.reader("!terraform.output vpc/main vpc_id")), [])
+        self.assertEqual(len(self.errors(self.reader("!terraform.output vpc/main vpc_idz"))), 1)
+
+    def test_disabled_target_reports_only_disabled(self):
+        reader = instance({"x": "!terraform.state vpc/off .nope"}, [{"component": "vpc/off"}], component="app")
+        errors = self.errors(reader)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("abstract or disabled", errors[0])
+
+    def test_output_name(self):
+        cases = {
+            ".vpc_id": "vpc_id",
+            ".queue_arns.tasks": "queue_arns",
+            ".foo[0]": "foo",
+            '.["vpc_id"]': "vpc_id",
+            "[.a // {} | .[]]": "a",
+            "'.id | [.]'": "id",
+            "vpc_id": "vpc_id",
+            ".": None,
+            ".{{ .settings.x }}": None,
+        }
+        for expression, want in cases.items():
+            with self.subTest(expression=expression):
+                self.assertEqual(check_dependencies.output_name(expression), want)
+
+    def test_undeclared_vars(self):
+        stacks = {"s1": {"components": {"terraform": {
+            "ok": instance({"x": 1, "y": 2}, component="app"),
+            "bad": instance({"x": 1, "z": 3, "w": 4}, component="app"),
+            "off": instance({"z": 3}, component="app", enabled=False),
+            "ghost": instance({"z": 3}, component="nope"),
+        }}}}
+        problems = check_dependencies.undeclared_vars(stacks, self.components)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("s1: bad sets w, z, which", problems[0])
+
 
 if __name__ == "__main__":
     unittest.main()
