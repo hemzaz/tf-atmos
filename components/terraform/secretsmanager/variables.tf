@@ -138,9 +138,10 @@ variable "secrets" {
 
 # Caller-supplied values, for secrets with static_value = true. Ephemeral:
 # never in a saved plan or in state; it reaches AWS only through the version's
-# write-only secret_string_wo. Supply it through the TF_VAR_secret_data
-# environment variable (an instance's Atmos `env:` section, or the operator's
-# shell for a real secret): Terraform requires an ephemeral variable set at
+# write-only secret_string_wo. Supply it as TF_VAR_secret_data in the one
+# instance's Atmos `env:` section (a real secret via `!env <INSTANCE_VAR>`),
+# never as a global TF_VAR_secret_data, which every secretsmanager instance
+# would receive (see README): Terraform requires an ephemeral variable set at
 # plan to be set again when a saved plan is applied, and `atmos terraform
 # deploy --from-plan` applies the planfile without the varfile.
 variable "secret_data" {
