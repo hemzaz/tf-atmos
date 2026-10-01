@@ -6,7 +6,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -23,7 +23,7 @@ override_data {
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   name_prefix = "fnx-dev-test"
   tags = {
     Environment = "test"
@@ -65,7 +65,7 @@ run "autoscaling_ebs_grants_the_service_linked_role" {
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Action) == toset(["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"])
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowAutoScalingEBSUsage"]).Condition == {
         StringEquals = {
-          "kms:ViaService"    = "ec2.eu-west-2.amazonaws.com"
+          "kms:ViaService"    = "ec2.us-east-1.amazonaws.com"
           "kms:CallerAccount" = "123456789012"
         }
       }
@@ -115,19 +115,19 @@ run "logs_and_events_are_scoped_to_this_account_and_region" {
   }
 
   assert {
-    condition     = one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Principal.Service == "logs.eu-west-2.amazonaws.com"
+    condition     = one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Principal.Service == "logs.us-east-1.amazonaws.com"
     error_message = "CloudWatch Logs is the regional logs principal."
   }
 
   assert {
-    condition     = one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:eu-west-2:123456789012:log-group:*"
+    condition     = one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:us-east-1:123456789012:log-group:*"
     error_message = "CloudWatch Logs may use the key only for this account's log groups in this region."
   }
 
   # Bus and archive crypto is scoped by the event-bus encryption context, which
   # archive calls always carry (they carry no aws:SourceArn).
   assert {
-    condition     = one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridge"]).Condition == { ArnLike = { "kms:EncryptionContext:aws:events:event-bus:arn" = "arn:aws:events:eu-west-2:123456789012:event-bus/*" } }
+    condition     = one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridge"]).Condition == { ArnLike = { "kms:EncryptionContext:aws:events:event-bus:arn" = "arn:aws:events:us-east-1:123456789012:event-bus/*" } }
     error_message = "EventBridge bus/archive crypto must be conditioned only on kms:EncryptionContext:aws:events:event-bus:arn for this account's buses in this region."
   }
 
@@ -151,7 +151,7 @@ run "logs_and_events_are_scoped_to_this_account_and_region" {
     condition = (
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSNSTopics"]).Principal.Service == "events.amazonaws.com"
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSNSTopics"]).Condition == { ArnLike = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:eu-west-2:123456789012:*" } }
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSNSTopics"]).Condition == { ArnLike = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:us-east-1:123456789012:*" } }
     )
     error_message = "EventBridge may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region, conditioned on the SNS encryption context alone (no aws:Source* keys, which break EventBridge delivery)."
   }
@@ -167,8 +167,8 @@ run "logs_and_events_are_scoped_to_this_account_and_region" {
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Condition.StringEquals == { "aws:SourceAccount" = "123456789012" }
       && toset(keys(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Condition.ArnLike)) == toset(["aws:SourceArn"])
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowEventBridgeSQSQueues"]).Condition.ArnLike["aws:SourceArn"]) == toset([
-        "arn:aws:events:eu-west-2:123456789012:rule/*",
-        "arn:aws:events:eu-west-2:123456789012:event-bus/*",
+        "arn:aws:events:us-east-1:123456789012:rule/*",
+        "arn:aws:events:us-east-1:123456789012:event-bus/*",
       ])
     )
     error_message = "EventBridge may use kms:GenerateDataKey/kms:Decrypt for SQS queues only from this account's rules (targets) and buses (bus DLQs) in this region (aws:SourceAccount and aws:SourceArn), and under no other condition."
@@ -180,7 +180,7 @@ run "logs_and_events_are_scoped_to_this_account_and_region" {
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchAlarmsSNSTopics"]).Condition == {
         StringEquals = { "aws:SourceAccount" = "123456789012" }
-        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:us-east-1:123456789012:*" }
       }
     )
     error_message = "CloudWatch alarms may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region, and only for this account (aws:SourceAccount)."
@@ -218,7 +218,7 @@ run "sns_delivers_to_queues_only_for_this_accounts_topics" {
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowSNS"]).Action) == toset(["kms:Decrypt", "kms:GenerateDataKey*"])
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowSNS"]).Condition == {
         StringEquals = { "aws:SourceAccount" = "123456789012" }
-        ArnLike      = { "aws:SourceArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+        ArnLike      = { "aws:SourceArn" = "arn:aws:sns:us-east-1:123456789012:*" }
       }
     )
     error_message = "SNS may use kms:Decrypt/kms:GenerateDataKey* only for this account's topics in this region (aws:SourceAccount and aws:SourceArn)."
@@ -267,7 +267,7 @@ run "cloudtrail_is_scoped_to_this_accounts_trails" {
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Action == "kms:GenerateDataKey*"
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Principal.Service == "cloudtrail.amazonaws.com"
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Condition.StringLike["kms:EncryptionContext:aws:cloudtrail:arn"] == "arn:aws:cloudtrail:*:123456789012:trail/*"
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Condition.ArnLike["aws:SourceArn"] == "arn:aws:cloudtrail:eu-west-2:123456789012:trail/*"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailEncryptLogs"]).Condition.ArnLike["aws:SourceArn"] == "arn:aws:cloudtrail:us-east-1:123456789012:trail/*"
     )
     error_message = "CloudTrail may only generate data keys for this account's trails (encryption context and aws:SourceArn)."
   }
@@ -275,7 +275,7 @@ run "cloudtrail_is_scoped_to_this_accounts_trails" {
   assert {
     condition = (
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDescribeKey"]).Action == "kms:DescribeKey"
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDescribeKey"]).Condition == { ArnLike = { "aws:SourceArn" = "arn:aws:cloudtrail:eu-west-2:123456789012:trail/*" } }
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDescribeKey"]).Condition == { ArnLike = { "aws:SourceArn" = "arn:aws:cloudtrail:us-east-1:123456789012:trail/*" } }
     )
     error_message = "CloudTrail DescribeKey is limited to this account's trails in this region."
   }
@@ -286,7 +286,7 @@ run "cloudtrail_is_scoped_to_this_accounts_trails" {
     condition = (
       one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDecrypt"]).Action == "kms:Decrypt"
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDecrypt"]).Principal.Service == "cloudtrail.amazonaws.com"
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDecrypt"]).Condition == { ArnLike = { "aws:SourceArn" = "arn:aws:cloudtrail:eu-west-2:123456789012:trail/*" } }
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudTrailDecrypt"]).Condition == { ArnLike = { "aws:SourceArn" = "arn:aws:cloudtrail:us-east-1:123456789012:trail/*" } }
     )
     error_message = "CloudTrail may kms:Decrypt (S3 Bucket Key) only for this account's trails in this region (aws:SourceArn)."
   }
@@ -307,29 +307,29 @@ run "replica_policy_is_scoped_to_its_own_region_not_the_primarys" {
     allow_autoscaling_ebs = true
     allow_backup          = true
     is_multi_region       = true
-    replica_regions       = ["us-east-1"]
+    replica_regions       = ["us-east-2"]
   }
 
   assert {
     condition = (
       one([
-        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        for s in jsondecode(module.kms.replica_key_policies["us-east-2"]).Statement : s
         if try(s.Sid, "") == "AllowCloudWatchLogs"
-      ]).Principal.Service == "logs.us-east-1.amazonaws.com"
+      ]).Principal.Service == "logs.us-east-2.amazonaws.com"
       && one([
-        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        for s in jsondecode(module.kms.replica_key_policies["us-east-2"]).Statement : s
         if try(s.Sid, "") == "AllowCloudWatchLogs"
-      ]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:us-east-1:123456789012:log-group:*"
+      ]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:us-east-2:123456789012:log-group:*"
     )
-    error_message = "A replica's AllowCloudWatchLogs statement must name the replica's own region (us-east-1), not the primary's (eu-west-2)."
+    error_message = "A replica's AllowCloudWatchLogs statement must name the replica's own region (us-east-2), not the primary's (us-east-1)."
   }
 
   assert {
     condition = (
       one([
-        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        for s in jsondecode(module.kms.replica_key_policies["us-east-2"]).Statement : s
         if try(s.Sid, "") == "AllowAutoScalingEBSUsage"
-      ]).Condition.StringEquals["kms:ViaService"] == "ec2.us-east-1.amazonaws.com"
+      ]).Condition.StringEquals["kms:ViaService"] == "ec2.us-east-2.amazonaws.com"
     )
     error_message = "A replica's AllowAutoScalingEBSUsage statement's kms:ViaService must name the replica's own region."
   }
@@ -337,11 +337,11 @@ run "replica_policy_is_scoped_to_its_own_region_not_the_primarys" {
   assert {
     condition = (
       one([
-        for s in jsondecode(module.kms.replica_key_policies["us-east-1"]).Statement : s
+        for s in jsondecode(module.kms.replica_key_policies["us-east-2"]).Statement : s
         if try(s.Sid, "") == "AllowBackupSNSTopics"
-      ]).Condition.ArnLike["kms:EncryptionContext:aws:sns:topicArn"] == "arn:aws:sns:us-east-1:123456789012:*"
+      ]).Condition.ArnLike["kms:EncryptionContext:aws:sns:topicArn"] == "arn:aws:sns:us-east-2:123456789012:*"
     )
-    error_message = "A replica's AllowBackupSNSTopics statement's kms:EncryptionContext:aws:sns:topicArn must name the replica's own region (us-east-1), not the primary's (eu-west-2)."
+    error_message = "A replica's AllowBackupSNSTopics statement's kms:EncryptionContext:aws:sns:topicArn must name the replica's own region (us-east-2), not the primary's (us-east-1)."
   }
 
   # The logs condition on the *primary's own* policy (module.kms.key_policy),
@@ -349,8 +349,8 @@ run "replica_policy_is_scoped_to_its_own_region_not_the_primarys" {
   # once replicas exist alongside it.
   assert {
     condition = (
-      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Principal.Service == "logs.eu-west-2.amazonaws.com"
-      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:eu-west-2:123456789012:log-group:*"
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Principal.Service == "logs.us-east-1.amazonaws.com"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]).Condition.ArnLike["kms:EncryptionContext:aws:logs:arn"] == "arn:aws:logs:us-east-1:123456789012:log-group:*"
     )
     error_message = "The primary key's own policy must stay scoped to the primary's region even when replicas exist."
   }
@@ -369,7 +369,7 @@ run "backup_publishes_to_sns_topics_only_for_this_accounts_topics" {
       && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
       && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowBackupSNSTopics"]).Condition == {
         StringEquals = { "aws:SourceAccount" = "123456789012" }
-        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:eu-west-2:123456789012:*" }
+        ArnLike      = { "kms:EncryptionContext:aws:sns:topicArn" = "arn:aws:sns:us-east-1:123456789012:*" }
       }
     )
     error_message = "AWS Backup may use kms:GenerateDataKey*/kms:Decrypt only for this account's SNS topics in this region (aws:SourceAccount and the SNS encryption context)."

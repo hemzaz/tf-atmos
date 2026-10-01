@@ -5,7 +5,7 @@
 mock_provider "aws" {}
 
 variables {
-  region           = "eu-west-2"
+  region           = "us-east-1"
   api_name         = "microservices-api"
   api_type         = "HTTP"
   create_dashboard = false

@@ -77,7 +77,7 @@
 #          app_domain_name: example.com          # external-dns filter, CORS origins, SES sender
 #          hosted_zone_id: Z0123456789ABCDEFGHIJ # app_domain_name's Route 53 zone
 #          letsencrypt_email: ops@example.com    # cert-manager ACME account
-#          cognito_user_pool_id: eu-west-2_xxxx  # JWT issuer
+#          cognito_user_pool_id: us-east-1_xxxx  # JWT issuer
 #          cognito_client_id: xxxxxxxx           # JWT audience
 #          welcome_email_version: "1.4.2"        # package key (welcome-email/<version>.zip); bump to deploy new code
 #          dns_component: network/main           # dns instance holding the domain's public zone
@@ -132,10 +132,10 @@ components:
         # Larger CIDR for microservices (many pods need IPs)
         ipv4_primary_cidr_block: "10.20.0.0/16"
 
-        availability_zones:
-          - "{{ .vars.region }}a"
-          - "{{ .vars.region }}b"
-          - "{{ .vars.region }}c"
+        availability_zone_ids:  # us-east-1 AZ IDs; see components/terraform/vpc/README.md
+          - use1-az1
+          - use1-az2
+          - use1-az4
 
         # Larger subnets for EKS pods
         private_subnets:

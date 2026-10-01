@@ -7,10 +7,10 @@
 #
 # Usage:
 #   cp templates/configs/development.yaml stacks/mixins/profiles/development.yaml
-#   # in the stack (e.g. stacks/orgs/fnx/dev/eu-west-2/<environment>.yaml):
+#   # in the stack (e.g. stacks/orgs/fnx/dev/us-east-1/<environment>.yaml):
 #   import:
 #     - orgs/fnx/dev/_defaults
-#     - mixins/region/eu-west-2
+#     - mixins/region/us-east-1
 #     - catalog/...                   # catalog imports
 #     - mixins/profiles/development   # last, so it overrides the catalog defaults
 #

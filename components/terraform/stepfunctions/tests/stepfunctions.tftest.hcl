@@ -7,7 +7,7 @@ mock_provider "aws" {
   # aws_sfn_state_machine) the events role's scoped policy.
   mock_resource "aws_cloudwatch_log_group" {
     defaults = {
-      arn = "arn:aws:logs:eu-west-2:123456789012:log-group:/aws/vendedlogs/states/test-order-fulfilment"
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:/aws/vendedlogs/states/test-order-fulfilment"
     }
   }
 
@@ -21,13 +21,13 @@ mock_provider "aws" {
 
   mock_resource "aws_sfn_state_machine" {
     defaults = {
-      arn = "arn:aws:states:eu-west-2:123456789012:stateMachine:test-order-fulfilment"
+      arn = "arn:aws:states:us-east-1:123456789012:stateMachine:test-order-fulfilment"
     }
   }
 }
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   name   = "order-fulfilment"
   definition = {
     Comment = "Order fulfilment workflow"
@@ -35,12 +35,12 @@ variables {
     States = {
       ProcessOrder = {
         Type     = "Task"
-        Resource = "arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"
+        Resource = "arn:aws:lambda:us-east-1:123456789012:function:test-order-processor"
         End      = true
       }
     }
   }
-  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -327,12 +327,12 @@ run "iam_policies_become_one_custom_inline_policy" {
       {
         sid       = "InvokeOrderProcessor"
         actions   = ["lambda:InvokeFunction"]
-        resources = ["arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"]
+        resources = ["arn:aws:lambda:us-east-1:123456789012:function:test-order-processor"]
       },
       {
         sid       = "PublishNotifications"
         actions   = ["sns:Publish"]
-        resources = ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+        resources = ["arn:aws:sns:us-east-1:123456789012:test-notifications"]
       }
     ]
   }
@@ -347,7 +347,7 @@ run "iam_policies_become_one_custom_inline_policy" {
       jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Sid == "InvokeOrderProcessor"
       && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Effect == "Allow"
       && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Action == ["lambda:InvokeFunction"]
-      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Resource == ["arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"]
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Resource == ["arn:aws:lambda:us-east-1:123456789012:function:test-order-processor"]
     )
     error_message = "The first iam_policies entry becomes a statement with matching Sid, Effect, Action and Resource."
   }
@@ -357,7 +357,7 @@ run "iam_policies_become_one_custom_inline_policy" {
       jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Sid == "PublishNotifications"
       && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Effect == "Allow"
       && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Action == ["sns:Publish"]
-      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Resource == ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+      && jsondecode(aws_iam_role_policy.custom[0].policy).Statement[1].Resource == ["arn:aws:sns:us-east-1:123456789012:test-notifications"]
     )
     error_message = "The second iam_policies entry becomes its own statement with matching Sid, Effect, Action and Resource."
   }
@@ -376,12 +376,12 @@ run "iam_policies_conditions_render_as_the_statements_condition" {
       {
         sid       = "PublishNotificationsKMS"
         actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
-        resources = ["arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"]
+        resources = ["arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"]
         conditions = [
           {
             test     = "StringEquals"
             variable = "kms:EncryptionContext:aws:sns:topicArn"
-            values   = ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+            values   = ["arn:aws:sns:us-east-1:123456789012:test-notifications"]
           }
         ]
       }
@@ -390,7 +390,7 @@ run "iam_policies_conditions_render_as_the_statements_condition" {
 
   assert {
     condition = (
-      jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Condition.StringEquals["kms:EncryptionContext:aws:sns:topicArn"] == ["arn:aws:sns:eu-west-2:123456789012:test-notifications"]
+      jsondecode(aws_iam_role_policy.custom[0].policy).Statement[0].Condition.StringEquals["kms:EncryptionContext:aws:sns:topicArn"] == ["arn:aws:sns:us-east-1:123456789012:test-notifications"]
     )
     error_message = "A statement's conditions render as its Condition, grouped by test operator then by variable."
   }
@@ -473,7 +473,7 @@ run "rejects_a_wildcard_allow_action_in_iam_policies" {
     iam_policies = [
       {
         actions   = ["*"]
-        resources = ["arn:aws:lambda:eu-west-2:123456789012:function:test-order-processor"]
+        resources = ["arn:aws:lambda:us-east-1:123456789012:function:test-order-processor"]
       }
     ]
   }

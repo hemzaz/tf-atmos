@@ -18,7 +18,7 @@
 TENANT ?= fnx
 STAGE ?= $(or $(ACCOUNT),dev)
 ENVIRONMENT ?= testenv-01
-REGION ?= eu-west-2
+REGION ?= us-east-1
 
 # Derived values (STACK can also be passed directly: make plan STACK=fnx-prod-production)
 STACK ?= $(TENANT)-$(STAGE)-$(ENVIRONMENT)

@@ -1,8 +1,27 @@
+# availability_zone_ids resolve to this account's AZ names, as Cloud Posse
+# aws-dynamic-subnets does with a zone-id filter.
+data "aws_availability_zones" "by_id" {
+  count = var.availability_zone_ids != null ? 1 : 0
+
+  filter {
+    name   = "zone-id"
+    values = var.availability_zone_ids
+  }
+}
+
 locals {
+  az_name_by_id = var.availability_zone_ids == null ? {} : zipmap(
+    data.aws_availability_zones.by_id[0].zone_ids,
+    data.aws_availability_zones.by_id[0].names,
+  )
+  availability_zones = var.availability_zone_ids == null ? var.availability_zones : [
+    for id in var.availability_zone_ids : lookup(local.az_name_by_id, id, null)
+  ]
+
   # Subnets keyed by CIDR so adding or removing one does not renumber the others
-  private_subnets  = { for i, cidr in var.private_subnets : cidr => { index = i, az = var.availability_zones[i] } }
-  public_subnets   = { for i, cidr in var.public_subnets : cidr => { index = i, az = var.availability_zones[i] } }
-  database_subnets = { for i, cidr in var.database_subnets : cidr => { index = i, az = var.availability_zones[i % length(var.availability_zones)] } }
+  private_subnets  = { for i, cidr in var.private_subnets : cidr => { index = i, az = local.availability_zones[i] } }
+  public_subnets   = { for i, cidr in var.public_subnets : cidr => { index = i, az = local.availability_zones[i] } }
+  database_subnets = { for i, cidr in var.database_subnets : cidr => { index = i, az = local.availability_zones[i % length(local.availability_zones)] } }
 }
 
 resource "aws_vpc" "main" {
@@ -11,6 +30,13 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
 
   tags = { Name = "${var.tags["Environment"]}-vpc" }
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for az in local.availability_zones : az != null])
+      error_message = "Every availability_zone_ids entry must be an AZ ID of this account's region."
+    }
+  }
 }
 
 resource "aws_subnet" "private" {

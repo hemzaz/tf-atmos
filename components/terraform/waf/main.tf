@@ -211,7 +211,7 @@ resource "aws_wafv2_web_acl_association" "this" {
 }
 
 resource "aws_cloudwatch_log_group" "this" {
-  #checkov:skip=CKV_AWS_158:kms_key_arn is an input; unset only for a CLOUDFRONT-scope (us-east-1) instance, whose region has no matching key in this stack's usual (regional) kms/main -- REGIONAL instances set it
+  #checkov:skip=CKV_AWS_158:kms_key_arn is an input; unset only for a CLOUDFRONT-scope (us-east-1) instance of a stack outside us-east-1, which has no us-east-1 key -- every fnx instance sets it
   count = local.enabled && var.enable_logging ? 1 : 0
 
   name              = local.log_group_name
@@ -234,9 +234,10 @@ resource "aws_cloudwatch_log_group" "this" {
 #
 # Because every instance of this component that logs creates its own named
 # policy, N waf instances in a region consume N of that region's 10
-# resource-policy slots (there are already 2 in eu-west-2 -- web-application/
-# waf and serverless-api/waf -- and 1 in us-east-1: web-application/
-# waf-cloudfront). var.manage_log_resource_policy is the escape hatch: set it
+# resource-policy slots (the templates' web-application/waf,
+# serverless-api/waf and web-application/waf-cloudfront are all in us-east-1,
+# the stacks' region, where dns query logging adds its own policies).
+# var.manage_log_resource_policy is the escape hatch: set it
 # to false on an additional instance in a region that is approaching the
 # quota, so it relies on the implicit AWSWAF-LOGS policy instead of adding
 # its own.

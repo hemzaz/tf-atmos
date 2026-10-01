@@ -1,0 +1,15 @@
+---
+import:
+  - orgs/fnx/dev/_defaults
+  - mixins/region/us-east-1
+
+vars:
+  region: us-east-1
+settings:
+  environment:
+    availability_zone_ids:
+      - use1-az1
+      - use1-az2
+      - use1-az4
+  context:
+    environment: us-east-1

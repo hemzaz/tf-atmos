@@ -8,7 +8,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -25,7 +25,7 @@ override_data {
 }
 
 variables {
-  region        = "eu-west-2"
+  region        = "us-east-1"
   function_name = "welcome-email"
   handler       = "index.handler"
   s3_bucket     = "test-artifacts"
@@ -50,12 +50,12 @@ run "failure_queue_gets_send_and_key_access" {
 
   variables {
     configure_event_invoke = true
-    on_failure_destination = "arn:aws:sqs:eu-west-2:123456789012:test-welcome-email-failures"
-    delivery_kms_key_arn   = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+    on_failure_destination = "arn:aws:sqs:us-east-1:123456789012:test-welcome-email-failures"
+    delivery_kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   }
 
   assert {
-    condition     = aws_lambda_function_event_invoke_config.main[0].destination_config[0].on_failure[0].destination == "arn:aws:sqs:eu-west-2:123456789012:test-welcome-email-failures"
+    condition     = aws_lambda_function_event_invoke_config.main[0].destination_config[0].on_failure[0].destination == "arn:aws:sqs:us-east-1:123456789012:test-welcome-email-failures"
     error_message = "on_failure_destination is the event invoke config's on_failure destination."
   }
 
@@ -67,7 +67,7 @@ run "failure_queue_gets_send_and_key_access" {
   assert {
     condition = (
       one([for s in jsondecode(data.aws_iam_policy_document.delivery[0].json).Statement : s if s.Sid == "SendToDeliveryQueues"]).Action == "sqs:SendMessage"
-      && one([for s in jsondecode(data.aws_iam_policy_document.delivery[0].json).Statement : s if s.Sid == "SendToDeliveryQueues"]).Resource == "arn:aws:sqs:eu-west-2:123456789012:test-welcome-email-failures"
+      && one([for s in jsondecode(data.aws_iam_policy_document.delivery[0].json).Statement : s if s.Sid == "SendToDeliveryQueues"]).Resource == "arn:aws:sqs:us-east-1:123456789012:test-welcome-email-failures"
     )
     error_message = "The role may send to the failure queue, and only to it."
   }
@@ -135,7 +135,7 @@ run "secretsmanager_source_arn_gets_scoped_invoke_permission" {
   command = plan
 
   variables {
-    secretsmanager_source_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/auth/jwt-signing-AbCdEf"
+    secretsmanager_source_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/auth/jwt-signing-AbCdEf"
   }
 
   assert {
@@ -144,7 +144,7 @@ run "secretsmanager_source_arn_gets_scoped_invoke_permission" {
   }
 
   assert {
-    condition     = aws_lambda_permission.secretsmanager[0].source_arn == "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/auth/jwt-signing-AbCdEf"
+    condition     = aws_lambda_permission.secretsmanager[0].source_arn == "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/auth/jwt-signing-AbCdEf"
     error_message = "source_arn is scoped to the one secret."
   }
 
@@ -158,7 +158,7 @@ run "rejects_a_non_secretsmanager_source_arn" {
   command = plan
 
   variables {
-    secretsmanager_source_arn = "arn:aws:sqs:eu-west-2:123456789012:some-queue"
+    secretsmanager_source_arn = "arn:aws:sqs:us-east-1:123456789012:some-queue"
   }
 
   expect_failures = [var.secretsmanager_source_arn]
@@ -200,7 +200,7 @@ run "kms_key_arn_gets_a_scoped_env_decrypt_grant" {
   command = plan
 
   variables {
-    kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+    kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   }
 
   assert {
@@ -211,7 +211,7 @@ run "kms_key_arn_gets_a_scoped_env_decrypt_grant" {
   assert {
     condition = (
       one([for s in jsondecode(aws_iam_role_policy.lambda_kms_env[0].policy).Statement : s if s.Sid == "AllowEnvironmentVariableDecryption"]).Resource
-      == "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+      == "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     )
     error_message = "The grant is scoped to kms_key_arn."
   }
@@ -219,7 +219,7 @@ run "kms_key_arn_gets_a_scoped_env_decrypt_grant" {
   assert {
     condition = (
       one([for s in jsondecode(aws_iam_role_policy.lambda_kms_env[0].policy).Statement : s if s.Sid == "AllowEnvironmentVariableDecryption"]).Condition.StringEquals["kms:EncryptionContext:aws:lambda:FunctionArn"]
-      == "arn:aws:lambda:eu-west-2:123456789012:function:test-welcome-email"
+      == "arn:aws:lambda:us-east-1:123456789012:function:test-welcome-email"
     )
     error_message = "The grant is further scoped by the encryption context Lambda itself sets: this function's own (deterministic) ARN."
   }
@@ -251,11 +251,11 @@ run "rotation_secret_arn_configures_rotation_from_this_instance" {
   # role's own policies, so without these, Secrets Manager could invoke this
   # function before its permissions exist or have propagated.
   variables {
-    secretsmanager_source_arn    = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
-    rotation_secret_arn          = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+    secretsmanager_source_arn    = "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+    rotation_secret_arn          = "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
     rotation_days                = 30
     custom_policy                = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "secretsmanager:GetSecretValue", Resource = "*" }] })
-    kms_key_arn                  = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+    kms_key_arn                  = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     vpc_id                       = "vpc-0123456789abcdef0"
     subnet_ids                   = ["subnet-0123456789abcdef0"]
     vpc_endpoint_prefix_list_ids = ["pl-0123456789abcdef0"]
@@ -267,12 +267,12 @@ run "rotation_secret_arn_configures_rotation_from_this_instance" {
   }
 
   assert {
-    condition     = aws_secretsmanager_secret_rotation.this[0].secret_id == "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+    condition     = aws_secretsmanager_secret_rotation.this[0].secret_id == "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
     error_message = "rotation_secret_arn becomes the rotation resource's secret_id."
   }
 
   assert {
-    condition     = aws_secretsmanager_secret_rotation.this[0].rotation_lambda_arn == "arn:aws:lambda:eu-west-2:123456789012:function:test-welcome-email"
+    condition     = aws_secretsmanager_secret_rotation.this[0].rotation_lambda_arn == "arn:aws:lambda:us-east-1:123456789012:function:test-welcome-email"
     error_message = "rotation_lambda_arn is this function's own (deterministic) ARN."
   }
 
@@ -291,7 +291,7 @@ run "rotation_secret_arn_requires_secretsmanager_source_arn" {
   command = plan
 
   variables {
-    rotation_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+    rotation_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
   }
 
   expect_failures = [aws_secretsmanager_secret_rotation.this]
@@ -307,8 +307,8 @@ run "rotation_secret_arn_requires_matching_secretsmanager_source_arn" {
   # SourceArn would name a different secret than the one rotation is
   # configured on).
   variables {
-    secretsmanager_source_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/api/other-secret-AbCdEf"
-    rotation_secret_arn       = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
+    secretsmanager_source_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/api/other-secret-AbCdEf"
+    rotation_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:microservices/dev/cache/auth-token-AbCdEf"
   }
 
   expect_failures = [aws_secretsmanager_secret_rotation.this]

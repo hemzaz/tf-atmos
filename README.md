@@ -35,12 +35,12 @@ domain files (`globals`, `networking`, `security`, `compute`, `services`).
 
 | Stack | Manifest (`stacks/orgs/fnx/...`) | Purpose |
 |-------|----------------------------------|---------|
-| `fnx-dev-testenv-01` | `dev/eu-west-2/testenv-01.yaml` | dev |
-| `fnx-staging-staging-01` | `staging/eu-west-2/staging-01.yaml` | staging |
-| `fnx-prod-production` | `prod/eu-west-2/production.yaml` | production |
-| `fnx-core-root` | `core/eu-west-2/root.yaml` | management account: the state backend (`backend/main`); not run by CI |
-| `fnx-local-sandbox` | `local/eu-west-2/sandbox.yaml` | Floci emulator lane, no AWS account needed |
-| `fnx-local-localemu` | `local/eu-west-2/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
+| `fnx-dev-testenv-01` | `dev/us-east-1/testenv-01.yaml` | dev |
+| `fnx-staging-staging-01` | `staging/us-east-1/staging-01.yaml` | staging |
+| `fnx-prod-production` | `prod/us-east-1/production.yaml` | production |
+| `fnx-core-root` | `core/us-east-1/root.yaml` | management account: the state backend (`backend/main`); not run by CI |
+| `fnx-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
+| `fnx-local-localemu` | `local/us-east-1/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
 
 An instance name need not match its module: `metadata.component` decides. `network/main` and
 `network/services` are `dns` instances; `network/vpc-peering` is the `network` module.

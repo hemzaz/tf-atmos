@@ -4,10 +4,10 @@
 mock_provider "aws" {}
 
 variables {
-  region                             = "eu-west-2"
+  region                             = "us-east-1"
   name                               = "orders"
   hash_key                           = "pk"
-  server_side_encryption_kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  server_side_encryption_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"

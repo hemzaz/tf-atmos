@@ -13,19 +13,19 @@ mock_provider "aws" {
 mock_provider "kubernetes" {}
 
 variables {
-  region                    = "eu-west-2"
+  region                    = "us-east-1"
   environment               = "dev"
   cluster_name              = "testenv-01-main"
-  host                      = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+  host                      = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate    = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
   cluster_secret_store_name = "aws-secretsmanager"
-  database_secret_arn       = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds!db-11111111-2222-3333-4444-555555555555"
-  database_endpoint         = "testenv-01-main-db.abcdefghijk.eu-west-2.rds.amazonaws.com:5432"
+  database_secret_arn       = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-11111111-2222-3333-4444-555555555555"
+  database_endpoint         = "testenv-01-main-db.abcdefghijk.us-east-1.rds.amazonaws.com:5432"
   database_name             = "mainapp"
   api_gateway_image         = "ghcr.io/fnx-platform/api-gateway:1.4.2"
-  platform_api_image        = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/platform-api:1.4.2"
-  auth_service_image        = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/auth-service:1.4.2"
-  job_processor_image       = "123456789012.dkr.ecr.eu-west-2.amazonaws.com/job-processor:1.4.2"
+  platform_api_image        = "123456789012.dkr.ecr.us-east-1.amazonaws.com/platform-api:1.4.2"
+  auth_service_image        = "123456789012.dkr.ecr.us-east-1.amazonaws.com/auth-service:1.4.2"
+  job_processor_image       = "123456789012.dkr.ecr.us-east-1.amazonaws.com/job-processor:1.4.2"
   tags = {
     Environment = "dev"
     Tenant      = "fnx"
@@ -95,8 +95,8 @@ run "redis_enabled_creates_its_own_external_secret_and_env_var" {
 
   variables {
     redis_enabled    = true
-    redis_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:redis-auth/production/production-cache-AbCdEf"
-    redis_host       = "production-cache.abcdefg.euw2.cache.amazonaws.com"
+    redis_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:redis-auth/production/production-cache-AbCdEf"
+    redis_host       = "production-cache.abcdefg.use1.cache.amazonaws.com"
   }
 
   assert {
@@ -127,8 +127,8 @@ run "no_plaintext_credential_reaches_the_deployment_spec" {
   # takes no database_password/redis_password (or similar) variable at all.
   variables {
     redis_enabled    = true
-    redis_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:redis-auth/dev/dev-cache-AbCdEf"
-    redis_host       = "dev-cache.abcdefg.euw2.cache.amazonaws.com"
+    redis_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:redis-auth/dev/dev-cache-AbCdEf"
+    redis_host       = "dev-cache.abcdefg.use1.cache.amazonaws.com"
   }
 
   assert {
@@ -249,8 +249,8 @@ run "redis_url_uses_the_tls_scheme" {
 
   variables {
     redis_enabled    = true
-    redis_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:redis-auth/dev/dev-cache-AbCdEf"
-    redis_host       = "dev-cache.abcdefg.euw2.cache.amazonaws.com"
+    redis_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:redis-auth/dev/dev-cache-AbCdEf"
+    redis_host       = "dev-cache.abcdefg.use1.cache.amazonaws.com"
   }
 
   assert {

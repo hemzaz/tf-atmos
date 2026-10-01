@@ -11,7 +11,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -25,7 +25,7 @@ provider "aws" {
 # credentials configured here.
 provider "aws" {
   alias                       = "replica"
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -42,7 +42,7 @@ override_data {
 }
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -79,7 +79,7 @@ run "ebs_delete_requires_the_restore_test_resource_tag" {
     condition = (
       one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyEbsVolumesTaggedByThisTest"]).Action == "ec2:DeleteVolume"
       && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyEbsVolumesTaggedByThisTest"]).Effect == "Allow"
-      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyEbsVolumesTaggedByThisTest"]).Resource == "arn:aws:ec2:eu-west-2:123456789012:volume/*"
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyEbsVolumesTaggedByThisTest"]).Resource == "arn:aws:ec2:us-east-1:123456789012:volume/*"
       && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyEbsVolumesTaggedByThisTest"]).Condition == {
         StringEquals = { "aws:ResourceTag/BackupRestoreTest" = "true" }
       }
@@ -97,7 +97,7 @@ run "rds_delete_is_scoped_to_the_restore_test_db_prefix_and_tag" {
   assert {
     condition = (
       one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyRdsInstancesUnderTheRestoreTestPrefix"]).Action == "rds:DeleteDBInstance"
-      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyRdsInstancesUnderTheRestoreTestPrefix"]).Resource == "arn:aws:rds:eu-west-2:123456789012:db:test-backup-restore-test-*"
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyRdsInstancesUnderTheRestoreTestPrefix"]).Resource == "arn:aws:rds:us-east-1:123456789012:db:test-backup-restore-test-*"
       && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "DeleteOnlyRdsInstancesUnderTheRestoreTestPrefix"]).Condition == {
         StringEquals = { "aws:ResourceTag/BackupRestoreTest" = "true" }
       }
@@ -112,7 +112,7 @@ run "rds_tagging_is_scoped_to_the_restore_test_db_prefix" {
   assert {
     condition = (
       one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredRdsInstancesOnlyUnderTheRestoreTestPrefix"]).Action == "rds:AddTagsToResource"
-      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredRdsInstancesOnlyUnderTheRestoreTestPrefix"]).Resource == "arn:aws:rds:eu-west-2:123456789012:db:test-backup-restore-test-*"
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredRdsInstancesOnlyUnderTheRestoreTestPrefix"]).Resource == "arn:aws:rds:us-east-1:123456789012:db:test-backup-restore-test-*"
       && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredRdsInstancesOnlyUnderTheRestoreTestPrefix"]).Condition == {
         StringEquals = { "aws:RequestTag/BackupRestoreTest" = "true" }
       }
@@ -134,7 +134,7 @@ run "ebs_tagging_requires_the_request_tag_and_no_existing_environment_tag" {
   assert {
     condition = (
       one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredEbsVolumesOnlyBeforeTheyAreEnvironmentManaged"]).Action == "ec2:CreateTags"
-      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredEbsVolumesOnlyBeforeTheyAreEnvironmentManaged"]).Resource == "arn:aws:ec2:eu-west-2:123456789012:volume/*"
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredEbsVolumesOnlyBeforeTheyAreEnvironmentManaged"]).Resource == "arn:aws:ec2:us-east-1:123456789012:volume/*"
       && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "TagRestoredEbsVolumesOnlyBeforeTheyAreEnvironmentManaged"]).Condition == {
         StringEquals = { "aws:RequestTag/BackupRestoreTest" = "true" }
         Null         = { "aws:ResourceTag/Environment" = "true" }
@@ -196,7 +196,7 @@ run "backup_actions_are_scoped_to_this_components_own_vault" {
   assert {
     condition = (
       one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "ListRecoveryPointsInOwnVault"]).Action == "backup:ListRecoveryPointsByBackupVault"
-      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "ListRecoveryPointsInOwnVault"]).Resource == "arn:aws:backup:eu-west-2:123456789012:backup-vault:test-backup"
+      && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "ListRecoveryPointsInOwnVault"]).Resource == "arn:aws:backup:us-east-1:123456789012:backup-vault:test-backup"
     )
     error_message = "backup:ListRecoveryPointsByBackupVault must be scoped to this component's own vault ARN, not '*'."
   }
@@ -205,9 +205,9 @@ run "backup_actions_are_scoped_to_this_components_own_vault" {
     condition = (
       toset(one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "StartRestoreAndGetMetadataForOwnEnvironmentRecoveryPoints"]).Action) == toset(["backup:StartRestoreJob", "backup:GetRecoveryPointRestoreMetadata"])
       && toset(one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "StartRestoreAndGetMetadataForOwnEnvironmentRecoveryPoints"]).Resource) == toset([
-        "arn:aws:ec2:eu-west-2::snapshot/*",
-        "arn:aws:rds:eu-west-2:123456789012:snapshot:awsbackup:*",
-        "arn:aws:backup:eu-west-2:123456789012:recovery-point:*",
+        "arn:aws:ec2:us-east-1::snapshot/*",
+        "arn:aws:rds:us-east-1:123456789012:snapshot:awsbackup:*",
+        "arn:aws:backup:us-east-1:123456789012:recovery-point:*",
       ])
       && one([for s in jsondecode(aws_iam_role_policy.backup_testing_custom[0].policy).Statement : s if try(s.Sid, "") == "StartRestoreAndGetMetadataForOwnEnvironmentRecoveryPoints"]).Condition == {
         StringEquals = { "aws:ResourceTag/Environment" = "test" }
@@ -421,7 +421,7 @@ run "rds_tag_based_selection_is_and_scoped_to_rds_and_this_environment" {
   assert {
     condition = (
       length(aws_backup_selection.rds_tagged_daily) == 1
-      && toset(aws_backup_selection.rds_tagged_daily[0].resources) == toset(["arn:aws:rds:eu-west-2:123456789012:db:*"])
+      && toset(aws_backup_selection.rds_tagged_daily[0].resources) == toset(["arn:aws:rds:us-east-1:123456789012:db:*"])
       && length(aws_backup_selection.rds_tagged_daily[0].selection_tag) == 0
       && length(aws_backup_selection.rds_tagged_daily[0].condition) == 1
     )
@@ -484,7 +484,7 @@ run "ec2_and_ebs_tag_based_selections_are_and_scoped_by_resource_type" {
   assert {
     condition = (
       length(aws_backup_selection.ec2_daily) == 1
-      && toset(aws_backup_selection.ec2_daily[0].resources) == toset(["arn:aws:ec2:eu-west-2:123456789012:instance/*"])
+      && toset(aws_backup_selection.ec2_daily[0].resources) == toset(["arn:aws:ec2:us-east-1:123456789012:instance/*"])
       && length(aws_backup_selection.ec2_daily[0].selection_tag) == 0
       && length(aws_backup_selection.ec2_daily[0].condition) == 1
     )
@@ -494,7 +494,7 @@ run "ec2_and_ebs_tag_based_selections_are_and_scoped_by_resource_type" {
   assert {
     condition = (
       length(aws_backup_selection.ebs_tagged_daily) == 1
-      && toset(aws_backup_selection.ebs_tagged_daily[0].resources) == toset(["arn:aws:ec2:eu-west-2:123456789012:volume/*"])
+      && toset(aws_backup_selection.ebs_tagged_daily[0].resources) == toset(["arn:aws:ec2:us-east-1:123456789012:volume/*"])
       && length(aws_backup_selection.ebs_tagged_daily[0].selection_tag) == 0
       && length(aws_backup_selection.ebs_tagged_daily[0].condition) == 1
     )
@@ -511,12 +511,12 @@ run "explicit_arn_list_selections_are_built" {
   }
 
   assert {
-    condition     = length(aws_backup_selection.rds_daily) == 1 && toset(aws_backup_selection.rds_daily[0].resources) == toset(["arn:aws:rds:eu-west-2:123456789012:db:mydb"])
+    condition     = length(aws_backup_selection.rds_daily) == 1 && toset(aws_backup_selection.rds_daily[0].resources) == toset(["arn:aws:rds:us-east-1:123456789012:db:mydb"])
     error_message = "The explicit RDS ARN-list selection must build its resources list from var.rds_instances."
   }
 
   assert {
-    condition     = length(aws_backup_selection.ebs_daily) == 1 && toset(aws_backup_selection.ebs_daily[0].resources) == toset(["arn:aws:ec2:eu-west-2:123456789012:volume/vol-0123456789abcdef0"])
+    condition     = length(aws_backup_selection.ebs_daily) == 1 && toset(aws_backup_selection.ebs_daily[0].resources) == toset(["arn:aws:ec2:us-east-1:123456789012:volume/vol-0123456789abcdef0"])
     error_message = "The explicit EBS ARN-list selection must build its resources list from var.ebs_volume_ids."
   }
 }
@@ -561,7 +561,7 @@ run "backup_testing_lambda_has_its_own_encrypted_log_group" {
   # actually proves the log group is wired to it, not just that kms_key_id is
   # null when the variable is unset.
   variables {
-    kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+    kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   }
 
   assert {
@@ -569,7 +569,7 @@ run "backup_testing_lambda_has_its_own_encrypted_log_group" {
       length(aws_cloudwatch_log_group.backup_testing) == 1
       && aws_cloudwatch_log_group.backup_testing[0].name == "/aws/lambda/test-backup-testing"
       && aws_cloudwatch_log_group.backup_testing[0].retention_in_days == 365
-      && aws_cloudwatch_log_group.backup_testing[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+      && aws_cloudwatch_log_group.backup_testing[0].kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     )
     error_message = "The restore-test Lambda's CloudWatch log group must use var.kms_key_arn for encryption, not be left on the default/unencrypted path."
   }

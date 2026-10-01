@@ -7,7 +7,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -24,8 +24,8 @@ override_data {
 }
 
 variables {
-  region      = "eu-west-2"
-  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+  region      = "us-east-1"
+  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -93,7 +93,7 @@ run "policies_are_scoped_to_this_trail" {
   assert {
     condition = one([
       for st in jsondecode(data.aws_iam_policy_document.bucket.json).Statement : st if st.Sid == "AWSCloudTrailWrite"
-    ]).Condition.StringEquals["aws:SourceArn"] == "arn:aws:cloudtrail:eu-west-2:123456789012:trail/test-cloudtrail"
+    ]).Condition.StringEquals["aws:SourceArn"] == "arn:aws:cloudtrail:us-east-1:123456789012:trail/test-cloudtrail"
     error_message = "Only this trail may write to the bucket (aws:SourceArn)."
   }
 
@@ -112,12 +112,12 @@ run "policies_are_scoped_to_this_trail" {
   }
 
   assert {
-    condition     = jsondecode(data.aws_iam_policy_document.assume.json).Statement[0].Condition.StringEquals["aws:SourceArn"] == "arn:aws:cloudtrail:eu-west-2:123456789012:trail/test-cloudtrail"
+    condition     = jsondecode(data.aws_iam_policy_document.assume.json).Statement[0].Condition.StringEquals["aws:SourceArn"] == "arn:aws:cloudtrail:us-east-1:123456789012:trail/test-cloudtrail"
     error_message = "Only this trail may assume the CloudWatch Logs role."
   }
 
   assert {
-    condition     = jsondecode(data.aws_iam_policy_document.cloudwatch_logs.json).Statement[0].Resource == "arn:aws:logs:eu-west-2:123456789012:log-group:/aws/cloudtrail/test-cloudtrail:log-stream:*"
+    condition     = jsondecode(data.aws_iam_policy_document.cloudwatch_logs.json).Statement[0].Resource == "arn:aws:logs:us-east-1:123456789012:log-group:/aws/cloudtrail/test-cloudtrail:log-stream:*"
     error_message = "The role may write only to the trail's own log group."
   }
 }

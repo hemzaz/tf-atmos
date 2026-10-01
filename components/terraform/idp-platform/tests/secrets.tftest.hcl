@@ -14,11 +14,11 @@ mock_provider "aws" {}
 override_module {
   target = module.eks_cluster
   outputs = {
-    eks_cluster_arn                        = "arn:aws:eks:eu-west-2:123456789012:cluster/dev-idp"
+    eks_cluster_arn                        = "arn:aws:eks:us-east-1:123456789012:cluster/dev-idp"
     eks_cluster_certificate_authority_data = "Y2E="
     eks_cluster_endpoint                   = "https://example.eks.amazonaws.com"
     eks_cluster_id                         = "dev-idp"
-    eks_cluster_identity_oidc_issuer_arn   = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLE"
+    eks_cluster_identity_oidc_issuer_arn   = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
     eks_cluster_managed_security_group_id  = "sg-0123456789abcdef0"
     eks_node_group_arns                    = {}
   }
@@ -27,11 +27,11 @@ override_module {
 override_module {
   target = module.idp_database
   outputs = {
-    instance_address    = "dev-idp.example.eu-west-2.rds.amazonaws.com"
-    instance_endpoint   = "dev-idp.example.eu-west-2.rds.amazonaws.com:5432"
+    instance_address    = "dev-idp.example.us-east-1.rds.amazonaws.com"
+    instance_endpoint   = "dev-idp.example.us-east-1.rds.amazonaws.com:5432"
     instance_id         = "dev-idp"
     instance_name       = "idp"
-    password_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds-dev-idp-AbCdEf"
+    password_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds-dev-idp-AbCdEf"
     security_group_id   = "sg-0123456789abcdef1"
   }
 }
@@ -39,7 +39,7 @@ override_module {
 override_module {
   target = module.acm_certificate
   outputs = {
-    certificate_arns    = { idp = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000" }
+    certificate_arns    = { idp = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000" }
     certificate_domains = { idp = "example.com" }
   }
 }
@@ -67,11 +67,11 @@ override_data {
 }
 
 variables {
-  region                  = "eu-west-2"
+  region                  = "us-east-1"
   environment             = "dev"
   domain_name             = "example.com"
   acknowledge_unsupported = true
-  kms_key_arn             = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+  kms_key_arn             = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
 }
 
 run "redis_auth_token_is_generated_and_written_write_only" {
@@ -102,7 +102,7 @@ run "database_url_requires_verified_tls" {
   command = plan
 
   assert {
-    condition     = local.database_url == "postgresql://dev-idp.example.eu-west-2.rds.amazonaws.com:5432/idp?sslmode=verify-full&sslrootcert=/etc/ssl/certs/rds-global-bundle.pem"
+    condition     = local.database_url == "postgresql://dev-idp.example.us-east-1.rds.amazonaws.com:5432/idp?sslmode=verify-full&sslrootcert=/etc/ssl/certs/rds-global-bundle.pem"
     error_message = "The config secret's database_url must require verified TLS against the RDS CA bundle."
   }
 }
@@ -143,7 +143,7 @@ run "redis_slow_log_group_uses_the_cmk" {
   command = plan
 
   assert {
-    condition     = aws_cloudwatch_log_group.redis_slow_log.kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+    condition     = aws_cloudwatch_log_group.redis_slow_log.kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
     error_message = "The Redis slow-log group must be encrypted with kms_key_arn."
   }
 }

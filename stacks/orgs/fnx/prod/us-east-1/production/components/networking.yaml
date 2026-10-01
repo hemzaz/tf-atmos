@@ -1,0 +1,278 @@
+---
+# =============================================================================
+# Networking Component Configurations for Production Environment
+# =============================================================================
+# VPC and network resources with full high availability
+# Multi-AZ deployment, redundant NAT Gateways, comprehensive flow logging
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/us-east-1/production/components/globals
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+
+# The two VPCs' CIDRs, in one place: each vpc instance's
+# ipv4_primary_cidr_block, the other one's private_network_acl_peer_cidr_blocks
+# and network/vpc-peering's routes all read them. Literals, not
+# !terraform.state <vpc> .vpc_cidr: vpc/main and vpc/services would then
+# read each other, a cycle.
+settings:
+  network:
+    vpc_cidrs:
+      main: "10.20.0.0/16"
+      services: "10.21.0.0/16"
+
+components:
+  terraform:
+    # ==========================================================================
+    # Primary VPC - Main Application Workloads (High Availability)
+    # ==========================================================================
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+        # The private NACL admits vpc/services, peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.services }}"
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
+
+        # Private subnets - application tier
+        private_subnets:
+          - "10.20.1.0/24"
+          - "10.20.2.0/24"
+          - "10.20.3.0/24"
+
+        # Public subnets - load balancers, NAT
+        public_subnets:
+          - "10.20.101.0/24"
+          - "10.20.102.0/24"
+          - "10.20.103.0/24"
+
+        # Database subnets - isolated tier
+        database_subnets:
+          - "10.20.201.0/24"
+          - "10.20.202.0/24"
+          - "10.20.203.0/24"
+
+        # Elasticache subnets
+        nat_gateway_enabled: true
+        nat_gateway_strategy: "one_per_az"
+
+        # DNS settings
+        default_sg_ingress_self_only: true
+        default_sg_egress_self_only: false
+        default_sg_allow_all_outbound: true
+
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/main, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+
+        tags:
+          NetworkTier: "primary"
+          HighAvailability: "true"
+          CriticalityLevel: "high"
+
+    # ==========================================================================
+    # Services VPC - Dedicated Backend Services (High Availability)
+    # ==========================================================================
+        vpc_flow_logs_enabled: true
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main
+    vpc/services:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
+        # The private NACL admits vpc/main (the bastion), peered by network/vpc-peering.
+        private_network_acl_peer_cidr_blocks:
+          - "{{ .settings.network.vpc_cidrs.main }}"
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
+
+        private_subnets:
+          - "10.21.1.0/24"
+          - "10.21.2.0/24"
+          - "10.21.3.0/24"
+
+        public_subnets:
+          - "10.21.101.0/24"
+          - "10.21.102.0/24"
+          - "10.21.103.0/24"
+
+        database_subnets:
+          - "10.21.201.0/24"
+          - "10.21.202.0/24"
+          - "10.21.203.0/24"
+
+        # One NAT per AZ for HA
+        nat_gateway_enabled: true
+        nat_gateway_strategy: "one_per_az"
+
+        vpc_flow_logs_enabled: true
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key.
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
+
+        # Load balancer subnet discovery for the AWS Load Balancer Controller that
+        # catalog/eks-addons enables on eks/data, as in Cloud Posse's
+        # terraform-aws-eks-cluster example: role tags per tier, and the cluster
+        # tag on both. The eks component names the cluster "<Environment>-<name>".
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+
+        tags:
+          NetworkTier: "services"
+          HighAvailability: "true"
+      dependencies:
+        components:
+          - component: kms/main
+
+    # ==========================================================================
+    # VPC Peering - Connect Main and Services VPCs
+    # ==========================================================================
+    # Also the operator's path from ec2/bastion (a private subnet of vpc/main)
+    # to eks/data's private endpoint (docs/OPERATIONS.md, "In-cluster components").
+    network/vpc-peering:
+      metadata:
+        component: network
+      vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        create_vpc_peering: true
+        requester_vpc_id: !terraform.state vpc/main .vpc_id
+        accepter_vpc_id: !terraform.state vpc/services .vpc_id
+
+        auto_accept: true
+
+        # Private route tables only: the peer CIDR needs to be reachable from
+        # the application tier, and adding it to the public tables would route
+        # peer traffic through internet-facing subnets for no gain.
+        requester_routes:
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.services }}"
+            route_table_ids: !terraform.state vpc/main .private_route_table_ids
+        accepter_routes:
+          - destination_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+            route_table_ids: !terraform.state vpc/services .private_route_table_ids
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: vpc/services
+
+    # ==========================================================================
+    # Network Resources - DNS for Main VPC
+    # ==========================================================================
+    network/main:
+      metadata:
+        component: dns
+        inherits:
+          - dns
+      vars:
+        root_domain: "{{ .settings.environment.domain_name }}"
+        create_root_zone: false
+        multi_account_dns_delegation: false
+        # Query log groups (us-east-1): prod keeps 90 days, like eks's
+        # cluster_log_retention_period; dev and staging keep the default 7.
+        query_log_retention_in_days: 90
+        zones:
+          main:
+            name: "{{ .settings.environment.domain_name }}"
+            comment: "Production main zone"
+            force_destroy: false  # Protected in production
+            enable_query_logging: true
+          internal:
+            name: "internal.{{ .settings.environment.domain_name }}"
+            comment: "Production internal DNS"
+            force_destroy: false
+            # Private zone: Route53 query logging only supports public zones (use Resolver query logging)
+            enable_query_logging: false
+            vpc_associations:
+              - !terraform.state vpc/main .vpc_id
+        # Still removed from the dns remap: www (alias to alb/main, which does
+        # not exist) and api (apigateway manages its own custom-domain record,
+        # so an alias here would be a dependency cycle). Re-add once those
+        # targets exist.
+        records:
+          # Delegates services.<domain> (network/services, dns-zones layer)
+          # from this zone: ACM validates acm/services' names there.
+          services_delegation:
+            zone_name: "main"
+            name: "services.{{ .settings.environment.domain_name }}"
+            type: "NS"
+            ttl: 30 # Cloud Posse dns-delegated's NS TTL
+            records: !terraform.state network/services .zone_name_servers.services
+          db_internal:
+            zone_name: "internal"
+            name: "db.internal.{{ .settings.environment.domain_name }}"
+            type: "CNAME"
+            ttl: 300
+            # instance_address, not instance_endpoint: the endpoint carries a
+            # :5432 suffix, which is not a legal CNAME target.
+            records:
+              - !terraform.state rds/main .instance_address
+      dependencies:
+        components:
+          - component: network/services
+          - component: vpc/main
+          - component: rds/main
+
+    # ==========================================================================
+    # Network Resources - DNS for Services VPC
+    # ==========================================================================
+    network/services:
+      metadata:
+        component: dns
+        inherits:
+          - dns
+      vars:
+        root_domain: "{{ .settings.environment.domain_name }}"
+        create_root_zone: false
+        query_log_retention_in_days: 90
+        zones:
+          services:
+            name: "services.{{ .settings.environment.domain_name }}"
+            comment: "Production services zone"
+            force_destroy: false
+            enable_query_logging: true
+          data:
+            name: "data.services.{{ .settings.environment.domain_name }}"
+            # NS record in the services zone (record delegation_data)
+            parent_zone: services
+            comment: "Data services DNS"
+            force_destroy: false
+
+        records:
+          api_services:
+            zone_name: "services"
+            name: "api.services.{{ .settings.environment.domain_name }}"
+            type: "CNAME"
+            ttl: 300
+            records: ["api-internal.services.{{ .settings.environment.domain_name }}"]
+          # data_db (CNAME to the disabled infrastructure/data RDS) removed in the dns remap

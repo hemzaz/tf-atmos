@@ -5,7 +5,7 @@
 mock_provider "aws" {}
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -120,7 +120,7 @@ run "dashboard_body_is_cloudwatch_json" {
   }
 
   assert {
-    condition     = jsondecode(aws_cloudwatch_dashboard.metric["eventbridge"].dashboard_body).widgets[0].properties.region == "eu-west-2"
+    condition     = jsondecode(aws_cloudwatch_dashboard.metric["eventbridge"].dashboard_body).widgets[0].properties.region == "us-east-1"
     error_message = "Every metric widget carries the region."
   }
 }

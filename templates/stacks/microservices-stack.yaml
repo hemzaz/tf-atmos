@@ -6,7 +6,7 @@
 #
 # Usage: copy into an account/region directory as a top-level stack and set
 # settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
-#   cp templates/stacks/microservices-stack.yaml stacks/orgs/fnx/dev/eu-west-2/micro-01.yaml
+#   cp templates/stacks/microservices-stack.yaml stacks/orgs/fnx/dev/us-east-1/micro-01.yaml
 #   atmos validate stacks
 #   atmos workflow plan -f plan-environment -s fnx-dev-micro-01
 # To target another account or region, change the `orgs/fnx/<stage>/_defaults`
@@ -14,7 +14,7 @@
 
 import:
   - orgs/fnx/dev/_defaults
-  - mixins/region/eu-west-2
+  - mixins/region/us-east-1
   - catalog/_base/defaults
   - catalog/vpc/defaults
   - catalog/securitygroup/defaults
@@ -41,7 +41,7 @@ settings:
     # Route 53 zone external-dns and cert-manager may write to
     hosted_zone_id: "Z0123456789ABCDEFGHIJ"
     # Cognito user pool that issues the API's JWTs
-    jwt_issuer: "https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_EXAMPLE"
+    jwt_issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_EXAMPLE"
 
 components:
   terraform:
@@ -53,6 +53,10 @@ components:
           - vpc/defaults
       vars:
         ipv4_primary_cidr_block: "{{ .settings.environment.vpc_cidr }}"
+        availability_zone_ids:  # us-east-1 AZ IDs; see components/terraform/vpc/README.md
+          - use1-az1
+          - use1-az2
+          - use1-az4
         public_subnets:
           - "10.40.1.0/24"
           - "10.40.2.0/24"

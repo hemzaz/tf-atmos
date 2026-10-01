@@ -5,15 +5,15 @@
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
     }
   }
 }
 
 variables {
-  region                  = "eu-west-2"
+  region                  = "us-east-1"
   ipv4_primary_cidr_block = "10.20.0.0/16"
-  availability_zones      = ["eu-west-2a", "eu-west-2b"]
+  availability_zones      = ["us-east-1a", "us-east-1b"]
   private_subnets         = ["10.20.0.0/18", "10.20.64.0/18"]
   public_subnets          = ["10.20.192.0/22", "10.20.196.0/22"]
   vpc_flow_logs_enabled   = false

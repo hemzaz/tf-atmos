@@ -61,10 +61,10 @@ components:
         ipv4_primary_cidr_block: "10.10.0.0/16"
 
         # Availability zones for high availability
-        availability_zones:
-          - "{{ .vars.region }}a"
-          - "{{ .vars.region }}b"
-          - "{{ .vars.region }}c"
+        availability_zone_ids:  # us-east-1 AZ IDs; see components/terraform/vpc/README.md
+          - use1-az1
+          - use1-az2
+          - use1-az4
 
         # Subnet configuration - 3-tier architecture
         private_subnets:
@@ -316,9 +316,9 @@ components:
         region: "us-east-1"
         name: "webapp-waf-cf"
         scope: "CLOUDFRONT"
-        # kms/main lives in this stack's own region (eu-west-2) and cannot
-        # encrypt a us-east-1 log group; see components/terraform/waf/README.md.
-        kms_key_arn: null
+        # The stacks run in us-east-1, so the stack's own kms/main can encrypt
+        # this us-east-1 log group (components/terraform/waf/README.md).
+        kms_key_arn: !terraform.state kms/main .key_arn
 
         managed_rule_group_statement_rules:
           - name: "AWSManagedRulesCommonRuleSet"
@@ -336,6 +336,10 @@ components:
         tags:
           Layer: "security"
           Application: "web-application"
+
+      dependencies:
+        components:
+          - component: kms/main
 
     # =========================================================================
     # COMPUTE LAYER - ECS FARGATE

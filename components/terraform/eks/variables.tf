@@ -575,8 +575,8 @@ variable "map_additional_iam_roles" {
     Additional IAM roles to grant access to the cluster, as in Cloud Posse's eks/cluster component.
     `rolearn` is the full role ARN INCLUDING its path: access entries (unlike the old aws-auth
     ConfigMap) require it, and the IAM Identity Center role of a permission set lives under
-    /aws-reserved/sso.amazonaws.com/[<region>/], e.g.
-    arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>
+    /aws-reserved/sso.amazonaws.com/[<sso-region>/] (the Identity Center home region), e.g.
+    arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>
     (`aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`).
     `groups` = ["system:masters"] grants a cluster-scoped AmazonEKSClusterAdminPolicy association.
     `username` is ignored. Keys of access_entry_map win over a role listed here.

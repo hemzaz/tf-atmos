@@ -18,7 +18,7 @@ usage() {
   echo "  -h, --help           Display this help message"
   echo
   echo "Example:"
-  echo "  $0 -r eu-west-2 -p myprofile -s ssh-key/testenv-01/bastion -o ~/.ssh/testenv-01-bastion"
+  echo "  $0 -r us-east-1 -p myprofile -s ssh-key/testenv-01/bastion -o ~/.ssh/testenv-01-bastion"
   echo "  $0 -s ssh-key/testenv-01/bastion -i i-01234567890abcdef -o ~/.ssh/instance_key"
   exit 1
 }

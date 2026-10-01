@@ -6,7 +6,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -23,9 +23,9 @@ override_data {
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   name        = "alerts"
-  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -57,7 +57,7 @@ run "defaults_encrypt_with_the_cmk_and_deny_plain_http" {
   }
 
   assert {
-    condition     = one(jsondecode(data.aws_iam_policy_document.topic[0].json).Statement).Resource == "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+    condition     = one(jsondecode(data.aws_iam_policy_document.topic[0].json).Statement).Resource == "arn:aws:sns:us-east-1:123456789012:test-alerts"
     error_message = "The policy is scoped to this topic."
   }
 
@@ -103,9 +103,9 @@ run "subscriptions_with_a_dead_letter_queue" {
     subscribers = {
       orders = {
         protocol              = "sqs"
-        endpoint              = "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+        endpoint              = "arn:aws:sqs:us-east-1:123456789012:test-orders"
         raw_message_delivery  = true
-        dead_letter_queue_arn = "arn:aws:sqs:eu-west-2:123456789012:test-alerts-dlq"
+        dead_letter_queue_arn = "arn:aws:sqs:us-east-1:123456789012:test-alerts-dlq"
       }
       oncall = {
         protocol = "https"
@@ -120,7 +120,7 @@ run "subscriptions_with_a_dead_letter_queue" {
   }
 
   assert {
-    condition     = jsondecode(aws_sns_topic_subscription.this["orders"].redrive_policy) == { deadLetterTargetArn = "arn:aws:sqs:eu-west-2:123456789012:test-alerts-dlq" }
+    condition     = jsondecode(aws_sns_topic_subscription.this["orders"].redrive_policy) == { deadLetterTargetArn = "arn:aws:sqs:us-east-1:123456789012:test-alerts-dlq" }
     error_message = "dead_letter_queue_arn becomes the subscription's redrive policy."
   }
 
@@ -156,7 +156,7 @@ run "policy_json_is_merged_and_the_tls_deny_survives" {
           Effect    = "Allow"
           Principal = { AWS = "*" }
           Action    = "sns:Publish"
-          Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+          Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
           Condition = { StringEquals = { "aws:PrincipalOrgID" = "o-example" } }
         },
         {
@@ -165,7 +165,7 @@ run "policy_json_is_merged_and_the_tls_deny_survives" {
           Effect    = "Deny"
           Principal = { AWS = "*" }
           Action    = "sns:Publish"
-          Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+          Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
           Condition = { Bool = { "aws:SecureTransport" = "true" } }
         },
       ]
@@ -224,7 +224,7 @@ run "rejects_not_principal_on_an_allow_in_policy_json" {
         Effect       = "Allow"
         NotPrincipal = { AWS = "arn:aws:iam::123456789012:root" }
         Action       = "sns:Publish"
-        Resource     = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource     = "arn:aws:sns:us-east-1:123456789012:test-alerts"
       }]
     })
   }
@@ -242,7 +242,7 @@ run "rejects_a_public_allow_with_an_empty_condition_in_policy_json" {
         Effect    = "Allow"
         Principal = { AWS = "*" }
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         Condition = {}
       }]
     })
@@ -261,7 +261,7 @@ run "rejects_a_wildcard_principal_arn_in_policy_json" {
         Effect    = "Allow"
         Principal = { AWS = ["arn:aws:iam::*:root"] }
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         Condition = { StringEquals = { "aws:PrincipalOrgID" = "o-example" } }
       }]
     })
@@ -281,8 +281,8 @@ run "public_allow_pinned_by_an_odd_cased_key_and_operator_is_accepted" {
         effect    = "allow"
         principal = { AWS = "*" }
         action    = "sns:Publish"
-        resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
-        condition = { ArnLike = { "AWS:SourceArn" = ["arn:aws:events:eu-west-2:123456789012:rule/test-*"] } }
+        resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
+        condition = { ArnLike = { "AWS:SourceArn" = ["arn:aws:events:us-east-1:123456789012:rule/test-*"] } }
       }]
     })
   }
@@ -303,7 +303,7 @@ run "rejects_a_public_allow_with_a_non_pinning_condition" {
         Effect    = "Allow"
         Principal = { AWS = "*" }
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         Condition = { Bool = { "aws:SecureTransport" = "true" } }
       }]
     })
@@ -322,7 +322,7 @@ run "rejects_an_unconditioned_public_allow_with_lowercase_keys" {
         effect    = "allow"
         principal = "*"
         action    = "sns:Publish"
-        resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
       }]
     })
   }
@@ -340,7 +340,7 @@ run "rejects_a_public_allow_pinned_only_if_the_key_exists" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         # A caller without aws:SourceAccount passes an ...IfExists test.
         Condition = { StringEqualsIfExists = { "aws:SourceAccount" = "123456789012" } }
       }]
@@ -360,7 +360,7 @@ run "rejects_a_public_allow_pinned_by_a_negated_operator" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         Condition = { StringNotEquals = { "aws:SourceAccount" = "210987654321" } }
       }]
     })
@@ -379,7 +379,7 @@ run "rejects_a_public_allow_pinned_to_a_wildcard" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         Condition = { StringLike = { "aws:PrincipalArn" = ["*"] } }
       }]
     })
@@ -398,7 +398,7 @@ run "rejects_a_public_allow_pinned_by_for_all_values" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         # ForAllValues: is true when the key is absent.
         Condition = { "ForAllValues:StringEquals" = { "aws:PrincipalOrgID" = ["o-example"] } }
       }]
@@ -418,7 +418,7 @@ run "rejects_a_public_allow_pinned_to_wildcards_only" {
         Effect    = "Allow"
         Principal = "*"
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         Condition = { StringLike = { "aws:SourceAccount" = "?*" } }
       }]
     })
@@ -437,7 +437,7 @@ run "rejects_an_unpinned_service_allow_in_policy_json" {
         Effect    = "Allow"
         Principal = { Service = "s3.amazonaws.com" }
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
       }]
     })
   }
@@ -456,7 +456,7 @@ run "pinned_service_allow_in_policy_json_is_accepted" {
         Effect    = "Allow"
         Principal = { Service = "s3.amazonaws.com" }
         Action    = "sns:Publish"
-        Resource  = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource  = "arn:aws:sns:us-east-1:123456789012:test-alerts"
         Condition = { ArnLike = { "aws:SourceArn" = "arn:aws:s3:::test-bucket" } }
       }]
     })
@@ -478,7 +478,7 @@ run "rejects_not_principal_with_odd_cased_keys" {
         EFFECT       = "Allow"
         notPrincipal = { AWS = "arn:aws:iam::123456789012:root" }
         Action       = "sns:Publish"
-        Resource     = "arn:aws:sns:eu-west-2:123456789012:test-alerts"
+        Resource     = "arn:aws:sns:us-east-1:123456789012:test-alerts"
       }
     })
   }
@@ -491,7 +491,7 @@ run "disabled_creates_nothing" {
 
   variables {
     enabled     = false
-    subscribers = { q = { protocol = "sqs", endpoint = "arn:aws:sqs:eu-west-2:123456789012:q" } }
+    subscribers = { q = { protocol = "sqs", endpoint = "arn:aws:sqs:us-east-1:123456789012:q" } }
   }
 
   assert {
@@ -521,7 +521,7 @@ run "rejects_plain_http_and_firehose_without_a_role" {
   variables {
     subscribers = {
       web  = { protocol = "http", endpoint = "http://example.com" }
-      hose = { protocol = "firehose", endpoint = "arn:aws:firehose:eu-west-2:123456789012:deliverystream/x" }
+      hose = { protocol = "firehose", endpoint = "arn:aws:firehose:us-east-1:123456789012:deliverystream/x" }
     }
   }
 

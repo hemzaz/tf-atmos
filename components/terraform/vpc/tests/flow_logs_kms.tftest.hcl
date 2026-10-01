@@ -5,7 +5,7 @@
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
     }
   }
   mock_data "aws_caller_identity" {
@@ -16,9 +16,9 @@ mock_provider "aws" {
 }
 
 variables {
-  region                  = "eu-west-2"
+  region                  = "us-east-1"
   ipv4_primary_cidr_block = "10.40.0.0/16"
-  availability_zones      = ["eu-west-2a", "eu-west-2b"]
+  availability_zones      = ["us-east-1a", "us-east-1b"]
   private_subnets         = ["10.40.0.0/18", "10.40.64.0/18"]
   public_subnets          = ["10.40.192.0/22", "10.40.196.0/22"]
   tags = {
@@ -42,7 +42,7 @@ run "own_key_by_default" {
     target          = aws_kms_key.flow_logs[0]
     override_during = plan
     values = {
-      arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     }
   }
 
@@ -62,7 +62,7 @@ run "caller_key_encrypts_flow_logs_no_component_key_created" {
 
   variables {
     vpc_flow_logs_enabled = true
-    flow_logs_kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    flow_logs_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
   }
 
   assert {
@@ -71,7 +71,7 @@ run "caller_key_encrypts_flow_logs_no_component_key_created" {
   }
 
   assert {
-    condition     = aws_cloudwatch_log_group.flow_logs[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    condition     = aws_cloudwatch_log_group.flow_logs[0].kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
     error_message = "With a caller key given, the flow logs log group must use it."
   }
 }
@@ -82,13 +82,13 @@ run "caller_key_also_encrypts_the_s3_archive_bucket" {
   variables {
     vpc_flow_logs_enabled = true
     flow_logs_s3_backup   = true
-    flow_logs_kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    flow_logs_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
   }
 
   assert {
     condition = one([
       for r in aws_s3_bucket_server_side_encryption_configuration.flow_logs[0].rule : r
-    ]).apply_server_side_encryption_by_default[0].kms_master_key_id == "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    ]).apply_server_side_encryption_by_default[0].kms_master_key_id == "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
     error_message = "The flow logs S3 archive bucket must use the caller's key too, not the (uncreated) component key."
   }
 }
@@ -110,14 +110,14 @@ run "flow_logs_role_trust_is_scoped_to_this_account" {
 
   variables {
     vpc_flow_logs_enabled = true
-    flow_logs_kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    flow_logs_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
   }
 
   assert {
     condition = (
       jsondecode(aws_iam_role.flow_logs[0].assume_role_policy).Statement[0].Principal.Service == "vpc-flow-logs.amazonaws.com"
       && jsondecode(aws_iam_role.flow_logs[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
-      && jsondecode(aws_iam_role.flow_logs[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:ec2:eu-west-2:123456789012:vpc-flow-log/*"
+      && jsondecode(aws_iam_role.flow_logs[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:ec2:us-east-1:123456789012:vpc-flow-log/*"
     )
     error_message = "The flow-logs role must trust vpc-flow-logs.amazonaws.com only with aws:SourceAccount = this account and aws:SourceArn = a flow log in this account and region."
   }

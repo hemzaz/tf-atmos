@@ -7,7 +7,7 @@ mock_provider "aws" {
   override_data {
     target = data.aws_region.current
     values = {
-      region = "eu-west-2"
+      region = "us-east-1"
     }
   }
   override_data {
@@ -38,13 +38,13 @@ mock_provider "aws" {
 mock_provider "helm" {}
 
 variables {
-  region                    = "eu-west-2"
+  region                    = "us-east-1"
   cluster_name              = "production-main"
-  host                      = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+  host                      = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate    = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
-  oidc_provider_arn         = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
-  oidc_provider_url         = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
-  kms_key_arn               = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+  oidc_provider_arn         = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
+  oidc_provider_url         = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
+  kms_key_arn               = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
   allowed_namespaces        = ["backend-services"]
   rds_managed_secret_access = true
   tags = {
@@ -103,8 +103,8 @@ run "store_conditions_and_service_accounts_are_rendered" {
   assert {
     condition = alltrue([
       for k, r in aws_iam_role.external_secrets : jsondecode(r.assume_role_policy).Statement[0].Condition.StringEquals == {
-        "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:sub" = "system:serviceaccount:external-secrets:${k}"
-        "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:aud" = "sts.amazonaws.com"
+        "oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:sub" = "system:serviceaccount:external-secrets:${k}"
+        "oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:aud" = "sts.amazonaws.com"
       }
     ]) && length(aws_iam_role.external_secrets) == 2
     error_message = "Each role must trust exactly its store's service account (sub) for sts.amazonaws.com (aud)."
@@ -140,21 +140,21 @@ run "store_policies_are_scoped" {
 
   assert {
     condition = toset(jsondecode(aws_iam_policy.external_secrets["aws-certificate-store"].policy).Statement[0].Resource) == toset([
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:certificates/*",
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:production/certificates/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:certificates/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:production/certificates/*",
     ])
     error_message = "The certificate store's role must read only certificates/* and <context>/certificates/*."
   }
 
   assert {
     condition = toset(jsondecode(aws_iam_policy.external_secrets["aws-secretsmanager"].policy).Statement[0].Resource) == toset([
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:app/*",
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:infra/*",
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:redis-auth/*",
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:production/app/*",
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:production/infra/*",
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:production/redis-auth/*",
-      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds!db-*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:app/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:infra/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:redis-auth/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:production/app/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:production/infra/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:production/redis-auth/*",
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-*",
     ])
     error_message = "The default store's role must read exactly app, infra, redis-auth (top-level and <context>/) and rds!db-*: no certificates, no ssh-key."
   }

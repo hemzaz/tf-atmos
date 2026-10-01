@@ -1,7 +1,7 @@
 ---
 # The Terraform state backend (bucket, KMS key, access roles). Deployed ONCE,
 # as backend/main in the management account's stack fnx-core-root
-# (stacks/orgs/fnx/core/eu-west-2/root.yaml); workload stacks never create one.
+# (stacks/orgs/fnx/core/us-east-1/root.yaml); workload stacks never create one.
 components:
   terraform:
     backend:

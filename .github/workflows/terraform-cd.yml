@@ -28,7 +28,7 @@
 #     stage's read/write state role (dev/staging: fnx-terraform-backend-role,
 #     prod: fnx-terraform-backend-prod-role), each trusted only by that stage's
 #     CI apply roles (stacks/orgs/fnx/_defaults.yaml,
-#     stacks/orgs/fnx/core/eu-west-2/root.yaml).
+#     stacks/orgs/fnx/core/us-east-1/root.yaml).
 #   - Missing, needs an organization-owned repo: a tag ruleset allowing only
 #     GitHub Actions to create/update/delete refs/tags/deployed/**. On a
 #     personal repo Actions cannot be a bypass actor, and without the bypass
@@ -218,7 +218,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
-          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       - name: Allow git operations in the container's workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # One deploy per instance, in same-stack dependency order, stopping at
@@ -316,7 +316,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
-          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       - name: Validate stacks
         run: atmos validate stacks
       # Inputs are passed via env (not interpolated into the script) to avoid

@@ -23,7 +23,7 @@ override_data {
 }
 
 variables {
-  region     = "eu-west-2"
+  region     = "us-east-1"
   vpc_id     = "vpc-0123456789abcdef0"
   subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
   identifier = "test-db"
@@ -380,7 +380,7 @@ run "read_replica_matches_primary" {
     create_read_replica             = true
     deletion_protection             = true
     performance_insights_enabled    = true
-    performance_insights_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+    performance_insights_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     monitoring_interval             = 60
     create_monitoring_role          = true
     max_allocated_storage           = 500
@@ -390,7 +390,7 @@ run "read_replica_matches_primary" {
   override_resource {
     target = aws_db_instance.main
     values = {
-      master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds-test-AbCdEf", kms_key_id = "", secret_status = "active" }]
+      master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds-test-AbCdEf", kms_key_id = "", secret_status = "active" }]
     }
   }
 
@@ -466,7 +466,7 @@ run "service_role_trusts_are_scoped_to_this_account" {
     target          = aws_sns_topic.rotation_notifications[0]
     override_during = plan
     values = {
-      arn = "arn:aws:sns:eu-west-2:123456789012:test-test-db-rotation"
+      arn = "arn:aws:sns:us-east-1:123456789012:test-test-db-rotation"
     }
   }
 
@@ -474,7 +474,7 @@ run "service_role_trusts_are_scoped_to_this_account" {
     target          = aws_db_instance.main
     override_during = plan
     values = {
-      master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds-test-AbCdEf", kms_key_id = "", secret_status = "active" }]
+      master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds-test-AbCdEf", kms_key_id = "", secret_status = "active" }]
     }
   }
 
@@ -483,8 +483,8 @@ run "service_role_trusts_are_scoped_to_this_account" {
       jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Principal.Service == "monitoring.rds.amazonaws.com"
       && jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
       && toset(jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"]) == toset([
-        "arn:aws:rds:eu-west-2:123456789012:db:test-test-db",
-        "arn:aws:rds:eu-west-2:123456789012:db:test-test-db-read-replica",
+        "arn:aws:rds:us-east-1:123456789012:db:test-test-db",
+        "arn:aws:rds:us-east-1:123456789012:db:test-test-db-read-replica",
       ])
     )
     error_message = "The enhanced-monitoring role must trust monitoring.rds.amazonaws.com only for this account and for exactly the primary and replica instance ARNs."
@@ -503,7 +503,7 @@ run "service_role_trusts_are_scoped_to_this_account" {
   assert {
     condition = (
       jsondecode(aws_sns_topic_policy.rotation_notifications[0].policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
-      && jsondecode(aws_sns_topic_policy.rotation_notifications[0].policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:events:eu-west-2:123456789012:rule/*"
+      && jsondecode(aws_sns_topic_policy.rotation_notifications[0].policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:events:us-east-1:123456789012:rule/*"
     )
     error_message = "The rotation topic accepts EventBridge publishes only from this account's rules."
   }
@@ -518,7 +518,7 @@ run "monitoring_trust_names_only_the_primary_without_a_replica" {
   }
 
   assert {
-    condition     = jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == ["arn:aws:rds:eu-west-2:123456789012:db:test-test-db"]
+    condition     = jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == ["arn:aws:rds:us-east-1:123456789012:db:test-test-db"]
     error_message = "Without a read replica the enhanced-monitoring trust names only the primary."
   }
 }

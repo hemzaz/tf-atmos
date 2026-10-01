@@ -316,7 +316,7 @@ variable "log_group_retention_days" {
 
 variable "kms_key_arn" {
   type        = string
-  description = "KMS key ARN to encrypt the log group with. Leave unset for the CloudFront (us-east-1) scope: KMS keys are regional, so a key in this stack's usual region cannot encrypt a us-east-1 log group"
+  description = "KMS key ARN to encrypt the log group with. KMS keys are regional: for the CloudFront (us-east-1) scope it must be a us-east-1 key, so a stack in us-east-1 can pass its own key and a stack elsewhere leaves it unset"
   default     = null
   nullable    = true
 

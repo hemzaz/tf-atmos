@@ -4,7 +4,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -31,16 +31,16 @@ override_data {
   target = data.aws_ec2_managed_prefix_list.cloudfront
   values = {
     id  = "pl-00a54069"
-    arn = "arn:aws:ec2:eu-west-2:aws:prefix-list/pl-00a54069"
+    arn = "arn:aws:ec2:us-east-1:aws:prefix-list/pl-00a54069"
   }
 }
 
 variables {
-  region          = "eu-west-2"
+  region          = "us-east-1"
   name            = "webapp-alb"
   vpc_id          = "vpc-00000000000000000"
   subnets         = ["subnet-00000000000000001", "subnet-00000000000000002"]
-  certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+  certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -226,7 +226,7 @@ run "access_logs_bucket_denies_non_tls_and_grants_only_the_elb_account" {
       s.Sid != "AllowELBLogDelivery" || (
         s.Principal.Service == "logdelivery.elasticloadbalancing.amazonaws.com" &&
         s.Condition.StringEquals["aws:SourceAccount"] == "123456789012" &&
-        s.Condition.ArnLike["aws:SourceArn"] == "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/*"
+        s.Condition.ArnLike["aws:SourceArn"] == "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/*"
       )
     ])
     error_message = "Only the logdelivery.elasticloadbalancing.amazonaws.com service principal, scoped to this account and this region's load balancers, may write access logs."

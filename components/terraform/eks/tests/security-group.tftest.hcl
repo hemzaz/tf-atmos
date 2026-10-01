@@ -11,14 +11,14 @@ mock_provider "aws" {
 
   mock_resource "aws_eks_cluster" {
     defaults = {
-      arn      = "arn:aws:eks:eu-west-2:123456789012:cluster/mock"
-      endpoint = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+      arn      = "arn:aws:eks:us-east-1:123456789012:cluster/mock"
+      endpoint = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
       certificate_authority = [{
         data = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMvakNDQWVhZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="
       }]
       identity = [{
         oidc = [{
-          issuer = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
+          issuer = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
         }]
       }]
     }
@@ -26,7 +26,7 @@ mock_provider "aws" {
 
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     }
   }
 
@@ -44,7 +44,7 @@ mock_provider "aws" {
 
   mock_resource "aws_iam_openid_connect_provider" {
     defaults = {
-      arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
+      arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
     }
   }
 }
@@ -62,7 +62,7 @@ mock_provider "tls" {
 mock_provider "random" {}
 
 variables {
-  region     = "eu-west-2"
+  region     = "us-east-1"
   name       = "main"
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {

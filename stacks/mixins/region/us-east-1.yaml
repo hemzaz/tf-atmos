@@ -1,0 +1,18 @@
+---
+import:
+  # Import the catalog with vpc configuration for us-east-1 region
+  - catalog/vpc/defaults
+  # All accounts (stages) in this region will have vpc components
+
+vars:
+  region: us-east-1
+settings:
+  environment:
+    availability_zone_ids:
+      - use1-az1
+      - use1-az2
+      - use1-az4
+
+# Other defaults for the us-east-1 region
+  context:
+    environment: us-east-1

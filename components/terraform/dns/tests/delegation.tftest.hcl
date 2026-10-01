@@ -51,7 +51,7 @@ mock_provider "aws" {
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   root_domain = "fnx.example.com"
   tags = {
     Environment = "test"

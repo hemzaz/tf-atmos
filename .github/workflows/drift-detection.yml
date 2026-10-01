@@ -141,7 +141,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN || vars.AWS_PLAN_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # A READ-only state role (stacks/orgs/fnx/_defaults.yaml: the prod one
       # for prod stacks), hence -lock=false: it cannot write a .tflock object.
       # One plan per instance (ci-components.py) instead of a stack-wide

@@ -1,7 +1,7 @@
 variable "region" {
   type        = string
   description = "AWS region"
-  default     = "eu-west-2"
+  default     = "us-east-1"
 
   validation {
     condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))
@@ -33,13 +33,38 @@ variable "management_cidr" {
   }
 }
 
+# availability_zones (names) and availability_zone_ids follow Cloud Posse
+# aws-dynamic-subnets: set exactly one. A name maps to a different physical
+# zone in every account; an ID (use1-az1) does not, so the stacks use IDs.
 variable "availability_zones" {
   type        = list(string)
-  description = "Availability Zones for the subnets, in subnet order: subnet N goes to availability_zones[N]"
+  description = "Availability Zone names for the subnets, in subnet order: subnet N goes to availability_zones[N]. Set this or availability_zone_ids, not both"
+  default     = null
 
   validation {
-    condition     = length(var.availability_zones) > 0
-    error_message = "At least one availability zone must be provided."
+    condition     = var.availability_zones == null || length(coalesce(var.availability_zones, [])) > 0
+    error_message = "availability_zones, when set, must list at least one availability zone."
+  }
+}
+
+variable "availability_zone_ids" {
+  type        = list(string)
+  description = "Availability Zone IDs (e.g. use1-az1) for the subnets, in subnet order, resolved to this account's AZ names. Set this or availability_zones, not both"
+  default     = null
+
+  validation {
+    condition     = var.availability_zone_ids == null || length(coalesce(var.availability_zone_ids, [])) > 0
+    error_message = "availability_zone_ids, when set, must list at least one availability zone ID."
+  }
+
+  validation {
+    condition     = alltrue([for id in coalesce(var.availability_zone_ids, []) : can(regex("^[a-z]{2,4}[0-9]+-az[0-9]+$", id))])
+    error_message = "availability_zone_ids must be AZ IDs such as use1-az1."
+  }
+
+  validation {
+    condition     = (var.availability_zones == null) != (var.availability_zone_ids == null)
+    error_message = "Set exactly one of availability_zones and availability_zone_ids."
   }
 }
 

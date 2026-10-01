@@ -17,7 +17,7 @@ components:
         tenant: "{{ .settings.context.tenant }}"
         environment: "{{ .settings.context.environment }}"
         service_name: api
-        container_image: 123456789012.dkr.ecr.eu-west-2.amazonaws.com/api@sha256:<digest>
+        container_image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/api@sha256:<digest>
         vpc_id: !terraform.state vpc/main .vpc_id
         private_subnet_ids: !terraform.state vpc/main .private_subnet_ids
         public_subnet_ids: !terraform.state vpc/main .public_subnet_ids

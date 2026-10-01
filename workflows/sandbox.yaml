@@ -15,7 +15,7 @@
 #   atmos workflow sandbox-down -f sandbox     # stop and remove it
 #
 # Components not listed here cannot be exercised against Floci; the gaps are
-# documented in stacks/orgs/fnx/local/eu-west-2/sandbox.yaml. rds is the notable
+# documented in stacks/orgs/fnx/local/us-east-1/sandbox.yaml. rds is the notable
 # one - CreateDBSubnetGroup is unimplemented - so it is exercised against
 # LocalEmu instead, in the fnx-local-localemu lane, via `atmos workflow localemu
 # -f localemu` (workflows/localemu.yaml) and .github/workflows/emulator.yml in CI.

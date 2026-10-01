@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./scripts/quickstart.sh --tenant fnx --stage dev --environment testenv-01
-#   ./scripts/quickstart.sh --tenant fnx --stage prod --environment production --region eu-west-2
+#   ./scripts/quickstart.sh --tenant fnx --stage prod --environment production --region us-east-1
 #   ./scripts/quickstart.sh --help
 #
 # This script will:
@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Default values
-DEFAULT_REGION="eu-west-2"
+DEFAULT_REGION="us-east-1"
 # Tool versions are pinned in .atmos.env (Terraform itself is installed by the
 # Atmos toolchain from stacks/orgs/<tenant>/_defaults.yaml dependencies.tools)
 # shellcheck source=../.atmos.env

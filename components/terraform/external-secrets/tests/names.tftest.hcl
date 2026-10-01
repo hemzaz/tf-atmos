@@ -5,7 +5,7 @@ mock_provider "aws" {
   override_data {
     target = data.aws_region.current
     values = {
-      region = "eu-west-2"
+      region = "us-east-1"
     }
   }
   override_data {
@@ -25,15 +25,15 @@ mock_provider "aws" {
 mock_provider "helm" {}
 
 variables {
-  region                              = "eu-west-2"
-  host                                = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+  region                              = "us-east-1"
+  host                                = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate              = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
-  oidc_provider_arn                   = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
-  oidc_provider_url                   = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
+  oidc_provider_arn                   = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
+  oidc_provider_url                   = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
   create_default_cluster_secret_store = true
   create_certificate_secret_store     = true
   allowed_namespaces                  = ["backend-services"]
-  kms_key_arn                         = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+  kms_key_arn                         = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
 }
 
 run "prod_role_does_not_repeat_the_environment" {
@@ -68,7 +68,7 @@ run "prod_role_does_not_repeat_the_environment" {
 
   # The trust policy's condition key is the issuer without https://.
   assert {
-    condition     = strcontains(aws_iam_role.external_secrets["aws-secretsmanager"].assume_role_policy, "\"oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:sub\"")
+    condition     = strcontains(aws_iam_role.external_secrets["aws-secretsmanager"].assume_role_policy, "\"oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:sub\"")
     error_message = "The trust policy must key on the issuer host, without https://."
   }
 }
@@ -109,7 +109,7 @@ run "arn_is_rejected" {
   command = plan
 
   variables {
-    cluster_name = "arn:aws:eks:eu-west-2:123456789012:cluster/production-main"
+    cluster_name = "arn:aws:eks:us-east-1:123456789012:cluster/production-main"
     tags = {
       Environment = "production"
     }
@@ -213,7 +213,7 @@ run "policy_is_scoped_to_account_region_and_kms_key" {
   }
 
   assert {
-    condition     = strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "arn:aws:secretsmanager:eu-west-2:123456789012:secret:")
+    condition     = strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "arn:aws:secretsmanager:us-east-1:123456789012:secret:")
     error_message = "Secrets Manager resources must be scoped to this region and account."
   }
 
@@ -233,7 +233,7 @@ run "policy_is_scoped_to_account_region_and_kms_key" {
   }
 
   assert {
-    condition     = jsondecode(aws_iam_policy.external_secrets["aws-secretsmanager"].policy).Statement[1].Condition.StringEquals["kms:ViaService"] == "secretsmanager.eu-west-2.amazonaws.com"
+    condition     = jsondecode(aws_iam_policy.external_secrets["aws-secretsmanager"].policy).Statement[1].Condition.StringEquals["kms:ViaService"] == "secretsmanager.us-east-1.amazonaws.com"
     error_message = "kms:ViaService must be secretsmanager.<region>.amazonaws.com only (no store reads SSM)."
   }
 }
@@ -251,7 +251,7 @@ run "trust_policy_requires_aud_sts_amazonaws_com" {
   }
 
   assert {
-    condition     = strcontains(aws_iam_role.external_secrets["aws-secretsmanager"].assume_role_policy, "\"oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:aud\"")
+    condition     = strcontains(aws_iam_role.external_secrets["aws-secretsmanager"].assume_role_policy, "\"oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:aud\"")
     error_message = "The trust policy must condition on \"<issuer>:aud\"."
   }
 
@@ -270,11 +270,11 @@ run "kms_key_arn_accepts_a_multi_region_key" {
     tags = {
       Environment = "production"
     }
-    kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/mrk-1234567890abcdef1234567890abcdef"
+    kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/mrk-1234567890abcdef1234567890abcdef"
   }
 
   assert {
-    condition     = strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "arn:aws:kms:eu-west-2:123456789012:key/mrk-1234567890abcdef1234567890abcdef")
+    condition     = strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "arn:aws:kms:us-east-1:123456789012:key/mrk-1234567890abcdef1234567890abcdef")
     error_message = "A multi-region KMS key ARN (key/mrk-<32 hex>) must be accepted."
   }
 }
@@ -552,7 +552,7 @@ run "rds_managed_secret_access_grants_the_fixed_naming_convention" {
   }
 
   assert {
-    condition     = strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds!db-*")
+    condition     = strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-*")
     error_message = "rds_managed_secret_access = true must grant secret:rds!db-*, scoped to this account/region."
   }
 }

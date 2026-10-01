@@ -42,7 +42,7 @@ workflows:
       - name: target_region
         type: input
         prompt: DR target region
-        default: us-east-1
+        default: us-east-2
       - name: warning
         type: toast
         level: warning

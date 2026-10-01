@@ -7,10 +7,6 @@ components:
         type: abstract
       vars:
         ipv4_primary_cidr_block: "10.0.0.0/16"
-        availability_zones:
-          - '{{ .vars.region }}a'
-          - '{{ .vars.region }}b'
-          - '{{ .vars.region }}c'
         private_subnets:
           - "10.0.1.0/24"
           - "10.0.2.0/24"

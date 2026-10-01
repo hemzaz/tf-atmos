@@ -16,11 +16,9 @@ components:
       vars:
         ipv4_primary_cidr_block: "10.0.0.0/16"
 
-        # Availability zones - will be overridden per region
-        availability_zones:
-          - "{{ .vars.region }}a"
-          - "{{ .vars.region }}b"
-          - "{{ .vars.region }}c"
+        # No AZ default: each instance sets availability_zone_ids (region- and
+        # EKS-specific, see components/terraform/vpc/README.md), or
+        # availability_zones names in the emulator stacks.
 
         # Subnet configuration
         private_subnets:

@@ -68,7 +68,7 @@ components:
         # components/terraform/iam/README.md) and kms/main declares a
         # dependencies.components edge to it so the role exists before
         # kms/main's first apply. The sandbox lane
-        # (stacks/orgs/fnx/local/eu-west-2/sandbox.yaml) overrides this to
+        # (stacks/orgs/fnx/local/us-east-1/sandbox.yaml) overrides this to
         # false: it runs no Auto Scaling or EKS node groups, and has no iam
         # instance.
         allow_autoscaling_ebs: true

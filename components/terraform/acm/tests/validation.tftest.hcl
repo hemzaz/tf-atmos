@@ -19,14 +19,14 @@ mock_provider "aws" {
 
   mock_resource "aws_acm_certificate" {
     defaults = {
-      arn    = "arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+      arn    = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
       status = "ISSUED"
     }
   }
 }
 
 variables {
-  region  = "eu-west-2"
+  region  = "us-east-1"
   zone_id = "Z1234567890ABCDEFGHIJ"
   tags = {
     Environment = "test"

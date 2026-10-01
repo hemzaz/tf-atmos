@@ -6,7 +6,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -30,7 +30,7 @@ override_data {
 }
 
 variables {
-  region                  = "eu-west-2"
+  region                  = "us-east-1"
   cross_account_role_name = "test-CrossAccountRole"
   policy_name             = "test-CrossAccountPolicy"
   # Same as the overridden caller identity: trusts_other_accounts is false,
@@ -50,7 +50,7 @@ run "cross_account_trust_is_pinned_to_the_named_principals" {
     trusted_account_ids = ["111111111111"]
     trusted_principal_arns = [
       "arn:aws:iam::111111111111:role/hub-ci-plan",
-      "arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_Admin_0123456789abcdef",
+      "arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_Admin_0123456789abcdef",
     ]
     external_id = "spoke-external-id"
   }
@@ -60,7 +60,7 @@ run "cross_account_trust_is_pinned_to_the_named_principals" {
       jsondecode(aws_iam_role.cross_account_role[0].assume_role_policy).Statement[0].Principal.AWS == "arn:aws:iam::111111111111:root"
       && toset(jsondecode(aws_iam_role.cross_account_role[0].assume_role_policy).Statement[0].Condition.ArnEquals["aws:PrincipalArn"]) == toset([
         "arn:aws:iam::111111111111:role/hub-ci-plan",
-        "arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_Admin_0123456789abcdef",
+        "arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_Admin_0123456789abcdef",
       ])
       && jsondecode(aws_iam_role.cross_account_role[0].assume_role_policy).Statement[0].Condition.StringEquals["sts:ExternalId"] == "spoke-external-id"
     )
@@ -123,7 +123,7 @@ run "cross_account_policies_grant_no_exfiltration_actions" {
   command = plan
 
   variables {
-    managed_sns_topic_arns = ["arn:aws:sns:eu-west-2:123456789012:test-topic"]
+    managed_sns_topic_arns = ["arn:aws:sns:us-east-1:123456789012:test-topic"]
   }
 
   assert {
@@ -513,7 +513,7 @@ run "lambda_uploader_writes_only_the_stage_bucket" {
       toset(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Action) == toset(["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"])
       && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Resource == "*"
       && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/testenv-01-main"
-      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Condition["StringEquals"]["kms:ViaService"] == "s3.eu-west-2.amazonaws.com"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Condition["StringEquals"]["kms:ViaService"] == "s3.us-east-1.amazonaws.com"
     )
     error_message = "KMS access must be GenerateDataKey/Encrypt/Decrypt on the kms/main alias only, and only via s3.<region>.amazonaws.com."
   }

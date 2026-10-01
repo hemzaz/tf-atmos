@@ -101,7 +101,7 @@ class CheckLambdaPackagesTest(unittest.TestCase):
 
     def test_bucket_with_another_key_fails(self):
         self.assert_errors(
-            stack(s3__lambda_artifacts=set_var("kms_key_arn", "arn:aws:kms:eu-west-2:1:key/x")),
+            stack(s3__lambda_artifacts=set_var("kms_key_arn", "arn:aws:kms:us-east-1:1:key/x")),
             "is not encrypted with kms/main",
         )
 

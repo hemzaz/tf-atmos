@@ -1,0 +1,272 @@
+---
+# LocalEmu lane — fnx-local-localemu
+#
+# A second local lane, alongside the Floci sandbox (sandbox.yaml). It exists
+# for the components Floci cannot execute AT ALL, so that they are proven
+# somewhere rather than only validated:
+#
+#   rds          Floci has no CreateDBSubnetGroup. This lane is what caught
+#                the overlapping backup/maintenance windows that would have
+#                failed CreateDBInstance in staging AND prod.
+#
+# guardduty, securityhub and backup are NOT here, each tried and each blocked
+# by a LocalEmu gap rather than a component defect. Recorded so the next
+# attempt does not repeat them:
+#   - guardduty  CreateDetector succeeds, but reading any detector feature back
+#                returns "empty result". The features cannot be avoided either:
+#                aws_guardduty_detector_feature uses
+#                `for_each = var.enable ? local.features : {}`, so the
+#                enable_*_protection flags set each feature's STATUS, not
+#                whether the resource exists.
+#   - securityhub  UpdateSecurityHubConfiguration returns 501 "not
+#                implemented", and the provider calls it while creating
+#                aws_securityhub_account. Nothing is created at all.
+#   - backup     the IAM roles, SNS topic and both alarms create fine, then
+#                DescribeBackupVault returns 501 and the vault - the point of
+#                the component - cannot be read back.
+#
+# elasticache is NOT here either. Floci blocks it at CreateCacheSubnetGroup,
+# which LocalEmu does implement - but LocalEmu creates the replication group
+# without its member cache clusters, so the provider's read fails with
+# "CacheClusterNotFound: Cache cluster localemu-localemu-cache-001 not found".
+# Different wall, same outcome: elasticache still has no executing coverage.
+#
+# apigateway is NOT here, and cannot be run against either emulator. AWS
+# provider 6.65 waits for the RestApi's `apiStatus` field to reach AVAILABLE
+# (valid values UPDATING|AVAILABLE|PENDING|FAILED - a recent addition to the
+# API). Neither Floci nor LocalEmu returns apiStatus, so the SDK reads "" and
+# the create fails with:
+#     unexpected state '', wanted target 'AVAILABLE'
+# Confirmed from a TF_LOG=DEBUG trace: CreateRestApi returns 201 and the API is
+# fully formed - LocalEmu even returns rootResourceId, which Floci omits - the
+# failure is purely the missing status field. So the AWS_PROXY integration and
+# the aws_lambda_permission added in #138 still have no executing coverage.
+#
+# RUN IT AGAINST A FRESH EMULATOR. One apply/destroy cycle from a just-started
+# LocalEmu is clean (vpc 16 resources, lambda 4, rds 6). A SECOND cycle in the
+# same process is not: leftover objects make CreateDBParameterGroup and
+# CreateRole return AlreadyExists, and aws_db_subnet_group then fails with
+# "Provider produced inconsistent result after apply". This is emulator
+# fidelity, not a component defect. The `localemu` workflow
+# (workflows/localemu.yaml, run in CI by .github/workflows/emulator.yml) works
+# around it with a clear-lane-state step that removes this lane's
+# fnx-local-localemu-* workspace state before every apply, so a fresh cycle is
+# what actually runs even when the same LocalEmu process is reused; a manual
+# run without that workflow still needs a freshly started LocalEmu or the
+# state cleared by hand.
+#
+# This is a SEPARATE STACK, not extra instances in sandbox.yaml, because
+# Terraform state is keyed by component+stack: applying one instance against
+# two different emulators would have them share a state file and believe
+# resources exist that do not.
+#
+# LocalEmu (localemu.cloud, Apache 2.0) is NOT an Atmos emulator component -
+# Atmos has no localemu driver. It is started by hand, outside Atmos, and is
+# reached through the `local-emu` identity in atmos.yaml, whose
+# spec.endpoint_url points at http://localhost:4566. `atmos workflow
+# localemu-up -f localemu` installs (via pip into a venv) and starts it;
+# `atmos workflow localemu -f localemu` does that, applies every component
+# above, destroys them, and stops it again — see workflows/localemu.yaml. A
+# manual apply outside that workflow still needs BOTH the dummy credentials
+# and AWS_ENDPOINT_URL exported - spec.endpoint_url only redirects Atmos's own
+# AWS calls, not the Terraform provider, so without the env var the apply
+# reaches real AWS and fails on an STS 403:
+#
+#   export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test \
+#          AWS_ENDPOINT_URL=http://localhost:4566
+#   atmos terraform apply <c> -s fnx-local-localemu --identity local-emu
+#
+# Never `--identity local-aws`: that is the Floci lane.
+#
+# Requires Python 3.13 exactly: 3.12 lacks warnings.deprecated (PEP 702) and
+# LocalEmu fails at runtime, while on 3.14 moto-ext caps aws-sam-translator at
+# <=1.103.0 and localemu 1.2.0 cannot be installed at all.
+import:
+  - catalog/_base/defaults
+  - mixins/tenant/fnx
+  - mixins/region/us-east-1
+  - orgs/fnx/local/_defaults
+  - catalog/vpc/defaults
+
+vars:
+  region: us-east-1
+
+# Local and disposable, exactly as in the Floci lane: a throwaway emulator run
+# must never touch real state.
+terraform:
+  backend_type: local
+  backend:
+    local: {}
+
+settings:
+  environment:
+    description: "Local LocalEmu lane"
+    namespace: localemu
+    account: local
+    aws_account_id: "000000000000"
+    vpc_cidr: "10.91.0.0/16"
+    enable_vpc_flow_logs: false
+  context:
+    tenant: fnx
+    environment: localemu
+    stage: local
+
+components:
+  terraform:
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "10.91.0.0/16"
+        # Emulator: AZ names (vpc/defaults sets no AZs).
+        availability_zones:
+          - "{{ .vars.region }}a"
+          - "{{ .vars.region }}b"
+        private_subnets:
+          - "10.91.1.0/24"
+          - "10.91.2.0/24"
+        public_subnets:
+          - "10.91.101.0/24"
+          - "10.91.102.0/24"
+        database_subnets:
+          - "10.91.201.0/24"
+          - "10.91.202.0/24"
+        nat_gateway_enabled: false
+        vpc_flow_logs_enabled: false
+        # This lane has no kms/main instance (see the header - only rds runs
+        # here, and nothing else needs a CMK). flow_logs_kms_key_arn is left
+        # unset (component default: "", its own per-VPC key), since
+        # vpc/defaults no longer sets it - see stacks/catalog/vpc/defaults.yaml.
+        manage_network_acls: false
+        manage_default_security_group: false
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # Re-run of the lambda component against a second emulator, not new
+    # coverage: apigateway cannot run in this lane (see the header), so nothing
+    # here proxies to it. Package is built by the build-lambda-package step in
+    # workflows/sandbox.yaml, which must be run before this applies.
+    lambda/api:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "api-backend"
+        handler: "main.handler"
+        runtime: "python3.13"
+        filename: "/tmp/tf-atmos-sandbox/lambda.zip"
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # Blocked by Floci (no CreateDBSubnetGroup). rds has never executed
+    # anywhere despite being declared in staging and prod.
+    rds/main:
+      metadata:
+        component: rds
+      vars:
+        identifier: "localemu-db"
+        db_name: "appdb"
+        # Windows must be separated by >= 30 minutes. Prod and staging both
+        # carried adjacent windows (backup 03:00-04:00, maintenance 04:00-...)
+        # and were rejected here with "The backup window and maintenance
+        # window must not overlap" - see the fix in their services.yaml.
+        backup_window: "03:00-04:00"
+        maintenance_window: "Sun:04:30-Sun:05:30"
+        # SETTLED 2026-09-21: a LocalEmu gap, NOT a component defect. The
+        # default stays true everywhere else; it is off only here.
+        #
+        # With rotation on, LocalEmu fails the apply with "No Lambda rotation
+        # function ARN is associated with this secret" - it models the secret as
+        # an ordinary one. Against real AWS the component is correct:
+        #   - AWS RDS user guide, "Password management with Amazon RDS and AWS
+        #     Secrets Manager": "RDS manages the settings for the secret and
+        #     rotates the secret every seven days by default. You can modify
+        #     some of the settings, such as the rotation schedule."
+        #   - aws_secretsmanager_secret_rotation: rotation_lambda_arn "Must be
+        #     supplied if the secret is not managed by AWS."
+        # manage_master_user_password is hardcoded true in rds/main.tf, so the
+        # secret IS AWS-managed, the Lambda ARN is correctly omitted, and
+        # setting only the schedule is exactly the supported usage.
+        enable_secrets_rotation: false
+        # BOTH are needed. The component computes
+        #   deletion_protection = var.deletion_protection || var.prevent_destroy
+        # and prevent_destroy also defaults true, so setting deletion_protection
+        # alone is a no-op and destroy still fails with "Cannot delete a DB
+        # instance when DeletionProtection is enabled". Deliberate design -
+        # prevent_destroy stands in for lifecycle.prevent_destroy, which cannot
+        # take a variable - but an easy footgun, so it is spelled out here.
+        deletion_protection: false
+        prevent_destroy: false
+        skip_final_snapshot: true
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
+      dependencies:
+        components:
+          - component: vpc/main
+
+    # Dashboards and the SNS topic are on by default, so the minimal instance
+    # still creates resources - 9 of them, applied and destroyed cleanly. The
+    # per-service alarm groups stay off: each wants real ARNs or instance ids
+    # that do not exist in this lane.
+    #
+    # This instance is what found that api_gateway_name defaulted to null while
+    # enable_backend_monitoring defaulted true, so every monitoring instance in
+    # dev, staging AND prod failed at PLAN time inside templatefile(). All 6
+    # real monitoring instances now set api_gateway_name from apigateway's
+    # api_name output via !terraform.state; this localemu instance keeps the
+    # "" default, which drops the API Gateway widgets and alarms here. See the
+    # comment on the variable in components/terraform/monitoring/variables.tf.
+    monitoring/main:
+      metadata:
+        component: monitoring
+      vars:
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # iam has a lifecycle.precondition that a naive instance trips, gated on
+    # create_cross_account_role (default true):
+    #
+    #   cross-account-roles.tf:83  trusting an account other than the caller
+    #     requires one of trusted_principal_org_id, external_id or require_mfa.
+    #
+    # It is satisfied here deliberately rather than sidestepped. The trusted
+    # account is NOT this lane's own 000000000000: trusting self would make
+    # local.trusts_other_accounts false and short-circuit the precondition,
+    # leaving the guard unexercised. A foreign account plus an external_id is
+    # what actually proves it. managed_s3_bucket_arns is optional; it is set so
+    # the S3 statements of the resource-management policy are exercised too.
+    #
+    # `environment` is validated against dev/development/staging/stage/prod/
+    # production, so it cannot be "localemu" the way the tags are.
+    iam/main:
+      metadata:
+        component: iam
+      vars:
+        environment: dev
+        account_id: "000000000000"
+        cross_account_role_name: "localemu-cross-account"
+        policy_name: "localemu-resource-management"
+        trusted_account_ids:
+          - "111122223333"
+        # The other precondition: the trust is pinned to named principals
+        # (aws:PrincipalArn), which need not exist.
+        trusted_principal_arns:
+          - "arn:aws:iam::111122223333:role/localemu-hub-ci-plan"
+        external_id: "localemu-external-id"
+        managed_s3_bucket_arns:
+          - "arn:aws:s3:::localemu-managed-bucket"
+        tags:
+          Environment: localemu
+          Tenant: fnx
+          ManagedBy: Terraform

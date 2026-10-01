@@ -14,7 +14,7 @@
 mock_provider "aws" {}
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   vpc_id = "vpc-0123456789abcdef0"
   tags = {
     Environment = "test"

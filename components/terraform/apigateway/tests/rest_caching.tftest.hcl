@@ -13,7 +13,7 @@ mock_provider "aws" {
 }
 
 variables {
-  region           = "eu-west-2"
+  region           = "us-east-1"
   api_name         = "main-api"
   api_type         = "REST"
   create_dashboard = false
@@ -24,7 +24,7 @@ variables {
   }
 
   authorizer_type        = "COGNITO_USER_POOLS"
-  cognito_user_pool_arns = ["arn:aws:cognito-idp:eu-west-2:123456789012:userpool/eu-west-2_EXAMPLE"]
+  cognito_user_pool_arns = ["arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_EXAMPLE"]
 
   api_resources = [
     { path_part = "products" },

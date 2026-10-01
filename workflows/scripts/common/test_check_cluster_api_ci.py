@@ -23,7 +23,9 @@ def stacks_with(**components):
     return {"fnx-dev-testenv-01": {"components": {"terraform": components}}}
 
 
-ADMIN = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
+# The sso.amazonaws.com/<region>/ path segment is the IAM Identity Center home
+# region, not the stack's; us-east-1 here is only an example.
+ADMIN = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
 
 
 def admin_eks(arn, stage="dev"):

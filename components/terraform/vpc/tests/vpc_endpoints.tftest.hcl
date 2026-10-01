@@ -5,15 +5,15 @@
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
     }
   }
 }
 
 variables {
-  region                  = "eu-west-2"
+  region                  = "us-east-1"
   ipv4_primary_cidr_block = "10.20.0.0/16"
-  availability_zones      = ["eu-west-2a", "eu-west-2b"]
+  availability_zones      = ["us-east-1a", "us-east-1b"]
   private_subnets         = ["10.20.0.0/18", "10.20.64.0/18"]
   public_subnets          = ["10.20.192.0/22", "10.20.196.0/22"]
   vpc_flow_logs_enabled   = false
@@ -42,12 +42,12 @@ run "interface_endpoints_scoped_to_vpc_cidr" {
   }
 
   assert {
-    condition     = aws_vpc_endpoint.interface["secretsmanager"].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.interface["secretsmanager"].service_name == "com.amazonaws.eu-west-2.secretsmanager"
+    condition     = aws_vpc_endpoint.interface["secretsmanager"].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.interface["secretsmanager"].service_name == "com.amazonaws.us-east-1.secretsmanager"
     error_message = "secretsmanager must be an Interface endpoint with the correct PrivateLink service name."
   }
 
   assert {
-    condition     = aws_vpc_endpoint.interface["elasticache"].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.interface["elasticache"].service_name == "com.amazonaws.eu-west-2.elasticache"
+    condition     = aws_vpc_endpoint.interface["elasticache"].vpc_endpoint_type == "Interface" && aws_vpc_endpoint.interface["elasticache"].service_name == "com.amazonaws.us-east-1.elasticache"
     error_message = "elasticache must be an Interface endpoint with the correct PrivateLink service name."
   }
 

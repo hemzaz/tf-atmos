@@ -4,7 +4,7 @@
 mock_provider "aws" {
   mock_resource "aws_athena_workgroup" {
     defaults = {
-      arn  = "arn:aws:athena:eu-west-2:123456789012:workgroup/test-data-pipeline"
+      arn  = "arn:aws:athena:us-east-1:123456789012:workgroup/test-data-pipeline"
       name = "test-data-pipeline"
     }
   }
@@ -33,15 +33,15 @@ override_data {
 override_data {
   target = data.aws_region.current
   values = {
-    region = "eu-west-2"
+    region = "us-east-1"
   }
 }
 
 variables {
-  region          = "eu-west-2"
+  region          = "us-east-1"
   name            = "data-pipeline"
   output_location = "s3://test-athena-results/"
-  kms_key_arn     = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn     = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -95,7 +95,7 @@ run "query_policy_is_scoped_to_the_workgroup_results_bucket_and_key" {
   command = plan
 
   assert {
-    condition     = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowWorkgroupQueries"]).Resource == "arn:aws:athena:eu-west-2:123456789012:workgroup/test-data-pipeline"
+    condition     = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowWorkgroupQueries"]).Resource == "arn:aws:athena:us-east-1:123456789012:workgroup/test-data-pipeline"
     error_message = "Athena actions are scoped to this workgroup's ARN."
   }
 
@@ -135,9 +135,9 @@ run "query_policy_adds_catalog_and_source_reads_when_given" {
 
   assert {
     condition = one([for s in jsondecode(output.query_policy).Statement : s if s.Sid == "AllowCatalogRead"]).Resource == [
-      "arn:aws:glue:eu-west-2:123456789012:catalog",
-      "arn:aws:glue:eu-west-2:123456789012:database/test_data_lake",
-      "arn:aws:glue:eu-west-2:123456789012:table/test_data_lake/*",
+      "arn:aws:glue:us-east-1:123456789012:catalog",
+      "arn:aws:glue:us-east-1:123456789012:database/test_data_lake",
+      "arn:aws:glue:us-east-1:123456789012:table/test_data_lake/*",
     ]
     error_message = "Catalog read is scoped to the catalog, the named databases and their tables."
   }

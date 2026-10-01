@@ -33,7 +33,7 @@ components_dir="$repo_root/components/terraform"
 # works for a developer who has not exported anything.
 : "${AWS_ACCESS_KEY_ID:=test}"
 : "${AWS_SECRET_ACCESS_KEY:=test}"
-: "${AWS_REGION:=eu-west-2}"
+: "${AWS_REGION:=us-east-1}"
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
 
 if [ -n "${TF_PLUGIN_CACHE_DIR:-}" ]; then

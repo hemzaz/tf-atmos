@@ -76,7 +76,7 @@ mock_provider "aws" {
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-2"
   root_domain = "fnx.example.com"
   tags = {
     Environment = "test"
@@ -111,7 +111,7 @@ run "public_zone_logs_to_us_east_1" {
       && aws_cloudwatch_log_group.dns_query_logs["main"].retention_in_days == 7
       && aws_cloudwatch_log_group.dns_query_logs["main"].kms_key_id == aws_kms_key.query_logs[0].arn
     )
-    error_message = "The log group is in us-east-1 (not the stack's eu-west-2), under /aws/route53/, kept 7 days by default and encrypted with the component's own key."
+    error_message = "The log group is in us-east-1 (not the stack's us-east-2), under /aws/route53/, kept 7 days by default and encrypted with the component's own key."
   }
 
   assert {
@@ -297,7 +297,7 @@ run "caller_log_group_must_be_in_us_east_1" {
       main = {
         name                 = "fnx.example.com"
         enable_query_logging = true
-        query_logging_config = { cloudwatch_log_group_arn = "arn:aws:logs:eu-west-2:111111111111:log-group:/aws/route53/fnx.example.com" }
+        query_logging_config = { cloudwatch_log_group_arn = "arn:aws:logs:us-east-2:111111111111:log-group:/aws/route53/fnx.example.com" }
       }
     }
   }
@@ -313,7 +313,7 @@ run "caller_key_must_be_in_us_east_1" {
       main = {
         name                 = "fnx.example.com"
         enable_query_logging = true
-        query_logging_config = { kms_key_id = "arn:aws:kms:eu-west-2:111111111111:key/33333333-3333-3333-3333-333333333333" }
+        query_logging_config = { kms_key_id = "arn:aws:kms:us-east-2:111111111111:key/33333333-3333-3333-3333-333333333333" }
       }
     }
   }

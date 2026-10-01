@@ -7,7 +7,7 @@ mock_provider "aws" {
   mock_resource "aws_glue_catalog_database" {
     override_during = plan
     defaults = {
-      arn = "arn:aws:glue:eu-west-2:123456789012:database/test_data_lake"
+      arn = "arn:aws:glue:us-east-1:123456789012:database/test_data_lake"
     }
   }
 
@@ -21,21 +21,21 @@ mock_provider "aws" {
   mock_resource "aws_glue_crawler" {
     override_during = plan
     defaults = {
-      arn = "arn:aws:glue:eu-west-2:123456789012:crawler/mock"
+      arn = "arn:aws:glue:us-east-1:123456789012:crawler/mock"
     }
   }
 
   mock_resource "aws_glue_job" {
     override_during = plan
     defaults = {
-      arn = "arn:aws:glue:eu-west-2:123456789012:job/mock"
+      arn = "arn:aws:glue:us-east-1:123456789012:job/mock"
     }
   }
 
   mock_resource "aws_glue_catalog_table" {
     override_during = plan
     defaults = {
-      arn = "arn:aws:glue:eu-west-2:123456789012:table/test_data_lake/mock"
+      arn = "arn:aws:glue:us-east-1:123456789012:table/test_data_lake/mock"
     }
   }
 }
@@ -57,14 +57,14 @@ override_data {
 override_data {
   target = data.aws_region.current
   values = {
-    region = "eu-west-2"
+    region = "us-east-1"
   }
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   name        = "data-lake"
-  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -226,23 +226,23 @@ run "catalog_and_logs_permissions_are_scoped" {
 
   assert {
     condition = one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowOwnCatalogDatabase"]).Resource == [
-      "arn:aws:glue:eu-west-2:123456789012:catalog",
-      "arn:aws:glue:eu-west-2:123456789012:database/test_data_lake",
-      "arn:aws:glue:eu-west-2:123456789012:table/test_data_lake/*",
+      "arn:aws:glue:us-east-1:123456789012:catalog",
+      "arn:aws:glue:us-east-1:123456789012:database/test_data_lake",
+      "arn:aws:glue:us-east-1:123456789012:table/test_data_lake/*",
     ]
     error_message = "Catalog actions are limited to this instance's own database and its tables."
   }
 
   assert {
     condition = (
-      one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowDefaultDatabaseLookup"]).Resource == "arn:aws:glue:eu-west-2:123456789012:database/default"
+      one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowDefaultDatabaseLookup"]).Resource == "arn:aws:glue:us-east-1:123456789012:database/default"
       && one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowDefaultDatabaseLookup"]).Action == "glue:GetDatabase"
     )
     error_message = "The default database is granted glue:GetDatabase only."
   }
 
   assert {
-    condition     = one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowGlueLogGroups"]).Resource == "arn:aws:logs:eu-west-2:123456789012:log-group:/aws-glue/*"
+    condition     = one([for s in jsondecode(aws_iam_role_policy.service[0].policy).Statement : s if s.Sid == "AllowGlueLogGroups"]).Resource == "arn:aws:logs:us-east-1:123456789012:log-group:/aws-glue/*"
     error_message = "Log group actions are limited to /aws-glue/*."
   }
 

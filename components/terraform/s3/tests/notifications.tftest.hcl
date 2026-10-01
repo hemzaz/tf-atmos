@@ -5,7 +5,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -22,9 +22,9 @@ override_data {
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   name        = "assets"
-  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -50,7 +50,7 @@ run "eventbridge_and_queue_notifications_render" {
       eventbridge = true
       queue_list = [
         {
-          queue_arn     = "arn:aws:sqs:eu-west-2:123456789012:test-trigger"
+          queue_arn     = "arn:aws:sqs:us-east-1:123456789012:test-trigger"
           events        = ["s3:ObjectCreated:*"]
           filter_prefix = "incoming/"
           filter_suffix = ".csv"
@@ -75,7 +75,7 @@ run "eventbridge_and_queue_notifications_render" {
   }
 
   assert {
-    condition     = one(aws_s3_bucket_notification.this[0].queue).queue_arn == "arn:aws:sqs:eu-west-2:123456789012:test-trigger"
+    condition     = one(aws_s3_bucket_notification.this[0].queue).queue_arn == "arn:aws:sqs:us-east-1:123456789012:test-trigger"
     error_message = "The queue ARN passes through unchanged."
   }
 
@@ -103,13 +103,13 @@ run "lambda_and_topic_notifications_render" {
       enabled = true
       lambda_list = [
         {
-          lambda_function_arn = "arn:aws:lambda:eu-west-2:123456789012:function:test-fn"
+          lambda_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:test-fn"
           events              = ["s3:ObjectRemoved:*"]
         },
       ]
       topic_list = [
         {
-          topic_arn     = "arn:aws:sns:eu-west-2:123456789012:test-topic"
+          topic_arn     = "arn:aws:sns:us-east-1:123456789012:test-topic"
           filter_prefix = "reports/"
         },
       ]
@@ -117,7 +117,7 @@ run "lambda_and_topic_notifications_render" {
   }
 
   assert {
-    condition     = one(aws_s3_bucket_notification.this[0].lambda_function).lambda_function_arn == "arn:aws:lambda:eu-west-2:123456789012:function:test-fn"
+    condition     = one(aws_s3_bucket_notification.this[0].lambda_function).lambda_function_arn == "arn:aws:lambda:us-east-1:123456789012:function:test-fn"
     error_message = "The lambda destination ARN renders."
   }
 
@@ -127,7 +127,7 @@ run "lambda_and_topic_notifications_render" {
   }
 
   assert {
-    condition     = one(aws_s3_bucket_notification.this[0].topic).topic_arn == "arn:aws:sns:eu-west-2:123456789012:test-topic" && one(aws_s3_bucket_notification.this[0].topic).filter_prefix == "reports/"
+    condition     = one(aws_s3_bucket_notification.this[0].topic).topic_arn == "arn:aws:sns:us-east-1:123456789012:test-topic" && one(aws_s3_bucket_notification.this[0].topic).filter_prefix == "reports/"
     error_message = "The topic destination and its filter_prefix render, with the default events (s3:ObjectCreated:*)."
   }
 
@@ -150,7 +150,7 @@ run "disabled_bucket_creates_no_notification" {
     event_notification_details = {
       enabled = true
       queue_list = [
-        { queue_arn = "arn:aws:sqs:eu-west-2:123456789012:test-trigger" },
+        { queue_arn = "arn:aws:sqs:us-east-1:123456789012:test-trigger" },
       ]
     }
   }

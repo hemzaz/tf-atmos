@@ -5,7 +5,7 @@
 #
 # Usage: copy into an account/region directory as a top-level stack and set
 # settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
-#   cp templates/stacks/full-stack.yaml stacks/orgs/fnx/prod/eu-west-2/platform-01.yaml
+#   cp templates/stacks/full-stack.yaml stacks/orgs/fnx/prod/us-east-1/platform-01.yaml
 #   atmos validate stacks
 #   atmos workflow plan -f plan-environment -s fnx-prod-platform-01
 # To target another account or region, change the `orgs/fnx/<stage>/_defaults`
@@ -16,7 +16,7 @@
 
 import:
   - orgs/fnx/prod/_defaults
-  - mixins/region/eu-west-2
+  - mixins/region/us-east-1
   - catalog/_base/defaults
   - catalog/kms/defaults
   - catalog/vpc/defaults
@@ -60,6 +60,10 @@ components:
           - vpc/defaults
       vars:
         ipv4_primary_cidr_block: "{{ .settings.environment.vpc_cidr }}"
+        availability_zone_ids:  # us-east-1 AZ IDs; see components/terraform/vpc/README.md
+          - use1-az1
+          - use1-az2
+          - use1-az4
         public_subnets:
           - "10.30.1.0/24"
           - "10.30.2.0/24"
