@@ -18,6 +18,10 @@ names follow Cloud Posse `aws-vpc` where an input maps one to one.
   stacks. Stage mixins set defaults on abstract `vpc/defaults`, never on a bare `vpc` key (that
   would create a stray real instance).
 - `tags` must carry a non-empty `Environment`: it is used in resource names.
+- Set exactly one of `availability_zone_ids` and `availability_zones`. The AWS stacks use IDs
+  (`use1-az1`, `use1-az2`, `use1-az4`): in us-east-1 each account maps the names a/b/c to its own
+  physical zones, and EKS rejects a cluster subnet in `use1-az3`, so a name could land there.
+  The local (emulator) stacks keep names.
 - Empty `flow_logs_kms_key_arn` makes the component create its own key; a caller's key needs a
   `logs.<region>.amazonaws.com` statement scoped by `kms:EncryptionContext:aws:logs:arn`.
 - `map_public_ip_on_launch` defaults to `false` (Cloud Posse defaults to `true`).

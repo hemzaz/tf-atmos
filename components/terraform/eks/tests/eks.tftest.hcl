@@ -604,3 +604,39 @@ run "al2_before_133_is_accepted" {
     error_message = "AL2 is still valid before Kubernetes 1.33."
   }
 }
+
+run "cluster_subnet_in_use1_az3_is_rejected" {
+  command = plan
+
+  override_data {
+    target = data.aws_subnet.cluster["subnet-4e5f6a7b"]
+    values = {
+      availability_zone_id = "use1-az3"
+    }
+  }
+
+  expect_failures = [aws_eks_cluster.default]
+}
+
+run "cluster_subnets_in_supported_zone_ids_are_accepted" {
+  command = plan
+
+  override_data {
+    target = data.aws_subnet.cluster["subnet-0a1b2c3d"]
+    values = {
+      availability_zone_id = "use1-az1"
+    }
+  }
+
+  override_data {
+    target = data.aws_subnet.cluster["subnet-4e5f6a7b"]
+    values = {
+      availability_zone_id = "use1-az4"
+    }
+  }
+
+  assert {
+    condition     = length(aws_eks_cluster.default) == 1
+    error_message = "Subnets in use1-az1 and use1-az4 pass the zone-ID precondition."
+  }
+}

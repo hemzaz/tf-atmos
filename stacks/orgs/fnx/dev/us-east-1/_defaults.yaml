@@ -7,9 +7,9 @@ vars:
   region: us-east-1
 settings:
   environment:
-    availability_zones:
-      - us-east-1a
-      - us-east-1b
-      - us-east-1c
+    availability_zone_ids:
+      - use1-az1
+      - use1-az2
+      - use1-az4
   context:
     environment: us-east-1

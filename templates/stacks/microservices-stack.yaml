@@ -53,6 +53,10 @@ components:
           - vpc/defaults
       vars:
         ipv4_primary_cidr_block: "{{ .settings.environment.vpc_cidr }}"
+        availability_zone_ids:  # us-east-1 AZ IDs; see components/terraform/vpc/README.md
+          - use1-az1
+          - use1-az2
+          - use1-az4
         public_subnets:
           - "10.40.1.0/24"
           - "10.40.2.0/24"

@@ -89,6 +89,10 @@ components:
           - vpc/defaults
       vars:
         ipv4_primary_cidr_block: "10.90.0.0/16"
+        # Emulator: AZ names (vpc/defaults sets no AZs).
+        availability_zones:
+          - "{{ .vars.region }}a"
+          - "{{ .vars.region }}b"
         private_subnets:
           - "10.90.1.0/24"
           - "10.90.2.0/24"

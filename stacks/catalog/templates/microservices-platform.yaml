@@ -132,10 +132,10 @@ components:
         # Larger CIDR for microservices (many pods need IPs)
         ipv4_primary_cidr_block: "10.20.0.0/16"
 
-        availability_zones:
-          - "{{ .vars.region }}a"
-          - "{{ .vars.region }}b"
-          - "{{ .vars.region }}c"
+        availability_zone_ids:  # us-east-1 AZ IDs; see components/terraform/vpc/README.md
+          - use1-az1
+          - use1-az2
+          - use1-az4
 
         # Larger subnets for EKS pods
         private_subnets:

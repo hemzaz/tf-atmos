@@ -36,10 +36,11 @@ components:
         # The private NACL admits vpc/services, peered by network/vpc-peering.
         private_network_acl_peer_cidr_blocks:
           - "{{ .settings.network.vpc_cidrs.services }}"
-        availability_zones:
-          - us-east-1a
-          - us-east-1b
-          - us-east-1c
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
 
         private_subnets:
           - "10.10.1.0/24"
@@ -93,10 +94,11 @@ components:
         # The private NACL admits vpc/main (the bastion), peered by network/vpc-peering.
         private_network_acl_peer_cidr_blocks:
           - "{{ .settings.network.vpc_cidrs.main }}"
-        availability_zones:
-          - us-east-1a
-          - us-east-1b
-          - us-east-1c
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
 
         private_subnets:
           - "10.11.1.0/24"

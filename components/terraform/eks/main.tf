@@ -104,6 +104,18 @@ resource "aws_cloudwatch_log_group" "default" {
   })
 }
 
+# EKS rejects cluster subnets in these AZ IDs (Amazon EKS user guide, cluster
+# VPC and subnet requirements). AZ names map to different IDs per account, so
+# the check reads each subnet's zone ID.
+locals {
+  eks_unsupported_zone_ids = ["use1-az3", "usw1-az2", "cac1-az3"]
+}
+
+data "aws_subnet" "cluster" {
+  for_each = local.enabled ? toset(var.subnet_ids) : toset([])
+  id       = each.value
+}
+
 #trivy:ignore:AWS-0040 Public endpoint is off unless cluster_endpoint_public_access = true
 resource "aws_eks_cluster" "default" {
   #checkov:skip=CKV_AWS_38:Public endpoint is off unless cluster_endpoint_public_access = true
@@ -172,6 +184,14 @@ resource "aws_eks_cluster" "default" {
     # As in cloudposse/terraform-aws-eks-cluster: bootstrap_cluster_creator_admin_permissions
     # only applies when the cluster is created.
     ignore_changes = [access_config[0].bootstrap_cluster_creator_admin_permissions]
+
+    # Fails at plan what CreateCluster rejects later (UnsupportedAvailabilityZoneException).
+    precondition {
+      condition = length([
+        for id, subnet in data.aws_subnet.cluster : id if contains(local.eks_unsupported_zone_ids, subnet.availability_zone_id)
+      ]) == 0
+      error_message = "EKS does not place a cluster in AZ IDs ${join(", ", local.eks_unsupported_zone_ids)}; a subnet_ids entry is in one of them. Use other subnets (vpc availability_zone_ids)."
+    }
   }
 
   # The endpoint rules are variable validations on cluster_endpoint_public_access
