@@ -21,7 +21,6 @@ variables {
     Tenant      = "fnx"
     ManagedBy   = "Terraform"
   }
-  enable_security_group_logging = false
 }
 
 run "default_allows_all_egress" {

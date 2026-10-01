@@ -206,6 +206,16 @@ variable "resource_tags" {
   }
 }
 
+variable "kms_key_arn" {
+  type        = string
+  description = "Customer managed KMS key ARN (kms/main's key_arn) encrypting the Redis slow-log CloudWatch log group. Its policy must let logs.<region>.amazonaws.com use it (kms allow_cloudwatch_logs)"
+
+  validation {
+    condition     = can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[a-zA-Z0-9-]+$", var.kms_key_arn))
+    error_message = "kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>)."
+  }
+}
+
 variable "log_retention_days" {
   type        = number
   description = "CloudWatch log retention period in days"

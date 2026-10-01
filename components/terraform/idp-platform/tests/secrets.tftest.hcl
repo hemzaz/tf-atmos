@@ -71,6 +71,7 @@ variables {
   environment             = "dev"
   domain_name             = "example.com"
   acknowledge_unsupported = true
+  kms_key_arn             = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
 }
 
 run "redis_auth_token_is_generated_and_written_write_only" {
@@ -134,4 +135,25 @@ run "redis_auth_token_generator_meets_elasticache_constraints" {
     condition     = length(regexall("[^!&#$^<>-]", local.redis_auth_token_generator.override_special)) == 0
     error_message = "ElastiCache AUTH tokens allow punctuation only from !&#$^<>-."
   }
+}
+
+# Every CloudWatch log group this component creates is encrypted with the CMK
+# passed in (kms/main), not CloudWatch Logs' default key.
+run "redis_slow_log_group_uses_the_cmk" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_log_group.redis_slow_log.kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+    error_message = "The Redis slow-log group must be encrypted with kms_key_arn."
+  }
+}
+
+run "rejects_non_arn_kms_key" {
+  command = plan
+
+  variables {
+    kms_key_arn = "alias/main"
+  }
+
+  expect_failures = [var.kms_key_arn]
 }

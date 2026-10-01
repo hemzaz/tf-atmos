@@ -179,9 +179,13 @@ resource "aws_elasticache_parameter_group" "redis" {
   tags = local.tags
 }
 
+# Encrypted with the stack's CMK (kms/main): its key policy lets
+# logs.<region>.amazonaws.com use it for this account's log groups
+# (kms allow_cloudwatch_logs, on in kms/defaults).
 resource "aws_cloudwatch_log_group" "redis_slow_log" {
   name              = "/aws/elasticache/${local.name_prefix}-idp-redis/slow-log"
   retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
 
   tags = local.tags
 }

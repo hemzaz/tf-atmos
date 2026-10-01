@@ -236,7 +236,6 @@
                 {
                     "resource": "aws_cloudwatch_log_group.redis_slow_log",
                     "check_ids": [
-                        "CKV_AWS_158",
                         "CKV_AWS_338"
                     ]
                 },
@@ -460,25 +459,6 @@
                     "resource": "aws_secretsmanager_secret_rotation.this",
                     "check_ids": [
                         "CKV_AWS_304"
-                    ]
-                }
-            ]
-        },
-        {
-            "file": "/securitygroup/audit.tf",
-            "findings": [
-                {
-                    "resource": "aws_cloudwatch_log_group.security_group_changes",
-                    "check_ids": [
-                        "CKV_AWS_158",
-                        "CKV_AWS_338"
-                    ]
-                },
-                {
-                    "resource": "aws_cloudwatch_log_group.security_group_changes[0]",
-                    "check_ids": [
-                        "CKV_AWS_158",
-                        "CKV_AWS_338"
                     ]
                 }
             ]

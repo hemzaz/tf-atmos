@@ -1,6 +1,15 @@
-# Security group auditing: CloudWatch logging and alarms on security group
-# change events, a detector for rules open to the whole internet, and a set of
-# rule templates offered as an output for reference.
+# Plan-time audit of the rules this component creates: a detector for ingress
+# open to the whole internet (0.0.0.0/0 or ::/0), the enforce_no_public_ingress
+# guard built on it, and a set of rule templates offered as an output for
+# reference.
+#
+# Security group CHANGE detection is not here: it is an account-and-region
+# concern, owned by security-monitoring (an EventBridge rule per change and the
+# CIS SecurityGroupChanges metric filter and alarm, both to its KMS-encrypted
+# alert topic). This component used to create its own log group, EventBridge
+# rule, metric filter and alarm per instance; the rule had no target, the
+# filter could never match CloudTrail's JSON, and the names collided between
+# instances, so none of it ever alerted.
 #
 # The rules this component actually creates are in main.tf; what is normalized
 # and keyed for them is in normalize.tf.
@@ -163,88 +172,6 @@ locals {
     for rule in local.permissive_rules :
     "${rule.rule_key} (${rule.from_port}-${rule.to_port})"
   ]) : ""
-}
-
-# CloudWatch Log Group for security group changes
-resource "aws_cloudwatch_log_group" "security_group_changes" {
-  count = var.enable_security_group_logging ? 1 : 0
-
-  name              = "/aws/securitygroups/${var.tags["Environment"]}/changes"
-  retention_in_days = var.log_retention_days
-
-  tags = merge(
-    var.tags,
-    {
-      Name    = "${var.tags["Environment"]}-sg-changes"
-      Purpose = "security-audit"
-    }
-  )
-}
-
-# EventBridge rule to capture security group changes
-resource "aws_cloudwatch_event_rule" "security_group_changes" {
-  count = var.enable_security_group_logging ? 1 : 0
-
-  name        = "${var.tags["Environment"]}-security-group-changes"
-  description = "Capture all security group changes"
-
-  event_pattern = jsonencode({
-    source      = ["aws.ec2"]
-    detail-type = ["AWS API Call via CloudTrail"]
-    detail = {
-      eventSource = ["ec2.amazonaws.com"]
-      eventName = [
-        "AuthorizeSecurityGroupIngress",
-        "AuthorizeSecurityGroupEgress",
-        "RevokeSecurityGroupIngress",
-        "RevokeSecurityGroupEgress",
-        "CreateSecurityGroup",
-        "DeleteSecurityGroup",
-        "ModifySecurityGroupRules"
-      ]
-    }
-  })
-}
-
-# CloudWatch Log Stream for security group changes
-resource "aws_cloudwatch_log_stream" "security_group_changes" {
-  count = var.enable_security_group_logging ? 1 : 0
-
-  name           = "${var.tags["Environment"]}-sg-audit-stream"
-  log_group_name = aws_cloudwatch_log_group.security_group_changes[0].name
-}
-
-# CloudWatch alarm for overly permissive rules
-resource "aws_cloudwatch_metric_alarm" "permissive_sg_rules" {
-  count = var.enable_security_group_alarms && local.has_permissive_rules ? 1 : 0
-
-  alarm_name          = "${var.tags["Environment"]}-permissive-security-group-rules"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "1"
-  metric_name         = "PermissiveSecurityGroupRules"
-  namespace           = "Custom/SecurityGroups"
-  period              = "300"
-  statistic           = "Sum"
-  threshold           = "0"
-  alarm_description   = "Alert on overly permissive security group rules (0.0.0.0/0). Found in: ${local.permissive_rule_warning}"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = var.security_alarm_actions
-}
-
-# Custom metric for tracking permissive rules
-resource "aws_cloudwatch_log_metric_filter" "permissive_rules" {
-  count = var.enable_security_group_logging && var.enable_security_group_alarms ? 1 : 0
-
-  name           = "${var.tags["Environment"]}-permissive-sg-rules"
-  log_group_name = aws_cloudwatch_log_group.security_group_changes[0].name
-  pattern        = "[...CidrIp=0.0.0.0/0...]"
-
-  metric_transformation {
-    name          = "PermissiveSecurityGroupRules"
-    namespace     = "Custom/SecurityGroups"
-    value         = "1"
-    default_value = "0"
-  }
 }
 
 # Validation: Prevent 0.0.0.0/0 in production
