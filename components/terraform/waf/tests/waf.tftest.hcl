@@ -4,7 +4,7 @@
 mock_provider "aws" {}
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   name   = "webapp-waf"
   scope  = "REGIONAL"
   tags = {
@@ -18,7 +18,7 @@ run "cloudfront_scope_is_rejected_outside_us_east_1" {
   command = plan
 
   variables {
-    region = "eu-west-2"
+    region = "us-east-2"
     scope  = "CLOUDFRONT"
   }
 
@@ -67,7 +67,7 @@ run "a_null_association_arn_is_rejected_with_a_clear_message" {
   variables {
     scope = "REGIONAL"
     association_resource_arns = [
-      "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/test-webapp-alb/abc123",
+      "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/test-webapp-alb/abc123",
       null,
     ]
   }
@@ -81,7 +81,7 @@ run "regional_scope_associates_every_arn" {
   variables {
     scope = "REGIONAL"
     association_resource_arns = [
-      "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/test-webapp-alb/abc123",
+      "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/test-webapp-alb/abc123",
     ]
   }
 
@@ -91,7 +91,7 @@ run "regional_scope_associates_every_arn" {
   }
 
   assert {
-    condition     = one(values(aws_wafv2_web_acl_association.this)).resource_arn == "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/test-webapp-alb/abc123"
+    condition     = one(values(aws_wafv2_web_acl_association.this)).resource_arn == "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/test-webapp-alb/abc123"
     error_message = "The association targets the given resource ARN."
   }
 }

@@ -38,7 +38,9 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   account one CloudWatch Logs resource policy `route53-query-logging-<first zone>` (route53,
   scoped by `aws:SourceAccount`/`aws:SourceArn`; the `aws_route53_query_log` waits for it) and
   one KMS key `alias/route53-query-logs-<first zone>` (rotation on; account root plus
-  `logs.us-east-1` scoped to `/aws/route53/*`), because `kms/main` is in the stack region. All
+  `logs.us-east-1` scoped to `/aws/route53/*`), so the component works in any stack region. The
+  fnx stacks are in us-east-1, so `kms/main` could serve instead (`query_logging_config.kms_key_id`);
+  the names differ, so the two keys do not collide. All
   three use the resource `region` argument, not a provider alias; DNS-account zones get theirs
   in the DNS account. CloudWatch Logs allows 10 resource policies per region and account.
 - `<first zone>` is the alphabetically first query-logged zone, so adding a zone that sorts earlier

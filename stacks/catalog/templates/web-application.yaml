@@ -316,8 +316,9 @@ components:
         region: "us-east-1"
         name: "webapp-waf-cf"
         scope: "CLOUDFRONT"
-        # kms/main lives in this stack's own region (eu-west-2) and cannot
-        # encrypt a us-east-1 log group; see components/terraform/waf/README.md.
+        # Unset like every CLOUDFRONT instance (components/terraform/waf/README.md).
+        # The stacks are in us-east-1 too, so this instance could read kms/main
+        # like web-application/waf does; left unset to keep the pattern.
         kms_key_arn: null
 
         managed_rule_group_statement_rules:
