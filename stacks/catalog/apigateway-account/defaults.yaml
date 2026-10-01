@@ -1,0 +1,23 @@
+---
+##################################################
+# Catalog Configuration for API Gateway account settings
+##################################################
+# The account's API Gateway CloudWatch Logs role (Cloud Posse
+# aws-api-gateway-account-settings). REST execution and access logging fail at
+# stage create/update without it, so every stack with a REST apigateway
+# instance that logs needs one instance of this, in an earlier deploy layer,
+# listed in the apigateway instances' dependencies.components.
+#
+# Per-account, per-region singleton: exactly one enabled instance per account
+# and region, or the instances overwrite each other's setting.
+
+components:
+  terraform:
+    apigateway-account/defaults:
+      metadata:
+        component: apigateway-account
+        type: abstract
+      vars:
+        enabled: true
+        tags:
+          Component: "ApiGatewayAccount"

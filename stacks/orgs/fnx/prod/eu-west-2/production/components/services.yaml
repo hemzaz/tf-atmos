@@ -144,6 +144,9 @@ components:
           CriticalityLevel: "high"
       dependencies:
         components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
           - component: network/main
           - component: acm/main
           - component: cognito/main
@@ -211,6 +214,9 @@ components:
         tracing_enabled: true
       dependencies:
         components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
           - component: network/services
           - component: acm/services
           - component: cognito/main

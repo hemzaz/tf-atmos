@@ -12,6 +12,7 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   `acm/services .certificate_arns.services_wildcard` and `network/services .zone_ids.data`. Both,
   in the three AWS stacks, read `cognito/main .user_pool_arn` and `lambda/data-processor`
   (`.function_invoke_arn`, `.function_name`).
+- Both depend on `apigateway-account/main` (the account's CloudWatch Logs role; ordering only).
 - Used by: `monitoring` (`.api_name`, `.rest_api_stage_name`).
 - In the `microservices-platform` template, `http_routes` send `ANY /{proxy+}` over the VPC link to
   `alb-controller-ingress-group`'s `https_listener_arn`, with `tls_server_name_to_verify` set.
@@ -37,7 +38,9 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   bypass without `execute-api:InvalidateCache` gets a 403. No instance caches today.
 - The stage-wide `*/*` method settings (throttling, execution logging, metrics) apply to every
   REST stage; they used to exist only with caching on. REST execution and access logging need the
-  account-level API Gateway CloudWatch role, which no component manages yet.
+  account-level API Gateway CloudWatch role, which `apigateway-account` sets: a stack with a REST
+  instance that logs needs `apigateway-account/main`, in `dependencies.components` and an earlier
+  deploy layer, or the stage fails to create.
 - `enable_waf`'s inline web ACL has no logging configuration (so nothing to redact); the `waf`
   component is the one with logs.
 - `enable_waf` and `tracing_enabled` default to `false`. WAF is on for `apigateway/data` in every
