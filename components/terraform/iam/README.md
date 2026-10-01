@@ -2,7 +2,8 @@
 
 An optional cross-account role (trust gated by org ID, external ID or MFA) with a fixed
 cross-account policy and a resource-management policy scoped to caller-supplied ARNs, and
-optionally the GitHub Actions OIDC provider with separate CI plan and apply roles.
+optionally the GitHub Actions OIDC provider with separate CI plan and apply roles, and a Lambda
+package uploader role for an application repo's CI.
 
 ## Wiring
 
@@ -30,5 +31,12 @@ optionally the GitHub Actions OIDC provider with separate CI plan and apply role
   (`iam/dev`, `iam/main`). If `AWSServiceRoleForAutoScaling` already exists
   (`aws iam get-role --role-name AWSServiceRoleForAutoScaling`), the create fails: set the flag
   `false`, or import it at `'aws_iam_service_linked_role.autoscaling[0]'` and never flip it back.
+- Lambda uploader (`lambda-uploader.tf`): `<ci_role_name_prefix>-lambda-uploader`, created only
+  when `lambda_uploader_trusted_github_repos` names an app repo (`<org>/<repo>:<branch>`, same
+  validation as the apply role's). It may put/get objects in, and list, the stage's
+  `s3/lambda-artifacts` bucket and use `lambda_uploader_kms_key_alias` via S3 only. The bucket
+  is named, not read (`<tags.Environment>-lambda-artifacts-<account id>`, the s3 component's
+  convention), because `iam/ci` applies before storage; `check-lambda-packages.py` fails lint
+  when the stack's bucket or `kms/main` alias stops matching.
 - A resource-management precondition requires at least one managed ARN list, so a CI-only
   instance must set `create_cross_account_role: false`.

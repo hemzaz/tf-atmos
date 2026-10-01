@@ -290,3 +290,171 @@ run "ci_backend_role_arn_must_be_a_role_arn" {
 
   expect_failures = [var.ci_backend_read_role_arns]
 }
+
+# Lambda package uploader (lambda-uploader.tf): an application repo's CI
+# uploads zips to this stage's s3/lambda-artifacts bucket, nothing else. The
+# bucket is named by the s3 component's convention, <Environment>-lambda-
+# artifacts-<account id>, because iam/ci applies before kms and storage.
+run "lambda_uploader_absent_without_trusted_repos" {
+  command = plan
+
+  variables {
+    github_oidc_enabled           = true
+    github_oidc_repository        = "hemzaz/tf-atmos"
+    github_oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix           = "test-ci"
+    lambda_uploader_kms_key_alias = "alias/testenv-01-main"
+    tags                          = { Environment = "testenv-01" }
+  }
+
+  assert {
+    condition     = length(aws_iam_role.lambda_uploader) == 0 && length(aws_iam_role_policy.lambda_uploader) == 0
+    error_message = "lambda_uploader_trusted_github_repos defaults to [], so no uploader role or policy may be created."
+  }
+
+  assert {
+    condition     = output.lambda_uploader_role_arn == null && output.lambda_artifacts_bucket_name == null
+    error_message = "The uploader outputs must be null when no role is created."
+  }
+}
+
+run "lambda_uploader_trusts_only_the_pinned_app_branch" {
+  command = plan
+
+  variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "fnx-dev-testenv-01-ci"
+    lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
+    tags                                 = { Environment = "testenv-01" }
+  }
+
+  assert {
+    condition     = aws_iam_role.lambda_uploader[0].name == "fnx-dev-testenv-01-ci-lambda-uploader"
+    error_message = "The uploader role is <ci_role_name_prefix>-lambda-uploader."
+  }
+
+  assert {
+    condition = (
+      length(jsondecode(aws_iam_role.lambda_uploader[0].assume_role_policy).Statement) == 1
+      && jsondecode(aws_iam_role.lambda_uploader[0].assume_role_policy).Statement[0].Action == "sts:AssumeRoleWithWebIdentity"
+      && jsondecode(aws_iam_role.lambda_uploader[0].assume_role_policy).Statement[0].Principal.Federated == "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+      && keys(jsondecode(aws_iam_role.lambda_uploader[0].assume_role_policy).Statement[0].Condition) == ["StringEquals"]
+      && jsondecode(aws_iam_role.lambda_uploader[0].assume_role_policy).Statement[0].Condition.StringEquals == {
+        "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+        "token.actions.githubusercontent.com:sub" = "repo:hemzaz/data-app:ref:refs/heads/main"
+      }
+    )
+    error_message = "The uploader role must trust exactly sub = repo:hemzaz/data-app:ref:refs/heads/main and aud = sts.amazonaws.com (StringEquals), nothing else."
+  }
+}
+
+run "lambda_uploader_writes_only_the_stage_bucket" {
+  command = plan
+
+  variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "test-ci"
+    lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
+    tags                                 = { Environment = "testenv-01" }
+  }
+
+  assert {
+    condition     = output.lambda_artifacts_bucket_name == "testenv-01-lambda-artifacts-123456789012"
+    error_message = "The bucket must follow the s3 component's convention <Environment>-lambda-artifacts-<account id> (s3/lambda-artifacts)."
+  }
+
+  # Statement order is the document's: objects, bucket, KMS. A single-element
+  # list serializes as a bare string.
+  assert {
+    condition = (
+      length(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement) == 3
+      && toset(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[0].Action) == toset(["s3:PutObject", "s3:GetObject"])
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[0].Resource == "arn:aws:s3:::testenv-01-lambda-artifacts-123456789012/*"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[1].Action == "s3:ListBucket"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[1].Resource == "arn:aws:s3:::testenv-01-lambda-artifacts-123456789012"
+    )
+    error_message = "S3 access must be PutObject/GetObject on the stage's lambda-artifacts objects and ListBucket on that bucket, and nothing else."
+  }
+
+  assert {
+    condition = (
+      toset(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Action) == toset(["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"])
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Resource == "*"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/testenv-01-main"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Condition["StringEquals"]["kms:ViaService"] == "s3.eu-west-2.amazonaws.com"
+    )
+    error_message = "KMS access must be GenerateDataKey/Encrypt/Decrypt on the kms/main alias only, and only via s3.<region>.amazonaws.com."
+  }
+}
+
+# One run per wildcard position, so each is proven rejected on its own.
+run "lambda_uploader_rejects_a_wildcard_org" {
+  command = plan
+
+  variables {
+    lambda_uploader_trusted_github_repos = ["*/data-app:main"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
+  }
+
+  expect_failures = [var.lambda_uploader_trusted_github_repos]
+}
+
+run "lambda_uploader_rejects_a_wildcard_repo" {
+  command = plan
+
+  variables {
+    lambda_uploader_trusted_github_repos = ["hemzaz/*:main"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
+  }
+
+  expect_failures = [var.lambda_uploader_trusted_github_repos]
+}
+
+run "lambda_uploader_rejects_a_wildcard_branch" {
+  command = plan
+
+  variables {
+    lambda_uploader_trusted_github_repos = ["hemzaz/data-app:*"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
+  }
+
+  expect_failures = [var.lambda_uploader_trusted_github_repos]
+}
+
+run "lambda_uploader_rejects_pull_request_subject" {
+  command = plan
+
+  variables {
+    lambda_uploader_trusted_github_repos = ["hemzaz/data-app:pull_request"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
+  }
+
+  expect_failures = [var.lambda_uploader_trusted_github_repos]
+}
+
+run "lambda_uploader_rejects_a_repo_without_a_pinned_branch" {
+  command = plan
+
+  variables {
+    lambda_uploader_trusted_github_repos = ["hemzaz/data-app"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
+  }
+
+  expect_failures = [var.lambda_uploader_trusted_github_repos]
+}
+
+run "lambda_uploader_requires_the_kms_alias" {
+  command = plan
+
+  variables {
+    lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
+  }
+
+  expect_failures = [var.lambda_uploader_trusted_github_repos]
+}

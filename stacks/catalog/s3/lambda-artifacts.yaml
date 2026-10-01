@@ -10,7 +10,10 @@
 # storage layer, before compute. The bucket is
 # <Environment>-lambda-artifacts-<account id>; encryption (kms/main),
 # versioning, public access block and the TLS-only policy come from
-# s3/defaults and the component.
+# s3/defaults and the component. Application CI writes it through iam/ci's
+# lambda-uploader role, which names this bucket by that convention instead of
+# reading its state (check-lambda-packages.py keeps the two in step); keys
+# are <function_name>/<version>.zip (docs/OPERATIONS.md, "Lambda packages").
 
 import:
   - catalog/s3/defaults
@@ -25,10 +28,11 @@ components:
       vars:
         name: lambda-artifacts
         lifecycle_configuration_rules:
-          # Packages are overwritten in place (s3_key is a fixed path), so the
-          # previous versions are the rollback set: keep the newest 10 and
-          # expire older ones after 30 days. Once only a delete marker is
-          # left, remove it.
+          # Each release is a new key, so earlier releases stay current and
+          # are the rollback set (set package_version back). A key that is
+          # overwritten anyway keeps its newest 10 previous versions, older
+          # ones expiring after 30 days. Once only a delete marker is left,
+          # remove it.
           - id: noncurrent-packages
             abort_incomplete_multipart_upload_days: 7
             noncurrent_version_expiration:
