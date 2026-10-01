@@ -120,6 +120,18 @@ variable "max_allocated_storage" {
   default     = 100
 }
 
+variable "ca_cert_identifier" {
+  # Cloud Posse's input name, type and default (cloudposse/terraform-aws-rds).
+  type        = string
+  description = "Identifier of the CA certificate for the primary and the read replica (e.g. rds-ca-rsa2048-g1). null keeps the RDS default"
+  default     = null
+
+  validation {
+    condition     = var.ca_cert_identifier == null || can(regex("^rds-ca-[a-z0-9-]+$", var.ca_cert_identifier))
+    error_message = "ca_cert_identifier must be an RDS CA identifier such as rds-ca-rsa2048-g1, or null."
+  }
+}
+
 variable "storage_type" {
   type        = string
   description = "Storage type for the RDS instance"

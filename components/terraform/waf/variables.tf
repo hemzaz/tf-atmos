@@ -258,6 +258,20 @@ variable "redacted_fields" {
     condition     = alltrue(flatten([for v in values(var.redacted_fields) : [for n in coalesce(v.single_header, []) : can(regex("^[A-Za-z0-9_-]{1,64}$", n))]]))
     error_message = "redacted_fields[*].single_header entries must be header names: 1-64 letters, digits, hyphens or underscores."
   }
+
+  # Counted as local.redacted_fields renders them: one field per method,
+  # query_string, uri_path and header, a field named twice counted once.
+  validation {
+    condition = length(distinct(flatten([
+      for v in values(var.redacted_fields) : concat(
+        v.method ? ["method"] : [],
+        v.query_string ? ["query_string"] : [],
+        v.uri_path ? ["uri_path"] : [],
+        [for h in coalesce(v.single_header, []) : "single_header:${lower(h)}"],
+      )
+    ]))) <= 100
+    error_message = "redacted_fields may redact at most 100 fields (the WAF logging configuration limit); each method, query_string, uri_path and header counts as one."
+  }
 }
 
 variable "logging_filter" {

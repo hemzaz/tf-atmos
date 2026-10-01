@@ -25,8 +25,9 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   certificate ARN is only a warning.
 - The REST custom domain is REGIONAL with `TLS_1_2`; a precondition rejects `EDGE`/`PRIVATE`
   endpoints with a domain.
-- `api_resources` hang off the API root: paths are one level deep. Methods and integrations are
-  addressed by `resource_path`; every integration needs a matching method.
+- `api_resources` hang off the API root unless `parent_id` names another resource; methods and
+  integrations still address them as `"/<path_part>"`, and every integration needs a matching
+  method. The cache `method_path` uses the resource's full path (`v1/products/GET`).
 - `cors_configuration` and `http_routes` apply to HTTP APIs only; a REST API ignores them silently
   (staging and prod set CORS on REST instances, a known gap).
 - `api_name` output is null for an HTTP API.
@@ -34,8 +35,12 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   and `enable_caching` provisions the billed cache cluster; each needs the other. `"*/*"` needs
   `cache_all_methods_acknowledged`. A cached method with authorization other than `NONE` must put
   the identity header in its `request_parameters` and its integration's `cache_key_parameters`,
-  or users share cache entries (validated). Cached data is encrypted, and `Cache-Control`
-  bypass without `execute-api:InvalidateCache` gets a 403. No instance caches today.
+  or users share cache entries (validated). For `AWS_IAM` that header is the SigV4
+  `Authorization`, unique per request, so the method never hits: don't cache `AWS_IAM` methods.
+  Cached data is encrypted, and `Cache-Control` bypass without `execute-api:InvalidateCache` gets
+  a 403. No instance caches today.
+- `cache_method_paths` allows one method besides `"*/*"`: each is its own method setting, an
+  `UpdateStage` on the same stage, and parallel ones fail with `ConflictException`.
 - The stage-wide `*/*` method settings (throttling, execution logging, metrics) apply to every
   REST stage; they used to exist only with caching on. REST execution and access logging need the
   account-level API Gateway CloudWatch role, which `apigateway-account` sets: a stack with a REST

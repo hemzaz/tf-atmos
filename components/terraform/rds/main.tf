@@ -372,6 +372,10 @@ resource "aws_db_instance" "read_replica" {
   # db-XXXX resource ID, which RDS does not accept here.
   replicate_source_db = aws_db_instance.main.identifier
   instance_class      = var.read_replica_instance_class != null ? var.read_replica_instance_class : var.instance_class
+  # Storage autoscaling and the CA certificate are per instance, not
+  # inherited from the source.
+  max_allocated_storage = var.max_allocated_storage
+  ca_cert_identifier    = var.ca_cert_identifier
 
   # Without these the replica lands in the VPC's default security group and
   # the default parameter group (no TLS enforcement, no logging defaults).
@@ -414,6 +418,7 @@ resource "aws_db_instance" "main" {
   instance_class        = var.instance_class
   allocated_storage     = var.allocated_storage
   max_allocated_storage = var.max_allocated_storage
+  ca_cert_identifier    = var.ca_cert_identifier
   storage_type          = var.storage_type
   storage_encrypted     = var.storage_encrypted
   kms_key_id            = var.kms_key_id

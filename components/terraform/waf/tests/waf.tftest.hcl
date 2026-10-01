@@ -265,6 +265,37 @@ run "dropping_the_credential_headers_is_rejected" {
   expect_failures = [var.redacted_fields]
 }
 
+# WAF accepts at most 100 redacted fields: the two defaults plus 98 headers
+# pass, plus 99 fail.
+run "one_hundred_redacted_fields_are_accepted" {
+  command = plan
+
+  variables {
+    redacted_fields = merge(
+      { authorization = { single_header = ["authorization"] }, cookie = { single_header = ["cookie"] } },
+      { for i in range(98) : "h${i}" => { single_header = ["x-h-${i}"] } },
+    )
+  }
+
+  assert {
+    condition     = length(aws_wafv2_web_acl_logging_configuration.this[0].redacted_fields) == 100
+    error_message = "100 redacted fields render as 100 blocks."
+  }
+}
+
+run "more_than_one_hundred_redacted_fields_are_rejected" {
+  command = plan
+
+  variables {
+    redacted_fields = merge(
+      { authorization = { single_header = ["authorization"] }, cookie = { single_header = ["cookie"] } },
+      { for i in range(99) : "h${i}" => { single_header = ["x-h-${i}"] } },
+    )
+  }
+
+  expect_failures = [var.redacted_fields]
+}
+
 run "logging_filter_is_rendered_when_set" {
   command = plan
 

@@ -57,15 +57,25 @@ locals {
   # ignores cors_configuration (see the enable_cors local above).
   http_routes = local.create_http_api ? var.http_routes : {}
 
+  # Full resource path by resource_path key. A resource under the API root is
+  # "/<path_part>"; one under a parent_id sits below that parent's own path,
+  # which only API Gateway knows, so it is the resource's computed path.
+  api_resource_full_paths = {
+    for idx, res in aws_api_gateway_resource.resource : "/${var.api_resources[idx].path_part}" => (
+      var.api_resources[idx].parent_id == null ? "/${var.api_resources[idx].path_part}" : res.path
+    )
+  }
+
   # Response caching (REST). "*/*" is the stage-wide setting and caches every
   # method only with cache_all_methods_acknowledged (variables.tf). Every other
   # entry is an api_methods key ("GET /products") and gets its own method
-  # setting. API Gateway's method_path is "<resource path without the leading
-  # slash>/<HTTP method>"; the root resource "/" is escaped as "~1".
+  # setting. API Gateway's method_path is "<full resource path without the
+  # leading slash>/<HTTP method>" (provider docs: trimprefix(path, "/")), so a
+  # nested resource is "v1/products/GET"; the root resource "/" is "~1".
   cache_all_methods = local.create_rest_api && contains(var.cache_method_paths, "*/*")
   cache_method_paths = local.create_rest_api ? {
     for k in var.cache_method_paths : k => (
-      split(" ", k)[1] == "/" ? "~1/${split(" ", k)[0]}" : "${trimprefix(split(" ", k)[1], "/")}/${split(" ", k)[0]}"
+      split(" ", k)[1] == "/" ? "~1/${split(" ", k)[0]}" : "${trimprefix(local.api_resource_full_paths[split(" ", k)[1]], "/")}/${split(" ", k)[0]}"
     ) if k != "*/*"
   } : {}
 }
@@ -501,7 +511,8 @@ resource "aws_api_gateway_integration" "integration" {
 
   # A cached method on an authorized route must key its cache on the caller's
   # identity, or one user's response is served to another (variables.tf
-  # cache_method_paths enforces it).
+  # cache_method_paths enforces it). For AWS_IAM that key is the SigV4
+  # Authorization header, which is unique per request: safe, but never a hit.
   cache_key_parameters = each.value.cache_key_parameters
 
   # api_methods validates that every method has an integration; this catches the
@@ -734,7 +745,10 @@ resource "aws_api_gateway_method_settings" "stage" {
 
 # Per-method caching, one override per cache_method_paths entry. A method
 # override replaces the stage-wide settings for that method, so it repeats
-# them rather than inheriting.
+# them rather than inheriting. Each instance is an UpdateStage on the same
+# stage; for_each siblings cannot be chained with depends_on and run in
+# parallel, which API Gateway rejects (ConflictException) and the provider
+# does not retry. cache_method_paths therefore allows one method besides "*/*".
 resource "aws_api_gateway_method_settings" "cache" {
   for_each = local.cache_method_paths
 
