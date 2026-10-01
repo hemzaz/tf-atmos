@@ -215,6 +215,13 @@ run "lambda_artifacts_bucket" {
     )
     error_message = "Noncurrent package versions beyond the newest 10 expire after 30 days; orphan delete markers and stale multipart uploads are removed."
   }
+
+  # A rule without filter_and still sends an explicit empty filter, so newer
+  # AWS providers do not warn about a rule with neither filter nor prefix.
+  assert {
+    condition     = length(aws_s3_bucket_lifecycle_configuration.this[0].rule[0].filter) == 1
+    error_message = "A lifecycle rule with no filter_and must render an explicit empty filter block."
+  }
 }
 
 run "disabled_creates_nothing" {

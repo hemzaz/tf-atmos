@@ -43,8 +43,10 @@ locals {
 
   # Resource policies and key aliases are account-wide names, and network/main
   # and network/services share an account: name them after this instance's
-  # first query-logged zone (zone names are unique per instance).
-  query_log_name_suffix = try(
+  # first query-logged zone (zone names are unique per instance) unless
+  # var.query_logging_name pins it: the derived value changes when a zone that
+  # sorts earlier is added, replacing the policy and the alias.
+  query_log_name_suffix = var.query_logging_name != null ? var.query_logging_name : try(
     replace(trimsuffix(sort([for z in values(local.query_logged_zones) : lower(z.name)])[0], "."), ".", "-"),
     ""
   )
@@ -272,6 +274,15 @@ resource "aws_route53_query_log" "query_logging" {
   zone_id                  = aws_route53_zone.zones[each.key].zone_id
 
   depends_on = [aws_cloudwatch_log_resource_policy.route53_query_logging]
+
+  # A caller-supplied log group must be in the zone's own account (the
+  # variable validation only knows the region).
+  lifecycle {
+    precondition {
+      condition     = !contains(keys(var.zones[each.key].query_logging_config), "cloudwatch_log_group_arn") || split(":", var.zones[each.key].query_logging_config["cloudwatch_log_group_arn"])[4] == data.aws_caller_identity.current.account_id
+      error_message = "zones.${each.key}.query_logging_config.cloudwatch_log_group_arn must be in this component's account (${data.aws_caller_identity.current.account_id}): Route53 only logs to a log group in the zone's own account."
+    }
+  }
 }
 
 resource "aws_route53_query_log" "dns_account_query_logging" {
@@ -282,4 +293,12 @@ resource "aws_route53_query_log" "dns_account_query_logging" {
   zone_id                  = aws_route53_zone.dns_account_zones[each.key].zone_id
 
   depends_on = [aws_cloudwatch_log_resource_policy.dns_account_route53_query_logging]
+
+  # A caller-supplied log group must be in the DNS account, which owns the zone.
+  lifecycle {
+    precondition {
+      condition     = !contains(keys(var.zones[each.key].query_logging_config), "cloudwatch_log_group_arn") || split(":", var.zones[each.key].query_logging_config["cloudwatch_log_group_arn"])[4] == one(data.aws_caller_identity.dns_account[*].account_id)
+      error_message = "zones.${each.key}.query_logging_config.cloudwatch_log_group_arn must be in the DNS account: Route53 only logs to a log group in the zone's own account."
+    }
+  }
 }

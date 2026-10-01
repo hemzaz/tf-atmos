@@ -207,11 +207,11 @@ variable "private_network_acl_peer_cidr_blocks" {
     error_message = "private_network_acl_peer_cidr_blocks must not contain a /0 range (0.0.0.0/0)."
   }
 
-  # rule_no is 200 + index; NACL rules stop at 32766, and a peer list that
-  # long is a mistake anyway.
+  # rule_no is 200 + index. The private NACL already has 5 egress rules
+  # (100-140) and the default quota is 20 rules per direction, so peers get 15.
   validation {
-    condition     = length(var.private_network_acl_peer_cidr_blocks) <= 20
-    error_message = "private_network_acl_peer_cidr_blocks allows at most 20 entries (rules 200-219)."
+    condition     = length(var.private_network_acl_peer_cidr_blocks) <= 15
+    error_message = "private_network_acl_peer_cidr_blocks allows at most 15 entries (rules 200-214): with the 5 built-in private egress rules that is the default NACL quota of 20 rules per direction."
   }
 }
 

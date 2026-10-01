@@ -193,3 +193,22 @@ run "private_zones_cannot_delegate" {
 
   expect_failures = [var.zones]
 }
+
+# nullable = false: an explicit null (e.g. an unset Atmos var) takes the default
+# instead of reaching the validation as a null comparison.
+run "null_delegation_ttl_takes_the_default" {
+  command = plan
+
+  variables {
+    delegation_ttl = null
+    zones = {
+      services = { name = "services.fnx.example.com" }
+      data     = { name = "data.services.fnx.example.com", parent_zone = "services" }
+    }
+  }
+
+  assert {
+    condition     = aws_route53_record.records["delegation_data"].ttl == 30
+    error_message = "A null delegation_ttl must fall back to the default 30."
+  }
+}

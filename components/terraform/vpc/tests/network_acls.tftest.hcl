@@ -113,3 +113,28 @@ run "private_nacl_peer_malformed_cidr_is_rejected" {
 
   expect_failures = [var.private_network_acl_peer_cidr_blocks]
 }
+
+# 5 built-in private egress rules + 16 peers would be 21, over the default
+# NACL quota of 20 rules per direction.
+run "private_nacl_peer_cidr_cap_rejects_16" {
+  command = plan
+
+  variables {
+    private_network_acl_peer_cidr_blocks = [for i in range(16) : "10.${100 + i}.0.0/16"]
+  }
+
+  expect_failures = [var.private_network_acl_peer_cidr_blocks]
+}
+
+run "private_nacl_peer_cidr_cap_allows_15" {
+  command = plan
+
+  variables {
+    private_network_acl_peer_cidr_blocks = [for i in range(15) : "10.${100 + i}.0.0/16"]
+  }
+
+  assert {
+    condition     = length([for r in aws_network_acl.private[0].egress : r if r.rule_no >= 200]) == 15
+    error_message = "15 peer CIDRs must produce 15 peer egress rules."
+  }
+}

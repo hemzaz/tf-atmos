@@ -99,6 +99,17 @@ variable "zones" {
   }
 }
 
+variable "query_logging_name" {
+  type        = string
+  description = "Suffix of the account-wide Route53 query logging resource policy and KMS key alias names (route53-query-logging-<suffix>, alias/route53-query-logs-<suffix>). Null derives it from the alphabetically first query-logged zone name, which renames and replaces both when a zone that sorts earlier is added: set it once the zones are settled to pin the names. Resource policies and aliases are per account, so instances sharing an account (network/main, network/services) need different values."
+  default     = null
+
+  validation {
+    condition     = var.query_logging_name == null || can(regex("^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$", coalesce(var.query_logging_name, "-")))
+    error_message = "query_logging_name must be lowercase letters, digits and hyphens (1-64 characters, not starting or ending with a hyphen)."
+  }
+}
+
 variable "query_log_retention_in_days" {
   type        = number
   description = "Days CloudWatch Logs keeps the query log groups this component creates; zones.<key>.query_logging_config.retention_days overrides it per zone. 7 matches eks's cluster_log_retention_period default (owner decision); prod pins 90."
@@ -114,6 +125,7 @@ variable "delegation_ttl" {
   type        = number
   description = "TTL in seconds of the NS records that zones.<key>.parent_zone writes into the parent zone. 30 matches Cloud Posse dns-delegated, so a re-created subzone's new name servers propagate within seconds; raise it (AWS suggests up to 172800) once the delegation is stable."
   default     = 30
+  nullable    = false
 
   validation {
     condition     = var.delegation_ttl >= 0 && var.delegation_ttl <= 2147483647 && floor(var.delegation_ttl) == var.delegation_ttl
