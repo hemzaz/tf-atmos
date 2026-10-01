@@ -147,6 +147,7 @@ resource "aws_vpc_security_group_egress_rule" "replication" {
 }
 
 resource "aws_elasticache_replication_group" "main" {
+  #checkov:skip=CKV_AWS_31:False positive, the check reads only auth_token; transit encryption is forced on and the token is set write-only through auth_token_wo (idp-platform's replication group is baselined for the same reason)
   count = local.enabled ? 1 : 0
 
   replication_group_id = local.name
