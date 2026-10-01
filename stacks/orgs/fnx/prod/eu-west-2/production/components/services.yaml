@@ -11,6 +11,7 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/s3/lambda-artifacts
   - catalog/cost-optimization/defaults
   - catalog/rds/prod
   - catalog/elasticache/prod
@@ -345,9 +346,10 @@ components:
         function_name: "production-data-processor"
         handler: "main.handler"
         runtime: "python3.13"
-        # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
-        s3_bucket: "fnx-production-lambda-artifacts"
+        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
+        # this repo builds or uploads the package: s3_key must exist in it
+        # before the first apply - see docs/OPERATIONS.md.
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: "production-data-processor/latest.zip"
         memory_size: 1024
         timeout: 600
@@ -360,6 +362,7 @@ components:
       dependencies:
         components:
           - component: vpc/services
+          - component: s3/lambda-artifacts
 
     lambda/data-transformer:
       metadata:
@@ -368,9 +371,10 @@ components:
         function_name: "production-data-transformer"
         handler: "transform.handler"
         runtime: "python3.13"
-        # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
-        s3_bucket: "fnx-production-lambda-artifacts"
+        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
+        # this repo builds or uploads the package: s3_key must exist in it
+        # before the first apply - see docs/OPERATIONS.md.
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: "production-data-transformer/latest.zip"
         memory_size: 2048
         timeout: 900
@@ -380,6 +384,7 @@ components:
       dependencies:
         components:
           - component: vpc/services
+          - component: s3/lambda-artifacts
 
     lambda/report-generator:
       metadata:
@@ -388,9 +393,10 @@ components:
         function_name: "production-report-generator"
         handler: "reports.handler"
         runtime: "python3.13"
-        # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
-        s3_bucket: "fnx-production-lambda-artifacts"
+        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
+        # this repo builds or uploads the package: s3_key must exist in it
+        # before the first apply - see docs/OPERATIONS.md.
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: "production-report-generator/latest.zip"
         memory_size: 3008
         timeout: 900
@@ -399,6 +405,7 @@ components:
       dependencies:
         components:
           - component: vpc/services
+          - component: s3/lambda-artifacts
 
 
     monitoring/main:

@@ -4,6 +4,7 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/s3/lambda-artifacts
   - catalog/cost-optimization/defaults
   - catalog/rds/dev
 
@@ -222,9 +223,10 @@ components:
         function_name: "data-processor"
         handler: "main.handler"
         runtime: "python3.13"
-        # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
-        s3_bucket: "fnx-lambda-artifacts"
+        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
+        # this repo builds or uploads the package: s3_key must exist in it
+        # before the first apply - see docs/OPERATIONS.md.
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: "data-processor/latest.zip"
         memory_size: 512
         vpc_id: !terraform.state vpc/services .vpc_id
@@ -232,6 +234,7 @@ components:
       dependencies:
         components:
           - component: vpc/services
+          - component: s3/lambda-artifacts
 
 
     # Monitoring instances

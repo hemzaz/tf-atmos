@@ -66,7 +66,10 @@
 #    one of its iam instances sets enable_autoscaling_service_linked_role:
 #    true (see components/terraform/iam/README.md), and kms/main declares a
 #    dependencies.components edge to that instance (every real dev/staging/
-#    prod stack already does both).
+#    prod stack already does both). s3/lambda-artifacts (imported below) must
+#    be applied too, with welcome-email/<version>.zip in it, before
+#    microservices/lambda/welcome-email: deploy-full-stack's storage layer
+#    applies it; the template's deploy-microservices workflow does not.
 # 2. settings.microservices, read by eks-addons, apigateway and the
 #    welcome-email Lambda:
 #      settings:
@@ -76,8 +79,7 @@
 #          letsencrypt_email: ops@example.com    # cert-manager ACME account
 #          cognito_user_pool_id: eu-west-2_xxxx  # JWT issuer
 #          cognito_client_id: xxxxxxxx           # JWT audience
-#          lambda_artifacts_bucket: my-artifacts # holds welcome-email/<version>.zip
-#          welcome_email_version: "1.4.2"        # package key; bump to deploy new code
+#          welcome_email_version: "1.4.2"        # package key (welcome-email/<version>.zip); bump to deploy new code
 #          dns_component: network/main           # dns instance holding the domain's public zone
 #          dns_zone_key: main                    # that zone's key in its zone_ids output
 #    A missing key fails every describe/plan of the stack with its name
@@ -106,6 +108,9 @@ import:
   - catalog/sqs/defaults
   - catalog/ses/defaults
   - catalog/secretsmanager/defaults
+  # s3/lambda-artifacts, the stack's lambda package bucket (an fnx org stack
+  # imports the same file in components/services.yaml).
+  - catalog/s3/lambda-artifacts
 
 # =============================================================================
 # COMPONENT DEFINITIONS
@@ -841,7 +846,7 @@ components:
 
     # Sends the welcome email for a UserRegistered event (the rule passes the
     # event's detail). The service's CI builds the package and uploads it as
-    # welcome-email/<version>.zip to settings.microservices.lambda_artifacts_bucket;
+    # welcome-email/<version>.zip to the stack's s3/lambda-artifacts bucket;
     # bumping settings.microservices.welcome_email_version changes s3_key, which
     # is what makes Terraform deploy the new code. It sends through SES from
     # the app domain's identity (microservices/ses). An invocation that still
@@ -855,7 +860,7 @@ components:
         function_name: welcome-email
         handler: "index.handler"
         runtime: "nodejs22.x"
-        s3_bucket: '{{ required "settings.microservices.lambda_artifacts_bucket is required" .settings.microservices.lambda_artifacts_bucket }}'
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: 'welcome-email/{{ required "settings.microservices.welcome_email_version is required" .settings.microservices.welcome_email_version }}.zip'
         memory_size: 256
         timeout: 30
@@ -884,6 +889,7 @@ components:
       dependencies:
         components:
           - component: kms/main
+          - component: s3/lambda-artifacts
           - component: microservices/ses
           - component: microservices/sqs/welcome-email-failures
 

@@ -7,9 +7,13 @@ default, TLS-only bucket policy.
 
 ## Wiring
 
-- No instance in the fnx stacks. `s3/defaults` reads `kms/main .key_arn`; the `batch-processing`
-  and `data-pipeline` templates create buckets from it (`serverless-api` also declares one).
-- Consumers read `.bucket_name`, `.bucket_arn` or `.bucket_regional_domain_name`.
+- `s3/defaults` reads `kms/main .key_arn`. `s3/lambda-artifacts` (`stacks/catalog/s3/lambda-artifacts.yaml`,
+  imported by each AWS stack's `components/services.yaml`, the `microservices-platform` template
+  and `templates/stacks/serverless-stack.yaml`) is the lambda package bucket, deployed in the
+  `deploy-full-stack` storage layer. The `batch-processing` and `data-pipeline` templates create
+  buckets from `s3/defaults` too (`serverless-api` also declares one).
+- Consumers read `.bucket_id`, `.bucket_name`, `.bucket_arn` or `.bucket_regional_domain_name`;
+  `lambda/*` reads `s3/lambda-artifacts .bucket_id`.
 
 ## Notes
 

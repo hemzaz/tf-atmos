@@ -31,6 +31,8 @@ import:
   - catalog/sqs/defaults
   - catalog/eventbridge/defaults
   - catalog/stepfunctions/defaults
+  # s3/lambda-artifacts: the bucket holding the Lambda packages (<function>.zip)
+  - catalog/s3/lambda-artifacts
   # Optional environment profile from templates/configs (import it last):
   # - mixins/profiles/development
 
@@ -43,8 +45,6 @@ settings:
     environment: serverless-01
   environment:
     description: "Serverless platform (Lambda, API Gateway, DynamoDB)"
-    # Bucket holding the Lambda deployment packages (<function>.zip)
-    artifacts_bucket: "fnx-dev-lambda-artifacts"
     lambda_runtime: "python3.13"
     log_retention_days: 14
     ops_email: "ops@example.com"
@@ -77,7 +77,9 @@ components:
       vars:
         runtime: "{{ .settings.environment.lambda_runtime }}"
         architectures: ["arm64"]
-        s3_bucket: "{{ .settings.environment.artifacts_bucket }}"
+        # The functions' packages; nothing here uploads them, so each s3_key
+        # must exist in this bucket before the first apply.
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         timeout: 30
         memory_size: 512
         tracing_mode: "Active"
@@ -111,6 +113,9 @@ components:
               }
             ]
           }
+      dependencies:
+        components:
+          - component: s3/lambda-artifacts
 
     # HTTP API in front of the functions (catalog: apigateway_http)
     apigateway/main:
@@ -147,6 +152,8 @@ components:
         api_gateway_source_arn: !terraform.state 'apigateway/main .http_api_execution_arn + "/*/*"'
       dependencies:
         components:
+          # Replaces lambda/defaults' list (list_merge_strategy: replace).
+          - component: s3/lambda-artifacts
           - component: apigateway/main
 
     # Background processor, triggered by EventBridge "Order Created" events

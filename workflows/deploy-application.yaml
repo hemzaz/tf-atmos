@@ -1,7 +1,8 @@
 # Application-layer deployments on top of an existing foundation. What these
 # workflows select reads state they do not deploy, so these must already be
-# applied (deploy-full-stack, layers backend through certificates): kms/main, vpc/*,
-# eks/* (where present), acm/* and the dns zones (network/main, network/services).
+# applied (deploy-full-stack, layers backend through certificates): kms/main,
+# s3/lambda-artifacts (lambda's package bucket), vpc/*, eks/* (where present),
+# acm/* and the dns zones (network/main, network/services).
 # monitoring also reads rds/*, elasticache/main (deploy-full-stack data layer) and
 # lambda/* for dashboard/alarm dimensions; lambda and ecs are applied by this
 # workflow, but rds and elasticache come only from deploy-full-stack's data

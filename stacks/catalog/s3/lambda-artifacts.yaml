@@ -1,0 +1,40 @@
+---
+##################################################
+# Lambda deployment-package bucket
+##################################################
+# The bucket every lambda/* instance of a stack loads its Zip package from
+# (s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id). Cloud Posse's
+# aws-lambda component takes its bucket the same way, from an s3-bucket
+# component's bucket_id (s3_bucket_component). Imported by each AWS stack that
+# runs lambdas (components/services.yaml); deployed in the deploy-full-stack
+# storage layer, before compute. The bucket is
+# <Environment>-lambda-artifacts-<account id>; encryption (kms/main),
+# versioning, public access block and the TLS-only policy come from
+# s3/defaults and the component.
+
+import:
+  - catalog/s3/defaults
+
+components:
+  terraform:
+    s3/lambda-artifacts:
+      metadata:
+        component: s3
+        inherits:
+          - s3/defaults
+      vars:
+        name: lambda-artifacts
+        lifecycle_configuration_rules:
+          # Packages are overwritten in place (s3_key is a fixed path), so the
+          # previous versions are the rollback set: keep the newest 10 and
+          # expire older ones after 30 days. Once only a delete marker is
+          # left, remove it.
+          - id: noncurrent-packages
+            abort_incomplete_multipart_upload_days: 7
+            noncurrent_version_expiration:
+              newer_noncurrent_versions: 10
+              noncurrent_days: 30
+            expiration:
+              expired_object_delete_marker: true
+        tags:
+          Purpose: "lambda-artifacts"

@@ -10,6 +10,7 @@ import:
   - catalog/apigateway/defaults
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
+  - catalog/s3/lambda-artifacts
   - catalog/cost-optimization/defaults
   - catalog/rds/staging
 
@@ -261,9 +262,10 @@ components:
         function_name: "staging-data-processor"
         handler: "main.handler"
         runtime: "python3.13"
-        # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
-        s3_bucket: "fnx-staging-lambda-artifacts"
+        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
+        # this repo builds or uploads the package: s3_key must exist in it
+        # before the first apply - see docs/OPERATIONS.md.
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: "staging-data-processor/latest.zip"
         memory_size: 512
         timeout: 300
@@ -272,6 +274,7 @@ components:
       dependencies:
         components:
           - component: vpc/services
+          - component: s3/lambda-artifacts
 
     lambda/data-transformer:
       metadata:
@@ -280,9 +283,10 @@ components:
         function_name: "staging-data-transformer"
         handler: "transform.handler"
         runtime: "python3.13"
-        # Placeholder: CI builds the package and uploads it here. The bucket must
-        # exist and hold this key before the first apply - see docs/OPERATIONS.md.
-        s3_bucket: "fnx-staging-lambda-artifacts"
+        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
+        # this repo builds or uploads the package: s3_key must exist in it
+        # before the first apply - see docs/OPERATIONS.md.
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: "staging-data-transformer/latest.zip"
         memory_size: 1024
         timeout: 600
@@ -291,6 +295,7 @@ components:
       dependencies:
         components:
           - component: vpc/services
+          - component: s3/lambda-artifacts
 
 
     # ==========================================================================
