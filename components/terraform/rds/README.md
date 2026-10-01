@@ -23,6 +23,19 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
   be `true`.
 - Prod's `rds/main` encrypts the master secret with `kms/main` (`master_user_secret_kms_key_id`);
   external-secrets can already decrypt it.
+- The parameter group is the engine defaults overlaid by `parameters` (the caller's entry wins,
+  last per name). Defaults: TLS required (`rds.force_ssl = 1` for postgres,
+  `require_secure_transport = ON` otherwise) and `log_statement = ddl`. Turning either off takes an
+  explicit entry in `parameters`.
+- TLS is required, so clients must connect with TLS; to verify the server
+  (`sslmode=verify-full`), an app needs the RDS CA bundle
+  (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) in its image.
+  `eks-backend-services` and `idp-platform` build their DSNs that way (`database_ca_bundle_path`).
+- The read replica uses the primary's security group, parameter group, deletion protection,
+  Performance Insights key and enhanced monitoring.
+- The final snapshot is `final_snapshot_identifier`, else `<Environment>-<identifier>-final-snapshot`:
+  stable across plans, so destroying, recreating and destroying again needs the old snapshot
+  deleted or a new `final_snapshot_identifier`.
 - Use `instance_identifier` (the `DBInstanceIdentifier` dimension) for CloudWatch, not `instance_id`
   (the `db-...` resource ID since AWS provider v5).
 - `rds/main` really runs against LocalEmu in `atmos workflow localemu -f localemu`; Floci cannot run

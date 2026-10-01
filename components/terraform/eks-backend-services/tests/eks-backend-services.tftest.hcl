@@ -52,6 +52,27 @@ run "database_external_secret_targets_the_shared_store" {
   }
 }
 
+# rds forces TLS (rds.force_ssl = 1); the DSN must verify the server against
+# the RDS CA bundle the images ship, not merely encrypt.
+run "database_url_requires_verified_tls" {
+  command = plan
+
+  assert {
+    condition     = endswith(kubernetes_manifest.database_external_secret.manifest.spec.target.template.data.database_url, "/mainapp?sslmode=verify-full&sslrootcert=/etc/ssl/certs/rds-global-bundle.pem")
+    error_message = "database_url must end in ?sslmode=verify-full&sslrootcert=<database_ca_bundle_path>."
+  }
+}
+
+run "database_ca_bundle_path_must_be_absolute" {
+  command = plan
+
+  variables {
+    database_ca_bundle_path = "certs/rds.pem&sslmode=disable"
+  }
+
+  expect_failures = [var.database_ca_bundle_path]
+}
+
 run "redis_is_off_by_default" {
   command = plan
 

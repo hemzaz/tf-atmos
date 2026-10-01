@@ -73,7 +73,9 @@ components:
             generate_random_password: true
           # Created empty. To have Terraform write it, an instance sets
           # static_value: true and supplies the value in TF_VAR_secret_data
-          # (ephemeral, write-only: never in plan or state).
+          # (ephemeral, write-only: never in plan or state). rds forces TLS: a
+          # Postgres DSN stored here needs
+          # ?sslmode=verify-full&sslrootcert=<RDS CA bundle path in the image>.
           db_connection:
             name: "connection"
             description: "Application database connection string"

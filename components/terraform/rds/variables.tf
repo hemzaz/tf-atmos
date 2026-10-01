@@ -137,11 +137,22 @@ variable "db_name" {
 
 variable "parameters" {
   type = list(object({
-    name  = string
-    value = string
+    name         = string
+    value        = string
+    apply_method = optional(string, "immediate")
   }))
-  description = "List of DB parameters to set"
+  description = <<-EOT
+    DB parameters, overlaid on the engine defaults (main.tf locals): an entry here wins over a default
+    of the same name, and the last entry per name wins. The defaults enforce TLS (postgres
+    rds.force_ssl = 1, mysql require_secure_transport = ON) and log DDL only (log_statement = ddl).
+    apply_method follows Cloud Posse's db_parameter: "immediate" or "pending-reboot" (static parameters).
+  EOT
   default     = []
+
+  validation {
+    condition     = alltrue([for p in var.parameters : contains(["immediate", "pending-reboot"], p.apply_method)])
+    error_message = "parameters[*].apply_method must be \"immediate\" or \"pending-reboot\"."
+  }
 }
 
 variable "availability_zone" {
@@ -225,6 +236,13 @@ variable "skip_final_snapshot" {
   type        = bool
   description = "Skip final snapshot when deleting the RDS instance"
   default     = false
+}
+
+variable "final_snapshot_identifier" {
+  type        = string
+  description = "Name of the final snapshot taken on destroy when skip_final_snapshot is false (Cloud Posse's name). Empty uses <Environment>-<identifier>-final-snapshot"
+  default     = ""
+  nullable    = false
 }
 
 variable "copy_tags_to_snapshot" {

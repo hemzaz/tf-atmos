@@ -23,5 +23,8 @@ pattern; the shared logic has to move to `modules/terraform` before this is adop
   write-only attributes (`*_wo`), as in `elasticache`. Nothing reads a secret back at plan: the CI
   plan role (ReadOnlyAccess) has no `secretsmanager:GetSecretValue`. Bump `secrets_version` to
   rotate both.
+- `../rds` forces TLS, so the config secret's `database_url` (and the `database_connection_string`
+  output) carry `sslmode=verify-full&sslrootcert=<database_ca_bundle_path>`: the app images must
+  ship the RDS CA bundle at that path.
 - `environment` accepts only `dev`, `staging` or `prod`, and `domain_name` allows exactly one dot
   (`example.com`, not `idp.example.com`).

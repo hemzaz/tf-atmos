@@ -1,76 +1,55 @@
 # components/terraform/rds/main.tf
-
-# Local variables for performance optimization
+// ... 498 more lines (total: 499)
 locals {
-  # Performance optimization parameters based on engine
-  performance_parameters = var.engine == "postgres" ? {
-    shared_preload_libraries = {
-      name  = "shared_preload_libraries"
-      value = "pg_stat_statements"
-    }
-    log_statement = {
-      name  = "log_statement"
-      value = "all"
-    }
-    log_min_duration_statement = {
-      name  = "log_min_duration_statement"
-      value = "1000" # Log queries taking longer than 1 second
-    }
-    max_connections = {
-      name  = "max_connections"
-      value = tostring(var.max_connections)
-    }
-    work_mem = {
-      name  = "work_mem"
-      value = "${var.work_mem_mb}MB"
-    }
-    maintenance_work_mem = {
-      name  = "maintenance_work_mem"
-      value = "${var.maintenance_work_mem_mb}MB"
-    }
-    effective_cache_size = {
-      name  = "effective_cache_size"
-      value = "${var.effective_cache_size_mb}MB"
-    }
-    random_page_cost = {
-      name  = "random_page_cost"
-      value = tostring(var.random_page_cost)
-    }
-    checkpoint_completion_target = {
-      name  = "checkpoint_completion_target"
-      value = tostring(var.checkpoint_completion_target)
-    }
-    } : {
-    # MySQL performance parameters
-    innodb_buffer_pool_size = {
-      name  = "innodb_buffer_pool_size"
-      value = "{DBInstanceClassMemory*3/4}"
-    }
-    max_connections = {
-      name  = "max_connections"
-      value = tostring(var.max_connections)
-    }
-    innodb_log_file_size = {
-      name  = "innodb_log_file_size"
-      value = "268435456" # 256MB
-    }
-    query_cache_type = {
-      name  = "query_cache_type"
-      value = "1"
-    }
-    query_cache_size = {
-      name  = "query_cache_size"
-      value = "67108864" # 64MB
-    }
-    slow_query_log = {
-      name  = "slow_query_log"
-      value = "1"
-    }
-    long_query_time = {
-      name  = "long_query_time"
-      value = "1"
-    }
-  }
+  name = "${var.tags["Environment"]}-${var.identifier}"
+
+  # Engine-family defaults. var.parameters is merged after them, so a caller
+  # entry with the same name wins (Cloud Posse's rds component also treats its
+  # db_parameter list as caller-owned). Static parameters carry
+  # apply_method = "pending-reboot": AWS rejects "immediate" for them.
+  postgres_default_parameters = [
+    { name = "shared_preload_libraries", value = "pg_stat_statements", apply_method = "pending-reboot" },
+    # ddl, not all: "all" logs every statement verbatim, including any that
+    # carries a secret (ALTER ROLE ... PASSWORD '...'), at high log volume.
+    { name = "log_statement", value = "ddl", apply_method = "immediate" },
+    { name = "log_min_duration_statement", value = "1000", apply_method = "immediate" }, # queries slower than 1s
+    { name = "max_connections", value = tostring(var.max_connections), apply_method = "pending-reboot" },
+    { name = "work_mem", value = "${var.work_mem_mb}MB", apply_method = "immediate" },
+    { name = "maintenance_work_mem", value = "${var.maintenance_work_mem_mb}MB", apply_method = "immediate" },
+    { name = "effective_cache_size", value = "${var.effective_cache_size_mb}MB", apply_method = "immediate" },
+    { name = "random_page_cost", value = tostring(var.random_page_cost), apply_method = "immediate" },
+    { name = "checkpoint_completion_target", value = tostring(var.checkpoint_completion_target), apply_method = "immediate" },
+    # Every client connection must use TLS. Turn it off only knowingly, with an
+    # explicit { name = "rds.force_ssl", value = "0" } in var.parameters.
+    { name = "rds.force_ssl", value = "1", apply_method = "immediate" },
+  ]
+
+  # MySQL/MariaDB. The query cache was removed in MySQL 8.0 (the default
+  # family is mysql8.0), so query_cache_* would fail CreateDBParameterGroup.
+  mysql_default_parameters = [
+    { name = "innodb_buffer_pool_size", value = "{DBInstanceClassMemory*3/4}", apply_method = "pending-reboot" },
+    { name = "max_connections", value = tostring(var.max_connections), apply_method = "immediate" },
+    { name = "innodb_log_file_size", value = "268435456", apply_method = "pending-reboot" }, # 256MB
+    { name = "slow_query_log", value = "1", apply_method = "immediate" },
+    { name = "long_query_time", value = "1", apply_method = "immediate" },
+    # Every client connection must use TLS; turn it off only knowingly, with an
+    # explicit { name = "require_secure_transport", value = "OFF" }.
+    { name = "require_secure_transport", value = "ON", apply_method = "immediate" },
+  ]
+
+  default_parameters = var.engine == "postgres" ? tolist(local.postgres_default_parameters) : tolist(local.mysql_default_parameters)
+
+  # Defaults first, then the caller's list; the last entry per name wins, so a
+  # caller overrides a default and a repeated caller entry is deduped.
+  parameters_by_name = { for p in concat(local.default_parameters, var.parameters) : p.name => p... }
+  db_parameters      = { for name, ps in local.parameters_by_name : name => ps[length(ps) - 1] }
+
+  monitoring_role_arn = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
+
+  # Stable across plans, like Cloud Posse's terraform-aws-rds
+  # (final_snapshot_identifier, else module.final_snapshot_label.id). The old
+  # timestamp() suffix changed on every plan: a perpetual diff.
+  final_snapshot_identifier = var.final_snapshot_identifier != "" ? var.final_snapshot_identifier : "${local.name}-final-snapshot"
 }
 
 resource "aws_db_subnet_group" "main" {
@@ -195,12 +174,13 @@ resource "aws_db_parameter_group" "main" {
   name   = "${var.tags["Environment"]}-${var.identifier}-pg"
   family = var.family
 
-  # Performance optimization parameters
+  # Engine defaults overlaid by var.parameters (the caller wins); see locals
   dynamic "parameter" {
-    for_each = merge({ for p in var.parameters : p.name => p }, local.performance_parameters)
+    for_each = local.db_parameters
     content {
-      name  = parameter.value.name
-      value = parameter.value.value
+      name         = parameter.value.name
+      value        = parameter.value.value
+      apply_method = parameter.value.apply_method
     }
   }
 
@@ -334,17 +314,43 @@ resource "aws_iam_role_policy_attachment" "monitoring" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
-# Read replica for performance scaling
+# Read replica for performance scaling. Same-region replica: storage
+# encryption, engine and credentials come from the source; everything that
+# does not is set to the primary's value so the replica is reachable from the
+# same app security groups and protected the same way.
 resource "aws_db_instance" "read_replica" {
   count = var.create_read_replica ? 1 : 0
 
-  identifier                   = "${var.tags["Environment"]}-${var.identifier}-read-replica"
-  replicate_source_db          = aws_db_instance.main.id
-  instance_class               = var.read_replica_instance_class != null ? var.read_replica_instance_class : var.instance_class
-  monitoring_interval          = var.monitoring_interval
-  monitoring_role_arn          = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
-  performance_insights_enabled = var.performance_insights_enabled
-  skip_final_snapshot          = true
+  identifier = "${local.name}-read-replica"
+  # The source DB instance identifier: since AWS provider v5, .id is the
+  # db-XXXX resource ID, which RDS does not accept here.
+  replicate_source_db = aws_db_instance.main.identifier
+  instance_class      = var.read_replica_instance_class != null ? var.read_replica_instance_class : var.instance_class
+
+  # Without these the replica lands in the VPC's default security group and
+  # the default parameter group (no TLS enforcement, no logging defaults).
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  parameter_group_name   = aws_db_parameter_group.main.name
+  publicly_accessible    = var.publicly_accessible
+  port                   = var.port
+
+  deletion_protection                   = aws_db_instance.main.deletion_protection
+  iam_database_authentication_enabled   = var.iam_database_authentication_enabled
+  auto_minor_version_upgrade            = var.auto_minor_version_upgrade
+  maintenance_window                    = var.maintenance_window
+  copy_tags_to_snapshot                 = var.copy_tags_to_snapshot
+  monitoring_interval                   = var.monitoring_interval
+  monitoring_role_arn                   = local.monitoring_role_arn
+  performance_insights_enabled          = var.performance_insights_enabled
+  performance_insights_retention_period = var.performance_insights_enabled ? var.performance_insights_retention_period : null
+  performance_insights_kms_key_id       = var.performance_insights_enabled ? var.performance_insights_kms_key_id : null
+  enabled_cloudwatch_logs_exports       = var.enabled_cloudwatch_logs_exports
+  # A replica has no final snapshot of its own; the primary's covers the data.
+  skip_final_snapshot = true
+
+  depends_on = [
+    aws_iam_role_policy_attachment.monitoring
+  ]
 
   tags = merge(
     var.tags,
@@ -383,10 +389,10 @@ resource "aws_db_instance" "main" {
   backup_window                         = var.backup_window
   maintenance_window                    = var.maintenance_window
   skip_final_snapshot                   = var.skip_final_snapshot
-  final_snapshot_identifier             = var.skip_final_snapshot ? null : "${var.tags["Environment"]}-${var.identifier}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+  final_snapshot_identifier             = var.skip_final_snapshot ? null : local.final_snapshot_identifier
   copy_tags_to_snapshot                 = var.copy_tags_to_snapshot
   monitoring_interval                   = var.monitoring_interval
-  monitoring_role_arn                   = var.monitoring_interval > 0 ? (var.create_monitoring_role ? aws_iam_role.monitoring[0].arn : var.monitoring_role_arn) : null
+  monitoring_role_arn                   = local.monitoring_role_arn
   performance_insights_enabled          = var.performance_insights_enabled
   performance_insights_retention_period = var.performance_insights_retention_period
   performance_insights_kms_key_id       = var.performance_insights_enabled ? var.performance_insights_kms_key_id : null
@@ -431,7 +437,7 @@ resource "aws_cloudwatch_metric_alarm" "database_cpu" {
   alarm_actions       = var.sns_topic_arn != null ? [var.sns_topic_arn] : []
 
   dimensions = {
-    DBInstanceIdentifier = aws_db_instance.main.id
+    DBInstanceIdentifier = aws_db_instance.main.identifier
   }
 }
 
@@ -450,7 +456,7 @@ resource "aws_cloudwatch_metric_alarm" "database_connections" {
   alarm_actions       = var.sns_topic_arn != null ? [var.sns_topic_arn] : []
 
   dimensions = {
-    DBInstanceIdentifier = aws_db_instance.main.id
+    DBInstanceIdentifier = aws_db_instance.main.identifier
   }
 }
 
@@ -469,7 +475,7 @@ resource "aws_cloudwatch_metric_alarm" "database_free_storage" {
   alarm_actions       = var.sns_topic_arn != null ? [var.sns_topic_arn] : []
 
   dimensions = {
-    DBInstanceIdentifier = aws_db_instance.main.id
+    DBInstanceIdentifier = aws_db_instance.main.identifier
   }
 }
 
@@ -489,7 +495,7 @@ resource "aws_cloudwatch_metric_alarm" "backup_retention" {
   alarm_actions       = var.sns_topic_arn != null ? [var.sns_topic_arn] : []
 
   dimensions = {
-    DBInstanceIdentifier = aws_db_instance.main.id
+    DBInstanceIdentifier = aws_db_instance.main.identifier
   }
 }
 

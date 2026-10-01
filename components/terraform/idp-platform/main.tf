@@ -7,6 +7,11 @@ locals {
   tags        = merge({ Environment = var.environment }, var.tags, var.resource_tags)
 
   storage_buckets = toset(["artifacts", "backups", "logs", "techdocs", "uploads"])
+
+  # ../rds forces TLS (rds.force_ssl = 1); verify-full also checks the server
+  # certificate against the RDS CA bundle the app images ship.
+  database_tls_query = "sslmode=verify-full&sslrootcert=${var.database_ca_bundle_path}"
+  database_url       = "postgresql://${module.idp_database.instance_endpoint}/${module.idp_database.instance_name}?${local.database_tls_query}"
 }
 
 # UNSUPPORTED: this component nests the eks, rds and acm root components (each with its
@@ -505,7 +510,7 @@ resource "aws_secretsmanager_secret" "idp_config" {
 resource "aws_secretsmanager_secret_version" "idp_config" {
   secret_id = aws_secretsmanager_secret.idp_config.id
   secret_string_wo = jsonencode({
-    database_url          = "postgresql://${module.idp_database.instance_endpoint}/${module.idp_database.instance_name}"
+    database_url          = local.database_url
     database_secret_arn   = module.idp_database.password_secret_arn
     redis_url             = "rediss://${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379"
     redis_auth_secret_arn = aws_secretsmanager_secret.redis_auth.arn
