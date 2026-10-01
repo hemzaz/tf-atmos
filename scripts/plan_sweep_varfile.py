@@ -886,6 +886,25 @@ def build(describe, stack, stacks_dir, components_dir):
         r = b.walk(k, x)
         if r is not SENTINEL:
             top[k] = r
+    # Atmos exports an instance's `env` section to every terraform command, so
+    # a TF_VAR_<name> there sets <name> as surely as `vars` does. It is the one
+    # way to feed an ephemeral variable (secretsmanager's secret_data) through
+    # `deploy --from-plan`, which applies the planfile without the varfile.
+    # Folded in as Terraform reads it: below `vars` (a -var-file wins over the
+    # environment), a complex value parsed as HCL, of which JSON is a subset.
+    # plan-sweep.sh strips the shell's own TF_VAR_*; only the stack's count.
+    for k, x in (describe.get('env') or {}).items():
+        name = k[len('TF_VAR_'):] if k.startswith('TF_VAR_') else ''
+        if not name or name in top:
+            continue
+        if isinstance(x, str) and x.lstrip()[:1] in ('{', '['):
+            try:
+                x = json.loads(x)
+            except ValueError:
+                pass
+        r = b.walk(name, x)
+        if r is not SENTINEL:
+            top[name] = r
     return top, b
 
 
@@ -1339,6 +1358,14 @@ def self_test(components_dir, tmp):
           ['subnet-0123456789abcdef0', 'subnet-0123456789abcdef1'])
     check('!env is not counted as a !terraform reference',
           (b.counts['fallback'], b.counts['other_guessed'], b.counts['other_dropped']), (0, 1, 1))
+
+    # An instance's env TF_VAR_<name> sets <name> (JSON is HCL), below vars,
+    # as Terraform ranks a -var-file above the environment.
+    top, b = build({'vars': {'a': 1}, 'env': {
+        'TF_VAR_m': '{"k": "{\\"j\\": 1}"}', 'TF_VAR_a': '2', 'TF_VAR_s': 'plain', 'OTHER': 'x',
+    }}, None, None, None)
+    check('env TF_VAR_* folds into the varfile', top,
+          {'a': 1, 'm': {'k': '{"j": 1}'}, 's': 'plain'})
     return failures
 
 

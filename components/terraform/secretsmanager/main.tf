@@ -5,29 +5,31 @@
 locals {
   default_description = "Managed by Terraform"
 
-  # Create a map of secrets from the input variables
+  # Resolve each secret's optional attributes against the component defaults.
   defined_secrets = { for k, v in var.secrets : k => {
-    name                   = coalesce(lookup(v, "name", null), k)
-    description            = lookup(v, "description", local.default_description)
-    policy                 = lookup(v, "policy", null)
-    path                   = lookup(v, "path", "")
-    kms_key_id             = lookup(v, "kms_key_id", var.default_kms_key_id)
-    secret_data            = lookup(v, "secret_data", null)
-    rotation_lambda_arn    = lookup(v, "rotation_lambda_arn", null)
-    rotation_days          = lookup(v, "rotation_days", var.default_rotation_days)
-    rotation_automatically = lookup(v, "rotation_automatically", var.default_rotation_automatically)
-    rotate_immediately     = lookup(v, "rotate_immediately", var.default_rotate_immediately)
+    name                   = coalesce(v.name, k)
+    description            = coalesce(v.description, local.default_description)
+    policy                 = v.policy
+    path                   = v.path
+    kms_key_id             = v.kms_key_id != null ? v.kms_key_id : var.default_kms_key_id
+    rotation_lambda_arn    = v.rotation_lambda_arn
+    rotation_days          = coalesce(v.rotation_days, var.default_rotation_days)
+    rotation_automatically = coalesce(v.rotation_automatically, var.default_rotation_automatically)
+    rotate_immediately     = coalesce(v.rotate_immediately, var.default_rotate_immediately)
     # Set when a SEPARATE component instance's own aws_secretsmanager_secret_rotation
     # (e.g. the lambda component's rotation_secret_arn) owns this secret's
     # rotation instead -- see that variable's description for why rotation
     # for a Lambda that itself reads this secret cannot be configured here,
-    # on this component's own first apply, without failing outright. Drives
-    # the same ignore_changes split as rotation_automatically/rotation_lambda_arn
-    # below, without requiring this component to also know the Lambda's ARN.
-    rotation_managed_externally      = lookup(v, "rotation_managed_externally", false)
-    recovery_window_in_days          = lookup(v, "recovery_window_in_days", var.default_recovery_window_in_days)
-    generate_random_password         = lookup(v, "generate_random_password", false)
-    random_password_override_special = lookup(v, "random_password_override_special", var.random_password_override_special)
+    # on this component's own first apply, without failing outright. The
+    # write-only value below is never re-sent unless secret_string_version
+    # changes, so nothing here fights that Lambda for the value.
+    rotation_managed_externally      = v.rotation_managed_externally
+    recovery_window_in_days          = coalesce(v.recovery_window_in_days, var.default_recovery_window_in_days)
+    generate_random_password         = v.generate_random_password
+    static_value                     = v.static_value
+    secret_string_version            = v.secret_string_version
+    password_length                  = coalesce(v.password_length, var.random_password_length)
+    random_password_override_special = coalesce(v.random_password_override_special, var.random_password_override_special)
   } if var.enabled && var.secrets_enabled }
 
   # Secrets whose rotation THIS component itself configures via
@@ -43,40 +45,57 @@ locals {
   # invoke permission already exist.
   rotation_enabled = { for k, v in local.secrets_with_path : k => v if v.rotation_automatically && v.rotation_lambda_arn != null }
 
-  # Secrets whose value in AWS is owned by a rotation Lambda's finishSecret
-  # step, either way -- this component's own rotation_enabled above, or a
-  # separate component instance's rotation_managed_externally. Either way,
-  # this component's aws_secretsmanager_secret_version must stop fighting
-  # that Lambda for the value after the initial create -- see the two
-  # aws_secretsmanager_secret_version resources below for why they are split
-  # on this.
-  version_managed_externally = { for k, v in local.secrets_with_path : k => v if v.rotation_managed_externally || (v.rotation_automatically && v.rotation_lambda_arn != null) }
-
   # Process secret paths with proper structure
   secrets_with_path = { for k, v in local.defined_secrets : k => merge(v, {
     full_path = join("/", compact([var.context_name, var.environment, trimprefix(trimsuffix(v.path, "/"), "/"), v.name]))
   }) }
+
+  # Secrets that get a value from Terraform: generated, or caller-supplied
+  # through the ephemeral var.secret_data. Any other secret is created empty.
+  versioned_secrets = { for k, v in local.secrets_with_path : k => v if v.generate_random_password || v.static_value }
+
+  # A local, not inline: tests cannot assert an ephemeral resource's
+  # arguments. password_length is per secret (it used to be silently
+  # ignored, so every generated secret was random_password_length long).
+  password_generators = { for k, v in local.secrets_with_path : k => {
+    length           = v.password_length
+    special          = var.random_password_special
+    override_special = v.random_password_override_special
+    min_lower        = var.random_password_min_lower
+    min_upper        = var.random_password_min_upper
+    min_numeric      = var.random_password_min_numeric
+    min_special      = var.random_password_min_special
+  } if v.generate_random_password }
 }
 
-# Generate random passwords for secrets that need it
-resource "random_password" "this" {
-  for_each = { for k, v in local.secrets_with_path : k => v if v.generate_random_password }
+# Generated values. Ephemeral, as elasticache's AUTH token (#258): regenerated
+# on every run but never in plan or state. A value reaches AWS only through
+# the version's write-only secret_string_wo, sent on the version's create (or
+# replacement) and on an update only when secret_string_version changes.
+# Cloud Posse's components keep a stored random_password instead; this one
+# deliberately does not, so state readers (CI plan roles included) cannot read
+# any secret.
+ephemeral "random_password" "this" {
+  for_each = local.password_generators
 
-  length           = var.random_password_length
-  special          = var.random_password_special
-  override_special = each.value.random_password_override_special
-  min_lower        = var.random_password_min_lower
-  min_upper        = var.random_password_min_upper
-  min_numeric      = var.random_password_min_numeric
-  min_special      = var.random_password_min_special
+  length           = each.value.length
+  special          = each.value.special
+  override_special = each.value.override_special
+  min_lower        = each.value.min_lower
+  min_upper        = each.value.min_upper
+  min_numeric      = each.value.min_numeric
+  min_special      = each.value.min_special
+}
 
-  lifecycle {
-    # Ensure passwords are treated as sensitive values
-    precondition {
-      condition     = var.random_password_length >= 8
-      error_message = "Password length must be at least 8 characters for security."
-    }
-  }
+locals {
+  # Ephemeral (it reads ephemeral values): usable only in write-only
+  # arguments. var.secret_data's keys are validated to be static_value
+  # secrets, never generated ones, so the merge cannot shadow a generated
+  # value.
+  secret_values = merge(
+    { for k, v in ephemeral.random_password.this : k => v.result },
+    var.secret_data,
+  )
 }
 
 # Create the AWS secrets
@@ -109,66 +128,25 @@ resource "aws_secretsmanager_secret" "this" {
   }
 }
 
-# Create secret versions with values. Split in two by rotation status: once a
-# secret's rotation Lambda has run at least once, the value AWS actually
-# holds under AWSCURRENT is whatever the Lambda's finishSecret step put
-# there, not var.secret_data/random_password.this -- so this resource, which
-# only ever knows the ORIGINAL value, must not fight the Lambda for it on
-# every later apply. The rotation-enabled half below is otherwise identical
-# but ignores secret_string after the initial create; the non-rotating half
-# keeps managing it exactly as before.
+# The secret's value, write-only: secret_string stays null in plan and state.
+# The provider sends secret_string_wo when the version is created (including
+# a replacement, e.g. a renamed secret) and, on an update, only when
+# secret_string_wo_version changes. Bump the secret's secret_string_version
+# to rotate a generated value or to push a changed var.secret_data value.
+#
+# One resource for rotating and non-rotating secrets alike. The stored value
+# used to need an ignore_changes split so that Terraform would not overwrite
+# a rotation Lambda's value on every apply; a write-only value is never
+# compared, so it is re-sent only on a deliberate version bump. For a secret a
+# Lambda rotates (rotation_lambda_arn or rotation_managed_externally), such a
+# bump puts a Terraform value back as AWSCURRENT: rotate it with
+# `aws secretsmanager rotate-secret` instead.
 resource "aws_secretsmanager_secret_version" "this" {
-  for_each = { for k, v in local.secrets_with_path : k => v if(v.secret_data != null || v.generate_random_password) && !contains(keys(local.version_managed_externally), k) }
+  for_each = local.versioned_secrets
 
-  secret_id     = aws_secretsmanager_secret.this[each.key].id
-  secret_string = each.value.generate_random_password ? random_password.this[each.key].result : each.value.secret_data
-
-  lifecycle {
-    precondition {
-      condition     = each.value.generate_random_password || (each.value.secret_data != null && length(each.value.secret_data) > 0)
-      error_message = "Secret data must not be empty. For secret ${each.key}, either provide non-empty secret_data or set generate_random_password=true."
-    }
-
-    precondition {
-      condition     = each.value.generate_random_password || (each.value.secret_data == null) || (!can(regex("^\\s*\\{", each.value.secret_data))) || (can(jsondecode(each.value.secret_data)) && length(jsondecode(each.value.secret_data)) > 0)
-      error_message = "Secret data for ${each.key} appears to be JSON but is not valid or is empty. Ensure the JSON is well-formed and contains data."
-    }
-
-    precondition {
-      condition     = each.value.generate_random_password || each.value.secret_data == null || (!can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", each.value.secret_data)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", each.value.secret_data)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", each.value.secret_data)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", each.value.secret_data)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", each.value.secret_data)))
-      error_message = "Secret data for ${each.key} appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without using predictable patterns."
-    }
-  }
-}
-
-# The rotation-enabled half of the version resource above: same secret_data/
-# generate_random_password validation, but secret_string changes after the
-# initial create are ignored, because the rotation Lambda's finishSecret step
-# owns the value from then on (see the comment above aws_secretsmanager_secret_version.this).
-resource "aws_secretsmanager_secret_version" "rotating" {
-  for_each = { for k, v in local.secrets_with_path : k => v if(v.secret_data != null || v.generate_random_password) && contains(keys(local.version_managed_externally), k) }
-
-  secret_id     = aws_secretsmanager_secret.this[each.key].id
-  secret_string = each.value.generate_random_password ? random_password.this[each.key].result : each.value.secret_data
-
-  lifecycle {
-    ignore_changes = [secret_string]
-
-    precondition {
-      condition     = each.value.generate_random_password || (each.value.secret_data != null && length(each.value.secret_data) > 0)
-      error_message = "Secret data must not be empty. For secret ${each.key}, either provide non-empty secret_data or set generate_random_password=true."
-    }
-
-    precondition {
-      condition     = each.value.generate_random_password || (each.value.secret_data == null) || (!can(regex("^\\s*\\{", each.value.secret_data))) || (can(jsondecode(each.value.secret_data)) && length(jsondecode(each.value.secret_data)) > 0)
-      error_message = "Secret data for ${each.key} appears to be JSON but is not valid or is empty. Ensure the JSON is well-formed and contains data."
-    }
-
-    precondition {
-      condition     = each.value.generate_random_password || each.value.secret_data == null || (!can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", each.value.secret_data)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", each.value.secret_data)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", each.value.secret_data)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", each.value.secret_data)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", each.value.secret_data)))
-      error_message = "Secret data for ${each.key} appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without using predictable patterns."
-    }
-  }
+  secret_id                = aws_secretsmanager_secret.this[each.key].id
+  secret_string_wo         = local.secret_values[each.key]
+  secret_string_wo_version = each.value.secret_string_version
 }
 
 # Attach resource policies to secrets if specified

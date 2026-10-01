@@ -18,26 +18,8 @@ output "secret_names" {
 }
 
 output "secret_versions" {
-  description = "Map of secret names to their version IDs (merging the non-rotating and rotating aws_secretsmanager_secret_version resources -- see main.tf's comment on why they're split)"
-  value = merge(
-    { for k, v in aws_secretsmanager_secret_version.this : k => v.version_id },
-    { for k, v in aws_secretsmanager_secret_version.rotating : k => v.version_id },
-  )
-  sensitive = true
-}
-
-output "secret_values" {
-  description = "Map of secret names to their values - USE WITH CAUTION. DO NOT output these values to logs. For a secret with rotation enabled this is the value Terraform itself last wrote, not necessarily AWSCURRENT -- ignore_changes on that resource means it goes stale the first time the rotation Lambda runs; read the real current value from AWS, not this output, once rotation is live"
-  value = merge(
-    { for k, v in aws_secretsmanager_secret_version.this : k => v.secret_string },
-    { for k, v in aws_secretsmanager_secret_version.rotating : k => v.secret_string },
-  )
-  sensitive = true
-}
-
-output "generated_passwords" {
-  description = "Map of secret names to their generated random passwords (only for secrets with generate_random_password = true). For a secret with rotation enabled this is only ever the ORIGINAL Terraform-generated value: the resource is never recomputed by a later apply, and the rotation Lambda's own value lives only in AWS, never back in this random_password resource's state. A consumer that reads this output to configure another AWS resource's credential (e.g. elasticache's auth_token) will re-push this stale value on its own next apply unless that resource also stops tracking it after its first apply."
-  value       = { for k, v in random_password.this : k => v.result }
+  description = "Map of secret names to the version IDs Terraform wrote (generated and static_value secrets only). No output carries a secret's value: consumers read it from Secrets Manager at runtime (ESO, the application) by secret_arns / secret_names."
+  value       = { for k, v in aws_secretsmanager_secret_version.this : k => v.version_id }
   sensitive   = true
 }
 

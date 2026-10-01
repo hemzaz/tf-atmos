@@ -44,7 +44,9 @@ components:
         default_rotation_automatically: false
         default_recovery_window_in_days: 30
 
-        # Random password generation settings
+        # Random password generation settings. Generated values are ephemeral
+        # and written write-only (never in plan or state); a secret's own
+        # password_length overrides random_password_length.
         random_password_length: 32
         random_password_special: true
         random_password_override_special: "!#$%&*()-_=+[]{}<>:?"
@@ -69,11 +71,13 @@ components:
             description: "Application database credentials"
             path: "database"
             generate_random_password: true
+          # Created empty. To have Terraform write it, an instance sets
+          # static_value: true and supplies the value in TF_VAR_secret_data
+          # (ephemeral, write-only: never in plan or state).
           db_connection:
             name: "connection"
             description: "Application database connection string"
             path: "database"
-            secret_data: null # To be provided in environment-specific configuration
 
     # API secrets pattern
     secretsmanager/api:
