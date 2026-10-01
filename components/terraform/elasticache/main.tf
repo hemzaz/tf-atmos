@@ -169,11 +169,14 @@ resource "aws_elasticache_replication_group" "main" {
   num_node_groups         = var.cluster_mode_enabled ? var.cluster_mode_num_node_groups : null
   replicas_per_node_group = var.cluster_mode_enabled ? var.cluster_mode_replicas_per_node_group : null
 
-  # Encryption. auth_token is required whenever transit encryption is on
-  # (validated on the variable), so the cache is never reachable unauthenticated.
+  # Encryption. Transit encryption is forced on (validated on the variable)
+  # and the AUTH token is always set, so the cache is never reachable
+  # unauthenticated. The token is write-only: Terraform sends it only when
+  # auth_token_version changes and never stores it in plan or state.
   at_rest_encryption_enabled = var.at_rest_encryption_enabled
   transit_encryption_enabled = var.transit_encryption_enabled
-  auth_token                 = var.auth_token
+  auth_token_wo              = local.auth_token
+  auth_token_wo_version      = var.auth_token_version
   auth_token_update_strategy = "ROTATE"
   kms_key_id                 = var.kms_key_id
 
@@ -191,17 +194,68 @@ resource "aws_elasticache_replication_group" "main" {
   apply_immediately          = var.apply_immediately
 
   tags = { Name = local.name }
+
+  lifecycle {
+    # Checks the token actually generated, every plan and apply: ElastiCache's
+    # AUTH token rules (16-128 characters; punctuation only from !&#$^<>-).
+    precondition {
+      condition     = can(regex("^[A-Za-z0-9!&#$^<>-]{16,128}$", local.auth_token))
+      error_message = "The generated AUTH token breaks ElastiCache's rules (16-128 characters, punctuation only from !&#$^<>-); check local.auth_token_generator."
+    }
+  }
 }
 
-# Mirrors ec2's ssh_key Secrets Manager pattern: auth_token reaches this
-# component as a Terraform variable (from a secret store, per its own
-# description), but nothing downstream of this component could read it back
-# out of Terraform state -- so it is also stored as a real Secrets Manager
-# secret a consumer (eks-backend-services) reads via an ExternalSecret,
-# matching how rds/main's RDS-managed master user secret is consumed.
+# AUTH token. As in Cloud Posse's aws-elasticache-redis component, the token
+# is generated here, not passed in, with the same shape as its redis_cluster
+# module: 128 characters, override_special "#^-", at least 3 of each class.
+# ElastiCache allows 16-128 characters, with punctuation only from !&#$^<>-
+# (never '@', '"', '/' or a space). Cloud Posse keeps a stored random_password; this one is ephemeral
+# instead. It is regenerated on every run but reaches AWS only through the
+# write-only attributes, which Terraform sends only when auth_token_version
+# changes. Nothing holds the token in plan or state.
+#
+# One apply feeds the same value to the secret version and the replication
+# group, so the two agree. If an apply fails between them, bump
+# auth_token_version and apply again: both are re-sent.
+#
+# No ephemeral read back from Secrets Manager (idp-platform's pattern): the
+# CI plan role (ReadOnlyAccess) has no secretsmanager:GetSecretValue, and
+# mock_provider tests cannot run a module with any aws ephemeral resource.
+ephemeral "random_password" "auth_token" {
+  count = local.enabled ? 1 : 0
+
+  length           = local.auth_token_generator.length
+  special          = local.auth_token_generator.special
+  override_special = local.auth_token_generator.override_special
+  min_upper        = local.auth_token_generator.min_upper
+  min_lower        = local.auth_token_generator.min_lower
+  min_numeric      = local.auth_token_generator.min_numeric
+  min_special      = local.auth_token_generator.min_special
+}
+
+locals {
+  # A local, not inline: tests cannot assert an ephemeral resource's arguments.
+  auth_token_generator = {
+    length           = 128
+    special          = true
+    override_special = "#^-"
+    min_upper        = 3
+    min_lower        = 3
+    min_numeric      = 3
+    min_special      = 3
+  }
+
+  auth_token = one(ephemeral.random_password.auth_token[*].result)
+
+  store_auth_token = local.enabled && var.store_auth_token_in_secrets_manager
+}
+
+# The generated token's only durable copy. A consumer (eks-backend-services)
+# reads it through an ExternalSecret (JSON key auth_token), the way rds/main's
+# RDS-managed master user secret is consumed.
 resource "aws_secretsmanager_secret" "auth_token" {
-  #checkov:skip=CKV2_AWS_57:Mirror of the replication group's auth_token input; rotating the secret alone would desync it from aws_elasticache_replication_group.main -- rotate by changing auth_token
-  count = local.enabled && var.store_auth_token_in_secrets_manager ? 1 : 0
+  #checkov:skip=CKV2_AWS_57:Rotated by bumping auth_token_version, which re-sends the token to both this secret and aws_elasticache_replication_group.main; a Secrets Manager rotation alone would desync the two
+  count = local.store_auth_token ? 1 : 0
 
   name        = "redis-auth/${var.tags["Environment"]}/${var.cluster_id}"
   description = "Redis AUTH token for the ${local.name} cache"
@@ -213,12 +267,13 @@ resource "aws_secretsmanager_secret" "auth_token" {
 }
 
 resource "aws_secretsmanager_secret_version" "auth_token" {
-  count = local.enabled && var.store_auth_token_in_secrets_manager ? 1 : 0
+  count = local.store_auth_token ? 1 : 0
 
   secret_id = aws_secretsmanager_secret.auth_token[0].id
-  secret_string = jsonencode({
-    auth_token = var.auth_token
+  secret_string_wo = jsonencode({
+    auth_token = local.auth_token
   })
+  secret_string_wo_version = var.auth_token_version
 }
 
 # rotation_policy's own two statements, folding in additional_policy_json --

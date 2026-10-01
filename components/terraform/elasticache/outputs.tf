@@ -54,8 +54,8 @@ output "subnet_group_name" {
 }
 
 output "auth_token_secret_arn" {
-  value       = local.enabled && var.store_auth_token_in_secrets_manager ? aws_secretsmanager_secret.auth_token[0].arn : null
-  description = "ARN of the Secrets Manager secret holding auth_token (JSON key auth_token); null when store_auth_token_in_secrets_manager is false. A consumer (e.g. eks-backend-services) reads it back via an ExternalSecret -- never exported directly, unlike this, the token itself is never in an output"
+  value       = local.store_auth_token ? aws_secretsmanager_secret.auth_token[0].arn : null
+  description = "ARN of the Secrets Manager secret holding the generated AUTH token (JSON key auth_token); null when store_auth_token_in_secrets_manager is false. A consumer (e.g. eks-backend-services) reads it via an ExternalSecret. The token itself is never in an output, the plan or the state"
 }
 
 output "rotation_policy" {
