@@ -7,6 +7,21 @@
 
 mock_provider "aws" {}
 
+# The service-role trusts embed the account id (S4).
+override_data {
+  target = data.aws_caller_identity.current
+  values = {
+    account_id = "123456789012"
+  }
+}
+
+override_data {
+  target = data.aws_partition.current
+  values = {
+    partition = "aws"
+  }
+}
+
 variables {
   region     = "eu-west-2"
   vpc_id     = "vpc-0123456789abcdef0"
@@ -412,5 +427,80 @@ run "read_replica_matches_primary" {
   assert {
     condition     = aws_db_instance.read_replica[0].monitoring_role_arn == aws_db_instance.main.monitoring_role_arn && aws_db_instance.read_replica[0].monitoring_interval == 60
     error_message = "The replica must have the primary's enhanced monitoring."
+  }
+}
+
+# S4: confused-deputy conditions on the service-role trusts (RDS docs:
+# USER_Monitoring.OS.Enabling.html#USER_Monitoring.OS.confused-deputy and
+# cross-service-confused-deputy-prevention.html).
+run "service_role_trusts_are_scoped_to_this_account" {
+  command = plan
+
+  variables {
+    create_read_replica       = true
+    monitoring_interval       = 60
+    create_monitoring_role    = true
+    enable_rds_proxy          = true
+    create_rotation_sns_topic = true
+  }
+
+  override_resource {
+    target          = aws_sns_topic.rotation_notifications[0]
+    override_during = plan
+    values = {
+      arn = "arn:aws:sns:eu-west-2:123456789012:test-test-db-rotation"
+    }
+  }
+
+  override_resource {
+    target          = aws_db_instance.main
+    override_during = plan
+    values = {
+      master_user_secret = [{ secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds-test-AbCdEf", kms_key_id = "", secret_status = "active" }]
+    }
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Principal.Service == "monitoring.rds.amazonaws.com"
+      && jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+      && toset(jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"]) == toset([
+        "arn:aws:rds:eu-west-2:123456789012:db:test-test-db",
+        "arn:aws:rds:eu-west-2:123456789012:db:test-test-db-read-replica",
+      ])
+    )
+    error_message = "The enhanced-monitoring role must trust monitoring.rds.amazonaws.com only for this account and for exactly the primary and replica instance ARNs."
+  }
+
+  # The proxy trust stays exactly as AWS documents it (rds-proxy-iam-setup.html):
+  # no Condition, since AWS does not document source keys for the proxy.
+  assert {
+    condition = (
+      jsondecode(aws_iam_role.rds_proxy[0].assume_role_policy).Statement[0].Principal.Service == "rds.amazonaws.com"
+      && !can(jsondecode(aws_iam_role.rds_proxy[0].assume_role_policy).Statement[0].Condition)
+    )
+    error_message = "The RDS Proxy role must trust rds.amazonaws.com with no Condition, as AWS documents it."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_sns_topic_policy.rotation_notifications[0].policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+      && jsondecode(aws_sns_topic_policy.rotation_notifications[0].policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:events:eu-west-2:123456789012:rule/*"
+    )
+    error_message = "The rotation topic accepts EventBridge publishes only from this account's rules."
+  }
+}
+
+run "monitoring_trust_names_only_the_primary_without_a_replica" {
+  command = plan
+
+  variables {
+    monitoring_interval    = 60
+    create_monitoring_role = true
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.monitoring[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == ["arn:aws:rds:eu-west-2:123456789012:db:test-test-db"]
+    error_message = "Without a read replica the enhanced-monitoring trust names only the primary."
   }
 }

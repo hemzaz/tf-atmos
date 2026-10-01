@@ -92,9 +92,11 @@ resource "aws_iam_policy" "resource_management" {
       {
         Sid    = "SNSPublishAccess"
         Effect = "Allow",
+        # Publish only. No sns:Subscribe: it lets the role subscribe an
+        # external endpoint (another account's queue or function, any HTTPS
+        # URL or email address) and receive every message on the topic.
         Action = [
-          "sns:Publish",
-          "sns:Subscribe"
+          "sns:Publish"
         ],
         Resource = var.managed_sns_topic_arns != null ? var.managed_sns_topic_arns : []
       }

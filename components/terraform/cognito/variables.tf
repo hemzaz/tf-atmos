@@ -105,12 +105,35 @@ variable "allow_admin_create_user_only" {
 
 variable "advanced_security_mode" {
   type        = string
-  description = "Cognito threat protection: OFF, AUDIT (log only) or ENFORCED (block risky sign-ins). Billed per monthly active user above OFF"
-  default     = "ENFORCED"
+  description = "Cognito threat protection: OFF, AUDIT (log only) or ENFORCED (block risky sign-ins). AUDIT and ENFORCED require user_pool_tier = PLUS"
+  # OFF, the AWS default, so the component's own defaults are consistent with
+  # user_pool_tier's ESSENTIALS. catalog/cognito/defaults.yaml sets ENFORCED +
+  # PLUS for every AWS stack.
+  default = "OFF"
 
   validation {
     condition     = contains(["OFF", "AUDIT", "ENFORCED"], var.advanced_security_mode)
     error_message = "advanced_security_mode must be one of OFF, AUDIT, ENFORCED."
+  }
+
+  # Threat protection is a Plus-plan feature: "If you set AdvancedSecurityMode
+  # to AUDIT or ENFORCED, your user pool tier must be PLUS"
+  # (https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-sign-in-feature-plans.html).
+  # Left unset, AWS silently moves the pool to PLUS; this makes the cost explicit.
+  validation {
+    condition     = var.advanced_security_mode == "OFF" || var.user_pool_tier == "PLUS"
+    error_message = "advanced_security_mode AUDIT or ENFORCED requires user_pool_tier = \"PLUS\" (threat protection is a Plus-plan feature, billed per MAU with no free tier)."
+  }
+}
+
+variable "user_pool_tier" {
+  type        = string
+  description = "Cognito user pool feature plan: LITE, ESSENTIALS (the AWS default) or PLUS (required for threat protection, advanced_security_mode AUDIT/ENFORCED)"
+  default     = "ESSENTIALS"
+
+  validation {
+    condition     = contains(["LITE", "ESSENTIALS", "PLUS"], var.user_pool_tier)
+    error_message = "user_pool_tier must be one of LITE, ESSENTIALS, PLUS."
   }
 }
 

@@ -85,6 +85,14 @@ resource "aws_sns_topic_policy" "rotation_notifications" {
         }
         Action   = "SNS:Publish"
         Resource = aws_sns_topic.rotation_notifications[0].arn
+        # Only this account's rules (confused deputy), as
+        # security-monitoring's topic policy and the EventBridge resource-policy
+        # guide (eb-use-resource-based.html) do: without it any account's
+        # EventBridge rule could publish to this topic.
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:events:${var.region}:${local.account_id}:rule/*" }
+        }
       }
     ]
   })

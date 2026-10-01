@@ -35,9 +35,115 @@ variables {
   policy_name             = "test-CrossAccountPolicy"
   # Same as the overridden caller identity: trusts_other_accounts is false,
   # so the cross-account trust-condition precondition does not apply.
-  trusted_account_ids = ["123456789012"]
-  account_id          = "123456789012"
-  environment         = "dev"
+  trusted_account_ids    = ["123456789012"]
+  trusted_principal_arns = ["arn:aws:iam::123456789012:role/test-operator"]
+  account_id             = "123456789012"
+  environment            = "dev"
+}
+
+# S4: the cross-account role's trust is pinned to named principals, the
+# backend access_roles pattern (account-root principals + aws:PrincipalArn).
+run "cross_account_trust_is_pinned_to_the_named_principals" {
+  command = plan
+
+  variables {
+    trusted_account_ids = ["111111111111"]
+    trusted_principal_arns = [
+      "arn:aws:iam::111111111111:role/hub-ci-plan",
+      "arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_Admin_0123456789abcdef",
+    ]
+    external_id = "spoke-external-id"
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role.cross_account_role[0].assume_role_policy).Statement[0].Principal.AWS == "arn:aws:iam::111111111111:root"
+      && toset(jsondecode(aws_iam_role.cross_account_role[0].assume_role_policy).Statement[0].Condition.ArnEquals["aws:PrincipalArn"]) == toset([
+        "arn:aws:iam::111111111111:role/hub-ci-plan",
+        "arn:aws:iam::111111111111:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_Admin_0123456789abcdef",
+      ])
+      && jsondecode(aws_iam_role.cross_account_role[0].assume_role_policy).Statement[0].Condition.StringEquals["sts:ExternalId"] == "spoke-external-id"
+    )
+    error_message = "The trust must name the account root as principal and narrow it to exactly trusted_principal_arns with ArnEquals aws:PrincipalArn, keeping the external_id condition."
+  }
+}
+
+run "cross_account_role_requires_named_principals" {
+  command = plan
+
+  variables {
+    trusted_principal_arns = []
+  }
+
+  expect_failures = [aws_iam_role.cross_account_role]
+}
+
+run "trusted_principal_arns_rejects_a_wildcard_role" {
+  command = plan
+
+  variables {
+    trusted_principal_arns = ["arn:aws:iam::123456789012:role/*"]
+  }
+
+  expect_failures = [var.trusted_principal_arns]
+}
+
+run "trusted_principal_arns_rejects_a_wildcard_account" {
+  command = plan
+
+  variables {
+    trusted_principal_arns = ["arn:aws:iam::*:role/hub-ci-plan"]
+  }
+
+  expect_failures = [var.trusted_principal_arns]
+}
+
+run "trusted_principal_arns_rejects_an_account_root" {
+  command = plan
+
+  variables {
+    trusted_principal_arns = ["arn:aws:iam::123456789012:root"]
+  }
+
+  expect_failures = [var.trusted_principal_arns]
+}
+
+run "trusted_principal_arns_must_be_in_a_trusted_account" {
+  command = plan
+
+  variables {
+    trusted_principal_arns = ["arn:aws:iam::999999999999:role/hub-ci-plan"]
+  }
+
+  expect_failures = [var.trusted_principal_arns]
+}
+
+# S4: no action that lets the role hand data to another account.
+run "cross_account_policies_grant_no_exfiltration_actions" {
+  command = plan
+
+  variables {
+    managed_sns_topic_arns = ["arn:aws:sns:eu-west-2:123456789012:test-topic"]
+  }
+
+  assert {
+    condition = !contains(flatten([
+      for s in jsondecode(aws_iam_policy.cross_account_policy[0].policy).Statement : s.Action if s.Effect == "Allow"
+    ]), "s3:PutBucketPolicy")
+    error_message = "The cross-account policy must not allow s3:PutBucketPolicy: it could open a bucket to another account."
+  }
+
+  # Two asserts, not one `!a && b`: checkov's HCL parser (python-hcl2)
+  # rejects a line-leading && after a negated call.
+  assert {
+    condition     = !contains(flatten([for s in jsondecode(aws_iam_policy.resource_management[0].policy).Statement : s.Action]), "sns:Subscribe")
+    error_message = "The resource-management policy must not allow sns:Subscribe: it could subscribe an external endpoint to a managed topic."
+  }
+
+  assert {
+    condition     = contains(flatten([for s in jsondecode(aws_iam_policy.resource_management[0].policy).Statement : s.Action]), "sns:Publish")
+    error_message = "The resource-management policy keeps sns:Publish on the managed topics."
+  }
 }
 
 run "disabled_by_default_never_creates_the_role" {

@@ -199,9 +199,10 @@ components:
           pre_token_generation: "{{ .vars.pre_token_generation_lambda_arn }}"
           custom_message: "{{ .vars.custom_message_lambda_arn }}"
 
-        # Advanced security
-        user_pool_add_ons:
-          advanced_security_mode: "AUDIT"
+        # Threat protection in audit mode. AUDIT is a Plus-plan feature, so
+        # the tier must be PLUS (the cognito component validates the pair).
+        advanced_security_mode: "AUDIT"
+        user_pool_tier: "PLUS"
 
         # Deletion protection
         deletion_protection: "INACTIVE"

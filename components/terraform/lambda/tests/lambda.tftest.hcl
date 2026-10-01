@@ -102,6 +102,35 @@ run "no_secretsmanager_source_arn_no_permission" {
   }
 }
 
+# S4: S3 bucket ARNs carry no account and bucket names are global, so the S3
+# invoke permission must pin the bucket owner with source_account.
+run "s3_invoke_permission_pins_the_source_account" {
+  command = plan
+
+  variables {
+    s3_source_arn = "arn:aws:s3:::test-uploads"
+  }
+
+  assert {
+    condition = (
+      aws_lambda_permission.s3[0].principal == "s3.amazonaws.com"
+      && aws_lambda_permission.s3[0].source_arn == "arn:aws:s3:::test-uploads"
+      && aws_lambda_permission.s3[0].source_account == "123456789012"
+    )
+    error_message = "The S3 invoke permission must name the bucket (source_arn) and this account (source_account)."
+  }
+}
+
+run "s3_source_arn_rejects_a_wildcard" {
+  command = plan
+
+  variables {
+    s3_source_arn = "arn:aws:s3:::*"
+  }
+
+  expect_failures = [var.s3_source_arn]
+}
+
 run "secretsmanager_source_arn_gets_scoped_invoke_permission" {
   command = plan
 

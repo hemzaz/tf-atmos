@@ -19,10 +19,36 @@ variable "cross_account_role_name" {
 
 variable "trusted_account_ids" {
   type        = list(string)
-  description = "List of AWS account IDs that are allowed to assume the cross-account role"
+  description = "AWS account IDs whose principals may assume the cross-account role; trusted_principal_arns narrows the trust to named roles/users in them"
   validation {
     condition     = length(var.trusted_account_ids) > 0 && alltrue([for id in var.trusted_account_ids : can(regex("^\\d{12}$", id))])
     error_message = "Each AWS account ID must be a 12-digit number."
+  }
+}
+
+variable "trusted_principal_arns" {
+  type        = list(string)
+  description = <<-EOT
+    Exact IAM role/user ARNs that may assume the cross-account role, matched by an
+    `aws:PrincipalArn` ArnEquals condition on the account-root principals of trusted_account_ids
+    (the backend's access_roles pattern), so a listed role need not exist yet. Required when
+    create_cross_account_role is true. Each ARN must be in one of trusted_account_ids, include the
+    role's path (aws:PrincipalArn carries it), and contain no wildcard.
+  EOT
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for arn in var.trusted_principal_arns : can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$", arn))
+    ])
+    error_message = "Each trusted_principal_arns entry must be an IAM role or user ARN (arn:aws:iam::<account>:role/<path/name>) with no wildcard."
+  }
+
+  validation {
+    condition = alltrue([
+      for arn in var.trusted_principal_arns : contains(var.trusted_account_ids, try(split(":", arn)[4], ""))
+    ])
+    error_message = "Each trusted_principal_arns entry must belong to one of trusted_account_ids: the trust policy's principals are those accounts' roots, so a principal elsewhere could never match."
   }
 }
 
