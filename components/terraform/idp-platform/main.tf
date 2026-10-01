@@ -512,6 +512,17 @@ resource "aws_secretsmanager_secret_version" "idp_config" {
     jwt_secret            = ephemeral.random_password.jwt_secret.result
   })
   secret_string_wo_version = var.secrets_version
+
+  # redis_url comes from the cache's endpoint, and secret_string_wo is
+  # write-only, so Terraform cannot see it change: a replaced cache (new
+  # endpoint, fresh AUTH token) must re-create this version in the same apply,
+  # as redis_auth does. On the cache's id only: an in-place update of the cache
+  # must not re-create the secret.
+  depends_on = [aws_elasticache_replication_group.redis]
+
+  lifecycle {
+    replace_triggered_by = [aws_elasticache_replication_group.redis.id]
+  }
 }
 
 # Redis AUTH token, generated the way elasticache generates its own (#258): an

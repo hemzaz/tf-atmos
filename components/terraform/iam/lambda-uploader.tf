@@ -18,9 +18,11 @@
 # workflows/scripts/common/check-lambda-packages.py fails lint when the
 # stack's s3/lambda-artifacts or kms/main instance stops matching it.
 
+data "aws_partition" "current" {}
+
 locals {
   lambda_artifacts_bucket_name = "${lookup(var.tags, "Environment", "")}-lambda-artifacts-${data.aws_caller_identity.current.account_id}"
-  lambda_artifacts_bucket_arn  = "arn:aws:s3:::${local.lambda_artifacts_bucket_name}"
+  lambda_artifacts_bucket_arn  = "arn:${data.aws_partition.current.partition}:s3:::${local.lambda_artifacts_bucket_name}"
 
   create_lambda_uploader_role = var.github_oidc_enabled && length(var.lambda_uploader_trusted_github_repos) > 0
 

@@ -333,3 +333,106 @@ run "query_log_retention_must_be_a_cloudwatch_value" {
 
   expect_failures = [var.query_log_retention_in_days]
 }
+
+# The name suffix is derived from the first zone by default, so a zone that
+# sorts earlier renames it; query_logging_name pins it.
+run "derived_name_changes_with_an_earlier_zone" {
+  command = plan
+
+  variables {
+    zones = {
+      main  = { name = "fnx.example.com", enable_query_logging = true }
+      early = { name = "a.fnx.example.com", enable_query_logging = true }
+    }
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_resource_policy.route53_query_logging[0].policy_name == "route53-query-logging-a-fnx-example-com"
+    error_message = "Without query_logging_name the suffix follows the alphabetically first logged zone."
+  }
+}
+
+run "query_logging_name_is_stable_when_an_earlier_zone_is_added" {
+  command = plan
+
+  variables {
+    query_logging_name = "fnx-example-com"
+    zones = {
+      main  = { name = "fnx.example.com", enable_query_logging = true }
+      early = { name = "a.fnx.example.com", enable_query_logging = true }
+    }
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_log_resource_policy.route53_query_logging[0].policy_name == "route53-query-logging-fnx-example-com"
+      && aws_kms_alias.query_logs[0].name == "alias/route53-query-logs-fnx-example-com"
+    )
+    error_message = "With query_logging_name set, adding a zone that sorts earlier must not change the policy name or the key alias."
+  }
+}
+
+run "query_logging_name_must_be_a_valid_suffix" {
+  command = plan
+
+  variables {
+    query_logging_name = "Bad Name"
+    zones = {
+      main = { name = "fnx.example.com", enable_query_logging = true }
+    }
+  }
+
+  expect_failures = [var.query_logging_name]
+}
+
+run "caller_log_group_in_the_zone_account_is_accepted" {
+  command = plan
+
+  variables {
+    zones = {
+      main = {
+        name                 = "fnx.example.com"
+        enable_query_logging = true
+        query_logging_config = { cloudwatch_log_group_arn = "arn:aws:logs:us-east-1:111111111111:log-group:/aws/route53/fnx.example.com" }
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_route53_query_log.query_logging["main"].cloudwatch_log_group_arn == "arn:aws:logs:us-east-1:111111111111:log-group:/aws/route53/fnx.example.com"
+    error_message = "A caller log group in this account is used as given."
+  }
+}
+
+run "caller_log_group_must_be_in_the_zone_account" {
+  command = plan
+
+  variables {
+    zones = {
+      main = {
+        name                 = "fnx.example.com"
+        enable_query_logging = true
+        query_logging_config = { cloudwatch_log_group_arn = "arn:aws:logs:us-east-1:999999999999:log-group:/aws/route53/fnx.example.com" }
+      }
+    }
+  }
+
+  expect_failures = [aws_route53_query_log.query_logging["main"]]
+}
+
+run "caller_log_group_must_be_in_the_dns_account_for_dns_account_zones" {
+  command = plan
+
+  variables {
+    multi_account_dns_delegation = true
+    zones = {
+      main = {
+        name                 = "fnx.example.com"
+        enable_query_logging = true
+        query_logging_config = { cloudwatch_log_group_arn = "arn:aws:logs:us-east-1:111111111111:log-group:/aws/route53/fnx.example.com" }
+      }
+    }
+  }
+
+  expect_failures = [aws_route53_query_log.dns_account_query_logging["main"]]
+}

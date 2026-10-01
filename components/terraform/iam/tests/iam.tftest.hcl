@@ -22,6 +22,13 @@ override_data {
   }
 }
 
+override_data {
+  target = data.aws_partition.current
+  values = {
+    partition = "aws"
+  }
+}
+
 variables {
   region                  = "eu-west-2"
   cross_account_role_name = "test-CrossAccountRole"
