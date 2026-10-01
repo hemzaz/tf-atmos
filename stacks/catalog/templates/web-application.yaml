@@ -316,10 +316,9 @@ components:
         region: "us-east-1"
         name: "webapp-waf-cf"
         scope: "CLOUDFRONT"
-        # Unset like every CLOUDFRONT instance (components/terraform/waf/README.md).
-        # The stacks are in us-east-1 too, so this instance could read kms/main
-        # like web-application/waf does; left unset to keep the pattern.
-        kms_key_arn: null
+        # The stacks run in us-east-1, so the stack's own kms/main can encrypt
+        # this us-east-1 log group (components/terraform/waf/README.md).
+        kms_key_arn: !terraform.state kms/main .key_arn
 
         managed_rule_group_statement_rules:
           - name: "AWSManagedRulesCommonRuleSet"
@@ -337,6 +336,10 @@ components:
         tags:
           Layer: "security"
           Application: "web-application"
+
+      dependencies:
+        components:
+          - component: kms/main
 
     # =========================================================================
     # COMPUTE LAYER - ECS FARGATE

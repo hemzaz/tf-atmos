@@ -211,7 +211,7 @@ resource "aws_wafv2_web_acl_association" "this" {
 }
 
 resource "aws_cloudwatch_log_group" "this" {
-  #checkov:skip=CKV_AWS_158:kms_key_arn is an input; unset only for a CLOUDFRONT-scope (us-east-1) instance, whose region has no matching key in this stack's usual (regional) kms/main -- REGIONAL instances set it
+  #checkov:skip=CKV_AWS_158:kms_key_arn is an input; unset only for a CLOUDFRONT-scope (us-east-1) instance of a stack outside us-east-1, which has no us-east-1 key -- every fnx instance sets it
   count = local.enabled && var.enable_logging ? 1 : 0
 
   name              = local.log_group_name
