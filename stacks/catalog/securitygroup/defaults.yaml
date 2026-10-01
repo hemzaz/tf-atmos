@@ -10,18 +10,9 @@ components:
           description: "Manages security groups"
           category: "networking"
       vars:
-        enabled: true
         vpc_id: !terraform.state vpc/main .vpc_id
 
-        # Security group configurations
-        create_default_security_group: true
-        default_security_group_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-default-sg"
-
-        # Database security group
-        create_database_security_group: true
-        database_security_group_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-db-sg"
-
-        # Custom security groups
+        # One group per entry; instances set their own.
         security_groups: {}
 
         tags:

@@ -3,7 +3,7 @@
 Routes security findings to one KMS-encrypted SNS topic: EventBridge rules for GuardDuty findings
 of severity 4.0 and above, new active failed HIGH/CRITICAL Security Hub control findings and,
 optionally, HIGH/CRITICAL Inspector V2 findings; every security group create, delete and rule
-change (CloudTrail EC2 API calls); plus the four CIS v1.2.0 metric filters and
+change not made by automation (CloudTrail EC2 API calls); plus the four CIS v1.2.0 metric filters and
 alarms on the CloudTrail log group, email subscriptions, and an optional Slack/PagerDuty
 enrichment Lambda. It creates no detector or hub (one component per service, the Cloud Posse
 model).
@@ -12,7 +12,8 @@ model).
 
 - Instance: `security-monitoring/main` in the three AWS stacks.
 - Reads: `guardduty/main .detector_id`, `securityhub/main .account_arn`,
-  `cloudtrail/main .cloudtrail_logs_log_group_name`, `kms/main .key_arn`.
+  `cloudtrail/main .cloudtrail_logs_log_group_name`, `kms/main .key_arn`,
+  `iam/ci .ci_apply_role_arn`.
 
 ## Notes
 
@@ -28,6 +29,13 @@ model).
 - `enable_inspector` is `false` in the catalog: Inspector bills per resource scanned.
 - Security group changes alert twice by design: the EventBridge rule sends each change as it
   happens (`ModifySecurityGroupRules` included), the CIS `SecurityGroupChanges` alarm fires when
-  more than `sg_changes_threshold` changes land in 5 minutes. Controllers that edit groups
-  (AWS Load Balancer Controller, EKS) make the per-change rule noisy; set
-  `enable_security_group_change_events: false` to keep only the alarm.
+  more than `sg_changes_threshold` changes land in 5 minutes. `UpdateSecurityGroupRuleDescriptions*`
+  calls are intentionally not alerted: they change a description, not what a group allows.
+- The rule skips calls by the roles in `security_group_change_excluded_role_arns`; the alarm still
+  counts them. The catalog lists the EKS cluster role, the AWS Load Balancer Controller IRSA role,
+  the EKS service-linked roles (by naming convention: `eks` and `eks-addons` deploy later) and the
+  `iam/ci` apply role (from state). To exclude another role, add its exact ARN, path included, to
+  that list in `stacks/catalog/security-monitoring/defaults.yaml`; wildcards are rejected.
+- Root, IAM user and AWS service calls carry no `sessionIssuer`, and an `anything-but` never matches
+  a missing field, so the pattern is an `$or` with an `exists: false` branch that keeps them
+  alerting. Renaming an excluded role (e.g. the cluster's `name`) silently re-enables its alerts.

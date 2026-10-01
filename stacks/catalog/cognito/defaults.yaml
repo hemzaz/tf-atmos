@@ -6,7 +6,7 @@
 # carries no Atmos template strings: the scaffold engine rejects any output that
 # still contains Go-template delimiters, so a generated file cannot emit them.
 # Add them by hand afterwards if an instance needs one, e.g. name_prefix built
-# from .settings.context - see stacks/catalog/securitygroup/defaults.yaml.
+# from .settings.context - see stacks/catalog/iam/defaults.yaml.
 components:
   terraform:
     cognito/defaults:
