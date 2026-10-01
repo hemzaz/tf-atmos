@@ -549,3 +549,51 @@ run "eks_alarms_use_real_container_insights_metrics" {
   # reference is a configuration error, not a runtime `can()` failure); its
   # absence is enforced by the component simply no longer declaring it.
 }
+
+# lambda_error_alarms: the map key is a stable alarm id; function_name is the
+# watched function. Before this, the key was used as the FunctionName
+# dimension, so prod's `lambda_errors` entry watched a function literally named
+# "lambda_errors" and could never fire.
+run "lambda_error_alarm_watches_function_name" {
+  command = plan
+
+  variables {
+    name = "data"
+    lambda_error_alarms = {
+      data-processor = {
+        function_name      = "fnx-prod-data-processor"
+        evaluation_periods = 2
+        period             = 300
+        threshold          = 5
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.lambda_errors["data-processor"].dimensions["FunctionName"] == "fnx-prod-data-processor"
+    error_message = "The Lambda error alarm's FunctionName dimension must be the entry's function_name, not the map key."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.lambda_errors["data-processor"].alarm_name == "test-data-data-processor-errors"
+    error_message = "Lambda error alarms are named <Environment>-<name>-<key>-errors."
+  }
+}
+
+run "lambda_error_alarm_rejects_arn" {
+  command = plan
+
+  variables {
+    name = "data"
+    lambda_error_alarms = {
+      data-processor = {
+        function_name      = "arn:aws:lambda:eu-west-2:123456789012:function:fnx-prod-data-processor"
+        evaluation_periods = 2
+        period             = 300
+        threshold          = 5
+      }
+    }
+  }
+
+  expect_failures = [var.lambda_error_alarms]
+}

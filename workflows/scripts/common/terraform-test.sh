@@ -12,9 +12,9 @@
 # .github/workflows/terraform-ci.yml, and by `atmos workflow terraform-test`
 # (workflows/validate-enhanced.yaml) for a local full run.
 #
-# A named component with no tests/ directory is skipped, not failed: some
-# components (idp-platform) cannot be tested because mock_provider rejects
-# their ephemeral resources.
+# A named component with no tests/ directory is skipped, not failed: a
+# component with an aws ephemeral resource cannot be tested because
+# mock_provider rejects those.
 #
 # POSIX sh, no bashisms: this runs unmodified inside ghcr.io/cloudposse/atmos,
 # whose default awk is mawk (not gawk) -- the summary table below sticks to

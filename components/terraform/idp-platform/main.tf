@@ -207,7 +207,7 @@ resource "aws_elasticache_replication_group" "redis" {
   # Security
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
-  auth_token_wo              = ephemeral.aws_secretsmanager_secret_version.redis_auth.secret_string
+  auth_token_wo              = local.redis_auth_token
   auth_token_wo_version      = var.secrets_version
   auth_token_update_strategy = "ROTATE"
 
@@ -239,6 +239,13 @@ resource "aws_elasticache_replication_group" "redis" {
     Component = "cache"
     Service   = "idp-platform"
   })
+
+  lifecycle {
+    precondition {
+      condition     = can(regex("^[A-Za-z0-9!&#$^<>-]{16,128}$", local.redis_auth_token))
+      error_message = "The generated Redis AUTH token breaks ElastiCache's rules (16-128 characters, punctuation only from !&#$^<>-); check local.redis_auth_token_generator."
+    }
+  }
 }
 
 # S3 buckets for various IDP needs
@@ -502,13 +509,20 @@ resource "aws_secretsmanager_secret_version" "idp_config" {
     database_secret_arn   = module.idp_database.password_secret_arn
     redis_url             = "rediss://${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379"
     redis_auth_secret_arn = aws_secretsmanager_secret.redis_auth.arn
-    jwt_secret            = ephemeral.aws_secretsmanager_random_password.jwt_secret.random_password
+    jwt_secret            = ephemeral.random_password.jwt_secret.result
   })
   secret_string_wo_version = var.secrets_version
 }
 
-# Redis AUTH token: generated once into Secrets Manager (the single source of truth) and
-# read back ephemerally for ElastiCache. Bump secrets_version to rotate it.
+# Redis AUTH token, generated the way elasticache generates its own (#258): an
+# ephemeral random_password sent only through the write-only attributes of the
+# replication group and the secret version, in the same apply, so the two agree.
+# Nothing reads the token back from Secrets Manager: an ephemeral
+# aws_secretsmanager_secret_version is opened at plan time once the secret
+# exists, and the CI plan role (ReadOnlyAccess) has no
+# secretsmanager:GetSecretValue, so every plan would fail. random_password
+# (hashicorp/random) is local and needs no AWS call at plan.
+# Bump secrets_version to rotate: both write-only values are then re-sent.
 resource "aws_secretsmanager_secret" "redis_auth" {
   name                    = "${local.name_prefix}/idp-platform/redis-auth-token"
   description             = "ElastiCache AUTH token for the IDP platform Redis"
@@ -522,21 +536,46 @@ resource "aws_secretsmanager_secret" "redis_auth" {
 
 resource "aws_secretsmanager_secret_version" "redis_auth" {
   secret_id                = aws_secretsmanager_secret.redis_auth.id
-  secret_string_wo         = ephemeral.aws_secretsmanager_random_password.redis_auth_token.random_password
+  secret_string_wo         = local.redis_auth_token
   secret_string_wo_version = var.secrets_version
+
+  # A replaced cache gets a fresh token on create; re-create this version in
+  # the same apply so the secret carries that token too. On the cache's id
+  # only: an in-place update of the cache must not re-create the secret.
+  depends_on = [aws_elasticache_replication_group.redis]
+
+  lifecycle {
+    replace_triggered_by = [aws_elasticache_replication_group.redis.id]
+  }
 }
 
-ephemeral "aws_secretsmanager_random_password" "redis_auth_token" {
-  password_length     = 32
-  exclude_punctuation = true # ElastiCache rejects "@", "/" and '"' in AUTH tokens
+ephemeral "random_password" "redis_auth_token" {
+  length           = local.redis_auth_token_generator.length
+  special          = local.redis_auth_token_generator.special
+  override_special = local.redis_auth_token_generator.override_special
+  min_upper        = local.redis_auth_token_generator.min_upper
+  min_lower        = local.redis_auth_token_generator.min_lower
+  min_numeric      = local.redis_auth_token_generator.min_numeric
+  min_special      = local.redis_auth_token_generator.min_special
 }
 
-ephemeral "aws_secretsmanager_secret_version" "redis_auth" {
-  secret_id = aws_secretsmanager_secret.redis_auth.id
-
-  depends_on = [aws_secretsmanager_secret_version.redis_auth]
+ephemeral "random_password" "jwt_secret" {
+  length  = 64
+  special = false
 }
 
-ephemeral "aws_secretsmanager_random_password" "jwt_secret" {
-  password_length = 64
+locals {
+  # A local, not inline: tests cannot assert an ephemeral resource's arguments.
+  # Same shape as elasticache's auth_token_generator (Cloud Posse redis_cluster).
+  redis_auth_token_generator = {
+    length           = 128
+    special          = true
+    override_special = "#^-"
+    min_upper        = 3
+    min_lower        = 3
+    min_numeric      = 3
+    min_special      = 3
+  }
+
+  redis_auth_token = ephemeral.random_password.redis_auth_token.result
 }

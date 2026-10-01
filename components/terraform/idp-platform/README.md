@@ -19,5 +19,9 @@ pattern; the shared logic has to move to `modules/terraform` before this is adop
   subscriptions (Lambda function URL, API Gateway, AWS Chatbot), never a raw webhook, which would
   stay `PendingConfirmation` forever. Setting either requires `acknowledge_https_forwarder = true`;
   the raw-webhook host check is only a better error message.
+- The Redis AUTH token and the JWT secret are ephemeral `random_password`s sent only through
+  write-only attributes (`*_wo`), as in `elasticache`. Nothing reads a secret back at plan: the CI
+  plan role (ReadOnlyAccess) has no `secretsmanager:GetSecretValue`. Bump `secrets_version` to
+  rotate both.
 - `environment` accepts only `dev`, `staging` or `prod`, and `domain_name` allows exactly one dot
   (`example.com`, not `idp.example.com`).
