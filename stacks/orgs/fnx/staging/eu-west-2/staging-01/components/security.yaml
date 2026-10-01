@@ -15,6 +15,7 @@ import:
   - catalog/awsconfig/defaults
   - catalog/guardduty/defaults
   - catalog/securityhub/defaults
+  - catalog/apigateway-account/defaults
   - catalog/security-monitoring/defaults
   - catalog/backup/defaults
 
@@ -268,6 +269,18 @@ components:
         component: securityhub
         inherits:
           - securityhub/defaults
+
+    # ==========================================================================
+    # API Gateway account settings - the per-region CloudWatch Logs role that
+    # REST execution/access logging needs (apigateway/main and apigateway/data
+    # depend on it). One instance per account and region: a second one would
+    # overwrite this one's setting.
+    # ==========================================================================
+    apigateway-account/main:
+      metadata:
+        component: apigateway-account
+        inherits:
+          - apigateway-account/defaults
 
     # ==========================================================================
     # Security finding routing (GuardDuty + Security Hub -> SNS)

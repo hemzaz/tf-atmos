@@ -459,6 +459,9 @@ components:
     # API GATEWAY (HTTP API)
     # =========================================================================
 
+    # An HTTP API: its access logs need no account-level CloudWatch role, so it
+    # does not depend on apigateway-account/main. Switch api_type to REST and
+    # it does (see serverless-api.yaml's apigateway dependencies).
     microservices/apigateway:
       metadata:
         component: apigateway

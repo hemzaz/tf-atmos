@@ -114,6 +114,9 @@ components:
           allow_credentials: false
       dependencies:
         components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
           - component: network/main
           - component: acm/main
           - component: cognito/main
@@ -177,6 +180,9 @@ components:
         zone_id: !terraform.state network/services .zone_ids.data
       dependencies:
         components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
           - component: network/services
           - component: acm/services
           - component: cognito/main

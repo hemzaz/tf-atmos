@@ -353,6 +353,12 @@ components:
         components:
           - component: serverless-api/cognito
           - component: serverless-api/acm
+          # REST stage logging (enable_logging, the stage-wide method
+          # settings) needs the account's API Gateway CloudWatch role. This
+          # template does not create it: the importing stack must have the
+          # apigateway-account/main instance (the three AWS stacks' security.yaml
+          # do), since it is one per account and region, never per template.
+          - component: apigateway-account/main
     serverless-api/acm:
       metadata:
         component: acm

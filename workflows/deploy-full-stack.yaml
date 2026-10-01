@@ -19,7 +19,9 @@
 # workload stack; iam/ci reads it cross-stack. Connectivity follows networking, security-monitoring
 # follows security (it reads guardduty, securityhub and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
-# dependencies.components), lambda (compute) precedes apigateway (services), and
+# dependencies.components), lambda (compute) precedes apigateway (services), as
+# does apigateway-account (security: the account's CloudWatch role REST stage
+# logging needs; apigateway lists it in dependencies.components only), and
 # ec2/bastion (connectivity) precedes the EC2 instances that read it (compute).
 # network/main writes the NS record delegating network/services' zone from
 # its own zone_name_servers, so network/services has a dns-zones layer before
@@ -140,7 +142,8 @@ workflows:
         command: >-
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
+          or .metadata.component == "awsconfig" or .metadata.component == "cognito"
+          or .metadata.component == "apigateway-account"'
       - name: confirm_security
         type: confirm
         prompt: Apply the security layer plan above?
@@ -154,7 +157,7 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
-          or .metadata.component == "cognito"'
+          or .metadata.component == "cognito" or .metadata.component == "apigateway-account"'
       - name: plan-security-monitoring
         type: atmos
         command: terraform plan --query '.metadata.component == "security-monitoring"'
@@ -432,14 +435,15 @@ workflows:
           or .metadata.component == "network" or .atmos_component == "ec2/bastion"'
 
   deploy-security:
-    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, CloudTrail, AWS Config and Cognito"
+    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
     steps:
       - name: plan
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
-          or .metadata.component == "awsconfig" or .metadata.component == "cognito"'
+          or .metadata.component == "awsconfig" or .metadata.component == "cognito"
+          or .metadata.component == "apigateway-account"'
       - name: confirm
         type: confirm
         prompt: Deploy the security layer?
@@ -453,7 +457,7 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
-          or .metadata.component == "cognito"'
+          or .metadata.component == "cognito" or .metadata.component == "apigateway-account"'
 
   deploy-security-monitoring:
     description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector and Security Hub)"
