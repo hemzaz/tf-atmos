@@ -176,9 +176,15 @@ jobs:
         with:
           persist-credentials: false
       # actionlint runs shellcheck over every run block when it is on PATH; the
-      # toolchain cannot unpack shellcheck's release, so take Alpine's package.
+      # toolchain cannot unpack shellcheck's release, so take the distro package
+      # (the Atmos image is Debian-based, not Alpine; apk stays as a fallback).
       - name: Install shellcheck
-        run: apk add --no-cache shellcheck
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends shellcheck
+          else
+            apk add --no-cache shellcheck
+          fi
       # The toolchain verifies the release attestations with `gh` (GH_TOKEN), as
       # for tflint in the lint job; actionlint only reads the workflow files.
       - name: actionlint
