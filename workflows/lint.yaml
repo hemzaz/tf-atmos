@@ -174,10 +174,12 @@ workflows:
 
   # Workflow files are not Terraform or Atmos config, so nothing above reads them:
   # a PR that only touches cd/drift/dr/emulator workflows would otherwise get no
-  # static check. Tags carry a `v` prefix. shellcheck is not pinned: the toolchain
+  # static check. Tags carry a `v` prefix. shellcheck is not pinned here: the toolchain
   # does not unpack its .tar.xz release (the binary stays an XZ archive and
-  # actionlint dies with "exec format error"), so run blocks are not shellchecked
-  # in CI; run actionlint locally with shellcheck installed for that.
+  # actionlint dies with "exec format error"). CI installs the distro
+  # package (apt-get/apk, in the actionlint job) and actionlint finds it on
+  # PATH; locally, install shellcheck (e.g. `brew install shellcheck`). Without
+  # shellcheck on PATH actionlint skips the run-block checks silently.
   actionlint:
     description: Lint GitHub Actions workflows (actionlint)
     dependencies:
@@ -186,7 +188,7 @@ workflows:
     steps:
       - name: actionlint
         type: shell
-        command: actionlint -color -shellcheck=
+        command: actionlint -color
 
   security-scan:
     description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings

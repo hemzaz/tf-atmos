@@ -11,8 +11,10 @@
 #   - Every job's container is ghcr.io/cloudposse/atmos:<tag>@sha256:<digest>, the same
 #     literal in every workflow file (Actions has no shared variable for `container:`, and a
 #     digest only means something with a fixed tag, so there is no vars override). Dependabot
-#     (docker ecosystem, .github/dependabot.yml) proposes tag+digest bumps; also bump the
-#     atmos-version input in emulator.yml and `version.constraint` in atmos.yaml by hand.
+#     (docker ecosystem, .github/dependabot.yml) bumps .github/atmos-image/Dockerfile;
+#     scripts/sync-atmos-image.sh carries that tag@digest into every workflow's image and
+#     the atmos-version input in emulator.yml (the actionlint job runs it with --check).
+#     Only `version.constraint` in atmos.yaml is still bumped by hand.
 #   - Every root module commits its .terraform.lock.hcl and every init runs with
 #     -lockfile=readonly, so a provider that is not locked fails instead of floating.
 #     Regenerate locks with `atmos workflow providers-lock -f providers`.
@@ -173,6 +175,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # actionlint runs shellcheck over every run block when it is on PATH; the
+      # toolchain cannot unpack shellcheck's release, so take the distro package
+      # (the Atmos image is Debian-based, not Alpine; apk stays as a fallback).
+      - name: Install shellcheck
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends shellcheck
+          else
+            apk add --no-cache shellcheck
+          fi
       # The toolchain verifies the release attestations with `gh` (GH_TOKEN), as
       # for tflint in the lint job; actionlint only reads the workflow files.
       - name: actionlint

@@ -80,7 +80,8 @@ jobs:
       - uses: cloudposse/github-action-setup-atmos@9e8d1e2db56fe851a85871d5993d63e182b66536 # v3.6.0
         with:
           # Same Atmos as the digest-pinned ghcr.io/cloudposse/atmos image in
-          # terraform-ci.yml; bump both together (Dependabot only bumps the image).
+          # terraform-ci.yml; scripts/sync-atmos-image.sh rewrites this tag when
+          # Dependabot bumps .github/atmos-image/Dockerfile.
           atmos-version: "1.229.0"
 
       - name: Apply and destroy against LocalEmu
