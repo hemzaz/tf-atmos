@@ -383,6 +383,50 @@ variable "ci_apply_kms_key_aliases" {
   }
 }
 
+variable "lambda_uploader_trusted_github_repos" {
+  type        = list(string)
+  description = <<-EOT
+    Application repositories whose CI may upload Lambda packages to this stage's s3/lambda-artifacts
+    bucket through the "<ci_role_name_prefix>-lambda-uploader" role, each "<org>/<repo>:<branch>"
+    (the shape of ci_apply_role_trusted_github_repos; sub "repo:<org>/<repo>:ref:refs/heads/<branch>",
+    StringEquals). Empty (the default) creates no role. Requires github_oidc_enabled.
+  EOT
+  default     = []
+
+  validation {
+    condition = alltrue(flatten([
+      for repo in var.lambda_uploader_trusted_github_repos : [
+        can(regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:[A-Za-z0-9._/-]+$", repo)),
+        !strcontains(repo, "*"),
+        !strcontains(repo, "environment:"),
+        !endswith(repo, ":pull_request"),
+      ]
+    ]))
+    error_message = "Each lambda_uploader_trusted_github_repos entry must be \"<org>/<repo>:<branch>\" with an exact org, repo and branch: wildcards, pull_request and environment:<name> subjects are rejected."
+  }
+
+  validation {
+    condition     = length(var.lambda_uploader_trusted_github_repos) == 0 || var.lambda_uploader_kms_key_alias != null
+    error_message = "lambda_uploader_kms_key_alias is required when lambda_uploader_trusted_github_repos is set: the bucket is SSE-KMS."
+  }
+
+  validation {
+    condition     = length(var.lambda_uploader_trusted_github_repos) == 0 || var.github_oidc_enabled
+    error_message = "lambda_uploader_trusted_github_repos needs github_oidc_enabled = true: the uploader role trusts this instance's GitHub OIDC provider, so without it no role would be created."
+  }
+}
+
+variable "lambda_uploader_kms_key_alias" {
+  type        = string
+  description = "Alias (\"alias/...\") of the key encrypting the s3/lambda-artifacts bucket (kms/main's alias_name). The uploader role may use it only through S3 in var.region (kms:ViaService). An alias, not a key ARN, for the same layer-order reason as ci_apply_kms_key_aliases."
+  default     = null
+
+  validation {
+    condition     = var.lambda_uploader_kms_key_alias == null || can(regex("^alias/[A-Za-z0-9/_-]+$", var.lambda_uploader_kms_key_alias))
+    error_message = "lambda_uploader_kms_key_alias must be an \"alias/<name>\" KMS alias."
+  }
+}
+
 variable "ci_role_max_session_duration" {
   type        = number
   description = "Maximum session duration in seconds for the CI roles"

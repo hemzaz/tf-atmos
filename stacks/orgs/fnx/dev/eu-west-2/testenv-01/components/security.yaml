@@ -95,6 +95,15 @@ components:
         # kms/main's alias_name below, prefixed with "alias/".
         ci_apply_kms_key_aliases:
           - alias/testenv-01-main
+        # Lambda package uploader (<prefix>-lambda-uploader, the iam
+        # component's lambda-uploader.tf): the application repo's CI uploads
+        # each function's zip to this stage's s3/lambda-artifacts bucket with
+        # it (docs/OPERATIONS.md, "Lambda packages"). No role until the app
+        # repo is named here as "<org>/<repo>:<branch>" - an owner input. The
+        # alias is kms/main's, the bucket's key; check-lambda-packages.py
+        # keeps it and the bucket name in step with the storage instances.
+        lambda_uploader_trusted_github_repos: []
+        lambda_uploader_kms_key_alias: alias/testenv-01-main
       dependencies:
         components:
           - component: backend/main

@@ -48,30 +48,36 @@ components:
 
         # Methods are addressed by resource_path ("/" is the API root), because
         # a stack cannot know this API's resource IDs before apply.
+        # lambda/data-processor is disabled (no package yet), so "/api" has no
+        # method. When it is enabled, append these items to the two lists below
+        # (delete "#   " to keep the indentation) and add
+        # `- component: lambda/data-processor` to dependencies.components:
+        #   api_methods:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       authorization: "COGNITO_USER_POOLS"
+        #   api_integrations:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+        #       type: "AWS_PROXY"
+        #       uri: !terraform.state lambda/data-processor .function_invoke_arn
+        #       lambda_function_name: !terraform.state lambda/data-processor .function_name
         api_methods:
           - resource_path: "/"
             http_method: "GET"
             authorization: "NONE"
-          - resource_path: "/api"
-            http_method: "ANY"
-            authorization: "COGNITO_USER_POOLS"
 
         # "/" stays MOCK on purpose: it is a liveness endpoint, and a canned 200
-        # is the correct answer for one. "/api" is the real entry point and is
-        # proxied to Lambda.
+        # is the correct answer for one. The real entry point, "/api" proxied to
+        # Lambda, comes back with lambda/data-processor (see above).
         api_integrations:
           - resource_path: "/"
             http_method: "GET"
             integration_http_method: "GET"
             type: "MOCK"
-          - resource_path: "/api"
-            http_method: "ANY"
-            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
-            type: "AWS_PROXY"
-            uri: !terraform.state lambda/data-processor .function_invoke_arn
-            lambda_function_name: !terraform.state lambda/data-processor .function_name
 
-        # Authorizer for the COGNITO_USER_POOLS method above. A method that asks
+        # Authorizer for the "/api" COGNITO_USER_POOLS method. A method that asks
         # for COGNITO_USER_POOLS without a pool here fails at apply.
         authorizer_type: "COGNITO_USER_POOLS"
         cognito_user_pool_arns:
@@ -111,11 +117,13 @@ components:
           - component: network/main
           - component: acm/main
           - component: cognito/main
-          - component: lambda/data-processor
 
+    # Disabled with lambda/data-processor, its only backend: an API with no
+    # method cannot be deployed. Enable both together.
     apigateway/data:
       metadata:
         component: apigateway
+        enabled: false
       vars:
         description: "Data API Gateway for staging"
         stage_name: "v1"
@@ -255,18 +263,28 @@ components:
 
     # Data processing (was infrastructure/data.lambda). The lambda component is
     # single-function, so one instance per function.
+    #
+    # The application repo's CI builds each package and uploads it as
+    # <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
+    # with iam/ci's lambda-uploader role; a PR here then sets the instance's
+    # settings.package_version, and the changed s3_key redeploys the code
+    # (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
+    # package exists: upload it, set package_version, set enabled: true, and
+    # restore its readers, each marked with a "disabled" comment:
+    # apigateway/main's "/api" route and apigateway/data (data-processor), and
+    # monitoring/data's dimensions (every function).
     lambda/data-processor:
       metadata:
         component: lambda
+        enabled: false
+      settings:
+        package_version: "unreleased"
       vars:
         function_name: "staging-data-processor"
         handler: "main.handler"
         runtime: "python3.13"
-        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
-        # this repo builds or uploads the package: s3_key must exist in it
-        # before the first apply - see docs/OPERATIONS.md.
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
-        s3_key: "staging-data-processor/latest.zip"
+        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
         memory_size: 512
         timeout: 300
         vpc_id: !terraform.state vpc/services .vpc_id
@@ -276,18 +294,20 @@ components:
           - component: vpc/services
           - component: s3/lambda-artifacts
 
+    # Packaged, and disabled until its first package, like
+    # lambda/data-processor above.
     lambda/data-transformer:
       metadata:
         component: lambda
+        enabled: false
+      settings:
+        package_version: "unreleased"
       vars:
         function_name: "staging-data-transformer"
         handler: "transform.handler"
         runtime: "python3.13"
-        # The stack's package bucket (catalog/s3/lambda-artifacts). Nothing in
-        # this repo builds or uploads the package: s3_key must exist in it
-        # before the first apply - see docs/OPERATIONS.md.
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
-        s3_key: "staging-data-transformer/latest.zip"
+        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
         memory_size: 1024
         timeout: 600
         vpc_id: !terraform.state vpc/services .vpc_id
@@ -385,11 +405,15 @@ components:
         # data instead of empty widgets (they default to [] / "").
         eks_cluster_name: !terraform.state eks/data .eks_cluster_id
         rds_instances: !terraform.state rds/data .instance_identifier | [.]
-        api_gateway_name: !terraform.state apigateway/data .api_name
-        api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
-        lambda_functions:
-          - !terraform.state lambda/data-processor .function_name
-          - !terraform.state lambda/data-transformer .function_name
+        # The lambdas are disabled (no package yet), and apigateway/data with
+        # them: no API or Lambda dimensions until they are enabled. Then add
+        # back, each read also in dependencies (lambda_functions: the enabled
+        # ones only):
+        #   api_gateway_name: !terraform.state apigateway/data .api_name
+        #   api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
+        #   lambda_functions:
+        #     - !terraform.state lambda/data-processor .function_name
+        #     - !terraform.state lambda/data-transformer .function_name
 
         alarm_email_subscriptions:
           - "staging-alerts@example.com"
@@ -410,9 +434,6 @@ components:
           - component: kms/main
           - component: eks/data
           - component: rds/data
-          - component: apigateway/data
-          - component: lambda/data-processor
-          - component: lambda/data-transformer
 
     # Cost optimization: instance scheduler, Savings Plan/RI analyzer,
     # resource cleanup, cost anomaly detection and monthly budget.

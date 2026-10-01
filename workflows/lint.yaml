@@ -128,6 +128,19 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-state-keys.py < "$stacks_json"
+      # iam/ci's lambda uploader role names its stage's s3/lambda-artifacts
+      # bucket and kms/main alias instead of reading their state (it applies
+      # first); this fails when either stops matching, and when an enabled
+      # lambda's s3_key is not a released <function_name>/<version>.zip.
+      - name: check-lambda-packages
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_lambda_packages.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-lambda-packages.py < "$stacks_json"
       # A component that configures a kubernetes/helm/kubectl provider needs
       # the EKS API, which GitHub-hosted runners cannot reach where the
       # endpoint is private: each such instance must set

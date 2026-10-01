@@ -16,7 +16,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Domains | `settings.environment.domain_name` in each stack's `components/globals.yaml`; every zone, record, certificate and API domain derives from it |
 | Alert recipients | `alarm_email_subscriptions` on monitoring instances and the lists in `components/globals.yaml`; each address must confirm its SNS subscription |
 | Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main`: unset, so its CloudWatch alarms have no action |
-| Lambda packages | the `s3_key` of every `lambda/*` instance in `components/services.yaml`, uploaded to the stack's `s3/lambda-artifacts` bucket (`<Environment>-lambda-artifacts-<account id>`, applied by the `deploy-full-stack` storage layer) before lambda's first apply; nothing in this repo builds or uploads them |
+| Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on each stack's `iam/ci` (`components/security.yaml`), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
 
@@ -176,6 +176,33 @@ is the fallback for moves configuration cannot express. A moved-only change must
 `0 to add, 0 to change, 0 to destroy` in every stack. `moved` cannot help when there is no old
 object: an inline attribute promoted to a resource, a `ForceNew` replacement, or an instance
 switched to a different root module (import instead).
+
+## Lambda packages
+
+Function code lives in an application repo, not here (the Cloud Posse aws-lambda model). The
+contract:
+
+1. Set `lambda_uploader_trusted_github_repos: ["<org>/<app-repo>:<branch>"]` on the stack's `iam/ci`
+   and apply it. Its output `lambda_uploader_role_arn` (`<prefix>-lambda-uploader`) is the role
+   the app's workflow assumes with GitHub OIDC from that branch only; output
+   `lambda_artifacts_bucket_name` is the bucket, `<Environment>-lambda-artifacts-<account id>`.
+   The role may put and read objects in that bucket and use `kms/main` through S3, nothing else.
+2. The app CI uploads each build to `<function_name>/<version>.zip` (`function_name` as in the
+   instance's vars) as a conditional write: `aws s3api put-object --if-none-match '*'`, or the
+   same header on `complete-multipart-upload` for a multipart upload. The role allows
+   `s3:PutObject` only with `s3:if-none-match`, so released keys are immutable: re-uploading a
+   released version fails (412, or AccessDenied without the header) by design; build a new version.
+3. A PR here sets the instance's `settings.package_version` to `"<version>"`, quoted (an unquoted
+   `1.10` is the YAML float `1.1`, and `check-lambda-packages.py` rejects it); the changed `s3_key`
+   is what redeploys the function when CD applies the merge. Roll back by setting an earlier
+   version.
+
+First release of a function: upload, set `package_version`, set `metadata.enabled: true` on the
+`lambda/*` instance, and restore its readers (each marked with a `disabled` comment in
+`components/services.yaml`: apigateway/main's `/api` route and `apigateway/data` for
+`data-processor`, `monitoring/data`'s dimensions for every function). `check-lambda-packages.py`
+(in `lint`) fails an enabled instance still on the `unreleased` placeholder, and an `iam/ci` whose
+bucket name or KMS alias no longer matches the stack's `s3/lambda-artifacts` and `kms/main`.
 
 ## Day-2 tasks
 
