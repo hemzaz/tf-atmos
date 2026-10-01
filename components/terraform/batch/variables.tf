@@ -57,10 +57,13 @@ variable "compute_environments" {
     # min_vcpus to 0, instance_types to ["default_x86_64"].
     allocation_strategy = optional(string)
     min_vcpus           = optional(number)
-    desired_vcpus       = optional(number)
-    instance_types      = optional(list(string))
-    # Instance profile name or ARN; null uses the profile this component
-    # creates (AmazonEC2ContainerServiceforEC2Role only).
+    # Leave unset: Batch rescales desired vCPUs between min and max itself, so
+    # a set value drifts on every plan.
+    desired_vcpus  = optional(number)
+    instance_types = optional(list(string))
+    # Instance profile ARN (the provider rejects a bare name, and a role ARN
+    # fails at apply); null uses the profile this component creates
+    # (AmazonEC2ContainerServiceforEC2Role only).
     instance_role = optional(string)
     # ECS_AL2023 (default), ECS_AL2023_NVIDIA, ECS_AL2_NVIDIA, ...; and an AMI
     # that overrides the type's latest ECS-optimized image.
@@ -111,14 +114,14 @@ variable "compute_environments" {
 
   validation {
     condition = alltrue([
-      for ce in values(var.compute_environments) : length(ce.subnet_ids) > 0 && length(ce.security_group_ids) > 0
+      for ce in values(var.compute_environments) : try(length(ce.subnet_ids) > 0 && length(ce.security_group_ids) > 0, false)
     ])
     error_message = "Every compute environment needs at least one subnet_ids and one security_group_ids entry."
   }
 
   validation {
     condition = alltrue([
-      for ce in values(var.compute_environments) : !startswith(ce.type, "FARGATE") || length(ce.subnet_ids) <= 16
+      for ce in values(var.compute_environments) : !startswith(ce.type, "FARGATE") || try(length(ce.subnet_ids) <= 16, true)
     ])
     error_message = "A Fargate compute environment takes at most 16 subnet_ids."
   }
@@ -158,6 +161,13 @@ variable "compute_environments" {
       for ce in values(var.compute_environments) : ce.type == "SPOT" || (ce.spot_iam_fleet_role == null && ce.bid_percentage == null)
     ])
     error_message = "spot_iam_fleet_role and bid_percentage apply to SPOT compute environments only."
+  }
+
+  validation {
+    condition = alltrue([
+      for ce in values(var.compute_environments) : ce.instance_role == null || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:instance-profile/.+$", ce.instance_role))
+    ])
+    error_message = "instance_role must be an instance profile ARN (arn:aws:iam::<account>:instance-profile/<name>), not a name or a role ARN."
   }
 
   validation {
@@ -258,36 +268,41 @@ variable "job_queues" {
 
   validation {
     condition = alltrue([
-      for q in values(var.job_queues) : length(q.compute_environment_order) >= 1 && length(q.compute_environment_order) <= 3
+      for q in values(var.job_queues) : try(length(q.compute_environment_order) >= 1 && length(q.compute_environment_order) <= 3, false)
     ])
-    error_message = "Each job queue needs 1 to 3 compute_environment_order entries."
+    error_message = "Each job queue needs 1 to 3 compute_environment_order entries (not null)."
   }
 
+  # A null compute_environment_order is reported by the 1-3 entries rule
+  # above; the rules below treat it as passing (try(..., true)).
   validation {
     condition = alltrue([
-      for q in values(var.job_queues) : length(distinct([for o in q.compute_environment_order : o.order])) == length(q.compute_environment_order)
-      && length(distinct([for o in q.compute_environment_order : o.compute_environment])) == length(q.compute_environment_order)
+      for q in values(var.job_queues) : try(
+        length(distinct([for o in q.compute_environment_order : o.order])) == length(q.compute_environment_order)
+        && length(distinct([for o in q.compute_environment_order : o.compute_environment])) == length(q.compute_environment_order),
+        true
+      )
     ])
     error_message = "A job queue's compute_environment_order entries need distinct order values and distinct compute environments."
   }
 
   validation {
-    condition = alltrue(flatten([
-      for q in values(var.job_queues) : [
+    condition = alltrue([
+      for q in values(var.job_queues) : try(alltrue([
         for o in q.compute_environment_order :
         contains(keys(var.compute_environments), o.compute_environment)
         || can(regex("^arn:aws[a-z-]*:batch:[a-z0-9-]+:[0-9]{12}:compute-environment/.+$", o.compute_environment))
-      ]
-    ]))
+      ]), true)
+    ])
     error_message = "Each compute_environment_order.compute_environment must be a compute_environments key of this instance or a compute environment ARN."
   }
 
   validation {
     condition = alltrue([
-      for q in values(var.job_queues) : length(distinct([
+      for q in values(var.job_queues) : try(length(distinct([
         for o in q.compute_environment_order : startswith(var.compute_environments[o.compute_environment].type, "FARGATE")
         if contains(keys(var.compute_environments), o.compute_environment)
-      ])) <= 1
+      ])) <= 1, true)
     ])
     error_message = "A job queue cannot mix Fargate and EC2/SPOT compute environments."
   }

@@ -613,3 +613,73 @@ run "queue_rejects_more_than_three_compute_environments" {
 
   expect_failures = [var.job_queues]
 }
+
+run "instance_role_rejects_a_bare_profile_name" {
+  command = plan
+
+  variables {
+    compute_environments = {
+      ec2 = {
+        type               = "EC2"
+        instance_role      = "ecsInstanceRole"
+        max_vcpus          = 16
+        subnet_ids         = ["subnet-aaa"]
+        security_group_ids = ["sg-batch"]
+      }
+    }
+    job_queues = {}
+  }
+
+  expect_failures = [var.compute_environments]
+}
+
+run "instance_role_rejects_a_role_arn" {
+  command = plan
+
+  variables {
+    compute_environments = {
+      ec2 = {
+        type               = "EC2"
+        instance_role      = "arn:aws:iam::123456789012:role/ecsInstanceRole"
+        max_vcpus          = 16
+        subnet_ids         = ["subnet-aaa"]
+        security_group_ids = ["sg-batch"]
+      }
+    }
+    job_queues = {}
+  }
+
+  expect_failures = [var.compute_environments]
+}
+
+run "null_subnet_ids_is_rejected" {
+  command = plan
+
+  variables {
+    compute_environments = {
+      fargate = {
+        max_vcpus          = 16
+        subnet_ids         = null
+        security_group_ids = ["sg-batch"]
+      }
+    }
+    job_queues = {}
+  }
+
+  expect_failures = [var.compute_environments]
+}
+
+run "null_compute_environment_order_is_rejected" {
+  command = plan
+
+  variables {
+    job_queues = {
+      default = {
+        compute_environment_order = null
+      }
+    }
+  }
+
+  expect_failures = [var.job_queues]
+}
+
