@@ -7,55 +7,56 @@ locals {
   # var.cluster_name.
   name_prefix = startswith(lower(var.cluster_name), "${lower(var.tags["Environment"])}-") ? var.cluster_name : "${var.tags["Environment"]}-${var.cluster_name}"
 
-  # Secrets Manager and SSM ARNs, scoped to this account/region and to the
-  # configured path prefixes: a top-level prefix ("<prefix>/*"), plus, for
-  # every var.secret_path_context_prefixes entry, that context nested one
-  # level down ("<context>/<prefix>/*"). secretsmanager's full_path nests
-  # context_name/environment/path/name (e.g.
-  # "production/app/prod/production/app/credentials"), so a bare "*"
-  # wildcard there would also match an unrelated secret that merely contains
-  # "/<prefix>/" further down its name (e.g. "x/y/app/z"); using the stack's
-  # actual context (its descriptive stage name, settings.environment.stage,
-  # set in the catalog) instead of "*" keeps the nested match scoped to this
-  # stack.
-  secretsmanager_resource_arns = concat(
-    [
-      for prefix in var.secret_path_prefixes :
-      "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${prefix}/*"
-    ],
-    flatten([
-      for context in var.secret_path_context_prefixes : [
-        for prefix in var.secret_path_prefixes :
-        "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${context}/${prefix}/*"
-      ]
-    ]),
-    # RDS generates "rds!db-<id>" only once the instance exists, so it cannot
-    # be a secret_path_prefixes entry (which also rejects "!"); this grants
-    # the one fixed naming convention directly instead of a specific ARN.
-    var.rds_managed_secret_access ? [
-      "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:rds!db-*"
-    ] : []
-  )
+  # One ClusterSecretStore per entry, each with its own service account and
+  # IRSA role reading only the secrets it serves, and usable only from its own
+  # namespaces. The key is both the store's and its service account's name.
+  stores = {
+    "aws-secretsmanager" = {
+      create      = var.create_default_cluster_secret_store
+      role_suffix = "external-secrets"
+      prefixes    = var.secret_path_prefixes
+      rds         = var.rds_managed_secret_access
+      namespaces  = var.allowed_namespaces
+    }
+    "aws-certificate-store" = {
+      create      = var.create_certificate_secret_store
+      role_suffix = "external-secrets-cert"
+      prefixes    = var.certificate_secret_path_prefixes
+      rds         = false
+      namespaces  = var.certificate_allowed_namespaces
+    }
+  }
+  enabled_stores = { for k, v in local.stores : k => v if local.enabled && v.create }
 
-  ssm_resource_arns = concat(
-    [
-      for prefix in var.ssm_parameter_path_prefixes :
-      "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${prefix}/*"
-    ],
-    flatten([
-      for context in var.secret_path_context_prefixes : [
-        for prefix in var.ssm_parameter_path_prefixes :
-        "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${context}/${prefix}/*"
-      ]
-    ])
-  )
+  secret_arn_prefix = "arn:${data.aws_partition.current.partition}:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:"
+
+  # Per store: "<prefix>/*" plus "<context>/<prefix>/*" for every
+  # var.secret_path_context_prefixes entry. secretsmanager's full_path nests
+  # context_name/environment/path/name (e.g.
+  # "production/app/prod/production/app/credentials"), so a "*/<prefix>/*"
+  # wildcard would also match an unrelated secret containing "/<prefix>/"
+  # further down; the stack's own context (settings.environment.stage, set in
+  # the catalog) keeps the nested match scoped. RDS generates "rds!db-<id>"
+  # only once the instance exists, so rds_managed_secret_access grants that
+  # fixed naming convention directly ("!" is not a valid prefix entry).
+  store_secret_arns = {
+    for k, v in local.enabled_stores : k => concat(
+      [for prefix in v.prefixes : "${local.secret_arn_prefix}${prefix}/*"],
+      flatten([
+        for context in var.secret_path_context_prefixes : [
+          for prefix in v.prefixes : "${local.secret_arn_prefix}${context}/${prefix}/*"
+        ]
+      ]),
+      v.rds ? ["${local.secret_arn_prefix}rds!db-*"] : []
+    )
+  }
 }
 
-# Create IAM role for external-secrets to access AWS Secrets Manager
+# IRSA role per store, trusted only by that store's service account.
 resource "aws_iam_role" "external_secrets" {
-  count = local.enabled ? 1 : 0
+  for_each = local.enabled_stores
 
-  name = "${local.name_prefix}-external-secrets-role"
+  name = "${local.name_prefix}-${each.value.role_suffix}-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -68,7 +69,7 @@ resource "aws_iam_role" "external_secrets" {
         }
         Condition = {
           StringEquals = {
-            "${replace(var.oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:${var.namespace}:${var.service_account_name}"
+            "${replace(var.oidc_provider_url, "https://", "")}:sub" = "system:serviceaccount:${var.namespace}:${each.key}"
             "${replace(var.oidc_provider_url, "https://", "")}:aud" = "sts.amazonaws.com"
           }
         }
@@ -76,41 +77,39 @@ resource "aws_iam_role" "external_secrets" {
     ]
   })
 
-  tags = { Name = "${local.name_prefix}-external-secrets-role" }
+  tags = { Name = "${local.name_prefix}-${each.value.role_suffix}-role" }
 }
 
-# Create IAM policy for external-secrets to access AWS Secrets Manager
-# Rendered from a template (not a static file) so the resource ARNs are
-# scoped to this account/region, and to the configured secret path prefixes,
-# instead of "arn:aws:secretsmanager:*:*:secret:*". kms:Decrypt is scoped to
-# the stack's kms/main key with a kms:ViaService condition.
-# secretsmanager:ListSecrets is left on "*": AWS does not support
-# resource-level restriction for that action.
+# Secrets Manager reads on the store's own ARN prefixes only, in this
+# account/region, and kms:Decrypt on the stack's kms/main key through Secrets
+# Manager only. No secretsmanager:ListSecrets: it has no resource-level
+# support (it would need "*") and ESO needs it only for dataFrom.find, which
+# nothing here uses.
 resource "aws_iam_policy" "external_secrets" {
-  count = local.enabled ? 1 : 0
+  for_each = local.enabled_stores
 
-  name        = "${local.name_prefix}-external-secrets-policy"
-  description = "Policy for external-secrets to access AWS Secrets Manager"
+  name        = "${local.name_prefix}-${each.value.role_suffix}-policy"
+  description = "external-secrets ClusterSecretStore ${each.key}: read its Secrets Manager paths"
   policy = templatefile("${path.module}/policies/external-secrets-policy.json.tpl", {
     region                       = data.aws_region.current.region
     dns_suffix                   = data.aws_partition.current.dns_suffix
     kms_key_arn                  = var.kms_key_arn
-    secretsmanager_resource_arns = local.secretsmanager_resource_arns
-    ssm_resource_arns            = local.ssm_resource_arns
+    secretsmanager_resource_arns = local.store_secret_arns[each.key]
   })
 
-  tags = { Name = "${local.name_prefix}-external-secrets-policy" }
+  tags = { Name = "${local.name_prefix}-${each.value.role_suffix}-policy" }
 }
 
-# Attach the policy to the role
 resource "aws_iam_role_policy_attachment" "external_secrets" {
-  count = local.enabled ? 1 : 0
+  for_each = local.enabled_stores
 
-  role       = aws_iam_role.external_secrets[0].name
-  policy_arn = aws_iam_policy.external_secrets[0].arn
+  role       = aws_iam_role.external_secrets[each.key].name
+  policy_arn = aws_iam_policy.external_secrets[each.key].arn
 }
 
-# Install external-secrets with Helm
+# The operator and its CRDs. Its own service account has no IRSA role: a
+# namespaced SecretStore with no auth block would read with the operator's
+# credentials, bypassing the stores' namespace conditions.
 resource "helm_release" "external_secrets" {
   count = local.enabled ? 1 : 0
 
@@ -121,142 +120,55 @@ resource "helm_release" "external_secrets" {
   namespace        = var.namespace
   create_namespace = var.create_namespace
 
-  set = [
-    {
-      name  = "serviceAccount.create"
-      value = "true"
-    },
-    {
-      name  = "serviceAccount.name"
-      value = var.service_account_name
-    },
-    {
-      name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-      value = aws_iam_role.external_secrets[0].arn
-    },
+  values = [
+    yamlencode({
+      installCRDs = true
+      serviceAccount = {
+        create = true
+        name   = var.service_account_name
+      }
+    }),
   ]
 
-  # Additional customizations can be added here
+  # The stores release below needs the CRDs and the validating webhook up.
+  wait    = true
+  atomic  = true
+  timeout = 600
+}
+
+# The ClusterSecretStores and their service accounts, from a local chart
+# installed after the operator, so the first plan does not need the
+# external-secrets CRDs (a kubernetes_manifest would). Cloud Posse's
+# eks/external-secrets-operator installs its store the same way
+# (charts/external-ssm-secrets, a second helm release).
+resource "helm_release" "cluster_secret_stores" {
+  count = length(local.enabled_stores) > 0 ? 1 : 0
+
+  name      = "external-secrets-stores"
+  chart     = "${path.module}/charts/cluster-secret-stores"
+  namespace = var.namespace
+  # Referencing the operator release orders this after it (with depends_on).
+  description = "ClusterSecretStores for ${helm_release.external_secrets[0].name} ${helm_release.external_secrets[0].version}"
+
+  values = [
+    yamlencode({
+      region = var.region
+      stores = [
+        for k, v in local.enabled_stores : {
+          name       = k
+          roleArn    = aws_iam_role.external_secrets[k].arn
+          namespaces = v.namespaces
+        }
+      ]
+    }),
+  ]
+
+  wait    = true
+  atomic  = true
+  timeout = 300
 
   depends_on = [
-    aws_iam_role.external_secrets,
-    aws_iam_policy.external_secrets,
-    aws_iam_role_policy_attachment.external_secrets
+    helm_release.external_secrets,
+    aws_iam_role_policy_attachment.external_secrets,
   ]
-}
-
-# Wait for external-secrets CRDs to be registered with dynamic health check
-resource "terraform_data" "wait_for_crds" {
-  count = local.enabled && (var.create_default_cluster_secret_store || var.create_certificate_secret_store) ? 1 : 0
-
-  depends_on = [helm_release.external_secrets]
-
-  # Use triggers to run on each apply
-  triggers_replace = {
-    helm_release_id = helm_release.external_secrets[0].id
-  }
-
-  # Use local-exec to wait for CRDs to be ready with proper health check
-  provisioner "local-exec" {
-    command = <<-EOT
-      # Maximum wait time in seconds
-      MAX_WAIT=120
-      # Check interval in seconds
-      INTERVAL=5
-      # Counter for elapsed time
-      ELAPSED=0
-      
-      echo "Waiting for External Secrets CRDs to be registered..."
-      
-      while [ $ELAPSED -lt $MAX_WAIT ]; do
-        # Check if the CRDs are available and ready
-        if kubectl get crd clustersecretstores.external-secrets.io &>/dev/null && \
-           kubectl get crd externalsecrets.external-secrets.io &>/dev/null; then
-          echo "✅ External Secrets CRDs are registered and available"
-          exit 0
-        fi
-        
-        echo "Waiting for CRDs to be available... ($ELAPSED/$MAX_WAIT seconds)"
-        sleep $INTERVAL
-        ELAPSED=$((ELAPSED + INTERVAL))
-      done
-      
-      echo "❌ Timed out waiting for External Secrets CRDs"
-      echo "Manual intervention may be required"
-      # Don't fail the provisioning, as this might be temporary
-      exit 0
-    EOT
-  }
-}
-
-# Create ClusterSecretStore for AWS Secrets Manager
-resource "kubernetes_manifest" "cluster_secret_store" {
-  count = local.enabled && var.create_default_cluster_secret_store ? 1 : 0
-
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "ClusterSecretStore"
-    metadata = {
-      name = "aws-secretsmanager"
-    }
-    spec = merge(
-      {
-        provider = {
-          aws = {
-            service = "SecretsManager"
-            region  = var.region
-            auth = {
-              jwt = {
-                serviceAccountRef = {
-                  name      = var.service_account_name
-                  namespace = var.namespace
-                }
-              }
-            }
-          }
-        }
-      },
-      # Restricts which namespaces may bind an ExternalSecret to this store;
-      # an empty list (the default) omits the field, matching the previous,
-      # unrestricted behavior.
-      length(var.allowed_namespaces) > 0 ? {
-        conditions = [
-          { namespaces = var.allowed_namespaces }
-        ]
-      } : {}
-    )
-  }
-
-  depends_on = [helm_release.external_secrets]
-}
-
-# Create a dedicated ClusterSecretStore for certificate secrets
-resource "kubernetes_manifest" "certificate_secret_store" {
-  count = local.enabled && var.create_certificate_secret_store ? 1 : 0
-
-  manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
-    kind       = "ClusterSecretStore"
-    metadata = {
-      name = "aws-certificate-store"
-    }
-    spec = {
-      provider = {
-        aws = {
-          service = "SecretsManager"
-          region  = var.region
-          auth = {
-            jwt = {
-              serviceAccountRef = {
-                name      = var.service_account_name
-                namespace = var.namespace
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  depends_on = [helm_release.external_secrets]
 }

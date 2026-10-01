@@ -35,12 +35,12 @@ variable "cluster_name" {
     error_message = "cluster_name must be an EKS cluster name, not an ARN."
   }
 
-  # IAM role names are limited to 64 characters. The role is
-  # "<cluster_name>-external-secrets-role", with the Environment prefixed only
-  # when cluster_name lacks it, case-insensitively (see local.name_prefix).
+  # IAM role names are limited to 64 characters. The longest role is
+  # "<cluster_name>-external-secrets-cert-role", with the Environment prefixed
+  # only when cluster_name lacks it, case-insensitively (see local.name_prefix).
   validation {
-    condition     = var.cluster_name == null ? true : length("${startswith(lower(var.cluster_name), "${lower(lookup(var.tags, "Environment", ""))}-") ? var.cluster_name : "${lookup(var.tags, "Environment", "")}-${var.cluster_name}"}-external-secrets-role") <= 64
-    error_message = "<cluster name>-external-secrets-role must fit IAM's 64-character role name limit."
+    condition     = var.cluster_name == null ? true : length("${startswith(lower(var.cluster_name), "${lower(lookup(var.tags, "Environment", ""))}-") ? var.cluster_name : "${lookup(var.tags, "Environment", "")}-${var.cluster_name}"}-external-secrets-cert-role") <= 64
+    error_message = "<cluster name>-external-secrets-cert-role must fit IAM's 64-character role name limit."
   }
 }
 
@@ -78,25 +78,31 @@ variable "create_namespace" {
 
 variable "service_account_name" {
   type        = string
-  description = "Name of the service account for external-secrets"
+  description = "Name of the operator's own service account (no IRSA role; each ClusterSecretStore has its own service account)"
   default     = "external-secrets"
 }
 
+# 2.x serves only external-secrets.io/v1 (v1beta1 is unserved by default).
 variable "chart_version" {
   type        = string
-  description = "Version of the external-secrets Helm chart"
-  default     = "0.9.9"
+  description = "Version of the external-secrets Helm chart (https://charts.external-secrets.io)"
+  default     = "2.11.0"
+
+  validation {
+    condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.chart_version)) && !startswith(var.chart_version, "0.")
+    error_message = "chart_version must be an exact chart version >= 1.0.0 (x.y.z): the manifests use external-secrets.io/v1."
+  }
 }
 
 variable "create_default_cluster_secret_store" {
   type        = bool
-  description = "Whether to create the default cluster secret store"
+  description = "Whether to create the default ClusterSecretStore (\"aws-secretsmanager\") and its IRSA role"
   default     = true
 }
 
 variable "create_certificate_secret_store" {
   type        = bool
-  description = "Whether to create a dedicated secret store for certificates"
+  description = "Whether to create the certificate ClusterSecretStore (\"aws-certificate-store\") and its IRSA role, which reads only certificate_secret_path_prefixes"
   default     = true
 }
 
@@ -142,12 +148,28 @@ variable "kms_key_arn" {
 
 variable "secret_path_prefixes" {
   type        = list(string)
-  description = "Secrets Manager secret-name path prefixes external-secrets may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover this repo's certificate secrets (components/terraform/secretsmanager), bastion SSH keys (ec2's \"ssh-key/<Environment>/<name>\"), the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod), and elasticache's redis AUTH token secrets (\"redis-auth/<Environment>/<cluster_id>\")."
-  default     = ["certificates", "ssh-key", "app", "infra", "redis-auth"]
+  description = "Secrets Manager secret-name path prefixes the default ClusterSecretStore (\"aws-secretsmanager\") may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover bastion SSH keys (ec2's \"ssh-key/<Environment>/<name>\"), the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod), and elasticache's redis AUTH token secrets (\"redis-auth/<Environment>/<cluster_id>\"). Certificates belong to certificate_secret_path_prefixes."
+  default     = ["ssh-key", "app", "infra", "redis-auth"]
 
   validation {
     condition     = alltrue([for p in var.secret_path_prefixes : can(regex("^[0-9A-Za-z_.-]+$", p))])
     error_message = "secret_path_prefixes entries must be a single non-empty path segment, without leading/trailing slashes or wildcards."
+  }
+
+  validation {
+    condition     = length(setintersection(var.secret_path_prefixes, var.certificate_secret_path_prefixes)) == 0
+    error_message = "secret_path_prefixes must not repeat a certificate_secret_path_prefixes entry: certificates are read only through aws-certificate-store."
+  }
+}
+
+variable "certificate_secret_path_prefixes" {
+  type        = list(string)
+  description = "Secrets Manager secret-name path prefixes the certificate ClusterSecretStore (\"aws-certificate-store\") may read, matched like secret_path_prefixes. The default covers the secretsmanager component's certificate secrets (\"certificates/...\")."
+  default     = ["certificates"]
+
+  validation {
+    condition     = length(var.certificate_secret_path_prefixes) > 0 && alltrue([for p in var.certificate_secret_path_prefixes : can(regex("^[0-9A-Za-z_.-]+$", p))])
+    error_message = "certificate_secret_path_prefixes must be non-empty, each entry a single path segment without slashes or wildcards."
   }
 }
 
@@ -157,34 +179,46 @@ variable "rds_managed_secret_access" {
   default     = false
 }
 
-# Least-privilege scoping for the default ClusterSecretStore (RBAC, not IAM):
-# without it, any namespace on the cluster can create an ExternalSecret that
-# reads anything the IAM policy above allows -- including, once
-# rds_managed_secret_access is on, any RDS-managed master password in the
-# account/region. Off (empty list) by default so it never breaks a store with
-# consumers this component does not know about; a stack sets it to the exact
-# namespaces its known consumers (e.g. eks-backend-services' "backend-services")
-# use.
+# Without spec.conditions any namespace could bind an ExternalSecret to a
+# ClusterSecretStore and read everything its role allows (RDS master
+# passwords, TLS keys). So a created store must name its namespaces.
 variable "allowed_namespaces" {
   type        = list(string)
-  description = "Kubernetes namespaces allowed to use the default ClusterSecretStore (\"aws-secretsmanager\"), via spec.conditions[].namespaces. Empty (the default) leaves the store usable from any namespace -- set this once every consumer namespace is known, especially alongside rds_managed_secret_access."
+  description = "Kubernetes namespaces allowed to use the default ClusterSecretStore (\"aws-secretsmanager\"), via spec.conditions[].namespaces. Required (non-empty) whenever that store is created."
   default     = []
-}
-
-variable "ssm_parameter_path_prefixes" {
-  type        = list(string)
-  description = "SSM Parameter Store path prefixes external-secrets may read, matched as a top-level prefix (\"/<prefix>/*\"), plus \"/<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes."
-  default     = ["certificates"]
+  nullable    = false
 
   validation {
-    condition     = alltrue([for p in var.ssm_parameter_path_prefixes : can(regex("^[0-9A-Za-z_.-]+$", p))])
-    error_message = "ssm_parameter_path_prefixes entries must be a single non-empty path segment, without leading/trailing slashes or wildcards."
+    condition     = !var.enabled || !var.create_default_cluster_secret_store || length(var.allowed_namespaces) > 0
+    error_message = "allowed_namespaces must list the namespaces that may use aws-secretsmanager (e.g. [\"backend-services\"]), or set create_default_cluster_secret_store: false."
+  }
+
+  validation {
+    condition     = alltrue([for n in var.allowed_namespaces : can(regex("^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$", n))])
+    error_message = "allowed_namespaces entries must be Kubernetes namespace names (RFC 1123 labels, no wildcards)."
+  }
+}
+
+variable "certificate_allowed_namespaces" {
+  type        = list(string)
+  description = "Kubernetes namespaces allowed to use the certificate ClusterSecretStore (\"aws-certificate-store\"). The default is eks-addons' Istio gateway certificate ExternalSecret's namespace."
+  default     = ["istio-ingress"]
+  nullable    = false
+
+  validation {
+    condition     = !var.enabled || !var.create_certificate_secret_store || length(var.certificate_allowed_namespaces) > 0
+    error_message = "certificate_allowed_namespaces must list the namespaces that may use aws-certificate-store, or set create_certificate_secret_store: false."
+  }
+
+  validation {
+    condition     = alltrue([for n in var.certificate_allowed_namespaces : can(regex("^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$", n))])
+    error_message = "certificate_allowed_namespaces entries must be Kubernetes namespace names (RFC 1123 labels, no wildcards)."
   }
 }
 
 variable "secret_path_context_prefixes" {
   type        = list(string)
-  description = "Explicit leading path segment(s) (this stack's context, e.g. its descriptive stage name) that may precede a secret_path_prefixes/ssm_parameter_path_prefixes match one level down, in place of a depth-agnostic \"*/<prefix>/*\" wildcard (which would also match an unrelated secret merely containing \"/<prefix>/\" further down its name, e.g. \"x/y/app/z\"). secretsmanager's full_path nests context_name/environment/path/name (e.g. \"production/app/prod/production/app/credentials\" for context_name \"production/app\"), so the catalog sets this to settings.environment.stage (\"production\"), the descriptive stage name each stack's secretsmanager/app and secretsmanager/infra instances already hardcode as the leading segment of context_name. Empty by default: only the top-level \"<prefix>/*\" match applies unless a stack's catalog configures this."
+  description = "Explicit leading path segment(s) (this stack's context, e.g. its descriptive stage name) that may precede a secret_path_prefixes/certificate_secret_path_prefixes match one level down, in place of a depth-agnostic \"*/<prefix>/*\" wildcard (which would also match an unrelated secret merely containing \"/<prefix>/\" further down its name, e.g. \"x/y/app/z\"). secretsmanager's full_path nests context_name/environment/path/name (e.g. \"production/app/prod/production/app/credentials\" for context_name \"production/app\"), so the catalog sets this to settings.environment.stage (\"production\"), the descriptive stage name each stack's secretsmanager/app and secretsmanager/infra instances already hardcode as the leading segment of context_name. Empty by default: only the top-level \"<prefix>/*\" match applies unless a stack's catalog configures this."
   default     = []
 
   validation {

@@ -248,7 +248,6 @@ components:
 
         namespace: "external-secrets"
         service_account_name: "external-secrets"
-        chart_version: "0.9.9"
         create_default_cluster_secret_store: true
         create_certificate_secret_store: true
         # eks-backend-services/main reads rds/main's RDS-managed master user
@@ -276,8 +275,10 @@ components:
 
         namespace: "external-secrets"
         service_account_name: "external-secrets"
-        chart_version: "0.9.9"
-        create_default_cluster_secret_store: true
+        # Nothing on eks/data reads through a ClusterSecretStore yet, so it
+        # gets none (and no IRSA role). A consumer turns its store on with
+        # allowed_namespaces (or certificate_allowed_namespaces) naming it.
+        create_default_cluster_secret_store: false
         create_certificate_secret_store: false
       dependencies:
         components:

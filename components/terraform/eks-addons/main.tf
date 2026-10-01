@@ -483,7 +483,7 @@ resource "kubernetes_manifest" "istio_certificate_external_secret" {
   count = var.istio_enabled && var.use_external_secrets && var.secrets_manager_secret_path != "" ? 1 : 0
 
   manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
+    apiVersion = "external-secrets.io/v1"
     kind       = "ExternalSecret"
     metadata = {
       name      = "istio-certificate"

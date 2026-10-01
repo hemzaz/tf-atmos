@@ -342,7 +342,7 @@ mkdir -p "$TF_PLUGIN_CACHE_DIR" || exit 2
 # ---------------------------------------------------------------------------
 # A stand-in for the aws CLI, on PATH for the plans only.
 #
-# external-secrets' kubernetes and helm providers authenticate with an exec
+# external-secrets' helm provider authenticates with an exec
 # plugin that runs `aws eks get-token`, and so do eks-addons' (provider.tf), so
 # this covers both components. A developer's machine has the aws CLI
 # and CI's atmos image does not, so the same pair used to stop at "executable

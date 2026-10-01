@@ -1,0 +1,7 @@
+# Set by Terraform (main.tf, helm_release.cluster_secret_stores).
+region: ""
+# One entry per ClusterSecretStore:
+#   - name: aws-secretsmanager                # store and service account name
+#     roleArn: arn:aws:iam::<account>:role/... # the store's own IRSA role
+#     namespaces: ["backend-services"]         # the only namespaces that may use it
+stores: []

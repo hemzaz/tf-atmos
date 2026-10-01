@@ -28,9 +28,16 @@ components:
         namespace: "external-secrets"
         create_namespace: true
         service_account_name: "external-secrets"
-        chart_version: "0.9.9"
+        # The one pin for every instance. 2.11 is tested on Kubernetes 1.36
+        # (external-secrets.io stability-support) and serves only
+        # external-secrets.io/v1.
+        chart_version: "2.11.0"
+        # Each store has its own IRSA role and must name the namespaces that
+        # may use it: instances set allowed_namespaces for aws-secretsmanager.
         create_default_cluster_secret_store: true
         create_certificate_secret_store: true
+        # eks-addons' Istio gateway certificate ExternalSecret.
+        certificate_allowed_namespaces: ["istio-ingress"]
 
         # The same per-stack customer-managed key secretsmanager/defaults uses
         # as default_kms_key_id: every environment runs a kms/main instance

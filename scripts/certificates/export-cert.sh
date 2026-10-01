@@ -355,15 +355,15 @@ echo -e "${BOLD}Usage with External Secrets:${RESET}"
 echo -e "Add the following to your Kubernetes resources:"
 echo
 cat << EOF
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: $(echo $DOMAIN_NAME | tr '.' '-')-tls
-  namespace: istio-system
+  namespace: istio-ingress
 spec:
   refreshInterval: "1h"
   secretStoreRef:
-    name: aws-secretsmanager
+    name: aws-certificate-store
     kind: ClusterSecretStore
   target:
     name: $(echo $DOMAIN_NAME | tr '.' '-')-tls

@@ -277,7 +277,7 @@ resource "kubernetes_service_account_v1" "backend_services" {
 # variable or Kubernetes Secret Terraform itself writes.
 resource "kubernetes_manifest" "database_external_secret" {
   manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
+    apiVersion = "external-secrets.io/v1"
     kind       = "ExternalSecret"
     metadata = {
       name      = local.database_secret_name
@@ -331,7 +331,7 @@ resource "kubernetes_manifest" "redis_external_secret" {
   count = var.redis_enabled ? 1 : 0
 
   manifest = {
-    apiVersion = "external-secrets.io/v1beta1"
+    apiVersion = "external-secrets.io/v1"
     kind       = "ExternalSecret"
     metadata = {
       name      = local.redis_secret_name
