@@ -705,6 +705,7 @@ resource "aws_wafv2_web_acl_association" "api_waf_association" {
 # so throttling_* never reached a stage that did not cache. Caching here is off
 # unless cache_method_paths holds "*/*" with cache_all_methods_acknowledged.
 resource "aws_api_gateway_method_settings" "stage" {
+  #checkov:skip=CKV_AWS_225:Deliberate. Caching every method (*/*) caches authenticated responses under a key that ignores the caller; caching is per method via aws_api_gateway_method_settings.cache (cache_method_paths), and */* caches only with cache_all_methods_acknowledged
   count = local.create_rest_api ? 1 : 0
 
   rest_api_id = aws_api_gateway_rest_api.rest_api[0].id
