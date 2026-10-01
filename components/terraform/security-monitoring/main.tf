@@ -47,6 +47,31 @@ locals {
     "ModifySecurityGroupRules",
   ]
 
+  # Automation roles whose security group changes are not alerted. Nulls are
+  # dropped: iam/ci returns a null ci_apply_role_arn while its apply role is
+  # disabled.
+  security_group_change_excluded_role_arns = distinct(compact(var.security_group_change_excluded_role_arns))
+
+  # Who made the call, for the security_group_changes rule. EventBridge
+  # matches a field-level condition only when the field is present, and
+  # anything-but is no exception: {"anything-but": [...]} on
+  # sessionIssuer.arn does NOT match an event that has no sessionIssuer. Only
+  # assumed-role sessions carry one; root, IAM users and AWS service events
+  # (userIdentity.type Root, IAMUser, AWSService) do not. So the anything-but
+  # alone would drop exactly the human and root changes this rule exists for.
+  # The $or keeps them: the first branch matches assumed-role calls by any
+  # role not listed, the second matches every call without a sessionIssuer
+  # ({"exists": false} on the leaf also holds when sessionContext itself is
+  # absent). Two branches, two rule combinations (limit 1000). With no
+  # excluded roles the condition is left out entirely: an empty anything-but
+  # list is not a valid pattern.
+  security_group_change_principal_filter = length(local.security_group_change_excluded_role_arns) == 0 ? null : {
+    "$or" = [
+      { userIdentity = { sessionContext = { sessionIssuer = { arn = [{ anything-but = local.security_group_change_excluded_role_arns }] } } } },
+      { userIdentity = { sessionContext = { sessionIssuer = { arn = [{ exists = false }] } } } },
+    ]
+  }
+
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
 }
@@ -233,20 +258,24 @@ resource "aws_cloudwatch_event_target" "inspector_sns" {
 # this rule delivers each change (who, which group, which API call) as it
 # happens, including ModifySecurityGroupRules, which the CIS pattern omits.
 # EventBridge receives these "AWS API Call via CloudTrail" events from the
-# account trail (cloudtrail/main).
+# account trail (cloudtrail/main). Calls made by the roles in
+# security_group_change_excluded_role_arns (controllers, EKS, CI applies) are
+# left to the alarm; see security_group_change_principal_filter above.
+# UpdateSecurityGroupRuleDescriptions* is not matched: it changes a rule's
+# description only, never what the group allows.
 resource "aws_cloudwatch_event_rule" "security_group_changes" {
   count = var.enable_security_group_change_events ? 1 : 0
 
   name        = "${local.name_prefix}-security-group-changes"
-  description = "Capture security group create, delete and rule changes"
+  description = "Capture security group create, delete and rule changes not made by automation roles"
 
   event_pattern = jsonencode({
     source      = ["aws.ec2"]
     detail-type = ["AWS API Call via CloudTrail"]
-    detail = {
+    detail = merge({
       eventSource = ["ec2.amazonaws.com"]
       eventName   = local.security_group_change_events
-    }
+    }, local.security_group_change_principal_filter)
   })
 }
 

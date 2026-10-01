@@ -144,3 +144,87 @@ run "security_group_change_events_can_be_turned_off" {
     error_message = "Turning the per-change rule off must leave the CIS alarm in place."
   }
 }
+
+# Automation exclusion. anything-but does not match an event that lacks the
+# field, so a pattern with only the anything-but branch would silently drop
+# root, IAM user and AWS service calls (no sessionIssuer). These runs pin the
+# two-branch $or: excluded roles in one branch, {"exists": false} in the other.
+run "automation_roles_are_excluded_but_principals_without_session_issuer_still_alert" {
+  command = plan
+
+  variables {
+    security_group_change_excluded_role_arns = [
+      "arn:aws:iam::123456789012:role/test-main-aws-load-balancer-controller-role",
+      "arn:aws:iam::123456789012:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS",
+      "arn:aws:iam::123456789012:role/test-main-aws-load-balancer-controller-role",
+      null,
+    ]
+  }
+
+  assert {
+    condition     = length(jsondecode(aws_cloudwatch_event_rule.security_group_changes[0].event_pattern).detail["$or"]) == 2
+    error_message = "The principal filter must be an $or of exactly two branches."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_cloudwatch_event_rule.security_group_changes[0].event_pattern).detail["$or"][0].userIdentity.sessionContext.sessionIssuer.arn[0]["anything-but"]
+      == [
+        "arn:aws:iam::123456789012:role/test-main-aws-load-balancer-controller-role",
+        "arn:aws:iam::123456789012:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS",
+      ]
+    )
+    error_message = "The first branch must exclude every listed role ARN on sessionIssuer.arn, once each, nulls dropped."
+  }
+
+  assert {
+    condition     = jsondecode(aws_cloudwatch_event_rule.security_group_changes[0].event_pattern).detail["$or"][1].userIdentity.sessionContext.sessionIssuer.arn[0].exists == false
+    error_message = "The second branch must match events without a sessionIssuer (root, IAM users, AWS services); anything-but alone never matches a missing field."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_cloudwatch_event_rule.security_group_changes[0].event_pattern).detail.eventSource == ["ec2.amazonaws.com"]
+      && contains(jsondecode(aws_cloudwatch_event_rule.security_group_changes[0].event_pattern).detail.eventName, "ModifySecurityGroupRules")
+    )
+    error_message = "The principal filter must sit beside the event filter, not replace it."
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.security_group_changes) == 1 && !strcontains(aws_cloudwatch_log_metric_filter.cloudtrail["security_group_changes"].pattern, "userIdentity")
+    error_message = "The CIS SecurityGroupChanges filter and alarm must keep counting every change, automation included."
+  }
+}
+
+run "no_excluded_roles_means_no_principal_filter" {
+  command = plan
+
+  variables {
+    security_group_change_excluded_role_arns = [null]
+  }
+
+  assert {
+    condition     = !contains(keys(jsondecode(aws_cloudwatch_event_rule.security_group_changes[0].event_pattern).detail), "$or")
+    error_message = "With no excluded roles the pattern must carry no principal filter (an empty anything-but list is invalid)."
+  }
+}
+
+run "excluded_role_arns_reject_wildcards" {
+  command = plan
+
+  variables {
+    security_group_change_excluded_role_arns = ["arn:aws:iam::123456789012:role/*"]
+  }
+
+  expect_failures = [var.security_group_change_excluded_role_arns]
+}
+
+run "excluded_role_arns_reject_user_arns" {
+  command = plan
+
+  variables {
+    security_group_change_excluded_role_arns = ["arn:aws:iam::123456789012:user/alice"]
+  }
+
+  expect_failures = [var.security_group_change_excluded_role_arns]
+}

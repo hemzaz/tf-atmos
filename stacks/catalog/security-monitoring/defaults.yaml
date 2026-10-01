@@ -5,11 +5,13 @@
 # Routes security findings to an SNS topic. It does NOT own the GuardDuty
 # detector or the Security Hub hub: the guardduty and securityhub components
 # do, and this component consumes their outputs. They, kms/main (the topic's
-# key) and cloudtrail/main (the CIS filters' log group) are declared in dependencies.components so they deploy first;
+# key), cloudtrail/main (the CIS filters' log group) and iam/ci (the CI apply
+# role excluded from security group change alerts) are declared in
+# dependencies.components so they deploy first;
 # workflows/scripts/common/check-dependencies.py enforces that.
 #
-# Every stack runs kms/main, cloudtrail/main, guardduty/main and
-# securityhub/main, so the references resolve in all of them.
+# Every stack runs kms/main, cloudtrail/main, guardduty/main,
+# securityhub/main and iam/ci, so the references resolve in all of them.
 
 components:
   terraform:
@@ -23,6 +25,7 @@ components:
           - component: cloudtrail/main
           - component: guardduty/main
           - component: securityhub/main
+          - component: iam/ci
       vars:
         guardduty_detector_id: !terraform.state guardduty/main .detector_id
         securityhub_account_arn: !terraform.state securityhub/main .account_arn
@@ -39,6 +42,35 @@ components:
         # CloudTrail events). The securitygroup component creates no
         # monitoring of its own.
         enable_security_group_change_events: true
+        # ...except changes made by automation, which the CIS
+        # SecurityGroupChanges alarm still counts. Exact role ARNs, as
+        # CloudTrail records them in userIdentity.sessionContext.sessionIssuer.arn.
+        # Calls without a sessionIssuer (root, IAM users, AWS services) always
+        # alert. eks and eks-addons deploy after this component
+        # (workflows/deploy-full-stack.yaml), so their roles are named by
+        # convention, not read from state:
+        #   - eks: cluster "<Environment>-<name>" for both instances in every
+        #     stack (eks/main is name: main, eks/data is name: data), role
+        #     "<cluster>-cluster-role" (components/terraform/eks/main.tf)
+        #   - eks-addons: "<cluster>-aws-load-balancer-controller-role", the
+        #     controller's IRSA role, on eks-addons/main and eks-addons/data
+        #     (components/terraform/eks-addons/main.tf, addons.tf)
+        #   A new eks instance needs its two ARNs (cluster role, controller
+        #   role) added here, or its changes alert.
+        #   - the EKS service-linked roles (cluster security group, managed
+        #     node group remote-access groups)
+        # iam/ci deploys earlier, so the CI apply role (terraform-cd.yml) is
+        # read from its state; it is null while the apply role is disabled and
+        # the component drops nulls. To exclude another role, add its ARN here
+        # (or replace the list in a stack: list_merge_strategy is replace).
+        security_group_change_excluded_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-main-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-main-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-data-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-data-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
+          - !terraform.state iam/ci .ci_apply_role_arn
         # The alert topic is encrypted with the stack's CMK. kms/defaults sets
         # allow_eventbridge and allow_cloudwatch_alarms so EventBridge and CloudWatch
         # can publish to it.
