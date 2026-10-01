@@ -18,7 +18,7 @@ mock_provider "aws" {
 }
 
 variables {
-  region           = "eu-west-2"
+  region           = "us-east-1"
   api_name         = "microservices-api"
   api_type         = "HTTP"
   create_dashboard = false
@@ -47,7 +47,7 @@ run "http_proxy_over_vpc_link_wires_the_route_to_the_integration" {
         integration_type = "HTTP_PROXY"
         connection_type  = "VPC_LINK"
         connection_id    = "vpcl-0123456789abcdef0"
-        integration_uri  = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
       }
     }
   }
@@ -83,7 +83,7 @@ run "connection_id_defaults_to_this_components_own_vpc_link" {
       "ANY /{proxy+}" = {
         integration_type = "HTTP_PROXY"
         connection_type  = "VPC_LINK"
-        integration_uri  = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
       }
     }
   }
@@ -101,13 +101,13 @@ run "jwt_route_uses_this_components_own_authorizer" {
     authorizer_type            = "JWT"
     authorizer_identity_source = "$request.header.Authorization"
     jwt_audience               = ["client-id"]
-    jwt_issuer                 = "https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_test"
+    jwt_issuer                 = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_test"
     http_routes = {
       "ANY /{proxy+}" = {
         integration_type   = "HTTP_PROXY"
         connection_type    = "VPC_LINK"
         connection_id      = "vpcl-0123456789abcdef0"
-        integration_uri    = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri    = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
         authorization_type = "JWT"
       }
     }
@@ -131,7 +131,7 @@ run "aws_proxy_route_grants_lambda_invoke_permission" {
     http_routes = {
       "POST /webhook" = {
         integration_type     = "AWS_PROXY"
-        integration_uri      = "arn:aws:lambda:eu-west-2:123456789012:function:webhook"
+        integration_uri      = "arn:aws:lambda:us-east-1:123456789012:function:webhook"
         lambda_function_name = "webhook"
       }
     }
@@ -164,12 +164,12 @@ run "aws_proxy_route_with_proxy_and_default_route_keys_gets_a_valid_statement_id
     http_routes = {
       "ANY /{proxy+}" = {
         integration_type     = "AWS_PROXY"
-        integration_uri      = "arn:aws:lambda:eu-west-2:123456789012:function:catchall"
+        integration_uri      = "arn:aws:lambda:us-east-1:123456789012:function:catchall"
         lambda_function_name = "catchall"
       }
       "$default" = {
         integration_type     = "AWS_PROXY"
-        integration_uri      = "arn:aws:lambda:eu-west-2:123456789012:function:default"
+        integration_uri      = "arn:aws:lambda:us-east-1:123456789012:function:default"
         lambda_function_name = "default"
       }
     }
@@ -205,7 +205,7 @@ run "tls_server_name_to_verify_wires_tls_config_onto_the_integration" {
         integration_type          = "HTTP_PROXY"
         connection_type           = "VPC_LINK"
         connection_id             = "vpcl-0123456789abcdef0"
-        integration_uri           = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri           = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
         tls_server_name_to_verify = "internal.microservices.example.com"
       }
     }
@@ -226,7 +226,7 @@ run "no_tls_server_name_to_verify_leaves_the_hop_plaintext" {
         integration_type = "HTTP_PROXY"
         connection_type  = "VPC_LINK"
         connection_id    = "vpcl-0123456789abcdef0"
-        integration_uri  = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
       }
     }
   }
@@ -244,7 +244,7 @@ run "rejects_tls_server_name_to_verify_on_an_aws_proxy_route" {
     http_routes = {
       "POST /webhook" = {
         integration_type          = "AWS_PROXY"
-        integration_uri           = "arn:aws:lambda:eu-west-2:123456789012:function:webhook"
+        integration_uri           = "arn:aws:lambda:us-east-1:123456789012:function:webhook"
         lambda_function_name      = "webhook"
         tls_server_name_to_verify = "internal.microservices.example.com"
       }
@@ -278,7 +278,7 @@ run "rejects_aws_proxy_without_lambda_function_name" {
     http_routes = {
       "POST /webhook" = {
         integration_type = "AWS_PROXY"
-        integration_uri  = "arn:aws:lambda:eu-west-2:123456789012:function:webhook"
+        integration_uri  = "arn:aws:lambda:us-east-1:123456789012:function:webhook"
       }
     }
   }
@@ -294,7 +294,7 @@ run "rejects_vpc_link_without_connection_id" {
       "ANY /{proxy+}" = {
         integration_type = "HTTP_PROXY"
         connection_type  = "VPC_LINK"
-        integration_uri  = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
       }
     }
   }
@@ -311,7 +311,7 @@ run "rejects_a_jwt_route_without_a_jwt_authorizer_on_the_component" {
         integration_type   = "HTTP_PROXY"
         connection_type    = "VPC_LINK"
         connection_id      = "vpcl-0123456789abcdef0"
-        integration_uri    = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri    = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
         authorization_type = "JWT"
       }
     }
@@ -330,7 +330,7 @@ run "rest_api_ignores_http_routes" {
         integration_type = "HTTP_PROXY"
         connection_type  = "VPC_LINK"
         connection_id    = "vpcl-0123456789abcdef0"
-        integration_uri  = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/microservices/abc/def"
+        integration_uri  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/microservices/abc/def"
       }
     }
   }

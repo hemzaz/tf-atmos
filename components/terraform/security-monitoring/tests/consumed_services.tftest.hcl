@@ -25,13 +25,13 @@ mock_provider "aws" {
 
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:eu-west-2:123456789012:test-security-alerts"
+      arn = "arn:aws:sns:us-east-1:123456789012:test-security-alerts"
     }
   }
 }
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -39,8 +39,8 @@ variables {
   }
   enable_inspector          = false
   guardduty_detector_id     = "12abc34d567e8fa901bc2d34e56789f0"
-  securityhub_account_arn   = "arn:aws:securityhub:eu-west-2:123456789012:hub/default"
-  kms_key_id                = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+  securityhub_account_arn   = "arn:aws:securityhub:us-east-1:123456789012:hub/default"
+  kms_key_id                = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
   cloudtrail_log_group_name = "/aws/cloudtrail/test-cloudtrail"
 }
 
@@ -78,7 +78,7 @@ run "routes_consumed_detector_and_hub" {
   }
 
   assert {
-    condition     = output.security_hub_account_arn == "arn:aws:securityhub:eu-west-2:123456789012:hub/default"
+    condition     = output.security_hub_account_arn == "arn:aws:securityhub:us-east-1:123456789012:hub/default"
     error_message = "security_hub_account_arn must pass the consumed hub ARN through."
   }
 }
@@ -130,7 +130,7 @@ run "topic_policy_is_same_account_only" {
     condition = one([
       for s in jsondecode(aws_sns_topic_policy.security_alerts.policy).Statement :
       s.Condition.ArnLike["aws:SourceArn"] if s.Principal.Service == "events.amazonaws.com"
-    ]) == "arn:aws:events:eu-west-2:123456789012:rule/*"
+    ]) == "arn:aws:events:us-east-1:123456789012:rule/*"
     error_message = "EventBridge may publish only from this account's rules in this region."
   }
 
@@ -138,7 +138,7 @@ run "topic_policy_is_same_account_only" {
     condition = one([
       for s in jsondecode(aws_sns_topic_policy.security_alerts.policy).Statement :
       s.Condition.ArnLike["aws:SourceArn"] if s.Principal.Service == "cloudwatch.amazonaws.com"
-    ]) == "arn:aws:cloudwatch:eu-west-2:123456789012:alarm:*"
+    ]) == "arn:aws:cloudwatch:us-east-1:123456789012:alarm:*"
     error_message = "CloudWatch may publish only from this account's alarms in this region."
   }
 }
@@ -210,7 +210,7 @@ run "rejects_malformed_detector_id" {
   command = plan
 
   variables {
-    guardduty_detector_id = "arn:aws:guardduty:eu-west-2:123456789012:detector/abc"
+    guardduty_detector_id = "arn:aws:guardduty:us-east-1:123456789012:detector/abc"
   }
 
   expect_failures = [var.guardduty_detector_id]

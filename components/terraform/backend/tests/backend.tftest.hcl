@@ -65,7 +65,7 @@ mock_provider "aws" {
 # derived instance, e.g. fnx-prod-production-iam-ci), plus their .tflock files.
 # The patterns are the ones stacks/catalog/backend/defaults.yaml renders.
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   tenant      = "fnx"
   account_id  = "111111111111"
   bucket_name = "fnx-terraform-state"

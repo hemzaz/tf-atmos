@@ -11,14 +11,14 @@ mock_provider "aws" {
   # What EKS returns: the CA base64-encoded, the issuer as an https:// URL.
   mock_resource "aws_eks_cluster" {
     defaults = {
-      arn      = "arn:aws:eks:eu-west-2:123456789012:cluster/mock"
-      endpoint = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+      arn      = "arn:aws:eks:us-east-1:123456789012:cluster/mock"
+      endpoint = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
       certificate_authority = [{
         data = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMvakNDQWVhZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="
       }]
       identity = [{
         oidc = [{
-          issuer = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
+          issuer = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
         }]
       }]
     }
@@ -26,7 +26,7 @@ mock_provider "aws" {
 
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     }
   }
 
@@ -44,7 +44,7 @@ mock_provider "aws" {
 
   mock_resource "aws_iam_openid_connect_provider" {
     defaults = {
-      arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
+      arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
     }
   }
 }
@@ -62,7 +62,7 @@ mock_provider "tls" {
 mock_provider "random" {}
 
 variables {
-  region     = "eu-west-2"
+  region     = "us-east-1"
   name       = "main"
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {
@@ -376,16 +376,16 @@ run "caller_key_encrypts_secrets_and_the_log_group_no_component_key_created" {
   command = apply
 
   variables {
-    cluster_encryption_config_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    cluster_encryption_config_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
   }
 
   assert {
-    condition     = aws_eks_cluster.default[0].encryption_config[0].provider[0].key_arn == "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    condition     = aws_eks_cluster.default[0].encryption_config[0].provider[0].key_arn == "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
     error_message = "Secrets must be encrypted with the caller's key."
   }
 
   assert {
-    condition     = aws_cloudwatch_log_group.default[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    condition     = aws_cloudwatch_log_group.default[0].kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
     error_message = "With a caller key given, the log group must use it too (kms/main's allow_cloudwatch_logs already grants every log group in this account and region)."
   }
 
@@ -415,11 +415,11 @@ run "node_group_ebs_kms_key_id_defaults_every_devices_key" {
   command = plan
 
   variables {
-    node_group_ebs_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    node_group_ebs_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/22222222-3333-4444-5555-666666666666"
   }
 
   assert {
-    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/22222222-3333-4444-5555-666666666666"
     error_message = "A block device with no ebs.kms_key_id of its own must default to node_group_ebs_kms_key_id."
   }
 }
@@ -428,14 +428,14 @@ run "device_level_kms_key_id_wins_over_the_default" {
   command = plan
 
   variables {
-    node_group_ebs_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    node_group_ebs_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/22222222-3333-4444-5555-666666666666"
     node_groups = {
       workers = {
         instance_types = ["m5.xlarge"]
         block_device_map = {
           "/dev/xvda" = {
             ebs = {
-              kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/33333333-4444-5555-6666-777777777777"
+              kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/33333333-4444-5555-6666-777777777777"
             }
           }
         }
@@ -444,7 +444,7 @@ run "device_level_kms_key_id_wins_over_the_default" {
   }
 
   assert {
-    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/33333333-4444-5555-6666-777777777777"
+    condition     = aws_launch_template.default["workers"].block_device_mappings[0].ebs[0].kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/33333333-4444-5555-6666-777777777777"
     error_message = "A device's own ebs.kms_key_id must win over node_group_ebs_kms_key_id."
   }
 }
@@ -462,7 +462,7 @@ run "unencrypted_device_does_not_get_the_default_kms_key_id" {
   command = plan
 
   variables {
-    node_group_ebs_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/22222222-3333-4444-5555-666666666666"
+    node_group_ebs_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/22222222-3333-4444-5555-666666666666"
     node_groups = {
       workers = {
         instance_types = ["m5.xlarge"]

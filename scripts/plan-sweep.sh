@@ -406,7 +406,7 @@ export PLAN_SWEEP_CA_CERT="$SYNTH_CA_CERT"
 # because the classifier below has to recognise it: a kubernetes provider that
 # needs the API server at plan time (kubernetes_manifest does) can never reach
 # a host this script invented, and that failure is ours, not the component's.
-SYNTH_EKS_HOST=EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com
+SYNTH_EKS_HOST=EXAMPLE0123456789.gr7.us-east-1.eks.amazonaws.com
 export PLAN_SWEEP_EKS_HOST="$SYNTH_EKS_HOST"
 
 # ---------------------------------------------------------------------------

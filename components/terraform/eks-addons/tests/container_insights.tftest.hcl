@@ -41,7 +41,7 @@ mock_provider "aws" {
   mock_resource "aws_cloudwatch_log_group" {
     override_during = plan
     defaults = {
-      arn = "arn:aws:logs:eu-west-2:123456789012:log-group:mock"
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:mock"
     }
   }
 }
@@ -50,12 +50,12 @@ mock_provider "kubernetes" {}
 mock_provider "time" {}
 
 variables {
-  region                 = "eu-west-2"
+  region                 = "us-east-1"
   cluster_name           = "production-main"
-  host                   = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+  host                   = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
-  oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
-  oidc_provider_url      = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
+  oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
+  oidc_provider_url      = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
   tags = {
     Environment = "production"
   }
@@ -68,7 +68,7 @@ run "switch_installs_the_addon_role_and_encrypted_log_groups" {
     clusters = {
       main = {
         enable_container_insights             = true
-        container_insights_kms_key_arn        = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+        container_insights_kms_key_arn        = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
         container_insights_log_retention_days = 7
       }
     }
@@ -91,8 +91,8 @@ run "switch_installs_the_addon_role_and_encrypted_log_groups" {
 
   assert {
     condition = jsondecode(aws_iam_role.container_insights["main"].assume_role_policy).Statement[0].Condition.StringEquals == {
-      "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:sub" = "system:serviceaccount:amazon-cloudwatch:cloudwatch-agent"
-      "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:aud" = "sts.amazonaws.com"
+      "oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:sub" = "system:serviceaccount:amazon-cloudwatch:cloudwatch-agent"
+      "oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:aud" = "sts.amazonaws.com"
     }
     error_message = "Only amazon-cloudwatch:cloudwatch-agent (agent and Fluent Bit) may assume the role."
   }
@@ -115,7 +115,7 @@ run "switch_installs_the_addon_role_and_encrypted_log_groups" {
   assert {
     condition = alltrue([
       for g in aws_cloudwatch_log_group.container_insights :
-      g.kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555" && g.retention_in_days == 7
+      g.kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555" && g.retention_in_days == 7
     ])
     error_message = "Every log group must be encrypted with the given key and keep the given retention."
   }
@@ -123,7 +123,7 @@ run "switch_installs_the_addon_role_and_encrypted_log_groups" {
   assert {
     condition = alltrue([
       for r in jsondecode(aws_iam_policy.container_insights_logs["main"].policy).Statement[0].Resource :
-      startswith(r, "arn:aws:logs:eu-west-2:123456789012:log-group:mock")
+      startswith(r, "arn:aws:logs:us-east-1:123456789012:log-group:mock")
     ]) && length(jsondecode(aws_iam_policy.container_insights_logs["main"].policy).Statement[0].Resource) == 8
     error_message = "Log writes must be scoped to the four log groups (and their streams), nothing else."
   }
@@ -149,7 +149,7 @@ run "addon_version_override" {
     clusters = {
       main = {
         enable_container_insights        = true
-        container_insights_kms_key_arn   = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+        container_insights_kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
         container_insights_addon_version = "v6.6.0-eksbuild.2"
       }
     }
@@ -197,7 +197,7 @@ run "retention_must_be_a_cloudwatch_value" {
     clusters = {
       main = {
         enable_container_insights             = true
-        container_insights_kms_key_arn        = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+        container_insights_kms_key_arn        = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
         container_insights_log_retention_days = 10
       }
     }

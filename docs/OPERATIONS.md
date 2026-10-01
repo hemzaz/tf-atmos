@@ -10,7 +10,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 
 | Input | Where |
 |-------|-------|
-| Workload account IDs | `settings.environment.account_id` in `stacks/orgs/fnx/{dev,staging,prod}/_defaults.yaml`; `settings.environment.aws_account_id` in `staging-01.yaml` and `production.yaml` (dev reads it from `AWS_ACCOUNT_ID`); the CI role ARNs in `access_roles` of `stacks/orgs/fnx/core/eu-west-2/root.yaml` |
+| Workload account IDs | `settings.environment.account_id` in `stacks/orgs/fnx/{dev,staging,prod}/_defaults.yaml`; `settings.environment.aws_account_id` in `staging-01.yaml` and `production.yaml` (dev reads it from `AWS_ACCOUNT_ID`); the CI role ARNs in `access_roles` of `stacks/orgs/fnx/core/us-east-1/root.yaml` |
 | Management account ID | `settings.environment.management_account_id` in `stacks/orgs/fnx/_defaults.yaml` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
@@ -72,7 +72,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 |----------|-------|
 | `AWS_PLAN_ROLE_ARN` | a dev or staging `iam/ci` `ci_plan_role_arn`: PR plans, dev/staging drift, DR checks. Unset = AWS jobs skip |
 | `AWS_PROD_PLAN_ROLE_ARN` | prod's `iam/ci` `ci_plan_role_arn`: prod plans on master, prod drift |
-| `AWS_REGION` | optional override (default `eu-west-2`) |
+| `AWS_REGION` | optional override (default `us-east-1`) |
 
 CD derives each stack's apply role from its `iam/ci` (`workflows/scripts/common/ci-apply-role-arn.py`).
 For CI across several accounts from one OIDC provider, see
@@ -100,7 +100,7 @@ zone, so its domain must resolve, or validation times out after 45 minutes. Prod
 `fnx.example.com` is delegated at the registrar to prod's `zone_name_servers.main`
 (`atmos terraform output network/main -s fnx-prod-production`). Dev's and staging's parent is
 that Terraform-managed zone: add an NS record for `dev.`/`staging.fnx.example.com` to prod's
-`network/main` `records` (`stacks/orgs/fnx/prod/eu-west-2/production/components/networking.yaml`)
+`network/main` `records` (`stacks/orgs/fnx/prod/us-east-1/production/components/networking.yaml`)
 with the child stack's `zone_name_servers.main`, and deploy prod's `network/main`.
 `services.<d>` delegation is wired by the stacks themselves.
 
@@ -130,12 +130,12 @@ An operator applies them through the VPC with their own role, a named cluster ad
 gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master):
 
 1. Once per stack, the owner names the role (full ARN, path kept, e.g.
-   `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>`,
+   `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_<hash>`,
    from `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`) in two places:
    `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
    which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
    `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
-   `stacks/orgs/fnx/core/eu-west-2/root.yaml`, so it can write the stack's state. Apply `backend/main`
+   `stacks/orgs/fnx/core/us-east-1/root.yaml`, so it can write the stack's state. Apply `backend/main`
    (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
    backend and warns while a stack has none.
 2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then
@@ -252,7 +252,7 @@ re-apply; import resources created outside Terraform.
 
 Bastion SSH keys are generated per instance and stored in Secrets Manager at
 `ssh-key/<Environment>/<name>`. Read `private_key_openssh`, not `private_key_pem`:
-`scripts/certificates/export-ssh-key.sh -r eu-west-2 -s ssh-key/<Environment>/bastion -o bastion.key`.
+`scripts/certificates/export-ssh-key.sh -r us-east-1 -s ssh-key/<Environment>/bastion -o bastion.key`.
 The key is also in Terraform state.
 
 ## State restore and disaster recovery

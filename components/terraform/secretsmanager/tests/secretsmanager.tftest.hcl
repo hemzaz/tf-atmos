@@ -5,10 +5,10 @@
 mock_provider "aws" {}
 
 variables {
-  region             = "eu-west-2"
+  region             = "us-east-1"
   environment        = "test"
   context_name       = "microservices"
-  default_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  default_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -49,7 +49,7 @@ run "rotation_wiring_creates_the_rotation_resource" {
         name                     = "auth-token"
         path                     = "cache"
         generate_random_password = true
-        rotation_lambda_arn      = "arn:aws:lambda:eu-west-2:123456789012:function:test-redis-auth-rotation"
+        rotation_lambda_arn      = "arn:aws:lambda:us-east-1:123456789012:function:test-redis-auth-rotation"
         rotation_automatically   = true
         rotation_days            = 30
       }
@@ -62,7 +62,7 @@ run "rotation_wiring_creates_the_rotation_resource" {
   }
 
   assert {
-    condition     = aws_secretsmanager_secret_rotation.this["redis"].rotation_lambda_arn == "arn:aws:lambda:eu-west-2:123456789012:function:test-redis-auth-rotation"
+    condition     = aws_secretsmanager_secret_rotation.this["redis"].rotation_lambda_arn == "arn:aws:lambda:us-east-1:123456789012:function:test-redis-auth-rotation"
     error_message = "rotation_lambda_arn is wired onto the rotation resource."
   }
 
@@ -86,7 +86,7 @@ run "rotate_immediately_can_be_turned_on_per_secret" {
         name                     = "auth-token"
         path                     = "cache"
         generate_random_password = true
-        rotation_lambda_arn      = "arn:aws:lambda:eu-west-2:123456789012:function:test-redis-auth-rotation"
+        rotation_lambda_arn      = "arn:aws:lambda:us-east-1:123456789012:function:test-redis-auth-rotation"
         rotation_automatically   = true
         rotate_immediately       = true
       }
@@ -151,7 +151,7 @@ run "rejects_rotation_days_out_of_range" {
         name                     = "auth-token"
         path                     = "cache"
         generate_random_password = true
-        rotation_lambda_arn      = "arn:aws:lambda:eu-west-2:123456789012:function:test-redis-auth-rotation"
+        rotation_lambda_arn      = "arn:aws:lambda:us-east-1:123456789012:function:test-redis-auth-rotation"
         rotation_automatically   = true
         rotation_days            = 400
       }
@@ -217,7 +217,7 @@ run "secret_access_policy_grants_exactly_one_secret_and_its_key" {
   assert {
     condition = (
       one([for s in jsondecode(output.secret_access_policy["redis"]).Statement : s if s.Sid == "AllowSecretKMSUse"]).Condition.StringEquals["kms:ViaService"]
-      == "secretsmanager.eu-west-2.amazonaws.com"
+      == "secretsmanager.us-east-1.amazonaws.com"
     )
     error_message = "The KMS statement also requires kms:ViaService=secretsmanager, so the grant cannot be used to call KMS directly with a forged encryption context naming this secret."
   }

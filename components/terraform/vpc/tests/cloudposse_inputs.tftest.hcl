@@ -6,7 +6,7 @@
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = {
-      names = ["eu-west-2a", "eu-west-2b", "eu-west-2c"]
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
     }
   }
   mock_data "aws_caller_identity" {
@@ -17,9 +17,9 @@ mock_provider "aws" {
 }
 
 variables {
-  region                  = "eu-west-2"
+  region                  = "us-east-1"
   ipv4_primary_cidr_block = "10.30.0.0/16"
-  availability_zones      = ["eu-west-2a", "eu-west-2b"]
+  availability_zones      = ["us-east-1a", "us-east-1b"]
   private_subnets         = ["10.30.0.0/18", "10.30.64.0/18"]
   public_subnets          = ["10.30.192.0/22", "10.30.196.0/22"]
   vpc_flow_logs_enabled   = false
@@ -39,7 +39,7 @@ run "primary_cidr_and_availability_zones" {
   }
 
   assert {
-    condition     = aws_subnet.private["10.30.64.0/18"].availability_zone == "eu-west-2b" && aws_subnet.public["10.30.192.0/22"].availability_zone == "eu-west-2a"
+    condition     = aws_subnet.private["10.30.64.0/18"].availability_zone == "us-east-1b" && aws_subnet.public["10.30.192.0/22"].availability_zone == "us-east-1a"
     error_message = "Subnet N is placed in availability_zones[N]."
   }
 

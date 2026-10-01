@@ -4,7 +4,7 @@
 mock_provider "aws" {
   mock_resource "aws_sesv2_email_identity" {
     defaults = {
-      arn                         = "arn:aws:ses:eu-west-2:123456789012:identity/example.com"
+      arn                         = "arn:aws:ses:us-east-1:123456789012:identity/example.com"
       verified_for_sending_status = false
       # A nested block: the mock takes one object, applied to each element.
       dkim_signing_attributes = {
@@ -22,7 +22,7 @@ mock_provider "aws" {
 }
 
 variables {
-  region  = "eu-west-2"
+  region  = "us-east-1"
   domain  = "example.com"
   zone_id = "Z0123456789ABCDEFGHIJ"
   tags = {
@@ -64,7 +64,7 @@ run "dkim_records_point_at_ses" {
   }
 
   assert {
-    condition     = output.email_identity_arn == "arn:aws:ses:eu-west-2:123456789012:identity/example.com" && output.verified_for_sending_status == false && output.dkim_status == "PENDING"
+    condition     = output.email_identity_arn == "arn:aws:ses:us-east-1:123456789012:identity/example.com" && output.verified_for_sending_status == false && output.dkim_status == "PENDING"
     error_message = "The outputs carry the identity ARN and its verification state."
   }
 

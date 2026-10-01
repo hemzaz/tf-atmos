@@ -8,7 +8,7 @@
 mock_provider "aws" {}
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -20,12 +20,12 @@ variables {
   rds_instances                   = ["db-1"]
   ecs_clusters                    = ["ecs-1"]
   lambda_functions                = ["fn-1"]
-  load_balancers                  = ["app/lb-1/0123456789abcdef", "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/lb-2/fedcba9876543210"]
+  load_balancers                  = ["app/lb-1/0123456789abcdef", "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/lb-2/fedcba9876543210"]
   elasticache_clusters            = ["cache-1"]
   eks_cluster_name                = "eks-1"
   api_gateway_name                = "api-1"
   api_gateway_stages              = ["prod"]
-  kms_key_id                      = "arn:aws:kms:eu-west-2:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
+  kms_key_id                      = "arn:aws:kms:us-east-1:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
   cpu_alarms = {
     high_cpu = {
       namespace          = "AWS/EC2"
@@ -243,7 +243,7 @@ run "sns_topic_is_kms_encrypted" {
   }
 
   assert {
-    condition     = aws_sns_topic.alarms[0].kms_master_key_id == "arn:aws:kms:eu-west-2:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
+    condition     = aws_sns_topic.alarms[0].kms_master_key_id == "arn:aws:kms:us-east-1:123456789012:key/abcd1234-ab12-cd34-ef56-1234567890ab"
     error_message = "The alarm SNS topic must be encrypted with kms_key_id."
   }
 }
@@ -419,7 +419,7 @@ run "every_dashboard_name_is_unique_with_all_flags_on" {
     create_certificate_dashboard    = true
     enable_backend_monitoring       = true
     enable_certificate_monitoring   = true
-    certificate_arns                = ["arn:aws:acm:eu-west-2:123456789012:certificate/abc"]
+    certificate_arns                = ["arn:aws:acm:us-east-1:123456789012:certificate/abc"]
     certificate_names               = ["example"]
   }
 
@@ -587,7 +587,7 @@ run "lambda_error_alarm_rejects_arn" {
     name = "data"
     lambda_error_alarms = {
       data-processor = {
-        function_name      = "arn:aws:lambda:eu-west-2:123456789012:function:fnx-prod-data-processor"
+        function_name      = "arn:aws:lambda:us-east-1:123456789012:function:fnx-prod-data-processor"
         evaluation_periods = 2
         period             = 300
         threshold          = 5

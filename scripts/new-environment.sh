@@ -16,9 +16,9 @@
 #   ./scripts/new-environment.sh --interactive
 #
 # Examples:
-#   ./scripts/new-environment.sh --tenant fnx --stage dev --environment testenv-02 --region eu-west-2
+#   ./scripts/new-environment.sh --tenant fnx --stage dev --environment testenv-02 --region us-east-1
 #   ./scripts/new-environment.sh --interactive
-#   ./scripts/new-environment.sh --tenant fnx --stage prod --environment prod-02 --region eu-west-2 --template microservices-platform
+#   ./scripts/new-environment.sh --tenant fnx --stage prod --environment prod-02 --region us-east-1 --template microservices-platform
 #
 
 set -euo pipefail
@@ -119,7 +119,7 @@ ${BOLD}REQUIRED OPTIONS:${RESET}
     --tenant <name>           Tenant/organization name (e.g., fnx)
     --stage <name>            Stage (e.g., dev, staging, prod)
     --environment <name>      Environment name (e.g., testenv-01, prod-01)
-    --region <region>         AWS region (e.g., eu-west-2)
+    --region <region>         AWS region (e.g., us-east-1)
 
 ${BOLD}OPTIONAL:${RESET}
     --account <name>          Account name for settings.environment.account (default: stage)
@@ -146,15 +146,15 @@ ${BOLD}EXAMPLES:${RESET}
     $0 --interactive
 
     # Create development environment
-    $0 --tenant fnx --stage dev --environment testenv-02 --region eu-west-2
+    $0 --tenant fnx --stage dev --environment testenv-02 --region us-east-1
 
     # Create production environment with a template
     $0 --tenant fnx --stage prod --environment prod-02 \\
-       --region eu-west-2 --template microservices-platform --env-type production
+       --region us-east-1 --template microservices-platform --env-type production
 
     # Dry run to see what would be created
     $0 --tenant fnx --stage staging --environment staging-02 \\
-       --region eu-west-2 --dry-run
+       --region us-east-1 --dry-run
 
 ${BOLD}FILES CREATED:${RESET}
     stacks/orgs/<tenant>/<stage>/<region>/<environment>.yaml
@@ -240,7 +240,7 @@ run_interactive() {
     esac
     ENVIRONMENT=$(prompt_value "Environment name" "$default_env")
 
-    local region_options=("eu-west-2" "us-east-2" "us-west-2")
+    local region_options=("us-east-1" "us-east-2" "us-west-2")
     REGION=$(prompt_selection "Select AWS region:" "${region_options[@]}")
 
     local env_type_options=("development" "staging" "production")

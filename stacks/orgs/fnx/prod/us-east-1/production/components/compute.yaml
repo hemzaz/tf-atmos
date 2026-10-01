@@ -1,0 +1,392 @@
+---
+# =============================================================================
+# Compute Component Configurations for Production Environment
+# =============================================================================
+# Production compute with high availability, auto-scaling, and full monitoring
+# Multi-AZ deployments, reserved capacity, enhanced security
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/us-east-1/production/components/globals
+  - catalog/eks/defaults
+  - catalog/ec2/defaults
+  - catalog/external-secrets/defaults
+  - catalog/eks-addons/defaults
+  - catalog/eks-backend-services/defaults
+
+components:
+  terraform:
+    # ==========================================================================
+    # EKS Cluster - Main Application Workloads (Production HA)
+    # ==========================================================================
+    eks/main:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        # The cluster is "<Environment>-<name>": production-main.
+        name: main
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # The operator's path to the private endpoint (docs/OPERATIONS.md,
+        # "In-cluster components"): TCP 443 on the cluster security group from
+        # the bastion's own security group, whose SSM port-forward carries it.
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
+        tags:
+          Cluster: production-main
+          Purpose: "application-workloads"
+          CriticalityLevel: "high"
+          SLA: "99.9"
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        # Private-only endpoint for production
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+          - "authenticator"
+          - "controllerManager"
+          - "scheduler"
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        cluster_log_retention_period: 90
+        node_groups:
+          # General purpose workers
+          workers:
+            instance_types: ["m5.xlarge"]
+            desired_group_size: 6
+            min_group_size: 3
+            max_group_size: 12
+            kubernetes_labels:
+              role: worker
+              environment: production
+            capacity_type: "ON_DEMAND" # Stable capacity for production
+            # gp3 and encrypted are the component defaults, so only the
+            # size is stated.
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+            # Spread across AZs
+            subnet_ids: !terraform.state vpc/main .private_subnet_ids
+            tags:
+              NodeGroup: workers
+          # Monitoring and observability
+          monitoring:
+            instance_types: ["m5.large"]
+            desired_group_size: 3
+            min_group_size: 2
+            max_group_size: 4
+            kubernetes_labels:
+              role: monitoring
+            kubernetes_taints:
+              - key: dedicated
+                value: monitoring
+                effect: "NO_SCHEDULE"
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 200 # Extra space for metrics
+          # High-memory workloads
+          memory-optimized:
+            instance_types: ["r5.xlarge"]
+            desired_group_size: 3
+            min_group_size: 2
+            max_group_size: 6
+            kubernetes_labels:
+              role: memory-optimized
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+          - component: iam/ci
+          - component: ec2/bastion
+
+    # ==========================================================================
+    # EKS Cluster - Data Processing Workloads (Production HA)
+    # ==========================================================================
+    eks/data:
+      metadata:
+        component: eks
+        inherits:
+          - eks/defaults
+      vars:
+        name: data
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+        # The operator's path to the private endpoint (docs/OPERATIONS.md,
+        # "In-cluster components"): TCP 443 on the cluster security group from
+        # the bastion in vpc/main, over network/vpc-peering. A security group
+        # reference works across a same-account, same-region peering, so the
+        # rule names the bastion rather than vpc/main's whole CIDR.
+        allowed_security_group_ids:
+          - !terraform.state ec2/bastion .security_group_id
+        tags:
+          Cluster: production-data
+          Purpose: "data-processing"
+        cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - "api"
+          - "audit"
+        cluster_encryption_config_kms_key_id: !terraform.state kms/main .key_arn
+        cluster_log_retention_period: 90
+        node_groups:
+          # Data processing workers
+          data-workers:
+            instance_types: ["r5.2xlarge"]
+            desired_group_size: 4
+            min_group_size: 3
+            max_group_size: 8
+            kubernetes_labels:
+              role: data-processing
+            capacity_type: "ON_DEMAND"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 200
+          # Batch processing (can use spot for cost savings)
+          batch-workers:
+            instance_types: ["m5.2xlarge", "m5.xlarge"]
+            desired_group_size: 2
+            min_group_size: 0
+            max_group_size: 10
+            kubernetes_labels:
+              role: batch
+            kubernetes_taints:
+              - key: workload
+                value: batch
+                effect: "NO_SCHEDULE"
+            capacity_type: "SPOT"
+            block_device_map:
+              "/dev/xvda":
+                ebs:
+                  volume_size: 100
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: kms/main
+          - component: iam/ci
+          - component: ec2/bastion
+          - component: network/vpc-peering
+
+    # ==========================================================================
+    # EC2 Bastion Host (Production Hardened)
+    # ==========================================================================
+    ec2/bastion:
+      metadata:
+        component: ec2
+        inherits:
+          - ec2
+      vars:
+        name: bastion
+        vpc_id: !terraform.state vpc/main .vpc_id
+        # No ssh_key_pair: the component generates the bastion's key (catalog
+        # defaults, ED25519) and stores the private key in Secrets Manager,
+        # encrypted with kms/main.
+        ssh_key_secret_kms_key_id: !terraform.state kms/main .key_arn
+        # Required in prod by the ec2 `environment` validation. The component
+        # defaults it false, which suits dev and staging where instances are
+        # torn down routinely; the validation stops that default reaching prod.
+        disable_api_termination: true
+        tags:
+          Role: bastion
+          Access: restricted
+          CriticalityLevel: "high"
+        metadata_http_tokens_required: true
+        metadata_http_put_response_hop_limit: 1
+        instance_type: "t3.small"
+        subnet: !terraform.state vpc/main .private_subnet_ids[0]
+        ebs_optimized: true
+        allowed_ingress_rules:
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.0.0.0/8"]
+            description: "SSH from internal VPN only"
+        allowed_egress_rules:
+          - from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
+            description: "HTTPS outbound"
+          - from_port: 22
+            to_port: 22
+            protocol: "tcp"
+            cidr_blocks: ["10.20.0.0/16", "10.21.0.0/16"]
+            description: "SSH to VPC resources"
+        monitoring: true
+        root_volume_type: "gp3"
+        root_volume_size: 20
+        root_block_device_encrypted: true
+        root_block_device_kms_key_id: !terraform.state kms/main .key_arn
+        delete_on_termination: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+
+    # ==========================================================================
+    # External Secrets Operator - Main Cluster
+    # ==========================================================================
+    external-secrets/main:
+      metadata:
+        component: external-secrets
+        inherits:
+          - external-secrets/defaults
+      vars:
+        enabled: true
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+
+        namespace: "external-secrets"
+        service_account_name: "external-secrets"
+        create_default_cluster_secret_store: true
+        create_certificate_secret_store: true
+        # eks-backend-services/main reads rds/main's RDS-managed master user
+        # secret (name "rds!db-<id>") through this ClusterSecretStore.
+        rds_managed_secret_access: true
+        # Least privilege: only eks-backend-services/main's namespace may use
+        # this store, now that it grants read on any RDS-managed secret.
+        allowed_namespaces: ["backend-services"]
+      dependencies:
+        components:
+          - component: eks/main
+          - component: kms/main
+    external-secrets/data:
+      metadata:
+        component: external-secrets
+        inherits:
+          - external-secrets/defaults
+      vars:
+        enabled: true
+        cluster_name: !terraform.state eks/data .eks_cluster_id
+        host: !terraform.state eks/data .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
+
+        namespace: "external-secrets"
+        service_account_name: "external-secrets"
+        # Nothing on eks/data reads through a ClusterSecretStore yet, so it
+        # gets none (and no IRSA role). A consumer turns its store on with
+        # allowed_namespaces (or certificate_allowed_namespaces) naming it.
+        create_default_cluster_secret_store: false
+        create_certificate_secret_store: false
+      dependencies:
+        components:
+          - component: eks/data
+          - component: kms/main
+
+    # EKS add-ons, one instance per cluster: the load balancer controller,
+    # cluster-autoscaler, metrics-server, external-dns, cert-manager and
+    # Container Insights, each with its own IRSA role. external-dns and cert-manager may change records
+    # only in the dns instance's public zones. The cluster endpoints are private, so
+    # plan/apply these from inside the VPC (see the eks-addons README).
+    eks-addons/main:
+      metadata:
+        component: eks-addons
+        inherits:
+          - eks-addons
+      vars:
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/main .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/main .eks_cluster_identity_oidc_issuer
+        clusters:
+          main:
+            enable_aws_load_balancer_controller: true
+            enable_cluster_autoscaler: true
+            enable_metrics_server: true
+            enable_external_dns: true
+            enable_cert_manager: true
+            # CloudWatch agent + Fluent Bit; log groups on kms/main
+            enable_container_insights: true
+            container_insights_kms_key_arn: !terraform.state kms/main .key_arn
+            container_insights_log_retention_days: 90
+            vpc_id: !terraform.state vpc/main .vpc_id
+            # Public zones only; internal.* is private and stays out.
+            dns_zone_ids: !terraform.state network/main '.zone_ids.main | [.]'
+            cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+      dependencies:
+        components:
+          - component: eks/main
+          - component: vpc/main
+          - component: network/main
+          - component: kms/main
+    eks-addons/data:
+      metadata:
+        component: eks-addons
+        inherits:
+          - eks-addons
+      vars:
+        cluster_name: !terraform.state eks/data .eks_cluster_id
+        host: !terraform.state eks/data .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/data .eks_cluster_certificate_authority_data
+        oidc_provider_arn: !terraform.state eks/data .eks_cluster_identity_oidc_issuer_arn
+        oidc_provider_url: !terraform.state eks/data .eks_cluster_identity_oidc_issuer
+        clusters:
+          data:
+            enable_aws_load_balancer_controller: true
+            enable_cluster_autoscaler: true
+            enable_metrics_server: true
+            enable_external_dns: true
+            enable_cert_manager: true
+            # CloudWatch agent + Fluent Bit; log groups on kms/main
+            enable_container_insights: true
+            container_insights_kms_key_arn: !terraform.state kms/main .key_arn
+            container_insights_log_retention_days: 90
+            vpc_id: !terraform.state vpc/services .vpc_id
+            dns_zone_ids: !terraform.state network/services '.zone_ids | [.services, .data]'
+            cert_manager_letsencrypt_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+      dependencies:
+        components:
+          - component: eks/data
+          - component: vpc/services
+          - component: network/services
+          - component: kms/main
+
+    # Backend microservices on eks/main. Plans/applies in the "services" layer
+    # of workflows/deploy-full-stack.yaml (after compute, platform, data and
+    # addons), so it can read eks-addons/main, external-secrets/main,
+    # rds/main and elasticache/main state on a first deploy. Only prod runs
+    # elasticache/main today, so only prod turns redis_enabled on.
+    eks-backend-services/main:
+      metadata:
+        component: eks-backend-services
+        inherits:
+          - eks-backend-services/defaults
+      vars:
+        environment: "{{ .settings.context.stage }}"
+        cluster_name: !terraform.state eks/main .eks_cluster_id
+        host: !terraform.state eks/main .eks_cluster_endpoint
+        cluster_ca_certificate: !terraform.state eks/main .eks_cluster_certificate_authority_data
+        cluster_secret_store_name: !terraform.state external-secrets/main .default_cluster_secret_store_name
+        database_secret_arn: !terraform.state rds/main .password_secret_arn
+        database_endpoint: !terraform.state rds/main .instance_endpoint
+        database_name: !terraform.state rds/main .instance_name
+        redis_enabled: true
+        redis_secret_arn: !terraform.state elasticache/main .auth_token_secret_arn
+        redis_host: !terraform.state elasticache/main .primary_endpoint_address
+        redis_port: !terraform.state elasticache/main .port
+        api_gateway_image: '{{ required "settings.environment.backend_service_images.api_gateway must be set" .settings.environment.backend_service_images.api_gateway }}'
+        platform_api_image: '{{ required "settings.environment.backend_service_images.platform_api must be set" .settings.environment.backend_service_images.platform_api }}'
+        auth_service_image: '{{ required "settings.environment.backend_service_images.auth_service must be set" .settings.environment.backend_service_images.auth_service }}'
+        job_processor_image: '{{ required "settings.environment.backend_service_images.job_processor must be set" .settings.environment.backend_service_images.job_processor }}'
+      dependencies:
+        components:
+          - component: eks/main
+          - component: eks-addons/main
+          - component: external-secrets/main
+          - component: rds/main
+          - component: elasticache/main

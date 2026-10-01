@@ -1,0 +1,365 @@
+---
+import:
+  - orgs/fnx/dev/us-east-1/testenv-01/components/globals
+  - catalog/apigateway/defaults
+  - catalog/cognito/defaults
+  - catalog/monitoring/defaults
+  - catalog/s3/lambda-artifacts
+  - catalog/cost-optimization/defaults
+  - catalog/rds/dev
+
+components:
+  terraform:
+    # User pool backing the COGNITO_USER_POOLS authorizer on apigateway/main.
+    cognito/main:
+      metadata:
+        component: cognito
+        inherits:
+          - cognito/defaults
+      vars:
+        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        # Dev only: a deletable pool, so tearing the environment down does not
+        # leave one behind. Staging and prod keep deletion protection on.
+        deletion_protection: false
+        clients:
+          api:
+            # Confidential client: this consumer is server-side, so it can hold
+            # a secret. A browser or mobile client needs generate_secret: false.
+            generate_secret: true
+
+    # API Gateway instances
+    apigateway/main:
+      metadata:
+        component: apigateway
+      vars:
+        description: "Main API Gateway for {{ .settings.context.tenant }}-{{ .settings.context.environment }}"
+        stage_name: "v1"
+
+        # API resources
+        api_resources:
+          - path_part: "api"
+          - path_part: "auth"
+
+        # Methods are addressed by resource_path ("/" is the API root), because
+        # a stack cannot know this API's resource IDs before apply.
+        # lambda/data-processor is disabled (no package yet), so "/api" has no
+        # method. When it is enabled, append these items to the two lists below
+        # (delete "#   " to keep the indentation) and add
+        # `- component: lambda/data-processor` to dependencies.components:
+        #   api_methods:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       authorization: "COGNITO_USER_POOLS"
+        #   api_integrations:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+        #       type: "AWS_PROXY"
+        #       uri: !terraform.state lambda/data-processor .function_invoke_arn
+        #       lambda_function_name: !terraform.state lambda/data-processor .function_name
+        api_methods:
+          - resource_path: "/"
+            http_method: "GET"
+            authorization: "NONE"
+
+        # "/" stays MOCK on purpose: it is a liveness endpoint, and a canned 200
+        # is the correct answer for one. The real entry point, "/api" proxied to
+        # Lambda, comes back with lambda/data-processor (see above).
+        api_integrations:
+          - resource_path: "/"
+            http_method: "GET"
+            integration_http_method: "GET"
+            type: "MOCK"
+
+        # Authorizer for the "/api" COGNITO_USER_POOLS method. A method that asks
+        # for COGNITO_USER_POOLS without a pool here fails at apply.
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+
+        # Domain Configuration
+        domain_name: "api.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
+        enable_logging: true
+        log_retention_days: 30
+        create_dashboard: true
+
+        api_name: "main-api"
+        zone_id: !terraform.state network/main .zone_ids.main
+      dependencies:
+        components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
+          - component: network/main
+          - component: acm/main
+          - component: cognito/main
+    # Disabled with lambda/data-processor, its only backend: an API with no
+    # method cannot be deployed. Enable both together.
+    apigateway/data:
+      metadata:
+        component: apigateway
+        enabled: false
+      vars:
+        description: "Data API Gateway for {{ .settings.context.tenant }}-{{ .settings.context.environment }}"
+        stage_name: "v1"
+
+        # API resources
+        api_resources:
+          - path_part: "data"
+          - path_part: "metrics"
+
+        api_methods:
+          - resource_path: "/data"
+            http_method: "ANY"
+            authorization: "COGNITO_USER_POOLS"
+
+        # Real backend: AWS_PROXY hands the whole request to the function and
+        # returns whatever it produces. lambda_function_name is required so this
+        # component can grant API Gateway permission to invoke it - without that
+        # policy the integration applies fine and every call returns 500.
+        api_integrations:
+          - resource_path: "/data"
+            http_method: "ANY"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state lambda/data-processor .function_invoke_arn
+            lambda_function_name: !terraform.state lambda/data-processor .function_name
+
+        # Authorizer for the COGNITO_USER_POOLS method above, same pool as
+        # apigateway/main. A method that asks for COGNITO_USER_POOLS without a
+        # pool here fails at apply.
+        authorizer_type: "COGNITO_USER_POOLS"
+        cognito_user_pool_arns:
+          - !terraform.state cognito/main .user_pool_arn
+
+        # Domain Configuration
+        domain_name: "data.services.{{ .settings.environment.domain_name }}"
+        certificate_arn: !terraform.state acm/services .certificate_arns.services_wildcard
+        enable_logging: true
+        log_retention_days: 30
+        create_dashboard: true
+        enable_waf: true
+
+        api_name: "data-api"
+        zone_id: !terraform.state network/services .zone_ids.data
+      dependencies:
+        components:
+          # Ordering only: REST stage logging needs the account's
+          # CloudWatch role set first (no output is read).
+          - component: apigateway-account/main
+          - component: network/services
+          - component: acm/services
+          - component: cognito/main
+          - component: lambda/data-processor
+
+    # Infrastructure instances
+    # ECS Fargate cluster for the main apps (was infrastructure/main.ecs).
+    # vpc_id/subnet_ids are not passed: an aws_ecs_cluster has neither - those
+    # belong to ECS services, which this component does not manage.
+    ecs/main:
+      metadata:
+        component: ecs
+      vars:
+        cluster_name: "main-apps"
+        fargate_only: true
+      dependencies:
+        components:
+          - component: vpc/main
+
+    # Application database (was infrastructure/main.rds)
+    rds/main:
+      metadata:
+        component: rds
+        inherits:
+          - rds/dev
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "main-db"
+        db_name: "mainapp"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.t3.micro"
+        allocated_storage: 5
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # Without this, the RDS security group's only ingress rule has an
+        # empty security_groups list and nothing on eks/main can reach the
+        # database (eks-backend-services/main's pods run there).
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: eks/main
+
+    # Analytics database (was infrastructure/data.rds)
+    rds/data:
+      metadata:
+        component: rds
+        inherits:
+          - rds/dev
+      vars:
+        # Without this, environment falls back to the module default "dev"
+        # and every environment == "prod" gate in the component silently
+        # passes.
+        environment: "{{ .settings.context.stage }}"
+        identifier: "data-db"
+        db_name: "datawarehouse"
+        # Selected into backup/main's daily/weekly/monthly plans by tag
+        # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
+        # rds state from the same deploy phase.
+        tags:
+          Backup: "true"
+        engine: "{{ .settings.environment.rds_engine }}"
+        engine_version: "{{ .settings.environment.rds_engine_version }}"
+        instance_class: "db.r5.large"
+        allocated_storage: 20
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+
+    # Data processing (was infrastructure/data.lambda). The lambda component is
+    # single-function, so one instance per function.
+    #
+    # The application repo's CI builds the package and uploads it as
+    # <function_name>/<version>.zip to the stack's s3/lambda-artifacts bucket
+    # with iam/ci's lambda-uploader role; a PR here then sets
+    # settings.package_version, and the changed s3_key redeploys the code
+    # (docs/OPERATIONS.md, "Lambda packages"). Disabled until the first
+    # package exists: upload it, set package_version, set enabled: true, and
+    # restore its readers, each marked with a "disabled" comment:
+    # apigateway/main's "/api" route, apigateway/data, and monitoring/data's
+    # dimensions.
+    lambda/data-processor:
+      metadata:
+        component: lambda
+        enabled: false
+      settings:
+        package_version: "unreleased"
+      vars:
+        function_name: "data-processor"
+        handler: "main.handler"
+        runtime: "python3.13"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
+        memory_size: 512
+        vpc_id: !terraform.state vpc/services .vpc_id
+        subnet_ids: !terraform.state vpc/services .private_subnet_ids
+      dependencies:
+        components:
+          - component: vpc/services
+          - component: s3/lambda-artifacts
+
+
+    # Monitoring instances
+    monitoring/main:
+      metadata:
+        component: monitoring
+        inherits:
+          - monitoring/defaults
+      vars:
+        # Cloud Posse null-label style: every resource this component creates
+        # is named "<Environment>-<name>-<suffix>". monitoring/main and
+        # monitoring/data previously both named resources from Environment
+        # alone and collided (ResourceAlreadyExists) on the second apply.
+        name: main
+        # kms/main already allows CloudWatch alarms to publish to encrypted
+        # topics (catalog/kms/defaults.yaml allow_cloudwatch_alarms).
+        kms_key_id: !terraform.state kms/main .key_arn
+        create_dashboard: true
+        enable_certificate_monitoring: true
+        certificate_arns: !terraform.state acm/main .certificate_arns // {} | [.[]]
+        certificate_names: !terraform.state acm/main .certificate_domains // {} | keys
+        certificate_domains: !terraform.state acm/main .certificate_domains // {} | [.[]]
+        certificate_expiry_threshold: 30
+
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / "").
+        eks_cluster_name: !terraform.state eks/main .eks_cluster_id
+        rds_instances: !terraform.state rds/main .instance_identifier | [.]
+        ecs_clusters: !terraform.state ecs/main .cluster_name | [.]
+        api_gateway_name: !terraform.state apigateway/main .api_name
+        api_gateway_stages: !terraform.state apigateway/main .rest_api_stage_name | [.]
+
+        # Alert emails
+        alarm_email_subscriptions:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
+
+        create_sns_topic: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/main
+          - component: kms/main
+          - component: eks/main
+          - component: rds/main
+          - component: ecs/main
+          - component: apigateway/main
+    monitoring/data:
+      metadata:
+        component: monitoring
+        inherits:
+          - monitoring/defaults
+      vars:
+        name: data
+        kms_key_id: !terraform.state kms/main .key_arn
+        create_dashboard: true
+        enable_certificate_monitoring: true
+
+        # Certificate monitoring configuration
+        certificate_arns: !terraform.state acm/services .certificate_arns // {} | [.[]]
+        certificate_expiry_threshold: 30
+
+        # Dashboard/alarm dimensions: the sources this stack actually
+        # deploys, so the infrastructure and backend dashboards plot real
+        # data instead of empty widgets (they default to [] / "").
+        eks_cluster_name: !terraform.state eks/data .eks_cluster_id
+        rds_instances: !terraform.state rds/data .instance_identifier | [.]
+        # lambda/data-processor is disabled (no package yet), and
+        # apigateway/data with it: no API or Lambda dimensions until they are
+        # enabled. Then add back, each read also in dependencies:
+        #   api_gateway_name: !terraform.state apigateway/data .api_name
+        #   api_gateway_stages: !terraform.state apigateway/data .rest_api_stage_name | [.]
+        #   lambda_functions:
+        #     - !terraform.state lambda/data-processor .function_name
+
+        # Alert emails - only send critical alerts
+        alarm_email_subscriptions:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        create_sns_topic: true
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: acm/services
+          - component: kms/main
+          - component: eks/data
+          - component: rds/data
+
+    # Cost optimization: instance scheduler, Savings Plan/RI analyzer,
+    # resource cleanup, cost anomaly detection and monthly budget.
+    cost-optimization/main:
+      metadata:
+        component: cost-optimization
+        inherits:
+          - cost-optimization/defaults
+      vars:
+        monthly_budget_limit: "{{ .settings.environment.monitoring.budget_monthly_limit }}"
+        budget_notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"
+        cost_anomaly_notification_email: "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+        cost_alert_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.warning_alerts 0 }}"

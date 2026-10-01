@@ -6,7 +6,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -23,9 +23,9 @@ override_data {
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   name        = "orders"
-  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -81,7 +81,7 @@ run "dlq_is_encrypted_and_wired_both_ways" {
   }
 
   assert {
-    condition     = jsondecode(aws_sqs_queue_redrive_allow_policy.dlq[0].redrive_allow_policy) == { redrivePermission = "byQueue", sourceQueueArns = ["arn:aws:sqs:eu-west-2:123456789012:test-orders"] }
+    condition     = jsondecode(aws_sqs_queue_redrive_allow_policy.dlq[0].redrive_allow_policy) == { redrivePermission = "byQueue", sourceQueueArns = ["arn:aws:sqs:us-east-1:123456789012:test-orders"] }
     error_message = "Only this instance's queue may redrive into the DLQ."
   }
 }
@@ -117,14 +117,14 @@ run "queue_policy_lets_eventbridge_send_from_one_rule" {
         conditions = [{
           test     = "ArnEquals"
           variable = "aws:SourceArn"
-          values   = ["arn:aws:events:eu-west-2:123456789012:rule/test-bus/test-orders"]
+          values   = ["arn:aws:events:us-east-1:123456789012:rule/test-bus/test-orders"]
         }]
       }]
     }]
   }
 
   assert {
-    condition     = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Resource == "arn:aws:sqs:eu-west-2:123456789012:test-orders"
+    condition     = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Resource == "arn:aws:sqs:us-east-1:123456789012:test-orders"
     error_message = "Statements are scoped to this queue's ARN."
   }
 
@@ -135,7 +135,7 @@ run "queue_policy_lets_eventbridge_send_from_one_rule" {
 
   assert {
     condition = one(jsondecode(data.aws_iam_policy_document.queue[0].json).Statement).Condition == {
-      ArnEquals    = { "aws:SourceArn" = "arn:aws:events:eu-west-2:123456789012:rule/test-bus/test-orders" }
+      ArnEquals    = { "aws:SourceArn" = "arn:aws:events:us-east-1:123456789012:rule/test-bus/test-orders" }
       StringEquals = { "aws:SourceAccount" = "123456789012" }
     }
     error_message = "The caller's aws:SourceArn condition is kept, iam_policy_limit_to_current_account (default true) adds aws:SourceAccount, and nothing else is added."
@@ -333,7 +333,7 @@ run "rejects_statement_resources" {
     iam_policy = [{
       statements = [{
         actions    = ["sqs:SendMessage"]
-        resources  = ["arn:aws:sqs:eu-west-2:123456789012:other"]
+        resources  = ["arn:aws:sqs:us-east-1:123456789012:other"]
         principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
       }]
     }]
@@ -405,7 +405,7 @@ run "service_allow_pinned_by_source_arn_needs_no_account_limit" {
       statements = [{
         actions    = ["sqs:SendMessage"]
         principals = [{ type = "Service", identifiers = ["events.amazonaws.com"] }]
-        conditions = [{ test = "ArnLike", variable = "AWS:SourceArn", values = ["arn:aws:events:eu-west-2:123456789012:rule/test-bus/test-rule"] }]
+        conditions = [{ test = "ArnLike", variable = "AWS:SourceArn", values = ["arn:aws:events:us-east-1:123456789012:rule/test-bus/test-rule"] }]
       }]
     }]
   }
@@ -460,7 +460,7 @@ run "rejects_a_service_allow_pinned_only_if_the_key_exists" {
       statements = [{
         actions    = ["sqs:SendMessage"]
         principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
-        conditions = [{ test = "ArnEqualsIfExists", variable = "aws:SourceArn", values = ["arn:aws:sns:eu-west-2:123456789012:test-topic"] }]
+        conditions = [{ test = "ArnEqualsIfExists", variable = "aws:SourceArn", values = ["arn:aws:sns:us-east-1:123456789012:test-topic"] }]
       }]
     }]
   }
@@ -478,7 +478,7 @@ run "rejects_a_service_allow_pinned_by_for_all_values" {
         actions    = ["sqs:SendMessage"]
         principals = [{ type = "Service", identifiers = ["sns.amazonaws.com"] }]
         # ForAllValues: is true when the key is absent.
-        conditions = [{ test = "ForAllValues:ArnEquals", variable = "aws:SourceArn", values = ["arn:aws:sns:eu-west-2:123456789012:test-topic"] }]
+        conditions = [{ test = "ForAllValues:ArnEquals", variable = "aws:SourceArn", values = ["arn:aws:sns:us-east-1:123456789012:test-topic"] }]
       }]
     }]
   }

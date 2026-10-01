@@ -576,7 +576,7 @@ variable "map_additional_iam_roles" {
     `rolearn` is the full role ARN INCLUDING its path: access entries (unlike the old aws-auth
     ConfigMap) require it, and the IAM Identity Center role of a permission set lives under
     /aws-reserved/sso.amazonaws.com/[<region>/], e.g.
-    arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>
+    arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_<hash>
     (`aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`).
     `groups` = ["system:masters"] grants a cluster-scoped AmazonEKSClusterAdminPolicy association.
     `username` is ignored. Keys of access_entry_map win over a role listed here.

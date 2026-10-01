@@ -23,7 +23,7 @@ def stacks_with(**components):
     return {"fnx-dev-testenv-01": {"components": {"terraform": components}}}
 
 
-ADMIN = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
+ADMIN = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
 
 
 def admin_eks(arn, stage="dev"):

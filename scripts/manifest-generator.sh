@@ -125,7 +125,7 @@ generate_stack_template() {
     local tenant="${2:-fnx}"
     local stage="${3:-dev}"
     local environment="${4:-$stack_label}"
-    local region="${5:-eu-west-2}"
+    local region="${5:-us-east-1}"
 
     # Stack scaffolding lives in one place: new-environment.sh emits the current
     # layout (stacks/orgs/<tenant>/<stage>/<region>/<environment>.yaml, naming
@@ -201,7 +201,7 @@ variable "environment" {
 variable "region" {
   type        = string
   description = "AWS region"
-  default     = "eu-west-2"
+  default     = "us-east-1"
   
   validation {
     condition     = can(regex("^[a-z0-9-]+$", var.region))
@@ -307,7 +307,7 @@ components:
 |------|-------------|------|---------|----------|
 | tenant | Tenant name | string | n/a | yes |
 | environment | Environment name | string | n/a | yes |
-| region | AWS region | string | "eu-west-2" | no |
+| region | AWS region | string | "us-east-1" | no |
 | enabled | Whether to create resources | bool | true | no |
 | name | Resource name | string | null | no |
 | tags | Common tags | map(string) | {} | no |

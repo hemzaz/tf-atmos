@@ -4,7 +4,7 @@
 #
 # Usage: copy into an account/region directory as a top-level stack and set
 # settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
-#   cp templates/stacks/minimal-stack.yaml stacks/orgs/fnx/dev/eu-west-2/minimal-01.yaml
+#   cp templates/stacks/minimal-stack.yaml stacks/orgs/fnx/dev/us-east-1/minimal-01.yaml
 #   atmos validate stacks
 #   atmos terraform plan vpc/main -s fnx-dev-minimal-01
 # To target another account or region, change the `orgs/fnx/<stage>/_defaults`
@@ -12,7 +12,7 @@
 
 import:
   - orgs/fnx/dev/_defaults
-  - mixins/region/eu-west-2
+  - mixins/region/us-east-1
   - catalog/_base/defaults
   - catalog/vpc/defaults
   - catalog/securitygroup/defaults

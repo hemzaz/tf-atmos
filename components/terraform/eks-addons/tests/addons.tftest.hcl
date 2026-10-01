@@ -20,7 +20,7 @@ mock_provider "aws" {
     values = {
       status   = "ACTIVE"
       version  = "1.36"
-      endpoint = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+      endpoint = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
     }
   }
   # Role ARNs are known at plan, so values that carry them can be asserted.
@@ -42,12 +42,12 @@ mock_provider "kubernetes" {}
 mock_provider "time" {}
 
 variables {
-  region                 = "eu-west-2"
+  region                 = "us-east-1"
   cluster_name           = "testenv-01-main"
-  host                   = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+  host                   = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
-  oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
-  oidc_provider_url      = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF"
+  oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
+  oidc_provider_url      = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
   istio_enabled          = false
   tags = {
     Environment = "testenv-01"
@@ -196,14 +196,14 @@ run "trust_is_scoped_to_the_oidc_provider_and_service_account" {
 
   assert {
     condition = jsondecode(aws_iam_role.addon["main.external-dns"].assume_role_policy).Statement[0].Condition.StringEquals == {
-      "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:sub" = "system:serviceaccount:external-dns:external-dns"
-      "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:aud" = "sts.amazonaws.com"
+      "oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:sub" = "system:serviceaccount:external-dns:external-dns"
+      "oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:aud" = "sts.amazonaws.com"
     }
     error_message = "external-dns must be assumable only by external-dns:external-dns, audience STS."
   }
 
   assert {
-    condition     = jsondecode(aws_iam_role.addon["main.aws-load-balancer-controller"].assume_role_policy).Statement[0].Condition.StringEquals["oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:sub"] == "system:serviceaccount:alb-controller:aws-load-balancer-controller"
+    condition     = jsondecode(aws_iam_role.addon["main.aws-load-balancer-controller"].assume_role_policy).Statement[0].Condition.StringEquals["oidc.eks.us-east-1.amazonaws.com/id/ABCDEF:sub"] == "system:serviceaccount:alb-controller:aws-load-balancer-controller"
     error_message = "The load balancer controller must be assumable only by its own namespace:serviceaccount."
   }
 
@@ -282,7 +282,7 @@ run "policies_are_scoped" {
   assert {
     condition = [
       for s in jsondecode(aws_iam_policy.addon["main.cluster-autoscaler"].policy).Statement : s.Resource if s.Sid == "DescribeThisClustersNodegroups"
-    ][0] == "arn:aws:eks:eu-west-2:123456789012:nodegroup/testenv-01-main/*/*"
+    ][0] == "arn:aws:eks:us-east-1:123456789012:nodegroup/testenv-01-main/*/*"
     error_message = "eks:DescribeNodegroup must be limited to this cluster's node groups."
   }
 

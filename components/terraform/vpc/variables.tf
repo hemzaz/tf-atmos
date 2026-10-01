@@ -1,7 +1,7 @@
 variable "region" {
   type        = string
   description = "AWS region"
-  default     = "eu-west-2"
+  default     = "us-east-1"
 
   validation {
     condition     = can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.region))

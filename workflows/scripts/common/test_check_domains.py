@@ -290,9 +290,9 @@ class CheckDomainsTest(unittest.TestCase):
 
     def test_literal_certificate_arn_is_a_warning(self):
         self.assert_result(
-            self.api_stacks(f"api.{DOMAIN}", "arn:aws:acm:eu-west-2:1:certificate/x"),
+            self.api_stacks(f"api.{DOMAIN}", "arn:aws:acm:us-east-1:1:certificate/x"),
             warnings=[
-                "apigateway/main: certificate_arn 'arn:aws:acm:eu-west-2:1:certificate/x' is a literal certificate ARN; "
+                "apigateway/main: certificate_arn 'arn:aws:acm:us-east-1:1:certificate/x' is a literal certificate ARN; "
                 "domain_name api.staging.fnx.example.com is not checked against it"
             ],
         )

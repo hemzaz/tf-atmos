@@ -67,22 +67,22 @@ from plan_sweep_hcl import (
 # ---------------------------------------------------------------------------
 # A default, so that `--self-test` run by hand works without the shell's
 # environment; the sweep always exports the real constant.
-EKS_HOST = os.environ.get('PLAN_SWEEP_EKS_HOST', 'EXAMPLE0123456789.gr7.eu-west-2.eks.amazonaws.com')
+EKS_HOST = os.environ.get('PLAN_SWEEP_EKS_HOST', 'EXAMPLE0123456789.gr7.us-east-1.eks.amazonaws.com')
 
 SYNTH = [
     (r'(^|_)vpc_id$',                 'vpc-0123456789abcdef0'),
     # Two subnets, not one: rds's subnet group and eks both require subnets in
     # two AZs, and a one-element list would fail those checks on our account.
     (r'subnet_ids$',                  ['subnet-0123456789abcdef0', 'subnet-0123456789abcdef1']),
-    (r'(kms_key_id|kms_key_arn)$',    'arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012'),
+    (r'(kms_key_id|kms_key_arn)$',    'arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012'),
     # kms/main's own output name, so `!terraform.state kms/main .key_arn` is
     # valued by the output it reads rather than by the consuming variable.
-    (r'^key_arn$',                    'arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012'),
+    (r'^key_arn$',                    'arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012'),
     (r'^zone_id$',                    'Z1234567890ABCDEFGHIJ'),
     # s3's bucket_id / bucket_name: lambda's s3_bucket (s3/lambda-artifacts).
     (r'^bucket_(id|name)$',           'example-bucket-123456789012'),
-    (r'^certificate_arn$',            'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012'),
-    (r'^certificate_arns$',           ['arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
+    (r'^certificate_arn$',            'arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012'),
+    (r'^certificate_arns$',           ['arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012']),
     (r'^certificate_names$',          ['main_wildcard']),
     (r'^certificate_domains$',        ['example.com']),
     (r'^host$',                       'https://' + EKS_HOST),
@@ -93,12 +93,12 @@ SYNTH = [
     # The same synthetic host as `host`, which the diagnostic classifier
     # recognises when it fails to resolve.
     (r'^eks_cluster_endpoint$',       'https://' + EKS_HOST),
-    (r'^eks_cluster_identity_oidc_issuer$', 'https://oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
-    (r'^eks_cluster_identity_oidc_issuer_arn$', 'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
+    (r'^eks_cluster_identity_oidc_issuer$', 'https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
+    (r'^eks_cluster_identity_oidc_issuer_arn$', 'arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     (r'^ssh_key_pair$',               'example-keypair'),
     (r'^security_group_id$',          'sg-0123456789abcdef0'),
-    (r'^oidc_provider_url$',          'oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
-    (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
+    (r'^oidc_provider_url$',          'oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
+    (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     # The backend's access role outputs (no stack reads them today: iam/ci
     # names the roles by convention; kept for any cross-stack consumer).
     (r'^backend(_prod|_core)?(_read)?_role_arn$','arn:aws:iam::123456789012:role/example-terraform-backend-role'),
@@ -107,9 +107,9 @@ SYNTH = [
     # two the whole integration object was dropped, which tripped the
     # component's own "AWS_PROXY requires uri" validation and reported six
     # pairs as UNATTRIBUTABLE -- a script artefact, not a stack defect.
-    (r'^uri$',                        'arn:aws:apigateway:eu-west-2:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-2:123456789012:function:example-function/invocations'),
+    (r'^uri$',                        'arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:example-function/invocations'),
     (r'^lambda_function_name$',       'example-function'),
-    (r'^cognito_user_pool_arns$',     ['arn:aws:cognito-idp:eu-west-2:123456789012:userpool/eu-west-2_EXAMPLE1']),
+    (r'^cognito_user_pool_arns$',     ['arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_EXAMPLE1']),
     # Singular: ec2's instances[].subnet_id. The plural pattern above is
     # anchored, so it never matched this one.
     (r'^subnet_id$',                  'subnet-0123456789abcdef0'),
@@ -126,7 +126,7 @@ SYNTH = [
                                        'ns-0003.awsdns-03.com', 'ns-0004.awsdns-04.net']),
     # security-monitoring consumes guardduty's detector and securityhub's hub.
     (r'^detector_id$',                '12abc34d567e8fa901bc2d34e56789f0'),
-    (r'^account_arn$',                'arn:aws:securityhub:eu-west-2:123456789012:hub/default'),
+    (r'^account_arn$',                'arn:aws:securityhub:us-east-1:123456789012:hub/default'),
     # Output names read by stacks/catalog/templates/microservices-platform.yaml,
     # each shaped like the value the component really returns.
     (r'^table_name$',                 'example-table'),
@@ -141,8 +141,8 @@ SYNTH = [
     (r'^eks_cluster_managed_security_group_id$', 'sg-0123456789abcdef1'),
     (r'^member_clusters$',            ['example-cache-0001-001', 'example-cache-0002-001']),
     # ...its EventBridge targets: the sqs queues and the welcome-email Lambda.
-    (r'^queue_arn$',                  'arn:aws:sqs:eu-west-2:123456789012:example-queue'),
-    (r'^function_arn$',               'arn:aws:lambda:eu-west-2:123456789012:function:example-function'),
+    (r'^queue_arn$',                  'arn:aws:sqs:us-east-1:123456789012:example-queue'),
+    (r'^function_arn$',               'arn:aws:lambda:us-east-1:123456789012:function:example-function'),
     # ...and the DLQ alarms' queue names.
     (r'^(dead_letter_)?queue_name$',  'example-queue'),
     # ...and the cloudtrail component's log group for its CIS metric filters.
@@ -150,7 +150,7 @@ SYNTH = [
     # ...and alb-ingress-group's ALB listener, apigateway's http_routes[*]'s
     # integration_uri (an HTTP_PROXY/VPC_LINK route's target listener).
     (r'^(http|https)_listener_arn$',
-     'arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/example-alb/1234567890123456/1234567890123456'),
+     'arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/example-alb/1234567890123456/1234567890123456'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry
@@ -933,7 +933,7 @@ def build(describe, stack, stacks_dir, components_dir):
 # "x"` is "x" there too -- so a '//' default wins on both.
 ATMOS_DATA = {'certificate_arns': {'main_wildcard': 'arn:a', 'api': 'arn:b'},
               'one_key': {'only': 'arn:c'}, 'vpc_id': 'vpc-1', 'subnets': ['s1', 's2'],
-              'nothing': None, 'arn_keyed': {'arn:aws:acm:eu-west-2:1:certificate/x': 'a'},
+              'nothing': None, 'arn_keyed': {'arn:aws:acm:us-east-1:1:certificate/x': 'a'},
               'obj': {'a': 'id-1'}}
 ATMOS_CASES = [
     ('[.certificate_arns // {} | .[]]', 'null null'),
@@ -969,7 +969,7 @@ ATMOS_CASES = [
     # A key missing inside the result, not as the result.
     ('.certificate_arns | [.main_wildcard, .missing]', ['arn:a', None]),
     ('.certificate_arns | {"a": .missing}', {'a': None}),
-    ('.arn_keyed', {'arn:aws:acm:eu-west-2:1:certificate/x': 'a'}),
+    ('.arn_keyed', {'arn:aws:acm:us-east-1:1:certificate/x': 'a'}),
 ]
 # Also recorded on the local backend, and rejected by real Atmos:
 #   `.arn_keyed, .arn_keyed` -- mapping key "arn:aws:acm:..." already defined;
@@ -1152,7 +1152,7 @@ def self_test(components_dir, tmp):
         synth_value(SCALAR, ['eks_cluster_identity_oidc_issuer']),
         synth_value(SCALAR, ['eks_cluster_endpoint']),
         synth_value(SCALAR, ['eks_cluster_certificate_authority_data']),
-    ), ('https://oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E',
+    ), ('https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E',
         'https://' + EKS_HOST, CA_CERT or None))
     check('indented output block', [k for k, _ in blocks('  output "x" {\n  value = 1\n}\n', 'output')],
           ['x'])
@@ -1173,7 +1173,7 @@ def self_test(components_dir, tmp):
           (kind, isinstance(fixed, list) and len(fixed) >= 2 and all(isinstance(x, str) for x in fixed)),
           ('shaped', True))
     check('map key accessor', ref('.certificate_arns.main_wildcard', 'certificate_arn')[1],
-          'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012')
+          'arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012')
     dns = res.component('dns')
     check('dns zone_ids shape', shape_of(dns.outputs.get('zone_ids', ''), Ctx(dns)), MAP(SCALAR))
     # acm's zone_id is validated ^Z[A-Z0-9]{1,32}$: the synthetic leaf must match.
@@ -1191,7 +1191,7 @@ def self_test(components_dir, tmp):
     check('keys collected', res.keys(stack, 'acm/main', 'certificate_arns'),
           ['main_wildcard', 'piped_key', 'selected_key'])
     check('pipe key', ref('.certificate_arns // {} | .piped_key', 'certificate_arn')[1],
-          'arn:aws:acm:eu-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012')
+          'arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012')
     check('select key', ref('.certificate_arns | to_entries | map(select(.key == "selected_key"))'
                             ' | .[0].value', 'certificate_arn')[0], 'shaped')
     for e, want in [('.m.k', {'k'}), ('.m["k"]', {'k'}), ('.m | .k', {'k'}), ('.m // {} | .k', {'k'}),

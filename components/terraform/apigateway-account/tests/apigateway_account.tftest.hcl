@@ -7,7 +7,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -22,12 +22,12 @@ override_resource {
   target          = aws_iam_role.this
   override_during = plan
   values = {
-    arn = "arn:aws:iam::123456789012:role/test-apigateway-cloudwatch-eu-west-2"
+    arn = "arn:aws:iam::123456789012:role/test-apigateway-cloudwatch-us-east-1"
   }
 }
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -49,7 +49,7 @@ run "role_trusts_api_gateway_only" {
   }
 
   assert {
-    condition     = aws_iam_role.this[0].name == "test-apigateway-cloudwatch-eu-west-2"
+    condition     = aws_iam_role.this[0].name == "test-apigateway-cloudwatch-us-east-1"
     error_message = "The role is named <Environment>-apigateway-cloudwatch-<region>."
   }
 }
@@ -63,7 +63,7 @@ run "attaches_the_managed_push_policy" {
   }
 
   assert {
-    condition     = aws_iam_role_policy_attachment.cloudwatch[0].role == "test-apigateway-cloudwatch-eu-west-2"
+    condition     = aws_iam_role_policy_attachment.cloudwatch[0].role == "test-apigateway-cloudwatch-us-east-1"
     error_message = "The policy is attached to this component's role."
   }
 }
@@ -90,7 +90,7 @@ run "account_setting_uses_the_role" {
   # Against the literal ARN the override pins, not aws_iam_role.this[0].arn:
   # both sides of that comparison would be the same override.
   assert {
-    condition     = aws_api_gateway_account.this[0].cloudwatch_role_arn == "arn:aws:iam::123456789012:role/test-apigateway-cloudwatch-eu-west-2"
+    condition     = aws_api_gateway_account.this[0].cloudwatch_role_arn == "arn:aws:iam::123456789012:role/test-apigateway-cloudwatch-us-east-1"
     error_message = "aws_api_gateway_account must point at this component's role."
   }
 
@@ -102,12 +102,12 @@ run "account_setting_uses_the_role" {
   }
 
   assert {
-    condition     = aws_iam_role_policy_attachment.cloudwatch[0].role == aws_iam_role.this[0].name && aws_iam_role.this[0].name == "test-apigateway-cloudwatch-eu-west-2"
+    condition     = aws_iam_role_policy_attachment.cloudwatch[0].role == aws_iam_role.this[0].name && aws_iam_role.this[0].name == "test-apigateway-cloudwatch-us-east-1"
     error_message = "The push policy must be attached to the role set on the account."
   }
 
   assert {
-    condition     = output.role_arn == "arn:aws:iam::123456789012:role/test-apigateway-cloudwatch-eu-west-2" && output.role_name == "test-apigateway-cloudwatch-eu-west-2"
+    condition     = output.role_arn == "arn:aws:iam::123456789012:role/test-apigateway-cloudwatch-us-east-1" && output.role_name == "test-apigateway-cloudwatch-us-east-1"
     error_message = "role_arn and role_name outputs expose the role."
   }
 }

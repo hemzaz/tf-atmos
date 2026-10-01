@@ -53,13 +53,13 @@ auth:
     # is started by hand, outside Atmos, via `atmos workflow localemu-up -f
     # localemu` (or the full `atmos workflow localemu -f localemu`, also run in
     # CI by .github/workflows/emulator.yml) - see the RUN IT AGAINST A FRESH
-    # EMULATOR note in stacks/orgs/fnx/local/eu-west-2/localemu.yaml for how
+    # EMULATOR note in stacks/orgs/fnx/local/us-east-1/localemu.yaml for how
     # that workflow copes with LocalEmu not being idempotent across restarts.
     #
     # It exists for rds, which Floci cannot exercise at all (no
     # CreateDBSubnetGroup) and LocalEmu can. It does NOT rescue apigateway or
     # elasticache: both fail on LocalEmu too, for their own reasons - see the
-    # header of stacks/orgs/fnx/local/eu-west-2/localemu.yaml. The credentials
+    # header of stacks/orgs/fnx/local/us-east-1/localemu.yaml. The credentials
     # are the conventional local-emulator dummies and authenticate nothing;
     # they are read from the environment so no literal lands in git.
     local-emu:
@@ -67,7 +67,7 @@ auth:
       credentials:
         access_key_id: !env LOCALEMU_ACCESS_KEY_ID
         secret_access_key: !env LOCALEMU_SECRET_ACCESS_KEY
-        region: eu-west-2
+        region: us-east-1
       spec:
         endpoint_url: http://localhost:4566
 

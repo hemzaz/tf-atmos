@@ -12,8 +12,8 @@ mock_provider "aws" {
     target          = data.aws_lb.this
     override_during = plan
     values = {
-      arn      = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:loadbalancer/app/test-group/0123456789abcdef"
-      dns_name = "test-group-0123456789.eu-west-2.elb.amazonaws.com"
+      arn      = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/test-group/0123456789abcdef"
+      dns_name = "test-group-0123456789.us-east-1.elb.amazonaws.com"
       zone_id  = "Z215JYRZR1TBD5"
     }
   }
@@ -21,14 +21,14 @@ mock_provider "aws" {
     target          = data.aws_lb_listener.http
     override_during = plan
     values = {
-      arn = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/test-group/0123456789abcdef/1111111111111111"
+      arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/test-group/0123456789abcdef/1111111111111111"
     }
   }
   override_data {
     target          = data.aws_lb_listener.https
     override_during = plan
     values = {
-      arn = "arn:aws:elasticloadbalancing:eu-west-2:123456789012:listener/app/test-group/0123456789abcdef/2222222222222222"
+      arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/test-group/0123456789abcdef/2222222222222222"
     }
   }
   mock_resource "aws_security_group" {
@@ -42,9 +42,9 @@ mock_provider "aws" {
 mock_provider "kubernetes" {}
 
 variables {
-  region                   = "eu-west-2"
+  region                   = "us-east-1"
   cluster_name             = "testenv-01-microservices"
-  host                     = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+  host                     = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate   = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
   vpc_id                   = "vpc-0123456789abcdef0"
   group_name               = "microservices-http"
@@ -160,7 +160,7 @@ run "https_listener_when_certificate_arn_is_set" {
   command = plan
 
   variables {
-    certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+    certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
   }
 
   assert {
@@ -193,7 +193,7 @@ run "certificate_arn_admits_no_port_80_ingress_rule" {
   command = plan
 
   variables {
-    certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+    certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
   }
 
   assert {
@@ -231,7 +231,7 @@ run "two_admitted_security_groups_and_tls_creates_two_ingress_rules" {
 
   variables {
     admit_security_group_ids = ["sg-0123456789abcdef0", "sg-0123456789abcdef1"]
-    certificate_arn          = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+    certificate_arn          = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
   }
 
   assert {
@@ -340,7 +340,7 @@ run "outputs_are_wired_to_the_load_balancer_lookup" {
   command = plan
 
   variables {
-    certificate_arn = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+    certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
   }
 
   assert {

@@ -1,6 +1,6 @@
 # Pull request / merge queue checks with Atmos Native CI.
 # Required configuration:
-#   vars.AWS_REGION          region for OIDC credentials (defaults to eu-west-2)
+#   vars.AWS_REGION          region for OIDC credentials (defaults to us-east-1)
 #   vars.AWS_PLAN_ROLE_ARN   read-only IAM role trusted for this repo's GitHub OIDC tokens
 #   (plan jobs are skipped while it is unset)
 #   vars.AWS_PROD_PLAN_ROLE_ARN  production's own plan role (master subject only), used for the
@@ -291,7 +291,7 @@ jobs:
       # ones that don't go through the atmos-installed terraform, agrees.
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      AWS_REGION: eu-west-2
+      AWS_REGION: us-east-1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -633,7 +633,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN || vars.AWS_PLAN_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # TFSTATE_ACCESS=read makes the stack backend assume a READ-only state
       # role (stacks/orgs/fnx/_defaults.yaml): the prod one for a prod stack,
       # the non-prod one otherwise. That role cannot write a .tflock object, so

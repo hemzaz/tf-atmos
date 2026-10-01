@@ -11,14 +11,14 @@ mock_provider "aws" {
 
   mock_resource "aws_eks_cluster" {
     defaults = {
-      arn      = "arn:aws:eks:eu-west-2:123456789012:cluster/mock"
-      endpoint = "https://ABCDEF0123456789.gr7.eu-west-2.eks.amazonaws.com"
+      arn      = "arn:aws:eks:us-east-1:123456789012:cluster/mock"
+      endpoint = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
       certificate_authority = [{
         data = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMvakNDQWVhZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="
       }]
       identity = [{
         oidc = [{
-          issuer = "https://oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
+          issuer = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
         }]
       }]
     }
@@ -26,7 +26,7 @@ mock_provider "aws" {
 
   mock_resource "aws_kms_key" {
     defaults = {
-      arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+      arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     }
   }
 
@@ -44,7 +44,7 @@ mock_provider "aws" {
 
   mock_resource "aws_iam_openid_connect_provider" {
     defaults = {
-      arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
+      arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789"
     }
   }
 }
@@ -79,7 +79,7 @@ override_resource {
 }
 
 variables {
-  region     = "eu-west-2"
+  region     = "us-east-1"
   name       = "main"
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {
@@ -199,8 +199,8 @@ run "cni_policy_is_on_the_vpc_cni_irsa_role_not_the_node_role" {
 
   assert {
     condition = (
-      jsondecode(aws_iam_role.vpc_cni[0].assume_role_policy).Statement[0].Condition.StringEquals["oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789:sub"] == "system:serviceaccount:kube-system:aws-node" &&
-      jsondecode(aws_iam_role.vpc_cni[0].assume_role_policy).Statement[0].Condition.StringEquals["oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789:aud"] == "sts.amazonaws.com" &&
+      jsondecode(aws_iam_role.vpc_cni[0].assume_role_policy).Statement[0].Condition.StringEquals["oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789:sub"] == "system:serviceaccount:kube-system:aws-node" &&
+      jsondecode(aws_iam_role.vpc_cni[0].assume_role_policy).Statement[0].Condition.StringEquals["oidc.eks.us-east-1.amazonaws.com/id/ABCDEF0123456789ABCDEF0123456789:aud"] == "sts.amazonaws.com" &&
       jsondecode(aws_iam_role.vpc_cni[0].assume_role_policy).Statement[0].Principal.Federated == aws_iam_openid_connect_provider.default[0].arn
     )
     error_message = "Only kube-system/aws-node may assume the vpc-cni role, through the cluster's OIDC provider."
@@ -369,7 +369,7 @@ run "admin_roles_get_cluster_admin_with_the_sso_path_kept" {
 
   variables {
     map_additional_iam_roles = [{
-      rolearn = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
+      rolearn = "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"
       groups  = ["system:masters"]
     }]
     access_entry_map = {
@@ -395,15 +395,15 @@ run "admin_roles_get_cluster_admin_with_the_sso_path_kept" {
 
   assert {
     condition = (
-      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].principal_arn == "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef" &&
-      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].type == "STANDARD" &&
-      length(aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].kubernetes_groups) == 0
+      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].principal_arn == "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef" &&
+      aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].type == "STANDARD" &&
+      length(aws_eks_access_entry.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef"].kubernetes_groups) == 0
     )
     error_message = "An admin role must be a STANDARD access entry keyed by its full ARN, path included, with system:masters removed from its groups."
   }
 
   assert {
-    condition     = aws_eks_access_policy_association.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_0123456789abcdef-arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"].access_scope[0].type == "cluster"
+    condition     = aws_eks_access_policy_association.map["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_0123456789abcdef-arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"].access_scope[0].type == "cluster"
     error_message = "An admin role must get a cluster-scoped AmazonEKSClusterAdminPolicy association."
   }
 
@@ -444,7 +444,7 @@ run "placeholder_admin_role_is_rejected" {
 
   variables {
     map_additional_iam_roles = [{
-      rolearn = "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/eu-west-2/AWSReservedSSO_AdministratorAccess_<hash>"
+      rolearn = "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_<hash>"
       groups  = ["system:masters"]
     }]
   }

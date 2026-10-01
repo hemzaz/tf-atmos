@@ -1,0 +1,284 @@
+---
+# Local sandbox stack — fnx-local-sandbox
+#
+# Runs real terraform apply/destroy against the Floci AWS emulator, with no AWS
+# account and no credentials. This is how a component is proven to actually
+# provision, rather than merely validate.
+#
+#   atmos emulator up aws -s fnx-local-sandbox
+#   atmos terraform apply vpc/main -s fnx-local-sandbox
+#   atmos emulator down aws -s fnx-local-sandbox
+#
+# Deliberately standalone: it does not import the dev/staging/prod component
+# files, so nothing here can affect a real environment, and a change to a real
+# environment cannot silently change what the sandbox proves.
+#
+# Known Floci gaps, each verified against the running emulator rather than
+# assumed. They are limits of the emulator, not defects in the components:
+#   - CreateNetworkAcl is unimplemented          -> manage_network_acls: false
+#   - no VPC default SG to adopt                 -> manage_default_security_group: false
+#   - CreateDBSubnetGroup is unimplemented, so the rds component cannot be
+#     exercised here. It IS exercised against LocalEmu - see localemu.yaml -
+#     and that lane is what caught the overlapping backup and maintenance
+#     windows that would have failed CreateDBInstance in staging and prod.
+#   - CreateCacheSubnetGroup is unimplemented too, so elasticache is blocked
+#     here for the same reason rds is. Unlike rds it has no coverage
+#     anywhere: LocalEmu creates the replication group but not its member
+#     cache clusters, so the provider's read fails with CacheClusterNotFound.
+#   - apigateway cannot be exercised here either, though not for the reason
+#     recorded in #141. That claim - that the create waiter reads
+#     rootResourceId, which GetRestApi omits - is wrong. A TF_LOG=DEBUG trace
+#     shows AWS provider 6.65 waiting on the RestApi's `apiStatus` field
+#     (UPDATING|AVAILABLE|PENDING|FAILED). Neither emulator returns it, so the
+#     SDK reads "" and the create fails with "unexpected state '', wanted
+#     target 'AVAILABLE'". LocalEmu DOES return rootResourceId and still fails
+#     identically, which is what disproved the original explanation. The REST
+#     API itself is created correctly first - verified with get-rest-apis - so
+#     this is an emulator response gap, not a defect, but it means apigateway
+#     has no executing coverage on either emulator and the AWS_PROXY
+#     integration and aws_lambda_permission added in #138 have still never
+#     executed anywhere.
+#   - DescribeManagedPrefixLists is unimplemented, so a VPC-attached lambda
+#     cannot be exercised here: the component resolves the region's S3 managed
+#     prefix list for egress. lambda/main therefore runs outside a VPC, and the
+#     prefix-list path has no executing coverage anywhere.
+#   - DescribeSecurityGroups returns empty UserIdGroupPairs, dropping the
+#     self-reference on `self = true` rules, so a re-plan of vpc/main always
+#     shows aws_security_group.default as changed. apply and destroy both
+#     succeed; only idempotency is affected, and only here.
+import:
+  - catalog/_base/defaults
+  - mixins/tenant/fnx
+  - mixins/region/us-east-1
+  - orgs/fnx/local/_defaults
+  - catalog/emulator/aws
+  - catalog/vpc/defaults
+  - catalog/kms/defaults
+
+vars:
+  region: us-east-1
+
+# Sandbox state is local and disposable. The inherited S3 backend assumes a role
+# in the management account and writes to the shared state bucket — neither
+# exists here, and neither should: a throwaway emulator run must never touch
+# real state.
+terraform:
+  backend_type: local
+  backend:
+    local: {}
+
+settings:
+  environment:
+    description: "Local Floci sandbox"
+    namespace: sandbox
+    account: local
+    aws_account_id: "000000000000"
+    vpc_cidr: "10.90.0.0/16"
+    enable_vpc_flow_logs: false
+  context:
+    tenant: fnx
+    environment: sandbox
+    stage: local
+
+components:
+  terraform:
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "10.90.0.0/16"
+        private_subnets:
+          - "10.90.1.0/24"
+          - "10.90.2.0/24"
+        public_subnets:
+          - "10.90.101.0/24"
+          - "10.90.102.0/24"
+        # Exercises the database_subnet_ids output, which had no coverage at all
+        # until it was added - aws_subnet.database existed with no way to read it.
+        database_subnets:
+          - "10.90.201.0/24"
+          - "10.90.202.0/24"
+        # NAT gateways and flow logs are off: they cost time to converge and add
+        # nothing to what the sandbox is proving.
+        nat_gateway_enabled: false
+        vpc_flow_logs_enabled: false
+        # Floci does not implement CreateNetworkAcl, and does not pre-create a
+        # VPC default security group for aws_default_security_group to adopt.
+        # These two are emulator gaps, not defects in the component - both stay
+        # true everywhere else.
+        manage_network_acls: false
+        manage_default_security_group: false
+        # kms/main's allow_cloudwatch_logs already grants every log group in
+        # this account and region, so the flow-log group uses it instead of
+        # creating its own per-VPC key. Flow logs are off here
+        # (vpc_flow_logs_enabled: false above), but the value is still
+        # resolved, so kms/main must still be applied first - the sandbox
+        # workflow already does (kms/main before vpc/main).
+        flow_logs_kms_key_arn: !terraform.state kms/main .key_arn
+      dependencies:
+        components:
+          - component: kms/main
+
+    kms/main:
+      metadata:
+        component: kms
+        inherits:
+          - kms/defaults
+      vars:
+        name_prefix: sandbox
+        description: "Sandbox CMK"
+        enable_key_rotation: true
+        deletion_window_in_days: 7
+        alias_name: "alias/sandbox"
+        # This lane runs no Auto Scaling or EKS node groups, so the grant
+        # (kms/defaults default: true) would do nothing here.
+        allow_autoscaling_ebs: false
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    network/main:
+      metadata:
+        component: dns
+      vars:
+        root_domain: sandbox.internal
+        create_root_zone: false
+        zones:
+          main:
+            name: "sandbox.internal"
+            comment: "Sandbox zone"
+            force_destroy: true
+            enable_query_logging: false
+        records: {}
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    secretsmanager/app:
+      metadata:
+        component: secretsmanager
+      vars:
+        environment: sandbox
+        context_name: "sandbox/app"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # lambda executes here and nowhere else. This is the instance that proved
+    # the component could not be created at all without a deployment package:
+    # aws_lambda_function rejects "one of filename,image_uri,s3_bucket must be
+    # specified" at APPLY time, so validate, tflint, checkov and trivy all
+    # reported green while every real instance was uncreatable.
+    #
+    # filename points at a zip the sandbox workflow builds before apply - see
+    # the build-lambda-package step in workflows/sandbox.yaml. Nothing is
+    # committed, because a deployment package is application output and this is
+    # an infrastructure repo; the real stacks name an S3 object instead.
+    #
+    # Deliberately NOT in a VPC: Floci does not implement
+    # DescribeManagedPrefixLists, so the data source that resolves egress for a
+    # VPC-attached lambda cannot run here. That path stays unexercised.
+    lambda/main:
+      metadata:
+        component: lambda
+      vars:
+        function_name: "probe"
+        handler: "main.handler"
+        runtime: "python3.13"
+        filename: "/tmp/tf-atmos-sandbox/lambda.zip"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    # The v1.0.0 notes recorded cognito as unimplemented by Floci. That is no
+    # longer true - CreateUserPool works - so the pool that every /api method
+    # authorizes against finally executes somewhere.
+    cognito/main:
+      metadata:
+        component: cognito
+      vars:
+        name_prefix: "fnx-sandbox-local"
+        deletion_protection: false
+        # Two Floci limits shape this instance, neither a component defect:
+        #   - SetUserPoolMfaConfig is unimplemented, and the provider calls it
+        #     whenever MFA is not OFF, so MFA is OFF here (prod uses ON).
+        #   - CreateUserPoolClient returns a response missing
+        #     prevent_user_existence_errors and explicit_auth_flows, so
+        #     Terraform aborts with "Provider produced inconsistent result
+        #     after apply". No client is declared here for that reason; the
+        #     user pool itself creates and destroys cleanly.
+        mfa_configuration: "OFF"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+
+    securitygroup/app:
+      metadata:
+        component: securitygroup
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        # enforce_no_public_ingress is the guard worth proving: it blocks
+        # creation of any group allowing 0.0.0.0/0 ingress.
+        enforce_no_public_ingress: true
+        security_groups:
+          app:
+            # Every consumer of these groups is another component (it reads the
+            # id through !terraform.state), so a replaced group would leave them
+            # on an emptied old one until they are re-applied. Keep the id; only
+            # a changed rule is briefly absent while it is replaced. See the
+            # component README.
+            # Every rule carries an explicit `key`: without one a rule is keyed
+            # by its position, and removing an earlier rule would replace the
+            # ones after it. Adding or renaming a key on a live rule takes two
+            # applies (see the README).
+            preserve_security_group_id: true
+            # The component's own default for allow_all_egress is now `true`
+            # (matches Cloudposse). This group already has its own explicit
+            # all-outbound egress rule below, so leaving the default in place
+            # would add the reserved `_allow_all_egress_` rule on top of it —
+            # same permission, authorized twice — and apply would fail with
+            # InvalidPermission.Duplicate. Set explicitly to false instead.
+            allow_all_egress: false
+            description: "Sandbox application tier"
+            ingress_rules:
+              - key: "https-vpc"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks: ["10.90.0.0/16"]
+                description: "HTTPS from inside the VPC"
+            egress_rules:
+              - key: "all-outbound"
+                from_port: 0
+                to_port: 0
+                protocol: "-1"
+                cidr_blocks: ["0.0.0.0/0"]
+                description: "All outbound"
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+      dependencies:
+        components:
+          - component: vpc/main
+
+    # ecs is exercised here before it is wired into any real environment by
+    # the infrastructure/* remap. rds cannot be: see the Floci gaps above.
+    ecs/main:
+      metadata:
+        component: ecs
+      vars:
+        fargate_only: true
+        enable_container_insights: true
+        tags:
+          Environment: sandbox
+          Tenant: fnx
+          ManagedBy: Terraform
+

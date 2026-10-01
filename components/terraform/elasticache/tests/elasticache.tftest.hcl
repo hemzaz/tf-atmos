@@ -4,7 +4,7 @@
 mock_provider "aws" {}
 
 variables {
-  region     = "eu-west-2"
+  region     = "us-east-1"
   cluster_id = "cache"
   vpc_id     = "vpc-0123456789abcdef0"
   subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
@@ -386,7 +386,7 @@ run "rotation_policy_folds_in_additional_policy_json" {
     additional_policy_json = jsonencode({
       Version = "2012-10-17"
       Statement = [
-        { Sid = "AllowSecretReadWrite", Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:test" },
+        { Sid = "AllowSecretReadWrite", Effect = "Allow", Action = ["secretsmanager:GetSecretValue"], Resource = "arn:aws:secretsmanager:us-east-1:123456789012:secret:test" },
       ]
     })
   }

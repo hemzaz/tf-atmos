@@ -30,7 +30,7 @@ mock_provider "aws" {
 mock_provider "tls" {}
 
 variables {
-  region     = "eu-west-2"
+  region     = "us-east-1"
   name       = "bastion"
   vpc_id     = "vpc-0123456789abcdef0"
   subnet_ids = ["subnet-0a1b2c3d"]
@@ -191,7 +191,7 @@ run "bastion_generates_its_own_key" {
   variables {
     ssh_key_pair              = null
     create_ssh_keys           = true
-    ssh_key_secret_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    ssh_key_secret_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
   }
 
   assert {
@@ -205,7 +205,7 @@ run "bastion_generates_its_own_key" {
   }
 
   assert {
-    condition     = aws_secretsmanager_secret.ssh_key[0].kms_key_id == "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+    condition     = aws_secretsmanager_secret.ssh_key[0].kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
     error_message = "The private key's secret is encrypted with the given KMS key."
   }
 

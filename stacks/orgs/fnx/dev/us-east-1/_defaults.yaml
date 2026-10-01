@@ -1,0 +1,15 @@
+---
+import:
+  - orgs/fnx/dev/_defaults
+  - mixins/region/us-east-1
+
+vars:
+  region: us-east-1
+settings:
+  environment:
+    availability_zones:
+      - us-east-1a
+      - us-east-1b
+      - us-east-1c
+  context:
+    environment: us-east-1

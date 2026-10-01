@@ -4,22 +4,22 @@
 mock_provider "aws" {
   mock_resource "aws_kinesis_stream" {
     defaults = {
-      arn = "arn:aws:kinesis:eu-west-2:123456789012:stream/test-data-ingest"
+      arn = "arn:aws:kinesis:us-east-1:123456789012:stream/test-data-ingest"
       id  = "test-data-ingest"
     }
   }
 
   mock_resource "aws_kinesis_stream_consumer" {
     defaults = {
-      arn = "arn:aws:kinesis:eu-west-2:123456789012:stream/test-data-ingest/consumer/lambda-processor:1"
+      arn = "arn:aws:kinesis:us-east-1:123456789012:stream/test-data-ingest/consumer/lambda-processor:1"
     }
   }
 }
 
 variables {
-  region     = "eu-west-2"
+  region     = "us-east-1"
   name       = "data-ingest"
-  kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -337,7 +337,7 @@ run "writer_policy_is_unaffected_by_additional_policy_json" {
           Sid      = "AllowKinesisStreamRead"
           Effect   = "Allow"
           Action   = ["kinesis:GetRecords"]
-          Resource = "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+          Resource = "arn:aws:kinesis:us-east-1:123456789012:stream/some-other-stream"
         }
       ]
     })
@@ -360,7 +360,7 @@ run "additional_policy_json_is_folded_into_combined_policy_with_a_rewritten_sid"
           Sid      = "AllowKinesisStreamRead"
           Effect   = "Allow"
           Action   = ["kinesis:GetRecords"]
-          Resource = "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+          Resource = "arn:aws:kinesis:us-east-1:123456789012:stream/some-other-stream"
         }
       ]
     })
@@ -383,7 +383,7 @@ run "additional_policy_json_is_folded_into_combined_policy_with_a_rewritten_sid"
     condition = (
       jsondecode(output.combined_policy).Statement[2].Sid == "AdditionalAllowKinesisStreamRead0"
       && jsondecode(output.combined_policy).Statement[2].Action == ["kinesis:GetRecords"]
-      && jsondecode(output.combined_policy).Statement[2].Resource == "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+      && jsondecode(output.combined_policy).Statement[2].Resource == "arn:aws:kinesis:us-east-1:123456789012:stream/some-other-stream"
     )
     error_message = "The additional_policy_json statement is folded in with its Sid rewritten (prefixed 'Additional', suffixed its index), every other field passed through verbatim."
   }
@@ -404,13 +404,13 @@ run "additional_policy_json_shaped_like_another_streams_writer_policy_never_coll
           Sid      = "AllowKinesisStreamWrite"
           Effect   = "Allow"
           Action   = ["kinesis:PutRecord", "kinesis:PutRecords", "kinesis:DescribeStreamSummary"]
-          Resource = "arn:aws:kinesis:eu-west-2:123456789012:stream/some-other-stream"
+          Resource = "arn:aws:kinesis:us-east-1:123456789012:stream/some-other-stream"
         },
         {
           Sid      = "AllowKinesisStreamKMSWrite"
           Effect   = "Allow"
           Action   = ["kms:GenerateDataKey"]
-          Resource = "arn:aws:kms:eu-west-2:123456789012:key/11111111-1111-1111-1111-111111111111"
+          Resource = "arn:aws:kms:us-east-1:123456789012:key/11111111-1111-1111-1111-111111111111"
         }
       ]
     })

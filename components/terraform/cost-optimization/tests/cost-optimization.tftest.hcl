@@ -6,7 +6,7 @@
 # Run: terraform init -backend=false && terraform test
 
 provider "aws" {
-  region                      = "eu-west-2"
+  region                      = "us-east-1"
   access_key                  = "test"
   secret_key                  = "test"
   skip_credentials_validation = true
@@ -23,10 +23,10 @@ override_data {
 }
 
 variables {
-  region      = "eu-west-2"
+  region      = "us-east-1"
   name        = "main"
   environment = "dev"
-  kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -155,7 +155,7 @@ run "scheduler_logs_are_scoped_to_its_own_log_group" {
     condition = one([
       for s in jsondecode(aws_iam_role_policy.scheduler[0].policy).Statement : s
       if s.Sid == "OwnLogGroup"
-    ]).Resource[0] == "arn:aws:logs:eu-west-2:123456789012:log-group:/aws/lambda/test-main-scheduler:*"
+    ]).Resource[0] == "arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/test-main-scheduler:*"
     error_message = "The logs statement is scoped to the scheduler function's own log group, never arn:aws:logs:*:*:*."
   }
 }

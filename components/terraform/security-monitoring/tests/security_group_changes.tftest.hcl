@@ -25,13 +25,13 @@ mock_provider "aws" {
 
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:eu-west-2:123456789012:test-security-alerts"
+      arn = "arn:aws:sns:us-east-1:123456789012:test-security-alerts"
     }
   }
 }
 
 variables {
-  region = "eu-west-2"
+  region = "us-east-1"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -39,8 +39,8 @@ variables {
   }
   enable_inspector          = false
   guardduty_detector_id     = "12abc34d567e8fa901bc2d34e56789f0"
-  securityhub_account_arn   = "arn:aws:securityhub:eu-west-2:123456789012:hub/default"
-  kms_key_id                = "arn:aws:kms:eu-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+  securityhub_account_arn   = "arn:aws:securityhub:us-east-1:123456789012:hub/default"
+  kms_key_id                = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
   cloudtrail_log_group_name = "/aws/cloudtrail/test-cloudtrail"
 }
 
@@ -53,7 +53,7 @@ run "security_group_changes_reach_the_alert_topic" {
   }
 
   assert {
-    condition     = aws_cloudwatch_event_target.security_group_changes_sns[0].arn == aws_sns_topic.security_alerts.arn && aws_cloudwatch_event_target.security_group_changes_sns[0].arn == "arn:aws:sns:eu-west-2:123456789012:test-security-alerts"
+    condition     = aws_cloudwatch_event_target.security_group_changes_sns[0].arn == aws_sns_topic.security_alerts.arn && aws_cloudwatch_event_target.security_group_changes_sns[0].arn == "arn:aws:sns:us-east-1:123456789012:test-security-alerts"
     error_message = "The rule's target must be the stack's security alert topic."
   }
 

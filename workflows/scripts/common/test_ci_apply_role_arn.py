@@ -18,7 +18,7 @@ def ci(account="123456789012", prefix="fnx-prod-production-ci", **overrides):
 
 class ApplyRoleArnTest(unittest.TestCase):
     def test_arn_is_the_iam_ci_apply_role(self):
-        # The name the backend's prod_write role trusts (stacks/orgs/fnx/core/eu-west-2/root.yaml)
+        # The name the backend's prod_write role trusts (stacks/orgs/fnx/core/us-east-1/root.yaml)
         self.assertEqual(
             ci_apply_role_arn.apply_role_arn(ci()),
             "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply",

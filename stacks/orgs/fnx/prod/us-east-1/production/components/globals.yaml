@@ -1,0 +1,147 @@
+---
+# =============================================================================
+# Global Component Configurations for Production Environment
+# =============================================================================
+# PRODUCTION ENVIRONMENT - ALL CHANGES REQUIRE APPROVAL
+# This file defines environment-wide settings with security-first approach
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/us-east-1/_defaults
+
+  # Import catalog defaults for all components
+  - catalog/vpc/defaults
+  - catalog/network/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/external-secrets/defaults
+  - catalog/ec2/defaults
+  - catalog/eks/defaults
+  - catalog/iam/defaults
+  - catalog/acm/defaults
+  - catalog/apigateway/defaults
+  - catalog/monitoring/defaults
+
+vars:
+  # Core environment identifiers
+  tags:
+    Team: "Platform"
+    CostCenter: "Production"
+    Project: "Infrastructure"
+    Environment: "production"
+    ManagedBy: "Terraform"
+    Tenant: "fnx"
+    Application: "Production"
+    Provisioner: "Atmos"
+    DataClassification: "confidential"
+    Compliance: "pci-sox-gdpr"
+    CriticalityLevel: "high"
+    SLA: "99.9"
+    BackupRequired: "true"
+
+# Environment metadata (not passed to Terraform). Moved here from a stack-wide
+# `metadata:` block, which Atmos no longer allows; component templates read it
+# as {{ .settings.environment.<key> }}.
+settings:
+  environment:
+    # The stack's one domain. Every dns zone/record, acm domain/SAN and
+    # apigateway custom domain derives from it; the Route 53 zone ids come from
+    # the dns instances' zone_ids output, never from settings. example.com is a
+    # placeholder base until the owner sets the real domain.
+    domain_name: "fnx.example.com"
+    description: "Production Environment - Business Critical Infrastructure"
+    owner: "Platform Team"
+    version: "1.0.0"
+    stage: "production"
+    region: "us-east-1"
+
+  # Compliance requirements
+    compliance:
+      hipaa: false
+      pci: true
+      sox: true
+      gdpr: true
+
+  # Monitoring contacts - 24/7 coverage
+    monitoring:
+      critical_alerts:
+        - "prod-critical@example.com"
+        - "oncall@example.com"
+      warning_alerts:
+        - "prod-alerts@example.com"
+      pagerduty_service_key_ssm_parameter: /fnx/production/pagerduty/service_key
+      # cost-optimization/main's monthly AWS Budget (numeric string - see
+      # components/terraform/cost-optimization/variables.tf).
+      budget_monthly_limit: "10000"
+
+  # Change management - strict controls
+    change_management:
+      approval_required: true
+      change_window: "weekday-maintenance"
+      emergency_contact: "prod-emergency@example.com"
+      rollback_required: true
+
+  # SLA requirements
+    sla:
+      availability: "99.9%"
+      rpo: "1 hour"
+      rto: "4 hours"
+    tenant_name: production
+    eks_kubernetes_version: "1.36"
+    eks_public_access: false
+    rds_engine: "postgres"
+    rds_engine_version: "14"
+    use_external_secrets: true
+    # eks-backend-services/main's images. Release-pipeline-owned: these
+    # repositories/tags are not built by this repo. Terraform requires each
+    # value to be repository:tag or repository@sha256:<digest>, never :latest
+    # (variable validation) -- keep this map's tags in step with what the
+    # release pipeline actually pushes.
+    backend_service_images:
+      api_gateway: "ghcr.io/fnx-platform/api-gateway:1.4.2"
+      platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
+      auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
+      job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
+    secrets_manager_path_prefix: "production/fnx/certificates"
+    enable_container_insights: true
+    enable_vpc_flow_logs: true
+    enable_enhanced_monitoring: true
+    enable_guard_duty: true
+    enable_security_hub: true
+    security:
+      vpc_flow_logs: true
+      encryption_at_rest: true
+      encryption_in_transit: true
+      ssl_enforcement: true
+      kms_key_rotation: true
+      imdsv2_required: true
+
+  # Production-specific settings
+    enable_debug_logging: false
+    retention_days: 90
+    backup_retention_days: 30
+    multi_az: true
+    cross_zone_load_balancing: true
+    min_availability_zones: 3
+  context:
+    environment: production
+
+components:
+  terraform:
+    # Human cluster admins of every eks instance in this stack (eks/main and
+    # eks/data inherit eks/defaults): Cloud Posse's map_additional_iam_roles
+    # (components/terraform/eks/variables.tf); groups ["system:masters"] is a
+    # cluster-scoped AmazonEKSClusterAdminPolicy access entry. They apply the
+    # in-cluster components through the bastion's SSM port-forward
+    # (docs/OPERATIONS.md, "In-cluster components"), so
+    # each rolearn must also be in backend/main's
+    # access_roles.prod_write allowed_principal_arns
+    # (stacks/orgs/fnx/core/us-east-1/root.yaml). check-cluster-api-ci.py fails
+    # a role listed here but not there, and warns while this list is empty.
+    # The full role ARN WITH its path, e.g. IAM Identity Center's:
+    #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_<hash>"
+    #     groups: ["system:masters"]
+    # Empty until the owner supplies the real ARN: an access entry for a role
+    # that does not exist fails eks/main's apply.
+    eks/defaults:
+      vars:
+        map_additional_iam_roles: []

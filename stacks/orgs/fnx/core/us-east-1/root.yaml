@@ -1,0 +1,85 @@
+---
+# =============================================================================
+# fnx-core-root - the management account's stack
+# =============================================================================
+# Owns the ONE Terraform state backend every stack uses: bucket
+# fnx-terraform-state, its KMS key, and the stage-split read-only / read-write
+# access roles (components/terraform/backend). Workload stacks have no backend
+# instance; their iam/ci names this instance's roles by the same naming
+# convention the stack backend uses (stacks/orgs/fnx/_defaults.yaml), so no CI
+# role ever reads this stack's state.
+#
+# Bootstrap (cold start, once): workflows/bootstrap.yaml `backend-cold-start`, or by
+# hand - see components/terraform/backend/README.md#bootstrap.
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - orgs/fnx/core/_defaults
+  - catalog/backend/defaults
+
+vars:
+  region: us-east-1
+
+settings:
+  environment:
+    description: "Management account - organization-wide shared infrastructure"
+    namespace: root
+  context:
+    tenant: fnx
+    environment: root
+    stage: core
+
+components:
+  terraform:
+    backend/main:
+      metadata:
+        component: backend
+        inherits:
+          - backend
+      vars:
+        account_id: "{{ .settings.environment.management_account_id }}"
+        enable_access_logging: true
+        # Who may use the state. The CI roles are named from iam/ci's
+        # ci_role_name_prefix ("<tenant>-<account>-<environment>-ci", see each
+        # workload stack's components/security.yaml) in that stack's
+        # settings.environment.account_id - strings, not !terraform.state:
+        # iam/ci deploys after this instance, and CI roles never read the
+        # core state. The trust is an aws:PrincipalArn condition, so the roles do
+        # not have to exist yet (see components/terraform/backend/iam.tf).
+        # Add a stack's roles here when adding a stack. The administrator who
+        # applies this instance is always trusted as well (Cloud Posse's
+        # caller rule); list any other human/admin role ARN explicitly.
+        # Account IDs are the repository's placeholders - see
+        # docs/OPERATIONS.md#first-deploy-inputs.
+        #
+        # Human operators: every rolearn in a workload stack's eks
+        # map_additional_iam_roles (its components/globals.yaml) applies that
+        # stack's in-cluster components from inside the VPC, so it goes in the
+        # stage's write role too - `write` for dev/staging, `prod_write` for
+        # prod - with the same full ARN, path included (aws:PrincipalArn
+        # carries the role's path). check-cluster-api-ci.py fails a stack
+        # whose admin role is missing here. None yet: the owner supplies them.
+        access_roles:
+          read:
+            # Dev/staging state: their CI plan roles (PR plans, drift).
+            allowed_principal_arns:
+              - "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-plan"
+              - "arn:aws:iam::123456789012:role/fnx-staging-staging-01-ci-plan"
+          prod_read:
+            # Prod state: ONLY prod's plan role, which trusts the master
+            # branch subject alone (owner decision D3) - never PR code.
+            allowed_principal_arns:
+              - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan"
+          write:
+            # Dev/staging state: their CI apply roles (master branch subject
+            # only, see iam/ci ci_apply_role_trusted_repos).
+            allowed_principal_arns:
+              - "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-apply"
+              - "arn:aws:iam::123456789012:role/fnx-staging-staging-01-ci-apply"
+          prod_write:
+            # Prod state: ONLY prod's apply role.
+            allowed_principal_arns:
+              - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply"
+          # core_write: no principals listed - the applying administrator only
+          # (stacks/catalog/backend/defaults.yaml).
