@@ -81,6 +81,33 @@ variable "zones" {
     ])
     error_message = "enable_query_logging is only supported for public zones; private zones (with vpc_associations) need Route53 Resolver query logging instead."
   }
+
+  # Route53 only logs to a us-east-1 log group in the zone's own account, and a
+  # CloudWatch Logs CMK must be in the log group's region.
+  validation {
+    condition = alltrue(flatten([
+      for z in values(var.zones) : [
+        for key, value in z.query_logging_config : (
+          key == "cloudwatch_log_group_arn" ? can(regex("^arn:aws[a-z-]*:logs:us-east-1:[0-9]{12}:log-group:[^:*]+$", value)) :
+          key == "kms_key_id" ? can(regex("^arn:aws[a-z-]*:kms:us-east-1:[0-9]{12}:key/[^:]+$", value)) :
+          key == "retention_days" ? contains(["0", "1", "3", "5", "7", "14", "30", "60", "90", "120", "150", "180", "365", "400", "545", "731", "1096", "1827", "2192", "2557", "2922", "3288", "3653"], value) :
+          false
+        )
+      ]
+    ]))
+    error_message = "query_logging_config keys are cloudwatch_log_group_arn (a us-east-1 log group ARN without :*), kms_key_id (a us-east-1 KMS key ARN) and retention_days (a CloudWatch Logs retention value)."
+  }
+}
+
+variable "query_log_retention_in_days" {
+  type        = number
+  description = "Days CloudWatch Logs keeps the query log groups this component creates; zones.<key>.query_logging_config.retention_days overrides it per zone. 7 matches eks's cluster_log_retention_period default (owner decision); prod pins 90."
+  default     = 7
+
+  validation {
+    condition     = contains([0, 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.query_log_retention_in_days)
+    error_message = "query_log_retention_in_days must be a CloudWatch Logs retention value (0 = never expire, 1, 3, 5, 7, 14, 30, ...)."
+  }
 }
 
 variable "delegation_ttl" {
