@@ -29,5 +29,16 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
 - `cors_configuration` and `http_routes` apply to HTTP APIs only; a REST API ignores them silently
   (staging and prod set CORS on REST instances, a known gap).
 - `api_name` output is null for an HTTP API.
+- REST caching is per method: `cache_method_paths` lists `api_methods` keys (`"GET /products"`)
+  and `enable_caching` provisions the billed cache cluster; each needs the other. `"*/*"` needs
+  `cache_all_methods_acknowledged`. A cached method with authorization other than `NONE` must put
+  the identity header in its `request_parameters` and its integration's `cache_key_parameters`,
+  or users share cache entries (validated). Cached data is encrypted, and `Cache-Control`
+  bypass without `execute-api:InvalidateCache` gets a 403. No instance caches today.
+- The stage-wide `*/*` method settings (throttling, execution logging, metrics) apply to every
+  REST stage; they used to exist only with caching on. REST execution and access logging need the
+  account-level API Gateway CloudWatch role, which no component manages yet.
+- `enable_waf`'s inline web ACL has no logging configuration (so nothing to redact); the `waf`
+  component is the one with logs.
 - `enable_waf` and `tracing_enabled` default to `false`. WAF is on for `apigateway/data` in every
   stack and for prod's `apigateway/main`; X-Ray tracing is on in prod only.

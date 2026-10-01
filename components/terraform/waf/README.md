@@ -22,5 +22,9 @@ and a CloudWatch log group with its own scoped log resource policy. Modelled on 
 - Each logging instance creates its own CloudWatch Logs resource policy, which counts against the
   10-per-region quota; set `manage_log_resource_policy = false` to fall back to the shared
   `AWSWAF-LOGS` policy.
+- The logging configuration redacts the `authorization` and `cookie` headers (`redacted_fields`,
+  Cloud Posse's shape); the component rejects a map that drops either. Extend it per instance:
+  `waf/defaults` repeats the default so Atmos deep-merges an instance's extra entries onto it.
+  Each field becomes its own `redacted_fields` block, as AWS requires.
 - Rule priorities must be unique across all three rule lists. Rate rules accept only `IP` or
   `CONSTANT` aggregation and a `limit` of at least 10.

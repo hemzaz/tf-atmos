@@ -925,6 +925,13 @@ components:
             header_name: "user-agent"
             text_transformation_type: "LOWERCASE"
 
+        # Deep-merged onto waf/defaults' authorization + cookie redaction: this
+        # API's usage plans authenticate with an X-Api-Key header, which is a
+        # credential too.
+        redacted_fields:
+          x_api_key:
+            single_header: ["x-api-key"]
+
         tags:
           Layer: "security"
           Service: "waf"

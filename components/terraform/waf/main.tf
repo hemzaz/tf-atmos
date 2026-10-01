@@ -26,6 +26,20 @@ locals {
   log_group_name = "aws-waf-logs-${local.name}"
 
   manage_log_resource_policy = local.enabled && var.enable_logging && var.manage_log_resource_policy
+
+  # var.redacted_fields (Cloud Posse's shape, where one entry may list several
+  # headers) flattened to one { type, name } object per redacted field, since
+  # AWS allows exactly one field in each redacted_fields block. Keyed so that a
+  # field named twice (e.g. by two entries) is redacted once. Header names are
+  # lowercased: WAF matches single_header names case-insensitively.
+  redacted_fields = merge([
+    for k, v in var.redacted_fields : merge(
+      v.method ? { "method" = { type = "method", name = null } } : {},
+      v.query_string ? { "query_string" = { type = "query_string", name = null } } : {},
+      v.uri_path ? { "uri_path" = { type = "uri_path", name = null } } : {},
+      { for h in coalesce(v.single_header, []) : "single_header:${lower(h)}" => { type = "single_header", name = lower(h) } },
+    )
+  ]...)
 }
 
 resource "aws_wafv2_web_acl" "this" {
@@ -274,6 +288,68 @@ resource "aws_wafv2_web_acl_logging_configuration" "this" {
 
   resource_arn            = aws_wafv2_web_acl.this[0].arn
   log_destination_configs = [aws_cloudwatch_log_group.this[0].arn]
+
+  # Without this the Authorization and Cookie header values (bearer tokens,
+  # session cookies) land in the log group in clear text. One block per field,
+  # see local.redacted_fields.
+  dynamic "redacted_fields" {
+    for_each = local.redacted_fields
+    content {
+      dynamic "method" {
+        for_each = redacted_fields.value.type == "method" ? [1] : []
+        content {}
+      }
+      dynamic "query_string" {
+        for_each = redacted_fields.value.type == "query_string" ? [1] : []
+        content {}
+      }
+      dynamic "uri_path" {
+        for_each = redacted_fields.value.type == "uri_path" ? [1] : []
+        content {}
+      }
+      dynamic "single_header" {
+        for_each = redacted_fields.value.type == "single_header" ? [redacted_fields.value.name] : []
+        content {
+          name = single_header.value
+        }
+      }
+    }
+  }
+
+  # Cloud Posse's logging_filter, rendered as cloudposse/terraform-aws-waf
+  # does. Default null: every request is logged, as before.
+  dynamic "logging_filter" {
+    for_each = var.logging_filter != null ? [var.logging_filter] : []
+    content {
+      default_behavior = logging_filter.value.default_behavior
+
+      dynamic "filter" {
+        for_each = logging_filter.value.filter
+        content {
+          behavior    = filter.value.behavior
+          requirement = filter.value.requirement
+
+          dynamic "condition" {
+            for_each = filter.value.condition
+            content {
+              dynamic "action_condition" {
+                for_each = condition.value.action_condition != null ? [condition.value.action_condition] : []
+                content {
+                  action = action_condition.value.action
+                }
+              }
+              dynamic "label_name_condition" {
+                for_each = condition.value.label_name_condition != null ? [condition.value.label_name_condition] : []
+                content {
+                  label_name = label_name_condition.value.label_name
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 
   depends_on = [aws_cloudwatch_log_resource_policy.waf_logging]
 }

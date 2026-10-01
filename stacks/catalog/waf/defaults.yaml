@@ -34,5 +34,15 @@ components:
         sampled_requests_enabled: true
         enable_logging: true
         log_group_retention_days: 365
+        # Keeps bearer tokens and session cookies out of the WAF logs. Repeated
+        # here (the component has the same default) so an instance extends it
+        # through Atmos's map deep merge, e.g. adding
+        # `x_api_key: { single_header: ["x-api-key"] }`, instead of replacing
+        # it; the component rejects a map without these two.
+        redacted_fields:
+          authorization:
+            single_header: ["authorization"]
+          cookie:
+            single_header: ["cookie"]
         tags:
           Component: "WAF"

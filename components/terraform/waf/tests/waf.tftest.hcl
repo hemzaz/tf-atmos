@@ -182,3 +182,113 @@ run "unique_priorities_across_rule_lists_are_accepted" {
     error_message = "All three rule types are rendered onto the web ACL."
   }
 }
+
+# ---------------------------------------------------------------------------
+# Log redaction: credentials must never reach the WAF logs.
+# ---------------------------------------------------------------------------
+
+run "logging_redacts_authorization_and_cookie_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_wafv2_web_acl_logging_configuration.this[0].redacted_fields) == 2
+    error_message = "The default redacts exactly two fields."
+  }
+
+  assert {
+    condition = toset(flatten([
+      for f in aws_wafv2_web_acl_logging_configuration.this[0].redacted_fields : [for h in f.single_header : h.name]
+    ])) == toset(["authorization", "cookie"])
+    error_message = "The Authorization and Cookie headers are redacted from the logs by default."
+  }
+
+  assert {
+    condition     = length(aws_wafv2_web_acl_logging_configuration.this[0].logging_filter) == 0
+    error_message = "No logging_filter by default: every request is still logged."
+  }
+}
+
+run "cloudfront_scope_logging_also_redacts_credentials" {
+  command = plan
+
+  variables {
+    region = "us-east-1"
+    scope  = "CLOUDFRONT"
+  }
+
+  assert {
+    condition = toset(flatten([
+      for f in aws_wafv2_web_acl_logging_configuration.this[0].redacted_fields : [for h in f.single_header : h.name]
+    ])) == toset(["authorization", "cookie"])
+    error_message = "The CLOUDFRONT-scope logging configuration redacts the same headers as REGIONAL."
+  }
+}
+
+run "caller_can_extend_redacted_fields" {
+  command = plan
+
+  variables {
+    redacted_fields = {
+      authorization = { single_header = ["authorization"] }
+      cookie        = { single_header = ["Cookie"] }
+      extra         = { single_header = ["X-Api-Key", "x-amz-security-token"], query_string = true }
+    }
+  }
+
+  assert {
+    condition     = length(aws_wafv2_web_acl_logging_configuration.this[0].redacted_fields) == 5
+    error_message = "Each header and the query string is its own redacted_fields block (AWS allows one field per block)."
+  }
+
+  assert {
+    condition = toset(flatten([
+      for f in aws_wafv2_web_acl_logging_configuration.this[0].redacted_fields : [for h in f.single_header : h.name]
+    ])) == toset(["authorization", "cookie", "x-api-key", "x-amz-security-token"])
+    error_message = "Extra headers are redacted alongside the defaults, lowercased."
+  }
+
+  assert {
+    condition     = length([for f in aws_wafv2_web_acl_logging_configuration.this[0].redacted_fields : f if length(f.query_string) == 1 && length(f.single_header) == 0]) == 1
+    error_message = "The query string is redacted in a block of its own."
+  }
+}
+
+run "dropping_the_credential_headers_is_rejected" {
+  command = plan
+
+  variables {
+    redacted_fields = {
+      api_key = { single_header = ["x-api-key"] }
+    }
+  }
+
+  expect_failures = [var.redacted_fields]
+}
+
+run "logging_filter_is_rendered_when_set" {
+  command = plan
+
+  variables {
+    logging_filter = {
+      default_behavior = "DROP"
+      filter = [{
+        behavior    = "KEEP"
+        requirement = "MEETS_ANY"
+        condition = [
+          { action_condition = { action = "BLOCK" } },
+          { label_name_condition = { label_name = "awswaf:managed:aws:core-rule-set:SizeRestrictions_Body" } },
+        ]
+      }]
+    }
+  }
+
+  assert {
+    condition     = aws_wafv2_web_acl_logging_configuration.this[0].logging_filter[0].default_behavior == "DROP"
+    error_message = "logging_filter.default_behavior is passed through."
+  }
+
+  assert {
+    condition     = length(aws_wafv2_web_acl_logging_configuration.this[0].logging_filter[0].filter) == 1
+    error_message = "The filter is rendered."
+  }
+}
