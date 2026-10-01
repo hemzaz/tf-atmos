@@ -33,6 +33,17 @@ private `internal` = `internal.<d>`; `network/services` holds `services.<d>` and
   quickly; `delegation_ttl` sets it for `parent_zone` records. The child zone's own apex NS
   record keeps Route 53's 172800.
 - `enable_query_logging` is rejected for private zones (use Resolver query logging).
+- Query logging (`query-logging.tf`) lives in **us-east-1** whatever the stack region: Route53
+  only publishes there. Per zone a log group `/aws/route53/<zone>/queries`; per instance and
+  account one CloudWatch Logs resource policy `route53-query-logging-<first zone>` (route53,
+  scoped by `aws:SourceAccount`/`aws:SourceArn`; the `aws_route53_query_log` waits for it) and
+  one KMS key `alias/route53-query-logs-<first zone>` (rotation on; account root plus
+  `logs.us-east-1` scoped to `/aws/route53/*`), because `kms/main` is in the stack region. All
+  three use the resource `region` argument, not a provider alias; DNS-account zones get theirs
+  in the DNS account. CloudWatch Logs allows 10 resource policies per region and account.
+- `query_log_retention_in_days` defaults to 7 (prod: 90). A zone's `query_logging_config` may
+  set `retention_days`, a us-east-1 `kms_key_id` (no own key is then created for it) or a
+  us-east-1 `cloudwatch_log_group_arn` (no log group is created; the policy still names it).
 - Records in a DNS-account zone can only reference health checks from the main account.
 - `workflows/scripts/common/check-domains.py` (run by `validate-all`) requires every record name
   to sit in its zone and not inside a more specific public zone of the stack, and every nested

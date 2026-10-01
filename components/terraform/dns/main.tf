@@ -64,12 +64,6 @@ locals {
       dns_account = contains(local.dns_account_zone_keys, record.zone_name)
     }
   }
-
-  query_logged_zones = { for k, zone in var.zones : k => zone if zone.enable_query_logging }
-  query_log_groups = {
-    for k, zone in local.query_logged_zones : k => zone
-    if !contains(keys(lookup(zone, "query_logging_config", {})), "cloudwatch_log_group_arn")
-  }
 }
 
 # Create reusable delegation sets if specified
@@ -164,66 +158,6 @@ resource "aws_route53_zone" "dns_account_zones" {
     each.value.tags,
     {
       Name = each.value.name
-    }
-  )
-}
-
-# Setup DNS query logging if enabled
-resource "aws_route53_query_log" "query_logging" {
-  for_each = { for k, zone in local.query_logged_zones : k => zone if !contains(local.dns_account_zone_keys, k) }
-
-  cloudwatch_log_group_arn = lookup(
-    each.value.query_logging_config,
-    "cloudwatch_log_group_arn",
-    try(aws_cloudwatch_log_group.dns_query_logs[each.key].arn, null)
-  )
-
-  zone_id = aws_route53_zone.zones[each.key].zone_id
-}
-
-resource "aws_route53_query_log" "dns_account_query_logging" {
-  provider = aws.dns_account
-  for_each = { for k, zone in local.query_logged_zones : k => zone if contains(local.dns_account_zone_keys, k) }
-
-  cloudwatch_log_group_arn = lookup(
-    each.value.query_logging_config,
-    "cloudwatch_log_group_arn",
-    try(aws_cloudwatch_log_group.dns_account_query_logs[each.key].arn, null)
-  )
-
-  zone_id = aws_route53_zone.dns_account_zones[each.key].zone_id
-}
-
-# Create log groups for DNS query logging if needed
-resource "aws_cloudwatch_log_group" "dns_query_logs" {
-  for_each = { for k, zone in local.query_log_groups : k => zone if !contains(local.dns_account_zone_keys, k) }
-
-  name              = "/aws/route53/${each.value.name}/queries"
-  retention_in_days = lookup(each.value.query_logging_config, "retention_days", 30)
-  kms_key_id        = lookup(each.value.query_logging_config, "kms_key_id", null)
-
-  tags = merge(
-    var.tags,
-    each.value.tags,
-    {
-      Name = "/aws/route53/${each.value.name}/queries"
-    }
-  )
-}
-
-resource "aws_cloudwatch_log_group" "dns_account_query_logs" {
-  provider = aws.dns_account
-  for_each = { for k, zone in local.query_log_groups : k => zone if contains(local.dns_account_zone_keys, k) }
-
-  name              = "/aws/route53/${each.value.name}/queries"
-  retention_in_days = lookup(each.value.query_logging_config, "retention_days", 30)
-  kms_key_id        = lookup(each.value.query_logging_config, "kms_key_id", null)
-
-  tags = merge(
-    var.tags,
-    each.value.tags,
-    {
-      Name = "/aws/route53/${each.value.name}/queries"
     }
   )
 }

@@ -196,6 +196,9 @@ components:
         root_domain: "{{ .settings.environment.domain_name }}"
         create_root_zone: false
         multi_account_dns_delegation: false
+        # Query log groups (us-east-1): prod keeps 90 days, like eks's
+        # cluster_log_retention_period; dev and staging keep the default 7.
+        query_log_retention_in_days: 90
         zones:
           main:
             name: "{{ .settings.environment.domain_name }}"
@@ -249,6 +252,7 @@ components:
       vars:
         root_domain: "{{ .settings.environment.domain_name }}"
         create_root_zone: false
+        query_log_retention_in_days: 90
         zones:
           services:
             name: "services.{{ .settings.environment.domain_name }}"

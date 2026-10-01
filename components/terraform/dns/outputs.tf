@@ -62,6 +62,16 @@ output "domain_validation_options" {
   }
 }
 
+output "query_log_group_arns" {
+  description = "Map of query-logged zone keys to the us-east-1 CloudWatch Logs log group ARN Route53 publishes their query logs to"
+  value       = local.query_log_group_arns
+}
+
+output "query_log_kms_key_arns" {
+  description = "ARNs of the us-east-1 KMS keys this component created for its query log groups (main and DNS account); empty when it created none"
+  value       = concat(aws_kms_key.query_logs[*].arn, aws_kms_key.dns_account_query_logs[*].arn)
+}
+
 output "private_zone_vpc_associations" {
   description = "Map of private zone VPC associations"
   value = {
