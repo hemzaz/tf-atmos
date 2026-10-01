@@ -23,7 +23,7 @@ log_warning() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 
 echo -e "\n${WHITE}=== Disaster Recovery Status Check ===${NC}\n"
 
-DR_REGION="${DR_REGION:-us-east-1}"
+DR_REGION="${DR_REGION:-us-east-2}"
 
 echo "Primary Stack: $STACK"
 echo "Primary Region: $REGION"
