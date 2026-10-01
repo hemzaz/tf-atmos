@@ -84,14 +84,31 @@ resource "aws_iam_role" "lambda_uploader" {
 data "aws_iam_policy_document" "lambda_uploader" {
   count = local.create_lambda_uploader_role ? 1 : 0
 
-  # PutObject is the upload. GetObject and ListBucket let the app CI check
-  # whether a version's key already exists before uploading (without
-  # ListBucket, HeadObject on a missing key returns 403, not 404), so a
-  # released version is never overwritten.
+  # PutObject is the upload, allowed only as a conditional write
+  # (If-None-Match: *): S3 answers 412 for a key that already exists, so a
+  # released version can never be overwritten (S3 "Enforce conditional
+  # writes", s3:if-none-match). Multipart uploads send it on
+  # CompleteMultipartUpload, which is authorized as s3:PutObject too.
   statement {
     sid       = "PutLambdaPackages"
     effect    = "Allow"
-    actions   = ["s3:PutObject", "s3:GetObject"]
+    actions   = ["s3:PutObject"]
+    resources = ["${local.lambda_artifacts_bucket_arn}/*"]
+
+    condition {
+      test     = "Null"
+      variable = "s3:if-none-match"
+      values   = ["false"]
+    }
+  }
+
+  # GetObject and ListBucket let the app CI check whether a version's key
+  # already exists (without ListBucket, HeadObject on a missing key returns
+  # 403, not 404).
+  statement {
+    sid       = "ReadLambdaPackages"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
     resources = ["${local.lambda_artifacts_bucket_arn}/*"]
   }
 

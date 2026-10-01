@@ -42,23 +42,29 @@ components:
 
         # Methods are addressed by resource_path ("/" is the API root), because
         # a stack cannot know this API's resource IDs before apply.
-        # lambda/data-processor disabled (no package yet): "/api" has no method
-        # until it is enabled. Then add back, with `- component:
-        # lambda/data-processor` in dependencies:
-        #   api_methods:      {resource_path: "/api", http_method: "ANY",
-        #                      authorization: "COGNITO_USER_POOLS"}
-        #   api_integrations: {resource_path: "/api", http_method: "ANY",
-        #                      integration_http_method: "POST", type: "AWS_PROXY",
-        #                      uri: !terraform.state lambda/data-processor .function_invoke_arn,
-        #                      lambda_function_name: !terraform.state lambda/data-processor .function_name}
+        # lambda/data-processor is disabled (no package yet), so "/api" has no
+        # method. When it is enabled, append these items to the two lists below
+        # (delete "#   " to keep the indentation) and add
+        # `- component: lambda/data-processor` to dependencies.components:
+        #   api_methods:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       authorization: "COGNITO_USER_POOLS"
+        #   api_integrations:
+        #     - resource_path: "/api"
+        #       http_method: "ANY"
+        #       integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+        #       type: "AWS_PROXY"
+        #       uri: !terraform.state lambda/data-processor .function_invoke_arn
+        #       lambda_function_name: !terraform.state lambda/data-processor .function_name
         api_methods:
           - resource_path: "/"
             http_method: "GET"
             authorization: "NONE"
 
         # "/" stays MOCK on purpose: it is a liveness endpoint, and a canned 200
-        # is the correct answer for one. "/api" is the real entry point and is
-        # proxied to Lambda.
+        # is the correct answer for one. The real entry point, "/api" proxied to
+        # Lambda, comes back with lambda/data-processor (see above).
         api_integrations:
           - resource_path: "/"
             http_method: "GET"

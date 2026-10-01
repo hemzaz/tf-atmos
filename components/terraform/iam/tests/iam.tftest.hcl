@@ -369,25 +369,38 @@ run "lambda_uploader_writes_only_the_stage_bucket" {
     error_message = "The bucket must follow the s3 component's convention <Environment>-lambda-artifacts-<account id> (s3/lambda-artifacts)."
   }
 
-  # Statement order is the document's: objects, bucket, KMS. A single-element
+  # Statement order is the document's: put, get, list, KMS. A single-element
   # list serializes as a bare string.
   assert {
     condition = (
-      length(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement) == 3
-      && toset(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[0].Action) == toset(["s3:PutObject", "s3:GetObject"])
+      length(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement) == 4
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[0].Action == "s3:PutObject"
       && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[0].Resource == "arn:aws:s3:::testenv-01-lambda-artifacts-123456789012/*"
-      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[1].Action == "s3:ListBucket"
-      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[1].Resource == "arn:aws:s3:::testenv-01-lambda-artifacts-123456789012"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[1].Action == "s3:GetObject"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[1].Resource == "arn:aws:s3:::testenv-01-lambda-artifacts-123456789012/*"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Action == "s3:ListBucket"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Resource == "arn:aws:s3:::testenv-01-lambda-artifacts-123456789012"
     )
-    error_message = "S3 access must be PutObject/GetObject on the stage's lambda-artifacts objects and ListBucket on that bucket, and nothing else."
+    error_message = "S3 access must be PutObject and GetObject on the stage's lambda-artifacts objects and ListBucket on that bucket, and nothing else."
+  }
+
+  # Release immutability: PutObject only as a conditional write
+  # (If-None-Match: *), so S3 rejects an upload over an existing key with 412.
+  assert {
+    condition = (
+      keys(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[0].Condition) == ["Null"]
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[0].Condition["Null"] == { "s3:if-none-match" = "false" }
+      && !can(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[1].Condition)
+    )
+    error_message = "s3:PutObject must require s3:if-none-match (Null = false), so a released key can never be overwritten; GetObject stays unconditional."
   }
 
   assert {
     condition = (
-      toset(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Action) == toset(["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"])
-      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Resource == "*"
-      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/testenv-01-main"
-      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[2].Condition["StringEquals"]["kms:ViaService"] == "s3.eu-west-2.amazonaws.com"
+      toset(jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Action) == toset(["kms:GenerateDataKey", "kms:Encrypt", "kms:Decrypt"])
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Resource == "*"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/testenv-01-main"
+      && jsondecode(aws_iam_role_policy.lambda_uploader[0].policy).Statement[3].Condition["StringEquals"]["kms:ViaService"] == "s3.eu-west-2.amazonaws.com"
     )
     error_message = "KMS access must be GenerateDataKey/Encrypt/Decrypt on the kms/main alias only, and only via s3.<region>.amazonaws.com."
   }
@@ -398,6 +411,10 @@ run "lambda_uploader_rejects_a_wildcard_org" {
   command = plan
 
   variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["*/data-app:main"]
     lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
   }
@@ -409,6 +426,10 @@ run "lambda_uploader_rejects_a_wildcard_repo" {
   command = plan
 
   variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/*:main"]
     lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
   }
@@ -420,6 +441,10 @@ run "lambda_uploader_rejects_a_wildcard_branch" {
   command = plan
 
   variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:*"]
     lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
   }
@@ -431,6 +456,10 @@ run "lambda_uploader_rejects_pull_request_subject" {
   command = plan
 
   variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:pull_request"]
     lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
   }
@@ -442,6 +471,10 @@ run "lambda_uploader_rejects_a_repo_without_a_pinned_branch" {
   command = plan
 
   variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app"]
     lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
   }
@@ -453,7 +486,22 @@ run "lambda_uploader_requires_the_kms_alias" {
   command = plan
 
   variables {
+    github_oidc_enabled                  = true
+    github_oidc_repository               = "hemzaz/tf-atmos"
+    github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                  = "test-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
+  }
+
+  expect_failures = [var.lambda_uploader_trusted_github_repos]
+}
+
+run "lambda_uploader_requires_github_oidc" {
+  command = plan
+
+  variables {
+    lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
+    lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
   }
 
   expect_failures = [var.lambda_uploader_trusted_github_repos]

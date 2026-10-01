@@ -14,7 +14,8 @@ derives the same way (name "lambda-artifacts", no bucket_name override, the same
 tags.Environment; both run in the stack's account), and that the alias is "alias/" plus
 the alias_name of the kms/main instance that bucket is encrypted with.
 
-For each enabled lambda instance packaged from s3/lambda-artifacts, s3_key must be
+For each enabled lambda instance packaged from s3/lambda-artifacts, settings.package_version
+must be a YAML string (quoted), and s3_key must be
 "<function_name>/<version>.zip" with a real version: not the "unreleased" placeholder
 (no package exists, so the apply would fail) and not "latest" (an overwritten key
 does not redeploy the function). Exits 1 on any violation.
@@ -85,6 +86,14 @@ def package_errors(where: str, instance: dict) -> list[str]:
     variables = instance.get("vars") or {}
     if variables.get("s3_bucket") != BUCKET_READ:
         return []
+    # describe stacks keeps the YAML type of settings: an unquoted 1.10 is the
+    # float 1.1 here, and the key would silently name another release.
+    version_setting = (instance.get("settings") or {}).get("package_version")
+    if version_setting is not None and not isinstance(version_setting, str):
+        return [
+            f"{where}: settings.package_version {version_setting!r} is a "
+            f"{type(version_setting).__name__}, not a string: quote it (an unquoted 1.10 is 1.1)"
+        ]
     key = variables.get("s3_key") or ""
     function_name = variables.get("function_name") or ""
     prefix = f"{function_name}/"

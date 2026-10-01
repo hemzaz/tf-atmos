@@ -118,6 +118,20 @@ class CheckLambdaPackagesTest(unittest.TestCase):
 
         self.assert_errors(stack(lambda__data_processor=unreleased_and_disabled))
 
+    def test_unquoted_package_version_fails(self):
+        def float_version(instance):
+            instance["settings"] = {"package_version": 1.1}
+            instance["vars"]["s3_key"] = "data-processor/1.1.zip"
+
+        self.assert_errors(stack(lambda__data_processor=float_version), "is a float, not a string")
+
+    def test_quoted_package_version_passes(self):
+        def string_version(instance):
+            instance["settings"] = {"package_version": "1.10"}
+            instance["vars"]["s3_key"] = "data-processor/1.10.zip"
+
+        self.assert_errors(stack(lambda__data_processor=string_version))
+
     def test_latest_key_fails(self):
         self.assert_errors(
             stack(lambda__data_processor=set_var("s3_key", "data-processor/latest.zip")),

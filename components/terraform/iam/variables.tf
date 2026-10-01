@@ -409,6 +409,11 @@ variable "lambda_uploader_trusted_github_repos" {
     condition     = length(var.lambda_uploader_trusted_github_repos) == 0 || var.lambda_uploader_kms_key_alias != null
     error_message = "lambda_uploader_kms_key_alias is required when lambda_uploader_trusted_github_repos is set: the bucket is SSE-KMS."
   }
+
+  validation {
+    condition     = length(var.lambda_uploader_trusted_github_repos) == 0 || var.github_oidc_enabled
+    error_message = "lambda_uploader_trusted_github_repos needs github_oidc_enabled = true: the uploader role trusts this instance's GitHub OIDC provider, so without it no role would be created."
+  }
 }
 
 variable "lambda_uploader_kms_key_alias" {

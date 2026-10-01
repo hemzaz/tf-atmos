@@ -188,8 +188,12 @@ contract:
    `lambda_artifacts_bucket_name` is the bucket, `<Environment>-lambda-artifacts-<account id>`.
    The role may put and read objects in that bucket and use `kms/main` through S3, nothing else.
 2. The app CI uploads each build to `<function_name>/<version>.zip` (`function_name` as in the
-   instance's vars), never overwriting a released key: it checks with `aws s3api head-object` first.
-3. A PR here sets the instance's `settings.package_version` to `<version>`; the changed `s3_key`
+   instance's vars) as a conditional write: `aws s3api put-object --if-none-match '*'`, or the
+   same header on `complete-multipart-upload` for a multipart upload. The role allows
+   `s3:PutObject` only with `s3:if-none-match`, so released keys are immutable: re-uploading a
+   released version fails (412, or AccessDenied without the header) by design; build a new version.
+3. A PR here sets the instance's `settings.package_version` to `"<version>"`, quoted (an unquoted
+   `1.10` is the YAML float `1.1`, and `check-lambda-packages.py` rejects it); the changed `s3_key`
    is what redeploys the function when CD applies the merge. Roll back by setting an earlier
    version.
 
