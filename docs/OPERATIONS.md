@@ -130,7 +130,8 @@ An operator applies them through the VPC with their own role, a named cluster ad
 gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master):
 
 1. Once per stack, the owner names the role (full ARN, path kept, e.g.
-   `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_<hash>`,
+   `arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>`
+   (`<sso-region>` is the IAM Identity Center home region, not the stack's),
    from `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`) in two places:
    `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
    which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and

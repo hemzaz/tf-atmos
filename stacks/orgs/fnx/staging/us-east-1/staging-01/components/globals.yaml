@@ -112,7 +112,7 @@ components:
     # (stacks/orgs/fnx/core/us-east-1/root.yaml). check-cluster-api-ci.py fails
     # a role listed here but not there, and warns while this list is empty.
     # The full role ARN WITH its path, e.g. IAM Identity Center's:
-    #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_<hash>"
+    #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>"
     #     groups: ["system:masters"]
     # Empty until the owner supplies the real ARN: an access entry for a role
     # that does not exist fails eks/main's apply.

@@ -364,6 +364,8 @@ run "map_entries_expand_policies_and_translate_system_masters" {
 # The stacks' human admins (globals.yaml): Cloud Posse's
 # map_additional_iam_roles with system:masters, next to a map entry of a
 # different shape and the CI roles' list entries.
+# The sso.amazonaws.com/<region>/ path segment is the IAM Identity Center home
+# region, not the stack's; us-east-1 here is only an example.
 run "admin_roles_get_cluster_admin_with_the_sso_path_kept" {
   command = plan
 
@@ -444,7 +446,7 @@ run "placeholder_admin_role_is_rejected" {
 
   variables {
     map_additional_iam_roles = [{
-      rolearn = "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/us-east-1/AWSReservedSSO_AdministratorAccess_<hash>"
+      rolearn = "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>"
       groups  = ["system:masters"]
     }]
   }
