@@ -186,6 +186,15 @@ varfile and Terraform drops it with a warning, and a `!terraform.state` read of 
 yields null. `check-dependencies.py` (validate-all) fails both, so rename the stack side in the
 same PR.
 
+### Template fixtures
+
+Each `stacks/catalog/templates/<t>.yaml` has a never-deployed stack `fnx-fixtures-<name>`
+(`stacks/orgs/fnx/fixtures/us-east-1/<name>.yaml`; short names, since templates put the environment
+into length-limited AWS names), so lint, validate-all and plan-sweep check templates no real stack
+imports. A fixture listed in `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) has
+the listed checks' failures printed as `KNOWN-BROKEN` without failing; a template port PR removes
+its entry, which makes the fixture strict.
+
 ## Lambda packages
 
 Function code lives in an application repo, not here (the Cloud Posse aws-lambda model). The

@@ -44,8 +44,13 @@
 # credentials objected", never "this component works".
 #
 # Usage:
-#   bash scripts/plan-sweep.sh                       # the three real stacks
+#   bash scripts/plan-sweep.sh                       # the three real stacks and the template fixtures
 #   bash scripts/plan-sweep.sh fnx-prod-production   # only these stacks
+#
+# A template fixture listed for plan-sweep in KNOWN_BROKEN_FIXTURES
+# (workflows/scripts/common/fixtures.py) is swept and reported, but its
+# FAIL/ERROR/SKIP/UNATTRIBUTABLE/INCONCLUSIVE pairs are counted as KNOWN-BROKEN
+# and do not fail the run.
 #
 # Exit status: 1 if any pair FAILs, ERRORs or is SKIPped, or if nothing was
 # planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
@@ -93,7 +98,7 @@ for v in $(compgen -e); do
 done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STACKS="${*:-fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production}"
+STACKS="${*:-}"
 
 cd "$REPO" || exit 1
 
@@ -116,6 +121,15 @@ if ! printf '%s\n' "$yq_version" | grep -Eq 'mikefarah/yq.* version v?4\.'; then
     "       The sweep evaluates !terraform.state expressions with it, as Atmos does." >&2
   exit 2
 fi
+
+# The default is the three real stacks plus every template fixture
+# (stacks/orgs/fnx/fixtures). A fixture listing that fails is this script's
+# failure, not a sweep that silently drops the fixtures.
+if [ -z "$STACKS" ]; then
+  fixture_stacks=$(atmos list stacks) || exit 2
+  STACKS="fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production $(printf '%s\n' "$fixture_stacks" | grep '^fnx-fixtures-' | tr '\n' ' ')"
+fi
+KNOWN_BROKEN=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("plan-sweep")))') || exit 2
 
 fail=0
 pass=0
@@ -691,7 +705,23 @@ for d in "$MIRROR"/components/terraform/*/; do
   fi
 done
 
+# A known-broken fixture's failing pairs move from the failing counters to
+# known_broken once its stack is done, so they are printed but never fail the run.
+known_broken=0
+settle_stack() {
+  [ -n "$settle_for" ] || return 0
+  case " $KNOWN_BROKEN " in *" $settle_for "*) ;; *) return 0 ;; esac
+  known_broken=$((known_broken + fail + errored + skip + unattributable + inconclusive - settle_base))
+  fail=$settle_fail errored=$settle_errored skip=$settle_skip
+  unattributable=$settle_unattributable inconclusive=$settle_inconclusive
+}
+settle_for=""
 for s in $STACKS; do
+  settle_stack
+  settle_for=$s settle_fail=$fail settle_errored=$errored settle_skip=$skip
+  settle_unattributable=$unattributable settle_inconclusive=$inconclusive
+  settle_base=$((fail + errored + skip + unattributable + inconclusive))
+  case " $KNOWN_BROKEN " in *" $s "*) printf '%-24s %-26s %s\n' "$s" "-" "KNOWN-BROKEN fixture: failures below do not fail the run" ;; esac
   # `atmos list components` emits TAB-separated "<component>\t<type>\t<count>".
   # Splitting on whitespace yields three tokens per line and invents components.
   #
@@ -866,10 +896,11 @@ for s in $STACKS; do
     fi
   done
 done
+settle_stack
 
 printf '%s\n' "-------------------------------------------------------------------"
-printf 'PASS %s   FAIL %s   ERROR %s   UNATTRIBUTABLE %s   INCONCLUSIVE %s   SKIP %s\n' \
-  "$pass" "$fail" "$errored" "$unattributable" "$inconclusive" "$skip"
+printf 'PASS %s   FAIL %s   ERROR %s   UNATTRIBUTABLE %s   INCONCLUSIVE %s   SKIP %s   KNOWN-BROKEN %s\n' \
+  "$pass" "$fail" "$errored" "$unattributable" "$inconclusive" "$skip" "$known_broken"
 printf '  of the passes: %s planned in full, %s stopped at an expected refusal\n' \
   "$pass_full" "$((pass - pass_full))"
 # How much of the sweep rests on the target's real output shape, and how much

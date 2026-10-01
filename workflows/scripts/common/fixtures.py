@@ -1,0 +1,49 @@
+"""Template fixtures (stacks/orgs/fnx/fixtures) whose failures are known and not yet fatal.
+
+Each catalog template (stacks/catalog/templates/*.yaml) has a fixture stack,
+fnx-fixtures-<short name>, so CI resolves and checks a template no real stack
+imports. A template not yet ported to the current component interfaces fails
+those checks; listing its fixture here, with the checks it fails (ALL for every
+one), reports those failures as KNOWN-BROKEN without failing the run. A port PR
+removes its entry, or the checks it fixed, which makes them strict again.
+
+Check names: check-dependencies, check-domains, check-cluster-api-ci,
+check-deploy-layers, plan-sweep, tflint (workflows/lint.yaml).
+"""
+ALL = frozenset({"*"})
+
+KNOWN_BROKEN_FIXTURES = {
+    "fnx-fixtures-batch": ALL,
+    "fnx-fixtures-pipeline": ALL,
+    "fnx-fixtures-serverless": ALL,
+    "fnx-fixtures-webapp": ALL,
+    # Clean on dependencies, outputs, vars and plan-sweep. No operator path to
+    # its private EKS endpoint (no bastion), and deploy-full-stack has no layer
+    # for dynamodb, eventbridge, sqs or ses.
+    "fnx-fixtures-msplatform": frozenset({"check-cluster-api-ci", "check-deploy-layers"}),
+}
+
+
+def known_broken(stack: str, check: str) -> bool:
+    checks = KNOWN_BROKEN_FIXTURES.get(stack, frozenset())
+    return checks is ALL or check in checks
+
+
+def stacks(check: str) -> list[str]:
+    """Fixture stacks whose failures of check are not fatal."""
+    return sorted(s for s in KNOWN_BROKEN_FIXTURES if known_broken(s, check))
+
+
+def fatal(errors: list[str], check: str) -> list[str]:
+    """Print the errors of known-broken fixtures as KNOWN-BROKEN; return the rest.
+
+    An error belongs to a stack when it contains "<stack>: " (every check prints
+    its stack name that way).
+    """
+    rest = []
+    for error in errors:
+        if any(f"{stack}: " in error for stack in stacks(check)):
+            print(f"KNOWN-BROKEN {error}")
+        else:
+            rest.append(error)
+    return rest

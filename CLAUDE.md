@@ -27,6 +27,9 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   (`check-deploy-layers.py`).
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - State keys must stay in their stage's prefix (`check-state-keys.py`).
+- Stage `fixtures` (`fnx-fixtures-<name>`) puts each catalog template under the checks and is
+  never deployed; `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) relaxes a
+  template until its port PR removes the entry.
 - 39 of the 45 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,
   `iam`, `idp-platform`, `kms`, `secretsmanager`); many use it in resource names.
 - `idp-platform` calls `../eks`, `../rds`, `../acm` as modules: grep for `source = "../<component>"`

@@ -1,0 +1,9 @@
+# fnx-fixtures-pipeline: stacks/catalog/templates/data-pipeline.yaml under CI's checks.
+# Never deployed (see ../_defaults.yaml).
+import:
+  - orgs/fnx/fixtures/_defaults
+  - catalog/templates/data-pipeline
+
+settings:
+  context:
+    environment: pipeline

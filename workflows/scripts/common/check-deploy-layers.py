@@ -277,6 +277,7 @@ def main() -> int:
         return 2
     with open(sys.argv[1]) as stacks_file, open(sys.argv[2]) as workflows_file:
         errors = check(json.load(stacks_file), json.load(workflows_file))
+    errors = check_dependencies.fixtures.fatal(errors, "check-deploy-layers")
     for error in errors:
         print(f"ERROR {error}")
     if errors:

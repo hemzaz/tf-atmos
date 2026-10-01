@@ -304,6 +304,7 @@ def check(stacks: dict) -> tuple[list[str], list[str]]:
 
 def main() -> int:
     errors, warnings = check(json.load(sys.stdin))
+    errors = check_dependencies.fixtures.fatal(errors, "check-domains")
     for warning in warnings:
         print(f"WARN {warning}")
     for error in errors:

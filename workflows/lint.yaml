@@ -55,9 +55,25 @@ workflows:
       - name: tflint-plugins
         type: shell
         command: tflint --init --config .tflint.hcl
+      # One stack at a time, so a template fixture in KNOWN_BROKEN_FIXTURES
+      # (workflows/scripts/common/fixtures.py, check "tflint") is linted and
+      # reported without failing the run. `atmos terraform lint` has no flag to
+      # exclude a stack.
       - name: tflint
-        type: atmos
-        command: terraform lint
+        type: shell
+        command: |
+          set -eu
+          broken=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("tflint")))')
+          stacks=$(atmos list stacks)
+          failed=""
+          for stack in $stacks; do
+            if atmos terraform lint -s "$stack"; then continue; fi
+            case " $broken " in
+              *" $stack "*) echo "KNOWN-BROKEN $stack: tflint failures do not fail the run" ;;
+              *) failed="$failed $stack" ;;
+            esac
+          done
+          if [ -n "$failed" ]; then echo "tflint failed in:$failed"; exit 1; fi
       # `atmos terraform lint` above lints stack INSTANCES, so a component with no
       # stack instance is never looked at. Ten of the twenty-three components were
       # in that state, and the gate reported "passed" while never opening them.
