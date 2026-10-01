@@ -166,7 +166,10 @@ resource "aws_iam_role_policy" "delivery" {
 # AWSLambdaSQSQueueExecutionRole / AWSLambdaKinesisExecutionRole /
 # AWSLambdaDynamoDBExecutionRole, which grant the same reads on "*".
 # A Kinesis consumer ARN (enhanced fan-out) also needs its stream's ARN for
-# the stream-level reads, so both are granted.
+# the stream-level reads, so both are granted. kinesis:ListStreams and
+# dynamodb:ListStreams are left out: they only take Resource "*", so a scoped
+# grant never matches, and Lambda's poller does not need them (AWS
+# services-kinesis-create.html; kinesis/main.tf omits it too).
 locals {
   esm_service = { for k, m in var.event_source_mappings : k => split(":", m.event_source_arn)[2] }
 
@@ -200,7 +203,6 @@ data "aws_iam_policy_document" "event_sources" {
         "kinesis:GetRecords",
         "kinesis:GetShardIterator",
         "kinesis:ListShards",
-        "kinesis:ListStreams",
         "kinesis:SubscribeToShard",
       ]
       resources = local.esm_kinesis_arns
@@ -211,7 +213,7 @@ data "aws_iam_policy_document" "event_sources" {
     for_each = length(local.esm_dynamodb_arns) > 0 ? [1] : []
     content {
       sid       = "ReadDynamoDBEventSources"
-      actions   = ["dynamodb:DescribeStream", "dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:ListStreams"]
+      actions   = ["dynamodb:DescribeStream", "dynamodb:GetRecords", "dynamodb:GetShardIterator"]
       resources = local.esm_dynamodb_arns
     }
   }

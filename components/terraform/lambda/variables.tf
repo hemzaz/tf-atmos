@@ -535,7 +535,7 @@ variable "event_source_mappings" {
     parallelization_factor         = optional(number)
     tumbling_window_in_seconds     = optional(number)
   }))
-  description = "Event source mappings (SQS queues, Kinesis streams or stream consumers, DynamoDB streams) keyed by mapping name; arguments mirror aws_lambda_event_source_mapping. starting_position is required for Kinesis/DynamoDB and forbidden for SQS; scaling_config is SQS-only; destination_config, maximum_retry_attempts, maximum_record_age_in_seconds, bisect_batch_on_function_error, parallelization_factor and tumbling_window_in_seconds are stream-only. The execution role gets read access to exactly these sources, and sqs:SendMessage / sns:Publish on each on_failure destination."
+  description = "Event source mappings (SQS queues, Kinesis streams or stream consumers, DynamoDB streams) keyed by mapping name; arguments mirror aws_lambda_event_source_mapping. starting_position is required for Kinesis/DynamoDB and forbidden for SQS; scaling_config is SQS-only; destination_config, maximum_retry_attempts, maximum_record_age_in_seconds, bisect_batch_on_function_error, parallelization_factor and tumbling_window_in_seconds are stream-only; filter_criteria takes up to 5 patterns (AWS default quota). The execution role gets read access to exactly these sources, and sqs:SendMessage / sns:Publish on each on_failure destination."
   default     = {}
 
   validation {
@@ -644,9 +644,9 @@ variable "event_source_mappings" {
   validation {
     condition = alltrue([
       for m in values(var.event_source_mappings) :
-      m.filter_criteria == null ? true : (length(m.filter_criteria.filter) >= 1 && length(m.filter_criteria.filter) <= 10)
+      m.filter_criteria == null ? true : (length(m.filter_criteria.filter) >= 1 && length(m.filter_criteria.filter) <= 5)
     ])
-    error_message = "event_source_mappings: filter_criteria.filter takes 1-10 patterns."
+    error_message = "event_source_mappings: filter_criteria.filter takes 1-5 patterns (the AWS default quota per mapping; up to 10 needs a Service Quotas increase and a change to this cap)."
   }
 
   validation {
@@ -671,5 +671,12 @@ variable "event_source_kms_key_arns" {
   validation {
     condition     = alltrue([for k in var.event_source_kms_key_arns : can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]+$", k))])
     error_message = "event_source_kms_key_arns must be KMS key ARNs (arn:aws:kms:<region>:<account>:key/<id>), not aliases or wildcards."
+  }
+
+  # The grant lives in the event_sources policy, which only exists with at
+  # least one mapping; without one these keys would be silently ignored.
+  validation {
+    condition     = length(var.event_source_kms_key_arns) == 0 || length(var.event_source_mappings) > 0
+    error_message = "event_source_kms_key_arns is only used with event_source_mappings; set a mapping or leave it empty."
   }
 }

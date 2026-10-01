@@ -140,7 +140,7 @@ run "kinesis_mapping_with_failure_destination" {
       toset(one([for s in jsondecode(data.aws_iam_policy_document.event_sources[0].json).Statement : s if s.Sid == "ReadKinesisEventSources"]).Action)
       == toset([
         "kinesis:DescribeStream", "kinesis:DescribeStreamSummary", "kinesis:DescribeStreamConsumer", "kinesis:GetRecords",
-        "kinesis:GetShardIterator", "kinesis:ListShards", "kinesis:ListStreams", "kinesis:SubscribeToShard",
+        "kinesis:GetShardIterator", "kinesis:ListShards", "kinesis:SubscribeToShard",
       ])
       && one([for s in jsondecode(data.aws_iam_policy_document.event_sources[0].json).Statement : s if s.Sid == "ReadKinesisEventSources"]).Resource
       == "arn:aws:kinesis:us-east-1:123456789012:stream/test-ingest"
@@ -205,7 +205,7 @@ run "dynamodb_stream_mapping_and_scoped_read_grant" {
   assert {
     condition = (
       toset(one([for s in jsondecode(data.aws_iam_policy_document.event_sources[0].json).Statement : s if s.Sid == "ReadDynamoDBEventSources"]).Action)
-      == toset(["dynamodb:DescribeStream", "dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:ListStreams"])
+      == toset(["dynamodb:DescribeStream", "dynamodb:GetRecords", "dynamodb:GetShardIterator"])
       && one([for s in jsondecode(data.aws_iam_policy_document.event_sources[0].json).Statement : s if s.Sid == "ReadDynamoDBEventSources"]).Resource
       == "arn:aws:dynamodb:us-east-1:123456789012:table/test-orders/stream/2026-01-01T00:00:00.000"
     )
@@ -338,8 +338,38 @@ run "rejects_a_kms_alias" {
   command = plan
 
   variables {
+    event_source_mappings = {
+      orders = { event_source_arn = "arn:aws:sqs:us-east-1:123456789012:test-orders" }
+    }
     event_source_kms_key_arns = ["alias/aws/sqs"]
   }
 
   expect_failures = [var.event_source_kms_key_arns]
+}
+
+run "rejects_kms_keys_without_mappings" {
+  command = plan
+
+  variables {
+    event_source_kms_key_arns = ["arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"]
+  }
+
+  expect_failures = [var.event_source_kms_key_arns]
+}
+
+run "rejects_more_than_five_filter_patterns" {
+  command = plan
+
+  variables {
+    event_source_mappings = {
+      bad = {
+        event_source_arn = "arn:aws:sqs:us-east-1:123456789012:test-orders"
+        filter_criteria = {
+          filter = [for i in range(6) : { pattern = jsonencode({ body = { n = [i] } }) }]
+        }
+      }
+    }
+  }
+
+  expect_failures = [var.event_source_mappings]
 }

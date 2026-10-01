@@ -45,7 +45,10 @@ rotation configuration.
 - SQS sources: set the queue's `visibility_timeout_seconds` to at least 6x this function's
   `timeout` (plus `maximum_batching_window_in_seconds`), as AWS recommends; this component cannot
   see the queue to check it. Failed messages go to the queue's own redrive DLQ, so the stream-only
-  retry and `destination_config` fields are rejected for SQS.
+  retry and `destination_config` fields are rejected for SQS. An SQS queue encrypted with a
+  customer managed key needs that key in `event_source_kms_key_arns`, or polling fails on decrypt.
+- Mappings target the unqualified function (`$LATEST`), so they bypass `create_alias` and any
+  provisioned concurrency configured on the alias.
 - In a VPC, egress defaults to the region's AWS-managed S3 prefix list; the built-in rules are never
   `0.0.0.0/0`. Add more with `custom_egress_rules` or confine it with
   `vpc_endpoint_prefix_list_ids`.
