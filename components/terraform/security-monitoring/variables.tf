@@ -95,6 +95,7 @@ variable "security_group_change_excluded_role_arns" {
   type        = list(string)
   description = "IAM role ARNs (the role's own ARN, path included, as CloudTrail records it in userIdentity.sessionContext.sessionIssuer.arn) whose security group changes the EventBridge rule does not alert on: controllers, the EKS cluster and service-linked roles, CI apply roles. Exact match, no wildcards. Calls without a sessionIssuer (root, IAM users, AWS services) always alert. The CIS SecurityGroupChanges alarm still counts every change. Null entries are dropped"
   default     = []
+  nullable    = false
 
   validation {
     condition = alltrue([

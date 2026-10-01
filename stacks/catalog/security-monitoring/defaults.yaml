@@ -49,10 +49,14 @@ components:
         # alert. eks and eks-addons deploy after this component
         # (workflows/deploy-full-stack.yaml), so their roles are named by
         # convention, not read from state:
-        #   - eks: cluster "<Environment>-<name>" (name: main in every stack),
-        #     role "<cluster>-cluster-role" (components/terraform/eks/main.tf)
+        #   - eks: cluster "<Environment>-<name>" for both instances in every
+        #     stack (eks/main is name: main, eks/data is name: data), role
+        #     "<cluster>-cluster-role" (components/terraform/eks/main.tf)
         #   - eks-addons: "<cluster>-aws-load-balancer-controller-role", the
-        #     controller's IRSA role (components/terraform/eks-addons/addons.tf)
+        #     controller's IRSA role, on eks-addons/main and eks-addons/data
+        #     (components/terraform/eks-addons/main.tf, addons.tf)
+        #   A new eks instance needs its two ARNs (cluster role, controller
+        #   role) added here, or its changes alert.
         #   - the EKS service-linked roles (cluster security group, managed
         #     node group remote-access groups)
         # iam/ci deploys earlier, so the CI apply role (terraform-cd.yml) is
@@ -62,6 +66,8 @@ components:
         security_group_change_excluded_role_arns:
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-main-cluster-role"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-main-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-data-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-data-aws-load-balancer-controller-role"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
           - !terraform.state iam/ci .ci_apply_role_arn
