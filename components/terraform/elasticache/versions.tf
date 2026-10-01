@@ -6,5 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.65"
     }
+    # Ephemeral random_password needs >= 3.7.
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.9"
+    }
   }
 }

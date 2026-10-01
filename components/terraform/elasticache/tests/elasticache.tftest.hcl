@@ -8,7 +8,6 @@ variables {
   cluster_id = "cache"
   vpc_id     = "vpc-0123456789abcdef0"
   subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
-  auth_token = "plan-only-token-0123456789"
   tags = {
     Environment = "test"
     Tenant      = "fnx"
@@ -242,8 +241,12 @@ run "ingress_slash_00_is_rejected" {
   expect_failures = [var.allowed_cidr_blocks]
 }
 
-run "auth_token_is_also_stored_in_secrets_manager_by_default" {
-  command = plan
+# apply, not plan: the state after apply is what must not hold the token.
+# Terraform nulls write-only attributes in state anyway, so the
+# secret_string/auth_token == null asserts guard against a revert to the
+# stored attributes (secret_string, auth_token), not against *_wo leaking.
+run "auth_token_is_generated_and_written_write_only" {
+  command = apply
 
   assert {
     condition     = aws_secretsmanager_secret.auth_token[0].name == "redis-auth/test/cache"
@@ -251,9 +254,91 @@ run "auth_token_is_also_stored_in_secrets_manager_by_default" {
   }
 
   assert {
-    condition     = jsondecode(aws_secretsmanager_secret_version.auth_token[0].secret_string).auth_token == "plan-only-token-0123456789"
-    error_message = "The secret version must hold the same auth_token the replication group uses."
+    condition     = aws_secretsmanager_secret_version.auth_token[0].secret_string == null && aws_secretsmanager_secret_version.auth_token[0].secret_binary == null
+    error_message = "The secret version must be written through secret_string_wo: no secret_string (or secret_binary) in state."
   }
+
+  assert {
+    condition     = aws_secretsmanager_secret_version.auth_token[0].secret_string_wo_version == 1
+    error_message = "secret_string_wo_version follows auth_token_version (default 1)."
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].auth_token == null
+    error_message = "The replication group must not hold the token in state: it is set through auth_token_wo."
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].auth_token_wo_version == 1 && aws_elasticache_replication_group.main[0].auth_token_update_strategy == "ROTATE"
+    error_message = "auth_token_wo is set with auth_token_wo_version = auth_token_version (default 1) and the ROTATE strategy."
+  }
+
+  assert {
+    condition     = output.auth_token_secret_arn == aws_secretsmanager_secret.auth_token[0].arn
+    error_message = "auth_token_secret_arn (read by eks-backend-services) is the generated token's secret."
+  }
+}
+
+# The ephemeral resource's own arguments cannot be asserted, so they live in
+# local.auth_token_generator. The token itself is checked by the replication
+# group's precondition, which every plan and apply run above has passed.
+run "auth_token_generator_meets_elasticache_constraints" {
+  command = plan
+
+  assert {
+    condition     = local.auth_token_generator.length >= 16 && local.auth_token_generator.length <= 128
+    error_message = "ElastiCache AUTH tokens are 16-128 characters."
+  }
+
+  assert {
+    condition = (
+      local.auth_token_generator.special
+      && local.auth_token_generator.override_special == "#^-"
+      && length(regexall("[^!&#$^<>-]", local.auth_token_generator.override_special)) == 0
+    )
+    error_message = "The token's punctuation is Cloud Posse's #^-, a subset of the only punctuation ElastiCache accepts (!&#$^<>-; never @, \", / or space)."
+  }
+
+  assert {
+    condition = (
+      local.auth_token_generator.min_upper == 3 && local.auth_token_generator.min_lower == 3
+      && local.auth_token_generator.min_numeric == 3 && local.auth_token_generator.min_special == 3
+    )
+    error_message = "As Cloud Posse, the token has at least 3 of each character class."
+  }
+}
+
+run "bumping_auth_token_version_rotates_both_copies" {
+  command = plan
+
+  variables {
+    auth_token_version = 2
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].auth_token_wo_version == 2 && aws_secretsmanager_secret_version.auth_token[0].secret_string_wo_version == 2
+    error_message = "auth_token_version drives both write-only versions, so a bump re-sends the token to the cache and its secret together."
+  }
+}
+
+run "rejects_auth_token_version_zero" {
+  command = plan
+
+  variables {
+    auth_token_version = 0
+  }
+
+  expect_failures = [var.auth_token_version]
+}
+
+run "rejects_a_fractional_auth_token_version" {
+  command = plan
+
+  variables {
+    auth_token_version = 1.5
+  }
+
+  expect_failures = [var.auth_token_version]
 }
 
 run "auth_token_secret_can_be_turned_off" {
@@ -264,8 +349,13 @@ run "auth_token_secret_can_be_turned_off" {
   }
 
   assert {
-    condition     = length(aws_secretsmanager_secret.auth_token) == 0 && length(aws_secretsmanager_secret_version.auth_token) == 0
+    condition     = length(aws_secretsmanager_secret.auth_token) == 0 && length(aws_secretsmanager_secret_version.auth_token) == 0 && output.auth_token_secret_arn == null
     error_message = "store_auth_token_in_secrets_manager = false must create neither the secret nor its version."
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].auth_token == null && aws_elasticache_replication_group.main[0].auth_token_wo_version == 1
+    error_message = "The generated token still reaches the cache, write-only."
   }
 }
 
@@ -339,4 +429,24 @@ run "rejects_additional_policy_json_without_a_statement_key" {
   }
 
   expect_failures = [var.additional_policy_json]
+}
+
+# The secret version's replace_triggered_by names main[0]: with the component
+# disabled both have count 0, and the reference must not be evaluated.
+run "disabled_creates_nothing" {
+  command = apply
+
+  variables {
+    enabled = false
+  }
+
+  assert {
+    condition = (
+      length(aws_elasticache_replication_group.main) == 0
+      && length(aws_secretsmanager_secret.auth_token) == 0
+      && length(aws_secretsmanager_secret_version.auth_token) == 0
+      && output.auth_token_secret_arn == null
+    )
+    error_message = "enabled = false must create no cache, secret or secret version."
+  }
 }

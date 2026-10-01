@@ -11,7 +11,7 @@ five lines printed at the end, nothing else.
 
 --process-functions=false leaves Atmos's YAML functions as literal strings:
 '!terraform.state vpc/main .vpc_id' needs another component's state, and
-'!env PROD_ELASTICACHE_AUTH_TOKEN' needs an environment variable. Neither is
+'!env AWS_ACCOUNT_ID' needs an environment variable. Neither is
 available here. Rather than drop them all and report INCONCLUSIVE, substitute
 a SYNTHETIC value, so the component's own validations are actually exercised.
 
@@ -100,7 +100,6 @@ SYNTH = [
     # The backend's access role outputs (no stack reads them today: iam/ci
     # names the roles by convention; kept for any cross-stack consumer).
     (r'^backend(_prod|_core)?(_read)?_role_arn$','arn:aws:iam::123456789012:role/example-terraform-backend-role'),
-    (r'(^|_)auth_token$',             'SyntheticAuthToken0123456789abcd'),
     (r'route_table_ids$',             ['rtb-0123456789abcdef0']),
     # apigateway's api_integrations[] carries the Lambda wiring. Without these
     # two the whole integration object was dropped, which tripped the
