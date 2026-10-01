@@ -174,7 +174,7 @@ workflows:
       - name: plan-compute
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs"
+          terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
           or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm_compute
         type: confirm
@@ -186,7 +186,7 @@ workflows:
       - name: deploy-compute
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs"
+          terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
           or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: plan-platform
         type: atmos
@@ -477,12 +477,12 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "security-monitoring"'
 
   deploy-compute:
-    description: "Deploy the compute layer: EKS clusters, ECS, Lambda functions and EC2 instances other than the bastion"
+    description: "Deploy the compute layer: EKS clusters, ECS, Batch compute environments and queues, Lambda functions and EC2 instances other than the bastion"
     steps:
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs"
+          terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
           or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm
         type: confirm
@@ -494,7 +494,7 @@ workflows:
       - name: deploy
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs"
+          terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
           or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
 
   deploy-platform:

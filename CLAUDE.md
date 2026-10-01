@@ -27,7 +27,7 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   (`check-deploy-layers.py`).
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - State keys must stay in their stage's prefix (`check-state-keys.py`).
-- 37 of the 43 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,
+- 38 of the 44 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,
   `iam`, `idp-platform`, `kms`, `secretsmanager`); many use it in resource names.
 - `idp-platform` calls `../eks`, `../rds`, `../acm` as modules: grep for `source = "../<component>"`
   before changing their variables.
