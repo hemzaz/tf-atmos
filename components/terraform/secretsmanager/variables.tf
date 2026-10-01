@@ -167,13 +167,8 @@ variable "secret_data" {
   }
 
   validation {
-    condition = alltrue([for k, v in var.secret_data : (
-      !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", v))
-      && !can(regex("(?i)(AKIA[0-9A-Z]{16})", v))
-      && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", v))
-      && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", v))
-      && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", v))
-    )])
+    # One line: checkov's HCL parser rejects this expression split across lines.
+    condition     = alltrue([for k, v in var.secret_data : !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", v)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", v)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", v)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", v)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", v))])
     error_message = "A secret_data value appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without predictable patterns."
   }
 }
