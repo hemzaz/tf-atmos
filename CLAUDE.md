@@ -32,6 +32,8 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 - `idp-platform` calls `../eks`, `../rds`, `../acm` as modules: grep for `source = "../<component>"`
   before changing their variables.
 - CI runs in the `ghcr.io/cloudposse/atmos` Linux container; shell that works on macOS may not.
+- Every root module commits `.terraform.lock.hcl` and every init uses `-lockfile=readonly`: after
+  a `required_providers` change run `atmos workflow providers-lock -f providers` and commit the locks.
 
 ## Before marking work complete
 

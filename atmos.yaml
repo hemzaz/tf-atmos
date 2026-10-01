@@ -20,6 +20,11 @@ components:
     auto_generate_backend_file: true
     init:
       reconfigure: auto
+      # Never add -upgrade: provider versions come from the committed
+      # .terraform.lock.hcl of each root module, which CI inits with
+      # -lockfile=readonly (-upgrade conflicts with it). Bump them with
+      # `atmos workflow providers-lock -f providers`.
+      upgrade: never
 
 stacks:
   base_path: stacks

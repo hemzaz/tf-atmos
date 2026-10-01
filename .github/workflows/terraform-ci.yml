@@ -1,12 +1,21 @@
 # Pull request / merge queue checks with Atmos Native CI.
 # Required configuration:
-#   vars.ATMOS_VERSION       Atmos container tag (defaults to 1.229.0)
 #   vars.AWS_REGION          region for OIDC credentials (defaults to eu-west-2)
 #   vars.AWS_PLAN_ROLE_ARN   read-only IAM role trusted for this repo's GitHub OIDC tokens
 #   (plan jobs are skipped while it is unset)
 #   vars.AWS_PROD_PLAN_ROLE_ARN  production's own plan role (master subject only), used for the
 #                                master-only (prod) plans on push; required once prod is planned
 # Terraform and scanners are installed by the Atmos toolchain (dependencies.tools).
+#
+# Supply chain pins:
+#   - Every job's container is ghcr.io/cloudposse/atmos:<tag>@sha256:<digest>, the same
+#     literal in every workflow file (Actions has no shared variable for `container:`, and a
+#     digest only means something with a fixed tag, so there is no vars override). Dependabot
+#     (docker ecosystem, .github/dependabot.yml) proposes tag+digest bumps; also bump the
+#     atmos-version input in emulator.yml and `version.constraint` in atmos.yaml by hand.
+#   - Every root module commits its .terraform.lock.hcl and every init runs with
+#     -lockfile=readonly, so a provider that is not locked fails instead of floating.
+#     Regenerate locks with `atmos workflow providers-lock -f providers`.
 #
 # GitHub-side controls this file relies on (they cannot be expressed in YAML):
 #   - Plan role trust (AWS_PLAN_ROLE_ARN, read-only): aud = sts.amazonaws.com, sub =
@@ -61,6 +70,12 @@ on:
 
 permissions: {}
 
+# Every `terraform init` (Atmos runs one before plan/apply/output) refuses to
+# change the committed .terraform.lock.hcl: a provider that is not locked fails
+# instead of floating. Regenerate locks: atmos workflow providers-lock -f providers.
+env:
+  TF_CLI_ARGS_init: -lockfile=readonly
+
 jobs:
   # The path filter for every job below (see `on:`). Plain git, no third-party
   # action: diff the checked-out commit against the event's base (the PR base,
@@ -85,7 +100,8 @@ jobs:
       # emulator: the former `paths:` filter of emulator.yml, plus this file,
       # which now calls it.
       # workflows: any workflow file, for actionlint (the workflows are not in
-      # the terraform filter, so a cd/drift/dr-only PR needs this one).
+      # the terraform filter, so a cd/drift/dr-only PR needs this one), and the
+      # pinned Atmos image reference that Dependabot bumps (atmos-image/).
       - id: filter
         name: Match changed files against each job group's paths
         env:
@@ -94,7 +110,7 @@ jobs:
           set -eu
           terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.trivyignore\.yaml|\.checkov\.baseline|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
           emulator_re='^(atmos\.yaml|components/terraform/.*|stacks/.*|workflows/.*|\.github/workflows/(emulator|terraform-ci)\.yml)$'
-          workflows_re='^\.github/workflows/.*\.ya?ml$'
+          workflows_re='^(\.github/workflows/.*\.ya?ml|\.github/atmos-image/.*|scripts/sync-atmos-image\.sh)$'
           if [ -n "${BASE_SHA//0/}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             # --no-renames: a rename lists only its new path, so moving a file out of stacks/ would skip everything.
             changed=$(git diff --no-renames --name-only "$BASE_SHA" HEAD)
@@ -122,7 +138,7 @@ jobs:
     if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
     steps:
@@ -150,7 +166,7 @@ jobs:
     if: github.event_name != 'push' && needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
     steps:
@@ -164,6 +180,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
         run: atmos workflow actionlint -f lint
+      # Every workflow's Atmos image must be the tag@digest pinned in
+      # .github/atmos-image/Dockerfile, the copy Dependabot bumps. Fails a
+      # Dependabot image PR until scripts/sync-atmos-image.sh is run on it.
+      - name: Atmos image pinned consistently
+        run: bash scripts/sync-atmos-image.sh --check
 
   plan-sweep:
     # The rung between `terraform validate` and the emulator lanes: bind each
@@ -185,7 +206,7 @@ jobs:
     # 6-hour default before anyone hears about it.
     timeout-minutes: 30
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
     steps:
@@ -214,7 +235,7 @@ jobs:
     if: github.event_name != 'push' && needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
       security-events: write
@@ -247,7 +268,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
     env:
@@ -273,7 +294,7 @@ jobs:
       # `dependencies.tools` (the repo's usual toolchain pattern) only injects
       # terraform into the PATH of the `atmos workflow`/`atmos terraform`
       # subprocess that declares it. The steps below run terraform directly
-      # (providers lock, then the test script) so they can sit around
+      # (the test script) so they can sit around
       # actions/cache, which is a GitHub Action, not something an atmos
       # workflow step can invoke -- so terraform needs to be on $GITHUB_PATH
       # for the rest of this job instead.
@@ -393,32 +414,9 @@ jobs:
 
           print(f"testable components: {all_components}")
           print(f"selected for this run ({event_name}): {selected}")
-      # Lock files are gitignored in this repo (never committed), so they
-      # don't exist at checkout -- generate them for every testable component
-      # (not just the ones selected above) so the cache key below is stable
-      # and shared across runs regardless of which subset a given PR touches.
-      # `providers lock` only fetches registry metadata/checksums, not the
-      # provider binaries, so this is cheap even though it runs unconditionally.
-      #
-      # `terraform get` first: a component that sources a local module (e.g.
-      # kms sourcing ../_library/...) makes `providers lock` fail outright
-      # with "Module not installed" otherwise -- it needs the module tree on
-      # disk to see every required_providers block, not just the root's.
-      #
-      # mkdir the plugin cache dir here too: `providers lock` only warns (and
-      # keeps going) when TF_PLUGIN_CACHE_DIR doesn't exist, but the actual
-      # `terraform init` in the test script below would hard-fail on it.
-      - name: Generate lock files for the plugin cache key
-        env:
-          ALL_COMPONENTS: ${{ steps.components.outputs.all }}
-        run: |
-          set -eu
-          mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          for component in $ALL_COMPONENTS; do
-            dir="components/terraform/$component"
-            terraform -chdir="$dir" get >/dev/null
-            terraform -chdir="$dir" providers lock -platform=linux_amd64
-          done
+      # Keyed on the committed lock files (one per root module), so a provider
+      # bump is a new cache entry. terraform-test.sh creates the directory on a
+      # cold cache and inits every component with -lockfile=readonly.
       - name: Restore/save the Terraform provider plugin cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -450,7 +448,7 @@ jobs:
     if: needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
     outputs:
@@ -600,7 +598,7 @@ jobs:
     if: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.matrix != '' && fromJson(needs.affected.outputs.matrix).include[0] != null }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
       id-token: write

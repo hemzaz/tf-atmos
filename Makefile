@@ -423,7 +423,6 @@ check-costs: ## Estimate infrastructure costs
 clean: ## Clean temporary files and caches
 	@echo "$(BLUE)Cleaning temporary files...$(NC)"
 	@find . -name "*.tfplan" -delete
-	@find . -name ".terraform.lock.hcl" -delete 2>/dev/null || true
 	@find . -name ".terraform" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find . -name "*.pyc" -delete 2>/dev/null || true

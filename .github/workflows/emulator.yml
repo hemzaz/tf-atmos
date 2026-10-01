@@ -40,6 +40,12 @@ concurrency:
   group: emulator-${{ github.ref }}
   cancel-in-progress: true
 
+# Every `terraform init` (Atmos runs one before plan/apply/output) refuses to
+# change the committed .terraform.lock.hcl: a provider that is not locked fails
+# instead of floating. Regenerate locks: atmos workflow providers-lock -f providers.
+env:
+  TF_CLI_ARGS_init: -lockfile=readonly
+
 jobs:
   # The Floci sandbox is NOT wired in yet, on purpose. Two problems surfaced on
   # the first CI runs, and only the first is solved:
@@ -73,7 +79,9 @@ jobs:
 
       - uses: cloudposse/github-action-setup-atmos@9e8d1e2db56fe851a85871d5993d63e182b66536 # v3.6.0
         with:
-          atmos-version: ${{ vars.ATMOS_VERSION || '1.229.0' }}
+          # Same Atmos as the digest-pinned ghcr.io/cloudposse/atmos image in
+          # terraform-ci.yml; bump both together (Dependabot only bumps the image).
+          atmos-version: "1.229.0"
 
       - name: Apply and destroy against LocalEmu
         run: atmos workflow localemu -f localemu

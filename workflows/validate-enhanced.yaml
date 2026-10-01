@@ -70,6 +70,9 @@ workflows:
           - name: terraform-fmt
             type: shell
             command: terraform fmt -check -recursive components/terraform
+      # -lockfile=readonly: the committed .terraform.lock.hcl must already
+      # lock every provider the module uses (atmos workflow providers-lock -f
+      # providers), so an unlocked provider fails here, not at deploy time.
       - name: validate-root-modules
         type: shell
         command: |
@@ -77,7 +80,7 @@ workflows:
           for dir in components/terraform/*/; do
             [ -n "$(find "$dir" -maxdepth 1 -name '*.tf' -print -quit)" ] || continue
             echo "validating ${dir}"
-            terraform -chdir="$dir" init -backend=false -input=false >/dev/null
+            terraform -chdir="$dir" init -backend=false -input=false -lockfile=readonly >/dev/null
             terraform -chdir="$dir" validate -no-color
           done
 

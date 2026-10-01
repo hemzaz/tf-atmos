@@ -673,19 +673,17 @@ printf '%s\n' "-----------------------------------------------------------------
 # that cannot init cannot plan, and calling that ERROR blames the component for
 # this script's broken setup.
 #
-# No .terraform.lock.hcl is committed, and since Terraform 1.4 init will not
-# install a provider from TF_PLUGIN_CACHE_DIR without a lock entry to check it
-# against -- so every fresh mirror downloaded every provider again. Letting the
-# cache through is safe here and only here: the lock files these inits write
-# live in the mirror and are thrown away with it, never committed, so there is
-# no lock file for a cached provider to break.
+# Each root module's committed .terraform.lock.hcl is copied into the mirror
+# (by the file listing above), and init must not change it: a provider that is
+# not locked fails init here, as it does in every other CI init. TF_CLI_ARGS_init
+# is unset above, so the flag is passed explicitly. With a lock entry to check
+# against, init installs from TF_PLUGIN_CACHE_DIR instead of downloading.
 init_failed=""
 for d in "$MIRROR"/components/terraform/*/; do
   comp="$(basename "$d")"
   case "$comp" in _*) continue ;; esac
   ls "$d"*.tf >/dev/null 2>&1 || continue
-  if ! (cd "$d" && TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=true \
-    terraform init -backend=false -input=false) \
+  if ! (cd "$d" && terraform init -backend=false -input=false -lockfile=readonly) \
     >"$WORK/init__$comp.log" 2>&1; then
     init_failed="$init_failed $comp"
   fi

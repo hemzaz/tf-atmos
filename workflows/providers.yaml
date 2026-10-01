@@ -1,0 +1,30 @@
+# Provider lock files (.terraform.lock.hcl), one per root module, committed.
+#
+# CI runs every `terraform init` with -lockfile=readonly, so a provider that is
+# not in the committed lock (a new required_providers entry, a raised
+# constraint, a new platform) fails init instead of floating to whatever the
+# registry serves that day. Regenerate the locks with this workflow and commit
+# them in the same PR as the constraint change.
+#
+# Usage:
+#   atmos workflow providers-lock -f providers                     # newest versions within the constraints
+#   UPGRADE=false atmos workflow providers-lock -f providers       # keep the locked versions, rewrite hashes
+#   COMPONENTS="kms vpc" atmos workflow providers-lock -f providers
+#
+# Platforms: linux_amd64 (CI), linux_arm64 (the devops container on Apple
+# silicon), darwin_arm64 and darwin_amd64 (the owner's Macs). See
+# scripts/providers-lock.sh.
+workflows:
+  providers-lock:
+    description: Regenerate every root module's multi-platform .terraform.lock.hcl
+    dependencies:
+      tools:
+        terraform: "1.16.3"
+    steps:
+      - name: providers-lock
+        type: shell
+        # $COMPONENTS is optional and deliberately unquoted: a space-separated
+        # list of component directory names; unset, every root module.
+        command: |
+          # shellcheck disable=SC2086
+          bash scripts/providers-lock.sh ${COMPONENTS:-}
