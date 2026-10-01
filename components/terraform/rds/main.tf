@@ -319,6 +319,7 @@ resource "aws_iam_role_policy_attachment" "monitoring" {
 # does not is set to the primary's value so the replica is reachable from the
 # same app security groups and protected the same way.
 resource "aws_db_instance" "read_replica" {
+  #checkov:skip=CKV2_AWS_69:False positive, aws_db_parameter_group.main sets rds.force_ssl = 1 / require_secure_transport = ON through a dynamic block Checkov cannot evaluate (tests/rds.tftest.hcl asserts it)
   count = var.create_read_replica ? 1 : 0
 
   identifier = "${local.name}-read-replica"
