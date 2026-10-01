@@ -1,0 +1,54 @@
+# Dependabot version updates: weekly, grouped, a bounded number of open PRs.
+# Security updates (Dependabot alerts) are a repository setting, separate from this.
+#
+# Each PR still goes through terraform-ci.yml and its `CI gate`.
+version: 2
+updates:
+  # SHA-pinned actions (`uses: owner/action@<sha> # vX.Y.Z`): Dependabot moves
+  # the SHA and the version comment together. One weekly PR for all of them.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # The Atmos CI image. Dependabot does not update `container: image:` refs in
+  # workflow files, so the pinned tag@digest also lives in
+  # .github/atmos-image/Dockerfile, which it does update. The actionlint job
+  # fails such a PR until `bash scripts/sync-atmos-image.sh` has carried the
+  # new tag@digest to the workflows: run it on the Dependabot branch, commit.
+  - package-ecosystem: docker
+    directory: /.github/atmos-image
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "ci"
+
+  # Provider lock files of every root module, in one grouped PR. Majors are
+  # ignored: a new major needs a deliberate constraint change (the `~> 6.65`
+  # house constraints stay), then `atmos workflow providers-lock -f providers`.
+  # If a Dependabot lock update drops a platform hash (linux_amd64,
+  # linux_arm64, darwin_arm64, darwin_amd64), rerun that workflow on its branch.
+  - package-ecosystem: terraform
+    directories:
+      - /components/terraform/*
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "chore"
+    groups:
+      terraform-providers:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

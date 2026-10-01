@@ -9,7 +9,7 @@
 # is repo:<org>/<repo>:ref:refs/heads/<default branch>, which both plan roles
 # trust. The scripts read the state bucket (management account) only through
 # the stack's read-only backend role (workflows/scripts/common/state-read-role.sh).
-# Optional: vars.ATMOS_VERSION / vars.AWS_REGION.
+# Optional: vars.AWS_REGION.
 name: Disaster recovery
 # AWS-dependent jobs are skipped (not failed) until vars.AWS_PLAN_ROLE_ARN is set:
 # there is no AWS account yet, and that variable marks AWS as configured.
@@ -34,6 +34,12 @@ on:
 
 permissions: {}
 
+# Every `terraform init` (Atmos runs one before plan/apply/output) refuses to
+# change the committed .terraform.lock.hcl: a provider that is not locked fails
+# instead of floating. Regenerate locks: atmos workflow providers-lock -f providers.
+env:
+  TF_CLI_ARGS_init: -lockfile=readonly
+
 jobs:
   disaster-recovery:
     name: ${{ inputs.action }} ${{ inputs.stack }}
@@ -44,7 +50,7 @@ jobs:
       contains(fromJson('["fnx-dev-testenv-01","fnx-staging-staging-01","fnx-prod-production"]'), inputs.stack)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
       id-token: write

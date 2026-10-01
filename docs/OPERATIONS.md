@@ -72,7 +72,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 |----------|-------|
 | `AWS_PLAN_ROLE_ARN` | a dev or staging `iam/ci` `ci_plan_role_arn`: PR plans, dev/staging drift, DR checks. Unset = AWS jobs skip |
 | `AWS_PROD_PLAN_ROLE_ARN` | prod's `iam/ci` `ci_plan_role_arn`: prod plans on master, prod drift |
-| `ATMOS_VERSION`, `AWS_REGION` | optional overrides |
+| `AWS_REGION` | optional override (default `eu-west-2`) |
 
 CD derives each stack's apply role from its `iam/ci` (`workflows/scripts/common/ci-apply-role-arn.py`).
 For CI across several accounts from one OIDC provider, see
@@ -222,6 +222,29 @@ bucket name or KMS alias no longer matches the stack's `s3/lambda-artifacts` and
 | Destroy a stack / the backend | `atmos workflow destroy -f destroy-environment` / `-f destroy-backend`; both prompt for the stack name, do not pass `-s` |
 
 Destroying the backend is irreversible: it deletes the bucket and every stack's state in it.
+
+### Pinned versions: providers, the Atmos image, actions
+
+Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for all three; each must pass
+`CI gate`. `.github/CODEOWNERS` requests the owner's review on `.github/`, `iam`, `backend` and the
+stacks' `security.yaml` (advisory until branch protection requires code-owner review).
+
+- **Providers.** Every root module commits a `.terraform.lock.hcl` for `linux_amd64` (CI),
+  `linux_arm64` (the devops container on Apple silicon), `darwin_arm64` and `darwin_amd64`, and
+  every CI init runs with `-lockfile=readonly` (`TF_CLI_ARGS_init`, plus explicit flags in
+  validate-all, plan-sweep and terraform-test), so an unlocked provider fails init.
+  `atmos.yaml` sets `init.upgrade: never` for the same reason. After a `required_providers`
+  change, or to take newer releases within the constraints:
+  `atmos workflow providers-lock -f providers` (`UPGRADE=false` keeps the locked versions), then
+  commit the locks. A new major is a deliberate constraint change; Dependabot ignores majors.
+- **Atmos image.** Every workflow runs `ghcr.io/cloudposse/atmos:<tag>@sha256:<digest>`, one
+  literal repeated (there is no `vars` override: a digest needs a fixed tag). Dependabot bumps the
+  copy in `.github/atmos-image/Dockerfile`; run `bash scripts/sync-atmos-image.sh` on its branch
+  (the actionlint job fails until you do). By hand: put the new tag and the digest of its manifest
+  index (`docker buildx imagetools inspect ghcr.io/cloudposse/atmos:<tag>`, or the ghcr registry
+  API) in that Dockerfile and run the script; it also sets `atmos-version` in `emulator.yml`.
+  Raise `version.constraint` in `atmos.yaml` and `.atmos.env` when the new version is required.
+- **Actions.** `uses:` refs are commit SHAs with a version comment; Dependabot moves both.
 
 Drift fix: codify an intended manual change in the stack, then `atmos terraform deploy`; otherwise
 re-apply; import resources created outside Terraform.

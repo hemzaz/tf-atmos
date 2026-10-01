@@ -1,0 +1,19 @@
+# Code owners for the paths that decide who can deploy what, and with which
+# credentials. A PR touching them requests the owner's review.
+#
+# Advisory until master's branch protection enables "Require review from Code
+# Owners" (a repository setting, deliberately not changed by the PR that added
+# this file). Later matching lines win.
+
+# CI/CD: OIDC role use, workflow permissions, the pinned Atmos image, Dependabot.
+/.github/                         @hemzaz
+
+# IAM: CI plan/apply roles and their trust policies.
+/components/terraform/iam/        @hemzaz
+/stacks/catalog/iam/              @hemzaz
+
+# The state backend: bucket, KMS key and the state access roles.
+/components/terraform/backend/    @hemzaz
+
+# Per-stack security domain files (guardduty, securityhub, kms, ...).
+/stacks/**/security.yaml          @hemzaz

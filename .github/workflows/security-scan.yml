@@ -16,7 +16,7 @@ jobs:
     name: Trivy & Checkov
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/cloudposse/atmos:${{ vars.ATMOS_VERSION || '1.229.0' }}
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
       contents: read
       security-events: write

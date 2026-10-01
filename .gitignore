@@ -52,7 +52,8 @@ venv.bak/
 *.tfplan
 *.tfvars
 .terraform/
-.terraform.lock.hcl
+# .terraform.lock.hcl is committed: one per root module, written by
+# `atmos workflow providers-lock -f providers` (CI inits with -lockfile=readonly).
 terraform.rc
 .terraformrc
 

@@ -64,6 +64,7 @@ atmos workflow tflint-init -f lint                  # once
 atmos workflow lint -f lint                         # fmt, yamllint, state-key check, TFLint, Trivy
 atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
 bash scripts/plan-sweep.sh fnx-dev-testenv-01       # plan with resolved variables, no AWS account needed
+atmos workflow providers-lock -f providers          # after a required_providers change: rewrite the committed locks
 atmos workflow sandbox -f sandbox                   # apply against Floci, then destroy (Docker only)
 atmos workflow localemu -f localemu                 # the same against LocalEmu (Python 3.13)
 atmos terraform plan vpc/main -s fnx-dev-testenv-01 # needs AWS credentials

@@ -77,7 +77,9 @@ for component in $components; do
   tested=$((tested + 1))
   echo "== $component =="
 
-  if ! terraform -chdir="$dir" init -backend=false -input=false >"$tmp_log" 2>&1; then
+  # -lockfile=readonly: test with exactly the committed provider versions
+  # (atmos workflow providers-lock -f providers writes them).
+  if ! terraform -chdir="$dir" init -backend=false -input=false -lockfile=readonly >"$tmp_log" 2>&1; then
     cat "$tmp_log"
     echo "terraform-test: init failed for $component" >&2
     rows="$rows
