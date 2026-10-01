@@ -29,8 +29,12 @@ IRSA role. Cloud Posse's `eks/external-secrets-operator` uses the same two-relea
   under `<stage>/` via `secret_path_context_prefixes`. The two lists may not overlap. `kms:Decrypt`
   is on `kms_key_arn` through Secrets Manager only. There is no SSM access and no `ListSecrets`, so
   `dataFrom.find` does not work.
+- Deliberate deviation from Cloud Posse, which puts the IRSA role on the operator's service
+  account: per-store roles keep a namespaced `SecretStore` with no auth from inheriting the
+  operator's credentials.
 - The stores need the CRDs only at apply time, after the operator release (`wait = true`); a plan
-  on a fresh cluster needs no CRDs.
+  on a fresh cluster needs no CRDs. If the stores release hits the rare race where the webhook's
+  endpoint has not propagated yet, re-apply.
 - `chart_version` is pinned once, in the catalog (2.11.0, tested on Kubernetes 1.36). 2.x serves
   only `external-secrets.io/v1`; validation rejects 0.x.
 - IAM names are `<cluster_name>-external-secrets-{role,policy}` and

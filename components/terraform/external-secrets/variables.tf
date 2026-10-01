@@ -148,12 +148,19 @@ variable "kms_key_arn" {
 
 variable "secret_path_prefixes" {
   type        = list(string)
-  description = "Secrets Manager secret-name path prefixes the default ClusterSecretStore (\"aws-secretsmanager\") may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover bastion SSH keys (ec2's \"ssh-key/<Environment>/<name>\"), the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod), and elasticache's redis AUTH token secrets (\"redis-auth/<Environment>/<cluster_id>\"). Certificates belong to certificate_secret_path_prefixes."
-  default     = ["ssh-key", "app", "infra", "redis-auth"]
+  description = "Secrets Manager secret-name path prefixes the default ClusterSecretStore (\"aws-secretsmanager\") may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod), and elasticache's redis AUTH token secrets (\"redis-auth/<Environment>/<cluster_id>\"). Certificates belong to certificate_secret_path_prefixes."
+  default     = ["app", "infra", "redis-auth"]
 
   validation {
     condition     = alltrue([for p in var.secret_path_prefixes : can(regex("^[0-9A-Za-z_.-]+$", p))])
     error_message = "secret_path_prefixes entries must be a single non-empty path segment, without leading/trailing slashes or wildcards."
+  }
+
+  # ec2 stores the bastion SSH private keys at "ssh-key/<Environment>/<name>".
+  # No in-cluster workload consumes them, so no store may serve them.
+  validation {
+    condition     = !contains(var.secret_path_prefixes, "ssh-key")
+    error_message = "secret_path_prefixes must not include \"ssh-key\": the bastion SSH private keys are never served to the cluster."
   }
 
   validation {

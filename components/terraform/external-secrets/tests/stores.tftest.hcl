@@ -101,8 +101,13 @@ run "store_conditions_and_service_accounts_are_rendered" {
   }
 
   assert {
-    condition     = strcontains(aws_iam_role.external_secrets["aws-certificate-store"].assume_role_policy, "system:serviceaccount:external-secrets:aws-certificate-store") && strcontains(aws_iam_role.external_secrets["aws-secretsmanager"].assume_role_policy, "system:serviceaccount:external-secrets:aws-secretsmanager")
-    error_message = "Each role must trust only its store's service account."
+    condition = alltrue([
+      for k, r in aws_iam_role.external_secrets : jsondecode(r.assume_role_policy).Statement[0].Condition.StringEquals == {
+        "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:sub" = "system:serviceaccount:external-secrets:${k}"
+        "oidc.eks.eu-west-2.amazonaws.com/id/ABCDEF:aud" = "sts.amazonaws.com"
+      }
+    ]) && length(aws_iam_role.external_secrets) == 2
+    error_message = "Each role must trust exactly its store's service account (sub) for sts.amazonaws.com (aud)."
   }
 }
 
@@ -142,8 +147,16 @@ run "store_policies_are_scoped" {
   }
 
   assert {
-    condition     = !strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "certificates/") && strcontains(aws_iam_policy.external_secrets["aws-secretsmanager"].policy, "secret:rds!db-*")
-    error_message = "The default store's role must not read certificates, and keeps the RDS-managed secrets it serves."
+    condition = toset(jsondecode(aws_iam_policy.external_secrets["aws-secretsmanager"].policy).Statement[0].Resource) == toset([
+      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:app/*",
+      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:infra/*",
+      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:redis-auth/*",
+      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:production/app/*",
+      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:production/infra/*",
+      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:production/redis-auth/*",
+      "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds!db-*",
+    ])
+    error_message = "The default store's role must read exactly app, infra, redis-auth (top-level and <context>/) and rds!db-*: no certificates, no ssh-key."
   }
 
   assert {
@@ -215,6 +228,16 @@ run "certificates_in_the_default_store_are_rejected" {
 
   variables {
     secret_path_prefixes = ["app", "certificates"]
+  }
+
+  expect_failures = [var.secret_path_prefixes]
+}
+
+run "ssh_key_in_the_default_store_is_rejected" {
+  command = plan
+
+  variables {
+    secret_path_prefixes = ["app", "ssh-key"]
   }
 
   expect_failures = [var.secret_path_prefixes]
