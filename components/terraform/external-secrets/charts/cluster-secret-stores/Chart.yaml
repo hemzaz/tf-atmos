@@ -1,0 +1,5 @@
+apiVersion: v2
+name: cluster-secret-stores
+description: AWS Secrets Manager ClusterSecretStores (one IRSA service account each) for the external-secrets component
+type: application
+version: 1.0.0

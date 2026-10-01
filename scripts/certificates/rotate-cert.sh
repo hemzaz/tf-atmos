@@ -439,7 +439,7 @@ if ! kubectl get externalsecret -n "$NAMESPACE" $CONTEXT_OPT 2>/dev/null | grep 
     
     # Create the ExternalSecret
     cat > /tmp/external-secret.yaml << EOF
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: $K8S_SECRET
