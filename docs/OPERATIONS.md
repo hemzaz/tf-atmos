@@ -275,6 +275,9 @@ STACK=<stack> atmos workflow dr-failover -f disaster-recovery        # interacti
 STACK=<stack> atmos workflow dr-failback -f disaster-recovery
 ```
 
+The stacks run in `us-east-1`; the DR region is `us-east-2` (`dr-failover`'s default target,
+`DR_REGION` in `dr-status`).
+
 ## Deploys green, does not serve
 
 `cognito/main` has no users or identity provider, so `/api` rejects every request; `apigateway` `/` is a `MOCK`
