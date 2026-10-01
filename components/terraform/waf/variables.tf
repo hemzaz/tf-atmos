@@ -224,6 +224,71 @@ variable "manage_log_resource_policy" {
   default     = true
 }
 
+variable "redacted_fields" {
+  # Cloud Posse's input name and type (cloudposse/terraform-aws-waf). Two
+  # deviations, both in main.tf/below: each field becomes its own
+  # redacted_fields block (upstream renders a multi-header entry as one block,
+  # which AWS rejects), and the default redacts the credential headers instead
+  # of nothing.
+  type = map(object({
+    method        = optional(bool, false)
+    uri_path      = optional(bool, false)
+    query_string  = optional(bool, false)
+    single_header = optional(list(string), null)
+  }))
+  description = "Request fields WAF keeps out of its logs, keyed by an arbitrary name. Each entry redacts the HTTP method, URI path, query string and/or the named headers. Must always redact the authorization and cookie headers; add entries (e.g. an API-key header) to extend it. Ignored when enable_logging is false"
+  default = {
+    authorization = { single_header = ["authorization"] }
+    cookie        = { single_header = ["cookie"] }
+  }
+  nullable = false
+
+  # A caller replacing the map (a Terraform default is replaced, not merged)
+  # must not silently start logging bearer tokens or session cookies.
+  validation {
+    condition = alltrue([
+      for h in ["authorization", "cookie"] : contains(flatten([
+        for v in values(var.redacted_fields) : [for n in coalesce(v.single_header, []) : lower(n)]
+      ]), h)
+    ])
+    error_message = "redacted_fields must redact the authorization and cookie headers (single_header), so credentials never reach the WAF logs. Add entries to extend it; do not drop these two."
+  }
+
+  validation {
+    condition     = alltrue(flatten([for v in values(var.redacted_fields) : [for n in coalesce(v.single_header, []) : can(regex("^[A-Za-z0-9_-]{1,64}$", n))]]))
+    error_message = "redacted_fields[*].single_header entries must be header names: 1-64 letters, digits, hyphens or underscores."
+  }
+}
+
+variable "logging_filter" {
+  # Cloud Posse's input name and type (cloudposse/terraform-aws-waf).
+  type = object({
+    default_behavior = string
+    filter = list(object({
+      behavior    = string
+      requirement = string
+      condition = list(object({
+        action_condition = optional(object({
+          action = string
+        }), null)
+        label_name_condition = optional(object({
+          label_name = string
+        }), null)
+      }))
+    }))
+  })
+  description = "Which requests WAF keeps in its logs (by rule action or label); null logs every request. Ignored when enable_logging is false"
+  default     = null
+
+  validation {
+    condition = var.logging_filter == null || (
+      contains(["KEEP", "DROP"], var.logging_filter.default_behavior) &&
+      alltrue([for f in var.logging_filter.filter : contains(["KEEP", "DROP"], f.behavior) && contains(["MEETS_ALL", "MEETS_ANY"], f.requirement)])
+    )
+    error_message = "logging_filter.default_behavior and filter[*].behavior must be KEEP or DROP; filter[*].requirement must be MEETS_ALL or MEETS_ANY."
+  }
+}
+
 variable "log_group_retention_days" {
   type        = number
   description = "CloudWatch log group retention, in days"

@@ -107,9 +107,20 @@ components:
         create_dashboard: true
         tracing_enabled: true
 
-        # Cache settings
-        enable_caching: true
-        cache_ttl_seconds: 300
+        # No response caching. This used to cache "*/*", every method including
+        # COGNITO_USER_POOLS ones, keyed without the caller's identity, so one
+        # user's response could be served to another. Nothing here is worth
+        # caching today: "/" is a MOCK liveness check and "/api" is disabled.
+        # The cache cluster is billed per hour (0.5 GB, the smallest, is about
+        # $15/month), so it stays off until a method is worth caching. To cache
+        # a public GET, set:
+        #   enable_caching: true
+        #   cache_method_paths: ["GET /products"]   # an api_methods key
+        #   cache_ttl_seconds: 300
+        # An authorized method also needs method.request.header.Authorization
+        # in its request_parameters and its integration's cache_key_parameters
+        # (the component rejects it otherwise).
+        enable_caching: false
 
         cors_configuration:
           allow_origins:

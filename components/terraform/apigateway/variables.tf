@@ -344,6 +344,21 @@ variable "api_methods" {
     error_message = "Every api_methods entry needs an api_integrations entry with the same http_method and resource_path, otherwise the method is deployed with nothing behind it."
   }
 
+  # API Gateway only keys the cache on parameters the method declares. Lives
+  # here, not on api_integrations, because this variable already reads
+  # api_integrations and the reverse reference would be a validation cycle.
+  validation {
+    condition = alltrue([
+      for i in var.api_integrations : alltrue([
+        for p in i.cache_key_parameters : anytrue([
+          for m in var.api_methods : contains(keys(m.request_parameters), p)
+          if m.http_method == i.http_method && m.resource_path == i.resource_path
+        ])
+      ])
+    ])
+    error_message = "Every api_integrations[*].cache_key_parameters entry must be declared in the matching api_methods entry's request_parameters."
+  }
+
   validation {
     condition = alltrue([
       for m in var.api_methods :
@@ -376,8 +391,9 @@ variable "api_integrations" {
     request_parameters      = optional(map(string), {})
     request_templates       = optional(map(string), {})
     lambda_function_name    = optional(string)
+    cache_key_parameters    = optional(list(string), [])
   }))
-  description = "List of integrations for the REST API, one per api_methods entry, addressed by the same resource_path + http_method pair. An AWS_PROXY entry must also set lambda_function_name so this component can grant API Gateway permission to invoke it."
+  description = "List of integrations for the REST API, one per api_methods entry, addressed by the same resource_path + http_method pair. An AWS_PROXY entry must also set lambda_function_name so this component can grant API Gateway permission to invoke it. cache_key_parameters (method request parameters, e.g. method.request.header.Authorization) add to the cache key of a cached method; each must be declared in the method's request_parameters."
   default     = []
 
   validation {
@@ -579,7 +595,62 @@ variable "allowed_countries" {
 # Caching Configuration Variables
 variable "enable_caching" {
   type        = bool
-  description = "Whether to enable caching for the API Gateway"
+  description = "Provision the REST stage's cache cluster (billed per hour, see cache_cluster_size). Requires cache_method_paths; caching only applies to the methods listed there"
+  default     = false
+}
+
+variable "cache_cluster_size" {
+  type        = string
+  description = "REST stage cache cluster size in GB, when enable_caching is true"
+  default     = "0.5"
+
+  validation {
+    condition     = contains(["0.5", "1.6", "6.1", "13.5", "28.4", "58.2", "118", "237"], var.cache_cluster_size)
+    error_message = "cache_cluster_size must be one of 0.5, 1.6, 6.1, 13.5, 28.4, 58.2, 118, 237."
+  }
+}
+
+variable "cache_method_paths" {
+  type        = list(string)
+  description = "REST methods whose responses API Gateway caches, as \"<HTTP_METHOD> <resource_path>\" keys of api_methods (e.g. \"GET /products\"). Empty caches nothing. \"*/*\" caches every method and needs cache_all_methods_acknowledged. A cached method with authorization other than NONE must key its cache on the caller's identity: list the identity header (authorizer_identity_source, or method.request.header.Authorization for AWS_IAM) in the method's request_parameters and its integration's cache_key_parameters"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([
+      for k in var.cache_method_paths : k == "*/*" || contains([for m in var.api_methods : "${m.http_method} ${m.resource_path}"], k)
+    ])
+    error_message = "Every cache_method_paths entry must be \"*/*\" or an api_methods key \"<HTTP_METHOD> <resource_path>\" (e.g. \"GET /products\")."
+  }
+
+  validation {
+    condition     = !contains(var.cache_method_paths, "*/*") || var.cache_all_methods_acknowledged
+    error_message = "Caching \"*/*\" caches every method, authenticated ones included. List the cacheable methods instead, or set cache_all_methods_acknowledged = true."
+  }
+
+  validation {
+    condition     = var.enable_caching == (length(var.cache_method_paths) > 0)
+    error_message = "enable_caching (the billed cache cluster) and cache_method_paths go together: list at least one cacheable method to enable caching, and enable caching to cache one."
+  }
+
+  # The cache key ignores the caller unless the identity header is part of it,
+  # so a cached authorized method would serve one user's response to another.
+  validation {
+    condition = alltrue([
+      for m in var.api_methods : alltrue([
+        for i in var.api_integrations :
+        contains(i.cache_key_parameters, m.authorization == "AWS_IAM" ? "method.request.header.Authorization" : var.authorizer_identity_source)
+        if i.http_method == m.http_method && i.resource_path == m.resource_path
+      ])
+      if m.authorization != "NONE" && (contains(var.cache_method_paths, "*/*") || contains(var.cache_method_paths, "${m.http_method} ${m.resource_path}"))
+    ])
+    error_message = "A cached method with authorization other than NONE must list the caller's identity header (authorizer_identity_source; method.request.header.Authorization for AWS_IAM) in its integration's cache_key_parameters, and in the method's request_parameters, or one user's cached response is served to another."
+  }
+}
+
+variable "cache_all_methods_acknowledged" {
+  type        = bool
+  description = "Acknowledge that cache_method_paths = [\"*/*\"] caches every method of the stage, including authenticated and non-GET ones"
   default     = false
 }
 

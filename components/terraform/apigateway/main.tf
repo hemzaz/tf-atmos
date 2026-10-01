@@ -56,6 +56,18 @@ locals {
   # HTTP API routes: REST ignores http_routes silently, the same way it
   # ignores cors_configuration (see the enable_cors local above).
   http_routes = local.create_http_api ? var.http_routes : {}
+
+  # Response caching (REST). "*/*" is the stage-wide setting and caches every
+  # method only with cache_all_methods_acknowledged (variables.tf). Every other
+  # entry is an api_methods key ("GET /products") and gets its own method
+  # setting. API Gateway's method_path is "<resource path without the leading
+  # slash>/<HTTP method>"; the root resource "/" is escaped as "~1".
+  cache_all_methods = local.create_rest_api && contains(var.cache_method_paths, "*/*")
+  cache_method_paths = local.create_rest_api ? {
+    for k in var.cache_method_paths : k => (
+      split(" ", k)[1] == "/" ? "~1/${split(" ", k)[0]}" : "${trimprefix(split(" ", k)[1], "/")}/${split(" ", k)[0]}"
+    ) if k != "*/*"
+  } : {}
 }
 
 # REST API
@@ -94,6 +106,13 @@ resource "aws_api_gateway_stage" "rest_stage" {
   }
 
   xray_tracing_enabled = var.tracing_enabled
+
+  # The cache cluster is billed per hour whether or not a method uses it, so
+  # it exists only with enable_caching, which requires cache_method_paths
+  # (variables.tf). Before, enable_caching turned caching on for */* but never
+  # provisioned the cluster at all.
+  cache_cluster_enabled = var.enable_caching
+  cache_cluster_size    = var.enable_caching ? var.cache_cluster_size : null
 
   tags = local.tags
 }
@@ -480,6 +499,11 @@ resource "aws_api_gateway_integration" "integration" {
   request_parameters = each.value.request_parameters
   request_templates  = each.value.request_templates
 
+  # A cached method on an authorized route must key its cache on the caller's
+  # identity, or one user's response is served to another (variables.tf
+  # cache_method_paths enforces it).
+  cache_key_parameters = each.value.cache_key_parameters
+
   # api_methods validates that every method has an integration; this catches the
   # other direction, an integration naming a method that was never declared.
   lifecycle {
@@ -675,28 +699,67 @@ resource "aws_wafv2_web_acl_association" "api_waf_association" {
   web_acl_arn  = aws_wafv2_web_acl.api_waf[0].arn
 }
 
-# API Gateway caching
-resource "aws_api_gateway_method_settings" "cache_settings" {
-  count = local.create_rest_api && var.enable_caching ? 1 : 0
+# Stage-wide method settings (*/*): throttling, execution logging, metrics and
+# the cache-control guards, for every REST stage. These used to exist only with
+# enable_caching, which also cached every method, authenticated ones included;
+# so throttling_* never reached a stage that did not cache. Caching here is off
+# unless cache_method_paths holds "*/*" with cache_all_methods_acknowledged.
+resource "aws_api_gateway_method_settings" "stage" {
+  count = local.create_rest_api ? 1 : 0
 
   rest_api_id = aws_api_gateway_rest_api.rest_api[0].id
   stage_name  = aws_api_gateway_stage.rest_stage[0].stage_name
   method_path = "*/*"
 
   settings {
-    # Enable caching
-    caching_enabled      = true
+    caching_enabled      = local.cache_all_methods
     cache_ttl_in_seconds = var.cache_ttl_seconds
+    cache_data_encrypted = true
 
-    # Throttling settings
+    # A client can send Cache-Control: max-age=0 to bypass (and refresh) the
+    # cache entry. Only a caller allowed execute-api:InvalidateCache may; the
+    # rest get a 403 instead of silently bypassing it.
+    require_authorization_for_cache_control    = true
+    unauthorized_cache_control_header_strategy = "FAIL_WITH_403"
+
     throttling_rate_limit  = var.throttling_rate_limit
     throttling_burst_limit = var.throttling_burst_limit
 
-    # Logging settings
     logging_level      = var.logging_level
     data_trace_enabled = var.data_trace_enabled
     metrics_enabled    = var.metrics_enabled
   }
+}
+
+# Per-method caching, one override per cache_method_paths entry. A method
+# override replaces the stage-wide settings for that method, so it repeats
+# them rather than inheriting.
+resource "aws_api_gateway_method_settings" "cache" {
+  for_each = local.cache_method_paths
+
+  rest_api_id = aws_api_gateway_rest_api.rest_api[0].id
+  stage_name  = aws_api_gateway_stage.rest_stage[0].stage_name
+  method_path = each.value
+
+  settings {
+    caching_enabled      = true
+    cache_ttl_in_seconds = var.cache_ttl_seconds
+    cache_data_encrypted = true
+
+    require_authorization_for_cache_control    = true
+    unauthorized_cache_control_header_strategy = "FAIL_WITH_403"
+
+    throttling_rate_limit  = var.throttling_rate_limit
+    throttling_burst_limit = var.throttling_burst_limit
+
+    logging_level      = var.logging_level
+    data_trace_enabled = var.data_trace_enabled
+    metrics_enabled    = var.metrics_enabled
+  }
+
+  # Both resources patch the same stage; serialise them so the UpdateStage
+  # calls do not race (ConflictException).
+  depends_on = [aws_api_gateway_method_settings.stage]
 }
 
 # CloudWatch Dashboard for API Gateway
