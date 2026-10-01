@@ -80,6 +80,10 @@ resource "aws_iam_instance_profile" "instance" {
 # components). Compute resource parameters set on the environment override the
 # template, so only what the environment cannot set lives here.
 resource "aws_launch_template" "this" {
+  # checkov:skip=CKV_AWS_341: the hop limit defaults to 1, but an environment
+  #   may set metadata_http_put_response_hop_limit (validated 1-64) for jobs
+  #   that must reach IMDS, and Checkov cannot evaluate the per-environment
+  #   value (as in the eks component's launch template).
   for_each = local.ec2_compute_environments
 
   name                   = each.value.name
