@@ -4,6 +4,7 @@
 # Usage:
 #   atmos workflow lint -f lint
 #   atmos workflow tflint-init -f lint            # install tflint + its .tflint.hcl plugins (network)
+#   atmos workflow actionlint -f lint             # lint .github/workflows (actionlint)
 #   atmos workflow security-scan -f lint          # PR gate: SARIF reports, fails on NEW HIGH/CRITICAL
 #   atmos workflow security-scan-report -f lint   # nightly: full backlog (no baselines), never fails
 #   atmos workflow security-baseline -f lint      # regenerate .trivyignore.yaml and .checkov.baseline
@@ -170,6 +171,22 @@ workflows:
       - name: tflint-plugins
         type: shell
         command: tflint --init --config .tflint.hcl
+
+  # Workflow files are not Terraform or Atmos config, so nothing above reads them:
+  # a PR that only touches cd/drift/dr/emulator workflows would otherwise get no
+  # static check. Tags carry a `v` prefix. shellcheck is not pinned: the toolchain
+  # does not unpack its .tar.xz release (the binary stays an XZ archive and
+  # actionlint dies with "exec format error"), so run blocks are not shellchecked
+  # in CI; run actionlint locally with shellcheck installed for that.
+  actionlint:
+    description: Lint GitHub Actions workflows (actionlint)
+    dependencies:
+      tools:
+        rhysd/actionlint: "v1.7.12"
+    steps:
+      - name: actionlint
+        type: shell
+        command: actionlint -color -shellcheck=
 
   security-scan:
     description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings

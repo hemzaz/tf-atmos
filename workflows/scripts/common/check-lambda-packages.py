@@ -14,7 +14,9 @@ derives the same way (name "lambda-artifacts", no bucket_name override, the same
 tags.Environment; both run in the stack's account), and that the alias is "alias/" plus
 the alias_name of the kms/main instance that bucket is encrypted with.
 
-For each enabled lambda instance packaged from s3/lambda-artifacts, settings.package_version
+For each enabled lambda instance packaged from s3/lambda-artifacts (any
+`!terraform.state s3/lambda-artifacts ...` read of s3_bucket, whatever its spacing, quoting
+or yq suffix such as `// "default"`), settings.package_version
 must be a YAML string (quoted), and s3_key must be
 "<function_name>/<version>.zip" with a real version: not the "unreleased" placeholder
 (no package exists, so the apply would fail) and not "latest" (an overwritten key
@@ -27,7 +29,7 @@ BUCKET_INSTANCE = "s3/lambda-artifacts"
 BUCKET_NAME = "lambda-artifacts"
 KMS_INSTANCE = "kms/main"
 KMS_READ = f"!terraform.state {KMS_INSTANCE} .key_arn"
-BUCKET_READ = f"!terraform.state {BUCKET_INSTANCE} .bucket_id"
+TERRAFORM_READS = ("!terraform.state", "!terraform.output")
 PLACEHOLDER_VERSIONS = ("unreleased", "latest")
 
 
@@ -82,9 +84,26 @@ def uploader_errors(where: str, iam: dict, instances: dict) -> list[str]:
     return errors
 
 
+def reads_lambda_bucket(value) -> bool:
+    """True for any `!terraform.state s3/lambda-artifacts ...` read, however it is spelled.
+
+    The first two whitespace-separated tokens decide: the function and the component, so
+    `.bucket_id`, `bucket_id`, `.bucket_id // "x"` and extra spaces all count. A lambda that
+    reads some other component, or sets a literal bucket name, is not packaged from here.
+    """
+    if not isinstance(value, str):
+        return False
+    tokens = value.split()
+    return (
+        len(tokens) >= 2
+        and tokens[0] in TERRAFORM_READS
+        and tokens[1].strip("\"'") == BUCKET_INSTANCE
+    )
+
+
 def package_errors(where: str, instance: dict) -> list[str]:
     variables = instance.get("vars") or {}
-    if variables.get("s3_bucket") != BUCKET_READ:
+    if not reads_lambda_bucket(variables.get("s3_bucket")):
         return []
     # describe stacks keeps the YAML type of settings: an unquoted 1.10 is the
     # float 1.1 here, and the key would silently name another release.

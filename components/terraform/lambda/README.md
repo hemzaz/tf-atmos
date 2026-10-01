@@ -13,7 +13,8 @@ rotation configuration.
   `.private_subnet_ids` and packaged from S3: `s3_bucket` is `s3/lambda-artifacts .bucket_id`
   (Cloud Posse's aws-lambda takes its bucket from an s3-bucket component the same way), `s3_key`
   `<function_name>/<settings.package_version>.zip`. All are `metadata.enabled: false` until their
-  first package is uploaded (`docs/OPERATIONS.md`, "Lambda packages"). `lambda/main` in `fnx-local-sandbox` (applied for real by the sandbox workflow)
+  first package is uploaded (`docs/OPERATIONS.md`, "Lambda packages"). `lambda/main` in
+  `fnx-local-sandbox` (applied for real by the sandbox workflow)
   and `lambda/api` in `fnx-local-localemu` use `filename`.
 - Used by: `apigateway` (`lambda/data-processor .function_invoke_arn` / `.function_name`),
   `monitoring` (`.function_name`).
