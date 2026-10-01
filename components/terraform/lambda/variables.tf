@@ -243,7 +243,7 @@ variable "on_failure_destination" {
 
 variable "delivery_kms_key_arn" {
   type        = string
-  description = "Customer managed KMS key ARN of the SQS queues / SNS topics in on_success_destination, on_failure_destination and dead_letter_target_arn; the execution role gets kms:GenerateDataKey and kms:Decrypt on it (the role always gets sqs:SendMessage / sns:Publish on those ARNs)"
+  description = "Customer managed KMS key ARN of the SQS queues / SNS topics in on_success_destination, on_failure_destination, dead_letter_target_arn and each event_source_mappings destination_config.on_failure.destination_arn; the execution role gets kms:GenerateDataKey and kms:Decrypt on it (the role always gets sqs:SendMessage / sns:Publish on those ARNs)"
   default     = null
 
   validation {
@@ -499,5 +499,184 @@ variable "allow_http_egress" {
       !contains(["prod", "production"], lower(lookup(var.tags, "Environment", "dev")))
     )
     error_message = "HTTP egress is not allowed in production environments. Use HTTPS (port 443) only."
+  }
+}
+
+# Poll-based triggers (aws_lambda_event_source_mapping), keyed by mapping
+# name. One generic map for SQS, Kinesis and DynamoDB streams: a deliberate
+# deviation from Cloud Posse's aws-lambda component, whose sqs_notifications
+# covers SQS only. The source service is read from event_source_arn, and the
+# execution role's read grant is derived from the same ARNs (main.tf).
+variable "event_source_mappings" {
+  type = map(object({
+    event_source_arn                   = string
+    enabled                            = optional(bool, true)
+    batch_size                         = optional(number)
+    maximum_batching_window_in_seconds = optional(number)
+    starting_position                  = optional(string)
+    starting_position_timestamp        = optional(string)
+    function_response_types            = optional(list(string), [])
+    filter_criteria = optional(object({
+      filter = list(object({
+        pattern = string
+      }))
+    }))
+    scaling_config = optional(object({
+      maximum_concurrency = number
+    }))
+    destination_config = optional(object({
+      on_failure = object({
+        destination_arn = string
+      })
+    }))
+    maximum_retry_attempts         = optional(number)
+    maximum_record_age_in_seconds  = optional(number)
+    bisect_batch_on_function_error = optional(bool)
+    parallelization_factor         = optional(number)
+    tumbling_window_in_seconds     = optional(number)
+  }))
+  description = "Event source mappings (SQS queues, Kinesis streams or stream consumers, DynamoDB streams) keyed by mapping name; arguments mirror aws_lambda_event_source_mapping. starting_position is required for Kinesis/DynamoDB and forbidden for SQS; scaling_config is SQS-only; destination_config, maximum_retry_attempts, maximum_record_age_in_seconds, bisect_batch_on_function_error, parallelization_factor and tumbling_window_in_seconds are stream-only; filter_criteria takes up to 5 patterns (AWS default quota). The execution role gets read access to exactly these sources, and sqs:SendMessage / sns:Publish on each on_failure destination."
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      can(regex("^arn:aws[a-z-]*:sqs:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+(\\.fifo)?$", m.event_source_arn))
+      || can(regex("^arn:aws[a-z-]*:kinesis:[a-z0-9-]+:[0-9]{12}:stream/[A-Za-z0-9_.-]+(/consumer/[A-Za-z0-9_.-]+:[0-9]+)?$", m.event_source_arn))
+      || can(regex("^arn:aws[a-z-]*:dynamodb:[a-z0-9-]+:[0-9]{12}:table/[A-Za-z0-9_.-]+/stream/[0-9TZ:.-]+$", m.event_source_arn))
+    ])
+    error_message = "event_source_mappings: each event_source_arn must be an SQS queue ARN, a Kinesis stream (or stream consumer) ARN, or a DynamoDB stream ARN (arn:aws:dynamodb:<region>:<account>:table/<table>/stream/<label>), with no wildcards."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      try(split(":", m.event_source_arn)[2], "") == "sqs" ? m.starting_position == null : contains(["TRIM_HORIZON", "LATEST", "AT_TIMESTAMP"], coalesce(m.starting_position, "-"))
+    ])
+    error_message = "event_source_mappings: starting_position (TRIM_HORIZON, LATEST or AT_TIMESTAMP) is required for a Kinesis or DynamoDB stream and must not be set for an SQS queue."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      m.starting_position == "AT_TIMESTAMP" ? (try(split(":", m.event_source_arn)[2], "") == "kinesis" && m.starting_position_timestamp != null) : m.starting_position_timestamp == null
+    ])
+    error_message = "event_source_mappings: starting_position = AT_TIMESTAMP is Kinesis-only and needs starting_position_timestamp (RFC 3339); starting_position_timestamp is not allowed otherwise."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      try(split(":", m.event_source_arn)[2], "") != "sqs" || (
+        m.destination_config == null
+        && m.maximum_retry_attempts == null
+        && m.maximum_record_age_in_seconds == null
+        && m.bisect_batch_on_function_error == null
+        && m.parallelization_factor == null
+        && m.tumbling_window_in_seconds == null
+      )
+    ])
+    error_message = "event_source_mappings: destination_config, maximum_retry_attempts, maximum_record_age_in_seconds, bisect_batch_on_function_error, parallelization_factor and tumbling_window_in_seconds are stream-only (Kinesis, DynamoDB); an SQS mapping retries and dead-letters through the queue's own redrive policy."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      m.scaling_config == null ? true : (
+        try(split(":", m.event_source_arn)[2], "") == "sqs"
+        && m.scaling_config.maximum_concurrency >= 2
+        && m.scaling_config.maximum_concurrency <= 1000
+      )
+    ])
+    error_message = "event_source_mappings: scaling_config.maximum_concurrency is SQS-only and must be between 2 and 1000."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      m.batch_size == null ? true : (
+        endswith(m.event_source_arn, ".fifo") ? (m.batch_size >= 1 && m.batch_size <= 10) : (m.batch_size >= 1 && m.batch_size <= 10000)
+      )
+    ])
+    error_message = "event_source_mappings: batch_size must be 1-10 for an SQS FIFO queue and 1-10000 for a standard SQS queue, a Kinesis stream or a DynamoDB stream."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      try(split(":", m.event_source_arn)[2], "") != "sqs" || coalesce(m.batch_size, 10) <= 10 || coalesce(m.maximum_batching_window_in_seconds, 0) >= 1
+    ])
+    error_message = "event_source_mappings: an SQS batch_size above 10 needs maximum_batching_window_in_seconds of at least 1."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      m.maximum_batching_window_in_seconds == null ? true : (
+        m.maximum_batching_window_in_seconds >= 0
+        && m.maximum_batching_window_in_seconds <= 300
+        && !(endswith(m.event_source_arn, ".fifo") && m.maximum_batching_window_in_seconds > 0)
+      )
+    ])
+    error_message = "event_source_mappings: maximum_batching_window_in_seconds must be 0-300, and an SQS FIFO queue takes no batching window."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) : alltrue([
+        m.maximum_retry_attempts == null ? true : (m.maximum_retry_attempts >= -1 && m.maximum_retry_attempts <= 10000),
+        m.maximum_record_age_in_seconds == null ? true : (m.maximum_record_age_in_seconds == -1 || (m.maximum_record_age_in_seconds >= 60 && m.maximum_record_age_in_seconds <= 604800)),
+        m.parallelization_factor == null ? true : (m.parallelization_factor >= 1 && m.parallelization_factor <= 10),
+        m.tumbling_window_in_seconds == null ? true : (m.tumbling_window_in_seconds >= 0 && m.tumbling_window_in_seconds <= 900),
+      ])
+    ])
+    error_message = "event_source_mappings: maximum_retry_attempts must be -1 to 10000, maximum_record_age_in_seconds -1 or 60-604800, parallelization_factor 1-10, tumbling_window_in_seconds 0-900."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      alltrue([for t in m.function_response_types : t == "ReportBatchItemFailures"])
+    ])
+    error_message = "event_source_mappings: the only function_response_types value is ReportBatchItemFailures."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      m.filter_criteria == null ? true : (length(m.filter_criteria.filter) >= 1 && length(m.filter_criteria.filter) <= 5)
+    ])
+    error_message = "event_source_mappings: filter_criteria.filter takes 1-5 patterns (the AWS default quota per mapping; up to 10 needs a Service Quotas increase and a change to this cap)."
+  }
+
+  validation {
+    condition = alltrue([
+      for m in values(var.event_source_mappings) :
+      m.destination_config == null ? true : can(regex("^arn:aws[a-z-]*:(sqs|sns):[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_.-]+$", m.destination_config.on_failure.destination_arn))
+    ])
+    error_message = "event_source_mappings: destination_config.on_failure.destination_arn must be an SQS queue or SNS topic ARN, with no wildcards."
+  }
+}
+
+# One list for the whole component rather than a per-mapping kms_key_arn:
+# aws_lambda_event_source_mapping already has a kms_key_arn argument with a
+# different meaning (the key that encrypts the mapping's filter criteria), so
+# a per-mapping attribute of that name would be misread; and one key commonly
+# encrypts several sources. Mirrors delivery_kms_key_arn above.
+variable "event_source_kms_key_arns" {
+  type        = list(string)
+  description = "Customer managed KMS key ARNs encrypting the event_source_mappings sources (an SSE-KMS queue, a KMS-encrypted Kinesis stream); the execution role gets kms:Decrypt on exactly these keys. Leave empty for sources on AWS managed or owned keys."
+  default     = []
+
+  validation {
+    condition     = alltrue([for k in var.event_source_kms_key_arns : can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]+$", k))])
+    error_message = "event_source_kms_key_arns must be KMS key ARNs (arn:aws:kms:<region>:<account>:key/<id>), not aliases or wildcards."
+  }
+
+  # The grant lives in the event_sources policy, which only exists with at
+  # least one mapping; without one these keys would be silently ignored.
+  validation {
+    condition     = length(var.event_source_kms_key_arns) == 0 || length(var.event_source_mappings) > 0
+    error_message = "event_source_kms_key_arns is only used with event_source_mappings; set a mapping or leave it empty."
   }
 }

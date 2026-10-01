@@ -108,12 +108,15 @@ resource "aws_iam_role_policy" "lambda_kms_env" {
   })
 }
 
-# Lambda delivers to asynchronous-invocation destinations and to the dead
-# letter target as the function's execution role, so the role must be allowed
-# to send to each SQS queue / publish to each SNS topic named there (and, for
-# one encrypted with a customer managed key, to use that key).
+# Lambda delivers to asynchronous-invocation destinations, to the dead letter
+# target and to a stream event source mapping's on_failure destination as the
+# function's execution role, so the role must be allowed to send to each SQS
+# queue / publish to each SNS topic named there (and, for one encrypted with a
+# customer managed key, to use that key).
 locals {
-  delivery_targets    = compact([var.on_success_destination, var.on_failure_destination, var.dead_letter_target_arn])
+  esm_failure_destinations = [for m in values(var.event_source_mappings) : m.destination_config.on_failure.destination_arn if m.destination_config != null]
+
+  delivery_targets    = distinct(concat(compact([var.on_success_destination, var.on_failure_destination, var.dead_letter_target_arn]), local.esm_failure_destinations))
   delivery_queue_arns = [for a in local.delivery_targets : a if try(split(":", a)[2], "") == "sqs"]
   delivery_topic_arns = [for a in local.delivery_targets : a if try(split(":", a)[2], "") == "sns"]
   delivery_policy     = length(local.delivery_queue_arns) + length(local.delivery_topic_arns) > 0
@@ -155,6 +158,81 @@ resource "aws_iam_role_policy" "delivery" {
   name   = "${var.tags["Environment"]}-${var.function_name}-delivery"
   role   = aws_iam_role.lambda.id
   policy = data.aws_iam_policy_document.delivery[0].json
+}
+
+# Event source mappings poll their source as the function's execution role,
+# so the role needs read access to each queue / stream. Derived from the
+# mapping ARNs and scoped to exactly them, unlike AWS's managed
+# AWSLambdaSQSQueueExecutionRole / AWSLambdaKinesisExecutionRole /
+# AWSLambdaDynamoDBExecutionRole, which grant the same reads on "*".
+# A Kinesis consumer ARN (enhanced fan-out) also needs its stream's ARN for
+# the stream-level reads, so both are granted. kinesis:ListStreams and
+# dynamodb:ListStreams are left out: they only take Resource "*", so a scoped
+# grant never matches, and Lambda's poller does not need them (AWS
+# services-kinesis-create.html; kinesis/main.tf omits it too).
+locals {
+  esm_service = { for k, m in var.event_source_mappings : k => split(":", m.event_source_arn)[2] }
+
+  esm_sqs_arns = distinct([for k, m in var.event_source_mappings : m.event_source_arn if local.esm_service[k] == "sqs"])
+  esm_kinesis_arns = distinct(flatten([
+    for k, m in var.event_source_mappings : [m.event_source_arn, regex("^(.+:stream/[^/]+)", m.event_source_arn)[0]] if local.esm_service[k] == "kinesis"
+  ]))
+  esm_dynamodb_arns = distinct([for k, m in var.event_source_mappings : m.event_source_arn if local.esm_service[k] == "dynamodb"])
+}
+
+data "aws_iam_policy_document" "event_sources" {
+  count = length(var.event_source_mappings) > 0 ? 1 : 0
+
+  dynamic "statement" {
+    for_each = length(local.esm_sqs_arns) > 0 ? [1] : []
+    content {
+      sid       = "ReadSqsEventSources"
+      actions   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:ChangeMessageVisibility"]
+      resources = local.esm_sqs_arns
+    }
+  }
+
+  dynamic "statement" {
+    for_each = length(local.esm_kinesis_arns) > 0 ? [1] : []
+    content {
+      sid = "ReadKinesisEventSources"
+      actions = [
+        "kinesis:DescribeStream",
+        "kinesis:DescribeStreamSummary",
+        "kinesis:DescribeStreamConsumer",
+        "kinesis:GetRecords",
+        "kinesis:GetShardIterator",
+        "kinesis:ListShards",
+        "kinesis:SubscribeToShard",
+      ]
+      resources = local.esm_kinesis_arns
+    }
+  }
+
+  dynamic "statement" {
+    for_each = length(local.esm_dynamodb_arns) > 0 ? [1] : []
+    content {
+      sid       = "ReadDynamoDBEventSources"
+      actions   = ["dynamodb:DescribeStream", "dynamodb:GetRecords", "dynamodb:GetShardIterator"]
+      resources = local.esm_dynamodb_arns
+    }
+  }
+
+  dynamic "statement" {
+    for_each = length(var.event_source_kms_key_arns) > 0 ? [1] : []
+    content {
+      sid       = "DecryptEventSources"
+      actions   = ["kms:Decrypt"]
+      resources = var.event_source_kms_key_arns
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "event_sources" {
+  count  = length(var.event_source_mappings) > 0 ? 1 : 0
+  name   = "${var.tags["Environment"]}-${var.function_name}-event-sources"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.event_sources[0].json
 }
 
 # Create log group before the Lambda function to avoid circular dependencies
@@ -484,6 +562,59 @@ resource "aws_lambda_function_event_invoke_config" "main" {
       }
     }
   }
+}
+
+resource "aws_lambda_event_source_mapping" "this" {
+  for_each = var.event_source_mappings
+
+  function_name                      = aws_lambda_function.main.function_name
+  event_source_arn                   = each.value.event_source_arn
+  enabled                            = each.value.enabled
+  batch_size                         = each.value.batch_size
+  maximum_batching_window_in_seconds = each.value.maximum_batching_window_in_seconds
+  starting_position                  = each.value.starting_position
+  starting_position_timestamp        = each.value.starting_position_timestamp
+  function_response_types            = length(each.value.function_response_types) > 0 ? each.value.function_response_types : null
+  maximum_retry_attempts             = each.value.maximum_retry_attempts
+  maximum_record_age_in_seconds      = each.value.maximum_record_age_in_seconds
+  bisect_batch_on_function_error     = each.value.bisect_batch_on_function_error
+  parallelization_factor             = each.value.parallelization_factor
+  tumbling_window_in_seconds         = each.value.tumbling_window_in_seconds
+
+  dynamic "filter_criteria" {
+    for_each = each.value.filter_criteria != null ? [each.value.filter_criteria] : []
+    content {
+      dynamic "filter" {
+        for_each = filter_criteria.value.filter
+        content {
+          pattern = filter.value.pattern
+        }
+      }
+    }
+  }
+
+  dynamic "scaling_config" {
+    for_each = each.value.scaling_config != null ? [each.value.scaling_config] : []
+    content {
+      maximum_concurrency = scaling_config.value.maximum_concurrency
+    }
+  }
+
+  dynamic "destination_config" {
+    for_each = each.value.destination_config != null ? [each.value.destination_config] : []
+    content {
+      on_failure {
+        destination_arn = destination_config.value.on_failure.destination_arn
+      }
+    }
+  }
+
+  tags = { Name = "${var.tags["Environment"]}-${var.function_name}-${each.key}" }
+
+  # CreateEventSourceMapping checks that the execution role can read the
+  # source (and reach the on_failure destination) before it accepts the
+  # mapping, so the grants must exist first.
+  depends_on = [aws_iam_role_policy.event_sources, aws_iam_role_policy.delivery]
 }
 
 # Provisioned Concurrency for consistent performance

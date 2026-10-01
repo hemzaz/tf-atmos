@@ -2,7 +2,8 @@
 
 A generic Lambda function: execution role and custom policy, log group, optional VPC security
 group, the function (Zip package), trigger permissions (API Gateway, S3, CloudWatch, SNS,
-EventBridge, Secrets Manager rotation), async invoke config and destinations, provisioned
+EventBridge, Secrets Manager rotation), event source mappings (SQS, Kinesis, DynamoDB streams)
+with their derived read grant, async invoke config and destinations, provisioned
 concurrency, an alias, CloudWatch alarms, an optional schedule rule, and optional Secrets Manager
 rotation configuration.
 
@@ -32,8 +33,22 @@ rotation configuration.
   without `source_code_hash` or `s3_object_version`). The principal creating the function needs
   `s3:GetObject` on it and `kms:Decrypt` on `kms/main` (the bucket's key); the CI apply role has
   both through `AdministratorAccess`.
-- There is no `event_source_mappings` input: the mappings the `data-pipeline`, `batch-processing`
-  and `serverless-api` templates set are not applied.
+- `event_source_mappings` is one map, keyed by mapping name, for SQS queues, Kinesis streams (or
+  enhanced fan-out consumers) and DynamoDB streams; the service comes from `event_source_arn`.
+  This deviates from Cloud Posse's aws-lambda, whose `sqs_notifications` covers SQS only (no
+  Kinesis or DynamoDB). The `data-pipeline`, `batch-processing` and `serverless-api` templates
+  use it.
+- The execution role's read grant (`<Environment>-<function_name>-event-sources`) is derived from
+  the mapping ARNs and scoped to exactly them. A source on a customer managed key also needs that
+  key in `event_source_kms_key_arns` (`kms:Decrypt`). A mapping's `on_failure` destination joins
+  the delivery policy (`sqs:SendMessage` / `sns:Publish`; `delivery_kms_key_arn` for its key).
+- SQS sources: set the queue's `visibility_timeout_seconds` to at least 6x this function's
+  `timeout` (plus `maximum_batching_window_in_seconds`), as AWS recommends; this component cannot
+  see the queue to check it. Failed messages go to the queue's own redrive DLQ, so the stream-only
+  retry and `destination_config` fields are rejected for SQS. An SQS queue encrypted with a
+  customer managed key needs that key in `event_source_kms_key_arns`, or polling fails on decrypt.
+- Mappings target the unqualified function (`$LATEST`), so they bypass `create_alias` and any
+  provisioned concurrency configured on the alias.
 - In a VPC, egress defaults to the region's AWS-managed S3 prefix list; the built-in rules are never
   `0.0.0.0/0`. Add more with `custom_egress_rules` or confine it with
   `vpc_endpoint_prefix_list_ids`.
