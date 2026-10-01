@@ -48,6 +48,16 @@ output "alias_arn" {
   description = "ARN of the Lambda function alias"
 }
 
+output "event_source_mapping_uuids" {
+  value       = { for k, v in aws_lambda_event_source_mapping.this : k => v.uuid }
+  description = "UUIDs of the event source mappings, keyed by event_source_mappings key"
+}
+
+output "event_source_mapping_arns" {
+  value       = { for k, v in aws_lambda_event_source_mapping.this : k => v.arn }
+  description = "ARNs of the event source mappings, keyed by event_source_mappings key"
+}
+
 output "alias_invoke_arn" {
   value       = var.create_alias ? aws_lambda_alias.main[0].invoke_arn : null
   description = "Invoke ARN of the Lambda function alias"
