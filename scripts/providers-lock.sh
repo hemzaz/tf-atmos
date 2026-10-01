@@ -11,6 +11,14 @@
 #   UPGRADE=false bash scripts/providers-lock.sh   # keep the locked versions,
 #                                                  # only (re)write the hashes
 #
+# Environment:
+#   UPGRADE   true | false. Whether to take the newest provider versions the
+#             constraints allow (true) or keep each root's locked version and only
+#             rewrite hashes (false). Default: true for a run over every root
+#             module, false when component names are given, so a subset run never
+#             upgrades providers. UPGRADE=true with components opts back in.
+#   TF_PLUGIN_CACHE_DIR   provider cache (default ~/.cache/terraform-plugins).
+#
 # CI runs `terraform init` with -lockfile=readonly, so a provider, version or
 # platform that is not in a committed lock fails init instead of floating.
 # Run this after changing a required_providers block, to take newer provider
@@ -41,7 +49,6 @@
 set -euo pipefail
 
 PLATFORMS=(linux_amd64 linux_arm64 darwin_arm64 darwin_amd64)
-UPGRADE="${UPGRADE:-true}"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="$REPO/components/terraform"
@@ -57,7 +64,9 @@ done
 
 if [ "$#" -gt 0 ]; then
   roots=("$@")
+  UPGRADE="${UPGRADE:-false}"
 else
+  UPGRADE="${UPGRADE:-true}"
   roots=()
   for d in "$TF_DIR"/*/; do
     c="$(basename "$d")"
@@ -69,13 +78,17 @@ fi
 
 WORK="$(mktemp -d)"
 # A run that fails puts back every lock it had moved aside, so a failure never
-# leaves a root with a half-written (local-platform-only) lock.
+# leaves a root with a half-written (local-platform-only) lock. A root that had
+# no lock yet (a new component) gets a discovery lock from step 1's init; it is
+# marked with $WORK/new-<root> and removed on failure rather than left behind.
 cleanup() {
   local rc=$?
   if [ "$rc" -ne 0 ]; then
     for c in "${roots[@]}"; do
       if [ -f "$WORK/prev-$c.lock.hcl" ]; then
         mv -f "$WORK/prev-$c.lock.hcl" "$TF_DIR/$c/.terraform.lock.hcl"
+      elif [ -f "$WORK/new-$c" ]; then
+        rm -f "$TF_DIR/$c/.terraform.lock.hcl"
       fi
     done
     echo "providers-lock: failed; the previous lock files are restored" >&2
@@ -96,6 +109,8 @@ for c in "${roots[@]}"; do
   [ -d "$dir" ] || { echo "providers-lock: no such component: $c" >&2; exit 2; }
   if [ -f "$dir/.terraform.lock.hcl" ]; then
     mv "$dir/.terraform.lock.hcl" "$WORK/prev-$c.lock.hcl"
+  else
+    : >"$WORK/new-$c"
   fi
   if ! TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE=true \
     terraform -chdir="$dir" init -backend=false -input=false >"$WORK/select-$c.log" 2>&1; then

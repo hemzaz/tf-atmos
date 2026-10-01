@@ -9,10 +9,11 @@
 # Usage:
 #   atmos workflow providers-lock -f providers                     # newest versions within the constraints
 #   UPGRADE=false atmos workflow providers-lock -f providers       # keep the locked versions, rewrite hashes
-#   COMPONENTS="kms vpc" atmos workflow providers-lock -f providers
+#   COMPONENTS="kms vpc" atmos workflow providers-lock -f providers   # subset: UPGRADE defaults to false
 #
-# Platforms: linux_amd64 (CI), linux_arm64 (the devops container on Apple
-# silicon), darwin_arm64 and darwin_amd64 (the owner's Macs). See
+# Platforms: linux_amd64 (CI and the amd64 devops container), darwin_arm64 and
+# darwin_amd64 (developer Macs running terraform natively). linux_arm64 is kept
+# only because the locks already carry it; nothing here runs on it. See
 # scripts/providers-lock.sh.
 workflows:
   providers-lock:
