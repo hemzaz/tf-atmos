@@ -22,11 +22,26 @@ state or outputs.
   `allowed_security_group_ids`, which would be a cycle.
 - Toggling `cluster_mode_enabled` replaces the cache (no online migration). With cluster mode on, a
   named `parameter_group_name` must itself be cluster-enabled (not validated).
+- The token is sent to the cache on every create or replacement, and on an update only when
+  `auth_token_version` changes. A cache replacement (a ForceNew change such as `kms_key_id`, or a
+  tainted create) re-creates the secret version alongside it (`replace_triggered_by` on the cache
+  id), so the two keep agreeing.
 - Rotate the token by incrementing `auth_token_version`: the apply sends one new token to both the
-  cache (ROTATE: the old token stays valid too) and the secret. Restart or re-sync consumers so they
-  read the new secret value. Rotating the secret alone desyncs the two.
-- If an apply fails between the secret and the cache, they can disagree: bump `auth_token_version`
-  and apply again.
+  cache and the secret. ROTATE leaves both the old and the new token valid (ElastiCache allows at
+  most two). Once consumers have re-read the secret, revoke the old one with SET, which sends the
+  new token again:
+
+  ```bash
+  aws elasticache modify-replication-group --replication-group-id <Environment>-<cluster_id> \
+    --auth-token "$(aws secretsmanager get-secret-value \
+      --secret-id redis-auth/<Environment>/<cluster_id> \
+      --query SecretString --output text | jq -r .auth_token)" \
+    --auth-token-update-strategy SET --apply-immediately
+  ```
+
+  Rotating the secret alone desyncs the two.
+- A secret version replaced alone or deleted out of band, or an apply that fails between the secret
+  and the cache, leaves them disagreeing: bump `auth_token_version` and apply again.
 - The token is not read back from Secrets Manager (idp-platform's pattern): the CI plan role has no
   `secretsmanager:GetSecretValue`, and `mock_provider` tests reject any aws ephemeral resource.
 - With a rotation Lambda managing the token out of band (the `microservices-platform` template),

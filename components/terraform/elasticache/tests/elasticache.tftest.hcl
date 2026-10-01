@@ -242,6 +242,9 @@ run "ingress_slash_00_is_rejected" {
 }
 
 # apply, not plan: the state after apply is what must not hold the token.
+# Terraform nulls write-only attributes in state anyway, so the
+# secret_string/auth_token == null asserts guard against a revert to the
+# stored attributes (secret_string, auth_token), not against *_wo leaking.
 run "auth_token_is_generated_and_written_write_only" {
   command = apply
 
@@ -426,4 +429,24 @@ run "rejects_additional_policy_json_without_a_statement_key" {
   }
 
   expect_failures = [var.additional_policy_json]
+}
+
+# The secret version's replace_triggered_by names main[0]: with the component
+# disabled both have count 0, and the reference must not be evaluated.
+run "disabled_creates_nothing" {
+  command = apply
+
+  variables {
+    enabled = false
+  }
+
+  assert {
+    condition = (
+      length(aws_elasticache_replication_group.main) == 0
+      && length(aws_secretsmanager_secret.auth_token) == 0
+      && length(aws_secretsmanager_secret_version.auth_token) == 0
+      && output.auth_token_secret_arn == null
+    )
+    error_message = "enabled = false must create no cache, secret or secret version."
+  }
 }

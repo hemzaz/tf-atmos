@@ -172,8 +172,9 @@ resource "aws_elasticache_replication_group" "main" {
 
   # Encryption. Transit encryption is forced on (validated on the variable)
   # and the AUTH token is always set, so the cache is never reachable
-  # unauthenticated. The token is write-only: Terraform sends it only when
-  # auth_token_version changes and never stores it in plan or state.
+  # unauthenticated. The token is write-only, never in plan or state. The
+  # provider sends it on every create (including a replacement); on an
+  # update, only when auth_token_version changes.
   at_rest_encryption_enabled = var.at_rest_encryption_enabled
   transit_encryption_enabled = var.transit_encryption_enabled
   auth_token_wo              = local.auth_token
@@ -210,14 +211,18 @@ resource "aws_elasticache_replication_group" "main" {
 # is generated here, not passed in, with the same shape as its redis_cluster
 # module: 128 characters, override_special "#^-", at least 3 of each class.
 # ElastiCache allows 16-128 characters, with punctuation only from !&#$^<>-
-# (never '@', '"', '/' or a space). Cloud Posse keeps a stored random_password; this one is ephemeral
-# instead. It is regenerated on every run but reaches AWS only through the
-# write-only attributes, which Terraform sends only when auth_token_version
-# changes. Nothing holds the token in plan or state.
+# (never '@', '"', '/' or a space). Cloud Posse keeps a stored
+# random_password; this one is ephemeral instead. It is regenerated on every
+# run but reaches AWS only through the write-only attributes. Each is sent
+# on its resource's create (or replacement), and on an update only when
+# auth_token_version changes. Nothing holds the token in plan or state.
 #
 # One apply feeds the same value to the secret version and the replication
-# group, so the two agree. If an apply fails between them, bump
-# auth_token_version and apply again: both are re-sent.
+# group, so the two agree. A cache replacement (a ForceNew change such as
+# kms_key_id, or a tainted create) re-creates the secret version alongside
+# it (replace_triggered_by below). A secret version replaced alone or
+# deleted out of band, or an apply that fails between the two, needs an
+# auth_token_version bump: both are then re-sent.
 #
 # No ephemeral read back from Secrets Manager (idp-platform's pattern): the
 # CI plan role (ReadOnlyAccess) has no secretsmanager:GetSecretValue, and
@@ -275,6 +280,15 @@ resource "aws_secretsmanager_secret_version" "auth_token" {
     auth_token = local.auth_token
   })
   secret_string_wo_version = var.auth_token_version
+
+  # A new cache gets a fresh token on create; re-create this version in the
+  # same apply so the secret carries that token too. On the cache's id only:
+  # an in-place update of the cache must not re-create the secret.
+  depends_on = [aws_elasticache_replication_group.main]
+
+  lifecycle {
+    replace_triggered_by = [aws_elasticache_replication_group.main[0].id]
+  }
 }
 
 # rotation_policy's own two statements, folding in additional_policy_json --
