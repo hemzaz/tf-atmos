@@ -90,7 +90,7 @@ run "a_listed_public_get_is_cached_encrypted_and_guarded" {
 
   variables {
     enable_caching     = true
-    cache_method_paths = ["GET /products", "GET /"]
+    cache_method_paths = ["GET /products"]
     cache_ttl_seconds  = 120
   }
 
@@ -102,11 +102,6 @@ run "a_listed_public_get_is_cached_encrypted_and_guarded" {
   assert {
     condition     = aws_api_gateway_method_settings.cache["GET /products"].method_path == "products/GET"
     error_message = "A resource path maps to API Gateway's <path without leading slash>/<method>."
-  }
-
-  assert {
-    condition     = aws_api_gateway_method_settings.cache["GET /"].method_path == "~1/GET"
-    error_message = "The root resource maps to ~1/<method>."
   }
 
   assert {
@@ -125,6 +120,65 @@ run "a_listed_public_get_is_cached_encrypted_and_guarded" {
     condition     = aws_api_gateway_method_settings.stage[0].settings[0].caching_enabled == false
     error_message = "Listing methods never turns on */* caching."
   }
+}
+
+run "the_root_resource_maps_to_its_escaped_path" {
+  command = plan
+
+  variables {
+    enable_caching     = true
+    cache_method_paths = ["GET /"]
+  }
+
+  assert {
+    condition     = aws_api_gateway_method_settings.cache["GET /"].method_path == "~1/GET"
+    error_message = "The root resource maps to ~1/<method>."
+  }
+}
+
+# A resource under parent_id sits below its parent's path; method_path must
+# carry the full path, not just "<path_part>/<method>".
+run "a_nested_resource_maps_to_its_full_path" {
+  command = plan
+
+  override_resource {
+    target          = aws_api_gateway_resource.resource
+    override_during = plan
+    values = {
+      path = "/v1/products"
+    }
+  }
+
+  variables {
+    enable_caching     = true
+    cache_method_paths = ["GET /products"]
+    api_resources      = [{ path_part = "products", parent_id = "v1-resource-id" }]
+    api_methods        = [{ resource_path = "/products", http_method = "GET" }]
+    api_integrations   = [{ resource_path = "/products", http_method = "GET", integration_http_method = "GET", type = "MOCK" }]
+  }
+
+  assert {
+    condition     = aws_api_gateway_resource.resource[0].parent_id == "v1-resource-id"
+    error_message = "parent_id is passed through."
+  }
+
+  assert {
+    condition     = aws_api_gateway_method_settings.cache["GET /products"].method_path == "v1/products/GET"
+    error_message = "A nested resource's method_path is its full path without the leading slash, then the method."
+  }
+}
+
+# Each per-method setting is a parallel UpdateStage on the same stage, which
+# API Gateway rejects with ConflictException.
+run "caching_two_methods_is_rejected" {
+  command = plan
+
+  variables {
+    enable_caching     = true
+    cache_method_paths = ["GET /products", "GET /"]
+  }
+
+  expect_failures = [var.cache_method_paths]
 }
 
 run "cache_all_without_acknowledgment_is_rejected" {

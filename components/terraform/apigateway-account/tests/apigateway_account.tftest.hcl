@@ -87,9 +87,23 @@ run "policy_arn_follows_the_partition" {
 run "account_setting_uses_the_role" {
   command = plan
 
+  # Against the literal ARN the override pins, not aws_iam_role.this[0].arn:
+  # both sides of that comparison would be the same override.
   assert {
-    condition     = aws_api_gateway_account.this[0].cloudwatch_role_arn == aws_iam_role.this[0].arn
+    condition     = aws_api_gateway_account.this[0].cloudwatch_role_arn == "arn:aws:iam::123456789012:role/test-apigateway-cloudwatch-eu-west-2"
     error_message = "aws_api_gateway_account must point at this component's role."
+  }
+
+  # The role set on the account is the one API Gateway may assume and that
+  # carries the push policy.
+  assert {
+    condition     = jsondecode(aws_iam_role.this[0].assume_role_policy).Statement[0].Principal.Service == "apigateway.amazonaws.com"
+    error_message = "The role set on the account must be the one trusted by apigateway.amazonaws.com."
+  }
+
+  assert {
+    condition     = aws_iam_role_policy_attachment.cloudwatch[0].role == aws_iam_role.this[0].name && aws_iam_role.this[0].name == "test-apigateway-cloudwatch-eu-west-2"
+    error_message = "The push policy must be attached to the role set on the account."
   }
 
   assert {

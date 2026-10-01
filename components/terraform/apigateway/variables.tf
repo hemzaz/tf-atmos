@@ -612,7 +612,7 @@ variable "cache_cluster_size" {
 
 variable "cache_method_paths" {
   type        = list(string)
-  description = "REST methods whose responses API Gateway caches, as \"<HTTP_METHOD> <resource_path>\" keys of api_methods (e.g. \"GET /products\"). Empty caches nothing. \"*/*\" caches every method and needs cache_all_methods_acknowledged. A cached method with authorization other than NONE must key its cache on the caller's identity: list the identity header (authorizer_identity_source, or method.request.header.Authorization for AWS_IAM) in the method's request_parameters and its integration's cache_key_parameters"
+  description = "REST methods whose responses API Gateway caches, as \"<HTTP_METHOD> <resource_path>\" keys of api_methods (e.g. \"GET /products\"). Empty caches nothing. \"*/*\" caches every method and needs cache_all_methods_acknowledged. At most one entry besides \"*/*\": each is its own UpdateStage on the stage, and parallel ones fail with ConflictException. A cached method with authorization other than NONE must key its cache on the caller's identity: list the identity header (authorizer_identity_source) in the method's request_parameters and its integration's cache_key_parameters. AWS_IAM requires method.request.header.Authorization, but a SigV4 signature differs on every request, so such a method never gets a cache hit: do not cache AWS_IAM methods"
   default     = []
   nullable    = false
 
@@ -626,6 +626,11 @@ variable "cache_method_paths" {
   validation {
     condition     = !contains(var.cache_method_paths, "*/*") || var.cache_all_methods_acknowledged
     error_message = "Caching \"*/*\" caches every method, authenticated ones included. List the cacheable methods instead, or set cache_all_methods_acknowledged = true."
+  }
+
+  validation {
+    condition     = length([for k in var.cache_method_paths : k if k != "*/*"]) <= 1
+    error_message = "cache_method_paths allows one method besides \"*/*\": each is its own aws_api_gateway_method_settings, and parallel UpdateStage calls on one stage fail with ConflictException."
   }
 
   validation {

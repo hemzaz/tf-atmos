@@ -33,10 +33,11 @@ model).
   calls are intentionally not alerted: they change a description, not what a group allows.
 - The rule skips calls by the roles in `security_group_change_excluded_role_arns`; the alarm still
   counts them. The catalog lists the cluster roles and AWS Load Balancer Controller IRSA roles of
-  both EKS instances (`eks/main`, `eks/data`), the EKS service-linked roles (by naming convention: `eks` and `eks-addons` deploy later) and the
-  `iam/ci` apply role (from state). To exclude another role, add its exact ARN, path included, to
-  that list in `stacks/catalog/security-monitoring/defaults.yaml`; wildcards are rejected. A new
-  `eks` instance needs its cluster role and controller role ARNs added there.
+  both EKS instances (`eks/main`, `eks/data`), the EKS service-linked roles (by naming
+  convention: `eks` and `eks-addons` deploy later) and the `iam/ci` apply role (from state). To
+  exclude another role, add its exact ARN, path included, to that list in
+  `stacks/catalog/security-monitoring/defaults.yaml`; wildcards are rejected. A new `eks`
+  instance needs its cluster role and controller role ARNs added there.
 - Root, IAM user and AWSService-type calls (`userIdentity.type` `AWSService`) carry no
   `sessionIssuer` (service-linked-role calls do), and an `anything-but` never matches
   a missing field, so the pattern is an `$or` with an `exists: false` branch that keeps them

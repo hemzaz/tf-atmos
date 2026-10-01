@@ -383,6 +383,8 @@ run "read_replica_matches_primary" {
     performance_insights_kms_key_id = "arn:aws:kms:eu-west-2:123456789012:key/00000000-0000-0000-0000-000000000000"
     monitoring_interval             = 60
     create_monitoring_role          = true
+    max_allocated_storage           = 500
+    ca_cert_identifier              = "rds-ca-rsa4096-g1"
   }
 
   override_resource {
@@ -427,6 +429,22 @@ run "read_replica_matches_primary" {
   assert {
     condition     = aws_db_instance.read_replica[0].monitoring_role_arn == aws_db_instance.main.monitoring_role_arn && aws_db_instance.read_replica[0].monitoring_interval == 60
     error_message = "The replica must have the primary's enhanced monitoring."
+  }
+
+  assert {
+    condition = (
+      aws_db_instance.read_replica[0].max_allocated_storage == aws_db_instance.main.max_allocated_storage
+      && aws_db_instance.read_replica[0].max_allocated_storage == 500
+    )
+    error_message = "The replica must autoscale storage to the primary's max_allocated_storage."
+  }
+
+  assert {
+    condition = (
+      aws_db_instance.read_replica[0].ca_cert_identifier == aws_db_instance.main.ca_cert_identifier
+      && aws_db_instance.read_replica[0].ca_cert_identifier == "rds-ca-rsa4096-g1"
+    )
+    error_message = "The replica must use the primary's CA certificate."
   }
 }
 
