@@ -318,8 +318,8 @@ BOOL_ATTRS = {'enabled'}
 AWS_RESOURCE = re.compile(r'^(?:data\.)?aws_')
 # random_password / random_string: every attribute is a plain value, never a
 # block, and `result` is a string -- on these two only (attr_shape's rand).
-# A `for` over their instances binds RANDOM_ELEM (secretsmanager's
-# generated_passwords is `v.result` over random_password).
+# A `for` over their instances binds RANDOM_ELEM (e.g. an output
+# `{ for k, v in random_password.this : k => v.result }`).
 RANDOM_RESOURCE = re.compile(r'^random_(?:password|string)\.')
 RANDOM_ELEM = ('random_resource',)
 

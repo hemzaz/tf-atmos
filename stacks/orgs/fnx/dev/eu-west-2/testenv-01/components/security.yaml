@@ -198,12 +198,19 @@ components:
             name: "istio-certificates"
             description: "TLS certificates for Istio Gateway"
             path: "certificates"
-            secret_data: |-
-              {
-                "tls.crt_ssm_parameter": "/fnx/certificates/example.com-wildcard/cert",
-                "reference_only": "true"
-              }
+            # The value comes from the ephemeral secret_data variable (below),
+            # written write-only: never in plan or state.
+            static_value: true
         context_name: "infra"
+      # secret_data is ephemeral, so it travels in TF_VAR_secret_data, not
+      # vars: Terraform needs an ephemeral value set at plan again when the
+      # saved plan is applied, and `deploy --from-plan` applies the planfile
+      # without the varfile. Atmos exports `env` to every terraform command.
+      # A real secret goes in the operator's or CI's environment instead
+      # (TF_VAR_secret_data); this value is only a reference to an SSM path.
+      env:
+        TF_VAR_secret_data: >-
+          {"istio_certificates": "{\"tls.crt_ssm_parameter\": \"/fnx/certificates/example.com-wildcard/cert\", \"reference_only\": \"true\"}"}
 
     # ==========================================================================
     # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,

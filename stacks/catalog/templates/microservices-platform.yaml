@@ -1620,10 +1620,13 @@ components:
     # and jwt_signing secrets are rotated every 30 days by the two Lambda
     # instances above, which configure that rotation from THEIR OWN component
     # instances (rotation_secret_arn) -- see the comment on that section for
-    # why. rotation_managed_externally: true here only tells THIS component
-    # to stop overwriting the value after the initial create (the same
-    # ignore_changes split rotation_lambda_arn + rotation_automatically would
-    # otherwise drive); it does not itself configure any rotation.
+    # why. rotation_managed_externally: true here records that the Lambda
+    # owns the value; it does not itself configure any rotation. Generated
+    # values are ephemeral and write-only (never in plan or state), sent on
+    # create and again only on a secret_string_version bump, so this
+    # component never overwrites a rotated value on a routine apply. Do not
+    # bump secret_string_version on redis or jwt_signing: rotate them with
+    # `aws secretsmanager rotate-secret`.
     #
     # secretsmanager/defaults sets var.environment from
     # settings.context.stage (dev/staging/prod), which two stacks sharing an
@@ -1679,7 +1682,7 @@ components:
             random_password_override_special: "!&#$^<>-"
             rotation_managed_externally: true
 
-          # API keys, filled in by operators after apply
+          # API keys, filled in by operators after apply (created empty)
           api_keys:
             name: "api-keys"
             description: "API keys for microservices"
