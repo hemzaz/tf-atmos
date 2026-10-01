@@ -20,6 +20,15 @@ components:
         # Principals allowed to assume the cross-account role
         trusted_account_ids:
           - "{{ .settings.environment.management_account_id }}"
+        # ...narrowed to exactly these role ARNs (aws:PrincipalArn, the
+        # backend's access_roles pattern); the component requires at least one
+        # when it creates the cross-account role, and rejects wildcards. The
+        # role need not exist yet: until it does, nobody can assume the
+        # cross-account role (fails closed).
+        # TODO(placeholder): replace with the management-account role(s) that
+        # actually operate this account (full ARN, path included).
+        trusted_principal_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-cross-account-operator"
         # Trust condition: the module requires require_mfa, external_id or
         # trusted_principal_org_id when trusting another account.
         # TODO(placeholder): replace with the real AWS Organizations ID.

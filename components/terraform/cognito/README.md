@@ -14,7 +14,10 @@ gives `apigateway` a real pool for `COGNITO_USER_POOLS` authorization.
 
 - `username_attributes`, `auto_verified_attributes` and a client's `generate_secret` are
   immutable: changing them replaces the pool (every user is lost) or the client.
-- `advanced_security_mode` defaults to `ENFORCED`, billed per monthly active user.
+- Threat protection (`advanced_security_mode` `AUDIT`/`ENFORCED`) needs the PLUS feature plan
+  (`user_pool_tier = "PLUS"`, validated). The component defaults to `OFF` and `ESSENTIALS`;
+  `cognito/defaults` sets `ENFORCED` + `PLUS` for the AWS stacks. PLUS is billed per monthly
+  active user with no free tier (ESSENTIALS has 10,000 free MAU).
 - Self-signup is off (`allow_admin_create_user_only = true`), `prevent_user_existence_errors` is
   always on, and `ALLOW_USER_PASSWORD_AUTH` is rejected (use SRP).
 - Browser and mobile clients must set `generate_secret: false`.

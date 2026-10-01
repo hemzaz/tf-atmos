@@ -62,7 +62,7 @@ components:
       vars:
         # The hub issues credentials; it does not manage workload resources.
         # Leaving this false also avoids the trust precondition the spoke must
-        # satisfy (cross-account-roles.tf:59).
+        # satisfy (cross-account-roles.tf:83).
         create_cross_account_role: false
         # Required by the component (no default). catalog/iam/defaults.yaml
         # supplies this for ordinary iam instances; these bases do not import

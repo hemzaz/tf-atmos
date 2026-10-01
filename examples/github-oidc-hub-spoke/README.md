@@ -17,8 +17,9 @@ list it in the instance's `metadata.inherits`.
    `-ci-exec` role ARN, listed explicitly (a wildcard hands CI every role in the organisation).
    Set it in `ci_plan_policy_arns` and re-apply. `AdministratorAccess`/`PowerUserAccess` are
    rejected for the plan role; give the apply role the same assume-only policy.
-4. Each workload stack: `iam/oidc-spoke` with `trusted_account_ids: ["<hub account id>"]` and
-   `external_id` (or `trusted_principal_org_id`), which its precondition requires. Never set
+4. Each workload stack: `iam/oidc-spoke` with `trusted_account_ids: ["<hub account id>"]`,
+   `trusted_principal_arns` (the hub's `-ci-plan`/`-ci-apply` role ARNs, exact, no wildcard) and
+   `external_id` (or `trusted_principal_org_id`); its preconditions require all three. Never set
    `github_oidc_provider_arn` in a spoke to the hub's provider, and never trust the spoke's own
    account id.
 5. Set the repository variable `AWS_PLAN_ROLE_ARN` to the hub plan role. `terraform-cd.yml`

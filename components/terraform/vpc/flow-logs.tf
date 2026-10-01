@@ -101,6 +101,19 @@ resource "aws_iam_role" "flow_logs" {
           Service = "vpc-flow-logs.amazonaws.com"
         }
         Action = "sts:AssumeRole"
+        # Confused-deputy guard, as AWS documents for this role
+        # (https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-iam-role.html):
+        # source account = the flow log's owner, source ARN = a flow log in
+        # this account and region. The flow log ID does not exist until the
+        # flow log is created with this role, hence the documented wildcard.
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:ec2:${var.region}:${data.aws_caller_identity.current.account_id}:vpc-flow-log/*"
+          }
+        }
       }
     ]
   })

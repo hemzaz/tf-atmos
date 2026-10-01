@@ -102,3 +102,23 @@ run "flow_logs_kms_key_arn_rejects_a_malformed_arn" {
 
   expect_failures = [var.flow_logs_kms_key_arn]
 }
+
+# S4: the flow-logs role trust carries AWS's documented confused-deputy
+# conditions (vpc/latest/userguide/flow-logs-iam-role.html).
+run "flow_logs_role_trust_is_scoped_to_this_account" {
+  command = plan
+
+  variables {
+    vpc_flow_logs_enabled = true
+    flow_logs_kms_key_arn = "arn:aws:kms:eu-west-2:123456789012:key/11111111-2222-3333-4444-555555555555"
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role.flow_logs[0].assume_role_policy).Statement[0].Principal.Service == "vpc-flow-logs.amazonaws.com"
+      && jsondecode(aws_iam_role.flow_logs[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+      && jsondecode(aws_iam_role.flow_logs[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:ec2:eu-west-2:123456789012:vpc-flow-log/*"
+    )
+    error_message = "The flow-logs role must trust vpc-flow-logs.amazonaws.com only with aws:SourceAccount = this account and aws:SourceArn = a flow log in this account and region."
+  }
+}

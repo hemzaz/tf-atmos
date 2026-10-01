@@ -3,9 +3,9 @@
 # make every plan of this component call STS GetCallerIdentity, which breaks
 # the fully offline test suite in tests/ (dummy credentials, no real AWS
 # call ever made) for every run, not just ones that set secretsmanager_source_arn,
-# kms_key_arn or rotation_secret_arn.
+# s3_source_arn, kms_key_arn or rotation_secret_arn.
 data "aws_caller_identity" "current" {
-  count = var.secretsmanager_source_arn != null || var.kms_key_arn != null || var.rotation_secret_arn != null ? 1 : 0
+  count = var.secretsmanager_source_arn != null || var.s3_source_arn != null || var.kms_key_arn != null || var.rotation_secret_arn != null ? 1 : 0
 }
 
 locals {
@@ -431,6 +431,12 @@ resource "aws_lambda_permission" "s3" {
   function_name = aws_lambda_function.main.function_name
   principal     = "s3.amazonaws.com"
   source_arn    = var.s3_source_arn
+  # A bucket ARN carries no account, and bucket names are global: if this
+  # bucket were deleted, another account could create one with the same name
+  # and invoke the function. source_account pins the bucket's owner
+  # (https://docs.aws.amazon.com/lambda/latest/dg/with-s3.html and the
+  # AddPermission SourceAccount parameter).
+  source_account = data.aws_caller_identity.current[0].account_id
 }
 
 resource "aws_lambda_permission" "cloudwatch" {

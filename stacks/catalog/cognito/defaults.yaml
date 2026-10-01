@@ -23,6 +23,13 @@ components:
 
         enabled: true
 
+        # Threat protection on, which requires the PLUS feature plan (AWS
+        # moves an ENFORCED pool to PLUS anyway when the tier is unset; this
+        # makes the per-MAU cost explicit). OFF + ESSENTIALS is the cheaper
+        # alternative an instance may choose.
+        advanced_security_mode: "ENFORCED"
+        user_pool_tier: "PLUS"
+
         # Merged with the Environment tag the stack hierarchy already sets
         tags:
           Component: "cognito"

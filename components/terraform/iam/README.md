@@ -1,6 +1,7 @@
 # iam
 
-An optional cross-account role (trust gated by org ID, external ID or MFA) with a fixed
+An optional cross-account role (trust pinned to named principals, and gated by org ID, external
+ID or MFA when another account is trusted) with a fixed
 cross-account policy and a resource-management policy scoped to caller-supplied ARNs, and
 optionally the GitHub Actions OIDC provider with separate CI plan and apply roles, and a Lambda
 package uploader role for an application repo's CI.
@@ -40,5 +41,12 @@ package uploader role for an application repo's CI.
   when the stack's bucket or `kms/main` alias stops matching. Puts are allowed only when
   conditional (`If-None-Match: *`, e.g. `aws s3api put-object --if-none-match '*'`), so
   re-uploading a released version fails by design: ship a new version instead.
-- A resource-management precondition requires at least one managed ARN list, so a CI-only
-  instance must set `create_cross_account_role: false`.
+- Cross-account trust: the principals are the account roots of `trusted_account_ids`, narrowed by
+  an `aws:PrincipalArn` ArnEquals condition to `trusted_principal_arns` (the backend's
+  `access_roles` pattern), which is required, wildcard-free and must sit in those accounts. List
+  the full ARN, path included (SSO roles live under `aws-reserved/sso.amazonaws.com/<region>/`).
+  `catalog/iam/defaults.yaml` names a placeholder `<tenant>-cross-account-operator` role in the
+  management account until the owner supplies the real callers.
+- The role cannot write bucket policies or subscribe to SNS topics (`s3:PutBucketPolicy` and
+  `sns:Subscribe` would let it hand a bucket or a topic's messages to another account).
+- A CI-only instance sets `create_cross_account_role: false`; the managed ARN lists are optional.

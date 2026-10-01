@@ -32,6 +32,10 @@ resource "aws_cognito_user_pool" "this" {
 
   deletion_protection = var.deletion_protection ? "ACTIVE" : "INACTIVE"
 
+  # Feature plan; PLUS is what advanced_security_mode AUDIT/ENFORCED needs
+  # (validated in variables.tf).
+  user_pool_tier = var.user_pool_tier
+
   password_policy {
     minimum_length                   = var.password_minimum_length
     require_lowercase                = true

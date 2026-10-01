@@ -1,7 +1,19 @@
 # components/terraform/rds/main.tf
 // ... 498 more lines (total: 499)
+data "aws_caller_identity" "current" {}
+
 locals {
   name = "${var.tags["Environment"]}-${var.identifier}"
+
+  # Confused-deputy scope for the service-role trusts below
+  # (https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/cross-service-confused-deputy-prevention.html).
+  account_id = data.aws_caller_identity.current.account_id
+  # Enhanced Monitoring: the instances that use the role, the primary and the
+  # read replica (USER_Monitoring.OS.Enabling.html#USER_Monitoring.OS.confused-deputy).
+  monitoring_source_arns = concat(
+    ["arn:aws:rds:${var.region}:${local.account_id}:db:${local.name}"],
+    var.create_read_replica ? ["arn:aws:rds:${var.region}:${local.account_id}:db:${local.name}-read-replica"] : [],
+  )
 
   # family and port follow the engine unless set explicitly. AWS families:
   # postgres<major> from 10 on (postgres14, postgres16), postgres9.6 before;
@@ -259,6 +271,15 @@ resource "aws_iam_role" "rds_proxy" {
         Principal = {
           Service = "rds.amazonaws.com"
         }
+        # The RDS-wide confused-deputy pattern (rds.amazonaws.com role trust,
+        # cross-service-confused-deputy-prevention.html). The proxy's ARN
+        # (db-proxy:prx-<random>) is unknown until it is created with this
+        # role, so the source ARN is any RDS resource in this account and
+        # region, the documented wildcard form.
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:aws:rds:${var.region}:${local.account_id}:*" }
+        }
       }
     ]
   })
@@ -313,6 +334,12 @@ resource "aws_iam_role" "monitoring" {
         Effect = "Allow"
         Principal = {
           Service = "monitoring.rds.amazonaws.com"
+        }
+        # AWS's documented Enhanced Monitoring trust: this account, and only
+        # the instances that use the role.
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+          ArnLike      = { "aws:SourceArn" = local.monitoring_source_arns }
         }
       }
     ]

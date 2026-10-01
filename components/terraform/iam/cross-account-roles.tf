@@ -10,6 +10,15 @@ locals {
   has_trust_condition = var.trusted_principal_org_id != null || var.external_id != null || var.require_mfa
 }
 
+# Trust: the account roots of trusted_account_ids as principals, narrowed to the
+# exact trusted_principal_arns by an aws:PrincipalArn condition. This is the
+# backend's access_roles pattern (../backend/iam.tf, after Cloud Posse's
+# aws-tfstate-backend src/iam.tf): a role named directly as a principal must
+# exist when the trust policy is written, a PrincipalArn condition need not, so
+# a hub CI role may be created after this spoke. ArnEquals rather than
+# upstream's ArnLike because trusted_principal_arns rejects wildcards. Without
+# the condition, the root principal lets ANY principal in those accounts that
+# holds sts:AssumeRole on this role assume it.
 data "aws_iam_policy_document" "cross_account_assume_role" {
   statement {
     sid     = "TrustedAccountsAssumeRole"
@@ -19,6 +28,15 @@ data "aws_iam_policy_document" "cross_account_assume_role" {
     principals {
       type        = "AWS"
       identifiers = [for id in var.trusted_account_ids : "arn:aws:iam::${id}:root"]
+    }
+
+    dynamic "condition" {
+      for_each = length(var.trusted_principal_arns) > 0 ? [var.trusted_principal_arns] : []
+      content {
+        test     = "ArnEquals"
+        variable = "aws:PrincipalArn"
+        values   = condition.value
+      }
     }
 
     dynamic "condition" {
@@ -58,6 +76,11 @@ resource "aws_iam_role" "cross_account_role" {
 
   lifecycle {
     precondition {
+      condition     = length(var.trusted_principal_arns) > 0
+      error_message = "create_cross_account_role requires trusted_principal_arns, the exact role/user ARNs that may assume the role: account-root trust alone lets every principal in trusted_account_ids assume it."
+    }
+
+    precondition {
       condition     = !local.trusts_other_accounts || local.has_trust_condition
       error_message = "Trusting another account requires at least one of trusted_principal_org_id, external_id or require_mfa."
     }
@@ -95,13 +118,15 @@ data "aws_iam_policy_document" "cross_account_policy" {
     ]
   }
 
+  # Read-only on the prefixed buckets. No s3:PutBucketPolicy: with it the role
+  # could rewrite a bucket policy to grant another account, exfiltrating the
+  # bucket, and no caller in this repo writes bucket policies through it.
   statement {
-    sid    = "ManagePrefixedBuckets"
+    sid    = "ReadPrefixedBuckets"
     effect = "Allow"
     actions = [
       "s3:ListBucket",
       "s3:GetBucketPolicy",
-      "s3:PutBucketPolicy",
     ]
     resources = ["arn:aws:s3:::${local.resource_name_prefix}-*"]
   }

@@ -151,8 +151,13 @@ variable "api_gateway_source_arn" {
 
 variable "s3_source_arn" {
   type        = string
-  description = "ARN of the S3 bucket that invokes the Lambda function"
+  description = "ARN of the S3 bucket that invokes the Lambda function (a bucket in this account: the permission also pins source_account)"
   default     = null
+
+  validation {
+    condition     = var.s3_source_arn == null || can(regex("^arn:aws[a-z-]*:s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.s3_source_arn))
+    error_message = "s3_source_arn must be an S3 bucket ARN (arn:aws:s3:::<bucket>), no wildcard or object key."
+  }
 }
 
 variable "cloudwatch_source_arn" {
