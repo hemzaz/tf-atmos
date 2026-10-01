@@ -40,6 +40,8 @@ workflows:
           # Every dns record, acm domain/SAN and apigateway custom domain sits
           # inside the zone it is written to (zone_id followed to its dns zone).
           python3 workflows/scripts/common/check-domains.py < "$stacks_json"
+          # Every secretsmanager secrets entry key is declared by variables.tf.
+          python3 workflows/scripts/common/check-secret-attributes.py components/terraform < "$stacks_json"
           # Every instance that needs a private EKS API is off hosted runners.
           python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
       # deploy-full-stack, deploy-application (deploy-app) and bootstrap (full)

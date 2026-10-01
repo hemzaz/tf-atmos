@@ -58,5 +58,6 @@ One Secrets Manager secret per `secrets` entry, with an optional value, resource
 ## Notes
 
 - Nothing is created when `enabled` or `secrets_enabled` is `false`.
-- `secrets` is a typed object map: an unknown attribute is dropped silently, so check the
-  spelling against `variables.tf`.
+- `secrets` is a typed object map: Terraform drops an unknown attribute silently, so lint
+  (`workflows/scripts/common/check-secret-attributes.py`) fails any stack entry key that
+  `variables.tf` does not declare.
