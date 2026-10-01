@@ -26,5 +26,7 @@ pattern; the shared logic has to move to `modules/terraform` before this is adop
 - `../rds` forces TLS, so the config secret's `database_url` (and the `database_connection_string`
   output) carry `sslmode=verify-full&sslrootcert=<database_ca_bundle_path>`: the app images must
   ship the RDS CA bundle at that path.
+- `kms_key_arn` (kms/main's `key_arn`) is required: it encrypts the Redis slow-log CloudWatch log
+  group, so the key policy must allow `logs.<region>.amazonaws.com` (kms `allow_cloudwatch_logs`).
 - `environment` accepts only `dev`, `staging` or `prod`, and `domain_name` allows exactly one dot
   (`example.com`, not `idp.example.com`).

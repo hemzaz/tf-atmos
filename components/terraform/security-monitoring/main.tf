@@ -35,6 +35,18 @@ locals {
     }
   }
 
+  # EC2 API calls that create, delete or change a security group or its rules
+  # (the security_group_changes EventBridge rule).
+  security_group_change_events = [
+    "AuthorizeSecurityGroupIngress",
+    "AuthorizeSecurityGroupEgress",
+    "RevokeSecurityGroupIngress",
+    "RevokeSecurityGroupEgress",
+    "CreateSecurityGroup",
+    "DeleteSecurityGroup",
+    "ModifySecurityGroupRules",
+  ]
+
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
 }
@@ -209,6 +221,39 @@ resource "aws_cloudwatch_event_target" "inspector_sns" {
   count = var.enable_inspector ? 1 : 0
 
   rule      = aws_cloudwatch_event_rule.inspector_findings[0].name
+  target_id = "SendToSNS"
+  arn       = aws_sns_topic.security_alerts.arn
+}
+
+# Security group changes, one event per change. This is an account-and-region
+# concern, so it lives here and not in the securitygroup component (which runs
+# once per group set and used to create a target-less copy of this rule per
+# instance). It complements the CIS SecurityGroupChanges alarm below: the
+# alarm counts changes in the trail's log group against sg_changes_threshold,
+# this rule delivers each change (who, which group, which API call) as it
+# happens, including ModifySecurityGroupRules, which the CIS pattern omits.
+# EventBridge receives these "AWS API Call via CloudTrail" events from the
+# account trail (cloudtrail/main).
+resource "aws_cloudwatch_event_rule" "security_group_changes" {
+  count = var.enable_security_group_change_events ? 1 : 0
+
+  name        = "${local.name_prefix}-security-group-changes"
+  description = "Capture security group create, delete and rule changes"
+
+  event_pattern = jsonencode({
+    source      = ["aws.ec2"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail = {
+      eventSource = ["ec2.amazonaws.com"]
+      eventName   = local.security_group_change_events
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "security_group_changes_sns" {
+  count = var.enable_security_group_change_events ? 1 : 0
+
+  rule      = aws_cloudwatch_event_rule.security_group_changes[0].name
   target_id = "SendToSNS"
   arn       = aws_sns_topic.security_alerts.arn
 }

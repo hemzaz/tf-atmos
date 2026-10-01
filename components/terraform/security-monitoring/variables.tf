@@ -85,6 +85,12 @@ variable "inspector_resource_types" {
   default     = ["EC2", "ECR", "LAMBDA"]
 }
 
+variable "enable_security_group_change_events" {
+  type        = bool
+  description = "Route every security group create, delete and rule change (EC2 API calls recorded by CloudTrail) to the alert topic through an EventBridge rule. Independent of the CIS SecurityGroupChanges alarm, which counts changes against sg_changes_threshold"
+  default     = true
+}
+
 # Alert Variables
 variable "security_email_subscriptions" {
   type        = list(string)

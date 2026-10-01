@@ -33,6 +33,11 @@ output "inspector_event_rule_arn" {
   value       = var.enable_inspector ? aws_cloudwatch_event_rule.inspector_findings[0].arn : null
 }
 
+output "security_group_change_rule_arn" {
+  description = "EventBridge rule ARN routing security group changes to the alert topic"
+  value       = var.enable_security_group_change_events ? aws_cloudwatch_event_rule.security_group_changes[0].arn : null
+}
+
 output "cloudtrail_metric_filter_names" {
   description = "Names of the CIS metric filters on the CloudTrail log group, by filter key"
   value       = { for k, f in aws_cloudwatch_log_metric_filter.cloudtrail : k => f.name }

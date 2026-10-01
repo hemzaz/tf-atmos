@@ -34,6 +34,11 @@ components:
         # policy and security group changes) run on the trail's log group.
         cloudtrail_log_group_name: !terraform.state cloudtrail/main .cloudtrail_logs_log_group_name
         require_cloudtrail_route: true
+        # Every security group create, delete and rule change in the account
+        # and region, one notification each (EventBridge, from the trail's
+        # CloudTrail events). The securitygroup component creates no
+        # monitoring of its own.
+        enable_security_group_change_events: true
         # The alert topic is encrypted with the stack's CMK. kms/defaults sets
         # allow_eventbridge and allow_cloudwatch_alarms so EventBridge and CloudWatch
         # can publish to it.

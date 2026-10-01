@@ -1,9 +1,11 @@
 # securitygroup
 
 One security group per `security_groups` entry, with each rule a separate
-`aws_security_group_rule`, plus optional change logging/alarms and a permissive-ingress audit
-(`audit.tf`). Ports Cloud Posse `terraform-aws-security-group`'s model: rule keys and
-`normalize.tf`, `preserve_security_group_id`, `allow_all_egress`, `name_prefix` naming.
+`aws_security_group_rule`, plus a plan-time permissive-ingress audit (`audit.tf`). Ports Cloud
+Posse `terraform-aws-security-group`'s model: rule keys and `normalize.tf`,
+`preserve_security_group_id`, `allow_all_egress`, `name_prefix` naming. Like that module, it
+creates no monitoring: security group change alerting is account-level and lives in
+`security-monitoring`.
 
 ## Wiring
 

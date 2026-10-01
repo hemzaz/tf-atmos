@@ -224,11 +224,6 @@ components:
         component: securitygroup
       vars:
         vpc_id: !terraform.state vpc/main .vpc_id
-        # Floci does not implement PutMetricFilter, so the permissive-rule
-        # metric filter and its alarm cannot be created here. The security
-        # groups and their rules - the part worth proving - still are.
-        enable_security_group_logging: false
-        enable_security_group_alarms: false
         # enforce_no_public_ingress is the guard worth proving: it blocks
         # creation of any group allowing 0.0.0.0/0 ingress.
         enforce_no_public_ingress: true

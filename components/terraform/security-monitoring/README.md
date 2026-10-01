@@ -2,7 +2,8 @@
 
 Routes security findings to one KMS-encrypted SNS topic: EventBridge rules for GuardDuty findings
 of severity 4.0 and above, new active failed HIGH/CRITICAL Security Hub control findings and,
-optionally, HIGH/CRITICAL Inspector V2 findings; plus the four CIS v1.2.0 metric filters and
+optionally, HIGH/CRITICAL Inspector V2 findings; every security group create, delete and rule
+change (CloudTrail EC2 API calls); plus the four CIS v1.2.0 metric filters and
 alarms on the CloudTrail log group, email subscriptions, and an optional Slack/PagerDuty
 enrichment Lambda. It creates no detector or hub (one component per service, the Cloud Posse
 model).
@@ -25,3 +26,8 @@ model).
 - There is no GuardDuty CloudWatch alarm (GuardDuty publishes no findings metric); the EventBridge
   rule is the route.
 - `enable_inspector` is `false` in the catalog: Inspector bills per resource scanned.
+- Security group changes alert twice by design: the EventBridge rule sends each change as it
+  happens (`ModifySecurityGroupRules` included), the CIS `SecurityGroupChanges` alarm fires when
+  more than `sg_changes_threshold` changes land in 5 minutes. Controllers that edit groups
+  (AWS Load Balancer Controller, EKS) make the per-change rule noisy; set
+  `enable_security_group_change_events: false` to keep only the alarm.
