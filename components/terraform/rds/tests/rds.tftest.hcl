@@ -120,6 +120,11 @@ run "postgres_defaults_log_ddl_and_force_ssl" {
   }
 
   assert {
+    condition     = one([for p in aws_db_parameter_group.main.parameter : p.apply_method if p.name == "rds.force_ssl"]) == "pending-reboot"
+    error_message = "rds.force_ssl must apply at the next reboot, not drop live sessions mid-apply."
+  }
+
+  assert {
     condition     = length([for p in aws_db_parameter_group.main.parameter : p if p.name == "require_secure_transport"]) == 0
     error_message = "require_secure_transport is a MySQL parameter; Postgres must not get it."
   }
@@ -142,6 +147,118 @@ run "mysql_defaults_require_secure_transport" {
     condition     = length([for p in aws_db_parameter_group.main.parameter : p if p.name == "rds.force_ssl" || startswith(p.name, "query_cache")]) == 0
     error_message = "MySQL must get neither rds.force_ssl nor the query cache parameters MySQL 8.0 removed."
   }
+}
+
+# The stacks set engine = postgres, engine_version = "14" and no family: the
+# old mysql8.0 default family put postgres parameters in a mysql group.
+run "postgres_family_and_port_derive_from_the_engine" {
+  command = plan
+
+  variables {
+    engine         = "postgres"
+    engine_version = "14"
+  }
+
+  assert {
+    condition     = aws_db_parameter_group.main.family == "postgres14"
+    error_message = "postgres 14 with no family must derive postgres14."
+  }
+
+  assert {
+    condition     = aws_db_instance.main.port == 5432
+    error_message = "postgres with no port must use 5432."
+  }
+}
+
+run "postgres_minor_version_derives_the_major_family" {
+  command = plan
+
+  variables {
+    engine         = "postgres"
+    engine_version = "16.4"
+  }
+
+  assert {
+    condition     = aws_db_parameter_group.main.family == "postgres16"
+    error_message = "postgres 16.4 must derive postgres16."
+  }
+}
+
+run "mysql_family_and_port_derive_from_the_engine" {
+  command = plan
+
+  variables {
+    engine_version = "8.0.39"
+  }
+
+  assert {
+    condition     = aws_db_parameter_group.main.family == "mysql8.0" && aws_db_instance.main.port == 3306
+    error_message = "mysql 8.0.39 with no family/port must derive mysql8.0 and 3306."
+  }
+}
+
+run "mariadb_family_derives_major_minor" {
+  command = plan
+
+  variables {
+    engine         = "mariadb"
+    engine_version = "10.11"
+  }
+
+  assert {
+    condition     = aws_db_parameter_group.main.family == "mariadb10.11" && aws_db_instance.main.port == 3306
+    error_message = "mariadb 10.11 must derive mariadb10.11 and 3306."
+  }
+}
+
+run "explicit_family_and_port_win" {
+  command = plan
+
+  variables {
+    engine         = "postgres"
+    engine_version = "14"
+    family         = "postgres14"
+    port           = 6432
+  }
+
+  assert {
+    condition     = aws_db_parameter_group.main.family == "postgres14" && aws_db_instance.main.port == 6432 && one(aws_security_group.rds.ingress[*].from_port) == 6432
+    error_message = "An explicit family and port must be used, the port by the security group too."
+  }
+}
+
+run "mismatched_family_is_rejected" {
+  command = plan
+
+  variables {
+    engine         = "postgres"
+    engine_version = "14"
+    family         = "mysql8.0"
+  }
+
+  expect_failures = [var.family]
+}
+
+run "unknown_engine_is_rejected" {
+  command = plan
+
+  variables {
+    engine = "oracle-ee"
+    family = "oracle-ee-19"
+  }
+
+  expect_failures = [var.engine]
+}
+
+run "mariadb_before_10_5_is_rejected" {
+  command = plan
+
+  variables {
+    engine         = "mariadb"
+    engine_version = "10.4"
+  }
+
+  expect_failures = [var.engine_version]
 }
 
 run "caller_parameters_override_defaults" {

@@ -3,6 +3,17 @@
 locals {
   name = "${var.tags["Environment"]}-${var.identifier}"
 
+  # family and port follow the engine unless set explicitly. AWS families:
+  # postgres<major> from 10 on (postgres14, postgres16), postgres9.6 before;
+  # mysql<major>.<minor> (mysql8.0, mysql8.4); mariadb<major>.<minor>
+  # (mariadb10.11). var.family's validation rejects a family of another engine.
+  version_parts  = split(".", var.engine_version)
+  major_minor    = join(".", slice(local.version_parts, 0, min(2, length(local.version_parts))))
+  postgres_major = tonumber(local.version_parts[0]) >= 10 ? local.version_parts[0] : local.major_minor
+  derived_family = var.engine == "postgres" ? "postgres${local.postgres_major}" : "${var.engine}${local.major_minor}"
+  family         = coalesce(var.family, local.derived_family)
+  port           = coalesce(var.port, var.engine == "postgres" ? 5432 : 3306)
+
   # Engine-family defaults. var.parameters is merged after them, so a caller
   # entry with the same name wins (Cloud Posse's rds component also treats its
   # db_parameter list as caller-owned). Static parameters carry
@@ -21,11 +32,13 @@ locals {
     { name = "checkpoint_completion_target", value = tostring(var.checkpoint_completion_target), apply_method = "immediate" },
     # Every client connection must use TLS. Turn it off only knowingly, with an
     # explicit { name = "rds.force_ssl", value = "0" } in var.parameters.
-    { name = "rds.force_ssl", value = "1", apply_method = "immediate" },
+    # pending-reboot: a new instance boots with it; an existing one picks it
+    # up at its next reboot instead of dropping plaintext sessions mid-apply.
+    { name = "rds.force_ssl", value = "1", apply_method = "pending-reboot" },
   ]
 
   # MySQL/MariaDB. The query cache was removed in MySQL 8.0 (the default
-  # family is mysql8.0), so query_cache_* would fail CreateDBParameterGroup.
+  # engine_version), so query_cache_* would fail CreateDBParameterGroup.
   mysql_default_parameters = [
     { name = "innodb_buffer_pool_size", value = "{DBInstanceClassMemory*3/4}", apply_method = "pending-reboot" },
     { name = "max_connections", value = tostring(var.max_connections), apply_method = "immediate" },
@@ -33,8 +46,9 @@ locals {
     { name = "slow_query_log", value = "1", apply_method = "immediate" },
     { name = "long_query_time", value = "1", apply_method = "immediate" },
     # Every client connection must use TLS; turn it off only knowingly, with an
-    # explicit { name = "require_secure_transport", value = "OFF" }.
-    { name = "require_secure_transport", value = "ON", apply_method = "immediate" },
+    # explicit { name = "require_secure_transport", value = "OFF" }. MariaDB has
+    # it from 10.5 only (var.engine_version validation); pending-reboot as above.
+    { name = "require_secure_transport", value = "ON", apply_method = "pending-reboot" },
   ]
 
   default_parameters = var.engine == "postgres" ? tolist(local.postgres_default_parameters) : tolist(local.mysql_default_parameters)
@@ -69,8 +83,8 @@ resource "aws_security_group" "rds" {
   # Main database access from application security groups
   ingress {
     description     = "Database access from allowed security groups"
-    from_port       = var.port
-    to_port         = var.port
+    from_port       = local.port
+    to_port         = local.port
     protocol        = "tcp"
     security_groups = var.allowed_security_groups
   }
@@ -80,8 +94,8 @@ resource "aws_security_group" "rds" {
     for_each = var.enable_rds_proxy ? [1] : []
     content {
       description = "RDS Proxy access"
-      from_port   = var.port
-      to_port     = var.port
+      from_port   = local.port
+      to_port     = local.port
       protocol    = "tcp"
       self        = true
     }
@@ -140,16 +154,16 @@ resource "aws_security_group" "rds_proxy" {
 
   ingress {
     description     = "Database proxy access from applications"
-    from_port       = var.port
-    to_port         = var.port
+    from_port       = local.port
+    to_port         = local.port
     protocol        = "tcp"
     security_groups = var.allowed_security_groups
   }
 
   egress {
     description     = "Database access to RDS instance"
-    from_port       = var.port
-    to_port         = var.port
+    from_port       = local.port
+    to_port         = local.port
     protocol        = "tcp"
     security_groups = [aws_security_group.rds.id]
   }
@@ -172,7 +186,7 @@ resource "aws_security_group" "rds_proxy" {
 # Enhanced parameter group with performance optimizations
 resource "aws_db_parameter_group" "main" {
   name   = "${var.tags["Environment"]}-${var.identifier}-pg"
-  family = var.family
+  family = local.family
 
   # Engine defaults overlaid by var.parameters (the caller wins); see locals
   dynamic "parameter" {
@@ -333,7 +347,7 @@ resource "aws_db_instance" "read_replica" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   parameter_group_name   = aws_db_parameter_group.main.name
   publicly_accessible    = var.publicly_accessible
-  port                   = var.port
+  port                   = local.port
 
   deletion_protection                   = aws_db_instance.main.deletion_protection
   iam_database_authentication_enabled   = var.iam_database_authentication_enabled
@@ -376,7 +390,7 @@ resource "aws_db_instance" "main" {
   # RDS generates the password and stores it in a Secrets Manager secret it manages
   manage_master_user_password           = true
   master_user_secret_kms_key_id         = var.master_user_secret_kms_key_id
-  port                                  = var.port
+  port                                  = local.port
   db_name                               = var.db_name
   parameter_group_name                  = aws_db_parameter_group.main.name
   db_subnet_group_name                  = aws_db_subnet_group.main.name

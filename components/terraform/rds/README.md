@@ -23,11 +23,15 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
   be `true`.
 - Prod's `rds/main` encrypts the master secret with `kms/main` (`master_user_secret_kms_key_id`);
   external-secrets can already decrypt it.
+- `engine` is `postgres`, `mysql` or `mariadb` (10.5+). Unless set, `family` derives from the
+  engine and `engine_version` (`postgres14`, `mysql8.0`, `mariadb10.11`) and `port` from the
+  engine (5432 postgres, 3306 otherwise). An explicit `family` must belong to the engine.
 - The parameter group is the engine defaults overlaid by `parameters` (the caller's entry wins,
-  last per name). Defaults: TLS required (`rds.force_ssl = 1` for postgres,
-  `require_secure_transport = ON` otherwise) and `log_statement = ddl`. Turning either off takes an
-  explicit entry in `parameters`.
-- TLS is required, so clients must connect with TLS; to verify the server
+  last per name). Defaults: `rds.force_ssl = 1` (postgres) or `require_secure_transport = ON`, and
+  `log_statement = ddl`. Turning either off takes an explicit entry in `parameters`.
+- The TLS parameter is `pending-reboot`: a new instance starts with it, but an instance that
+  existed without it enforces TLS only after its next reboot.
+- With TLS required, clients must connect with TLS; to verify the server
   (`sslmode=verify-full`), an app needs the RDS CA bundle
   (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) in its image.
   `eks-backend-services` and `idp-platform` build their DSNs that way (`database_ca_bundle_path`).

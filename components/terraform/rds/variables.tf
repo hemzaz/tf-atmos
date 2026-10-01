@@ -48,20 +48,50 @@ variable "identifier" {
 
 variable "engine" {
   type        = string
-  description = "Database engine type"
+  description = "Database engine: postgres, mysql or mariadb (the engines the parameter-group defaults know)"
   default     = "mysql"
+
+  validation {
+    condition     = contains(["postgres", "mysql", "mariadb"], var.engine)
+    error_message = "engine must be postgres, mysql or mariadb."
+  }
 }
 
 variable "engine_version" {
   type        = string
-  description = "Database engine version"
+  description = "Database engine version (postgres: 14 or 14.12; mysql/mariadb: at least <major>.<minor>, e.g. 8.0 or 10.11)"
   default     = "8.0"
+
+  validation {
+    condition     = can(regex("^[0-9]+(\\.[0-9]+)*$", var.engine_version))
+    error_message = "engine_version must be dotted numbers, e.g. 14, 14.12, 8.0 or 10.11."
+  }
+
+  validation {
+    condition     = var.engine == "postgres" || var.family != null || length(split(".", var.engine_version)) >= 2
+    error_message = "mysql and mariadb need engine_version <major>.<minor> (e.g. 8.0) to derive the parameter group family, or an explicit family."
+  }
+
+  # The TLS default require_secure_transport exists in MariaDB from 10.5 on.
+  validation {
+    condition = var.engine != "mariadb" || try(
+      tonumber(split(".", var.engine_version)[0]) > 10 ||
+      (tonumber(split(".", var.engine_version)[0]) == 10 && tonumber(split(".", var.engine_version)[1]) >= 5),
+      false
+    )
+    error_message = "mariadb needs engine_version 10.5 or later (require_secure_transport)."
+  }
 }
 
 variable "family" {
   type        = string
-  description = "Database parameter group family"
-  default     = "mysql8.0"
+  description = "Parameter group family. Null derives it from engine and engine_version: postgres<major> (postgres14), mysql<major>.<minor> (mysql8.0), mariadb<major>.<minor> (mariadb10.11)"
+  default     = null
+
+  validation {
+    condition     = var.family == null || startswith(coalesce(var.family, "-"), var.engine)
+    error_message = "family must belong to engine (e.g. postgres14 for postgres, mysql8.0 for mysql)."
+  }
 }
 
 variable "instance_class" {
@@ -126,8 +156,8 @@ variable "username" {
 
 variable "port" {
   type        = number
-  description = "Port for the database"
-  default     = 3306
+  description = "Port for the database. Null uses the engine's: 5432 for postgres, 3306 for mysql/mariadb"
+  default     = null
 }
 
 variable "db_name" {
