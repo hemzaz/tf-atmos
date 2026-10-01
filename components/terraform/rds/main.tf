@@ -2,17 +2,24 @@
 // ... 498 more lines (total: 499)
 data "aws_caller_identity" "current" {}
 
+data "aws_partition" "current" {}
+
 locals {
   name = "${var.tags["Environment"]}-${var.identifier}"
 
-  # Confused-deputy scope for the service-role trusts below
-  # (https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/cross-service-confused-deputy-prevention.html).
+  # Confused-deputy scope for the enhanced-monitoring trust and the rotation
+  # topic policy.
   account_id = data.aws_caller_identity.current.account_id
+  partition  = data.aws_partition.current.partition
   # Enhanced Monitoring: the instances that use the role, the primary and the
   # read replica (USER_Monitoring.OS.Enabling.html#USER_Monitoring.OS.confused-deputy).
+  # RDS stores identifiers lowercase, and the source ARN carries the stored
+  # form, so lower() keeps the match should an uppercase name ever reach
+  # here. Today it cannot: the provider rejects uppercase in the subnet and
+  # parameter group names built from the same Environment/identifier at plan.
   monitoring_source_arns = concat(
-    ["arn:aws:rds:${var.region}:${local.account_id}:db:${local.name}"],
-    var.create_read_replica ? ["arn:aws:rds:${var.region}:${local.account_id}:db:${local.name}-read-replica"] : [],
+    ["arn:${local.partition}:rds:${var.region}:${local.account_id}:db:${lower(local.name)}"],
+    var.create_read_replica ? ["arn:${local.partition}:rds:${var.region}:${local.account_id}:db:${lower(local.name)}-read-replica"] : [],
   )
 
   # family and port follow the engine unless set explicitly. AWS families:
@@ -271,15 +278,12 @@ resource "aws_iam_role" "rds_proxy" {
         Principal = {
           Service = "rds.amazonaws.com"
         }
-        # The RDS-wide confused-deputy pattern (rds.amazonaws.com role trust,
-        # cross-service-confused-deputy-prevention.html). The proxy's ARN
-        # (db-proxy:prx-<random>) is unknown until it is created with this
-        # role, so the source ARN is any RDS resource in this account and
-        # region, the documented wildcard form.
-        Condition = {
-          StringEquals = { "aws:SourceAccount" = local.account_id }
-          ArnLike      = { "aws:SourceArn" = "arn:aws:rds:${var.region}:${local.account_id}:*" }
-        }
+        # No aws:SourceAccount/SourceArn condition, deliberately: AWS
+        # documents this trust exactly as plain rds.amazonaws.com +
+        # sts:AssumeRole (rds-proxy-iam-setup.html) and does not say the
+        # proxy's AssumeRole carries those keys. A condition it does not
+        # satisfy would leave the proxy unable to read its secret, a
+        # runtime-only failure.
       }
     ]
   })

@@ -15,6 +15,13 @@ override_data {
   }
 }
 
+override_data {
+  target = data.aws_partition.current
+  values = {
+    partition = "aws"
+  }
+}
+
 variables {
   region     = "eu-west-2"
   vpc_id     = "vpc-0123456789abcdef0"
@@ -465,13 +472,14 @@ run "service_role_trusts_are_scoped_to_this_account" {
     error_message = "The enhanced-monitoring role must trust monitoring.rds.amazonaws.com only for this account and for exactly the primary and replica instance ARNs."
   }
 
+  # The proxy trust stays exactly as AWS documents it (rds-proxy-iam-setup.html):
+  # no Condition, since AWS does not document source keys for the proxy.
   assert {
     condition = (
       jsondecode(aws_iam_role.rds_proxy[0].assume_role_policy).Statement[0].Principal.Service == "rds.amazonaws.com"
-      && jsondecode(aws_iam_role.rds_proxy[0].assume_role_policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "123456789012"
-      && jsondecode(aws_iam_role.rds_proxy[0].assume_role_policy).Statement[0].Condition.ArnLike["aws:SourceArn"] == "arn:aws:rds:eu-west-2:123456789012:*"
+      && !can(jsondecode(aws_iam_role.rds_proxy[0].assume_role_policy).Statement[0].Condition)
     )
-    error_message = "The RDS Proxy role must trust rds.amazonaws.com only with aws:SourceAccount = this account and aws:SourceArn = an RDS resource in this account and region."
+    error_message = "The RDS Proxy role must trust rds.amazonaws.com with no Condition, as AWS documents it."
   }
 
   assert {

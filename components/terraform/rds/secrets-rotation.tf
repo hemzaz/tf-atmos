@@ -91,7 +91,7 @@ resource "aws_sns_topic_policy" "rotation_notifications" {
         # EventBridge rule could publish to this topic.
         Condition = {
           StringEquals = { "aws:SourceAccount" = local.account_id }
-          ArnLike      = { "aws:SourceArn" = "arn:aws:events:${var.region}:${local.account_id}:rule/*" }
+          ArnLike      = { "aws:SourceArn" = "arn:${local.partition}:events:${var.region}:${local.account_id}:rule/*" }
         }
       }
     ]
