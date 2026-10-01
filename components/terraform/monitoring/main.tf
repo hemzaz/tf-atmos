@@ -105,11 +105,11 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   period              = each.value.period
   statistic           = "Sum"
   threshold           = each.value.threshold
-  alarm_description   = "Error count for Lambda function ${each.key}"
+  alarm_description   = "Error count for Lambda function ${each.value.function_name}"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
 
   dimensions = {
-    FunctionName = each.key
+    FunctionName = each.value.function_name
   }
 
   tags = { Name = "${local.name_prefix}-${each.key}-errors" }

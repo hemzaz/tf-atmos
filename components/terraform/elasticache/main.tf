@@ -224,7 +224,7 @@ resource "aws_elasticache_replication_group" "main" {
 # deleted out of band, or an apply that fails between the two, needs an
 # auth_token_version bump: both are then re-sent.
 #
-# No ephemeral read back from Secrets Manager (idp-platform's pattern): the
+# No ephemeral read back from Secrets Manager (idp-platform's old pattern): the
 # CI plan role (ReadOnlyAccess) has no secretsmanager:GetSecretValue, and
 # mock_provider tests cannot run a module with any aws ephemeral resource.
 ephemeral "random_password" "auth_token" {

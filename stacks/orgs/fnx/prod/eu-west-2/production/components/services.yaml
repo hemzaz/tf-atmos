@@ -553,17 +553,19 @@ components:
         #     - !terraform.state lambda/data-processor .function_name
         #     - !terraform.state lambda/data-transformer .function_name
         #     - !terraform.state lambda/report-generator .function_name
+        #   lambda_error_alarms:   # key = stable alarm id, function_name = the dimension
+        #     data-processor:
+        #       function_name: !terraform.state lambda/data-processor .function_name
+        #       evaluation_periods: 2
+        #       period: 300
+        #       threshold: 5
+        #     (same for data-transformer and report-generator)
 
         alarm_email_subscriptions:
           - "prod-critical@example.com"
           - "data-team@example.com"
 
         create_sns_topic: true
-        lambda_error_alarms:
-          lambda_errors:
-            evaluation_periods: 2
-            period: 300
-            threshold: 5
         lambda_duration_threshold: 500000
       dependencies:
         components:

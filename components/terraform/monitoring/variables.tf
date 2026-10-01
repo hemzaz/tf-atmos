@@ -223,12 +223,20 @@ variable "db_connection_alarms" {
 
 variable "lambda_error_alarms" {
   type = map(object({
+    function_name      = string
     evaluation_periods = number
     period             = number
     threshold          = number
   }))
-  description = "Map of Lambda error alarms to create"
+  description = "Map of Lambda error alarms to create. The key is a stable identifier used in the alarm name; function_name is the watched Lambda function (the FunctionName dimension)."
   default     = {}
+
+  validation {
+    condition = alltrue([
+      for v in values(var.lambda_error_alarms) : can(regex("^[a-zA-Z0-9_-]{1,64}$", v.function_name))
+    ])
+    error_message = "Each lambda_error_alarms entry needs a function_name: a Lambda function name (1-64 letters, digits, '-' or '_'), not an ARN."
+  }
 }
 
 variable "log_metric_filters" {

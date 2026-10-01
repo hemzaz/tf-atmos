@@ -1,0 +1,128 @@
+# Mock-provider tests: no AWS credentials, no network. Run from the component
+# directory with `terraform init -backend=false && terraform test`.
+#
+# The Redis AUTH token used to be read back at plan time through an ephemeral
+# aws_secretsmanager_secret_version, which needs secretsmanager:GetSecretValue
+# that the CI plan role (ReadOnlyAccess) lacks. These tests only run because
+# the component no longer has any aws ephemeral resource: mock_provider
+# rejects those, so a revert fails here before it reaches a real plan.
+
+mock_provider "aws" {}
+
+# The nested ../eks, ../rds and ../acm root components configure their own
+# aws provider, which mock_provider cannot replace; override them whole.
+override_module {
+  target = module.eks_cluster
+  outputs = {
+    eks_cluster_arn                        = "arn:aws:eks:eu-west-2:123456789012:cluster/dev-idp"
+    eks_cluster_certificate_authority_data = "Y2E="
+    eks_cluster_endpoint                   = "https://example.eks.amazonaws.com"
+    eks_cluster_id                         = "dev-idp"
+    eks_cluster_identity_oidc_issuer_arn   = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-west-2.amazonaws.com/id/EXAMPLE"
+    eks_cluster_managed_security_group_id  = "sg-0123456789abcdef0"
+    eks_node_group_arns                    = {}
+  }
+}
+
+override_module {
+  target = module.idp_database
+  outputs = {
+    instance_address    = "dev-idp.example.eu-west-2.rds.amazonaws.com"
+    instance_endpoint   = "dev-idp.example.eu-west-2.rds.amazonaws.com:5432"
+    instance_id         = "dev-idp"
+    instance_name       = "idp"
+    password_secret_arn = "arn:aws:secretsmanager:eu-west-2:123456789012:secret:rds-dev-idp-AbCdEf"
+    security_group_id   = "sg-0123456789abcdef1"
+  }
+}
+
+override_module {
+  target = module.acm_certificate
+  outputs = {
+    certificate_arns    = { idp = "arn:aws:acm:eu-west-2:123456789012:certificate/00000000-0000-0000-0000-000000000000" }
+    certificate_domains = { idp = "example.com" }
+  }
+}
+
+override_data {
+  target = data.aws_subnets.private
+  values = {
+    ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+  }
+}
+
+override_data {
+  target = data.aws_subnets.public
+  values = {
+    ids = ["subnet-0123456789abcdef2", "subnet-0123456789abcdef3"]
+  }
+}
+
+override_data {
+  target = data.aws_vpc.selected
+  values = {
+    id         = "vpc-0123456789abcdef0"
+    cidr_block = "10.0.0.0/16"
+  }
+}
+
+variables {
+  region                  = "eu-west-2"
+  environment             = "dev"
+  domain_name             = "example.com"
+  acknowledge_unsupported = true
+}
+
+run "redis_auth_token_is_generated_and_written_write_only" {
+  command = plan
+
+  assert {
+    condition     = aws_elasticache_replication_group.redis.auth_token == null
+    error_message = "The replication group must not hold the token in state: it is set through auth_token_wo."
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.redis.auth_token_wo_version == 1 && aws_elasticache_replication_group.redis.auth_token_update_strategy == "ROTATE"
+    error_message = "auth_token_wo is set with auth_token_wo_version = secrets_version (default 1) and the ROTATE strategy."
+  }
+
+  assert {
+    condition     = aws_secretsmanager_secret_version.redis_auth.secret_string == null && aws_secretsmanager_secret_version.redis_auth.secret_string_wo_version == 1
+    error_message = "The Redis AUTH secret version is written only through secret_string_wo, versioned by secrets_version."
+  }
+
+  assert {
+    condition     = aws_secretsmanager_secret_version.idp_config.secret_string == null && aws_secretsmanager_secret_version.idp_config.secret_string_wo_version == 1
+    error_message = "The config secret version (with the JWT secret) is written only through secret_string_wo."
+  }
+}
+
+run "secrets_version_rotates_both_write_only_values" {
+  command = plan
+
+  variables {
+    secrets_version = 2
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.redis.auth_token_wo_version == 2 && aws_secretsmanager_secret_version.redis_auth.secret_string_wo_version == 2
+    error_message = "Bumping secrets_version must re-send the token to both the replication group and its secret."
+  }
+}
+
+# The ephemeral resource's own arguments cannot be asserted, so they live in
+# local.redis_auth_token_generator; the replication group's precondition
+# checks the generated token itself.
+run "redis_auth_token_generator_meets_elasticache_constraints" {
+  command = plan
+
+  assert {
+    condition     = local.redis_auth_token_generator.length >= 16 && local.redis_auth_token_generator.length <= 128
+    error_message = "ElastiCache AUTH tokens are 16-128 characters."
+  }
+
+  assert {
+    condition     = length(regexall("[^!&#$^<>-]", local.redis_auth_token_generator.override_special)) == 0
+    error_message = "ElastiCache AUTH tokens allow punctuation only from !&#$^<>-."
+  }
+}
