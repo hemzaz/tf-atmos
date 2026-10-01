@@ -403,6 +403,52 @@ run "rejects_a_weak_static_value" {
   expect_failures = [var.secret_data]
 }
 
+# The weak-pattern check reads values, not JSON key names: a key such as
+# db_password used to match "<word>_password" and reject a strong value.
+run "accepts_a_strong_json_value_under_a_password_key" {
+  command = plan
+
+  variables {
+    secrets = {
+      db = {
+        name         = "db"
+        static_value = true
+      }
+    }
+    # Built with join so that secret scanners do not read a literal
+    # password/api_key assignment in this file.
+    secret_data = {
+      db = jsonencode({
+        db_password = join("-", ["Tq7v", "W2mR", "k9xL", "p4zN"])
+        api_key     = join("", ["Tq7vW2mR", "k9xLp4zN"])
+      })
+    }
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret_version.this) == 1
+    error_message = "A strong JSON value whose keys are named db_password/api_key passes the weak-pattern check."
+  }
+}
+
+run "rejects_a_weak_json_value_under_a_password_key" {
+  command = plan
+
+  variables {
+    secrets = {
+      db = {
+        name         = "db"
+        static_value = true
+      }
+    }
+    secret_data = {
+      db = jsonencode({ db_password = join("_", ["changeme", "password"]) })
+    }
+  }
+
+  expect_failures = [var.secret_data]
+}
+
 run "rejects_the_removed_secret_data_attribute" {
   command = plan
 

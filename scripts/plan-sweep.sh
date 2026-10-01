@@ -54,6 +54,8 @@
 # not there, arguments Atmos cannot parse, an expression yq rejects. An output
 # that is not there BEHIND a '//' default is not broken -- Atmos succeeds with
 # the default -- but it is stale: a STALE line, counted, never failing.
+# An env TF_VAR_* object or list that is not JSON is a FAIL too: the varfile
+# builder folds only JSON into the varfile.
 # INCONCLUSIVE and UNATTRIBUTABLE do not fail the run, but neither is ever
 # reported as a pass. A PASS says how the plan ended:
 # "full plan", or "stopped at an expected refusal" once everything before it
@@ -778,7 +780,7 @@ for s in $STACKS; do
     # this script's damage, reported on top of the real finding.
     if [ -n "$ref_defects" ]; then
       n=$(printf '%s\n' "$ref_defects" | tr '\t' '\n' | grep -c .)
-      printf '%-24s %-26s FAIL %s broken !terraform reference(s), not planned\n' "$s" "$c" "$n"
+      printf '%-24s %-26s FAIL %s broken !terraform reference(s) or env TF_VAR_* value(s), not planned\n' "$s" "$c" "$n"
       printf '%s\n' "$ref_defects" | tr '\t' '\n' | cut -c1-220 | sed 's/^/        /'
       fail=$((fail + 1))
       continue

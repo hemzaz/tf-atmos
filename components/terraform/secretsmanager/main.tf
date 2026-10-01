@@ -70,8 +70,8 @@ locals {
 
 # Generated values. Ephemeral, as elasticache's AUTH token (#258): regenerated
 # on every run but never in plan or state. A value reaches AWS only through
-# the version's write-only secret_string_wo, sent on the version's create (or
-# replacement) and on an update only when secret_string_version changes.
+# the version's write-only secret_string_wo, sent only when the version is
+# created; a secret_string_version change replaces the version (ForceNew).
 # Cloud Posse's components keep a stored random_password instead; this one
 # deliberately does not, so state readers (CI plan roles included) cannot read
 # any secret.
@@ -129,10 +129,10 @@ resource "aws_secretsmanager_secret" "this" {
 }
 
 # The secret's value, write-only: secret_string stays null in plan and state.
-# The provider sends secret_string_wo when the version is created (including
-# a replacement, e.g. a renamed secret) and, on an update, only when
-# secret_string_wo_version changes. Bump the secret's secret_string_version
-# to rotate a generated value or to push a changed var.secret_data value.
+# The provider sends secret_string_wo only when the version is created; a
+# secret_string_wo_version change replaces the version (ForceNew), as does a
+# renamed secret. Bump the secret's secret_string_version to rotate a
+# generated value or to push a changed var.secret_data value.
 #
 # One resource for rotating and non-rotating secrets alike. The stored value
 # used to need an ignore_changes split so that Terraform would not overwrite

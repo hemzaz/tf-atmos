@@ -142,6 +142,19 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-lambda-packages.py < "$stacks_json"
+      # secretsmanager types `secrets` as map(object), whose conversion drops
+      # an undeclared attribute silently (pasword_length plans clean and the
+      # default applies); this fails any entry key variables.tf does not declare.
+      # Also run by validate-all.
+      - name: check-secret-attributes
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_secret_attributes.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-secret-attributes.py components/terraform < "$stacks_json"
       # A component that configures a kubernetes/helm/kubectl provider needs
       # the EKS API, which GitHub-hosted runners cannot reach where the
       # endpoint is private: each such instance must set

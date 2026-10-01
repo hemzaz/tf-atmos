@@ -893,6 +893,11 @@ def build(describe, stack, stacks_dir, components_dir):
     # Folded in as Terraform reads it: below `vars` (a -var-file wins over the
     # environment), a complex value parsed as HCL, of which JSON is a subset.
     # plan-sweep.sh strips the shell's own TF_VAR_*; only the stack's count.
+    # A plain string folds as itself, which is what Terraform reads for a
+    # string variable (and rejects for a complex one, as the plan will). An
+    # object or list that is HCL but not JSON is a defect here: this file
+    # cannot parse HCL, and folding it as a string would fail the plan with a
+    # type error that is not the component's.
     for k, x in (describe.get('env') or {}).items():
         name = k[len('TF_VAR_'):] if k.startswith('TF_VAR_') else ''
         if not name or name in top:
@@ -900,8 +905,11 @@ def build(describe, stack, stacks_dir, components_dir):
         if isinstance(x, str) and x.lstrip()[:1] in ('{', '['):
             try:
                 x = json.loads(x)
-            except ValueError:
-                pass
+            except ValueError as e:
+                b.defects.append('env %s is not JSON (%s): plan-sweep folds an object or list '
+                                 'TF_VAR_* only as JSON; write it as JSON, which Terraform '
+                                 'also reads' % (k, e))
+                continue
         r = b.walk(name, x)
         if r is not SENTINEL:
             top[name] = r
@@ -1366,6 +1374,12 @@ def self_test(components_dir, tmp):
     }}, None, None, None)
     check('env TF_VAR_* folds into the varfile', top,
           {'a': 1, 'm': {'k': '{"j": 1}'}, 's': 'plain'})
+    # HCL that is not JSON is rejected by name, not folded as a string.
+    top, b = build({'env': {'TF_VAR_secret_data': '{db = "x"}', 'TF_VAR_p': 'plain'}},
+                   None, None, None)
+    check('non-JSON object TF_VAR_* is a defect, a plain one folds',
+          (top, len(b.defects), 'TF_VAR_secret_data is not JSON' in ''.join(b.defects)),
+          ({'p': 'plain'}, 1, True))
     return failures
 
 

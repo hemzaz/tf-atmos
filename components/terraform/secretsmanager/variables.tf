@@ -88,9 +88,9 @@ variable "secrets" {
         allowed character set differs from the component default, e.g. ElastiCache AUTH tokens
       - static_value: The value is caller-supplied, from var.secret_data[<this key>] (ephemeral,
         written write-only). Mutually exclusive with generate_random_password
-      - secret_string_version: Write-only version of the value (defaults to 1). The value is sent on
-        create, and on update only when this changes: bump it to rotate a generated value or to push
-        a changed var.secret_data value
+      - secret_string_version: Write-only version of the value (defaults to 1). The value is sent only
+        when the version is created; changing this replaces the version (ForceNew): bump it to rotate
+        a generated value or to push a changed var.secret_data value
       - rotation_lambda_arn: ARN of the Lambda function for rotation (optional). Only safe when that
         function already exists and is permitted to be invoked by Secrets Manager AT THIS component's
         own apply time -- a Lambda that itself reads this secret (the common case) cannot satisfy that
@@ -168,8 +168,10 @@ variable "secret_data" {
   }
 
   validation {
+    # Checks values only: a JSON object's top-level values, else the whole
+    # string, so JSON key names (db_password, api_key) never match.
     # One line: checkov's HCL parser rejects this expression split across lines.
-    condition     = alltrue([for k, v in var.secret_data : !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", v)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", v)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", v)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", v)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", v))])
+    condition     = alltrue(flatten([for k, v in var.secret_data : [for s in(can(keys(jsondecode(v))) ? [for x in values(jsondecode(v)) : try(tostring(x), jsonencode(x))] : [v]) : !can(regex("(?i)(testpass|password123|p@ssw0rd|admin123|changeme|secret|secretkey|test-only|abc123|123456|default|temp|dummy|foobar|[a-z0-9]{1,8}|dev|test|stage|prod)[-_]?(password|secret|key|credential|token|pass|pwd)", s)) && !can(regex("(?i)(AKIA[0-9A-Z]{16})", s)) && !can(regex("(?i)(sk_live_[0-9a-zA-Z]{24})", s)) && !can(regex("(?i)(github_pat_[0-9a-zA-Z]{22}_[0-9a-zA-Z]{59})", s)) && !can(regex("(?i)(api[_-]?key|secret[_-]?key|access[_-]?key|auth[_-]?token)['\"]?\\s*[=:]\\s*['\"]?[a-zA-Z0-9_]{8,}['\"]?", s))]]))
     error_message = "A secret_data value appears to contain a weak, test, or hardcoded credential pattern. Use generate_random_password or provide a strong secret without predictable patterns."
   }
 }
