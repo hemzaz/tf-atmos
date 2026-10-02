@@ -1,0 +1,28 @@
+---
+##################################################
+# Catalog Configuration for AWS Batch
+##################################################
+# Managed compute environments and job queues, one map entry each (Cloud Posse
+# has no Batch component). Instances inherit this base and set
+# compute_environments (each with its own subnet_ids and security_group_ids,
+# usually !terraform.state vpc/main .private_subnet_ids and a securitygroup
+# instance's id; list both instances in dependencies.components) and
+# job_queues, whose compute_environment_order names those keys.
+#
+# Defaults: a compute environment is FARGATE unless it sets type; EC2 ones use
+# BEST_FIT_PROGRESSIVE, SPOT ones SPOT_PRICE_CAPACITY_OPTIMIZED (no Spot Fleet
+# role needed), both on ECS_AL2023 with IMDSv2 required.
+
+components:
+  terraform:
+    batch/defaults:
+      metadata:
+        component: batch
+        type: abstract
+      vars:
+        enabled: true
+        name: batch
+        compute_environments: {}
+        job_queues: {}
+        tags:
+          Component: "Batch"
