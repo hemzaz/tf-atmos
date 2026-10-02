@@ -623,6 +623,15 @@ variable "load_balancer" {
     # At least one condition; values are ORed within a list, the lists ANDed.
     host_headers  = optional(list(string), [])
     path_patterns = optional(list(string), [])
+    # A header the request must also carry, its value read at plan from an SSM
+    # parameter (SecureString), never written in a stack: CloudFront's secret
+    # origin-verify header, with the alb instance's default action a fixed 403.
+    # Cloud Posse's alb-ingress takes literal listener_http_header_conditions;
+    # this one reads its single value from SSM instead.
+    http_header = optional(object({
+      name                     = string
+      value_ssm_parameter_name = string
+    }))
 
     protocol             = optional(string, "HTTP")
     deregistration_delay = optional(number, 300)
@@ -637,7 +646,7 @@ variable "load_balancer" {
       interval            = optional(number, 30)
     }), {})
   })
-  description = "Optional ALB attachment: a target group (<Environment>-<name>, ip targets) forwarded to by a listener rule on listener_arn (priority, host_headers and/or path_patterns), registering container_name:container_port (a port_mappings entry of that container). vpc_id is the target group's VPC; protocol, deregistration_delay and health_check configure the target group. Null attaches no load balancer"
+  description = "Optional ALB attachment: a target group (<Environment>-<name>, ip targets) forwarded to by a listener rule on listener_arn (priority, host_headers and/or path_patterns, and optionally http_header: a header name whose required value is read from the SSM parameter value_ssm_parameter_name), registering container_name:container_port (a port_mappings entry of that container). vpc_id is the target group's VPC; protocol, deregistration_delay and health_check configure the target group. Null attaches no load balancer"
   default     = null
 
   validation {
@@ -666,10 +675,21 @@ variable "load_balancer" {
   validation {
     condition = var.load_balancer == null || try(
       length(var.load_balancer.host_headers) + length(var.load_balancer.path_patterns) > 0
-      && length(var.load_balancer.host_headers) + length(var.load_balancer.path_patterns) <= 5,
+      && length(var.load_balancer.host_headers) + length(var.load_balancer.path_patterns) + (var.load_balancer.http_header == null ? 0 : 1) <= 5,
       false
     )
-    error_message = "load_balancer needs 1 to 5 host_headers and path_patterns values in total (a listener rule takes at most 5 condition values)."
+    error_message = "load_balancer needs 1 to 5 host_headers and path_patterns values, http_header counting as one more (a listener rule takes at most 5 condition values)."
+  }
+
+  validation {
+    condition = try(var.load_balancer.http_header, null) == null || try(
+      can(regex("^[A-Za-z0-9-]{1,40}$", var.load_balancer.http_header.name))
+      && !contains(["host", "cookie"], lower(var.load_balancer.http_header.name))
+      && can(regex("^/?[A-Za-z0-9_./-]+$", var.load_balancer.http_header.value_ssm_parameter_name))
+      && length(var.load_balancer.http_header.value_ssm_parameter_name) <= 2048,
+      false
+    )
+    error_message = "load_balancer.http_header needs a name of 1-40 letters, digits or hyphens (not Host or Cookie, which have their own conditions) and value_ssm_parameter_name, an SSM parameter name (e.g. /app/origin-verify), not an ARN."
   }
 
   validation {
