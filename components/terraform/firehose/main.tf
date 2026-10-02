@@ -52,12 +52,19 @@ locals {
   processors = concat(
     local.lambda_processor ? [{
       type = "Lambda"
-      parameters = [
-        { name = "LambdaArn", value = var.processor_lambda_arn },
-        { name = "BufferSizeInMBs", value = tostring(var.processor_lambda_config.buffer_size_in_mbs) },
-        { name = "BufferIntervalInSeconds", value = tostring(var.processor_lambda_config.buffer_interval_in_seconds) },
-        { name = "NumberOfRetries", value = tostring(var.processor_lambda_config.number_of_retries) },
-      ]
+      # The provider keeps default-valued Lambda parameters out of state (and
+      # merges them back on create/update), and parameters is a set: sending
+      # a default would diff on every plan. Emit only set, non-default values.
+      parameters = concat(
+        [{ name = "LambdaArn", value = var.processor_lambda_arn }],
+        [
+          for p in [
+            { name = "BufferSizeInMBs", value = var.processor_lambda_config.buffer_size_in_mbs, default = 1 },
+            { name = "BufferIntervalInSeconds", value = var.processor_lambda_config.buffer_interval_in_seconds, default = 60 },
+            { name = "NumberOfRetries", value = var.processor_lambda_config.number_of_retries, default = 3 },
+          ] : { name = p.name, value = tostring(p.value) } if p.value != null && p.value != p.default
+        ],
+      )
     }] : [],
     length(local.jq_queries) > 0 ? [{
       type = "MetadataExtraction"
@@ -197,7 +204,7 @@ resource "aws_iam_role_policy" "delivery" {
         Resource = try(local.schema.kms_key_arn, null)
         Condition = {
           StringEquals = {
-            "kms:ViaService" = "glue.${coalesce(local.schema_region, var.region)}.amazonaws.com"
+            "kms:ViaService" = "glue.${local.schema_region}.amazonaws.com"
           }
         }
       }] : [],

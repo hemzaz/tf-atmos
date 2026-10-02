@@ -312,7 +312,7 @@ variable "dynamic_partitioning" {
     # Adds the AppendDelimiterToRecord processor (a newline after each record).
     append_delimiter = optional(bool, false)
   })
-  description = "Dynamic partitioning: partition S3 objects by keys extracted from each record with JQ (jq_queries, !{partitionKeyFromQuery:<key>}) or returned by processor_lambda_arn (!{partitionKeyFromLambda:<key>}). retry_duration (0-7200 seconds, default 300) is how long Firehose retries S3 delivery. Needs buffering_size >= 64, and s3_prefix must use at least one partition key. Can only be turned on when the stream is created. Null (default) or enabled = false turns it off"
+  description = "Dynamic partitioning: partition S3 objects by keys extracted from each record with JQ (jq_queries, !{partitionKeyFromQuery:<key>}) or returned by processor_lambda_arn (!{partitionKeyFromLambda:<key>}). retry_duration (0-7200 seconds, default 300) is how long Firehose retries S3 delivery. Needs buffering_size >= 64, and s3_prefix must use at least one partition key. Turning it on for an existing stream, or off later (enabled = false), replaces the stream (provider ForceNew): a new ARN, and buffered records are lost. Null (default) or enabled = false turns it off"
   default     = null
 
   validation {
@@ -344,25 +344,28 @@ variable "processor_lambda_arn" {
 
 variable "processor_lambda_config" {
   type = object({
-    buffer_size_in_mbs         = optional(number, 1)
-    buffer_interval_in_seconds = optional(number, 60)
-    number_of_retries          = optional(number, 3)
+    # Null keeps the Firehose default. Values equal to the default are not
+    # sent either: the provider keeps them out of state (a perpetual diff).
+    buffer_size_in_mbs         = optional(number)
+    buffer_interval_in_seconds = optional(number)
+    number_of_retries          = optional(number)
   })
-  description = "Lambda processor settings: BufferSizeInMBs (1-3, default 1), BufferIntervalInSeconds (60-900, default 60) and NumberOfRetries (0-300, default 3). Used only with processor_lambda_arn"
+  description = "Lambda processor settings, each null for the Firehose default: BufferSizeInMBs (0.2-3, default 1), BufferIntervalInSeconds (0-900, default 60) and NumberOfRetries (0-300, default 3). Used only with processor_lambda_arn"
   default     = {}
 
   validation {
-    condition     = var.processor_lambda_config.buffer_size_in_mbs >= 1 && var.processor_lambda_config.buffer_size_in_mbs <= 3
-    error_message = "processor_lambda_config.buffer_size_in_mbs must be between 1 and 3 (Lambda's 6 MB payload limit)."
+    # coalesce, not `x == null ||`: HCL's || does not short-circuit.
+    condition     = coalesce(var.processor_lambda_config.buffer_size_in_mbs, 1) >= 0.2 && coalesce(var.processor_lambda_config.buffer_size_in_mbs, 1) <= 3
+    error_message = "processor_lambda_config.buffer_size_in_mbs must be between 0.2 and 3 (Lambda's 6 MB payload limit)."
   }
 
   validation {
-    condition     = var.processor_lambda_config.buffer_interval_in_seconds >= 60 && var.processor_lambda_config.buffer_interval_in_seconds <= 900
-    error_message = "processor_lambda_config.buffer_interval_in_seconds must be between 60 and 900."
+    condition     = coalesce(var.processor_lambda_config.buffer_interval_in_seconds, 60) >= 0 && coalesce(var.processor_lambda_config.buffer_interval_in_seconds, 60) <= 900
+    error_message = "processor_lambda_config.buffer_interval_in_seconds must be between 0 and 900."
   }
 
   validation {
-    condition     = var.processor_lambda_config.number_of_retries >= 0 && var.processor_lambda_config.number_of_retries <= 300
+    condition     = coalesce(var.processor_lambda_config.number_of_retries, 3) >= 0 && coalesce(var.processor_lambda_config.number_of_retries, 3) <= 300
     error_message = "processor_lambda_config.number_of_retries must be between 0 and 300."
   }
 }

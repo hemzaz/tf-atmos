@@ -562,13 +562,12 @@ run "lambda_processor_with_lambda_partition_keys" {
       && {
         for p in aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].parameters : p.parameter_name => p.parameter_value
         } == {
-        LambdaArn               = "arn:aws:lambda:us-east-1:123456789012:function:test-transform:live"
-        BufferSizeInMBs         = "3"
-        BufferIntervalInSeconds = "60"
-        NumberOfRetries         = "5"
+        LambdaArn       = "arn:aws:lambda:us-east-1:123456789012:function:test-transform:live"
+        BufferSizeInMBs = "3"
+        NumberOfRetries = "5"
       }
     )
-    error_message = "processor_lambda_arn renders one Lambda processor with its buffering and retries (no MetadataExtraction without jq_queries)."
+    error_message = "processor_lambda_arn renders one Lambda processor with the non-default buffering and retries only (no MetadataExtraction without jq_queries)."
   }
 
   assert {
@@ -618,6 +617,50 @@ run "lambda_processor_without_partitioning" {
       && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].dynamic_partitioning_configuration) == 0
     )
     error_message = "A Lambda processor works without dynamic partitioning or the 64 MiB minimum."
+  }
+
+  assert {
+    condition = (
+      [for p in aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].parameters : p.parameter_name] == ["LambdaArn"]
+    )
+    error_message = "The default processor_lambda_config renders only LambdaArn (the provider keeps default parameters out of state; sending them diffs on every plan)."
+  }
+}
+
+run "lambda_processor_omits_explicit_defaults" {
+  command = plan
+
+  variables {
+    processor_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:test-transform"
+    processor_lambda_config = { buffer_size_in_mbs = 1, buffer_interval_in_seconds = 60, number_of_retries = 3 }
+  }
+
+  assert {
+    condition = (
+      [for p in aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].parameters : p.parameter_name] == ["LambdaArn"]
+    )
+    error_message = "Values equal to the Firehose defaults (1, 60, 3) are not sent."
+  }
+}
+
+run "lambda_processor_accepts_aws_minimums" {
+  command = plan
+
+  variables {
+    processor_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:test-transform"
+    processor_lambda_config = { buffer_size_in_mbs = 0.2, buffer_interval_in_seconds = 0, number_of_retries = 0 }
+  }
+
+  assert {
+    condition = {
+      for p in aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].parameters : p.parameter_name => p.parameter_value
+      } == {
+      LambdaArn               = "arn:aws:lambda:us-east-1:123456789012:function:test-transform"
+      BufferSizeInMBs         = "0.2"
+      BufferIntervalInSeconds = "0"
+      NumberOfRetries         = "0"
+    }
+    error_message = "AWS's minimums (0.2 MB, 0 s, 0 retries) are accepted and sent."
   }
 }
 

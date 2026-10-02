@@ -50,5 +50,5 @@ deviations are listed at the top of `main.tf`.
 - Dynamic partitioning: billed per GB processed and per S3 object delivered on top of ingestion,
   and high-cardinality keys multiply objects; keep keys coarse. It needs `buffering_size >= 64`, an
   `s3_prefix` using at least one partition key, and every `!{partitionKeyFromQuery:<key>}` defined
-  in `jq_queries` (validated). Firehose only allows turning it on when the stream is created (an
-  existing stream cannot be switched to it in place).
+  in `jq_queries` (validated). Turning it on for an existing stream, or off later (`enabled = false`),
+  replaces the stream (provider ForceNew): producers get a new ARN and buffered records are lost.
