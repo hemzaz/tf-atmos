@@ -1,0 +1,35 @@
+---
+##################################################
+# Catalog Configuration for an ECS service
+##################################################
+# One ECS service per instance with its task definition, log group and roles
+# (a subset of the Cloud Posse aws-ecs-service component). Instances inherit
+# this base and set `name`, `ecs_cluster_arn` (an ecs instance's .cluster_arn),
+# `task_cpu`/`task_memory`, `containers`, `subnet_ids` (vpc/main
+# .private_subnet_ids) and `security_group_ids` (a securitygroup instance's
+# ids), and optionally `load_balancer` (listener_arn: an alb instance's
+# .https_listener_arn, vpc_id: vpc/main .vpc_id) and `autoscaling`; list those
+# instances in dependencies.components.
+
+components:
+  terraform:
+    ecs-service/defaults:
+      metadata:
+        component: ecs-service
+        type: abstract
+      # log_kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults) with
+        # allow_cloudwatch_logs on, so the service's log group can use it.
+        log_kms_key_arn: !terraform.state kms/main .key_arn
+        launch_type: FARGATE
+        desired_count: 1
+        log_retention_days: 90
+        tags:
+          Component: "ECS-Service"

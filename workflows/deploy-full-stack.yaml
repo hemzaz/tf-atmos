@@ -306,7 +306,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
-          or .metadata.component == "cloudfront"'
+          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service"'
       - name: confirm_services
         type: confirm
         prompt: Apply the services layer plan above?
@@ -318,7 +318,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
-          or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"'
+          or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
+          or .metadata.component == "ecs-service"'
       - name: plan-monitoring
         type: atmos
         command: >-
@@ -661,7 +662,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
-          or .metadata.component == "cloudfront"'
+          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service"'
       - name: confirm
         type: confirm
         prompt: Deploy the services layer?
@@ -673,7 +674,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
-          or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"'
+          or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
+          or .metadata.component == "ecs-service"'
 
   deploy-monitoring:
     description: "Deploy the monitoring layer: monitoring and cost optimization"
