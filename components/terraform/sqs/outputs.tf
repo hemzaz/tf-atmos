@@ -40,3 +40,8 @@ output "dead_letter_queue_url" {
   description = "The URL of the dead-letter queue (null unless dlq_enabled)"
   value       = one(aws_sqs_queue.dlq[*].url)
 }
+
+output "producer_policy" {
+  description = "IAM identity policy (JSON) for a role that sends to the queue: sqs:SendMessage (which also covers SendMessageBatch), GetQueueAttributes and GetQueueUrl on the queue, and kms:GenerateDataKey / kms:Decrypt on kms_key_arn through SQS for this queue only. Attach it with the producer's own policy input, such as the lambda component's custom_policy. Null when disabled"
+  value       = local.producer_policy
+}

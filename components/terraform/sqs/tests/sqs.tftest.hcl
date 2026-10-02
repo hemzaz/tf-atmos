@@ -180,8 +180,29 @@ run "disabled_creates_nothing" {
   }
 
   assert {
-    condition     = output.queue_arn == null && output.dead_letter_queue_arn == null
+    condition     = output.queue_arn == null && output.dead_letter_queue_arn == null && output.producer_policy == null
     error_message = "Outputs are null when disabled."
+  }
+}
+
+run "producer_policy_sends_to_this_queue_and_uses_its_key_through_sqs" {
+  command = plan
+
+  assert {
+    condition = jsondecode(output.producer_policy).Statement[0].Resource == "arn:aws:sqs:us-east-1:123456789012:test-orders" && contains(
+      jsondecode(output.producer_policy).Statement[0].Action, "sqs:SendMessage"
+    )
+    error_message = "producer_policy must grant sqs:SendMessage on exactly this queue."
+  }
+
+  assert {
+    condition = (
+      jsondecode(output.producer_policy).Statement[1].Resource == var.kms_key_arn
+      && toset(jsondecode(output.producer_policy).Statement[1].Action) == toset(["kms:GenerateDataKey", "kms:Decrypt"])
+      && jsondecode(output.producer_policy).Statement[1].Condition.StringEquals["kms:ViaService"] == "sqs.us-east-1.amazonaws.com"
+      && jsondecode(output.producer_policy).Statement[1].Condition.StringEquals["kms:EncryptionContext:aws:sqs:arn"] == "arn:aws:sqs:us-east-1:123456789012:test-orders"
+    )
+    error_message = "producer_policy must grant the queue key's GenerateDataKey/Decrypt through SQS for this queue only."
   }
 }
 
