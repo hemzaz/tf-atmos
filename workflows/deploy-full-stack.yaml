@@ -207,7 +207,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
-          or .metadata.component == "backup"'
+          or .metadata.component == "backup" or .metadata.component == "firehose"'
       - name: confirm_data
         type: confirm
         prompt: Apply the data layer plan above?
@@ -219,7 +219,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
-          or .metadata.component == "backup"'
+          or .metadata.component == "backup" or .metadata.component == "firehose"'
       # network/services' zones are delegated from network/main's zone by an
       # NS record that network/main writes from network/services'
       # zone_name_servers, so network/services has its own dns-zones layer
@@ -523,7 +523,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
-          or .metadata.component == "backup"'
+          or .metadata.component == "backup" or .metadata.component == "firehose"'
       - name: confirm
         type: confirm
         prompt: Deploy the data layer?
@@ -535,7 +535,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "rds" or .metadata.component == "elasticache"
-          or .metadata.component == "backup"'
+          or .metadata.component == "backup" or .metadata.component == "firehose"'
 
   deploy-dns-zones:
     description: "Deploy the dns-zones layer: network/services' zones (delegated from network/main's zone in the dns layer)"

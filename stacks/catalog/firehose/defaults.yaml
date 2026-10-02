@@ -1,0 +1,37 @@
+---
+##################################################
+# Catalog Configuration for Amazon Data Firehose
+##################################################
+# One delivery stream per instance, delivering to S3 (the Cloud Posse
+# aws-kinesis-firehose-stream model). Instances inherit this base and set
+# `name`, `s3_bucket_arn` (an s3 instance's .bucket_arn) and, for a Kinesis
+# source, `kinesis_source_stream_arn` (a kinesis instance's .stream_arn) and
+# `kinesis_source_kms_key_arn` (kms/main .key_arn, the kinesis key); list
+# those instances in dependencies.components. A direct put instance may set
+# `server_side_encryption_kms_key_arn` (kms/main .key_arn) for a CMK instead
+# of the AWS owned key.
+
+components:
+  terraform:
+    firehose/defaults:
+      metadata:
+        component: firehose
+        type: abstract
+      # kms_key_arn reads kms/main, so the key is applied first.
+      # workflows/scripts/common/check-dependencies.py enforces that every
+      # component read via !terraform.state is declared here.
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        # Every stack runs a kms/main instance (catalog/kms/defaults) with
+        # allow_cloudwatch_logs on, so the delivery log group can use it; the
+        # delivery role gets S3-scoped use through its own IAM policy.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        buffering_size: 5
+        buffering_interval: 300
+        compression_format: UNCOMPRESSED
+        log_retention_days: 90
+        tags:
+          Component: "Firehose"
