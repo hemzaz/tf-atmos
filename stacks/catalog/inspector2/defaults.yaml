@@ -1,0 +1,28 @@
+---
+##################################################
+# Catalog Configuration for Amazon Inspector
+##################################################
+# Inspector for one account/region, owned by this component (the Cloud Posse
+# aws-inspector2 model: one component per service). security-monitoring reads
+# `account_id` from here with !terraform.state and routes Inspector findings
+# only while it is set, so it never enables Inspector itself.
+#
+# Off by default: Inspector bills per EC2 instance, container image and Lambda
+# function scanned. A stack opts in with `enabled: true`; the auto_enable_*
+# flags (Cloud Posse defaults: EC2, ECR and Lambda on, Lambda code off) pick
+# what is scanned.
+
+components:
+  terraform:
+    inspector2/defaults:
+      metadata:
+        component: inspector2
+        type: abstract
+      vars:
+        enabled: false
+        auto_enable_ec2: true
+        auto_enable_ecr: true
+        auto_enable_lambda: true
+        auto_enable_lambda_code: false
+        tags:
+          Component: "Inspector"

@@ -161,7 +161,7 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account"'
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"'
       - name: confirm_security
         type: confirm
         prompt: Apply the security layer plan above?
@@ -175,7 +175,8 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
-          or .metadata.component == "cognito" or .metadata.component == "apigateway-account"'
+          or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
+          or .metadata.component == "inspector2"'
       - name: plan-security-monitoring
         type: atmos
         command: terraform plan --query '.metadata.component == "security-monitoring"'
@@ -477,7 +478,7 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account"'
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"'
       - name: confirm
         type: confirm
         prompt: Deploy the security layer?
@@ -491,7 +492,8 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "secretsmanager"
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
-          or .metadata.component == "cognito" or .metadata.component == "apigateway-account"'
+          or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
+          or .metadata.component == "inspector2"'
 
   deploy-security-monitoring:
     description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector and Security Hub)"
