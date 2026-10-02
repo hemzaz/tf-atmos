@@ -11,8 +11,23 @@
 # dns instance's .zone_ids.<key>); optionally `web_acl_id` (a CLOUDFRONT-scope
 # waf instance's .arn). List each instance read in dependencies.components.
 #
-# Example instance (the origin bucket's policy is described in
-# components/terraform/cloudfront/README.md):
+# Origin access is account-scoped (components/terraform/cloudfront/README.md):
+# the origin s3 instance sets allow_cloudfront_oac_read and the stack's
+# kms/main sets allow_cloudfront, so the first deploy works in one pass.
+#
+# Example instances:
+#
+#   kms/main:
+#     vars:
+#       allow_cloudfront: true          # CloudFront may kms:Decrypt origin objects
+#
+#   s3/site:
+#     metadata:
+#       component: s3
+#       inherits: [s3/defaults]
+#     vars:
+#       name: site
+#       allow_cloudfront_oac_read: true # any distribution of the account may read
 #
 #   cdn/site:
 #     metadata:
@@ -21,8 +36,10 @@
 #     dependencies:
 #       components:
 #         - component: s3/site
+#         - component: kms/main
 #         - component: acm/main
 #         - component: network/main
+#         - component: waf/cdn          # with web_acl_id
 #     vars:
 #       name: site
 #       origin_bucket_regional_domain_name: !terraform.state s3/site .bucket_regional_domain_name
@@ -30,6 +47,7 @@
 #       acm_certificate_arn: !terraform.state acm/main .certificate_arns.www
 #       dns_alias_enabled: true
 #       parent_zone_id: !terraform.state network/main .zone_ids.main
+#       web_acl_id: !terraform.state waf/cdn .arn   # a scope CLOUDFRONT waf instance
 #       enable_spa_fallback: true
 
 components:

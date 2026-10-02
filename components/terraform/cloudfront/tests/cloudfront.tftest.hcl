@@ -418,3 +418,38 @@ run "rejects_allow_all_viewer_protocol" {
 
   expect_failures = [var.viewer_protocol_policy]
 }
+
+run "rejects_period_in_name" {
+  command = plan
+
+  variables {
+    name = "www.site"
+  }
+
+  expect_failures = [var.name]
+}
+
+run "rejects_log_delivery_names_over_60_characters" {
+  command = plan
+
+  variables {
+    tags = {
+      Environment = "a-long-environment-name"
+    }
+    name                  = "a-thirty-character-site-name12"
+    logging_enabled       = true
+    access_log_bucket_arn = "arn:aws:s3:::test-cdn-logs"
+  }
+
+  expect_failures = [aws_cloudwatch_log_delivery_source.this, aws_cloudwatch_log_delivery_destination.this]
+}
+
+run "rejects_log_prefix_with_leading_slash" {
+  command = plan
+
+  variables {
+    log_prefix = "/cloudfront"
+  }
+
+  expect_failures = [var.log_prefix]
+}

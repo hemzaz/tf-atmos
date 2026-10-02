@@ -29,8 +29,9 @@ variable "name" {
   description = "Short name. The distribution's comment and origin access control are named <Environment>-<name> (64 characters at most)"
 
   validation {
-    condition     = can(regex("^[a-zA-Z0-9_.-]{1,40}$", var.name))
-    error_message = "name must be 1-40 characters of letters, digits, underscore, period or hyphen."
+    # No periods: the logging v2 delivery source/destination names allow only [A-Za-z0-9_-].
+    condition     = can(regex("^[a-zA-Z0-9_-]{1,40}$", var.name))
+    error_message = "name must be 1-40 characters of letters, digits, underscore or hyphen."
   }
 }
 
@@ -344,8 +345,13 @@ variable "access_log_bucket_arn" {
 
 variable "log_prefix" {
   type        = string
-  description = "Suffix path of the delivered log objects in the bucket (logging v2 s3 suffix_path); null uses the CloudWatch Logs default"
+  description = "Suffix path of the delivered log objects in the bucket (logging v2 s3 suffix_path, at most 256 characters, no leading /); null uses the CloudWatch Logs default"
   default     = null
+
+  validation {
+    condition     = var.log_prefix == null || can(regex("^[^/].{0,255}$", coalesce(var.log_prefix, "-")))
+    error_message = "log_prefix must be 1-256 characters and must not start with /."
+  }
 }
 
 variable "log_output_format" {

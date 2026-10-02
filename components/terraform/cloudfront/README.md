@@ -16,16 +16,19 @@ CloudFront Functions / Lambda@Edge.
 
 - No instance in the fnx stacks. `cloudfront/defaults` (`stacks/catalog/cloudfront/defaults.yaml`)
   carries an example instance. It deploys in the `services` layer of
-  `workflows/deploy-full-stack.yaml`, after the `s3` (storage), `dns` and `acm` (certificates)
-  instances it reads.
+  `workflows/deploy-full-stack.yaml`, after the `s3` (storage), `kms`, `dns` and `acm`
+  (certificates) instances it relies on.
 - Inputs: `origin_bucket_regional_domain_name` from an s3 instance's
   `.bucket_regional_domain_name`, `acm_certificate_arn` from an acm instance's
   `.certificate_arns.<key>`, `parent_zone_id` from a dns instance's `.zone_ids.<key>`, `web_acl_id`
-  from a CLOUDFRONT-scope waf instance's `.arn`.
-- The origin bucket's policy: the s3 component merges `s3_origin_policy_json` through its
-  `source_policy_documents`. That read runs against the deploy order (cloudfront reads the bucket,
-  the bucket reads cloudfront), so the s3 instance cannot read it with `!terraform.state` in the
-  layered deploy; see Notes.
+  from a CLOUDFRONT-scope waf instance's `.arn` (list it in `dependencies.components`).
+- Origin access: the origin s3 instance sets `allow_cloudfront_oac_read: true` and the stack's
+  `kms/main` sets `allow_cloudfront: true` (s3 buckets are SSE-KMS with it). Both trust any
+  distribution of the account, need no distribution ARN, and deploy in earlier layers, so the
+  first deploy works in one pass.
+- Optional tightening: `s3_origin_policy_json` grants this distribution only; add it to the origin
+  s3 instance's `source_policy_documents` (and drop `allow_cloudfront_oac_read`) once the
+  distribution exists.
 - `stacks/catalog/templates/serverless-api.yaml` (`serverless-api/cloudfront`) and
   `web-application.yaml` predate this component and still use the old nested
   `origins`/`viewer_certificate` inputs; they need porting (the web-application ALB origin needs
@@ -35,20 +38,18 @@ CloudFront Functions / Lambda@Edge.
 
 ## Notes
 
-- Until the bucket policy holds `s3_origin_policy_json`, CloudFront gets 403 from S3. Because of
-  the read cycle above, the first deploy needs a second apply of the origin s3 instance with the
-  statement in `source_policy_documents` (or the distribution ARN pasted in once it exists).
-- Origin buckets from the s3 component are SSE-KMS with `kms/main`, and CloudFront must decrypt:
-  the key policy needs `cloudfront.amazonaws.com` `kms:Decrypt` with `AWS:SourceArn` = the
-  distribution ARN. The kms component has no such switch yet.
+- The trust boundary is the account, not the distribution (a deliberate deviation from Cloud
+  Posse, see `main.tf`): any CloudFront distribution in the account can read an origin bucket with
+  `allow_cloudfront_oac_read` and decrypt with a key with `allow_cloudfront`.
 - The ACM certificate and the WAF web ACL must be in us-east-1 (validated). Aliases need the
   certificate (validated).
 - `enable_spa_fallback` answers S3's 403 and 404 with 200 and `/<default_root_object>`; it cannot
   be combined with a `custom_error_response` for 403 or 404.
-- Logging v2 resources are created in us-east-1 whatever the stack region. CloudWatch Logs adds a
-  `delivery.logs.amazonaws.com` statement to the log bucket's policy when it creates the delivery,
-  which the s3 component would revert: give the log bucket that statement through its
-  `source_policy_documents`. A log bucket encrypted with a CMK needs a key policy allowing
-  `delivery.logs.amazonaws.com` to `kms:GenerateDataKey`.
+- Logging v2 resources are created in us-east-1 whatever the stack region, named
+  `<Environment>-<name>-cloudfront[-s3]` (60 characters of `[A-Za-z0-9_-]`, checked at plan).
+  CloudWatch Logs adds a `delivery.logs.amazonaws.com` statement to the log bucket's policy when
+  it creates the delivery, which the s3 component would revert: give the log bucket that statement
+  through its `source_policy_documents`. A log bucket encrypted with a CMK needs a key policy
+  allowing `delivery.logs.amazonaws.com` to `kms:GenerateDataKey`.
 - Managed policy names are mapped to their AWS IDs in `main.tf`; any other value must be a policy
   ID.

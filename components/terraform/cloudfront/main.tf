@@ -6,9 +6,16 @@
 # Gateway), ordered cache behaviors and functions are part 2 (see README).
 # Deviations from upstream:
 #   - The bucket is not created here and its policy is not written here
-#     (upstream creates the bucket, or overrides an existing bucket's policy).
-#     The s3 component owns the bucket and its policy; this component outputs
-#     the OAC statement (s3_origin_policy_json) for its source_policy_documents.
+#     (upstream creates the bucket, or overrides an existing bucket's policy
+#     with a statement for this one distribution's ARN).
+#   - Trust boundary: account-scoped, deliberately. The origin s3 instance
+#     sets allow_cloudfront_oac_read and the stack's kms sets
+#     allow_cloudfront, which let ANY CloudFront distribution of this account
+#     (aws:SourceAccount + AWS:SourceArn distribution/*) read the bucket and
+#     decrypt with the key. Neither needs this distribution's ARN, so the
+#     bucket and key deploy before the distribution and the first deploy
+#     works in one pass. s3_origin_policy_json (this distribution only) is an
+#     optional later tightening through the s3 source_policy_documents.
 #   - OAC only, signing always with sigv4 (upstream defaults to an origin
 #     access identity and makes the signing behavior an input).
 #   - The default cache behavior uses cache, origin request and response
@@ -173,7 +180,9 @@ resource "aws_cloudfront_distribution" "this" {
 
 # The statement the origin bucket's policy needs (Cloud Posse's
 # s3_origin_access_control policy document): this distribution only, through
-# its OAC, may read objects. Merged by the s3 component (source_policy_documents).
+# its OAC, may read objects. Optional: the s3 allow_cloudfront_oac_read
+# statement already covers every distribution of the account; this tightens
+# it through the s3 component's source_policy_documents.
 locals {
   s3_origin_policy_json = local.enabled ? jsonencode({
     Version = "2012-10-17"
@@ -202,6 +211,12 @@ resource "aws_cloudwatch_log_delivery_source" "this" {
   name         = "${local.name}-cloudfront"
   log_type     = "ACCESS_LOGS"
   resource_arn = aws_cloudfront_distribution.this[0].arn
+  lifecycle {
+    precondition {
+      condition     = can(regex("^[\\w-]{1,60}$", "${local.name}-cloudfront-s3"))
+      error_message = "The logging v2 delivery names (\"${local.name}-cloudfront\", \"${local.name}-cloudfront-s3\") must be 1-60 characters of letters, digits, underscore or hyphen: shorten name or Environment."
+    }
+  }
 }
 
 resource "aws_cloudwatch_log_delivery_destination" "this" {
@@ -213,6 +228,12 @@ resource "aws_cloudwatch_log_delivery_destination" "this" {
 
   delivery_destination_configuration {
     destination_resource_arn = var.access_log_bucket_arn
+  }
+  lifecycle {
+    precondition {
+      condition     = can(regex("^[\\w-]{1,60}$", "${local.name}-cloudfront-s3"))
+      error_message = "The logging v2 delivery names (\"${local.name}-cloudfront\", \"${local.name}-cloudfront-s3\") must be 1-60 characters of letters, digits, underscore or hyphen: shorten name or Environment."
+    }
   }
 }
 

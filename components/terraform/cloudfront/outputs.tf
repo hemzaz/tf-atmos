@@ -24,6 +24,6 @@ output "origin_access_control_id" {
 }
 
 output "s3_origin_policy_json" {
-  description = "Bucket policy JSON letting this distribution only (AWS:SourceArn) read the origin bucket's objects through OAC; add it to the origin s3 instance's source_policy_documents. Null when disabled"
+  description = "Optional: bucket policy JSON letting this distribution only (AWS:SourceArn) read the origin bucket's objects through OAC, a tightening of the s3 allow_cloudfront_oac_read statement (any distribution of the account) through the origin s3 instance's source_policy_documents, applied after the distribution exists. Null when disabled"
   value       = local.s3_origin_policy_json
 }

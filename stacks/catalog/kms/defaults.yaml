@@ -76,6 +76,10 @@ components:
         # AWS Backup needs this to publish to it, limited to this account's
         # topics in this region.
         allow_backup: true
+        # CloudFront reading SSE-KMS origin objects through OAC (any
+        # distribution of this account). Off: no stack has a cloudfront
+        # instance yet; a stack that adds one sets it on its kms/main.
+        allow_cloudfront: false
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates

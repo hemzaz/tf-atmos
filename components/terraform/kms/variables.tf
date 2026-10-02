@@ -182,6 +182,12 @@ variable "allow_s3" {
   default     = false
 }
 
+variable "allow_cloudfront" {
+  type        = bool
+  description = "Let CloudFront (cloudfront.amazonaws.com) decrypt with the key (kms:Decrypt) to serve SSE-KMS objects through origin access control, scoped by aws:SourceAccount and AWS:SourceArn to any distribution of this account"
+  default     = false
+}
+
 variable "allow_cloudwatch_alarms" {
   type        = bool
   description = "Let CloudWatch alarms (cloudwatch.amazonaws.com) publish to this account's SNS topics encrypted with the key (kms:GenerateDataKey*, kms:Decrypt), scoped by aws:SourceAccount and kms:EncryptionContext:aws:sns:topicArn"
