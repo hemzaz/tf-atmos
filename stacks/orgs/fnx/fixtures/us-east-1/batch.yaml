@@ -7,3 +7,14 @@ import:
 settings:
   context:
     environment: batch
+  # The template's REQUIREMENTS 3. Placeholders.
+  batch_processing:
+    data_processor_image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/processor:1.0
+    etl_job_image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/etl:1.0
+    report_generator_image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/reporter:1.0
+    ml_training_image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/trainer:1.0
+    db_password_secret_arn: arn:aws:secretsmanager:us-east-1:000000000000:secret:fixtures/batch/db-password-AbCdEf
+    validation_lambda_arn: arn:aws:lambda:us-east-1:000000000000:function:fixtures-validate-input
+    list_files_lambda_arn: arn:aws:lambda:us-east-1:000000000000:function:fixtures-list-files
+    aggregate_lambda_arn: arn:aws:lambda:us-east-1:000000000000:function:fixtures-aggregate
+    job_submitter_version: "1.0.0"

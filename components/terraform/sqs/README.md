@@ -9,6 +9,8 @@ queue policy) as plain resources.
 - No instance in the fnx stacks. `sqs/defaults` reads `kms/main .key_arn`; the `batch-processing`
   and `microservices-platform` templates create queues from it (`serverless-api` also declares one).
 - Consumers read `.queue_arn`, `.queue_name` and `.dead_letter_queue_*` (null unless `dlq_enabled`).
+- Deploys in the `deploy-full-stack` storage layer, with `s3`: an s3 instance notifying a queue
+  builds its ARN from the queue's name instead of reading its state.
 
 ## Notes
 

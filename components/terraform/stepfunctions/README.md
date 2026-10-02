@@ -8,7 +8,11 @@ and scoped to this machine. Modelled on Cloud Posse `aws-step-functions`.
 
 - No instance in the fnx stacks. `stepfunctions/defaults` reads `kms/main .key_arn`;
   `templates/stacks/serverless-stack.yaml` creates `stepfunctions/order-fulfilment`, whose
-  `definition` and `iam_policies` read Lambda and SNS ARNs through `!terraform.state`.
+  `definition` and `iam_policies` read Lambda and SNS ARNs through `!terraform.state`. The
+  `batch-processing` catalog template creates `batch-processing/stepfunctions/data-pipeline` and
+  `/parallel-processor`, which submit `batch` jobs (`.sync`).
+- Deploys in the `deploy-full-stack` platform layer, after compute (the batch and lambda state its
+  definitions read) and before the `eventbridge` rules (services) that start it.
 - `events_role_arn` (with `events_role_enabled`) is the `role_arn` an `eventbridge` target needs to
   start this machine.
 

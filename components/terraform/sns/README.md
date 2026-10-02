@@ -7,7 +7,9 @@ Modelled on Cloud Posse `aws-sns-topic` (input and output names, defaults) as pl
 ## Wiring
 
 - No instance in the fnx stacks. `sns/defaults` reads `kms/main .key_arn`; the copyable stack
-  template `templates/stacks/serverless-stack.yaml` creates `sns/notifications` from it.
+  template `templates/stacks/serverless-stack.yaml` creates `sns/notifications` from it, the
+  `batch-processing` catalog template `batch-processing/sns/notifications`. Deploys in the
+  `deploy-full-stack` storage layer.
 
 ## Notes
 

@@ -28,8 +28,8 @@ the roles follow its ecs-service pattern (created unless an ARN is given).
 - `secrets` take Secrets Manager secret ARNs (full, with the 6-character suffix; e.g. a
   `secretsmanager` instance's output) or SSM parameter ARNs; set `secrets_kms_key_arn` when they
   are encrypted with a customer managed key.
-- `stacks/catalog/templates/batch-processing.yaml` predates this component and still uses the
-  old split `batch`/`batch-job-queue`/`batch-job-definition` inputs; it needs porting.
+- The `batch-processing` catalog template runs one instance, `batch-processing/batch`, read by
+  its state machines, EventBridge rules and monitoring.
 
 ## Notes
 

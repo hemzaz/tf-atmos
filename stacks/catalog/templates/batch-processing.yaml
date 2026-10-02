@@ -5,31 +5,83 @@
 # Complete batch processing infrastructure
 #
 # Architecture:
-#   - AWS Batch compute environment (Fargate or EC2)
-#   - SQS queues for job submission
-#   - ECS Fargate for containerized jobs
-#   - S3 for input/output data
-#   - EventBridge for scheduling
-#   - Step Functions for workflow orchestration
-#   - CloudWatch for monitoring and logging
-#   - Auto-scaling based on queue depth
+#   - VPC with private subnets (NAT, VPC endpoints) for the jobs
+#   - One AWS Batch instance (batch-processing/batch): Fargate, Fargate Spot
+#     and a GPU EC2 compute environment, four job queues and four container
+#     job definitions with their job roles, execution role and KMS-encrypted
+#     log group
+#   - SQS queues for job submission (each with its dead-letter queue), the
+#     input bucket's event queue, job-status notifications and the EventBridge
+#     dead-letter queue
+#   - S3 buckets for input, output and scripts
+#   - Step Functions state machines (one instance each): the data pipeline and
+#     the parallel processor
+#   - EventBridge rules: daily and hourly schedules, the S3 trigger and the
+#     job-status rule
+#   - A Lambda that submits Batch jobs from the job queues
+#   - An SNS topic for pipeline notifications
+#   - CloudWatch dashboard and alarms
+#
+# Encryption: the stack's customer managed key, kms/main, encrypts the
+# buckets, the queues, the SNS topic, the state machines and their log groups,
+# the job log group, the EventBridge log groups, the Lambda's environment and
+# log group, and the monitoring alarm topic.
 #
 # Cost Estimates (Monthly):
 #   Development:  ~$50-150/month (minimal jobs)
 #   Staging:      ~$200-500/month
 #   Production:   ~$500-5,000/month (scales with job volume)
 #
-# Key Benefits:
-#   - Managed compute - no servers to manage
-#   - Auto-scaling - scales to zero when idle
-#   - Cost-effective - pay only for compute used
-#   - Flexible - supports any container workload
-#
 # Deployment Time: 15-25 minutes
 #
-# Usage:
-#   atmos terraform plan batch-processing -s <tenant>-<account>-<environment>
-#   atmos terraform apply batch-processing -s <tenant>-<account>-<environment>
+# Usage (instances are batch-processing/<part>):
+#   atmos terraform plan batch-processing/batch -s <tenant>-<stage>-<environment>
+#   atmos workflow deploy -f deploy-full-stack -s <tenant>-<stage>-<environment>
+#
+# =============================================================================
+# REQUIREMENTS FOR THE IMPORTING STACK
+# =============================================================================
+# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
+#    from catalog/kms/defaults). This template does not define it: doing so would
+#    deep-merge over that stack's own alias_name/description. It must keep the
+#    grants catalog/kms/defaults turns on: allow_cloudwatch_logs and
+#    allow_log_delivery (the job, state machine, EventBridge and Lambda log
+#    groups), allow_eventbridge (delivery to the encrypted queues), allow_s3
+#    (the input bucket's notifications to the trigger queue) and
+#    allow_cloudwatch_alarms (the alarm topic).
+# 2. s3/lambda-artifacts (imported below; an fnx org stack imports the same file
+#    in components/services.yaml) applied, with
+#    batch-job-submitter/<job_submitter_version>.zip in it, before
+#    batch-processing/lambda-job-submitter: deploy-full-stack's storage layer
+#    applies it before compute.
+# 3. settings.batch_processing, the inputs this template cannot create:
+#      settings:
+#        batch_processing:
+#          data_processor_image: <account>.dkr.ecr.<region>.amazonaws.com/processor:1.0
+#          etl_job_image: <account>.dkr.ecr.<region>.amazonaws.com/etl:1.0
+#          report_generator_image: <account>.dkr.ecr.<region>.amazonaws.com/reporter:1.0
+#          ml_training_image: <account>.dkr.ecr.<region>.amazonaws.com/trainer:1.0
+#          # The data processor's DB_PASSWORD: a full Secrets Manager ARN, with
+#          # its 6-character suffix (the execution role is granted exactly it).
+#          db_password_secret_arn: arn:aws:secretsmanager:<region>:<account>:secret:<name>-AbCdEf
+#          # The pipelines' Lambda functions, deployed elsewhere.
+#          validation_lambda_arn: arn:aws:lambda:<region>:<account>:function:<name>
+#          list_files_lambda_arn: arn:aws:lambda:<region>:<account>:function:<name>
+#          aggregate_lambda_arn: arn:aws:lambda:<region>:<account>:function:<name>
+#          job_submitter_version: "1.0.0"   # package key; bump to deploy new code
+#    A missing key fails every describe/plan of the stack with its name
+#    (gomplate `required`); `atmos validate stacks` does not render templates.
+#    settings.environment.account_id (set by every fnx stage _defaults) builds
+#    the ARNs of resources this template names but cannot read from state.
+# 4. If db_password_secret_arn is encrypted with a customer managed key, set
+#    batch-processing/batch's secrets_kms_key_arn to it.
+# 5. The externally supplied Lambdas' execution roles read and write the
+#    buckets, which are encrypted with kms/main: each needs its own IAM grant
+#    of kms:Decrypt and kms:GenerateDataKey* on kms/main's key, scoped with
+#    kms:ViaService s3.<region>.amazonaws.com (kms/main delegates to IAM, so no
+#    key-policy change). The job roles below get theirs from this template.
+# 6. On-call addresses, if any, in batch-processing/monitoring's
+#    alarm_email_subscriptions.
 # =============================================================================
 
 import:
@@ -40,6 +92,12 @@ import:
   - catalog/eventbridge/defaults
   - catalog/sqs/defaults
   - catalog/s3/defaults
+  - catalog/sns/defaults
+  - catalog/batch/defaults
+  - catalog/stepfunctions/defaults
+  # s3/lambda-artifacts, the stack's lambda package bucket (an fnx org stack
+  # imports the same file in components/services.yaml).
+  - catalog/s3/lambda-artifacts
 
 # =============================================================================
 # COMPONENT DEFINITIONS
@@ -58,8 +116,6 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        name: "batch"
-
         # VPC CIDR configuration
         ipv4_primary_cidr_block: "10.30.0.0/16"
 
@@ -229,12 +285,15 @@ components:
         # on batch-processing/sqs/trigger, listed in dependencies.components
         # below so Atmos applies it first) and the aws.s3 "Object Created"
         # pattern below is matched only once EventBridge notifications
-        # (eventbridge: true) are on.
+        # (eventbridge: true) are on. The queue ARN is built from the trigger
+        # queue's name ("<Environment>-batch-trigger") rather than read from
+        # its state: the sqs and s3 instances share deploy-full-stack's
+        # storage layer, which plans before it applies.
         event_notification_details:
           enabled: true
           eventbridge: true
           queue_list:
-            - queue_arn: !terraform.state batch-processing/sqs/trigger .queue_arn
+            - queue_arn: "arn:aws:sqs:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-batch-trigger"
               events:
                 - "s3:ObjectCreated:*"
               filter_prefix: "incoming/"
@@ -461,532 +520,497 @@ components:
           Platform: "batch-processing"
 
     # =========================================================================
+    # SNS (pipeline notifications)
+    # =========================================================================
+
+    # The data pipeline publishes its SUCCESS / FAILED / INVALID_INPUT
+    # messages here (its execution role's grant is on the state machine
+    # below). Subscribe consumers per stack, e.g.:
+    #   batch-processing/sns/notifications:
+    #     vars:
+    #       subscribers:
+    #         ops:
+    #           protocol: email
+    #           endpoint: ops@example.com
+    batch-processing/sns/notifications:
+      metadata:
+        component: sns
+        type: real
+        inherits:
+          - sns/defaults
+      vars:
+        name: batch-notifications
+        tags:
+          Layer: "messaging"
+          Platform: "batch-processing"
+
+    # =========================================================================
     # AWS BATCH
     # =========================================================================
 
-    batch-processing/batch-compute-fargate:
+    # One instance (Cloud Posse has no Batch component; see
+    # components/terraform/batch/README.md): compute environments, job queues
+    # and job definitions, each named <Environment>-batch-<key>. No service
+    # role (Batch uses its service-linked role), and the EC2 environment's
+    # instance profile and IMDSv2 launch template are the component's own
+    # (set image_id_override for a custom AMI). The job definitions' log group
+    # is /aws/batch/<Environment>-batch, encrypted with kms/main; the
+    # component creates the Fargate execution role and one job role per
+    # definition from job_role_policy_json.
+    batch-processing/batch:
       metadata:
         component: batch
         type: real
+        inherits:
+          - batch/defaults
       vars:
-        # Compute environment name
-        compute_environment_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-fargate"
-        compute_environment_type: "MANAGED"
-        service_role_arn: "{{ .vars.batch_service_role_arn }}"
+        name: batch
+        log_kms_key_arn: !terraform.state kms/main .key_arn
+        # batch-processing/eventbridge/hourly-batch's target role.
+        events_role_enabled: true
 
-        # Fargate compute resources
-        compute_resources:
-          type: "FARGATE"
-          max_vcpus: 256
-          subnets: !terraform.state batch-processing/vpc .private_subnet_ids
-          security_group_ids:
-            - !terraform.state batch-processing/securitygroups .security_group_ids.batch_compute
+        compute_environments:
+          fargate:
+            type: FARGATE
+            max_vcpus: 256
+            subnet_ids: !terraform.state batch-processing/vpc .private_subnet_ids
+            security_group_ids:
+              - !terraform.state batch-processing/securitygroups .security_group_ids.batch_compute
+            tags:
+              ComputeType: "fargate"
+          # Cost-optimized.
+          fargate-spot:
+            type: FARGATE_SPOT
+            max_vcpus: 512
+            subnet_ids: !terraform.state batch-processing/vpc .private_subnet_ids
+            security_group_ids:
+              - !terraform.state batch-processing/securitygroups .security_group_ids.batch_compute
+            tags:
+              ComputeType: "fargate-spot"
+          # GPU instances for ml_training, scaling from zero. Disabled, like
+          # the gpu queue: enable both per stack. "optimal" (the old value)
+          # picks only CPU families, on which a GPU job never starts, so the
+          # instance types are GPU families on the NVIDIA ECS AMI.
+          ec2:
+            type: EC2
+            state: DISABLED
+            allocation_strategy: BEST_FIT_PROGRESSIVE
+            min_vcpus: 0
+            max_vcpus: 256
+            instance_types:
+              - g5
+            image_type: ECS_AL2023_NVIDIA
+            subnet_ids: !terraform.state batch-processing/vpc .private_subnet_ids
+            security_group_ids:
+              - !terraform.state batch-processing/securitygroups .security_group_ids.batch_compute
+            tags:
+              ComputeType: "ec2"
 
-        # State
-        state: "ENABLED"
-
-        tags:
-          ComputeType: "fargate"
-          Platform: "batch-processing"
-
-      dependencies:
-        components:
-          - component: batch-processing/vpc
-          - component: batch-processing/securitygroups
-    batch-processing/batch-compute-fargate-spot:
-      metadata:
-        component: batch
-        type: real
-      vars:
-        # Compute environment name
-        compute_environment_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-fargate-spot"
-        compute_environment_type: "MANAGED"
-        service_role_arn: "{{ .vars.batch_service_role_arn }}"
-
-        # Fargate Spot compute resources (cost-optimized)
-        compute_resources:
-          type: "FARGATE_SPOT"
-          max_vcpus: 512
-          subnets: !terraform.state batch-processing/vpc .private_subnet_ids
-          security_group_ids:
-            - !terraform.state batch-processing/securitygroups .security_group_ids.batch_compute
-
-        # State
-        state: "ENABLED"
-
-        tags:
-          ComputeType: "fargate-spot"
-          Platform: "batch-processing"
-
-      dependencies:
-        components:
-          - component: batch-processing/vpc
-          - component: batch-processing/securitygroups
-    batch-processing/batch-compute-ec2:
-      metadata:
-        component: batch
-        type: real
-      vars:
-        # Compute environment name
-        compute_environment_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-ec2"
-        compute_environment_type: "MANAGED"
-        service_role_arn: "{{ .vars.batch_service_role_arn }}"
-
-        # EC2 compute resources (for GPU or specific instance needs)
-        compute_resources:
-          type: "BEST_FIT_PROGRESSIVE"
-          allocation_strategy: "BEST_FIT_PROGRESSIVE"
-          min_vcpus: 0
-          max_vcpus: 256
-          desired_vcpus: 0
-          instance_types:
-            - optimal
-          subnets: !terraform.state batch-processing/vpc .private_subnet_ids
-          security_group_ids:
-            - !terraform.state batch-processing/securitygroups .security_group_ids.batch_compute
-          instance_role: "{{ .vars.batch_instance_role_arn }}"
-          tags:
-            Name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-ec2"
-
-        # Launch template (optional - for custom AMI, EBS, etc.)
-        launch_template:
-          launch_template_id: "{{ .vars.batch_launch_template_id }}"
-          version: "$Latest"
-
-        # State
-        state: "DISABLED"
-
-        tags:
-          ComputeType: "ec2"
-          Platform: "batch-processing"
-      dependencies:
-        components:
-          - component: batch-processing/vpc
-          - component: batch-processing/securitygroups
-
-    # =========================================================================
-    # BATCH JOB QUEUES
-    # =========================================================================
-
-    batch-processing/batch-job-queues:
-      metadata:
-        component: batch-job-queue
-        type: real
-      vars:
+        # Readers take .job_queue_arns.<key> (queues) and
+        # .job_definition_names.<key> (definitions: SubmitJob runs the latest
+        # active revision of a name; the revisioned ARN changes on every edit).
         job_queues:
-          # High priority queue - Fargate only
+          # Fargate only.
           high_priority:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-high"
-            state: "ENABLED"
             priority: 100
-            compute_environments:
-              - compute_environment: !terraform.state batch-processing/batch-compute-fargate .compute_environment_arn
-                order: 1
-
-          # Default queue - Fargate then Spot
+            compute_environment_order:
+              - order: 1
+                compute_environment: fargate
+          # Fargate, then Spot.
           default:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-default"
-            state: "ENABLED"
             priority: 50
-            compute_environments:
-              - compute_environment: !terraform.state batch-processing/batch-compute-fargate .compute_environment_arn
-                order: 1
-              - compute_environment: !terraform.state batch-processing/batch-compute-fargate-spot .compute_environment_arn
-                order: 2
-
-          # Low priority queue - Spot only (cost-optimized)
+            compute_environment_order:
+              - order: 1
+                compute_environment: fargate
+              - order: 2
+                compute_environment: fargate-spot
+          # Spot only (cost-optimized).
           low_priority:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-low"
-            state: "ENABLED"
             priority: 10
-            compute_environments:
-              - compute_environment: !terraform.state batch-processing/batch-compute-fargate-spot .compute_environment_arn
-                order: 1
-
-          # GPU queue (if EC2 enabled)
+            compute_environment_order:
+              - order: 1
+                compute_environment: fargate-spot
           gpu:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-gpu"
-            state: "DISABLED"
             priority: 75
-            compute_environments:
-              - compute_environment: !terraform.state batch-processing/batch-compute-ec2 .compute_environment_arn
-                order: 1
+            state: DISABLED
+            compute_environment_order:
+              - order: 1
+                compute_environment: ec2
 
-        tags:
-          Layer: "compute"
-          Platform: "batch-processing"
-      dependencies:
-        components:
-          - component: batch-processing/batch-compute-fargate
-          - component: batch-processing/batch-compute-fargate-spot
-          - component: batch-processing/batch-compute-ec2
-
-    # =========================================================================
-    # BATCH JOB DEFINITIONS
-    # =========================================================================
-
-    batch-processing/batch-job-definitions:
-      metadata:
-        component: batch-job-definition
-        type: real
-      vars:
         job_definitions:
-          # Data processing job
           data_processor:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-processor"
-            type: "container"
-            platform_capabilities:
-              - "FARGATE"
-            container_properties:
-              image: "{{ .vars.data_processor_image }}"
-              resourceRequirements:
-                - type: "VCPU"
-                  value: "1"
-                - type: "MEMORY"
-                  value: "2048"
-              jobRoleArn: "{{ .vars.batch_job_role_arn }}"
-              executionRoleArn: "{{ .vars.batch_execution_role_arn }}"
-              networkConfiguration:
-                assignPublicIp: "DISABLED"
-              fargatePlatformConfiguration:
-                platformVersion: "LATEST"
-              logConfiguration:
-                logDriver: "awslogs"
-                options:
-                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
-                  awslogs-region: "{{ .vars.region }}"
-                  awslogs-stream-prefix: "data-processor"
-              environment:
-                - name: "ENVIRONMENT"
-                  value: "{{ .settings.context.environment }}"
-                - name: "INPUT_BUCKET"
-                  value: !terraform.state batch-processing/s3-input .bucket_name
-                - name: "OUTPUT_BUCKET"
-                  value: !terraform.state batch-processing/s3-output .bucket_name
-                - name: "AWS_REGION"
-                  value: "{{ .vars.region }}"
-              secrets:
-                - name: "DB_PASSWORD"
-                  valueFrom: "{{ .vars.db_password_secret_arn }}"
+            image: '{{ required "settings.batch_processing.data_processor_image is required" .settings.batch_processing.data_processor_image }}'
+            vcpu: 1
+            memory: 2048
+            log_stream_prefix: data-processor
+            environment:
+              ENVIRONMENT: "{{ .settings.context.environment }}"
+              INPUT_BUCKET: !terraform.state batch-processing/s3-input .bucket_name
+              OUTPUT_BUCKET: !terraform.state batch-processing/s3-output .bucket_name
+              AWS_REGION: "{{ .vars.region }}"
+            secrets:
+              DB_PASSWORD: '{{ required "settings.batch_processing.db_password_secret_arn is required" .settings.batch_processing.db_password_secret_arn }}'
+            # Read the input and output buckets, write the output bucket,
+            # through S3 with kms/main (both buckets' key).
+            job_role_policy_json: &batch_job_data_policy >-
+              {"Version": "2012-10-17", "Statement": [
+              {"Sid": "ListBuckets", "Effect": "Allow", "Action": "s3:ListBucket",
+              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input",
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output"]},
+              {"Sid": "ReadObjects", "Effect": "Allow", "Action": "s3:GetObject",
+              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input/*",
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/*"]},
+              {"Sid": "WriteOutput", "Effect": "Allow", "Action": "s3:PutObject",
+              "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/*"},
+              {"Sid": "BucketKeyThroughS3", "Effect": "Allow", "Action": ["kms:Decrypt", "kms:GenerateDataKey*"],
+              "Resource": "arn:aws:kms:{{ .vars.region }}:{{ .settings.environment.account_id }}:key/*",
+              "Condition": {"StringEquals": {"kms:ViaService": "s3.{{ .vars.region }}.amazonaws.com"},
+              "StringLike": {"kms:EncryptionContext:aws:s3:arn": [
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input*",
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output*"]}}}]}
             retry_strategy:
               attempts: 3
+              # Retry a lost host, exit on anything else. A pattern takes a
+              # wildcard only at its end, so the old "*error*" (any reason
+              # containing "error") is "*" here: every other failure exits.
               evaluate_on_exit:
                 - on_status_reason: "Host EC2*"
-                  action: "RETRY"
-                - on_reason: "*error*"
-                  action: "EXIT"
-            timeout:
-              attempt_duration_seconds: 3600
+                  action: RETRY
+                - on_reason: "*"
+                  action: EXIT
+            timeout_seconds: 3600
 
-          # ETL job
           etl_job:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-etl-job"
-            type: "container"
-            platform_capabilities:
-              - "FARGATE"
-            container_properties:
-              image: "{{ .vars.etl_job_image }}"
-              resourceRequirements:
-                - type: "VCPU"
-                  value: "2"
-                - type: "MEMORY"
-                  value: "4096"
-              jobRoleArn: "{{ .vars.batch_job_role_arn }}"
-              executionRoleArn: "{{ .vars.batch_execution_role_arn }}"
-              networkConfiguration:
-                assignPublicIp: "DISABLED"
-              fargatePlatformConfiguration:
-                platformVersion: "LATEST"
-              logConfiguration:
-                logDriver: "awslogs"
-                options:
-                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
-                  awslogs-region: "{{ .vars.region }}"
-                  awslogs-stream-prefix: "etl-job"
-              command:
-                - "--input"
-                - "Ref::input_path"
-                - "--output"
-                - "Ref::output_path"
-                - "--date"
-                - "Ref::processing_date"
-              environment:
-                - name: "ENVIRONMENT"
-                  value: "{{ .settings.context.environment }}"
+            image: '{{ required "settings.batch_processing.etl_job_image is required" .settings.batch_processing.etl_job_image }}'
+            vcpu: 2
+            memory: 4096
+            log_stream_prefix: etl-job
+            # Ref:: placeholders: batch-processing/stepfunctions/data-pipeline
+            # passes them as job Parameters.
+            command:
+              - "--input"
+              - "Ref::input_path"
+              - "--output"
+              - "Ref::output_path"
+              - "--date"
+              - "Ref::processing_date"
+            environment:
+              ENVIRONMENT: "{{ .settings.context.environment }}"
+            job_role_policy_json: *batch_job_data_policy
             retry_strategy:
               attempts: 2
-            timeout:
-              attempt_duration_seconds: 7200
+            timeout_seconds: 7200
 
-          # Report generator
           report_generator:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-report-generator"
-            type: "container"
-            platform_capabilities:
-              - "FARGATE"
-            container_properties:
-              image: "{{ .vars.report_generator_image }}"
-              resourceRequirements:
-                - type: "VCPU"
-                  value: "0.5"
-                - type: "MEMORY"
-                  value: "1024"
-              jobRoleArn: "{{ .vars.batch_job_role_arn }}"
-              executionRoleArn: "{{ .vars.batch_execution_role_arn }}"
-              networkConfiguration:
-                assignPublicIp: "DISABLED"
-              fargatePlatformConfiguration:
-                platformVersion: "LATEST"
-              logConfiguration:
-                logDriver: "awslogs"
-                options:
-                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
-                  awslogs-region: "{{ .vars.region }}"
-                  awslogs-stream-prefix: "report-generator"
+            image: '{{ required "settings.batch_processing.report_generator_image is required" .settings.batch_processing.report_generator_image }}'
+            vcpu: 0.5
+            memory: 1024
+            log_stream_prefix: report-generator
+            job_role_policy_json: *batch_job_data_policy
             retry_strategy:
               attempts: 1
-            timeout:
-              attempt_duration_seconds: 1800
+            timeout_seconds: 1800
 
-          # GPU job (if EC2 enabled)
+          # On the gpu queue (disabled by default).
           ml_training:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-ml-training"
-            type: "container"
-            platform_capabilities:
-              - "EC2"
-            container_properties:
-              image: "{{ .vars.ml_training_image }}"
-              resourceRequirements:
-                - type: "VCPU"
-                  value: "8"
-                - type: "MEMORY"
-                  value: "32768"
-                - type: "GPU"
-                  value: "1"
-              jobRoleArn: "{{ .vars.batch_job_role_arn }}"
-              privileged: false
-              logConfiguration:
-                logDriver: "awslogs"
-                options:
-                  awslogs-group: "/aws/batch/{{ .settings.context.tenant }}-{{ .settings.context.environment }}"
-                  awslogs-region: "{{ .vars.region }}"
-                  awslogs-stream-prefix: "ml-training"
-              linuxParameters:
-                sharedMemorySize: 4096
-                devices:
-                  - hostPath: "/dev/nvidia0"
-                    containerPath: "/dev/nvidia0"
-                    permissions:
-                      - "READ"
-                      - "WRITE"
+            platform_capability: EC2
+            image: '{{ required "settings.batch_processing.ml_training_image is required" .settings.batch_processing.ml_training_image }}'
+            vcpu: 8
+            memory: 32768
+            gpu: 1
+            log_stream_prefix: ml-training
+            linux_parameters:
+              shared_memory_size: 4096
+              devices:
+                - host_path: "/dev/nvidia0"
+                  container_path: "/dev/nvidia0"
+                  permissions:
+                    - "READ"
+                    - "WRITE"
+            job_role_policy_json: *batch_job_data_policy
             retry_strategy:
               attempts: 2
-            timeout:
-              attempt_duration_seconds: 86400
+            timeout_seconds: 86400
 
         tags:
           Layer: "compute"
           Platform: "batch-processing"
       dependencies:
         components:
+          - component: kms/main
+          - component: batch-processing/vpc
+          - component: batch-processing/securitygroups
           - component: batch-processing/s3-input
           - component: batch-processing/s3-output
 
     # =========================================================================
     # WORKFLOW ORCHESTRATION (Step Functions)
     # =========================================================================
+    # One state machine per instance (stepfunctions, the Cloud Posse
+    # aws-step-functions model), "<Environment>-<name>", KMS-encrypted and
+    # logging (level ALL with execution data) with X-Ray on, each with its own
+    # execution role. events_role_enabled creates the role the EventBridge
+    # rules below start it with.
+    #
+    # .sync Batch tasks need, besides batch:SubmitJob on the queues and
+    # definitions, batch:DescribeJobs/TerminateJob (no resource-level scope
+    # for DescribeJobs) and the managed StepFunctionsGetEventsForBatchJobsRule
+    # (AWS's documented policy for the Batch .sync integration).
 
-    batch-processing/step-functions:
+    # Data pipeline: validate, process, ETL, report, notify.
+    batch-processing/stepfunctions/data-pipeline:
       metadata:
-        component: step-functions
+        component: stepfunctions
         type: real
+        inherits:
+          - stepfunctions/defaults
       vars:
-        state_machines:
-          # Data pipeline workflow
-          data_pipeline:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-data-pipeline"
-            description: "Orchestrates data processing batch jobs"
-            type: "STANDARD"
-            logging_configuration:
-              level: "ALL"
-              include_execution_data: true
-              log_destination: "arn:aws:logs:{{ .vars.region }}:{{ .vars.account_id }}:log-group:/aws/states/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-data-pipeline:*"
-            tracing_configuration:
-              enabled: true
-            definition:
-              Comment: "Data processing pipeline workflow"
-              StartAt: "ValidateInput"
-              States:
-                ValidateInput:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::lambda:invoke"
-                  Parameters:
-                    FunctionName: "{{ .vars.validation_lambda_arn }}"
-                    Payload.$: "$"
-                  ResultPath: "$.validation"
-                  Next: "CheckValidation"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
+        name: batch-data-pipeline
+        events_role_enabled: true
+        definition:
+          Comment: "Data processing pipeline workflow"
+          StartAt: "ValidateInput"
+          States:
+            ValidateInput:
+              Type: "Task"
+              Resource: "arn:aws:states:::lambda:invoke"
+              Parameters:
+                FunctionName: '{{ required "settings.batch_processing.validation_lambda_arn is required" .settings.batch_processing.validation_lambda_arn }}'
+                Payload.$: "$"
+              ResultPath: "$.validation"
+              Next: "CheckValidation"
+              Catch:
+                - ErrorEquals:
+                    - "States.ALL"
+                  Next: "NotifyFailure"
 
-                CheckValidation:
-                  Type: "Choice"
-                  Choices:
-                    - Variable: "$.validation.Payload.valid"
-                      BooleanEquals: true
-                      Next: "SubmitProcessingJob"
-                  Default: "NotifyInvalidInput"
+            CheckValidation:
+              Type: "Choice"
+              Choices:
+                - Variable: "$.validation.Payload.valid"
+                  BooleanEquals: true
+                  Next: "SubmitProcessingJob"
+              Default: "NotifyInvalidInput"
 
-                NotifyInvalidInput:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::sns:publish"
-                  Parameters:
-                    TopicArn: "{{ .vars.batch_sns_topic_arn }}"
-                    Message:
-                      Status: "INVALID_INPUT"
-                      Input.$: "$.input_path"
-                      Errors.$: "$.validation.Payload.errors"
-                  End: true
+            NotifyInvalidInput:
+              Type: "Task"
+              Resource: "arn:aws:states:::sns:publish"
+              Parameters:
+                TopicArn: !terraform.state batch-processing/sns/notifications .sns_topic_arn
+                Message:
+                  Status: "INVALID_INPUT"
+                  Input.$: "$.input_path"
+                  Errors.$: "$.validation.Payload.errors"
+              End: true
 
-                SubmitProcessingJob:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::batch:submitJob.sync"
-                  Parameters:
-                    JobName.$: "States.Format('process-{}', $.job_id)"
-                    JobDefinition: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.data_processor
-                    JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_arns.default
-                    ContainerOverrides:
-                      Command.$: "States.Array('--input', $.input_path, '--output', $.output_path)"
-                  ResultPath: "$.processing_result"
-                  Next: "CheckProcessingResult"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
+            SubmitProcessingJob:
+              Type: "Task"
+              Resource: "arn:aws:states:::batch:submitJob.sync"
+              Parameters:
+                JobName.$: "States.Format('process-{}', $.job_id)"
+                JobDefinition: !terraform.state batch-processing/batch .job_definition_names.data_processor
+                JobQueue: !terraform.state batch-processing/batch .job_queue_arns.default
+                ContainerOverrides:
+                  Command.$: "States.Array('--input', $.input_path, '--output', $.output_path)"
+              ResultPath: "$.processing_result"
+              Next: "CheckProcessingResult"
+              Catch:
+                - ErrorEquals:
+                    - "States.ALL"
+                  Next: "NotifyFailure"
 
-                CheckProcessingResult:
-                  Type: "Choice"
-                  Choices:
-                    - Variable: "$.processing_result.Status"
-                      StringEquals: "SUCCEEDED"
-                      Next: "SubmitETLJob"
-                  Default: "NotifyFailure"
+            CheckProcessingResult:
+              Type: "Choice"
+              Choices:
+                - Variable: "$.processing_result.Status"
+                  StringEquals: "SUCCEEDED"
+                  Next: "SubmitETLJob"
+              Default: "NotifyFailure"
 
-                SubmitETLJob:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::batch:submitJob.sync"
-                  Parameters:
-                    JobName.$: "States.Format('etl-{}', $.job_id)"
-                    JobDefinition: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.etl_job
-                    JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_arns.default
-                    Parameters:
-                      input_path.$: "$.output_path"
-                      output_path.$: "$.final_output_path"
-                      processing_date.$: "$.processing_date"
-                  ResultPath: "$.etl_result"
-                  Next: "GenerateReport"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
+            SubmitETLJob:
+              Type: "Task"
+              Resource: "arn:aws:states:::batch:submitJob.sync"
+              Parameters:
+                JobName.$: "States.Format('etl-{}', $.job_id)"
+                JobDefinition: !terraform.state batch-processing/batch .job_definition_names.etl_job
+                JobQueue: !terraform.state batch-processing/batch .job_queue_arns.default
+                Parameters:
+                  input_path.$: "$.output_path"
+                  output_path.$: "$.final_output_path"
+                  processing_date.$: "$.processing_date"
+              ResultPath: "$.etl_result"
+              Next: "GenerateReport"
+              Catch:
+                - ErrorEquals:
+                    - "States.ALL"
+                  Next: "NotifyFailure"
 
-                GenerateReport:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::batch:submitJob.sync"
-                  Parameters:
-                    JobName.$: "States.Format('report-{}', $.job_id)"
-                    JobDefinition: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.report_generator
-                    JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_arns.low_priority
-                  ResultPath: "$.report_result"
-                  Next: "NotifySuccess"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
+            GenerateReport:
+              Type: "Task"
+              Resource: "arn:aws:states:::batch:submitJob.sync"
+              Parameters:
+                JobName.$: "States.Format('report-{}', $.job_id)"
+                JobDefinition: !terraform.state batch-processing/batch .job_definition_names.report_generator
+                JobQueue: !terraform.state batch-processing/batch .job_queue_arns.low_priority
+              ResultPath: "$.report_result"
+              Next: "NotifySuccess"
+              Catch:
+                - ErrorEquals:
+                    - "States.ALL"
+                  Next: "NotifyFailure"
 
-                NotifySuccess:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::sns:publish"
-                  Parameters:
-                    TopicArn: "{{ .vars.batch_sns_topic_arn }}"
-                    Message:
-                      Status: "SUCCESS"
-                      JobId.$: "$.job_id"
-                      OutputPath.$: "$.final_output_path"
-                      Duration.$: "$$.State.EnteredTime"
-                  End: true
+            NotifySuccess:
+              Type: "Task"
+              Resource: "arn:aws:states:::sns:publish"
+              Parameters:
+                TopicArn: !terraform.state batch-processing/sns/notifications .sns_topic_arn
+                Message:
+                  Status: "SUCCESS"
+                  JobId.$: "$.job_id"
+                  OutputPath.$: "$.final_output_path"
+                  Duration.$: "$$.State.EnteredTime"
+              End: true
 
-                NotifyFailure:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::sns:publish"
-                  Parameters:
-                    TopicArn: "{{ .vars.batch_sns_topic_arn }}"
-                    Message:
-                      Status: "FAILED"
-                      JobId.$: "$.job_id"
-                      Error.$: "$.error"
-                      ExecutionId.$: "$$.Execution.Id"
-                  Next: "FailState"
+            NotifyFailure:
+              Type: "Task"
+              Resource: "arn:aws:states:::sns:publish"
+              Parameters:
+                TopicArn: !terraform.state batch-processing/sns/notifications .sns_topic_arn
+                Message:
+                  Status: "FAILED"
+                  JobId.$: "$.job_id"
+                  Error.$: "$.error"
+                  ExecutionId.$: "$$.Execution.Id"
+              Next: "FailState"
 
-                FailState:
-                  Type: "Fail"
-                  Error: "PipelineFailed"
-                  Cause: "Data pipeline workflow failed"
-
-          # Parallel processing workflow
-          parallel_processor:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-parallel"
-            description: "Processes multiple files in parallel"
-            type: "STANDARD"
-            definition:
-              Comment: "Parallel batch processing workflow"
-              StartAt: "ListInputFiles"
-              States:
-                ListInputFiles:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::lambda:invoke"
-                  Parameters:
-                    FunctionName: "{{ .vars.list_files_lambda_arn }}"
-                    Payload.$: "$"
-                  ResultPath: "$.files"
-                  Next: "ProcessFilesInParallel"
-
-                ProcessFilesInParallel:
-                  Type: "Map"
-                  ItemsPath: "$.files.Payload"
-                  MaxConcurrency: 10
-                  Iterator:
-                    StartAt: "ProcessSingleFile"
-                    States:
-                      ProcessSingleFile:
-                        Type: "Task"
-                        Resource: "arn:aws:states:::batch:submitJob.sync"
-                        Parameters:
-                          JobName.$: "States.Format('parallel-{}', $.file_id)"
-                          JobDefinition: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.data_processor
-                          JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_arns.low_priority
-                          ContainerOverrides:
-                            Command.$: "States.Array('--input', $.file_path)"
-                        End: true
-                  ResultPath: "$.processing_results"
-                  Next: "AggregateResults"
-
-                AggregateResults:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::lambda:invoke"
-                  Parameters:
-                    FunctionName: "{{ .vars.aggregate_lambda_arn }}"
-                    Payload.$: "$"
-                  End: true
-
+            FailState:
+              Type: "Fail"
+              Error: "PipelineFailed"
+              Cause: "Data pipeline workflow failed"
+        iam_policies:
+          - sid: InvokeValidation
+            actions: ["lambda:InvokeFunction"]
+            resources:
+              - "{{ .settings.batch_processing.validation_lambda_arn }}"
+              - "{{ .settings.batch_processing.validation_lambda_arn }}:*"
+          - sid: SubmitBatchJobs
+            actions: ["batch:SubmitJob"]
+            resources:
+              - !terraform.state batch-processing/batch .job_queue_arns.default
+              - !terraform.state batch-processing/batch .job_queue_arns.low_priority
+              - !terraform.state batch-processing/batch .job_definition_arn_prefixes.data_processor | . + ":*"
+              - !terraform.state batch-processing/batch .job_definition_arn_prefixes.etl_job | . + ":*"
+              - !terraform.state batch-processing/batch .job_definition_arn_prefixes.report_generator | . + ":*"
+          - sid: TrackBatchJobs
+            actions: ["batch:DescribeJobs", "batch:TerminateJob"]
+            resources: ["*"]
+          - sid: BatchSyncEventsRule
+            actions: ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
+            resources:
+              - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/StepFunctionsGetEventsForBatchJobsRule"
+          - sid: PublishNotifications
+            actions: ["sns:Publish"]
+            resources:
+              - !terraform.state batch-processing/sns/notifications .sns_topic_arn
+          # The topic is encrypted with kms/main; Publish to it carries the
+          # aws:sns:topicArn encryption context, so this grant is scoped to
+          # that one topic, not the whole key.
+          - sid: PublishNotificationsKMS
+            actions: ["kms:GenerateDataKey*", "kms:Decrypt"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:EncryptionContext:aws:sns:topicArn"
+                values:
+                  - !terraform.state batch-processing/sns/notifications .sns_topic_arn
         tags:
           Layer: "orchestration"
           Platform: "batch-processing"
       dependencies:
         components:
-          - component: batch-processing/batch-job-definitions
-          - component: batch-processing/batch-job-queues
+          - component: kms/main
+          - component: batch-processing/batch
+          - component: batch-processing/sns/notifications
+
+    # Parallel processor: lists the input files and runs a data-processor job
+    # for each, then aggregates.
+    batch-processing/stepfunctions/parallel-processor:
+      metadata:
+        component: stepfunctions
+        type: real
+        inherits:
+          - stepfunctions/defaults
+      vars:
+        name: batch-parallel
+        events_role_enabled: true
+        definition:
+          Comment: "Parallel batch processing workflow"
+          StartAt: "ListInputFiles"
+          States:
+            ListInputFiles:
+              Type: "Task"
+              Resource: "arn:aws:states:::lambda:invoke"
+              Parameters:
+                FunctionName: '{{ required "settings.batch_processing.list_files_lambda_arn is required" .settings.batch_processing.list_files_lambda_arn }}'
+                Payload.$: "$"
+              ResultPath: "$.files"
+              Next: "ProcessFilesInParallel"
+
+            ProcessFilesInParallel:
+              Type: "Map"
+              ItemsPath: "$.files.Payload"
+              MaxConcurrency: 10
+              Iterator:
+                StartAt: "ProcessSingleFile"
+                States:
+                  ProcessSingleFile:
+                    Type: "Task"
+                    Resource: "arn:aws:states:::batch:submitJob.sync"
+                    Parameters:
+                      JobName.$: "States.Format('parallel-{}', $.file_id)"
+                      JobDefinition: !terraform.state batch-processing/batch .job_definition_names.data_processor
+                      JobQueue: !terraform.state batch-processing/batch .job_queue_arns.low_priority
+                      ContainerOverrides:
+                        Command.$: "States.Array('--input', $.file_path)"
+                    End: true
+              ResultPath: "$.processing_results"
+              Next: "AggregateResults"
+
+            AggregateResults:
+              Type: "Task"
+              Resource: "arn:aws:states:::lambda:invoke"
+              Parameters:
+                FunctionName: '{{ required "settings.batch_processing.aggregate_lambda_arn is required" .settings.batch_processing.aggregate_lambda_arn }}'
+                Payload.$: "$"
+              End: true
+        iam_policies:
+          - sid: InvokeLambdas
+            actions: ["lambda:InvokeFunction"]
+            resources:
+              - "{{ .settings.batch_processing.list_files_lambda_arn }}"
+              - "{{ .settings.batch_processing.list_files_lambda_arn }}:*"
+              - "{{ .settings.batch_processing.aggregate_lambda_arn }}"
+              - "{{ .settings.batch_processing.aggregate_lambda_arn }}:*"
+          - sid: SubmitBatchJobs
+            actions: ["batch:SubmitJob"]
+            resources:
+              - !terraform.state batch-processing/batch .job_queue_arns.low_priority
+              - !terraform.state batch-processing/batch .job_definition_arn_prefixes.data_processor | . + ":*"
+          - sid: TrackBatchJobs
+            actions: ["batch:DescribeJobs", "batch:TerminateJob"]
+            resources: ["*"]
+          - sid: BatchSyncEventsRule
+            actions: ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
+            resources:
+              - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/StepFunctionsGetEventsForBatchJobsRule"
+        tags:
+          Layer: "orchestration"
+          Platform: "batch-processing"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: batch-processing/batch
 
     # =========================================================================
     # SCHEDULING (EventBridge)
@@ -997,7 +1021,9 @@ components:
     # so a renamed rule must be renamed there too. A delivery that still fails
     # after the retry policy goes to batch-processing/sqs/eventbridge-dlq.
     # Every instance lists kms/main itself: its own dependencies list replaces
-    # the one inherited from eventbridge/defaults.
+    # the one inherited from eventbridge/defaults. Step Functions targets use
+    # the state machine's own events role, the Batch target the batch
+    # instance's.
 
     # Daily batch processing: starts the data pipeline at 2 AM UTC. The paths
     # are built from the bucket names the s3 instances set (bucket_name).
@@ -1016,8 +1042,8 @@ components:
         schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC
         targets:
           data-pipeline:
-            arn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
-            role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
+            arn: !terraform.state batch-processing/stepfunctions/data-pipeline .state_machine_arn
+            role_arn: !terraform.state batch-processing/stepfunctions/data-pipeline .events_role_arn
             input_transformer:
               input_paths:
                 id: "$.id"
@@ -1034,7 +1060,7 @@ components:
       dependencies:
         components:
           - component: kms/main
-          - component: batch-processing/step-functions
+          - component: batch-processing/stepfunctions/data-pipeline
           - component: batch-processing/sqs/eventbridge-dlq
 
     # Hourly lightweight processing: submits a data-processor job to the
@@ -1053,10 +1079,10 @@ components:
         schedule_expression: "rate(1 hour)"
         targets:
           lightweight-job:
-            arn: !terraform.state batch-processing/batch-job-queues .job_queue_arns.low_priority
-            role_arn: "{{ .vars.eventbridge_batch_role_arn }}"
+            arn: !terraform.state batch-processing/batch .job_queue_arns.low_priority
+            role_arn: !terraform.state batch-processing/batch .events_role_arn
             batch_target:
-              job_definition: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.data_processor
+              job_definition: !terraform.state batch-processing/batch .job_definition_names.data_processor
               job_name: "hourly-process"
             dead_letter_config:
               arn: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_arn
@@ -1069,8 +1095,7 @@ components:
       dependencies:
         components:
           - component: kms/main
-          - component: batch-processing/batch-job-queues
-          - component: batch-processing/batch-job-definitions
+          - component: batch-processing/batch
           - component: batch-processing/sqs/eventbridge-dlq
 
     # S3 event processing: runs the parallel processor for each object created
@@ -1100,8 +1125,8 @@ components:
                 - prefix: "incoming/"
         targets:
           parallel-processor:
-            arn: !terraform.state batch-processing/step-functions .state_machine_arns.parallel_processor
-            role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
+            arn: !terraform.state batch-processing/stepfunctions/parallel-processor .state_machine_arn
+            role_arn: !terraform.state batch-processing/stepfunctions/parallel-processor .events_role_arn
             input_transformer:
               input_paths:
                 bucket: "$.detail.bucket.name"
@@ -1118,7 +1143,7 @@ components:
       dependencies:
         components:
           - component: kms/main
-          - component: batch-processing/step-functions
+          - component: batch-processing/stepfunctions/parallel-processor
           - component: batch-processing/sqs/eventbridge-dlq
 
     # Batch job status changes: this stack's failed and succeeded jobs go to
@@ -1142,9 +1167,10 @@ components:
             status:
               - "FAILED"
               - "SUCCEEDED"
-            # The event carries the queue's ARN, not its name.
+            # The event carries the queue's ARN, not its name; the queues are
+            # batch-processing/batch's "<Environment>-batch-<key>".
             jobQueue:
-              - wildcard: "arn:aws:batch:{{ .vars.region }}:*:job-queue/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-*"
+              - wildcard: "arn:aws:batch:{{ .vars.region }}:*:job-queue/{{ .settings.context.environment }}-batch-*"
         targets:
           notification-queue:
             arn: !terraform.state batch-processing/sqs/notifications .queue_arn
@@ -1165,32 +1191,43 @@ components:
     # =========================================================================
     # LAMBDA FUNCTIONS (Supporting)
     # =========================================================================
+
+    # Submits Batch jobs from the two job queues' messages. The function is
+    # "<Environment>-batch-job-submitter", packaged in s3/lambda-artifacts
+    # (REQUIREMENTS 2). It shares deploy-full-stack's compute layer with
+    # batch-processing/batch, so it cannot read that instance's state (a
+    # layer plans before it applies): the queue and job definition names are
+    # built from the batch instance's naming, "<Environment>-batch-<key>"
+    # (SubmitJob takes a queue name and runs a definition name's latest
+    # revision), and the dependency below applies batch first.
     batch-processing/lambda-job-submitter:
       metadata:
         component: lambda
         type: real
       vars:
         function_name: "batch-job-submitter"
-        description: "Submits batch jobs from SQS messages"
-
-        # Runtime configuration
         runtime: "python3.13"
         handler: "handler.submit_job"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: 'batch-job-submitter/{{ required "settings.batch_processing.job_submitter_version is required" .settings.batch_processing.job_submitter_version }}.zip'
         timeout: 60
         memory_size: 256
-
-        # Reserved concurrency
         reserved_concurrent_executions: 10
+        # Environment variables and the function's log group, with the stack key.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        kms_key_id: !terraform.state kms/main .key_arn
 
-        # Environment variables
         environment_variables:
           ENVIRONMENT: "{{ .settings.context.environment }}"
-          HIGH_PRIORITY_QUEUE: !terraform.state batch-processing/batch-job-queues .job_queue_arns.high_priority
-          DEFAULT_QUEUE: !terraform.state batch-processing/batch-job-queues .job_queue_arns.default
-          LOW_PRIORITY_QUEUE: !terraform.state batch-processing/batch-job-queues .job_queue_arns.low_priority
-          JOB_DEFINITION: !terraform.state batch-processing/batch-job-definitions .job_definition_arns.data_processor
+          HIGH_PRIORITY_QUEUE: "{{ .settings.context.environment }}-batch-high_priority"
+          DEFAULT_QUEUE: "{{ .settings.context.environment }}-batch-default"
+          LOW_PRIORITY_QUEUE: "{{ .settings.context.environment }}-batch-low_priority"
+          JOB_DEFINITION: "{{ .settings.context.environment }}-batch-data_processor"
 
-        # SQS event source mapping
+        # The queues' visibility timeout (43200 s) is well over 6x this
+        # function's timeout plus the batching window. The component grants
+        # the role sqs:ReceiveMessage/DeleteMessage/GetQueueAttributes on
+        # exactly these queues, and kms:Decrypt on their key below.
         event_source_mappings:
           sqs_high:
             event_source_arn: !terraform.state batch-processing/sqs/jobs-high .queue_arn
@@ -1200,42 +1237,39 @@ components:
             event_source_arn: !terraform.state batch-processing/sqs/jobs-low .queue_arn
             batch_size: 10
             maximum_batching_window_in_seconds: 60
+        # Both queues are encrypted with kms/main (sqs/defaults).
+        event_source_kms_key_arns:
+          - !terraform.state kms/main .key_arn
 
-        # IAM permissions
-        policy_statements:
-          batch:
-            effect: "Allow"
-            actions:
-              - "batch:SubmitJob"
-              - "batch:DescribeJobs"
-            resources:
-              - "*"
-          sqs:
-            effect: "Allow"
-            actions:
-              - "sqs:ReceiveMessage"
-              - "sqs:DeleteMessage"
-              - "sqs:GetQueueAttributes"
-            resources:
-              - !terraform.state batch-processing/sqs/jobs-high .queue_arn
-              - !terraform.state batch-processing/sqs/jobs-low .queue_arn
-
-        # CloudWatch logs
+        # Submit the data processor to the three Fargate queues.
+        custom_policy: >-
+          {"Version": "2012-10-17", "Statement": [
+          {"Sid": "SubmitJobs", "Effect": "Allow", "Action": "batch:SubmitJob",
+          "Resource": [
+          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-high_priority",
+          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-default",
+          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-low_priority",
+          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-definition/{{ .settings.context.environment }}-batch-data_processor:*"]},
+          {"Sid": "DescribeJobs", "Effect": "Allow", "Action": "batch:DescribeJobs", "Resource": "*"}]}
 
         tags:
           Layer: "compute"
           Function: "job-submitter"
       dependencies:
         components:
+          - component: kms/main
+          - component: s3/lambda-artifacts
           - component: batch-processing/sqs/jobs-high
           - component: batch-processing/sqs/jobs-low
-          - component: batch-processing/batch-job-queues
-          - component: batch-processing/batch-job-definitions
+          - component: batch-processing/batch
 
     # =========================================================================
     # MONITORING
     # =========================================================================
 
+    # Resources are "<Environment>-batch-<suffix>" (name), alarms
+    # "<Environment>-<key>", all notifying the instance's KMS-encrypted alarm
+    # topic.
     batch-processing/monitoring:
       metadata:
         component: monitoring
@@ -1243,311 +1277,205 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        dashboard_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-dashboard"
+        name: batch
+        kms_key_id: !terraform.state kms/main .key_arn
 
-        # Enable monitoring features
-        enable_resource_monitoring: true
+        # No certificates in this template.
+        enable_certificate_monitoring: false
 
-        # Custom dashboard
-        dashboards:
-          batch_overview:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-overview"
+        # Infrastructure dashboard for the template's VPC.
+        create_dashboard: true
+        vpc_id: !terraform.state batch-processing/vpc .vpc_id
+
+        metric_dashboards:
+          batch-overview:
             widgets:
-              # Batch compute metrics
-              - type: "metric"
-                properties:
-                  title: "Compute Environment"
-                  metrics:
-                    - namespace: "AWS/Batch"
-                      metric: "DesiredvCPUs"
-                      dimensions:
-                        ComputeEnvironmentName: !terraform.state batch-processing/batch-compute-fargate .compute_environment_name
-                      stat: "Average"
-                      period: 60
-                    - namespace: "AWS/Batch"
-                      metric: "RunningvCPUs"
-                      dimensions:
-                        ComputeEnvironmentName: !terraform.state batch-processing/batch-compute-fargate .compute_environment_name
-                      stat: "Average"
-                      period: 60
+              - title: "Compute Environment"
+                period: 60
+                stat: "Average"
+                metrics:
+                  - namespace: "AWS/Batch"
+                    metric: "DesiredvCPUs"
+                    dimensions:
+                      ComputeEnvironmentName: !terraform.state batch-processing/batch .compute_environment_names.fargate
+                  - namespace: "AWS/Batch"
+                    metric: "RunningvCPUs"
+                    dimensions:
+                      ComputeEnvironmentName: !terraform.state batch-processing/batch .compute_environment_names.fargate
+              - title: "Jobs Submitted / Failed"
+                period: 300
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/Batch"
+                    metric: "JobsSubmitted"
+                    dimensions:
+                      JobQueue: !terraform.state batch-processing/batch .job_queue_names.default
+                  - namespace: "AWS/Batch"
+                    metric: "JobsFailed"
+                    dimensions:
+                      JobQueue: !terraform.state batch-processing/batch .job_queue_names.default
+              - title: "Jobs Running"
+                period: 60
+                stat: "Average"
+                metrics:
+                  - namespace: "AWS/Batch"
+                    metric: "JobsRunning"
+                    dimensions:
+                      JobQueue: !terraform.state batch-processing/batch .job_queue_names.default
+              - title: "Workflow Executions"
+                period: 300
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/States"
+                    metric: "ExecutionsSucceeded"
+                    dimensions:
+                      StateMachineArn: !terraform.state batch-processing/stepfunctions/data-pipeline .state_machine_arn
+                  - namespace: "AWS/States"
+                    metric: "ExecutionsFailed"
+                    dimensions:
+                      StateMachineArn: !terraform.state batch-processing/stepfunctions/data-pipeline .state_machine_arn
+              - title: "Workflow Execution Time"
+                period: 300
+                stat: "Average"
+                metrics:
+                  - namespace: "AWS/States"
+                    metric: "ExecutionTime"
+                    dimensions:
+                      StateMachineArn: !terraform.state batch-processing/stepfunctions/data-pipeline .state_machine_arn
+              - title: "Queue Depth"
+                period: 60
+                stat: "Average"
+                metrics:
+                  - namespace: "AWS/SQS"
+                    metric: "ApproximateNumberOfMessagesVisible"
+                    dimensions:
+                      QueueName: !terraform.state batch-processing/sqs/jobs-high .queue_name
+                  - namespace: "AWS/SQS"
+                    metric: "ApproximateNumberOfMessagesVisible"
+                    dimensions:
+                      QueueName: !terraform.state batch-processing/sqs/jobs-low .queue_name
+              - title: "Dead-letter Queue Depth"
+                period: 60
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/SQS"
+                    metric: "ApproximateNumberOfMessagesVisible"
+                    dimensions:
+                      QueueName: !terraform.state batch-processing/sqs/jobs-high .dead_letter_queue_name
+                  - namespace: "AWS/SQS"
+                    metric: "ApproximateNumberOfMessagesVisible"
+                    dimensions:
+                      QueueName: !terraform.state batch-processing/sqs/jobs-low .dead_letter_queue_name
 
-              # Job queue metrics
-              - type: "metric"
-                properties:
-                  title: "Job Queue Status"
-                  metrics:
-                    - namespace: "AWS/Batch"
-                      metric: "JobsSubmitted"
-                      dimensions:
-                        JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_names.default
-                      stat: "Sum"
-                      period: 300
-                    - namespace: "AWS/Batch"
-                      metric: "JobsRunning"
-                      dimensions:
-                        JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_names.default
-                      stat: "Average"
-                      period: 60
-                    - namespace: "AWS/Batch"
-                      metric: "JobsFailed"
-                      dimensions:
-                        JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_names.default
-                      stat: "Sum"
-                      period: 300
-
-              # Step Functions metrics
-              - type: "metric"
-                properties:
-                  title: "Workflow Executions"
-                  metrics:
-                    - namespace: "AWS/States"
-                      metric: "ExecutionsSucceeded"
-                      dimensions:
-                        StateMachineArn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
-                      stat: "Sum"
-                      period: 300
-                    - namespace: "AWS/States"
-                      metric: "ExecutionsFailed"
-                      dimensions:
-                        StateMachineArn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
-                      stat: "Sum"
-                      period: 300
-                    - namespace: "AWS/States"
-                      metric: "ExecutionTime"
-                      dimensions:
-                        StateMachineArn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
-                      stat: "Average"
-                      period: 300
-
-              # SQS metrics
-              - type: "metric"
-                properties:
-                  title: "Queue Depth"
-                  metrics:
-                    - namespace: "AWS/SQS"
-                      metric: "ApproximateNumberOfMessagesVisible"
-                      dimensions:
-                        QueueName: !terraform.state batch-processing/sqs/jobs-high .queue_name
-                      stat: "Average"
-                      period: 60
-                    - namespace: "AWS/SQS"
-                      metric: "ApproximateNumberOfMessagesVisible"
-                      dimensions:
-                        QueueName: !terraform.state batch-processing/sqs/jobs-low .queue_name
-                      stat: "Average"
-                      period: 60
-                    - namespace: "AWS/SQS"
-                      metric: "ApproximateNumberOfMessagesVisible"
-                      dimensions:
-                        QueueName: !terraform.state batch-processing/sqs/jobs-high .dead_letter_queue_name
-                      stat: "Sum"
-                      period: 60
-                    - namespace: "AWS/SQS"
-                      metric: "ApproximateNumberOfMessagesVisible"
-                      dimensions:
-                        QueueName: !terraform.state batch-processing/sqs/jobs-low .dead_letter_queue_name
-                      stat: "Sum"
-                      period: 60
-
-        # Alarms
-        alarms:
-          # Batch job failures
-          batch_job_failures:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-job-failures"
-            metric_name: "JobsFailed"
+        metric_alarms:
+          batch-job-failures:
             namespace: "AWS/Batch"
+            metric_name: "JobsFailed"
+            dimensions:
+              JobQueue: !terraform.state batch-processing/batch .job_queue_names.default
             comparison_operator: "GreaterThanThreshold"
             threshold: 5
             evaluation_periods: 1
             period: 300
             statistic: "Sum"
-            dimensions:
-              JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_names.default
-
-          # Job queue depth (too many pending)
-          batch_queue_depth:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-queue-depth"
-            metric_name: "JobsPending"
+          # Too many pending jobs.
+          batch-queue-depth:
             namespace: "AWS/Batch"
+            metric_name: "JobsPending"
+            dimensions:
+              JobQueue: !terraform.state batch-processing/batch .job_queue_names.default
             comparison_operator: "GreaterThanThreshold"
             threshold: 100
             evaluation_periods: 3
             period: 300
             statistic: "Average"
-            dimensions:
-              JobQueue: !terraform.state batch-processing/batch-job-queues .job_queue_names.default
-
-          # Step Functions failures
-          workflow_failures:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-workflow-failures"
-            metric_name: "ExecutionsFailed"
+          batch-workflow-failures:
             namespace: "AWS/States"
-            comparison_operator: "GreaterThanThreshold"
-            threshold: 0
-            evaluation_periods: 1
-            period: 300
-            statistic: "Sum"
+            metric_name: "ExecutionsFailed"
             dimensions:
-              StateMachineArn: !terraform.state batch-processing/step-functions .state_machine_arns.data_pipeline
-
-          # DLQ messages, one alarm per job queue's dead-letter queue
-          dlq_high_messages:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-high-dlq"
-            metric_name: "ApproximateNumberOfMessagesVisible"
-            namespace: "AWS/SQS"
+              StateMachineArn: !terraform.state batch-processing/stepfunctions/data-pipeline .state_machine_arn
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 1
             period: 300
             statistic: "Sum"
+          # One alarm per job queue's dead-letter queue.
+          batch-jobs-high-dlq:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
             dimensions:
               QueueName: !terraform.state batch-processing/sqs/jobs-high .dead_letter_queue_name
-          dlq_low_messages:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-jobs-low-dlq"
-            metric_name: "ApproximateNumberOfMessagesVisible"
-            namespace: "AWS/SQS"
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 1
             period: 300
             statistic: "Sum"
+          batch-jobs-low-dlq:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
             dimensions:
               QueueName: !terraform.state batch-processing/sqs/jobs-low .dead_letter_queue_name
-
-          # EventBridge deliveries that failed after their retries
-          eventbridge_dlq_messages:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-eventbridge-dlq"
-            metric_name: "ApproximateNumberOfMessagesVisible"
-            namespace: "AWS/SQS"
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 1
             period: 300
             statistic: "Sum"
+          # EventBridge deliveries that failed after their retries.
+          batch-eventbridge-dlq:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
             dimensions:
               QueueName: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_name
-
-          # Compute environment not scaling
-          compute_not_scaling:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-compute-stuck"
-            metric_name: "DesiredvCPUs"
-            namespace: "AWS/Batch"
             comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Sum"
+          # Fargate environment pinned at its max_vcpus.
+          batch-compute-stuck:
+            namespace: "AWS/Batch"
+            metric_name: "DesiredvCPUs"
+            dimensions:
+              ComputeEnvironmentName: !terraform.state batch-processing/batch .compute_environment_names.fargate
+            comparison_operator: "GreaterThanOrEqualToThreshold"
             threshold: 256
             evaluation_periods: 3
             period: 300
             statistic: "Maximum"
-            dimensions:
-              ComputeEnvironmentName: !terraform.state batch-processing/batch-compute-fargate .compute_environment_name
 
-        # SNS notifications
-        alarm_notifications_enabled: true
-        alarm_email_addresses: []
-        sns_topic_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-alarms"
+        # On-call addresses per stack (REQUIREMENTS 6).
+        alarm_email_subscriptions: []
 
         tags:
           Layer: "monitoring"
           Platform: "batch-processing"
       dependencies:
         components:
-          - component: batch-processing/batch-compute-fargate
-          - component: batch-processing/batch-job-queues
-          - component: batch-processing/step-functions
+          - component: kms/main
+          - component: batch-processing/vpc
+          - component: batch-processing/batch
+          - component: batch-processing/stepfunctions/data-pipeline
           - component: batch-processing/sqs/jobs-high
           - component: batch-processing/sqs/jobs-low
           - component: batch-processing/sqs/eventbridge-dlq
 
 # =============================================================================
-# ENVIRONMENT-SPECIFIC OVERRIDES
+# ENVIRONMENT-SPECIFIC OVERRIDES (examples, set on the instances above)
 # =============================================================================
 #
 # Development:
-#   vars:
-#     nat_gateway_strategy: "single"
-#     fargate_max_vcpus: 64
-#     fargate_spot_max_vcpus: 128
-#     enable_ec2_compute: "DISABLED"
-#     data_processor_vcpu: "0.5"
-#     data_processor_memory: "1024"
-#     data_processor_timeout: 1800
-#     max_parallel_jobs: 5
-#     input_retention_days: 7
-#     log_retention_days: 7
-#     enable_hourly_batch: "DISABLED"
+#   batch-processing/batch: compute_environments.fargate.max_vcpus 64,
+#     fargate-spot 128; job_definitions.data_processor vcpu 0.5 / memory 1024,
+#     timeout_seconds 1800
+#   batch-processing/vpc: nat_gateway_strategy "single"
 #
 # Staging:
-#   vars:
-#     nat_gateway_strategy: "single"
-#     fargate_max_vcpus: 128
-#     fargate_spot_max_vcpus: 256
-#     enable_ec2_compute: "DISABLED"
-#     data_processor_vcpu: "1"
-#     data_processor_memory: "2048"
-#     data_processor_timeout: 3600
-#     max_parallel_jobs: 10
-#     input_retention_days: 14
-#     log_retention_days: 14
-#     enable_hourly_batch: "ENABLED"
+#   batch-processing/batch: fargate 128, fargate-spot 256
+#   batch-processing/eventbridge/hourly-batch: metadata.enabled true
 #
 # Production:
-#   vars:
-#     nat_gateway_strategy: "one_per_az"
-#     fargate_max_vcpus: 512
-#     fargate_spot_max_vcpus: 1024
-#     enable_ec2_compute: "ENABLED"
-#     ec2_max_vcpus: 512
-#     ec2_instance_types: ["m5.xlarge", "m5.2xlarge", "c5.xlarge"]
-#     data_processor_vcpu: "2"
-#     data_processor_memory: "4096"
-#     data_processor_timeout: 7200
-#     etl_job_vcpu: "4"
-#     etl_job_memory: "8192"
-#     max_parallel_jobs: 50
-#     input_retention_days: 30
-#     output_ia_days: 60
-#     output_glacier_days: 180
-#     log_retention_days: 90
-#     enable_hourly_batch: "ENABLED"
-#     enable_s3_trigger: "ENABLED"
-
-# =============================================================================
-# REQUIRED VARIABLES
-# =============================================================================
-# batch_service_role_arn: "arn:aws:iam::..."
-# batch_instance_role_arn: "arn:aws:iam::..." (for EC2)
-# batch_job_role_arn: "arn:aws:iam::..."
-# batch_execution_role_arn: "arn:aws:iam::..."
-# eventbridge_step_functions_role_arn: "arn:aws:iam::..."
-# eventbridge_batch_role_arn: "arn:aws:iam::..."
-# data_processor_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/processor:latest"
-# etl_job_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/etl:latest"
-# report_generator_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/reporter:latest"
-# validation_lambda_arn: "arn:aws:lambda:..."
-# list_files_lambda_arn: "arn:aws:lambda:..."
-# aggregate_lambda_arn: "arn:aws:lambda:..."
-# batch_sns_topic_arn: "arn:aws:sns:..."
-# alarm_email_addresses: ["ops@example.com"]
-#
-# log_bucket_name is NOT required: logging is disabled by default. See the
-# STORAGE (S3) note above to opt in per stack.
-#
-# KMS: the job role (batch_job_role_arn) and the execution roles behind the
-# validation_lambda_arn, list_files_lambda_arn and aggregate_lambda_arn
-# Lambdas are the principals that actually read and write the S3 buckets
-# above, which are encrypted with kms/main's key (not a batch-specific
-# key). kms/main delegates to IAM through its root-account statement, so
-# no key-policy change is needed, but each of those externally-supplied
-# roles still needs its own IAM policy granting kms:Decrypt and
-# kms:GenerateDataKey* on `!terraform.state kms/main .key_arn`, scoped
-# with `kms:ViaService: s3.<region>.amazonaws.com` -- otherwise
-# GetObject/PutObject against these buckets fails with AccessDenied.
-#
-# batch_execution_role_arn is the ECS task-execution role: it only pulls
-# container images and writes logs, and eventbridge_step_functions_role_arn
-# is the role EventBridge assumes to call states:StartExecution -- neither
-# touches these buckets, so neither needs a grant here. Each state
-# machine's own execution role is created by the stepfunctions component
-# itself (components/terraform/stepfunctions/main.tf) and already carries
-# a KMS policy for its own log group; give it S3/KMS access too only if a
-# state reads or writes these buckets directly (e.g. via an AWS SDK
-# service integration) rather than through the Lambdas above.
+#   batch-processing/vpc: nat_gateway_strategy "one_per_az"
+#   batch-processing/batch: fargate 512, fargate-spot 1024; compute_environments.ec2
+#     and job_queues.gpu state ENABLED; data_processor vcpu 2 / memory 4096,
+#     timeout_seconds 7200; etl_job vcpu 4 / memory 8192
+#   batch-processing/eventbridge/hourly-batch: metadata.enabled true

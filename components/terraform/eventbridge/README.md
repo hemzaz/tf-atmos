@@ -11,6 +11,9 @@ outputs); log group, bus and archive are encrypted with a customer managed key.
   `batch-processing`, `data-pipeline` and `microservices-platform` catalog templates and
   `templates/stacks/serverless-stack.yaml` configure rules.
 - Other instances put their rules on a created bus through its `event_bus_name` output.
+- Deploys in the `deploy-full-stack` services layer, after the state machines (platform), Batch
+  queues and Lambdas (compute) and queues (storage) it targets. Rules reading a bus instance's
+  state share that layer with it, so a stack with both needs them split by `.atmos_component`.
 
 ## Notes
 
@@ -23,7 +26,7 @@ outputs); log group, bus and archive are encrypted with a customer managed key.
   depend only on names, so queues can be applied first.
 - `role_arn` is required for Step Functions, Kinesis, Firehose, ECS, Batch and EventBridge targets
   and rejected for Lambda, SQS, SNS and Logs. This component creates no such role (`stepfunctions`
-  can, via `events_role_enabled`).
+  and `batch` can, via `events_role_enabled`).
 - Schedules only run on the default bus, so `schedule_expression` rejects a custom bus.
 - A CMK-encrypted bus should set `event_bus_dlq_arn`; schema discovery is unavailable on it.
 - The log resource policy is resource-scoped (not the 10-per-region account policies).
