@@ -124,9 +124,11 @@ SYNTH = [
     # dns zone_name_servers.<key>: a delegation NS record's records (B3).
     (r'name_servers$',                ['ns-0001.awsdns-01.org', 'ns-0002.awsdns-02.co.uk',
                                        'ns-0003.awsdns-03.com', 'ns-0004.awsdns-04.net']),
-    # security-monitoring consumes guardduty's detector and securityhub's hub.
+    # security-monitoring consumes guardduty's detector, securityhub's hub and
+    # inspector2's account.
     (r'^detector_id$',                '12abc34d567e8fa901bc2d34e56789f0'),
     (r'^account_arn$',                'arn:aws:securityhub:us-east-1:123456789012:hub/default'),
+    (r'^account_id$',                 '123456789012'),
     # Output names read by stacks/catalog/templates/microservices-platform.yaml,
     # each shaped like the value the component really returns.
     (r'^table_name$',                 'example-table'),

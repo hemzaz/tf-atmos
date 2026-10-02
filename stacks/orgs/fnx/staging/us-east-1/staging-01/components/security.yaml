@@ -15,6 +15,7 @@ import:
   - catalog/awsconfig/defaults
   - catalog/guardduty/defaults
   - catalog/securityhub/defaults
+  - catalog/inspector2/defaults
   - catalog/apigateway-account/defaults
   - catalog/security-monitoring/defaults
   - catalog/backup/defaults
@@ -271,6 +272,16 @@ components:
           - securityhub/defaults
 
     # ==========================================================================
+    # Amazon Inspector - owns the enabler (security-monitoring only routes its
+    # findings). Off, as in the catalog: Inspector bills per resource scanned.
+    # ==========================================================================
+    inspector2/main:
+      metadata:
+        component: inspector2
+        inherits:
+          - inspector2/defaults
+
+    # ==========================================================================
     # API Gateway account settings - the per-region CloudWatch Logs role that
     # REST execution/access logging needs (apigateway/main and apigateway/data
     # depend on it). One instance per account and region: a second one would
@@ -283,7 +294,7 @@ components:
           - apigateway-account/defaults
 
     # ==========================================================================
-    # Security finding routing (GuardDuty + Security Hub -> SNS)
+    # Security finding routing (GuardDuty + Security Hub + Inspector -> SNS)
     # ==========================================================================
     security-monitoring/main:
       metadata:

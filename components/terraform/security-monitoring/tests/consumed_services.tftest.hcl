@@ -1,7 +1,9 @@
-# security-monitoring consumes GuardDuty and Security Hub; it never creates them.
+# security-monitoring consumes GuardDuty, Security Hub and Inspector; it never
+# creates them.
 #
-# The guardduty and securityhub components own the detector and the hub (one
-# component per service, the Cloud Posse model). Stacks pass their IDs in with
+# The guardduty, securityhub and inspector2 components own the detector, the
+# hub and the Inspector enabler (one component per service, the Cloud Posse
+# model). Stacks pass their IDs in with
 # !terraform.state. These runs prove that the finding routes follow those IDs,
 # that a null ID fails the plan unless the route is explicitly optional, that a
 # null ID turns an optional route off, and that malformed IDs are rejected.
@@ -37,7 +39,6 @@ variables {
     Tenant      = "fnx"
     ManagedBy   = "Terraform"
   }
-  enable_inspector          = false
   guardduty_detector_id     = "12abc34d567e8fa901bc2d34e56789f0"
   securityhub_account_arn   = "arn:aws:securityhub:us-east-1:123456789012:hub/default"
   kms_key_id                = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
@@ -234,4 +235,49 @@ run "rejects_non_arn_kms_key" {
   }
 
   expect_failures = [var.kms_key_id]
+}
+
+run "inspector_route_off_without_account_id" {
+  command = plan
+
+  assert {
+    condition     = length(aws_cloudwatch_event_rule.inspector_findings) == 0 && length(aws_cloudwatch_event_target.inspector_sns) == 0
+    error_message = "inspector2 is off by default (null account_id): no Inspector route, and no plan failure."
+  }
+
+  assert {
+    condition     = output.inspector_event_rule_arn == null
+    error_message = "inspector_event_rule_arn must be null without a route."
+  }
+}
+
+run "routes_inspector_findings_when_enabled" {
+  command = plan
+
+  variables {
+    inspector2_account_id = "123456789012"
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_event_rule.inspector_findings) == 1 && length(aws_cloudwatch_event_target.inspector_sns) == 1
+    error_message = "An inspector2 account_id turns the Inspector route to the alert topic on."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_cloudwatch_event_rule.inspector_findings[0].event_pattern).source == ["aws.inspector2"]
+      && jsondecode(aws_cloudwatch_event_rule.inspector_findings[0].event_pattern).detail.severity == ["HIGH", "CRITICAL"]
+    )
+    error_message = "The Inspector route matches HIGH and CRITICAL Inspector2 findings."
+  }
+}
+
+run "rejects_malformed_inspector2_account_id" {
+  command = plan
+
+  variables {
+    inspector2_account_id = "arn:aws:inspector2:us-east-1:123456789012:owner/123456789012"
+  }
+
+  expect_failures = [var.inspector2_account_id]
 }

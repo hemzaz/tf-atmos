@@ -18,9 +18,9 @@ variable "tags" {
   }
 }
 
-# GuardDuty and Security Hub are owned by the guardduty and securityhub
-# components. Stacks pass their outputs in with !terraform.state; null turns
-# the matching finding route off.
+# GuardDuty, Security Hub and Inspector are owned by the guardduty,
+# securityhub and inspector2 components. Stacks pass their outputs in with
+# !terraform.state; null turns the matching finding route off.
 variable "guardduty_detector_id" {
   type        = string
   description = "ID of the GuardDuty detector owned by the guardduty component (its `detector_id` output). Null disables GuardDuty finding routing."
@@ -72,17 +72,15 @@ variable "require_cloudtrail_route" {
   default     = true
 }
 
-# Inspector Variables
-variable "enable_inspector" {
-  type        = bool
-  description = "Enable AWS Inspector V2"
-  default     = true
-}
+variable "inspector2_account_id" {
+  type        = string
+  description = "Account ID Inspector is enabled in, owned by the inspector2 component (its `account_id` output, null while inspector2 is disabled). Null disables Inspector finding routing."
+  default     = null
 
-variable "inspector_resource_types" {
-  type        = list(string)
-  description = "Resource types to scan with Inspector"
-  default     = ["EC2", "ECR", "LAMBDA"]
+  validation {
+    condition     = var.inspector2_account_id == null || can(regex("^[0-9]{12}$", var.inspector2_account_id))
+    error_message = "inspector2_account_id must be a 12-digit AWS account ID, or null."
+  }
 }
 
 variable "enable_security_group_change_events" {

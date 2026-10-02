@@ -29,8 +29,8 @@ output "securityhub_event_rule_arn" {
 }
 
 output "inspector_event_rule_arn" {
-  description = "EventBridge rule ARN for Inspector findings"
-  value       = var.enable_inspector ? aws_cloudwatch_event_rule.inspector_findings[0].arn : null
+  description = "EventBridge rule ARN for Inspector findings (null while inspector2_account_id is null)"
+  value       = local.inspector_enabled ? aws_cloudwatch_event_rule.inspector_findings[0].arn : null
 }
 
 output "security_group_change_rule_arn" {
