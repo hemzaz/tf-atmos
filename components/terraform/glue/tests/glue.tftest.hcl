@@ -341,6 +341,58 @@ run "crawlers_target_s3_or_catalog_tables" {
   }
 }
 
+run "crawler_configuration_is_passed_through_per_crawler" {
+  command = plan
+
+  # One crawler with a configuration and one without, in the same map.
+  variables {
+    crawlers = {
+      raw_data = {
+        catalog_tables = ["raw_events"]
+        schema_change_policy = {
+          delete_behavior = "LOG"
+          update_behavior = "LOG"
+        }
+        configuration = "{\"Version\":1,\"CrawlerOutput\":{\"Partitions\":{\"AddOrUpdateBehavior\":\"InheritFromTable\"}}}"
+      }
+      curated_data = {
+        s3_targets = [
+          { path = "s3://test-curated/" },
+        ]
+      }
+    }
+  }
+
+  assert {
+    condition     = jsondecode(aws_glue_crawler.this["raw_data"].configuration).CrawlerOutput.Partitions.AddOrUpdateBehavior == "InheritFromTable"
+    error_message = "configuration is the crawler's JSON as given."
+  }
+
+  assert {
+    condition     = aws_glue_crawler.this["curated_data"].configuration == null
+    error_message = "A crawler without configuration sets none."
+  }
+}
+
+run "rejects_a_crawler_configuration_that_is_not_json" {
+  command = plan
+
+  variables {
+    crawlers = {
+      raw_data = {
+        catalog_tables = ["raw_events"]
+        schema_change_policy = {
+          delete_behavior = "LOG"
+          update_behavior = "LOG"
+        }
+        configuration = "Version: 1.0"
+      }
+    }
+  }
+
+  expect_failures = [var.crawlers]
+}
+
 run "triggers_resolve_job_and_crawler_keys" {
   command = plan
 

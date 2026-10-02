@@ -126,9 +126,12 @@ variable "crawlers" {
     description  = optional(string)
     schedule     = optional(string)
     table_prefix = optional(string)
-    # Passed through jsonencode() to the crawler's `configuration` argument
-    # (a JSON string), e.g. { Version = 1.0, Grouping = { TableGroupingPolicy = "CombineCompatibleSchemas" } }.
-    configuration = optional(any)
+    # The crawler's configuration as a JSON string, as in Cloud Posse's
+    # aws-glue-crawler, e.g. jsonencode({ Version = 1.0, Grouping = { ... } }).
+    # A string, not an object: in a map of crawlers an `any` attribute must
+    # have one type across all entries, so two crawlers with different
+    # configurations (or one without) could not be declared together.
+    configuration = optional(string)
     s3_targets = optional(list(object({
       path       = string
       exclusions = optional(list(string), [])
@@ -148,6 +151,11 @@ variable "crawlers" {
   validation {
     condition     = alltrue([for c in values(var.crawlers) : (length(c.s3_targets) > 0) != (length(c.catalog_tables) > 0)])
     error_message = "Every crawler must set either s3_targets or catalog_tables (not both, not neither)."
+  }
+
+  validation {
+    condition     = alltrue([for c in values(var.crawlers) : c.configuration == null || can(jsondecode(c.configuration))])
+    error_message = "Every crawler configuration must be a JSON string."
   }
 
   validation {
