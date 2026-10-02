@@ -159,7 +159,7 @@ SYNTH = [
     (r'^job_queue_arns?$',            'arn:aws:batch:us-east-1:123456789012:job-queue/example-queue'),
     (r'^job_queue_names?$',           'example-queue'),
     (r'^job_definition_names?$',      'example-job-definition'),
-    (r'^job_definition_arn_prefix',   'arn:aws:batch:us-east-1:123456789012:job-definition/example-job-definition'),
+    (r'^job_definition_arn_prefix(es)?$','arn:aws:batch:us-east-1:123456789012:job-definition/example-job-definition'),
     (r'^compute_environment_names?$', 'example-compute-environment'),
     (r'^state_machine_arn$',          'arn:aws:states:us-east-1:123456789012:stateMachine:example-state-machine'),
     (r'^events_role_arn$',            'arn:aws:iam::123456789012:role/example-events-role'),

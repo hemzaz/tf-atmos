@@ -82,6 +82,9 @@
 #    key-policy change). The job roles below get theirs from this template.
 # 6. On-call addresses, if any, in batch-processing/monitoring's
 #    alarm_email_subscriptions.
+# 7. batch-processing/sqs/trigger receives the input bucket's incoming/ object
+#    events but has no consumer here (the EventBridge s3-trigger rule starts
+#    the pipeline): point an external consumer at it, or leave it to expire.
 # =============================================================================
 
 import:
@@ -293,7 +296,7 @@ components:
           enabled: true
           eventbridge: true
           queue_list:
-            - queue_arn: "arn:aws:sqs:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-batch-trigger"
+            - queue_arn: 'arn:aws:sqs:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:{{ .settings.context.environment }}-batch-trigger'
               events:
                 - "s3:ObjectCreated:*"
               filter_prefix: "incoming/"
@@ -416,6 +419,11 @@ components:
     # the policy is scoped to that bucket, and the sqs component adds
     # aws:SourceAccount = <this account>. S3 uses the queue's key under
     # kms/main's AllowS3 statement (allow_s3, on in catalog/kms/defaults).
+    # Nothing in this template consumes it: the pipeline starts from the same
+    # uploads through the EventBridge s3-trigger rule. The queue is for an
+    # external consumer (REQUIREMENTS 7); its messages expire after a day.
+    # Named "<Environment>-batch-trigger": batch-processing/s3-input builds
+    # this ARN from that name, so a rename must be made there too.
     batch-processing/sqs/trigger:
       metadata:
         component: sqs
@@ -557,6 +565,10 @@ components:
     # is /aws/batch/<Environment>-batch, encrypted with kms/main; the
     # component creates the Fargate execution role and one job role per
     # definition from job_role_policy_json.
+    # batch-processing/lambda-job-submitter builds its queue and job definition
+    # names and its IAM ARNs from this instance's name and keys
+    # (<Environment>-batch-<key>): renaming name, the high_priority, default or
+    # low_priority queue or data_processor needs the same change there.
     batch-processing/batch:
       metadata:
         component: batch
@@ -663,20 +675,22 @@ components:
               {"Sid": "WriteOutput", "Effect": "Allow", "Action": "s3:PutObject",
               "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/*"},
               {"Sid": "BucketKeyThroughS3", "Effect": "Allow", "Action": ["kms:Decrypt", "kms:GenerateDataKey*"],
-              "Resource": "arn:aws:kms:{{ .vars.region }}:{{ .settings.environment.account_id }}:key/*",
+              "Resource": "arn:aws:kms:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:key/*",
               "Condition": {"StringEquals": {"kms:ViaService": "s3.{{ .vars.region }}.amazonaws.com"},
               "StringLike": {"kms:EncryptionContext:aws:s3:arn": [
               "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input*",
               "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output*"]}}}]}
             retry_strategy:
               attempts: 3
-              # Retry a lost host, exit on anything else. A pattern takes a
-              # wildcard only at its end, so the old "*error*" (any reason
-              # containing "error") is "*" here: every other failure exits.
+              # Retry a lost host; exit when the application itself failed
+              # (any exit code). Infrastructure failures, such as a Fargate Spot
+              # interruption, carry no exit code, so they match neither entry
+              # and use the remaining attempts. A pattern takes a wildcard only
+              # at its end, so the old on_reason "*error*" could not be kept.
               evaluate_on_exit:
                 - on_status_reason: "Host EC2*"
                   action: RETRY
-                - on_reason: "*"
+                - on_exit_code: "*"
                   action: EXIT
             timeout_seconds: 3600
 
@@ -767,6 +781,8 @@ components:
       vars:
         name: batch-data-pipeline
         events_role_enabled: true
+        # Every Catch keeps the state's input and records the error at
+        # $.error, which NotifyFailure publishes with $.job_id.
         definition:
           Comment: "Data processing pipeline workflow"
           StartAt: "ValidateInput"
@@ -782,6 +798,7 @@ components:
               Catch:
                 - ErrorEquals:
                     - "States.ALL"
+                  ResultPath: "$.error"
                   Next: "NotifyFailure"
 
             CheckValidation:
@@ -817,6 +834,7 @@ components:
               Catch:
                 - ErrorEquals:
                     - "States.ALL"
+                  ResultPath: "$.error"
                   Next: "NotifyFailure"
 
             CheckProcessingResult:
@@ -825,7 +843,17 @@ components:
                 - Variable: "$.processing_result.Status"
                   StringEquals: "SUCCEEDED"
                   Next: "SubmitETLJob"
-              Default: "NotifyFailure"
+              Default: "ProcessingJobFailed"
+
+            # The job ended without SUCCEEDED but raised no error, so there is
+            # no $.error for NotifyFailure yet: record one, keeping the input.
+            ProcessingJobFailed:
+              Type: "Pass"
+              Parameters:
+                Error: "ProcessingJobFailed"
+                Status.$: "$.processing_result.Status"
+              ResultPath: "$.error"
+              Next: "NotifyFailure"
 
             SubmitETLJob:
               Type: "Task"
@@ -843,6 +871,7 @@ components:
               Catch:
                 - ErrorEquals:
                     - "States.ALL"
+                  ResultPath: "$.error"
                   Next: "NotifyFailure"
 
             GenerateReport:
@@ -857,6 +886,7 @@ components:
               Catch:
                 - ErrorEquals:
                     - "States.ALL"
+                  ResultPath: "$.error"
                   Next: "NotifyFailure"
 
             NotifySuccess:
@@ -901,13 +931,19 @@ components:
               - !terraform.state batch-processing/batch .job_definition_arn_prefixes.data_processor | . + ":*"
               - !terraform.state batch-processing/batch .job_definition_arn_prefixes.etl_job | . + ":*"
               - !terraform.state batch-processing/batch .job_definition_arn_prefixes.report_generator | . + ":*"
-          - sid: TrackBatchJobs
-            actions: ["batch:DescribeJobs", "batch:TerminateJob"]
+          # DescribeJobs takes no resource-level scope.
+          - sid: DescribeBatchJobs
+            actions: ["batch:DescribeJobs"]
             resources: ["*"]
+          # .sync stops the job when the execution is stopped or times out.
+          - sid: TerminateBatchJobs
+            actions: ["batch:TerminateJob"]
+            resources:
+              - 'arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job/*'
           - sid: BatchSyncEventsRule
             actions: ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
             resources:
-              - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/StepFunctionsGetEventsForBatchJobsRule"
+              - 'arn:aws:events:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:rule/StepFunctionsGetEventsForBatchJobsRule'
           - sid: PublishNotifications
             actions: ["sns:Publish"]
             resources:
@@ -997,13 +1033,19 @@ components:
             resources:
               - !terraform.state batch-processing/batch .job_queue_arns.low_priority
               - !terraform.state batch-processing/batch .job_definition_arn_prefixes.data_processor | . + ":*"
-          - sid: TrackBatchJobs
-            actions: ["batch:DescribeJobs", "batch:TerminateJob"]
+          # DescribeJobs takes no resource-level scope.
+          - sid: DescribeBatchJobs
+            actions: ["batch:DescribeJobs"]
             resources: ["*"]
+          # .sync stops the job when the execution is stopped or times out.
+          - sid: TerminateBatchJobs
+            actions: ["batch:TerminateJob"]
+            resources:
+              - 'arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job/*'
           - sid: BatchSyncEventsRule
             actions: ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
             resources:
-              - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/StepFunctionsGetEventsForBatchJobsRule"
+              - 'arn:aws:events:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:rule/StepFunctionsGetEventsForBatchJobsRule'
         tags:
           Layer: "orchestration"
           Platform: "batch-processing"
@@ -1246,10 +1288,10 @@ components:
           {"Version": "2012-10-17", "Statement": [
           {"Sid": "SubmitJobs", "Effect": "Allow", "Action": "batch:SubmitJob",
           "Resource": [
-          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-high_priority",
-          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-default",
-          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-low_priority",
-          "arn:aws:batch:{{ .vars.region }}:{{ .settings.environment.account_id }}:job-definition/{{ .settings.context.environment }}-batch-data_processor:*"]},
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-high_priority",
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-default",
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-low_priority",
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-definition/{{ .settings.context.environment }}-batch-data_processor:*"]},
           {"Sid": "DescribeJobs", "Effect": "Allow", "Action": "batch:DescribeJobs", "Resource": "*"}]}
 
         tags:

@@ -411,7 +411,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
 
   deploy-storage:
-    description: "Deploy the storage layer: S3 buckets (they read kms/main), such as the lambda package bucket compute reads"
+    description: "Deploy the storage layer: S3 buckets, SQS queues and SNS topics (they read kms/main), such as the lambda package bucket compute reads"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -542,7 +542,7 @@ workflows:
           or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
 
   deploy-platform:
-    description: "Deploy the platform layer: External Secrets"
+    description: "Deploy the platform layer: External Secrets and Step Functions state machines (after compute, whose Batch and Lambda state they read)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -662,7 +662,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
 
   deploy-services:
-    description: "Deploy the services layer: API Gateway, backend services and CloudFront distributions"
+    description: "Deploy the services layer: API Gateway, backend services, CloudFront distributions, ECS services and EventBridge rules"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
