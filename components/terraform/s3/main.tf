@@ -93,6 +93,26 @@ resource "aws_s3_bucket_versioning" "this" {
   }
 }
 
+# Cloud Posse's cors_configuration, verbatim: browser access from other
+# origins, e.g. uploads with presigned URLs.
+resource "aws_s3_bucket_cors_configuration" "this" {
+  count = local.enabled && length(var.cors_configuration) > 0 ? 1 : 0
+
+  bucket = aws_s3_bucket.this[0].id
+
+  dynamic "cors_rule" {
+    for_each = var.cors_configuration
+    content {
+      id              = cors_rule.value.id
+      allowed_headers = cors_rule.value.allowed_headers
+      allowed_methods = cors_rule.value.allowed_methods
+      allowed_origins = cors_rule.value.allowed_origins
+      expose_headers  = cors_rule.value.expose_headers
+      max_age_seconds = cors_rule.value.max_age_seconds
+    }
+  }
+}
+
 resource "aws_s3_bucket_logging" "this" {
   count = local.enabled && var.logging != null ? 1 : 0
 
