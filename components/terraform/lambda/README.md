@@ -46,11 +46,11 @@ rotation configuration.
   the mapping ARNs and scoped to exactly them. A source on a customer managed key also needs that
   key in `event_source_kms_key_arns` (`kms:Decrypt`). A mapping's `on_failure` destination joins
   the delivery policy (`sqs:SendMessage` / `sns:Publish`; `delivery_kms_key_arn` for its key).
-- `custom_policy` is one JSON document, and a JSON-string output read with `!terraform.state`
-  arrives as an object (Atmos re-reads the value as YAML), so it cannot take another component's
-  policy output. `iam_policies` adds statements (the `stepfunctions` component's shape) in a second
-  inline policy, `<Environment>-<function_name>-iam-policies`, whose resources can be read from
-  other instances' state; the `data-pipeline` template uses it.
+- `custom_policy` is one JSON document. A JSON-string output read with `!terraform.state` arrives
+  as an object (Atmos re-reads the value as YAML) unless the expression ends in `| tojson`, for
+  example `'.producer_policy | tojson'`. `iam_policies` adds statements (the `stepfunctions`
+  component's shape) in a second inline policy, `<Environment>-<function_name>-iam-policies`, for
+  combining grants from several instances' state; the `data-pipeline` template uses it.
 - SQS sources: set the queue's `visibility_timeout_seconds` to at least 6x this function's
   `timeout` (plus `maximum_batching_window_in_seconds`), as AWS recommends; this component cannot
   see the queue to check it. Failed messages go to the queue's own redrive DLQ, so the stream-only

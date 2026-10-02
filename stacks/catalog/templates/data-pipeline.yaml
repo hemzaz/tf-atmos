@@ -487,10 +487,8 @@ components:
 
         # Writes kinesis-enriched (OUTPUT_STREAM), the statements of that
         # stream's writer_policy output, and reads the lookup table
-        # (ENRICHMENT_TABLE); both are encrypted with kms/main. Statements, not
-        # custom_policy: !terraform.state returns a JSON-string output such as
-        # writer_policy as an object (Atmos re-reads the value as YAML), which
-        # custom_policy (a string) rejects.
+        # (ENRICHMENT_TABLE); both are encrypted with kms/main. Statements, because
+        # this Lambda combines grants from two instances.
         iam_policies:
           - sid: WriteEnrichedStream
             actions: ["kinesis:PutRecord", "kinesis:PutRecords", "kinesis:DescribeStreamSummary"]
@@ -599,8 +597,8 @@ components:
         tracing_mode: "Active"
 
         # Writes kinesis-validated (VALID_RECORDS_STREAM), the statements of
-        # that stream's writer_policy output (see lambda-transformer for why
-        # not custom_policy), and invalid records under s3-raw/invalid/; both
+        # that stream's writer_policy output (statements for the same
+        # reason as lambda-transformer), and invalid records under s3-raw/invalid/; both
         # are encrypted with kms/main.
         iam_policies:
           - sid: WriteValidatedStream

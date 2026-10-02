@@ -96,3 +96,22 @@ run "rejects_empty_resources" {
 
   expect_failures = [var.iam_policies]
 }
+
+run "rejects_duplicate_condition_test_and_variable" {
+  command = plan
+
+  variables {
+    iam_policies = [
+      {
+        actions   = ["kms:Decrypt"]
+        resources = ["arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"]
+        conditions = [
+          { test = "StringEquals", variable = "kms:ViaService", values = ["dynamodb.us-east-1.amazonaws.com"] },
+          { test = "StringEquals", variable = "kms:ViaService", values = ["sqs.us-east-1.amazonaws.com"] },
+        ]
+      }
+    ]
+  }
+
+  expect_failures = [var.iam_policies]
+}
