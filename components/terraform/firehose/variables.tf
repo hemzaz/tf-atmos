@@ -128,10 +128,8 @@ variable "s3_error_output_prefix" {
   }
 
   validation {
-    condition = var.s3_error_output_prefix == null || (
-      !strcontains(coalesce(var.s3_error_output_prefix, "-"), "!{")
-      || strcontains(coalesce(var.s3_error_output_prefix, "-"), "!{firehose:error-output-type}")
-    )
+    # One line: Checkov's HCL parser rejects a line that starts with ||.
+    condition     = var.s3_error_output_prefix == null || !strcontains(coalesce(var.s3_error_output_prefix, "-"), "!{") || strcontains(coalesce(var.s3_error_output_prefix, "-"), "!{firehose:error-output-type}")
     error_message = "An s3_error_output_prefix with !{...} expressions must include !{firehose:error-output-type}."
   }
 }
