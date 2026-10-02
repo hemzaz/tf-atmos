@@ -11,6 +11,7 @@ import:
   - catalog/cognito/defaults
   - catalog/monitoring/defaults
   - catalog/s3/lambda-artifacts
+  - catalog/sqs/defaults
   - catalog/cost-optimization/defaults
   - catalog/rds/staging
 
@@ -293,15 +294,30 @@ components:
         s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
         memory_size: 512
         timeout: 300
+        # Enqueues work for lambda/data-transformer on sqs/data-transform: the
+        # queue's producer_policy (SendMessage, and its kms/main key through
+        # SQS) and its URL.
+        environment_variables:
+          QUEUE_URL: !terraform.state sqs/data-transform .queue_url
+        custom_policy: !terraform.state sqs/data-transform .producer_policy
+        # The built-in egress reaches S3 only, and vpc/services has no SQS
+        # endpoint: SQS's regional endpoint is reached through the NAT gateway.
+        custom_egress_rules:
+          - description: "HTTPS to the SQS regional endpoint through the NAT gateway"
+            from_port: 443
+            to_port: 443
+            protocol: "tcp"
+            cidr_blocks: ["0.0.0.0/0"]
         vpc_id: !terraform.state vpc/services .vpc_id
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
       dependencies:
         components:
           - component: vpc/services
           - component: s3/lambda-artifacts
+          - component: sqs/data-transform
 
     # Packaged, and disabled until its first package, like
-    # lambda/data-processor above.
+    # lambda/data-processor above. Fed by sqs/data-transform.
     lambda/data-transformer:
       metadata:
         component: lambda
@@ -315,13 +331,48 @@ components:
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
         s3_key: '{{ .vars.function_name }}/{{ .settings.package_version }}.zip'
         memory_size: 1024
+        # sqs/data-transform's visibility_timeout_seconds is derived from this
+        # timeout and the batching window below: change them together.
         timeout: 600
+        # Failed messages are retried by the queue and moved to its DLQ after
+        # dlq_max_receive_count receives; with ReportBatchItemFailures the
+        # function returns only the failed messages, not the whole batch.
+        event_source_mappings:
+          data-transform:
+            event_source_arn: !terraform.state sqs/data-transform .queue_arn
+            batch_size: 10
+            maximum_batching_window_in_seconds: 5
+            function_response_types:
+              - ReportBatchItemFailures
+        # The queue is encrypted with kms/main: the poller needs kms:Decrypt.
+        event_source_kms_key_arns:
+          - !terraform.state kms/main .key_arn
         vpc_id: !terraform.state vpc/services .vpc_id
         subnet_ids: !terraform.state vpc/services .private_subnet_ids
       dependencies:
         components:
           - component: vpc/services
           - component: s3/lambda-artifacts
+          - component: sqs/data-transform
+          - component: kms/main
+
+    # Work queue of lambda/data-transformer: lambda/data-processor sends, the
+    # transformer's event source mapping polls. Failed messages move to
+    # <Environment>-data-transform-dlq after 5 receives and stay 14 days.
+    sqs/data-transform:
+      metadata:
+        component: sqs
+        inherits:
+          - sqs/defaults
+      vars:
+        name: data-transform
+        # AWS: at least 6x the consumer's timeout plus its batching window,
+        # 6 x 600 (lambda/data-transformer timeout) + 5 = 3605.
+        visibility_timeout_seconds: 3605
+        message_retention_seconds: 345600  # 4 days
+        dlq_enabled: true
+        dlq_max_receive_count: 5
+        dlq_message_retention_seconds: 1209600  # 14 days
 
 
     # ==========================================================================

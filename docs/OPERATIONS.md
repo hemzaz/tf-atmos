@@ -223,6 +223,13 @@ First release of a function: upload, set `package_version`, set `metadata.enable
 (in `lint`) fails an enabled instance still on the `unreleased` placeholder, and an `iam/ci` whose
 bucket name or KMS alias no longer matches the stack's `s3/lambda-artifacts` and `kms/main`.
 
+Triggers come up with their function: `data-transformer` polls `sqs/data-transform` (staging,
+prod; the queue deploys in the storage layer, before the function), which `data-processor` sends
+to; `report-generator` (prod) runs daily at 06:00 UTC. Messages that fail 5 receives move to
+`<Environment>-data-transform-dlq` (kept 14 days); after a fix, redrive them from the SQS console
+or `aws sqs start-message-move-task --source-arn <dlq arn>`. A change to `data-transformer`'s
+`timeout` needs the queue's `visibility_timeout_seconds` (6x timeout + 5) changed with it.
+
 ## Day-2 tasks
 
 | Task | Command |

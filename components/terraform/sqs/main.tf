@@ -20,6 +20,36 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
   arn_prefix = "arn:${data.aws_partition.current.partition}:sqs:${var.region}:${local.account_id}"
   queue_arn  = "${local.arn_prefix}:${local.queue_name}"
+
+  # Identity policy for a producer's role (as the kinesis component's
+  # writer_policy is for a stream): send to this queue, plus the data key SQS
+  # needs to encrypt each message with kms_key_arn, only through SQS and only
+  # for this queue (SQS's encryption context is the queue ARN). Cloud Posse's
+  # aws-sqs-queue has no such output; consumers get their grant from the
+  # lambda component's event_source_mappings instead.
+  producer_policy = local.enabled ? jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AllowSQSSendMessage"
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
+        Resource = local.queue_arn
+      },
+      {
+        Sid      = "AllowSQSQueueKMS"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = var.kms_key_arn
+        Condition = {
+          StringEquals = {
+            "kms:ViaService"                    = "sqs.${var.region}.amazonaws.com"
+            "kms:EncryptionContext:aws:sqs:arn" = local.queue_arn
+          }
+        }
+      }
+    ]
+  }) : null
 }
 
 data "aws_caller_identity" "current" {}

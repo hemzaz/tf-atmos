@@ -17,6 +17,10 @@ rotation configuration.
   first package is uploaded (`docs/OPERATIONS.md`, "Lambda packages"). `lambda/main` in
   `fnx-local-sandbox` (applied for real by the sandbox workflow)
   and `lambda/api` in `fnx-local-localemu` use `filename`.
+- Triggers: `lambda/data-transformer` polls `sqs/data-transform` (an event source mapping, with
+  `kms/main` in `event_source_kms_key_arns`), which `lambda/data-processor` sends to (`QUEUE_URL`,
+  `custom_policy` from the queue's `.producer_policy`); `lambda/report-generator` runs daily at
+  06:00 UTC (`schedule_expression`).
 - Used by: `apigateway` (`lambda/data-processor .function_invoke_arn` / `.function_name`),
   `monitoring` (`.function_name`).
 - The `microservices-platform` template runs two rotation functions from this component

@@ -6,9 +6,14 @@ queue policy) as plain resources.
 
 ## Wiring
 
-- No instance in the fnx stacks. `sqs/defaults` reads `kms/main .key_arn`; the `batch-processing`
+- Instances: `sqs/data-transform` (staging, prod), with a DLQ: `lambda/data-processor` sends
+  (`.queue_url`, `.producer_policy`) and `lambda/data-transformer` polls it (`.queue_arn` in its
+  `event_source_mappings`). `sqs/defaults` reads `kms/main .key_arn`; the `batch-processing`
   and `microservices-platform` templates create queues from it (`serverless-api` also declares one).
 - Consumers read `.queue_arn`, `.queue_name` and `.dead_letter_queue_*` (null unless `dlq_enabled`).
+- `.producer_policy` is an identity policy for a sending role (`sqs:SendMessage` on the queue and
+  the queue key through SQS), for the lambda component's `custom_policy`. Cloud Posse's component
+  has no such output; it mirrors the kinesis component's `writer_policy`.
 - Deploys in the `deploy-full-stack` storage layer, with `s3`: an s3 instance notifying a queue
   builds its ARN from the queue's name instead of reading its state.
 
