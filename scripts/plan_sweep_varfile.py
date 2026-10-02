@@ -153,6 +153,17 @@ SYNTH = [
     # integration_uri (an HTTP_PROXY/VPC_LINK route's target listener).
     (r'^(http|https)_listener_arn$',
      'arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/example-alb/1234567890123456/1234567890123456'),
+    # Output names read by stacks/catalog/templates/batch-processing.yaml: the
+    # batch instance's per-key maps (looked up by the map output's name), the
+    # state machines and their EventBridge roles, and the SNS topic.
+    (r'^job_queue_arns?$',            'arn:aws:batch:us-east-1:123456789012:job-queue/example-queue'),
+    (r'^job_queue_names?$',           'example-queue'),
+    (r'^job_definition_names?$',      'example-job-definition'),
+    (r'^job_definition_arn_prefix',   'arn:aws:batch:us-east-1:123456789012:job-definition/example-job-definition'),
+    (r'^compute_environment_names?$', 'example-compute-environment'),
+    (r'^state_machine_arn$',          'arn:aws:states:us-east-1:123456789012:stateMachine:example-state-machine'),
+    (r'^events_role_arn$',            'arn:aws:iam::123456789012:role/example-events-role'),
+    (r'^sns_topic_arn$',              'arn:aws:sns:us-east-1:123456789012:example-topic'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry

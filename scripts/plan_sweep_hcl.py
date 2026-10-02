@@ -284,6 +284,8 @@ SCALAR_ATTRS = {
     'instance_id', 'function_url', 'queue_url', 'table_name', 'stream_arn', 'role_arn',
     # aws_eks_cluster identity[0].oidc[0].issuer: the OIDC issuer URL.
     'issuer',
+    # aws_batch_job_definition: the ARN without its revision.
+    'arn_prefix',
 }
 # Attributes that are a list of strings on the AWS resources that have them.
 LIST_SCALAR_ATTRS = {
