@@ -559,7 +559,7 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "external-secrets"'
 
   deploy-data:
-    description: "Deploy the data layer: databases, caches and backups"
+    description: "Deploy the data layer: databases, caches, backups and Firehose delivery streams"
     steps:
       - *fixtures-stages
       - *refuse-fixtures

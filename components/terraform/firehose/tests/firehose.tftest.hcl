@@ -12,6 +12,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_data "aws_partition" {
+    defaults = {
+      partition = "aws"
+    }
+  }
+
   mock_resource "aws_cloudwatch_log_group" {
     defaults = {
       arn = "arn:aws:logs:us-east-1:123456789012:log-group:/aws/kinesisfirehose/test-raw"
@@ -242,6 +248,398 @@ run "delivery_role_is_scoped_to_exact_arns" {
     )
     error_message = "Logging is PutLogEvents on the delivery log stream only, and the policy has nothing else."
   }
+
+  assert {
+    condition = (
+      length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration) == 0
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].dynamic_partitioning_configuration) == 0
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration) == 0
+    )
+    error_message = "Without the optional features there is no processing, partitioning or conversion block."
+  }
+}
+
+# Data format conversion.
+
+run "conversion_parquet_defaults" {
+  command = plan
+
+  variables {
+    buffering_size = 64
+    data_format_conversion = {
+      schema_configuration = { database_name = "fnx_test_lake", table_name = "raw_events" }
+    }
+  }
+
+  assert {
+    condition = (
+      aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].enabled
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].input_format_configuration[0].deserializer[0].open_x_json_ser_de) == 1
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].input_format_configuration[0].deserializer[0].hive_json_ser_de) == 0
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].output_format_configuration[0].serializer[0].parquet_ser_de[0].compression == "SNAPPY"
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].output_format_configuration[0].serializer[0].orc_ser_de) == 0
+    )
+    error_message = "Conversion defaults to OpenX JSON in, SNAPPY Parquet out."
+  }
+
+  assert {
+    condition = (
+      aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].database_name == "fnx_test_lake"
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].table_name == "raw_events"
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].region == "us-east-1"
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].catalog_id == "123456789012"
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].version_id == "LATEST"
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].role_arn == "arn:aws:iam::123456789012:role/test-raw-delivery"
+    )
+    error_message = "The schema is read from the Glue table in this region and account, version LATEST, with the delivery role."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Sid == "GlueSchema"
+      && toset(jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Action) == toset(["glue:GetTable", "glue:GetTableVersion", "glue:GetTableVersions"])
+      && jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Resource == [
+        "arn:aws:glue:us-east-1:123456789012:catalog",
+        "arn:aws:glue:us-east-1:123456789012:database/fnx_test_lake",
+        "arn:aws:glue:us-east-1:123456789012:table/fnx_test_lake/raw_events",
+      ]
+      && length(jsondecode(aws_iam_role_policy.delivery[0].policy).Statement) == 5
+    )
+    error_message = "The delivery role reads exactly the Glue catalog, database and table, and gets no KMS-through-Glue grant without a catalog key."
+  }
+}
+
+run "conversion_orc_hive_cross_account_encrypted_catalog" {
+  command = plan
+
+  variables {
+    buffering_size = 128
+    data_format_conversion = {
+      input_format                = "HIVE_JSON"
+      hive_json_timestamp_formats = ["yyyy-MM-dd'T'HH:mm:ss"]
+      output_format               = "ORC"
+      compression                 = "ZLIB"
+      schema_configuration = {
+        database_name = "lake"
+        table_name    = "events"
+        region        = "us-west-2"
+        catalog_id    = "210987654321"
+        version_id    = "3"
+        kms_key_arn   = "arn:aws:kms:us-west-2:210987654321:key/cccccccc-dddd-eeee-ffff-000000000000"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].input_format_configuration[0].deserializer[0].hive_json_ser_de[0].timestamp_formats == tolist(["yyyy-MM-dd'T'HH:mm:ss"])
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].output_format_configuration[0].serializer[0].orc_ser_de[0].compression == "ZLIB"
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].catalog_id == "210987654321"
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration[0].schema_configuration[0].version_id == "3"
+    )
+    error_message = "Hive JSON in, ZLIB ORC out, against the given catalog and table version."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Resource == [
+        "arn:aws:glue:us-west-2:210987654321:catalog",
+        "arn:aws:glue:us-west-2:210987654321:database/lake",
+        "arn:aws:glue:us-west-2:210987654321:table/lake/events",
+      ]
+      && jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[5].Sid == "KMSThroughGlue"
+      && jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[5].Action == ["kms:Decrypt"]
+      && jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[5].Resource == "arn:aws:kms:us-west-2:210987654321:key/cccccccc-dddd-eeee-ffff-000000000000"
+      && jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[5].Condition.StringEquals["kms:ViaService"] == "glue.us-west-2.amazonaws.com"
+    )
+    error_message = "The Glue grant follows the schema's region and catalog, and an encrypted catalog adds kms:Decrypt through Glue."
+  }
+}
+
+run "conversion_disabled_adds_nothing" {
+  command = plan
+
+  variables {
+    data_format_conversion = {
+      enabled              = false
+      schema_configuration = { database_name = "lake", table_name = "events" }
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].data_format_conversion_configuration) == 0
+      && length(jsondecode(aws_iam_role_policy.delivery[0].policy).Statement) == 4
+    )
+    error_message = "enabled = false adds no conversion block and no Glue grant (and skips the 64 MiB rule)."
+  }
+}
+
+run "rejects_conversion_below_64_mib" {
+  command = plan
+
+  variables {
+    buffering_size = 63
+    data_format_conversion = {
+      schema_configuration = { database_name = "lake", table_name = "events" }
+    }
+  }
+
+  expect_failures = [var.data_format_conversion]
+}
+
+run "rejects_conversion_with_s3_compression" {
+  command = plan
+
+  variables {
+    buffering_size     = 64
+    compression_format = "GZIP"
+    data_format_conversion = {
+      schema_configuration = { database_name = "lake", table_name = "events" }
+    }
+  }
+
+  expect_failures = [var.data_format_conversion]
+}
+
+run "rejects_orc_with_parquet_compression" {
+  command = plan
+
+  variables {
+    buffering_size = 64
+    data_format_conversion = {
+      output_format        = "ORC"
+      compression          = "GZIP"
+      schema_configuration = { database_name = "lake", table_name = "events" }
+    }
+  }
+
+  expect_failures = [var.data_format_conversion]
+}
+
+# Dynamic partitioning.
+
+run "dynamic_partitioning_with_jq" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/type=!{partitionKeyFromQuery:event_type}/year=!{timestamp:yyyy}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning = {
+      retry_duration   = 600
+      jq_queries       = { source = ".source", event_type = ".detail.type" }
+      append_delimiter = true
+    }
+  }
+
+  assert {
+    condition = (
+      aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].dynamic_partitioning_configuration[0].enabled
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].dynamic_partitioning_configuration[0].retry_duration == 600
+    )
+    error_message = "Dynamic partitioning is enabled with the given retry duration."
+  }
+
+  assert {
+    condition = (
+      aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].enabled
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors) == 2
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].type == "MetadataExtraction"
+      && {
+        for p in aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].parameters : p.parameter_name => p.parameter_value
+        } == {
+        MetadataExtractionQuery = "{event_type:.detail.type,source:.source}"
+        JsonParsingEngine       = "JQ-1.6"
+      }
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[1].type == "AppendDelimiterToRecord"
+    )
+    error_message = "jq_queries render one JQ-1.6 MetadataExtraction processor, followed by AppendDelimiterToRecord."
+  }
+}
+
+run "dynamic_partitioning_default_retry" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = { jq_queries = { source = ".source" } }
+  }
+
+  assert {
+    condition = (
+      aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].dynamic_partitioning_configuration[0].retry_duration == 300
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors) == 1
+    )
+    error_message = "retry_duration defaults to 300 and append_delimiter is off by default."
+  }
+}
+
+run "rejects_dynamic_partitioning_below_64_mib" {
+  command = plan
+
+  variables {
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = { jq_queries = { source = ".source" } }
+  }
+
+  expect_failures = [var.dynamic_partitioning]
+}
+
+run "rejects_dynamic_partitioning_without_partition_key_in_prefix" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/year=!{timestamp:yyyy}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = { jq_queries = { source = ".source" } }
+  }
+
+  expect_failures = [var.s3_prefix]
+}
+
+run "rejects_undefined_query_key_in_prefix" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/region=!{partitionKeyFromQuery:region}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = { jq_queries = { source = ".source" } }
+  }
+
+  expect_failures = [var.s3_prefix]
+}
+
+run "rejects_lambda_key_without_lambda" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/customer=!{partitionKeyFromLambda:customer_id}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = {}
+  }
+
+  expect_failures = [var.s3_prefix]
+}
+
+run "rejects_bad_retry_duration" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = { retry_duration = 7201, jq_queries = { source = ".source" } }
+  }
+
+  expect_failures = [var.dynamic_partitioning]
+}
+
+# Lambda processor.
+
+run "lambda_processor_with_lambda_partition_keys" {
+  command = plan
+
+  variables {
+    buffering_size          = 64
+    processor_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:test-transform:live"
+    processor_lambda_config = { buffer_size_in_mbs = 3, number_of_retries = 5 }
+    s3_prefix               = "data/customer=!{partitionKeyFromLambda:customer_id}/"
+    s3_error_output_prefix  = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning    = {}
+  }
+
+  assert {
+    condition = (
+      length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors) == 1
+      && aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].type == "Lambda"
+      && {
+        for p in aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors[0].parameters : p.parameter_name => p.parameter_value
+        } == {
+        LambdaArn               = "arn:aws:lambda:us-east-1:123456789012:function:test-transform:live"
+        BufferSizeInMBs         = "3"
+        BufferIntervalInSeconds = "60"
+        NumberOfRetries         = "5"
+      }
+    )
+    error_message = "processor_lambda_arn renders one Lambda processor with its buffering and retries (no MetadataExtraction without jq_queries)."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Sid == "LambdaProcessor"
+      && toset(jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Action) == toset(["lambda:InvokeFunction", "lambda:GetFunctionConfiguration"])
+      && jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Resource == [
+        "arn:aws:lambda:us-east-1:123456789012:function:test-transform:live",
+        "arn:aws:lambda:us-east-1:123456789012:function:test-transform",
+      ]
+      && length(jsondecode(aws_iam_role_policy.delivery[0].policy).Statement) == 5
+    )
+    error_message = "The delivery role invokes exactly the given qualified ARN and its unqualified function ARN."
+  }
+}
+
+run "lambda_processor_then_jq" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    processor_lambda_arn   = "arn:aws:lambda:us-east-1:123456789012:function:test-transform"
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = { jq_queries = { source = ".source" } }
+  }
+
+  assert {
+    condition = (
+      [for p in aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors : p.type] == ["Lambda", "MetadataExtraction"]
+      && jsondecode(aws_iam_role_policy.delivery[0].policy).Statement[4].Resource == ["arn:aws:lambda:us-east-1:123456789012:function:test-transform"]
+    )
+    error_message = "The Lambda runs before JQ extraction; an unqualified ARN is granted once."
+  }
+}
+
+run "lambda_processor_without_partitioning" {
+  command = plan
+
+  variables {
+    processor_lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:test-transform:1"
+  }
+
+  assert {
+    condition = (
+      length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].processing_configuration[0].processors) == 1
+      && length(aws_kinesis_firehose_delivery_stream.this[0].extended_s3_configuration[0].dynamic_partitioning_configuration) == 0
+    )
+    error_message = "A Lambda processor works without dynamic partitioning or the 64 MiB minimum."
+  }
+}
+
+run "rejects_lambda_name_for_arn" {
+  command = plan
+
+  variables {
+    processor_lambda_arn = "test-transform"
+  }
+
+  expect_failures = [var.processor_lambda_arn]
+}
+
+run "rejects_out_of_range_lambda_config" {
+  command = plan
+
+  variables {
+    processor_lambda_arn    = "arn:aws:lambda:us-east-1:123456789012:function:test-transform"
+    processor_lambda_config = { buffer_size_in_mbs = 4 }
+  }
+
+  expect_failures = [var.processor_lambda_config]
 }
 
 run "disabled_creates_nothing" {
@@ -315,7 +713,7 @@ run "rejects_kms_alias" {
   expect_failures = [var.kms_key_arn]
 }
 
-run "rejects_dynamic_partitioning_prefix" {
+run "rejects_partition_key_prefix_without_dynamic_partitioning" {
   command = plan
 
   variables {
@@ -324,6 +722,43 @@ run "rejects_dynamic_partitioning_prefix" {
   }
 
   expect_failures = [var.s3_prefix]
+}
+
+run "rejects_partition_key_prefix_with_dynamic_partitioning_disabled" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+    dynamic_partitioning   = { enabled = false, jq_queries = { source = ".source" } }
+  }
+
+  expect_failures = [var.s3_prefix]
+}
+
+run "rejects_error_output_type_in_prefix" {
+  command = plan
+
+  variables {
+    s3_prefix              = "data/!{firehose:error-output-type}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/"
+  }
+
+  expect_failures = [var.s3_prefix]
+}
+
+run "rejects_partition_key_in_error_prefix" {
+  command = plan
+
+  variables {
+    buffering_size         = 64
+    s3_prefix              = "data/source=!{partitionKeyFromQuery:source}/"
+    s3_error_output_prefix = "errors/!{firehose:error-output-type}/!{partitionKeyFromQuery:source}/"
+    dynamic_partitioning   = { jq_queries = { source = ".source" } }
+  }
+
+  expect_failures = [var.s3_error_output_prefix]
 }
 
 run "rejects_expression_prefix_without_error_prefix" {
