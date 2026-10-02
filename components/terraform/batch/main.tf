@@ -1,5 +1,5 @@
 # AWS Batch: managed compute environments and the job queues that feed them,
-# one map entry each (job definitions follow in a later change). Cloud Posse
+# one map entry each (job definitions: job-definitions.tf). Cloud Posse
 # has no Batch component or module, so this follows the repo's own map-based
 # components: <Environment>-<name>-<key> names, plain resources, validations in
 # variables.tf.
