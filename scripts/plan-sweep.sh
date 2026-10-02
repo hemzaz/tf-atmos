@@ -127,7 +127,12 @@ fi
 # failure, not a sweep that silently drops the fixtures.
 if [ -z "$STACKS" ]; then
   fixture_stacks=$(atmos list stacks) || exit 2
-  STACKS="fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production $(printf '%s\n' "$fixture_stacks" | grep '^fnx-fixtures-' | tr '\n' ' ')"
+  fixture_stacks=$(printf '%s\n' "$fixture_stacks" | grep '^fnx-fixtures-' | tr '\n' ' ')
+  if [ -z "$fixture_stacks" ]; then
+    printf '%s\n' "error: no fnx-fixtures-* stacks listed; refusing to sweep without them." >&2
+    exit 2
+  fi
+  STACKS="fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production $fixture_stacks"
 fi
 KNOWN_BROKEN=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("plan-sweep")))') || exit 2
 
