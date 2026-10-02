@@ -13,6 +13,17 @@ variable "function_name" {
   description = "Name of the Lambda function"
 }
 
+variable "description" {
+  type        = string
+  description = "Description of what the function does (Cloud Posse aws-lambda-function's description); null for none"
+  default     = null
+
+  validation {
+    condition     = var.description == null || try(length(var.description) <= 256, false)
+    error_message = "description must be 256 characters or fewer."
+  }
+}
+
 variable "handler" {
   type        = string
   description = "Lambda function handler"
