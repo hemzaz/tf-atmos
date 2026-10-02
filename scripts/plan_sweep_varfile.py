@@ -173,6 +173,11 @@ SYNTH = [
     (r'^consumer_arns?$',             'arn:aws:kinesis:us-east-1:123456789012:stream/example-stream/consumer/example-consumer:1700000000'),
     (r'^(reader|writer|combined)_policy$',
      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"kinesis:PutRecord","Resource":"arn:aws:kinesis:us-east-1:123456789012:stream/example-stream"}]}'),
+    # JSON STRING outputs, like the kinesis policies above: Atmos decodes one
+    # into an object unless the read ends in `| tojson`, so a string input
+    # (custom_policy, additional_policy_json) fails the sweep without it.
+    (r'^(producer|rotation|secret_access)_policy$',
+     '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"sqs:SendMessage","Resource":"arn:aws:sqs:us-east-1:123456789012:example-queue"}]}'),
     (r'^bucket_arn$',                 'arn:aws:s3:::example-bucket-123456789012'),
     (r'^database_name$',              'example_database'),
     (r'^database_arn$',               'arn:aws:glue:us-east-1:123456789012:database/example_database'),

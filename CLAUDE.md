@@ -25,6 +25,8 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 - A new `!terraform.state` read needs the target in the reader's `dependencies.components`
   (`check-dependencies.py`) and in an earlier layer of `workflows/deploy-full-stack.yaml`
   (`check-deploy-layers.py`).
+- A `!terraform.state`/`!terraform.output` read of a JSON-string output (a `*_policy`) into a `type = string`
+  input needs `| tojson` (`'.producer_policy | tojson'`); otherwise Atmos decodes it into an object.
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - State keys must stay in their stage's prefix (`check-state-keys.py`).
 - Stage `fixtures` (`fnx-fixtures-<name>`) puts each catalog template under the checks and is
