@@ -35,6 +35,16 @@ workflows:
         type: input
         prompt: Stack
         default: '{{ env "STACK" }}'
+      # Template fixture stacks (stage "fixtures") are never deployed.
+      - name: stages
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json -s {{ .steps.stack.value }}
+          --query '[.[].components.terraform[].settings.context.stage] | unique | join(",")'
+        output: none
+      - name: refuse-fixtures
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       # Read-only: plan and print, so the prompt below confirms a plan the
       # operator has seen.
       - name: plan

@@ -6,6 +6,20 @@ workflows:
   import:
     description: Import an existing resource into Terraform state
     steps:
+      # Template fixture stacks (stage "fixtures", stacks/orgs/fnx/fixtures) are
+      # never deployed: refuse them (see deploy-full-stack.yaml). Without -s every
+      # stack is selected, fixtures included, so that is refused too.
+      - &fixtures-stages
+        name: stages
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[].settings.context.stage] | unique | join(",")'
+        output: none
+      - &refuse-fixtures
+        name: refuse-fixtures
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       - name: component
         type: input
         prompt: Component (e.g. vpc/main)

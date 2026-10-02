@@ -58,7 +58,7 @@ workflows:
       - &refuse-fixtures
         name: refuse-fixtures
         type: shell
-        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing to deploy a template fixture stack (stage fixtures)."; exit 1 ;; esac
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.

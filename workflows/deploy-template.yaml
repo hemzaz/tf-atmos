@@ -11,6 +11,20 @@ workflows:
   deploy:
     description: Complete template deployment with validation, plan review and verification
     steps:
+      # Template fixture stacks (stage "fixtures", stacks/orgs/fnx/fixtures) are
+      # never deployed: refuse them (see deploy-full-stack.yaml). Without -s every
+      # stack is selected, fixtures included, so that is refused too.
+      - &fixtures-stages
+        name: stages
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[].settings.context.stage] | unique | join(",")'
+        output: none
+      - &refuse-fixtures
+        name: refuse-fixtures
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       - name: template
         type: choose
         prompt: Template to deploy
@@ -43,6 +57,8 @@ workflows:
   deploy-web-app:
     description: Quick deploy of the web-application template (catalog/templates/web-application)
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: deploy
         type: atmos
         command: terraform deploy --query '.atmos_component | test("^web-application/")'
@@ -50,6 +66,8 @@ workflows:
   deploy-microservices:
     description: Quick deploy of the microservices-platform template (catalog/templates/microservices-platform)
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: deploy
         type: atmos
         command: terraform deploy --query '.atmos_component | test("^microservices/")'
@@ -57,6 +75,8 @@ workflows:
   deploy-serverless:
     description: Quick deploy of the serverless-api template (catalog/templates/serverless-api)
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: deploy
         type: atmos
         command: terraform deploy --query '.atmos_component | test("^serverless-api/")'
@@ -64,6 +84,8 @@ workflows:
   deploy-data-pipeline:
     description: Quick deploy of the data-pipeline template (catalog/templates/data-pipeline)
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: deploy
         type: atmos
         command: terraform deploy --query '.atmos_component | test("^data-pipeline/")'
@@ -71,6 +93,8 @@ workflows:
   deploy-batch:
     description: Quick deploy of the batch-processing template (catalog/templates/batch-processing)
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: deploy
         type: atmos
         command: terraform deploy --query '.atmos_component | test("^batch-processing/")'
@@ -78,6 +102,8 @@ workflows:
   deploy-parallel:
     description: Deploy a template running independent components concurrently
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: template
         type: choose
         prompt: Template to deploy
