@@ -350,6 +350,7 @@ resource "aws_security_group" "lambda" {
 
 resource "aws_lambda_function" "main" {
   function_name     = "${var.tags["Environment"]}-${var.function_name}"
+  description       = var.description
   role              = aws_iam_role.lambda.arn
   handler           = var.handler
   runtime           = var.runtime
