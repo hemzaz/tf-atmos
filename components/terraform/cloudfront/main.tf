@@ -120,6 +120,15 @@ locals {
 
 data "aws_partition" "current" {}
 
+# custom_headers values given as value_ssm_parameter_name, read at plan
+# (decrypted). Not ephemeral: an origin custom header is a plain distribution
+# attribute, in plan and state either way (marked sensitive below).
+data "aws_ssm_parameter" "custom_header" {
+  for_each = local.enabled ? toset(flatten([for o in var.custom_origins : [for h in o.custom_headers : h.value_ssm_parameter_name if h.value_ssm_parameter_name != null]])) : toset([])
+
+  name = each.value
+}
+
 resource "aws_cloudfront_origin_access_control" "this" {
   count = local.enabled && local.s3_origin_enabled ? 1 : 0
 
@@ -180,7 +189,7 @@ resource "aws_cloudfront_distribution" "this" {
         for_each = origin.value.custom_headers
         content {
           name  = custom_header.value.name
-          value = sensitive(custom_header.value.value)
+          value = sensitive(custom_header.value.value_ssm_parameter_name == null ? custom_header.value.value : data.aws_ssm_parameter.custom_header[custom_header.value.value_ssm_parameter_name].value)
         }
       }
 
