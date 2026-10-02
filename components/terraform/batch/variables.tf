@@ -490,12 +490,12 @@ variable "job_definitions" {
     condition = alltrue(flatten([
       for d in values(var.job_definitions) : [
         for n, arn in d.secrets : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", n)) && (
-          can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[^:]+(:[^:]*:[^:]*:[^:]*)?$", arn)) ||
+          can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[^:]+-[A-Za-z0-9]{6}(:[^:]*:[^:]*:[^:]*)?$", arn)) ||
           can(regex("^arn:aws[a-z-]*:ssm:[a-z0-9-]+:[0-9]{12}:parameter/.+$", arn))
         )
       ]
     ]))
-    error_message = "secrets maps an environment variable name to a Secrets Manager secret ARN (arn:aws:secretsmanager:<region>:<account>:secret:<name>-<suffix>, optionally :<json-key>:<version-stage>:<version-id>) or an SSM parameter ARN (arn:aws:ssm:<region>:<account>:parameter/<name>). Names are rejected: the execution role is scoped to the ARNs."
+    error_message = "secrets maps an environment variable name to a full Secrets Manager secret ARN (arn:aws:secretsmanager:<region>:<account>:secret:<name>-<6-character suffix>, optionally :<json-key>:<version-stage>:<version-id>) or an SSM parameter ARN (arn:aws:ssm:<region>:<account>:parameter/<name>). Names are rejected: the execution role is scoped to the ARNs."
   }
 
   validation {
@@ -535,6 +535,21 @@ variable "job_definitions" {
       ]), false)
     ])
     error_message = "retry_strategy.evaluate_on_exit takes up to 5 entries, each with action RETRY or EXIT and at least one of on_exit_code, on_reason or on_status_reason."
+  }
+
+  # The provider's evaluate_on_exit patterns (1-512 characters; a wildcard
+  # only as the last character).
+  validation {
+    condition = alltrue(flatten([
+      for d in values(var.job_definitions) : [
+        for e in try(d.retry_strategy.evaluate_on_exit, []) : [
+          e.on_exit_code == null || try(length(e.on_exit_code) <= 512 && can(regex("^[0-9]*\\*?$", e.on_exit_code)) && e.on_exit_code != "", false),
+          e.on_reason == null || try(length(e.on_reason) <= 512 && can(regex("^[0-9A-Za-z.:\\s]*\\*?$", e.on_reason)) && e.on_reason != "", false),
+          e.on_status_reason == null || try(length(e.on_status_reason) <= 512 && can(regex("^[0-9A-Za-z.:\\s]*\\*?$", e.on_status_reason)) && e.on_status_reason != "", false),
+        ]
+      ]
+    ]))
+    error_message = "evaluate_on_exit patterns must be 1-512 characters: on_exit_code digits only, on_reason and on_status_reason letters, digits, periods, colons and white space; each may end (only end) with *."
   }
 
   validation {

@@ -146,14 +146,14 @@ run "ec2_definition_takes_ec2_only_settings" {
       jsondecode(aws_batch_job_definition.this["train"].container_properties).resourceRequirements == [
         { type = "VCPU", value = "8" }, { type = "MEMORY", value = "32768" }, { type = "GPU", value = "1" },
       ]
-      && jsondecode(aws_batch_job_definition.this["train"].container_properties).privileged == false
+      && !contains(keys(jsondecode(aws_batch_job_definition.this["train"].container_properties)), "privileged")
       && jsondecode(aws_batch_job_definition.this["train"].container_properties).ulimits == [{ name = "nofile", softLimit = 65536, hardLimit = 65536 }]
       && jsondecode(aws_batch_job_definition.this["train"].container_properties).linuxParameters == {
         sharedMemorySize = 4096
         devices          = [{ hostPath = "/dev/nvidia0", permissions = ["READ", "WRITE"] }]
       }
     )
-    error_message = "EC2 definitions take gpu, privileged, ulimits and linux_parameters."
+    error_message = "EC2 definitions take gpu, ulimits and linux_parameters; privileged false is not sent."
   }
 
   assert {
@@ -161,6 +161,19 @@ run "ec2_definition_takes_ec2_only_settings" {
       !contains(keys(jsondecode(aws_batch_job_definition.this["train"].container_properties)), key)
     ])
     error_message = "An EC2 definition without secrets or job role policies gets no Fargate settings, execution role or job role."
+  }
+}
+
+run "ec2_privileged_true_is_sent" {
+  command = plan
+
+  variables {
+    job_definitions = { train = { platform_capability = "EC2", image = "train:1.0", vcpu = 1, memory = 1024, privileged = true } }
+  }
+
+  assert {
+    condition     = jsondecode(aws_batch_job_definition.this["train"].container_properties).privileged == true
+    error_message = "privileged = true on an EC2 definition is sent."
   }
 }
 
@@ -212,10 +225,9 @@ run "execution_role_is_created_for_fargate_and_scoped" {
       Principal = { Service = "ecs-tasks.amazonaws.com" }
       Condition = {
         StringEquals = { "aws:SourceAccount" = "123456789012" }
-        ArnLike      = { "aws:SourceArn" = "arn:aws:ecs:us-east-1:123456789012:*" }
       }
     }
-    error_message = "The execution role trusts ecs-tasks limited to this account's ECS tasks in this region."
+    error_message = "The execution role trusts ecs-tasks limited by aws:SourceAccount only (no SourceArn, which the execution role docs do not show)."
   }
 
   assert {
@@ -313,7 +325,15 @@ run "job_role_is_created_from_policies" {
   assert {
     condition = (
       aws_iam_role.job["etl"].name == "test-batch-etl-job"
-      && aws_iam_role.job["etl"].assume_role_policy == aws_iam_role.job_execution[0].assume_role_policy
+      && jsondecode(aws_iam_role.job["etl"].assume_role_policy).Statement[0] == {
+        Effect    = "Allow"
+        Action    = "sts:AssumeRole"
+        Principal = { Service = "ecs-tasks.amazonaws.com" }
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = "123456789012" }
+          ArnLike      = { "aws:SourceArn" = "arn:aws:ecs:us-east-1:123456789012:*" }
+        }
+      }
       && aws_iam_role_policy_attachment.job["etl:arn:aws:iam::123456789012:policy/etl-data"].policy_arn == "arn:aws:iam::123456789012:policy/etl-data"
       && jsondecode(aws_iam_role_policy.job["etl"].policy).Statement[0].Action == "s3:GetObject"
     )
@@ -384,7 +404,7 @@ run "fargate_settings_pass_through" {
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).fargatePlatformConfiguration.platformVersion == "1.4.0"
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).ephemeralStorage.sizeInGiB == 100
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).runtimePlatform == { cpuArchitecture = "ARM64", operatingSystemFamily = "LINUX" }
-      && jsondecode(aws_batch_job_definition.this["arm"].container_properties).readonlyRootFilesystem == false
+      && !contains(keys(jsondecode(aws_batch_job_definition.this["arm"].container_properties)), "readonlyRootFilesystem")
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).user == "1000"
       && aws_batch_job_definition.this["arm"].scheduling_priority == 10
       && !aws_batch_job_definition.this["arm"].propagate_tags
@@ -541,6 +561,36 @@ run "secret_names_are_rejected" {
 
   variables {
     job_definitions = { etl = { image = "etl:1.0", vcpu = 1, memory = 2048, secrets = { DB_PASSWORD = "db-password" } } }
+  }
+
+  expect_failures = [var.job_definitions]
+}
+
+run "secret_arns_without_the_suffix_are_rejected" {
+  command = plan
+
+  variables {
+    job_definitions = { etl = { image = "etl:1.0", vcpu = 1, memory = 2048, secrets = { DB_PASSWORD = "arn:aws:secretsmanager:us-east-1:123456789012:secret:db" } } }
+  }
+
+  expect_failures = [var.job_definitions]
+}
+
+run "evaluate_on_exit_rejects_a_leading_wildcard" {
+  command = plan
+
+  variables {
+    job_definitions = { etl = { image = "etl:1.0", vcpu = 1, memory = 2048, retry_strategy = { attempts = 2, evaluate_on_exit = [{ action = "EXIT", on_reason = "*error*" }] } } }
+  }
+
+  expect_failures = [var.job_definitions]
+}
+
+run "evaluate_on_exit_rejects_a_non_numeric_exit_code" {
+  command = plan
+
+  variables {
+    job_definitions = { etl = { image = "etl:1.0", vcpu = 1, memory = 2048, retry_strategy = { attempts = 2, evaluate_on_exit = [{ action = "RETRY", on_exit_code = "1a" }] } } }
   }
 
   expect_failures = [var.job_definitions]

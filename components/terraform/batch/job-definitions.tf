@@ -10,10 +10,13 @@
 #   <Environment>-<name>-<key>-job when it has job_role_policy_arns or
 #   job_role_policy_json.
 #
-# Both trust ecs-tasks.amazonaws.com limited to this account's ECS tasks in
-# this region (aws:SourceAccount + aws:SourceArn arn:aws:ecs:<region>:<acct>:*),
-# the trust policy AWS documents for task roles against the confused deputy
-# (a cluster-specific SourceArn is not supported, hence the wildcard).
+# Both trust ecs-tasks.amazonaws.com. Job roles use the trust AWS documents
+# for task roles against the confused deputy: aws:SourceAccount plus
+# aws:SourceArn arn:aws:ecs:<region>:<acct>:* (a cluster-specific SourceArn is
+# not supported, hence the wildcard). The execution role gets aws:SourceAccount
+# only: the ECS task execution role and Batch execution role docs show no
+# SourceArn, and a SourceArn the agent does not send would fail every job that
+# uses the role at start.
 
 locals {
   job_definitions = {
@@ -49,7 +52,7 @@ locals {
     for k, d in local.job_roles : { for a in d.job_role_policy_arns : "${k}:${a}" => { key = k, policy_arn = a } }
   ]...)
 
-  ecs_tasks_assume_role_policy = jsonencode({
+  job_role_assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
@@ -58,6 +61,18 @@ locals {
       Condition = {
         StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
         ArnLike      = { "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:*" }
+      }
+    }]
+  })
+
+  execution_role_assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
       }
     }]
   })
@@ -80,7 +95,7 @@ resource "aws_iam_role" "job_execution" {
   count = local.execution_role_enabled ? 1 : 0
 
   name               = local.execution_role_name
-  assume_role_policy = local.ecs_tasks_assume_role_policy
+  assume_role_policy = local.execution_role_assume_role_policy
 
   tags = { Name = local.execution_role_name }
 
@@ -150,7 +165,7 @@ resource "aws_iam_role" "job" {
   for_each = local.job_roles
 
   name               = each.value.role_name
-  assume_role_policy = local.ecs_tasks_assume_role_policy
+  assume_role_policy = local.job_role_assume_role_policy
 
   tags = { Name = each.value.role_name }
 
@@ -195,8 +210,10 @@ locals {
         jobRoleArn       = d.job_role_arn != null ? d.job_role_arn : try(aws_iam_role.job[k].arn, null)
         executionRoleArn = contains(local.execution_role_keys, k) ? local.execution_role_arn : null
 
-        readonlyRootFilesystem = d.readonly_root_filesystem
-        privileged             = d.fargate ? null : d.privileged
+        # Sent only when true: false is Batch's default, and an explicit false
+        # may not round-trip, which would register a revision on every apply.
+        readonlyRootFilesystem = d.readonly_root_filesystem ? true : null
+        privileged             = !d.fargate && d.privileged ? true : null
         user                   = d.user
         ulimits                = length(d.ulimits) > 0 ? [for u in d.ulimits : { name = u.name, softLimit = u.soft_limit, hardLimit = u.hard_limit }] : null
         linuxParameters = d.linux_parameters == null ? null : {
