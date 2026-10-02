@@ -7,7 +7,7 @@ Called by scripts/plan-sweep.sh once per stack/component pair, as
 and once at startup as `--self-test COMPONENTS_DIR TMPDIR` (which also runs
 by hand, from anywhere). Kept out of the shell script because it grew an HCL
 reader (plan_sweep_hcl.py) and a self-test; the contract with the shell is the
-five lines printed at the end, nothing else.
+six lines printed at the end, nothing else.
 
 --process-functions=false leaves Atmos's YAML functions as literal strings:
 '!terraform.state vpc/main .vpc_id' needs another component's state, and
@@ -1466,11 +1466,11 @@ def main(argv):
     # Line 4: !terraform references output-shaped, name-guessed, dropped; then
     # other functions guessed, dropped.
     #
-    # Line 6: top-level variables holding a dropped value, joined by comma.
-    #
     # Line 5: warnings, joined by TAB: references that work but are stale --
     # an output the target does not declare, behind a '//' default that
     # therefore always applies. Reported, never failing.
+    #
+    # Line 6: top-level variables holding a dropped value, joined by comma.
     c = b.counts
     print(d.get('component') or (d.get('metadata') or {}).get('component') or '')
     print(','.join(sorted(set(b.dropped))))

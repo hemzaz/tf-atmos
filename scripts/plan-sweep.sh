@@ -578,6 +578,10 @@ classify_diags() {
 # it names none this can read). A failed validation block lists the values
 # behind its condition, `var.x is "bad"`, one per variable it reads; a failed
 # type constraint says `not suitable for var.x`.
+# Terraform omits sensitive and ephemeral variables from that value box, so a
+# validation reading a dropped sensitive one would be misattributed to FAIL; none
+# does today. If one appears, keep UNATTRIBUTABLE when any dropped_top variable
+# is sensitive or ephemeral.
 invalid_names() {
   awk -F'\t' '
     $1 == "INVALID" {
