@@ -114,8 +114,9 @@ atmos workflow hot-deploy -f deploy-application -s <stack>   # Cognito, Lambda, 
 atmos workflow deploy -f deploy-template -s <stack>          # a stack template (stacks/catalog/templates/)
 ```
 
-Of the stack templates only `microservices-platform` names components that all exist; the others
-fail at `deploy-template`. No stack deploys `idp-platform`.
+Of the stack templates only `serverless-api` still names inputs its components do not declare
+(its fixture is known-broken); the others' fixtures pass the checks, `microservices-platform`
+with a known deploy-layer gap. No stack deploys `idp-platform`.
 
 ## In-cluster components
 

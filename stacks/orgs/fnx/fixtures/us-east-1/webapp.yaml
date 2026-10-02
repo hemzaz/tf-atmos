@@ -2,8 +2,38 @@
 # Never deployed (see ../_defaults.yaml).
 import:
   - orgs/fnx/fixtures/_defaults
+  - catalog/network/defaults
   - catalog/templates/web-application
 
 settings:
   context:
     environment: webapp
+  # The template's REQUIREMENTS 2. Placeholders.
+  web_application:
+    app_domain_name: fixtures.example.com
+    dns_component: network/main
+    dns_zone_key: main
+    app_container_image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/webapp:1.0
+    origin_verify_ssm_parameter: /fnx/webapp/origin-verify
+
+components:
+  terraform:
+    # The template's REQUIREMENTS 1: CloudFront log delivery into the SSE-KMS
+    # log bucket.
+    kms/main:
+      vars:
+        allow_log_delivery_s3: true
+
+    # The template's REQUIREMENTS 3: the dns instance holding app_domain_name's
+    # public zone.
+    network/main:
+      metadata:
+        component: dns
+        inherits:
+          - dns
+      vars:
+        root_domain: fixtures.example.com
+        zones:
+          main:
+            name: fixtures.example.com
+            comment: Template fixture zone
