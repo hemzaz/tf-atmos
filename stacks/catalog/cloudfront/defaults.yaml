@@ -1,0 +1,51 @@
+##################################################
+# Catalog Configuration for CloudFront
+##################################################
+# One distribution per instance in front of an S3 bucket through origin
+# access control (the Cloud Posse terraform-aws-cloudfront-s3-cdn model).
+# Instances inherit this base and set `name` and
+# `origin_bucket_regional_domain_name` (an s3 instance's
+# .bucket_regional_domain_name); for a custom domain also `aliases`,
+# `acm_certificate_arn` (an acm instance's .certificate_arns.<key>, us-east-1)
+# and, for alias records, `dns_alias_enabled: true` with `parent_zone_id` (a
+# dns instance's .zone_ids.<key>); optionally `web_acl_id` (a CLOUDFRONT-scope
+# waf instance's .arn). List each instance read in dependencies.components.
+#
+# Example instance (the origin bucket's policy is described in
+# components/terraform/cloudfront/README.md):
+#
+#   cdn/site:
+#     metadata:
+#       component: cloudfront
+#       inherits: [cloudfront/defaults]
+#     dependencies:
+#       components:
+#         - component: s3/site
+#         - component: acm/main
+#         - component: network/main
+#     vars:
+#       name: site
+#       origin_bucket_regional_domain_name: !terraform.state s3/site .bucket_regional_domain_name
+#       aliases: ["www.example.com"]
+#       acm_certificate_arn: !terraform.state acm/main .certificate_arns.www
+#       dns_alias_enabled: true
+#       parent_zone_id: !terraform.state network/main .zone_ids.main
+#       enable_spa_fallback: true
+
+components:
+  terraform:
+    cloudfront/defaults:
+      metadata:
+        component: cloudfront
+        type: abstract
+      vars:
+        enabled: true
+        price_class: PriceClass_100
+        http_version: http2and3
+        ipv6_enabled: true
+        minimum_protocol_version: TLSv1.2_2021
+        default_root_object: index.html
+        cache_policy_id: CachingOptimized
+        response_headers_policy_id: SecurityHeadersPolicy
+        tags:
+          Component: "CloudFront"

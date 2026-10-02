@@ -14,6 +14,8 @@ default, TLS-only bucket policy.
   buckets from `s3/defaults` too (`serverless-api` also declares one).
 - Consumers read `.bucket_id`, `.bucket_name`, `.bucket_arn` or `.bucket_regional_domain_name`;
   `lambda/*` reads `s3/lambda-artifacts .bucket_id`.
+- A CloudFront origin bucket takes the `cloudfront` instance's `s3_origin_policy_json` in
+  `source_policy_documents` (the deploy-order caveat is in `components/terraform/cloudfront/README.md`).
 
 ## Notes
 

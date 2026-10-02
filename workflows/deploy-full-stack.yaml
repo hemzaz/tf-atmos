@@ -27,9 +27,10 @@
 # its own zone_name_servers, so network/services has a dns-zones layer before
 # dns. acm validates its certificates in the dns instances' zones (zone_ids), so it
 # has its own certificates layer after dns and before services and monitoring,
-# which read its certificate ARNs. eks-addons reads its dns instance's zone_ids,
-# so it has its own addons layer after dns (and after compute, for the cluster
-# it installs into). The storage layer (s3, reading kms/main) precedes compute,
+# which read its certificate ARNs, as does cloudfront (services), which also
+# writes alias records into the dns instances' zones. eks-addons reads its dns
+# instance's zone_ids, so it has its own addons layer after dns (and after
+# compute, for the cluster it installs into). The storage layer (s3, reading kms/main) precedes compute,
 # whose lambda instances read s3/lambda-artifacts .bucket_id.
 # Every layer except backend has at least one enabled instance in every
 # workload stack (eks-backend-services/main, the last to gain instances, joined
@@ -304,7 +305,8 @@ workflows:
       - name: plan-services
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"'
+          terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
+          or .metadata.component == "cloudfront"'
       - name: confirm_services
         type: confirm
         prompt: Apply the services layer plan above?
@@ -316,7 +318,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
-          or .metadata.component == "eks-backend-services"'
+          or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"'
       - name: plan-monitoring
         type: atmos
         command: >-
@@ -651,14 +653,15 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "eks-addons"'
 
   deploy-services:
-    description: "Deploy the services layer: API Gateway and backend services"
+    description: "Deploy the services layer: API Gateway, backend services and CloudFront distributions"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"'
+          terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
+          or .metadata.component == "cloudfront"'
       - name: confirm
         type: confirm
         prompt: Deploy the services layer?
@@ -670,7 +673,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
-          or .metadata.component == "eks-backend-services"'
+          or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"'
 
   deploy-monitoring:
     description: "Deploy the monitoring layer: monitoring and cost optimization"
