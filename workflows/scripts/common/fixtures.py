@@ -34,15 +34,17 @@ def stacks(check: str) -> list[str]:
     return sorted(s for s in KNOWN_BROKEN_FIXTURES if known_broken(s, check))
 
 
-def fatal(errors: list[str], check: str) -> list[str]:
-    """Print the errors of known-broken fixtures as KNOWN-BROKEN; return the rest.
+def belongs(error: str, stack: str) -> bool:
+    """Whether a check's error is about stack: it starts "<stack>: ", or, for
+    check-deploy-layers, "<file> `<workflow>`: <stack>: "."""
+    return error.startswith(f"{stack}: ") or f"`: {stack}: " in error
 
-    An error belongs to a stack when it contains "<stack>: " (every check prints
-    its stack name that way).
-    """
+
+def fatal(errors: list[str], check: str) -> list[str]:
+    """Print the errors of known-broken fixtures as KNOWN-BROKEN; return the rest."""
     rest = []
     for error in errors:
-        if any(f"{stack}: " in error for stack in stacks(check)):
+        if any(belongs(error, stack) for stack in stacks(check)):
             print(f"KNOWN-BROKEN {error}")
         else:
             rest.append(error)

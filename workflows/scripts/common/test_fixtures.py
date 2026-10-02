@@ -42,6 +42,16 @@ class FixturesTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(fixtures.fatal(errors, "check-domains"), errors[3:])
 
+    def test_fatal_matches_only_the_stack_the_error_is_about(self):
+        # A strict stack's error that merely names a known-broken stack stays fatal.
+        errors = [
+            "fnx-dev-testenv-01: x reads y in fnx-fixtures-a: which does not exist",
+            "fnx-dev-testenv-01: note fnx-fixtures-a: z",
+            "xfnx-fixtures-a: not the stack",
+        ]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(fixtures.fatal(errors, "plan-sweep"), errors)
+
 
 class RealEntriesTest(unittest.TestCase):
     def test_every_entry_is_a_fixture_stack(self):
