@@ -37,7 +37,6 @@ variables {
     Tenant      = "fnx"
     ManagedBy   = "Terraform"
   }
-  enable_inspector          = false
   guardduty_detector_id     = "12abc34d567e8fa901bc2d34e56789f0"
   securityhub_account_arn   = "arn:aws:securityhub:us-east-1:123456789012:hub/default"
   kms_key_id                = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"

@@ -1,15 +1,18 @@
 locals {
   name_prefix = "${var.tags["Environment"]}-${lookup(var.tags, "Name", "security")}"
 
-  # The detector and the hub are owned by the guardduty and securityhub
-  # components (one component per service, the Cloud Posse model). This
-  # component only routes their findings, so a null ID turns the matching
-  # EventBridge rule off -- unless require_*_route is set, in which case the
-  # topic's precondition fails the plan instead. The CloudTrail log group
+  # The detector, the hub and the Inspector enabler are owned by the
+  # guardduty, securityhub and inspector2 components (one component per
+  # service, the Cloud Posse model). This component only routes their
+  # findings, so a null ID turns the matching EventBridge rule off -- unless
+  # require_*_route is set, in which case the topic's precondition fails the
+  # plan instead. Inspector is opt-in (inspector2 enabled defaults to false and
+  # returns a null account_id), so its route has no require_* switch. The CloudTrail log group
   # works the same way for the CIS metric filters and alarms. All are plain
   # variables, so the counts below are known at plan time.
   guardduty_enabled    = var.guardduty_detector_id != null
   security_hub_enabled = var.securityhub_account_arn != null
+  inspector_enabled    = var.inspector2_account_id != null
   cloudtrail_enabled   = var.cloudtrail_log_group_name != null
 
   # CIS AWS Foundations Benchmark v1.2.0 metric filters (the version Security
@@ -74,14 +77,6 @@ locals {
 
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
-}
-
-# AWS Inspector V2
-resource "aws_inspector2_enabler" "main" {
-  count = var.enable_inspector ? 1 : 0
-
-  account_ids    = [data.aws_caller_identity.current.account_id]
-  resource_types = var.inspector_resource_types
 }
 
 # SNS Topic for Security Alerts
@@ -226,9 +221,9 @@ resource "aws_cloudwatch_event_target" "securityhub_sns" {
   arn       = aws_sns_topic.security_alerts.arn
 }
 
-# EventBridge rule for Inspector findings
+# EventBridge rule for Inspector findings (inspector2 component)
 resource "aws_cloudwatch_event_rule" "inspector_findings" {
-  count = var.enable_inspector ? 1 : 0
+  count = local.inspector_enabled ? 1 : 0
 
   name        = "${local.name_prefix}-inspector-findings"
   description = "Capture Inspector HIGH and CRITICAL findings"
@@ -243,7 +238,7 @@ resource "aws_cloudwatch_event_rule" "inspector_findings" {
 }
 
 resource "aws_cloudwatch_event_target" "inspector_sns" {
-  count = var.enable_inspector ? 1 : 0
+  count = local.inspector_enabled ? 1 : 0
 
   rule      = aws_cloudwatch_event_rule.inspector_findings[0].name
   target_id = "SendToSNS"

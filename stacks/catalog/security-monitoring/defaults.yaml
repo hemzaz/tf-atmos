@@ -3,15 +3,16 @@
 # Catalog Configuration for security-monitoring
 ##################################################
 # Routes security findings to an SNS topic. It does NOT own the GuardDuty
-# detector or the Security Hub hub: the guardduty and securityhub components
-# do, and this component consumes their outputs. They, kms/main (the topic's
+# detector, the Security Hub hub or the Inspector enabler: the guardduty,
+# securityhub and inspector2 components do, and this component consumes their
+# outputs. They, kms/main (the topic's
 # key), cloudtrail/main (the CIS filters' log group) and iam/ci (the CI apply
 # role excluded from security group change alerts) are declared in
 # dependencies.components so they deploy first;
 # workflows/scripts/common/check-dependencies.py enforces that.
 #
 # Every stack runs kms/main, cloudtrail/main, guardduty/main,
-# securityhub/main and iam/ci, so the references resolve in all of them.
+# securityhub/main, inspector2/main and iam/ci, so the references resolve in all of them.
 
 components:
   terraform:
@@ -25,6 +26,7 @@ components:
           - component: cloudtrail/main
           - component: guardduty/main
           - component: securityhub/main
+          - component: inspector2/main
           - component: iam/ci
       vars:
         guardduty_detector_id: !terraform.state guardduty/main .detector_id
@@ -75,9 +77,10 @@ components:
         # allow_eventbridge and allow_cloudwatch_alarms so EventBridge and CloudWatch
         # can publish to it.
         kms_key_id: !terraform.state kms/main .key_arn
-        # Inspector V2 bills per EC2 instance, container image and Lambda
-        # function scanned. Off by default so no stack pays for it silently.
-        enable_inspector: false
+        # Inspector findings are routed while inspector2/main is enabled: its
+        # account_id is null while it is off (the catalog default, Inspector
+        # bills per resource scanned), which turns the route off.
+        inspector2_account_id: !terraform.state inspector2/main .account_id
         enable_alert_enrichment: false
         security_email_subscriptions: []
         tags:
