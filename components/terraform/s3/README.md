@@ -14,13 +14,16 @@ default, TLS-only bucket policy.
   buckets from `s3/defaults` too (`serverless-api` also declares one).
 - Consumers read `.bucket_id`, `.bucket_name`, `.bucket_arn` or `.bucket_regional_domain_name`;
   `lambda/*` reads `s3/lambda-artifacts .bucket_id`.
+- A CloudFront origin bucket sets `allow_cloudfront_oac_read: true` (any distribution of the
+  account may read objects through OAC); a `cloudfront` instance's `s3_origin_policy_json` in
+  `source_policy_documents` is the optional single-distribution alternative.
 
 ## Notes
 
 - The bucket is `<Environment>-<name>-<account id>` unless `bucket_name` is set.
 - Readers and writers need `kms:Decrypt` / `kms:GenerateDataKey` in their own IAM policies. A
-  service principal reading objects (for example CloudFront with origin access control) needs a
-  key-policy statement that `kms/main` does not have.
+  service principal reading objects needs a key-policy statement: for CloudFront with origin
+  access control, kms `allow_cloudfront` (off in `kms/defaults`).
 - S3 server access logs only go to SSE-S3 buckets, so `logging.bucket_name` cannot be a bucket from
   this component.
 - Notification destinations (`event_notification_details`, ported verbatim from Cloud Posse) must

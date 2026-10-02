@@ -155,6 +155,12 @@ variable "source_policy_documents" {
   }
 }
 
+variable "allow_cloudfront_oac_read" {
+  type        = bool
+  description = "Let CloudFront origin access control read objects (s3:GetObject on <bucket>/*), for any distribution of this account (aws:SourceAccount, AWS:SourceArn distribution/*). For an SSE-KMS bucket the key also needs kms allow_cloudfront"
+  default     = false
+}
+
 variable "event_notification_details" {
   type = object({
     enabled     = bool

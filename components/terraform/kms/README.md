@@ -23,7 +23,9 @@ use through their own IAM policies.
   The sandbox sets `allow_autoscaling_ebs: false`.
 - The `allow_*` flags add condition-scoped statements for service principals the root statement
   does not reach (CloudWatch Logs, log delivery, EventBridge, SNS, S3, CloudWatch alarms,
-  CloudTrail, Auto Scaling EBS, Backup). `kms/defaults` turns them on. Prefer them over
+  CloudTrail, Auto Scaling EBS, Backup, CloudFront). `kms/defaults` turns them on, except
+  `allow_cloudfront` (kms:Decrypt for any distribution of the account), which a stack with a
+  `cloudfront` instance over an SSE-KMS origin bucket sets on its `kms/main`. Prefer them over
   `key_service_users`, which has no conditions.
 - The CI apply role gets key use via `iam`'s `ci_apply_kms_key_aliases` (by alias, because
   `iam/ci` applies in the layer before `kms/main`).

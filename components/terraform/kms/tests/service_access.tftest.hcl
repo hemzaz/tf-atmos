@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics", "AllowCloudFront"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -102,6 +102,32 @@ run "log_delivery_is_scoped_to_this_account" {
   assert {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]) == 0
     error_message = "allow_log_delivery must not grant AllowCloudWatchLogs; the two flags are independent."
+  }
+}
+
+run "cloudfront_is_scoped_to_this_accounts_distributions" {
+  command = plan
+
+  variables {
+    allow_cloudfront = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudFront"]).Principal.Service == "cloudfront.amazonaws.com"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudFront"]).Action == "kms:Decrypt"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudFront"]).Resource == "*"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudFront"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "AWS:SourceArn" = "arn:aws:cloudfront::123456789012:distribution/*" }
+      }
+    )
+    error_message = "cloudfront.amazonaws.com may only kms:Decrypt (read-only OAC), for this account's distributions."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowS3", "AllowLogDelivery"], try(s.Sid, ""))]) == 0
+    error_message = "allow_cloudfront must not grant other services anything."
   }
 }
 

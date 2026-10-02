@@ -123,6 +123,42 @@ run "source_policies_are_merged_with_the_tls_statement" {
   }
 }
 
+run "cloudfront_oac_read_is_off_by_default" {
+  command = plan
+
+  assert {
+    condition     = length([for s in jsondecode(data.aws_iam_policy_document.bucket[0].json).Statement : s if try(s.Sid, "") == "AllowCloudFrontOACRead"]) == 0
+    error_message = "allow_cloudfront_oac_read is opt-in."
+  }
+}
+
+run "cloudfront_oac_read_is_scoped_to_this_accounts_distributions" {
+  command = plan
+
+  variables {
+    allow_cloudfront_oac_read = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(data.aws_iam_policy_document.bucket[0].json).Statement : s if try(s.Sid, "") == "AllowCloudFrontOACRead"]).Effect == "Allow"
+      && one([for s in jsondecode(data.aws_iam_policy_document.bucket[0].json).Statement : s if try(s.Sid, "") == "AllowCloudFrontOACRead"]).Principal.Service == "cloudfront.amazonaws.com"
+      && one([for s in jsondecode(data.aws_iam_policy_document.bucket[0].json).Statement : s if try(s.Sid, "") == "AllowCloudFrontOACRead"]).Action == "s3:GetObject"
+      && one([for s in jsondecode(data.aws_iam_policy_document.bucket[0].json).Statement : s if try(s.Sid, "") == "AllowCloudFrontOACRead"]).Resource == "arn:aws:s3:::test-assets-123456789012/*"
+      && one([for s in jsondecode(data.aws_iam_policy_document.bucket[0].json).Statement : s if try(s.Sid, "") == "AllowCloudFrontOACRead"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "AWS:SourceArn" = "arn:aws:cloudfront::123456789012:distribution/*" }
+      }
+    )
+    error_message = "CloudFront may only s3:GetObject on the bucket's objects, for this account's distributions."
+  }
+
+  assert {
+    condition     = toset([for s in jsondecode(data.aws_iam_policy_document.bucket[0].json).Statement : s.Sid]) == toset(["AllowCloudFrontOACRead", "ForceSSLOnlyAccess"])
+    error_message = "The CloudFront statement is kept alongside ForceSSLOnlyAccess."
+  }
+}
+
 run "logging_and_lifecycle_rules" {
   command = plan
 

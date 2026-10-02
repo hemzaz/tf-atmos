@@ -125,6 +125,39 @@ data "aws_iam_policy_document" "bucket" {
       values   = ["false"]
     }
   }
+
+  # CloudFront origin access control reads (allow_cloudfront_oac_read): any
+  # distribution of this account, so the policy needs no distribution ARN and
+  # the bucket deploys before its distribution in one pass. The cloudfront
+  # component's s3_origin_policy_json (one distribution) is the tighter,
+  # optional alternative through source_policy_documents.
+  dynamic "statement" {
+    for_each = var.allow_cloudfront_oac_read ? [1] : []
+
+    content {
+      sid       = "AllowCloudFrontOACRead"
+      effect    = "Allow"
+      actions   = ["s3:GetObject"]
+      resources = ["${local.bucket_arn}/*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["cloudfront.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [local.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "AWS:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:cloudfront::${local.account_id}:distribution/*"]
+      }
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "this" {

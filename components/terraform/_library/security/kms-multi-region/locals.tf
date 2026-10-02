@@ -488,6 +488,38 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # CloudFront reading SSE-KMS objects through origin access control (an
+  # origin bucket encrypted with this key): read-only, so kms:Decrypt only,
+  # limited to this account's distributions (any of them: account-scoped, so
+  # the key policy needs no distribution ARN and deploys before it).
+  # Region-independent.
+  dynamic "statement" {
+    for_each = var.allow_cloudfront ? [1] : []
+
+    content {
+      sid       = "AllowCloudFront"
+      actions   = ["kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["cloudfront.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "AWS:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
+      }
+    }
+  }
+
   # The EC2 Auto Scaling service-linked role that every managed node group /
   # ASG uses to launch instances needs kms:CreateGrant (scoped to
   # kms:GrantIsForAWSResource, AWS's documented pattern for EBS + Auto
