@@ -140,9 +140,8 @@ variable "security_groups" {
 
   # source_security_group_id and security_groups both name a source. The
   # source is either a sibling key in this map, or a literal sg-<hex> id read
-  # from another component via !terraform.state -- see
-  # stacks/catalog/templates/web-application.yaml's "http-from-alb" rule,
-  # which reads web-application/alb's security_group_id output this way.
+  # from another component via !terraform.state (e.g. an eks cluster's
+  # security group id).
   # Anything else is a typo that AWS would only reject at apply, with a
   # message that names neither the group nor the stack file.
   validation {

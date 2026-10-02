@@ -150,9 +150,9 @@ atmos workflow deploy -f deploy-template -s <stack>          # a stack template 
 ```
 
 Template readiness follows `KNOWN_BROKEN_FIXTURES` in `workflows/scripts/common/fixtures.py`
-(see [Template fixtures](#template-fixtures)): `batch-processing` and `data-pipeline` pass every
-check; `microservices-platform` still fails `check-cluster-api-ci` and `check-deploy-layers`;
-`serverless-api` and `web-application` are not ported yet, so every check is relaxed for them. No
+(see [Template fixtures](#template-fixtures)): `batch-processing`, `data-pipeline` and
+`web-application` pass every check; `microservices-platform` still fails `check-cluster-api-ci` and
+`check-deploy-layers`; `serverless-api` is not ported yet, so every check is relaxed for it. No
 stack deploys `idp-platform`.
 
 ## In-cluster components
