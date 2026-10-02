@@ -17,7 +17,7 @@
 # (Atmos applies a layer in dependency order). The backend layer has an instance
 # only in fnx-core-root (the single state backend), which is deployed before any
 # workload stack; iam/ci reads it cross-stack. Connectivity follows networking, security-monitoring
-# follows security (it reads guardduty, securityhub and cloudtrail state; awsconfig
+# follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
 # dependencies.components), lambda (compute) precedes apigateway (services), as
 # does apigateway-account (security: the account's CloudWatch role REST stage
@@ -468,7 +468,7 @@ workflows:
           or .metadata.component == "network" or .atmos_component == "ec2/bastion"'
 
   deploy-security:
-    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
+    description: "Deploy the security layer: secrets, GuardDuty, Security Hub, Inspector, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -496,7 +496,7 @@ workflows:
           or .metadata.component == "inspector2"'
 
   deploy-security-monitoring:
-    description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector and Security Hub)"
+    description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector, Security Hub and Inspector)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures

@@ -5,14 +5,14 @@
 # Routes security findings to an SNS topic. It does NOT own the GuardDuty
 # detector, the Security Hub hub or the Inspector enabler: the guardduty,
 # securityhub and inspector2 components do, and this component consumes their
-# outputs. They, kms/main (the topic's
-# key), cloudtrail/main (the CIS filters' log group) and iam/ci (the CI apply
-# role excluded from security group change alerts) are declared in
-# dependencies.components so they deploy first;
+# outputs. They, kms/main (the topic's key), cloudtrail/main (the CIS filters'
+# log group) and iam/ci (the CI apply role excluded from security group change
+# alerts) are declared in dependencies.components so they deploy first;
 # workflows/scripts/common/check-dependencies.py enforces that.
 #
 # Every stack runs kms/main, cloudtrail/main, guardduty/main,
-# securityhub/main, inspector2/main and iam/ci, so the references resolve in all of them.
+# securityhub/main, inspector2/main and iam/ci, so the references resolve in
+# all of them.
 
 components:
   terraform:

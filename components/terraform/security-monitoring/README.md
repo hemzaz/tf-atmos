@@ -2,18 +2,18 @@
 
 Routes security findings to one KMS-encrypted SNS topic: EventBridge rules for GuardDuty findings
 of severity 4.0 and above, new active failed HIGH/CRITICAL Security Hub control findings and,
-while the inspector2 component is enabled, HIGH/CRITICAL Inspector findings; every security group create, delete and rule
-change not made by automation (CloudTrail EC2 API calls); plus the four CIS v1.2.0 metric filters and
-alarms on the CloudTrail log group, email subscriptions, and an optional Slack/PagerDuty
-enrichment Lambda. It creates no detector, hub or Inspector enabler (one component per service,
-the Cloud Posse model).
+while the inspector2 component is enabled, HIGH/CRITICAL Inspector findings; every security group
+create, delete and rule change not made by automation (CloudTrail EC2 API calls); plus the four
+CIS v1.2.0 metric filters and alarms on the CloudTrail log group, email subscriptions, and an
+optional Slack/PagerDuty enrichment Lambda. It creates no detector, hub or Inspector enabler (one
+component per service, the Cloud Posse model).
 
 ## Wiring
 
 - Instance: `security-monitoring/main` in the three AWS stacks.
 - Reads: `guardduty/main .detector_id`, `securityhub/main .account_arn`,
-  `inspector2/main .account_id`, `cloudtrail/main .cloudtrail_logs_log_group_name`, `kms/main .key_arn`,
-  `iam/ci .ci_apply_role_arn`.
+  `inspector2/main .account_id`, `cloudtrail/main .cloudtrail_logs_log_group_name`,
+  `kms/main .key_arn`, `iam/ci .ci_apply_role_arn`.
 
 ## Notes
 
