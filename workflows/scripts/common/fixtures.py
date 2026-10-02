@@ -34,6 +34,12 @@ def stacks(check: str) -> list[str]:
     return sorted(s for s in KNOWN_BROKEN_FIXTURES if known_broken(s, check))
 
 
+def unswept() -> list[str]:
+    """Fixtures plan-sweep skips: those broken on ALL checks (CI cost; check-dependencies
+    still reports them). Narrowing or removing an entry puts the fixture back in the sweep."""
+    return sorted(s for s, checks in KNOWN_BROKEN_FIXTURES.items() if checks is ALL)
+
+
 FIXTURE_STAGE = "fixtures"
 
 

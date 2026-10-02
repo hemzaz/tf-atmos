@@ -193,7 +193,8 @@ Each `stacks/catalog/templates/<t>.yaml` has a never-deployed stack `fnx-fixture
 into length-limited AWS names), so lint, validate-all and plan-sweep check templates no real stack
 imports. A fixture listed in `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) has
 the listed checks' failures printed as `KNOWN-BROKEN` without failing; a template port PR removes
-its entry, which makes the fixture strict.
+its entry, which makes the fixture strict. plan-sweep does not sweep a fixture whose entry is `ALL`
+(check-dependencies still reports it); narrowing or removing the entry puts it back in the sweep.
 
 ## Lambda packages
 

@@ -50,7 +50,8 @@
 # A template fixture listed for plan-sweep in KNOWN_BROKEN_FIXTURES
 # (workflows/scripts/common/fixtures.py) is swept and reported, but its
 # FAIL/ERROR/SKIP/UNATTRIBUTABLE/INCONCLUSIVE pairs are counted as KNOWN-BROKEN
-# and do not fail the run.
+# and do not fail the run. A fixture whose entry is ALL is not swept at all
+# (fixtures.unswept(); one "SKIP (known broken, all checks)" line, not failing).
 #
 # Exit status: 1 if any pair FAILs, ERRORs or is SKIPped, or if nothing was
 # planned at all; 2 if a required tool is missing (yq must be mikefarah v4) or
@@ -135,6 +136,7 @@ if [ -z "$STACKS" ]; then
   STACKS="fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production $fixture_stacks"
 fi
 KNOWN_BROKEN=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("plan-sweep")))') || exit 2
+UNSWEPT=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.unswept()))') || exit 2
 
 fail=0
 pass=0
@@ -713,6 +715,7 @@ done
 # A known-broken fixture's failing pairs move from the failing counters to
 # known_broken once its stack is done, so they are printed but never fail the run.
 known_broken=0
+skipped_broken=0
 settle_stack() {
   [ -n "$settle_for" ] || return 0
   case " $KNOWN_BROKEN " in *" $settle_for "*) ;; *) return 0 ;; esac
@@ -726,6 +729,15 @@ for s in $STACKS; do
   settle_for=$s settle_fail=$fail settle_errored=$errored settle_skip=$skip
   settle_unattributable=$unattributable settle_inconclusive=$inconclusive
   settle_base=$((fail + errored + skip + unattributable + inconclusive))
+  # Broken on ALL checks: not planned at all (CI cost); check-dependencies still
+  # reports it. Counted apart from SKIP, which fails the run.
+  case " $UNSWEPT " in
+    *" $s "*)
+      printf 'SKIP (known broken, all checks): %s\n' "$s"
+      skipped_broken=$((skipped_broken + 1))
+      continue
+      ;;
+  esac
   case " $KNOWN_BROKEN " in *" $s "*) printf '%-24s %-26s %s\n' "$s" "-" "KNOWN-BROKEN fixture: failures below do not fail the run" ;; esac
   # `atmos list components` emits TAB-separated "<component>\t<type>\t<count>".
   # Splitting on whitespace yields three tokens per line and invents components.
@@ -904,8 +916,8 @@ done
 settle_stack
 
 printf '%s\n' "-------------------------------------------------------------------"
-printf 'PASS %s   FAIL %s   ERROR %s   UNATTRIBUTABLE %s   INCONCLUSIVE %s   SKIP %s   KNOWN-BROKEN %s\n' \
-  "$pass" "$fail" "$errored" "$unattributable" "$inconclusive" "$skip" "$known_broken"
+printf 'PASS %s   FAIL %s   ERROR %s   UNATTRIBUTABLE %s   INCONCLUSIVE %s   SKIP %s   KNOWN-BROKEN %s (+%s fixture stacks not swept)\n' \
+  "$pass" "$fail" "$errored" "$unattributable" "$inconclusive" "$skip" "$known_broken" "$skipped_broken"
 printf '  of the passes: %s planned in full, %s stopped at an expected refusal\n' \
   "$pass_full" "$((pass - pass_full))"
 # How much of the sweep rests on the target's real output shape, and how much

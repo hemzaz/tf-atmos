@@ -42,6 +42,10 @@ class FixturesTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(fixtures.fatal(errors, "check-domains"), errors[3:])
 
+    def test_plan_sweep_skips_only_all_entries(self):
+        self.assertEqual(fixtures.unswept(), ["fnx-fixtures-a"])
+        self.assertNotIn("fnx-fixtures-b", fixtures.unswept())
+
     def test_fatal_matches_only_the_stack_the_error_is_about(self):
         # A strict stack's error that merely names a known-broken stack stays fatal.
         errors = [
