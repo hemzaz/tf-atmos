@@ -173,8 +173,9 @@ resource "aws_elasticache_replication_group" "main" {
   # Encryption. Transit encryption is forced on (validated on the variable)
   # and the AUTH token is always set, so the cache is never reachable
   # unauthenticated. The token is write-only, never in plan or state. The
-  # provider sends it on every create (including a replacement); on an
-  # update, only when auth_token_version changes.
+  # provider sends it when the cache is created (including a replacement)
+  # and when auth_token_version changes; an apply that leaves the version
+  # alone never re-sends it.
   at_rest_encryption_enabled = var.at_rest_encryption_enabled
   transit_encryption_enabled = var.transit_encryption_enabled
   auth_token_wo              = local.auth_token
@@ -214,8 +215,8 @@ resource "aws_elasticache_replication_group" "main" {
 # (never '@', '"', '/' or a space). Cloud Posse keeps a stored
 # random_password; this one is ephemeral instead. It is regenerated on every
 # run but reaches AWS only through the write-only attributes. Each is sent
-# on its resource's create (or replacement), and on an update only when
-# auth_token_version changes. Nothing holds the token in plan or state.
+# when its resource is created (or replaced) and when auth_token_version
+# changes, never otherwise. Nothing holds the token in plan or state.
 #
 # One apply feeds the same value to the secret version and the replication
 # group, so the two agree. A cache replacement (a ForceNew change such as

@@ -189,10 +189,11 @@ run "producer_policy_sends_to_this_queue_and_uses_its_key_through_sqs" {
   command = plan
 
   assert {
-    condition = jsondecode(output.producer_policy).Statement[0].Resource == "arn:aws:sqs:us-east-1:123456789012:test-orders" && contains(
-      jsondecode(output.producer_policy).Statement[0].Action, "sqs:SendMessage"
+    condition = (
+      jsondecode(output.producer_policy).Statement[0].Resource == "arn:aws:sqs:us-east-1:123456789012:test-orders"
+      && toset(jsondecode(output.producer_policy).Statement[0].Action) == toset(["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"])
     )
-    error_message = "producer_policy must grant sqs:SendMessage on exactly this queue."
+    error_message = "producer_policy must grant exactly SendMessage, GetQueueAttributes and GetQueueUrl on exactly this queue."
   }
 
   assert {

@@ -22,8 +22,8 @@ state or outputs.
   `allowed_security_group_ids`, which would be a cycle.
 - Toggling `cluster_mode_enabled` replaces the cache (no online migration). With cluster mode on, a
   named `parameter_group_name` must itself be cluster-enabled (not validated).
-- The token is sent to the cache on every create or replacement, and on an update only when
-  `auth_token_version` changes. A cache replacement (a ForceNew change such as `kms_key_id`, or a
+- The token is sent to the cache when it is created or replaced and when `auth_token_version`
+  changes, never otherwise. A cache replacement (a ForceNew change such as `kms_key_id`, or a
   tainted create) re-creates the secret version alongside it (`replace_triggered_by` on the cache
   id), so the two keep agreeing.
 - Rotate the token by incrementing `auth_token_version`: the apply sends one new token to both the
