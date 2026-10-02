@@ -34,6 +34,8 @@ settings:
 # REQUIREMENTS header): the stack's kms/main, the iam instance that provisions
 # the Auto Scaling service-linked role kms/main's key policy names, and iam/ci
 # (eks access entries read its CI role ARNs).
+# iam/fixtures (the Auto Scaling SLR) and iam/ci (the GitHub OIDC provider) are
+# account-global singletons: fixture-only, never applied.
 components:
   terraform:
     iam/ci:
