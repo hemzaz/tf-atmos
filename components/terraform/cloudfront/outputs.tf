@@ -19,11 +19,11 @@ output "distribution_hosted_zone_id" {
 }
 
 output "origin_access_control_id" {
-  description = "ID of the S3 origin access control (Cloud Posse: cf_access_control_id). Null when disabled"
+  description = "ID of the S3 origin access control (Cloud Posse: cf_access_control_id). Null when disabled or without an S3 origin"
   value       = one(aws_cloudfront_origin_access_control.this[*].id)
 }
 
 output "s3_origin_policy_json" {
-  description = "Optional: bucket policy JSON letting this distribution only (AWS:SourceArn) read the origin bucket's objects through OAC, a tightening of the s3 allow_cloudfront_oac_read statement (any distribution of the account) through the origin s3 instance's source_policy_documents, applied after the distribution exists. Null when disabled"
+  description = "Optional: bucket policy JSON letting this distribution only (AWS:SourceArn) read the origin bucket's objects through OAC, a tightening of the s3 allow_cloudfront_oac_read statement (any distribution of the account) through the origin s3 instance's source_policy_documents, applied after the distribution exists. Null when disabled or without an S3 origin"
   value       = local.s3_origin_policy_json
 }

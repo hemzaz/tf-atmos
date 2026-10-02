@@ -1,10 +1,21 @@
 # One CloudFront distribution per instance, named <Environment>-<name>, in
-# front of an S3 bucket through origin access control (OAC). Modelled on
+# front of an optional S3 bucket (through origin access control, OAC) and
+# custom origins (ALB, API Gateway), with ordered cache behaviors and
+# CloudFront Functions / Lambda@Edge associations. Modelled on
 # cloudposse/terraform-aws-cloudfront-s3-cdn (the module behind Cloud Posse's
 # aws-spa-s3-cloudfront component), whose input names this component reuses
-# where they fit. Part 1 of 2: one default S3 origin. Custom origins (ALB, API
-# Gateway), ordered cache behaviors and functions are part 2 (see README).
+# where they fit (custom_origins, ordered_cache, function_association,
+# lambda_function_association).
 # Deviations from upstream:
+#   - The S3 origin is optional (origin_bucket_regional_domain_name null), so a
+#     distribution can serve custom origins only; default_origin_id picks the
+#     default behavior's origin ("" for the S3 origin, as upstream's
+#     target_origin_id ""). Without an S3 origin there is no OAC.
+#   - default_root_object defaults to index.html only when the default
+#     behavior targets the S3 origin (upstream: always index.html).
+#   - custom_origins and ordered_cache differences are listed beside those
+#     variables in variables.tf. Origin groups (failover), s3_origins and
+#     trusted signers / key groups are not modelled.
 #   - The bucket is not created here and its policy is not written here
 #     (upstream creates the bucket, or overrides an existing bucket's policy
 #     with a statement for this one distribution's ARN).
@@ -36,11 +47,24 @@ locals {
   enabled = var.enabled
   name    = "${var.tags["Environment"]}-${var.name}"
 
-  origin_id = "s3-${local.name}"
+  s3_origin_enabled = var.origin_bucket_regional_domain_name != null
+  origin_id         = "s3-${local.name}"
 
   # <bucket>.s3.<region>.amazonaws.com (validated), so the bucket's name and
   # ARN come from the one input the s3 component outputs.
-  origin_bucket = regex("^(.+)\\.s3\\.[a-z0-9-]+\\.amazonaws\\.com$", var.origin_bucket_regional_domain_name)[0]
+  origin_bucket = local.s3_origin_enabled ? regex("^(.+)\\.s3\\.[a-z0-9-]+\\.amazonaws\\.com$", coalesce(var.origin_bucket_regional_domain_name, "-"))[0] : null
+
+  # "" names the S3 origin (Cloud Posse's target_origin_id ""); anything else
+  # is a custom origin's origin_id (both validated).
+  default_origin_id   = var.default_origin_id == "" ? local.origin_id : var.default_origin_id
+  default_root_object = var.default_root_object != null ? var.default_root_object : (var.default_origin_id == "" ? "index.html" : null)
+
+  ordered_cache = [for c in var.ordered_cache : merge(c, {
+    target_origin_id           = c.target_origin_id == "" ? local.origin_id : c.target_origin_id
+    cache_policy_id            = lookup(local.managed_cache_policies, c.cache_policy_id, c.cache_policy_id)
+    origin_request_policy_id   = c.origin_request_policy_id == null ? null : lookup(local.managed_origin_request_policies, c.origin_request_policy_id, c.origin_request_policy_id)
+    response_headers_policy_id = c.response_headers_policy_id == "" ? null : lookup(local.managed_response_headers_policies, c.response_headers_policy_id, c.response_headers_policy_id)
+  })]
 
   # Cloud Posse names of the AWS managed policies; any other value is a policy
   # ID (validated). IDs from the CloudFront Developer Guide ("Use managed ...
@@ -74,11 +98,12 @@ locals {
   response_headers_policy_id = var.response_headers_policy_id == null ? null : lookup(local.managed_response_headers_policies, var.response_headers_policy_id, var.response_headers_policy_id)
 
   # SPA routing: S3 answers 403 (no s3:ListBucket) or 404 for a client-side
-  # route; serve the app shell with 200 instead.
+  # route; serve the app shell with 200 instead. The fallback needs a root
+  # object (validated); the empty string only keeps the template valid.
   spa_error_responses = [for code in [403, 404] : {
     error_code            = code
     response_code         = 200
-    response_page_path    = "/${var.default_root_object}"
+    response_page_path    = "/${local.default_root_object != null ? local.default_root_object : ""}"
     error_caching_min_ttl = 0
   }]
   custom_error_responses = concat(var.custom_error_response, var.enable_spa_fallback ? local.spa_error_responses : [])
@@ -96,7 +121,7 @@ locals {
 data "aws_partition" "current" {}
 
 resource "aws_cloudfront_origin_access_control" "this" {
-  count = local.enabled ? 1 : 0
+  count = local.enabled && local.s3_origin_enabled ? 1 : 0
 
   name                              = local.name
   description                       = "S3 origin ${local.origin_bucket} of ${local.name}"
@@ -115,7 +140,7 @@ resource "aws_cloudfront_origin_access_control" "this" {
 resource "aws_cloudfront_distribution" "this" {
   # checkov:skip=CKV_AWS_86:Access logging is an input (logging_enabled, standard logging v2), set per instance with a log bucket
   # checkov:skip=CKV_AWS_68:web_acl_id is an input; a CLOUDFRONT-scope waf instance is wired per instance
-  # checkov:skip=CKV_AWS_310:Origin failover needs a second origin (part 2)
+  # checkov:skip=CKV_AWS_310:Origin groups (failover) are not modelled; an instance has one origin per path
   # checkov:skip=CKV_AWS_374:Geo restriction is an input (geo_restriction_type), none by default as upstream
   # checkov:skip=CKV2_AWS_32:A response headers policy is attached (response_headers_policy_id, SecurityHeadersPolicy by default)
   # checkov:skip=CKV2_AWS_47:The WAF web ACL and its rules (Log4j included) come from the waf component through web_acl_id
@@ -124,22 +149,62 @@ resource "aws_cloudfront_distribution" "this" {
   enabled             = var.distribution_enabled
   comment             = coalesce(var.comment, local.name)
   aliases             = var.aliases
-  default_root_object = var.default_root_object
+  default_root_object = local.default_root_object
   http_version        = var.http_version
   is_ipv6_enabled     = var.ipv6_enabled
   price_class         = var.price_class
   web_acl_id          = var.web_acl_id
   wait_for_deployment = var.wait_for_deployment
 
-  origin {
-    origin_id                = local.origin_id
-    domain_name              = var.origin_bucket_regional_domain_name
-    origin_path              = var.origin_path
-    origin_access_control_id = aws_cloudfront_origin_access_control.this[0].id
+  dynamic "origin" {
+    for_each = local.s3_origin_enabled ? [local.origin_id] : []
+    content {
+      origin_id                = origin.value
+      domain_name              = var.origin_bucket_regional_domain_name
+      origin_path              = var.origin_path
+      origin_access_control_id = aws_cloudfront_origin_access_control.this[0].id
+    }
+  }
+
+  dynamic "origin" {
+    for_each = var.custom_origins
+    content {
+      origin_id   = origin.value.origin_id
+      domain_name = origin.value.domain_name
+      origin_path = origin.value.origin_path
+
+      # Header values are often a shared secret (the ALB origin-verify
+      # header): keep them out of plan output. This hides the whole origin
+      # set in plan diffs; the values are still in state.
+      dynamic "custom_header" {
+        for_each = origin.value.custom_headers
+        content {
+          name  = custom_header.value.name
+          value = sensitive(custom_header.value.value)
+        }
+      }
+
+      custom_origin_config {
+        http_port                = origin.value.custom_origin_config.http_port
+        https_port               = origin.value.custom_origin_config.https_port
+        origin_protocol_policy   = origin.value.custom_origin_config.origin_protocol_policy
+        origin_ssl_protocols     = origin.value.custom_origin_config.origin_ssl_protocols
+        origin_keepalive_timeout = origin.value.custom_origin_config.origin_keepalive_timeout
+        origin_read_timeout      = origin.value.custom_origin_config.origin_read_timeout
+      }
+
+      dynamic "origin_shield" {
+        for_each = try(origin.value.origin_shield.enabled, false) ? [origin.value.origin_shield] : []
+        content {
+          enabled              = origin_shield.value.enabled
+          origin_shield_region = origin_shield.value.region
+        }
+      }
+    }
   }
 
   default_cache_behavior {
-    target_origin_id           = local.origin_id
+    target_origin_id           = local.default_origin_id
     viewer_protocol_policy     = var.viewer_protocol_policy
     allowed_methods            = var.allowed_methods
     cached_methods             = var.cached_methods
@@ -147,6 +212,56 @@ resource "aws_cloudfront_distribution" "this" {
     cache_policy_id            = local.cache_policy_id
     origin_request_policy_id   = local.origin_request_policy_id
     response_headers_policy_id = local.response_headers_policy_id
+
+    dynamic "function_association" {
+      for_each = var.function_association
+      content {
+        event_type   = function_association.value.event_type
+        function_arn = function_association.value.function_arn
+      }
+    }
+
+    dynamic "lambda_function_association" {
+      for_each = var.lambda_function_association
+      content {
+        event_type   = lambda_function_association.value.event_type
+        lambda_arn   = lambda_function_association.value.lambda_arn
+        include_body = lambda_function_association.value.include_body
+      }
+    }
+  }
+
+  # List order is precedence (first match wins), as upstream.
+  dynamic "ordered_cache_behavior" {
+    for_each = local.ordered_cache
+    content {
+      path_pattern               = ordered_cache_behavior.value.path_pattern
+      target_origin_id           = ordered_cache_behavior.value.target_origin_id
+      viewer_protocol_policy     = ordered_cache_behavior.value.viewer_protocol_policy
+      allowed_methods            = ordered_cache_behavior.value.allowed_methods
+      cached_methods             = ordered_cache_behavior.value.cached_methods
+      compress                   = ordered_cache_behavior.value.compress
+      cache_policy_id            = ordered_cache_behavior.value.cache_policy_id
+      origin_request_policy_id   = ordered_cache_behavior.value.origin_request_policy_id
+      response_headers_policy_id = ordered_cache_behavior.value.response_headers_policy_id
+
+      dynamic "function_association" {
+        for_each = ordered_cache_behavior.value.function_association
+        content {
+          event_type   = function_association.value.event_type
+          function_arn = function_association.value.function_arn
+        }
+      }
+
+      dynamic "lambda_function_association" {
+        for_each = ordered_cache_behavior.value.lambda_function_association
+        content {
+          event_type   = lambda_function_association.value.event_type
+          lambda_arn   = lambda_function_association.value.lambda_arn
+          include_body = lambda_function_association.value.include_body
+        }
+      }
+    }
   }
 
   dynamic "custom_error_response" {
@@ -184,7 +299,7 @@ resource "aws_cloudfront_distribution" "this" {
 # statement already covers every distribution of the account; this tightens
 # it through the s3 component's source_policy_documents.
 locals {
-  s3_origin_policy_json = local.enabled ? jsonencode({
+  s3_origin_policy_json = local.enabled && local.s3_origin_enabled ? jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Sid       = "CloudFrontOACRead${replace(local.name, "/[^A-Za-z0-9]/", "")}"
