@@ -153,6 +153,16 @@ variable "iam_policies" {
     ])
     error_message = "Each iam_policies condition needs a non-empty test, variable and at least one value."
   }
+
+  # Two conditions with the same test and variable would render as duplicate
+  # object keys in the policy document.
+  validation {
+    condition = alltrue([
+      for s in var.iam_policies :
+      length(distinct([for c in coalesce(s.conditions, []) : "${c.test}|${c.variable}"])) == length(coalesce(s.conditions, []))
+    ])
+    error_message = "Each iam_policies statement may list a (test, variable) pair only once; merge the values."
+  }
 }
 
 variable "events_role_enabled" {

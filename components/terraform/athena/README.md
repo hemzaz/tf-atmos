@@ -9,7 +9,9 @@ the workgroup configuration is always enforced.
 - No instance in the fnx stacks. `athena/defaults` reads `kms/main .key_arn`; the `data-pipeline`
   template creates `data-pipeline/athena`, reading the `s3-athena-results` bucket
   (`output_location`) and `glue-database .database_name`.
-- Used by: `data-pipeline/step-functions` (`.workgroup_name`).
+- Deploys in the `deploy-full-stack` platform layer, after `glue` (compute). The
+  `stepfunctions` instances sharing that layer cannot read its state:
+  `data-pipeline/stepfunctions/daily-etl` names the workgroup (`<Environment>-<name>`) instead.
 
 ## Notes
 

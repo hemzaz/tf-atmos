@@ -10,6 +10,7 @@ resource.
   `data-pipeline`, `microservices-platform` and `serverless-api` catalog templates and
   `templates/stacks/serverless-stack.yaml` configure tables.
 - Consumers read `.table_name`, `.table_arn` and `.table_stream_arn`.
+- Deploys in the `deploy-full-stack` storage layer (it reads only `kms/main`).
 
 ## Notes
 

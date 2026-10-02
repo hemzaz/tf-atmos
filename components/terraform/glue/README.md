@@ -10,7 +10,10 @@ decision), as plain resources with scoped inline policies instead of `AWSGlueSer
 - No instance in the fnx stacks. `glue/defaults` reads `kms/main .key_arn`; the `data-pipeline`
   template creates `data-pipeline/glue-database`, reading its buckets' `.bucket_name`.
 - Used by (in that template): the Firehose instances (`.database_name`, `.table_names`), `athena`
-  (`.database_name`), `step-functions` (`.job_names`), `eventbridge` (`.crawler_names`).
+  (`.database_name`), `stepfunctions/daily-etl` (`.job_names`, `.job_arns`, `.database_arn`,
+  `.table_arns`), `eventbridge/crawler-completion` (`.crawler_names`).
+- Deploys in the `deploy-full-stack` compute layer, after the buckets it reads (storage) and before
+  `athena` and `stepfunctions` (platform) and `firehose` (data).
 
 ## Notes
 

@@ -80,6 +80,33 @@ resource "aws_iam_role_policy" "lambda_custom" {
   policy = var.custom_policy
 }
 
+# Condition is only rendered when a statement sets conditions, grouped by test
+# operator and then condition key (as in the stepfunctions component); Sid
+# only when set.
+resource "aws_iam_role_policy" "lambda_iam_policies" {
+  count = length(var.iam_policies) > 0 ? 1 : 0
+  name  = "${var.tags["Environment"]}-${var.function_name}-iam-policies"
+  role  = aws_iam_role.lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [for s in var.iam_policies : merge(
+      s.sid != null ? { Sid = s.sid } : {},
+      {
+        Effect   = coalesce(s.effect, "Allow")
+        Action   = s.actions
+        Resource = s.resources
+      },
+      length(coalesce(s.conditions, [])) > 0 ? {
+        Condition = {
+          for test in distinct([for c in s.conditions : c.test]) :
+          test => { for c in s.conditions : c.variable => c.values if c.test == test }
+        }
+      } : {}
+    )]
+  })
+}
+
 # kms_key_arn (below, on aws_lambda_function.main) tells Lambda to encrypt
 # this function's environment variables with a customer managed key instead
 # of the AWS-owned default. Lambda decrypts them as the function's own

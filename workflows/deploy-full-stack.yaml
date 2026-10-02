@@ -35,9 +35,12 @@
 # listener rules to it. The storage layer (s3, reading kms/main) precedes compute,
 # whose lambda instances read s3/lambda-artifacts .bucket_id; sqs and sns share it
 # (they read only kms/main; an s3 instance notifying a queue names it rather than
-# reading its state). stepfunctions (platform) follows compute, whose batch and
-# lambda state its definitions read, and eventbridge (services) follows it,
-# targeting state machines, Batch queues, lambdas and queues.
+# reading its state); so do kinesis and dynamodb, which also read only kms/main.
+# glue (compute) reads the buckets; athena (platform) reads glue, and firehose
+# (data) reads glue, kinesis and the buckets. stepfunctions (platform) follows
+# compute, whose batch, lambda and glue state its definitions read (an athena
+# workgroup it shares the layer with is named, not read), and eventbridge
+# (services) follows it, targeting state machines, Batch queues, lambdas and queues.
 # Every layer except backend has at least one enabled instance in every
 # workload stack (eks-backend-services/main, the last to gain instances, joined
 # the compute layer in all 3 stacks); fnx-core-root has only the backend layer.
@@ -118,7 +121,9 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
       - name: plan-storage
         type: atmos
-        command: terraform plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"'
+        command: >-
+          terraform plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
       - name: confirm_storage
         type: confirm
         prompt: Apply the storage layer plan above?
@@ -128,7 +133,9 @@ workflows:
         command: test "{{ .steps.confirm_storage.value }}" = "true" || { echo "Deployment cancelled before the storage layer."; exit 1; }
       - name: deploy-storage
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"'
+        command: >-
+          terraform deploy --from-plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
       - name: plan-networking
         type: atmos
         command: terraform plan --query '.metadata.component == "vpc"'
@@ -198,7 +205,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm_compute
         type: confirm
         prompt: Apply the compute layer plan above?
@@ -210,11 +217,11 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: plan-platform
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "stepfunctions"'
+          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
       - name: confirm_platform
         type: confirm
         prompt: Apply the platform layer plan above?
@@ -225,7 +232,7 @@ workflows:
       - name: deploy-platform
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "stepfunctions"'
+          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
       - name: plan-data
         type: atmos
         command: >-
@@ -411,13 +418,15 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "kms"'
 
   deploy-storage:
-    description: "Deploy the storage layer: S3 buckets, SQS queues and SNS topics (they read kms/main), such as the lambda package bucket compute reads"
+    description: "Deploy the storage layer: S3 buckets, SQS queues, SNS topics, Kinesis streams and DynamoDB tables (they read kms/main), such as the lambda package bucket compute reads"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"'
+        command: >-
+          terraform plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
       - name: confirm
         type: confirm
         prompt: Deploy the storage layer?
@@ -427,7 +436,9 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"'
+        command: >-
+          terraform deploy --from-plan --query '.metadata.component == "s3" or .metadata.component == "sqs" or .metadata.component == "sns"
+          or .metadata.component == "kinesis" or .metadata.component == "dynamodb"'
 
   deploy-networking:
     description: "Deploy the networking layer: VPCs"
@@ -519,7 +530,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "security-monitoring"'
 
   deploy-compute:
-    description: "Deploy the compute layer: EKS clusters, ECS, Batch compute environments and queues, Lambda functions and EC2 instances other than the bastion"
+    description: "Deploy the compute layer: EKS clusters, ECS, Batch compute environments and queues, Glue jobs and databases, Lambda functions and EC2 instances other than the bastion"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -527,7 +538,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm
         type: confirm
         prompt: Deploy the compute layer?
@@ -539,17 +550,17 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
 
   deploy-platform:
-    description: "Deploy the platform layer: External Secrets and Step Functions state machines (after compute, whose Batch and Lambda state they read)"
+    description: "Deploy the platform layer: External Secrets, Step Functions state machines and Athena (after compute, whose Batch, Lambda and Glue state they read)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "stepfunctions"'
+          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
       - name: confirm
         type: confirm
         prompt: Deploy the platform layer?
@@ -560,7 +571,7 @@ workflows:
       - name: deploy
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "stepfunctions"'
+          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
 
   deploy-data:
     description: "Deploy the data layer: databases, caches, backups and Firehose delivery streams"

@@ -377,7 +377,7 @@ resource "aws_glue_crawler" "this" {
   role                   = aws_iam_role.this[0].arn
   schedule               = each.value.schedule
   table_prefix           = each.value.table_prefix
-  configuration          = each.value.configuration != null ? jsonencode(each.value.configuration) : null
+  configuration          = each.value.configuration
   security_configuration = aws_glue_security_configuration.this[0].name
 
   dynamic "s3_target" {

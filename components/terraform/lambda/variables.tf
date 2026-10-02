@@ -143,6 +143,62 @@ variable "custom_policy" {
   default     = ""
 }
 
+# Statements in the shape of this repo's stepfunctions iam_policies. Cloud
+# Posse's aws-lambda takes iam-policy module documents (iam_policy) instead;
+# statements suffice here, and let one instance combine grants on resources
+# read from several instances' state, which a single custom_policy document
+# (one !terraform.state output) cannot.
+variable "iam_policies" {
+  type = list(object({
+    sid       = optional(string)
+    effect    = optional(string, "Allow")
+    actions   = list(string)
+    resources = list(string)
+    conditions = optional(list(object({
+      test     = string
+      variable = string
+      values   = list(string)
+    })), [])
+  }))
+  description = "Extra statements for the execution role, in one inline policy (<Environment>-<function_name>-iam-policies) beside custom_policy, for example a DynamoDB read grant and its key's kms:Decrypt scoped by kms:ViaService. conditions is optional per statement"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for s in var.iam_policies : contains(["Allow", "Deny"], coalesce(s.effect, "Allow"))])
+    error_message = "Each iam_policies statement's effect must be Allow or Deny."
+  }
+
+  validation {
+    condition     = alltrue([for s in var.iam_policies : length(s.actions) > 0 && length(s.resources) > 0])
+    error_message = "Each iam_policies statement needs at least one action and one resource."
+  }
+
+  validation {
+    condition     = alltrue([for s in var.iam_policies : coalesce(s.effect, "Allow") != "Allow" || alltrue([for a in s.actions : a != "*"])])
+    error_message = "An Allow statement in iam_policies may not use the \"*\" action."
+  }
+
+  validation {
+    condition = alltrue([
+      for s in var.iam_policies : alltrue([
+        for c in coalesce(s.conditions, []) : trimspace(c.test) != "" && trimspace(c.variable) != "" && length(c.values) > 0
+      ])
+    ])
+    error_message = "Each iam_policies condition needs a non-empty test, variable and at least one value."
+  }
+
+  # Two conditions with the same test and variable would render as duplicate
+  # object keys in the policy document.
+  validation {
+    condition = alltrue([
+      for s in var.iam_policies :
+      length(distinct([for c in coalesce(s.conditions, []) : "${c.test}|${c.variable}"])) == length(coalesce(s.conditions, []))
+    ])
+    error_message = "Each iam_policies statement may list a (test, variable) pair only once; merge the values."
+  }
+}
+
 variable "api_gateway_source_arn" {
   type        = string
   description = "ARN of the API Gateway that invokes the Lambda function"

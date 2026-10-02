@@ -15,11 +15,11 @@ deviations are listed at the top of `main.tf`.
 - Conversion reads a `glue` instance's `.database_name` and a table name (`.table_names`) into
   `data_format_conversion.schema_configuration`; a Lambda processor reads a `lambda` instance's
   `.function_arn` (or `.alias_arn`) into `processor_lambda_arn`.
-- It deploys in the `data` layer of `workflows/deploy-full-stack.yaml`, after `kms`, `s3` and
-  `lambda`. A `kinesis` or `glue` instance it reads must deploy in an earlier layer.
-- `stacks/catalog/templates/data-pipeline.yaml` (`data-pipeline/firehose-raw`,
-  `data-pipeline/firehose-processed`) predates this component and still uses the old nested
-  `kinesis_source_configuration`/`s3_configuration` inputs; it needs porting.
+- It deploys in the `data` layer of `workflows/deploy-full-stack.yaml`, after `kms`, `s3`,
+  `kinesis` (storage), `lambda` and `glue` (compute).
+- The `data-pipeline` template creates `data-pipeline/firehose-raw` (Hive JSON to Parquet) and
+  `data-pipeline/firehose-processed` (OpenX JSON to Parquet, partitioned by a JQ key), each from a
+  Kinesis stream into its bucket, with the encrypted catalog's key in `schema_configuration`.
 - Consumers read `.delivery_stream_name` (the `AWS/Firehose` `DeliveryStreamName` dimension) and
   `.delivery_stream_arn` (producers' `firehose:PutRecord*` grants, EventBridge targets).
 

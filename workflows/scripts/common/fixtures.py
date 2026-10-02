@@ -13,13 +13,12 @@ check-deploy-layers, plan-sweep, tflint (workflows/lint.yaml).
 ALL = frozenset({"*"})
 
 KNOWN_BROKEN_FIXTURES = {
-    "fnx-fixtures-pipeline": ALL,
     "fnx-fixtures-serverless": ALL,
     "fnx-fixtures-webapp": ALL,
     # Clean on dependencies, outputs, vars and plan-sweep. No operator path to
     # its private EKS endpoint (no bastion), deploy-full-stack has no layer for
-    # dynamodb, ses or alb-controller-ingress-group, and its eventbridge rules
-    # read their bus, which shares their (services) layer.
+    # ses or alb-controller-ingress-group, and its eventbridge rules read their
+    # bus, which shares their (services) layer.
     "fnx-fixtures-msplatform": frozenset({"check-cluster-api-ci", "check-deploy-layers"}),
 }
 
