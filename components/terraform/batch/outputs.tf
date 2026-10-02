@@ -51,6 +51,11 @@ output "job_role_arns" {
   )
 }
 
+output "events_role_arn" {
+  description = "EventBridge target role ARN (null unless events_role_enabled); allowed batch:SubmitJob on this instance's job queues and job definitions only"
+  value       = one(aws_iam_role.events[*].arn)
+}
+
 output "log_group_name" {
   description = "The job definitions' CloudWatch log group (/aws/batch/<Environment>-<name>); null without job definitions"
   value       = one(aws_cloudwatch_log_group.jobs[*].name)

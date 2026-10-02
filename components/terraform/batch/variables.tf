@@ -625,3 +625,17 @@ variable "log_retention_days" {
     error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, ...)."
   }
 }
+
+# Mirrors this repo's stepfunctions events_role_enabled: the eventbridge
+# component creates no target roles.
+variable "events_role_enabled" {
+  type        = bool
+  description = "Create <Environment>-<name>-events, a role trusted by events.amazonaws.com (this account) and allowed batch:SubmitJob on this instance's job queues and job definitions only (output as events_role_arn), for an eventbridge instance's Batch job queue target role_arn"
+  default     = false
+  nullable    = false
+
+  validation {
+    condition     = !var.events_role_enabled || (length(var.job_queues) > 0 && length(var.job_definitions) > 0)
+    error_message = "events_role_enabled needs at least one job_queues and one job_definitions entry to scope the role to."
+  }
+}

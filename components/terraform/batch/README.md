@@ -19,6 +19,9 @@ the roles follow its ecs-service pattern (created unless an ARN is given).
   `.job_queue_arns.<key>` and `.job_definition_names.<key>` (or `.job_definition_arn_prefixes`);
   CloudWatch dimensions read `.compute_environment_names` and `.job_queue_names`. IAM for
   submitters scopes `batch:SubmitJob` to the queue ARN and `<job_definition_arn_prefix>:*`.
+- `events_role_enabled` creates `<Environment>-<name>-events` (`events_role_arn`), the `role_arn`
+  an `eventbridge` Batch job queue target needs; it may only submit this instance's definitions to
+  its queues. The `eventbridge` component creates no target roles.
 - `job_definitions` need `log_kms_key_arn` (`!terraform.state kms/main .key_arn`, with `kms/main`
   in `dependencies.components`); its key policy must allow CloudWatch Logs
   (`allow_cloudwatch_logs`, on in `catalog/kms/defaults`).
