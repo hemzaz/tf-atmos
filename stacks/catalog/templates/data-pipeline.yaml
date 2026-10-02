@@ -4,16 +4,27 @@
 # =============================================================================
 # Complete data processing pipeline infrastructure
 #
-# Architecture:
-#   - Kinesis Data Streams for real-time ingestion
-#   - Lambda functions for data transformation
-#   - Kinesis Firehose for delivery to S3 (Data Lake)
-#   - Glue Catalog and Crawlers for schema management
-#   - Athena for ad-hoc SQL queries
-#   - QuickSight for visualization (manual setup required)
-#   - EventBridge for pipeline orchestration
-#   - Step Functions for complex ETL workflows
-#   - S3 buckets with lifecycle policies
+# Architecture (streaming path):
+#   producers -> kinesis-ingest -> lambda-transformer (enriches from the
+#   dynamodb-lookup table) -> kinesis-enriched -> lambda-validator ->
+#   kinesis-validated -> firehose-processed (Parquet, partitioned by source)
+#   -> s3-processed. firehose-raw also delivers kinesis-ingest as Parquet to
+#   s3-raw. Records the Lambdas fail to process go to sqs/stream-dlq.
+# Batch path: the daily-etl state machine (EventBridge, 02:00 UTC) runs the
+# Glue jobs and an Athena data quality query, then notifies sns/notifications.
+#   - Kinesis Data Streams (ingest, enriched, validated)
+#   - Lambda functions for transformation and validation
+#   - Amazon Data Firehose for delivery to the S3 data lake
+#   - Glue catalog, crawlers and ETL jobs; Athena workgroup and saved queries
+#   - Step Functions state machines (one instance each) and EventBridge rules
+#   - S3 buckets with lifecycle policies, a DynamoDB lookup table
+#   - An SNS topic for pipeline notifications, CloudWatch dashboard and alarms
+#   - QuickSight for visualization (manual setup, not in this template)
+#
+# Encryption: the stack's customer managed key, kms/main, encrypts the
+# buckets, the streams, the Glue Data Catalog, the Lambdas' environment and
+# log groups, the queue, the topics, the table, the state machines and every
+# log group here.
 #
 # Cost Estimates (Monthly):
 #   Development:  ~$100-250/month
@@ -22,9 +33,61 @@
 #
 # Deployment Time: 20-35 minutes
 #
-# Usage:
-#   atmos terraform plan data-pipeline -s <tenant>-<account>-<environment>
-#   atmos terraform apply data-pipeline -s <tenant>-<account>-<environment>
+# Usage (instances are data-pipeline/<part>):
+#   atmos terraform plan data-pipeline/kinesis-ingest -s <tenant>-<stage>-<environment>
+#   atmos workflow deploy -f deploy-full-stack -s <tenant>-<stage>-<environment>
+#
+# =============================================================================
+# REQUIREMENTS FOR THE IMPORTING STACK
+# =============================================================================
+# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
+#    from catalog/kms/defaults). This template does not define it: doing so would
+#    deep-merge over that stack's own alias_name/description. It must keep the
+#    grants catalog/kms/defaults turns on: allow_cloudwatch_logs and
+#    allow_log_delivery (the Lambda, Firehose, state machine, EventBridge and
+#    Glue log groups) and allow_cloudwatch_alarms (the Lambdas' alarms and the
+#    monitoring alarm topic).
+# 2. s3/lambda-artifacts (imported below; an fnx org stack imports the same file
+#    in components/services.yaml) applied, with
+#    pipeline-transformer/<transformer_version>.zip and
+#    pipeline-validator/<validator_version>.zip in it, before the Lambdas:
+#    deploy-full-stack's storage layer applies it before compute.
+# 3. settings.data_pipeline, the inputs this template cannot create:
+#      settings:
+#        data_pipeline:
+#          transformer_version: "1.0.0"   # package keys; bump to deploy new code
+#          validator_version: "1.0.0"
+#          # Where lambda-validator reads the record schemas (SCHEMA_REGISTRY_URL).
+#          schema_registry_url: https://schemas.example.com
+#          # The data-quality state machine's checks and the crawler-completion
+#          # rule's target, Lambda functions deployed elsewhere.
+#          schema_validation_lambda_arn: arn:aws:lambda:<region>:<account>:function:<name>
+#          completeness_validation_lambda_arn: arn:aws:lambda:<region>:<account>:function:<name>
+#          accuracy_validation_lambda_arn: arn:aws:lambda:<region>:<account>:function:<name>
+#          crawler_completion_lambda_arn: arn:aws:lambda:<region>:<account>:function:<name>
+#    A missing key fails every describe/plan of the stack with its name
+#    (gomplate `required`); `atmos validate stacks` does not render templates.
+#    settings.environment.account_id (set by every fnx stage _defaults) builds
+#    the ARNs of resources this template names but cannot read from state.
+# 4. data-pipeline/glue-database encrypts the Glue Data Catalog with kms/main,
+#    one setting per account and region: every other principal reading the
+#    catalog in this account and region (Athena users, other jobs, crawlers or
+#    roles) needs kms:Decrypt on kms/main. The roles here get it from this
+#    template; Athena users get it from data-pipeline/athena's query_policy.
+#    Otherwise catalog reads fail, for Firehose silently: conversion cannot load
+#    the schema and every record lands under errors/.
+# 5. The externally supplied Lambdas (3.) are invoked by the data-quality state
+#    machine and the crawler-completion rule; their own permissions are theirs.
+# 6. On-call addresses, if any, in data-pipeline/monitoring's
+#    alarm_email_subscriptions and data-pipeline/sns/notifications' subscribers.
+# 7. S3 access logging is off: the target must be a separate SSE-S3 bucket (S3
+#    cannot deliver access logs to an SSE-KMS bucket) and this template has
+#    none. Enable it per stack on each bucket instance, e.g.:
+#      data-pipeline/s3-raw:
+#        vars:
+#          logging:
+#            bucket_name: "my-log-bucket"
+#            prefix: "s3-access-logs/raw/"
 # =============================================================================
 
 import:
@@ -35,6 +98,15 @@ import:
   - catalog/s3/defaults
   - catalog/glue/defaults
   - catalog/athena/defaults
+  - catalog/firehose/defaults
+  - catalog/dynamodb/defaults
+  - catalog/sqs/defaults
+  - catalog/sns/defaults
+  - catalog/stepfunctions/defaults
+  - catalog/eventbridge/defaults
+  # s3/lambda-artifacts, the stack's lambda package bucket (an fnx org stack
+  # imports the same file in components/services.yaml).
+  - catalog/s3/lambda-artifacts
 
 # =============================================================================
 # COMPONENT DEFINITIONS
@@ -46,19 +118,12 @@ components:
     # DATA LAKE STORAGE (S3)
     # =========================================================================
 
-    # The three buckets below inherit s3/defaults (imported above), which
-    # supplies kms_key_arn (from kms/main) and versioning_enabled: true; the
-    # legacy `server_side_encryption`/`block_public_access*`/
-    # `replication_configuration`/`inventory_configuration` inputs below no
-    # longer exist on the s3 component (it always encrypts with SSE-KMS,
-    # always blocks public access, and does not implement replication or
-    # inventory - see components/terraform/s3/README.md) and have been
-    # dropped rather than silently ignored. `logging` keeps pointing at the
-    # `log_bucket_name` placeholder (documented at the bottom of this file):
-    # the s3 component requires that target to be a separate SSE-S3 bucket
-    # (S3 cannot deliver access logs to an SSE-KMS bucket), and no such
-    # bucket exists in this template yet, so it stays a deployer-supplied
-    # input rather than this task standing up a fourth bucket out of scope.
+    # Every bucket inherits s3/defaults (imported above), which supplies
+    # kms_key_arn (kms/main) and versioning_enabled: true; the s3 component
+    # always encrypts with SSE-KMS and blocks public access. Each bucket is
+    # "<Environment>-<name>-<account id>" (the s3 component's naming); every
+    # reader takes its name or ARN from state. Access logging is off
+    # (REQUIREMENTS 7).
     data-pipeline/s3-raw:
       metadata:
         component: s3
@@ -66,7 +131,7 @@ components:
         inherits:
           - s3/defaults
       vars:
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-raw"
+        name: "data-lake-raw"
 
         lifecycle_configuration_rules:
           - id: "transition-to-ia"
@@ -86,10 +151,6 @@ components:
             noncurrent_version_expiration:
               noncurrent_days: 90
 
-        logging:
-          bucket_name: "{{ .vars.log_bucket_name }}"
-          prefix: "s3-access-logs/raw/"
-
         tags:
           DataClassification: "raw"
           DataPipeline: "ingestion"
@@ -101,7 +162,7 @@ components:
         inherits:
           - s3/defaults
       vars:
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-processed"
+        name: "data-lake-processed"
 
         # Lifecycle rules keep processed data longer than raw.
         lifecycle_configuration_rules:
@@ -117,10 +178,6 @@ components:
             noncurrent_version_expiration:
               noncurrent_days: 180
 
-        logging:
-          bucket_name: "{{ .vars.log_bucket_name }}"
-          prefix: "s3-access-logs/processed/"
-
         tags:
           DataClassification: "processed"
           DataPipeline: "transformation"
@@ -132,7 +189,7 @@ components:
         inherits:
           - s3/defaults
       vars:
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lake-curated"
+        name: "data-lake-curated"
 
         # Lifecycle rules: analytics data is retained longest of the three.
         lifecycle_configuration_rules:
@@ -145,10 +202,6 @@ components:
                 storage_class: "STANDARD_IA"
             noncurrent_version_expiration:
               noncurrent_days: 365
-
-        logging:
-          bucket_name: "{{ .vars.log_bucket_name }}"
-          prefix: "s3-access-logs/curated/"
 
         tags:
           DataClassification: "curated"
@@ -164,7 +217,7 @@ components:
         inherits:
           - s3/defaults
       vars:
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-athena-results"
+        name: "athena-results"
         # Query results are reproducible from the source data; a short
         # expiration keeps result storage from growing unbounded.
         versioning_enabled: false
@@ -191,7 +244,7 @@ components:
         inherits:
           - s3/defaults
       vars:
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-glue-assets"
+        name: "glue-assets"
         lifecycle_configuration_rules:
           - id: "expire-temporary"
             enabled: true
@@ -214,7 +267,15 @@ components:
     # =========================================================================
     # DATA INGESTION (Kinesis)
     # =========================================================================
+    # One stream per instance, "<Environment>-<name>" (the kinesis component's
+    # naming, not the <tenant>-<environment>-<suffix> the buckets use),
+    # encrypted with kms/main (kinesis/defaults). ON_DEMAND (kinesis/defaults):
+    # no shard_count, which the component rejects with ON_DEMAND; switch to
+    # stream_mode: PROVISIONED and set shard_count to size a stream explicitly.
 
+    # Producers write here. lambda-transformer reads it through its own
+    # enhanced fan-out consumer; firehose-raw reads it with shared throughput
+    # (Firehose cannot use a registered consumer, so it has none).
     data-pipeline/kinesis-ingest:
       metadata:
         component: kinesis
@@ -222,15 +283,7 @@ components:
         inherits:
           - kinesis/defaults
       vars:
-        # Stream name is <Environment>-<name> (kinesis component convention,
-        # not the tenant-account-environment naming the older, full-name
-        # components below use).
         name: "data-ingest"
-
-        # ON_DEMAND (inherited from kinesis/defaults): no shard_count here,
-        # since the component's own validation rejects setting shard_count
-        # together with ON_DEMAND. Switch to stream_mode: PROVISIONED and add
-        # shard_count to size this explicitly.
 
         # Retention (kinesis/defaults already sets 24; explicit for clarity)
         retention_period: 24
@@ -245,15 +298,16 @@ components:
           - "ReadProvisionedThroughputExceeded"
           - "IteratorAgeMilliseconds"
 
-        # Enhanced fan-out consumers (aws_kinesis_stream_consumer)
+        # Enhanced fan-out consumers (aws_kinesis_stream_consumer); the key is
+        # the registered consumer name, read back from .consumer_arns.
         consumers:
-          lambda-processor: {}
-          firehose-delivery: {}
+          lambda_transformer: {}
 
         tags:
           DataPipeline: "ingestion"
           StreamType: "ingest"
 
+    # Written by lambda-transformer, read by lambda-validator.
     data-pipeline/kinesis-enriched:
       metadata:
         component: kinesis
@@ -273,40 +327,121 @@ components:
           - "OutgoingRecords"
           - "IteratorAgeMilliseconds"
 
-        # lambda-transformer both reads kinesis-ingest and writes this
-        # stream, but the lambda component's custom_policy accepts only one
-        # policy document. Folding kinesis-ingest's reader_policy into this
-        # stream's own combined_policy (rather than the other way around, or
-        # in a Go template at the YAML layer - see the kinesis component's
-        # README) gives lambda-transformer one combined document to read via
-        # a single, ordinary !terraform.state call below. writer_policy
-        # itself is left untouched by this - it always stays exactly this
-        # stream's own write grant.
-        additional_policy_json: !terraform.state data-pipeline/kinesis-ingest .reader_policy
-
         tags:
           DataPipeline: "transformation"
           StreamType: "enriched"
 
-      # list_merge_strategy is `replace` (atmos.yaml), so this instance-level
-      # dependencies.components REPLACES kinesis/defaults' own
-      # ([kms/main]) rather than adding to it - both must be listed here.
-      dependencies:
-        components:
-          - component: kms/main
-          - component: data-pipeline/kinesis-ingest
+    # Written by lambda-validator (the records that pass validation), read by
+    # firehose-processed: processed_events holds validated events only.
+    data-pipeline/kinesis-validated:
+      metadata:
+        component: kinesis
+        type: real
+        inherits:
+          - kinesis/defaults
+      vars:
+        name: "data-validated"
+
+        retention_period: 24
+
+        # Enhanced monitoring
+        shard_level_metrics:
+          - "IncomingBytes"
+          - "IncomingRecords"
+          - "OutgoingBytes"
+          - "OutgoingRecords"
+          - "IteratorAgeMilliseconds"
+
+        tags:
+          DataPipeline: "validation"
+          StreamType: "validated"
+
+    # =========================================================================
+    # LOOKUP DATA (DynamoDB)
+    # =========================================================================
+
+    # "<Environment>-data-lookup", read by lambda-transformer
+    # (ENRICHMENT_TABLE). Encryption with kms/main and point-in-time recovery
+    # come from dynamodb/defaults.
+    data-pipeline/dynamodb-lookup:
+      metadata:
+        component: dynamodb
+        type: real
+        inherits:
+          - dynamodb/defaults
+      vars:
+        name: "data-lookup"
+        hash_key: "lookup_type"
+        range_key: "lookup_key"
+        ttl_enabled: true
+        ttl_attribute: "expires_at"
+
+        tags:
+          DataPipeline: "enrichment"
+          DataStore: "lookup"
+
+    # =========================================================================
+    # MESSAGING (SQS, SNS)
+    # =========================================================================
+
+    # The Lambdas' Kinesis mappings send a record batch's failure metadata
+    # (shard, sequence numbers) here once its retries or maximum age run
+    # out, so the batch can be replayed from the stream within its retention.
+    # Nothing consumes it: failures wait 14 days (the sqs maximum) for an
+    # operator; data-pipeline/monitoring alarms on it.
+    data-pipeline/sqs/stream-dlq:
+      metadata:
+        component: sqs
+        type: real
+        inherits:
+          - sqs/defaults
+      vars:
+        name: "data-pipeline-stream-dlq"
+        message_retention_seconds: 1209600
+        tags:
+          DataPipeline: "ingestion"
+
+    # The daily-etl state machine publishes SUCCESS / FAILED here, and the
+    # Lambdas' performance alarms notify it (cloudwatch.amazonaws.com may
+    # publish; kms/main's allow_cloudwatch_alarms lets it use the key).
+    # Subscribe consumers per stack (REQUIREMENTS 6), e.g.:
+    #   data-pipeline/sns/notifications:
+    #     vars:
+    #       subscribers:
+    #         ops:
+    #           protocol: email
+    #           endpoint: ops@example.com
+    data-pipeline/sns/notifications:
+      metadata:
+        component: sns
+        type: real
+        inherits:
+          - sns/defaults
+      vars:
+        name: "data-pipeline-notifications"
+        allowed_aws_services_for_sns_published:
+          - "cloudwatch.amazonaws.com"
+        tags:
+          DataPipeline: "orchestration"
 
     # =========================================================================
     # DATA TRANSFORMATION (Lambda)
     # =========================================================================
+    # Both functions are "<Environment>-<function_name>", packaged in
+    # s3/lambda-artifacts as <function_name>/<version>.zip (REQUIREMENTS 2), with
+    # the stack key for their environment and log group. No VPC: they reach
+    # Kinesis, DynamoDB and S3 through the AWS endpoints. The component
+    # derives each mapping's read grant from its ARN, and kms:Decrypt on the
+    # streams' key from event_source_kms_key_arns.
 
     data-pipeline/lambda-transformer:
       metadata:
         component: lambda
         type: real
       vars:
-        function_name: "data-transformer"
-        description: "Transforms and enriches incoming data"
+        function_name: "pipeline-transformer"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: 'pipeline-transformer/{{ required "settings.data_pipeline.transformer_version is required" .settings.data_pipeline.transformer_version }}.zip'
 
         # Runtime configuration
         runtime: "python3.13"
@@ -317,20 +452,21 @@ components:
         # Reserved concurrency
         reserved_concurrent_executions: 100
 
-        # VPC configuration (if needed for enrichment lookups)
-        subnet_ids: "{{ .vars.private_subnet_ids }}"
+        # Environment variables and the function's log group, with the stack key.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        kms_key_id: !terraform.state kms/main .key_arn
 
-        # Environment variables
         environment_variables:
           ENVIRONMENT: "{{ .settings.context.environment }}"
           OUTPUT_STREAM: !terraform.state data-pipeline/kinesis-enriched .stream_name
           ENRICHMENT_TABLE: !terraform.state data-pipeline/dynamodb-lookup .table_name
           LOG_LEVEL: "INFO"
 
-        # Kinesis event source mapping
+        # Reads kinesis-ingest through its enhanced fan-out consumer (dedicated
+        # throughput per shard, independent of firehose-raw's reads).
         event_source_mappings:
           kinesis:
-            event_source_arn: !terraform.state data-pipeline/kinesis-ingest .stream_arn
+            event_source_arn: !terraform.state data-pipeline/kinesis-ingest .consumer_arns.lambda_transformer
             starting_position: "LATEST"
             batch_size: 100
             maximum_batching_window_in_seconds: 5
@@ -338,37 +474,61 @@ components:
             maximum_retry_attempts: 3
             maximum_record_age_in_seconds: 3600
             bisect_batch_on_function_error: true
-            tumbling_window_in_seconds: 0
             destination_config:
               on_failure:
-                destination_arn: "{{ .vars.dlq_arn }}"
+                destination_arn: !terraform.state data-pipeline/sqs/stream-dlq .queue_arn
+        event_source_kms_key_arns:
+          - !terraform.state kms/main .key_arn
+        # The dead-letter queue is encrypted with kms/main (sqs/defaults).
+        delivery_kms_key_arn: !terraform.state kms/main .key_arn
 
         # X-Ray tracing
         tracing_mode: "Active"
 
-        # CloudWatch logs
-        kms_key_id: "{{ .vars.lambda_logs_kms_key_id }}"
-
-        # This function is both a consumer and a producer: its event source
-        # mapping polls kinesis-ingest (a reader), and its handler calls
-        # PutRecord[s] against kinesis-enriched via OUTPUT_STREAM above (a
-        # writer). The `lambda` component's custom_policy accepts exactly one
-        # IAM policy document, so kinesis-ingest's reader_policy is folded
-        # into kinesis-enriched's combined_policy (via that instance's own
-        # additional_policy_json, above) rather than merged here - see the
-        # kinesis component's README ("Combining grants across two
-        # streams") for why. This reads that single, already-combined
-        # output (kinesis-enriched's plain writer_policy output intentionally
-        # never carries kinesis-ingest's grants, so any other consumer that
-        # attaches it stays scoped to kinesis-enriched alone).
-        custom_policy: !terraform.state data-pipeline/kinesis-enriched .combined_policy
+        # Writes kinesis-enriched (OUTPUT_STREAM), the statements of that
+        # stream's writer_policy output, and reads the lookup table
+        # (ENRICHMENT_TABLE); both are encrypted with kms/main. Statements, not
+        # custom_policy: !terraform.state returns a JSON-string output such as
+        # writer_policy as an object (Atmos re-reads the value as YAML), which
+        # custom_policy (a string) rejects.
+        iam_policies:
+          - sid: WriteEnrichedStream
+            actions: ["kinesis:PutRecord", "kinesis:PutRecords", "kinesis:DescribeStreamSummary"]
+            resources:
+              - !terraform.state data-pipeline/kinesis-enriched .stream_arn
+          - sid: WriteEnrichedStreamKMS
+            actions: ["kms:GenerateDataKey"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:ViaService"
+                values:
+                  - "kinesis.{{ .vars.region }}.amazonaws.com"
+              - test: StringEquals
+                variable: "kms:EncryptionContext:aws:kinesis:arn"
+                values:
+                  - !terraform.state data-pipeline/kinesis-enriched .stream_arn
+          - sid: ReadLookupTable
+            actions: ["dynamodb:GetItem", "dynamodb:BatchGetItem", "dynamodb:Query"]
+            resources:
+              - !terraform.state data-pipeline/dynamodb-lookup .table_arn
+          - sid: ReadLookupTableKMS
+            actions: ["kms:Decrypt"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:ViaService"
+                values:
+                  - "dynamodb.{{ .vars.region }}.amazonaws.com"
 
         # Performance alarms
         create_performance_alarms: true
         duration_alarm_threshold: 250000  # 250 seconds
         error_rate_alarm_threshold: 5
         throttle_alarm_threshold: 10
-        sns_topic_arn: "{{ .vars.alarm_sns_topic_arn }}"
+        sns_topic_arn: !terraform.state data-pipeline/sns/notifications .sns_topic_arn
 
         tags:
           DataPipeline: "transformation"
@@ -376,16 +536,25 @@ components:
 
       dependencies:
         components:
+          - component: kms/main
+          - component: s3/lambda-artifacts
           - component: data-pipeline/kinesis-ingest
           - component: data-pipeline/kinesis-enriched
           - component: data-pipeline/dynamodb-lookup
+          - component: data-pipeline/sqs/stream-dlq
+          - component: data-pipeline/sns/notifications
+
+    # Validates kinesis-enriched against the schemas at SCHEMA_REGISTRY_URL:
+    # valid records go to kinesis-validated, invalid ones to
+    # s3-raw/invalid/ (outside raw_events' data/ location).
     data-pipeline/lambda-validator:
       metadata:
         component: lambda
         type: real
       vars:
-        function_name: "data-validator"
-        description: "Validates data schema and quality"
+        function_name: "pipeline-validator"
+        s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
+        s3_key: 'pipeline-validator/{{ required "settings.data_pipeline.validator_version is required" .settings.data_pipeline.validator_version }}.zip'
 
         # Runtime configuration
         runtime: "python3.13"
@@ -396,11 +565,14 @@ components:
         # Reserved concurrency
         reserved_concurrent_executions: 50
 
-        # Environment variables
+        # Environment variables and the function's log group, with the stack key.
+        kms_key_arn: !terraform.state kms/main .key_arn
+        kms_key_id: !terraform.state kms/main .key_arn
+
         environment_variables:
           ENVIRONMENT: "{{ .settings.context.environment }}"
-          SCHEMA_REGISTRY_URL: "{{ .vars.schema_registry_url }}"
-          VALID_RECORDS_STREAM: "{{ .vars.valid_records_stream_name }}"
+          SCHEMA_REGISTRY_URL: '{{ required "settings.data_pipeline.schema_registry_url is required" .settings.data_pipeline.schema_registry_url }}'
+          VALID_RECORDS_STREAM: !terraform.state data-pipeline/kinesis-validated .stream_name
           INVALID_RECORDS_BUCKET: !terraform.state data-pipeline/s3-raw .bucket_name
           INVALID_RECORDS_PREFIX: "invalid/"
           LOG_LEVEL: "INFO"
@@ -415,97 +587,117 @@ components:
             parallelization_factor: 5
             maximum_retry_attempts: 2
             bisect_batch_on_function_error: true
+            destination_config:
+              on_failure:
+                destination_arn: !terraform.state data-pipeline/sqs/stream-dlq .queue_arn
+        event_source_kms_key_arns:
+          - !terraform.state kms/main .key_arn
+        # The dead-letter queue is encrypted with kms/main (sqs/defaults).
+        delivery_kms_key_arn: !terraform.state kms/main .key_arn
 
         # X-Ray tracing
         tracing_mode: "Active"
 
-        # Kinesis read actions plus kms:Decrypt on the enriched stream,
-        # scoped to that stream alone (kinesis's reader_policy output): this
-        # function's intended event source would poll kinesis-enriched with
-        # its own execution role, which needs this grant to read an
-        # encrypted stream. (The `lambda` component does not yet implement
-        # event_source_mappings - see "Out of scope" in the PR - so this
-        # grant is forward-looking, wired ahead of that gap being closed.)
-        custom_policy: !terraform.state data-pipeline/kinesis-enriched .reader_policy
+        # Writes kinesis-validated (VALID_RECORDS_STREAM), the statements of
+        # that stream's writer_policy output (see lambda-transformer for why
+        # not custom_policy), and invalid records under s3-raw/invalid/; both
+        # are encrypted with kms/main.
+        iam_policies:
+          - sid: WriteValidatedStream
+            actions: ["kinesis:PutRecord", "kinesis:PutRecords", "kinesis:DescribeStreamSummary"]
+            resources:
+              - !terraform.state data-pipeline/kinesis-validated .stream_arn
+          - sid: WriteValidatedStreamKMS
+            actions: ["kms:GenerateDataKey"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:ViaService"
+                values:
+                  - "kinesis.{{ .vars.region }}.amazonaws.com"
+              - test: StringEquals
+                variable: "kms:EncryptionContext:aws:kinesis:arn"
+                values:
+                  - !terraform.state data-pipeline/kinesis-validated .stream_arn
+          - sid: WriteInvalidRecords
+            actions: ["s3:PutObject"]
+            resources:
+              - !terraform.state data-pipeline/s3-raw .bucket_arn | . + "/invalid/*"
+          - sid: WriteInvalidRecordsKMS
+            actions: ["kms:GenerateDataKey"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:ViaService"
+                values:
+                  - "s3.{{ .vars.region }}.amazonaws.com"
 
         tags:
           DataPipeline: "validation"
           Function: "validator"
 
-    # =========================================================================
-    # DATA DELIVERY (Kinesis Firehose)
-    # =========================================================================
-
       dependencies:
         components:
+          - component: kms/main
+          - component: s3/lambda-artifacts
           - component: data-pipeline/kinesis-enriched
+          - component: data-pipeline/kinesis-validated
           - component: data-pipeline/s3-raw
+          - component: data-pipeline/sqs/stream-dlq
+
+    # =========================================================================
+    # DATA DELIVERY (Amazon Data Firehose)
+    # =========================================================================
+    # One delivery stream per instance, "<Environment>-<name>", each with its
+    # own delivery and source roles (the firehose component creates them),
+    # reading a Kinesis stream and writing Parquet to one bucket. Objects and
+    # the delivery log group use kms/main (firehose/defaults). The Glue Data
+    # Catalog is encrypted with kms/main (data-pipeline/glue-database), so
+    # schema_configuration.kms_key_arn gives the delivery role kms:Decrypt
+    # through Glue; without it conversion fails and every record lands under
+    # errors/. Conversion needs buffering_size >= 64 and compression_format
+    # UNCOMPRESSED (the serializer compresses with SNAPPY).
+
+    # Every ingest record, as Parquet against raw_events' schema, under
+    # s3-raw/data/year=/month=/day=/hour=/ (raw_events' partition projection).
+    # A Lambda processor can be added with processor_lambda_arn (a lambda
+    # instance's .function_arn); none is set, as before.
     data-pipeline/firehose-raw:
       metadata:
         component: firehose
         type: real
+        inherits:
+          - firehose/defaults
       vars:
-        delivery_stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-raw"
-        description: "Delivers raw data to S3 data lake"
+        name: "data-lake-raw"
 
-        # Source configuration
-        kinesis_source_configuration:
-          kinesis_stream_arn: !terraform.state data-pipeline/kinesis-ingest .stream_arn
-          role_arn: "{{ .vars.firehose_kinesis_role_arn }}"
+        # Source: kinesis-ingest, encrypted with kms/main.
+        kinesis_source_stream_arn: !terraform.state data-pipeline/kinesis-ingest .stream_arn
+        kinesis_source_kms_key_arn: !terraform.state kms/main .key_arn
 
         # S3 destination
-        s3_configuration:
-          bucket_arn: !terraform.state data-pipeline/s3-raw .bucket_arn
-          prefix: "data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
-          error_output_prefix: "errors/!{firehose:error-output-type}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
-          buffering_hints:
-            size_in_mb: 128
-            interval_in_seconds: 300
-          compression_format: "GZIP"
-          kms_key_arn: !terraform.state kms/main .key_arn
+        s3_bucket_arn: !terraform.state data-pipeline/s3-raw .bucket_arn
+        s3_prefix: "data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
+        s3_error_output_prefix: "errors/!{firehose:error-output-type}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+        buffering_size: 128
+        buffering_interval: 300
+        compression_format: "UNCOMPRESSED"
 
-        # Data format conversion (Parquet)
+        # Data format conversion (Hive JSON -> Parquet)
         data_format_conversion:
-          enabled: true
-          input_format_configuration:
-            deserializer:
-              hive_json_ser_de: {}
-          output_format_configuration:
-            serializer:
-              parquet_ser_de:
-                compression: "SNAPPY"
-                enable_dictionary_compression: true
-                max_padding_bytes: 0
-                page_size_bytes: 1048576
-                writer_version: "V2"
+          input_format: "HIVE_JSON"
+          compression: "SNAPPY"
+          parquet:
+            enable_dictionary_compression: true
+            max_padding_bytes: 0
+            page_size_bytes: 1048576
+            writer_version: "V2"
           schema_configuration:
             database_name: !terraform.state data-pipeline/glue-database .database_name
             table_name: !terraform.state data-pipeline/glue-database .table_names.raw_events
-            region: "{{ .vars.region }}"
-            # glue-database sets account-wide Data Catalog encryption
-            # (kms/main), so this role needs kms:Decrypt on kms/main as well
-            # as glue:GetTable*; without it Firehose cannot read the schema
-            # and silently routes every record to errors/.
-            role_arn: "{{ .vars.firehose_glue_role_arn }}"
-
-        # CloudWatch logging
-        cloudwatch_logging_options:
-          enabled: true
-          log_group_name: "/aws/kinesisfirehose/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-raw"
-          log_stream_name: "delivery"
-
-        # Processing configuration (optional Lambda transformation)
-        processing_configuration:
-          enabled: false
-          processors:
-            - type: "Lambda"
-              parameters:
-                - name: "LambdaArn"
-                  value: "{{ .vars.firehose_transformer_lambda_arn }}"
-                - name: "BufferSizeInMBs"
-                  value: "1"
-                - name: "BufferIntervalInSeconds"
-                  value: "60"
+            kms_key_arn: !terraform.state kms/main .key_arn
 
         tags:
           DataPipeline: "delivery"
@@ -517,86 +709,75 @@ components:
           - component: data-pipeline/kinesis-ingest
           - component: data-pipeline/s3-raw
           - component: data-pipeline/glue-database
+
+    # Validated records, as Parquet against processed_events' schema, under
+    # s3-processed/data/source=/year=/month=/day=/: the source partition key is
+    # each record's .source (dynamic partitioning).
     data-pipeline/firehose-processed:
       metadata:
         component: firehose
         type: real
+        inherits:
+          - firehose/defaults
       vars:
-        delivery_stream_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-processed"
-        description: "Delivers processed data to S3 data lake"
+        name: "data-lake-processed"
 
-        # Source configuration
-        kinesis_source_configuration:
-          kinesis_stream_arn: !terraform.state data-pipeline/kinesis-enriched .stream_arn
-          role_arn: "{{ .vars.firehose_kinesis_role_arn }}"
+        # Source: kinesis-validated, encrypted with kms/main.
+        kinesis_source_stream_arn: !terraform.state data-pipeline/kinesis-validated .stream_arn
+        kinesis_source_kms_key_arn: !terraform.state kms/main .key_arn
 
         # S3 destination
-        s3_configuration:
-          bucket_arn: !terraform.state data-pipeline/s3-processed .bucket_arn
-          prefix: "data/source=!{partitionKeyFromQuery:source}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
-          error_output_prefix: "errors/!{firehose:error-output-type}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
-          buffering_hints:
-            size_in_mb: 128
-            interval_in_seconds: 300
-          compression_format: "UNCOMPRESSED"  # Parquet handles compression
-          kms_key_arn: !terraform.state kms/main .key_arn
+        s3_bucket_arn: !terraform.state data-pipeline/s3-processed .bucket_arn
+        s3_prefix: "data/source=!{partitionKeyFromQuery:source}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+        s3_error_output_prefix: "errors/!{firehose:error-output-type}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/"
+        buffering_size: 128
+        buffering_interval: 300
+        compression_format: "UNCOMPRESSED"
 
-        # Data format conversion (Parquet)
+        # Data format conversion (OpenX JSON -> Parquet)
         data_format_conversion:
-          enabled: true
-          input_format_configuration:
-            deserializer:
-              open_x_json_ser_de:
-                convert_dots_in_json_keys_to_underscores: true
-                case_insensitive: true
-          output_format_configuration:
-            serializer:
-              parquet_ser_de:
-                compression: "SNAPPY"
-                enable_dictionary_compression: true
+          input_format: "OPENX_JSON"
+          open_x_json:
+            convert_dots_in_json_keys_to_underscores: true
+            case_insensitive: true
+          compression: "SNAPPY"
+          parquet:
+            enable_dictionary_compression: true
           schema_configuration:
             database_name: !terraform.state data-pipeline/glue-database .database_name
             table_name: !terraform.state data-pipeline/glue-database .table_names.processed_events
-            region: "{{ .vars.region }}"
-            # glue-database sets account-wide Data Catalog encryption
-            # (kms/main), so this role needs kms:Decrypt on kms/main as well
-            # as glue:GetTable*; without it Firehose cannot read the schema
-            # and silently routes every record to errors/.
-            role_arn: "{{ .vars.firehose_glue_role_arn }}"
+            kms_key_arn: !terraform.state kms/main .key_arn
 
-        # Dynamic partitioning
-        dynamic_partitioning_configuration:
-          enabled: true
-          retry_options:
-            duration_in_seconds: 300
-
-        # CloudWatch logging
-        cloudwatch_logging_options:
-          enabled: true
-          log_group_name: "/aws/kinesisfirehose/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-processed"
-          log_stream_name: "delivery"
+        # Dynamic partitioning on each record's source field.
+        dynamic_partitioning:
+          jq_queries:
+            source: ".source"
+          retry_duration: 300
 
         tags:
           DataPipeline: "delivery"
           Destination: "s3-processed"
 
-    # =========================================================================
-    # DATA CATALOG (Glue)
-    # =========================================================================
-
       dependencies:
         components:
           - component: kms/main
-          - component: data-pipeline/kinesis-enriched
+          - component: data-pipeline/kinesis-validated
           - component: data-pipeline/s3-processed
           - component: data-pipeline/glue-database
+
+    # =========================================================================
+    # DATA CATALOG (Glue)
+    # =========================================================================
     # The whole Glue side of the pipeline in one glue instance (catalog
     # database, tables, crawlers, ETL jobs, triggers, their shared role and
     # KMS security configuration - see components/terraform/glue/README.md).
     # The instance name predates the component and is kept so the
     # `!terraform.state data-pipeline/glue-database ...` reads elsewhere in
-    # this template (firehose, athena, step-functions, eventbridge) stay
+    # this template (firehose, athena, stepfunctions, eventbridge) stay
     # stable; it replaces the former data-pipeline/glue-crawlers instance.
+    # deploy-full-stack applies it in the compute layer, after the buckets it
+    # reads (storage) and before athena and the state machines (platform) and
+    # firehose (data), which read it.
     #
     # Flow: firehose-raw converts ingest records to Parquet against
     # raw_events' schema and writes s3-raw/data/year=/month=/day=/hour=/
@@ -604,7 +785,7 @@ components:
     # no crawl). firehose-processed (the streaming path) writes
     # s3-processed/data/ = processed_events, the one canonical processed
     # table; the processed_data crawler adds its partitions every 6 hours.
-    # step-functions' daily ETL (02:00 UTC) runs the transformation job
+    # data-pipeline/stepfunctions/daily-etl (02:00 UTC) runs the transformation job
     # (raw -> processed_events_batch under s3-processed/batch/, registering
     # its partitions through a catalog-updating sink), an Athena data quality
     # query, then the curation job (processed_events, de-duplicated on
@@ -806,11 +987,8 @@ components:
             schema_change_policy:
               delete_behavior: "LOG"
               update_behavior: "LOG"
-            configuration:
-              Version: 1.0
-              CrawlerOutput:
-                Partitions:
-                  AddOrUpdateBehavior: "InheritFromTable"
+            # A JSON string (the glue component's crawlers[].configuration).
+            configuration: '{"Version": 1.0, "CrawlerOutput": {"Partitions": {"AddOrUpdateBehavior": "InheritFromTable"}}}'
 
           # Discovers the curation job's output tables (curated_*); run by
           # the crawl-curated trigger after every curation job.
@@ -823,7 +1001,7 @@ components:
               update_behavior: "UPDATE_IN_DATABASE"
             table_prefix: "curated_"
 
-        # Run by step-functions' daily_etl (glue:startJobRun.sync) with
+        # Run by data-pipeline/stepfunctions/daily-etl (glue:startJobRun.sync) with
         # --input_path, --output_path and --date (the run's ISO-8601 time;
         # the jobs process the previous UTC day of it). An optional
         # --process_date YYYY-MM-DD replaces --date and is processed as-is
@@ -998,6 +1176,10 @@ components:
     # QUERY ENGINE (Athena)
     # =========================================================================
 
+    # The workgroup "<Environment>-data-pipeline". deploy-full-stack applies it
+    # in the platform layer, after glue-database (compute), which it reads;
+    # data-pipeline/stepfunctions/daily-etl shares that layer and builds the
+    # workgroup name instead of reading it.
     data-pipeline/athena:
       metadata:
         component: athena
@@ -1111,246 +1293,334 @@ components:
     # =========================================================================
     # WORKFLOW ORCHESTRATION (Step Functions)
     # =========================================================================
+    # One state machine per instance, "<Environment>-<name>" (the Cloud Posse
+    # aws-step-functions model), its execution role, X-Ray tracing and a log
+    # group encrypted with kms/main (stepfunctions/defaults). Each role gets
+    # exactly what its Tasks call (iam_policies), and an EventBridge role
+    # (events_role_enabled) for the rules below.
 
-    # The state machines' execution role reads the Glue Data Catalog
-    # (the Athena query on processed_events), which
-    # data-pipeline/glue-database encrypts account-wide with kms/main: that
-    # role needs kms:Decrypt on kms/main, as does every other catalog reader.
-    data-pipeline/step-functions:
+    # Daily ETL: the transformation job, an Athena data quality query on
+    # processed_events, then the curation job; both jobs process the previous
+    # UTC day of $.execution_date (see data-pipeline/glue-database). Crawls are
+    # not states: raw_events uses partition projection, the transformation job
+    # registers its own processed_events_batch partitions, and glue-database's
+    # crawl-curated trigger crawls the curation job's output.
+    # data-pipeline/athena shares deploy-full-stack's platform layer, so it is
+    # not read from state: its workgroup is "<Environment>-data-pipeline" (its
+    # name), and the dependency below applies it first.
+    data-pipeline/stepfunctions/daily-etl:
       metadata:
-        component: step-functions
+        component: stepfunctions
         type: real
+        inherits:
+          - stepfunctions/defaults
       vars:
-        state_machines:
-          # Daily ETL workflow
-          daily_etl:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-etl"
-            description: "Daily ETL workflow for data processing"
-            type: "STANDARD"
-            logging_configuration:
-              level: "ALL"
-              include_execution_data: true
-              log_destination: "arn:aws:logs:{{ .vars.region }}:{{ .vars.account_id }}:log-group:/aws/states/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-etl:*"
-            tracing_configuration:
-              enabled: true
-            definition:
-              Comment: "Daily ETL workflow"
-              # Crawls are not states here: raw_events uses partition
-              # projection, the transformation job registers its own
-              # processed_events_batch partitions, and
-              # data-pipeline/glue-database's crawl-curated trigger crawls
-              # the curation job's output. Both jobs process the previous
-              # UTC day of $.execution_date (see data-pipeline/glue-database).
-              StartAt: "RunTransformationJob"
-              States:
-                RunTransformationJob:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::glue:startJobRun.sync"
-                  Parameters:
-                    JobName: !terraform.state data-pipeline/glue-database .job_names.transformation
-                    Arguments:
-                      "--input_path": !terraform.state data-pipeline/s3-raw .bucket_name | "s3://" + . + "/data/"
-                      # processed_events_batch (reprocessing path), never
-                      # processed_events: see data-pipeline/glue-database.
-                      "--output_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/batch/"
-                      "--date.$": "$.execution_date"
-                  Next: "RunDataQualityChecks"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
+        name: "daily-etl"
+        events_role_enabled: true
+        definition:
+          Comment: "Daily ETL workflow"
+          StartAt: "RunTransformationJob"
+          States:
+            RunTransformationJob:
+              Type: "Task"
+              Resource: "arn:aws:states:::glue:startJobRun.sync"
+              Parameters:
+                JobName: !terraform.state data-pipeline/glue-database .job_names.transformation
+                Arguments:
+                  "--input_path": !terraform.state data-pipeline/s3-raw .bucket_name | "s3://" + . + "/data/"
+                  # processed_events_batch (reprocessing path), never
+                  # processed_events: see data-pipeline/glue-database.
+                  "--output_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/batch/"
+                  "--date.$": "$.execution_date"
+              ResultPath: "$.transformation"
+              Next: "RunDataQualityChecks"
+              Catch:
+                - ErrorEquals:
+                    - "States.ALL"
+                  Next: "NotifyFailure"
 
-                RunDataQualityChecks:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::athena:startQueryExecution.sync"
-                  Parameters:
-                    QueryString: !terraform.state data-pipeline/glue-database .database_name | "SELECT COUNT(*) FROM " + . + ".processed_events WHERE year = CAST(YEAR(CURRENT_DATE) AS VARCHAR)"
-                    WorkGroup: !terraform.state data-pipeline/athena .workgroup_name
-                  Next: "CreateCuratedDataset"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
+            RunDataQualityChecks:
+              Type: "Task"
+              Resource: "arn:aws:states:::athena:startQueryExecution.sync"
+              Parameters:
+                QueryString: !terraform.state data-pipeline/glue-database .database_name | "SELECT COUNT(*) FROM " + . + ".processed_events WHERE year = CAST(YEAR(CURRENT_DATE) AS VARCHAR)"
+                WorkGroup: "{{ .settings.context.environment }}-data-pipeline"
+              ResultPath: "$.data_quality"
+              Next: "CreateCuratedDataset"
+              Catch:
+                - ErrorEquals:
+                    - "States.ALL"
+                  Next: "NotifyFailure"
 
-                CreateCuratedDataset:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::glue:startJobRun.sync"
-                  Parameters:
-                    JobName: !terraform.state data-pipeline/glue-database .job_names.curation
-                    Arguments:
-                      # processed_events (streaming), the canonical source.
-                      "--input_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
-                      "--output_path": !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
-                      "--date.$": "$.execution_date"
-                  Next: "NotifySuccess"
-                  Catch:
-                    - ErrorEquals:
-                        - "States.ALL"
-                      Next: "NotifyFailure"
+            CreateCuratedDataset:
+              Type: "Task"
+              Resource: "arn:aws:states:::glue:startJobRun.sync"
+              Parameters:
+                JobName: !terraform.state data-pipeline/glue-database .job_names.curation
+                Arguments:
+                  # processed_events (streaming), the canonical source.
+                  "--input_path": !terraform.state data-pipeline/s3-processed .bucket_name | "s3://" + . + "/data/"
+                  "--output_path": !terraform.state data-pipeline/s3-curated .bucket_name | "s3://" + . + "/"
+                  "--date.$": "$.execution_date"
+              Next: "NotifySuccess"
+              Catch:
+                - ErrorEquals:
+                    - "States.ALL"
+                  Next: "NotifyFailure"
 
-                NotifySuccess:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::sns:publish"
-                  Parameters:
-                    TopicArn: "{{ .vars.data_pipeline_sns_topic_arn }}"
-                    Message:
-                      Status: "SUCCESS"
-                      Pipeline: "Daily ETL"
-                      ExecutionId.$: "$$.Execution.Id"
-                      CompletedAt.$: "$$.State.EnteredTime"
-                  End: true
+            NotifySuccess:
+              Type: "Task"
+              Resource: "arn:aws:states:::sns:publish"
+              Parameters:
+                TopicArn: !terraform.state data-pipeline/sns/notifications .sns_topic_arn
+                Message:
+                  Status: "SUCCESS"
+                  Pipeline: "Daily ETL"
+                  ExecutionId.$: "$$.Execution.Id"
+                  CompletedAt.$: "$$.State.EnteredTime"
+              End: true
 
-                NotifyFailure:
-                  Type: "Task"
-                  Resource: "arn:aws:states:::sns:publish"
-                  Parameters:
-                    TopicArn: "{{ .vars.data_pipeline_sns_topic_arn }}"
-                    Message:
-                      Status: "FAILED"
-                      Pipeline: "Daily ETL"
-                      ExecutionId.$: "$$.Execution.Id"
-                      Error.$: "$.Error"
-                      Cause.$: "$.Cause"
-                  Next: "FailState"
+            NotifyFailure:
+              Type: "Task"
+              Resource: "arn:aws:states:::sns:publish"
+              Parameters:
+                TopicArn: !terraform.state data-pipeline/sns/notifications .sns_topic_arn
+                Message:
+                  Status: "FAILED"
+                  Pipeline: "Daily ETL"
+                  ExecutionId.$: "$$.Execution.Id"
+                  Error.$: "$.Error"
+                  Cause.$: "$.Cause"
+              Next: "FailState"
 
-                FailState:
-                  Type: "Fail"
-                  Error: "ETLFailed"
-                  Cause: "Daily ETL workflow failed"
-
-          # Data quality workflow
-          data_quality:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-quality"
-            description: "Data quality validation workflow"
-            type: "EXPRESS"
-            logging_configuration:
-              level: "ERROR"
-              include_execution_data: false
-            definition:
-              Comment: "Data quality validation"
-              StartAt: "ValidateSchema"
-              States:
-                ValidateSchema:
-                  Type: "Task"
-                  Resource: "{{ .vars.schema_validation_lambda_arn }}"
-                  Next: "ValidateCompleteness"
-                ValidateCompleteness:
-                  Type: "Task"
-                  Resource: "{{ .vars.completeness_validation_lambda_arn }}"
-                  Next: "ValidateAccuracy"
-                ValidateAccuracy:
-                  Type: "Task"
-                  Resource: "{{ .vars.accuracy_validation_lambda_arn }}"
-                  End: true
-
+            FailState:
+              Type: "Fail"
+              Error: "ETLFailed"
+              Cause: "Daily ETL workflow failed"
+        iam_policies:
+          # glue:startJobRun.sync starts the job and polls its run.
+          - sid: RunGlueJobs
+            actions: ["glue:StartJobRun", "glue:GetJobRun", "glue:GetJobRuns", "glue:BatchStopJobRun"]
+            resources:
+              - !terraform.state data-pipeline/glue-database .job_arns.transformation
+              - !terraform.state data-pipeline/glue-database .job_arns.curation
+          # athena:startQueryExecution.sync runs the query as this role.
+          - sid: RunAthenaQuery
+            actions:
+              - "athena:StartQueryExecution"
+              - "athena:GetQueryExecution"
+              - "athena:GetQueryResults"
+              - "athena:StopQueryExecution"
+              - "athena:GetWorkGroup"
+            resources:
+              - 'arn:aws:athena:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:workgroup/{{ .settings.context.environment }}-data-pipeline'
+          - sid: ReadCatalog
+            actions: ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition"]
+            resources:
+              - 'arn:aws:glue:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:catalog'
+              - !terraform.state data-pipeline/glue-database .database_arn
+              - !terraform.state data-pipeline/glue-database .table_arns.processed_events
+          - sid: ReadProcessedData
+            actions: ["s3:GetBucketLocation", "s3:ListBucket", "s3:GetObject"]
+            resources:
+              - !terraform.state data-pipeline/s3-processed .bucket_arn
+              - !terraform.state data-pipeline/s3-processed .bucket_arn | . + "/*"
+          - sid: WriteQueryResults
+            actions:
+              - "s3:GetBucketLocation"
+              - "s3:ListBucket"
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:AbortMultipartUpload"
+              - "s3:ListMultipartUploadParts"
+            resources:
+              - !terraform.state data-pipeline/s3-athena-results .bucket_arn
+              - !terraform.state data-pipeline/s3-athena-results .bucket_arn | . + "/*"
+          # The buckets and the Data Catalog are encrypted with kms/main.
+          - sid: DataKMS
+            actions: ["kms:Decrypt", "kms:GenerateDataKey"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:ViaService"
+                values:
+                  - "s3.{{ .vars.region }}.amazonaws.com"
+                  - "glue.{{ .vars.region }}.amazonaws.com"
+          - sid: PublishNotifications
+            actions: ["sns:Publish"]
+            resources:
+              - !terraform.state data-pipeline/sns/notifications .sns_topic_arn
+          # The topic is encrypted with kms/main; Publish to it carries the
+          # aws:sns:topicArn encryption context, so this grant is scoped to
+          # that one topic, not the whole key.
+          - sid: PublishNotificationsKMS
+            actions: ["kms:GenerateDataKey*", "kms:Decrypt"]
+            resources:
+              - !terraform.state kms/main .key_arn
+            conditions:
+              - test: StringEquals
+                variable: "kms:EncryptionContext:aws:sns:topicArn"
+                values:
+                  - !terraform.state data-pipeline/sns/notifications .sns_topic_arn
         tags:
           DataPipeline: "orchestration"
-          Workflow: "step-functions"
-
-    # =========================================================================
-    # SCHEDULING (EventBridge)
-    # =========================================================================
-
+          Workflow: "daily-etl"
       dependencies:
         components:
+          - component: kms/main
           - component: data-pipeline/glue-database
           - component: data-pipeline/athena
           - component: data-pipeline/s3-raw
           - component: data-pipeline/s3-processed
           - component: data-pipeline/s3-curated
-    data-pipeline/eventbridge:
+          - component: data-pipeline/s3-athena-results
+          - component: data-pipeline/sns/notifications
+
+    # Data quality: three checks, Lambda functions deployed elsewhere
+    # (REQUIREMENTS 3). EXPRESS, logging errors only, without execution data.
+    data-pipeline/stepfunctions/data-quality:
+      metadata:
+        component: stepfunctions
+        type: real
+        inherits:
+          - stepfunctions/defaults
+      vars:
+        name: "data-quality"
+        type: "EXPRESS"
+        events_role_enabled: true
+        logging_configuration:
+          level: "ERROR"
+          include_execution_data: false
+        definition:
+          Comment: "Data quality validation"
+          StartAt: "ValidateSchema"
+          States:
+            ValidateSchema:
+              Type: "Task"
+              Resource: '{{ required "settings.data_pipeline.schema_validation_lambda_arn is required" .settings.data_pipeline.schema_validation_lambda_arn }}'
+              Next: "ValidateCompleteness"
+            ValidateCompleteness:
+              Type: "Task"
+              Resource: '{{ required "settings.data_pipeline.completeness_validation_lambda_arn is required" .settings.data_pipeline.completeness_validation_lambda_arn }}'
+              Next: "ValidateAccuracy"
+            ValidateAccuracy:
+              Type: "Task"
+              Resource: '{{ required "settings.data_pipeline.accuracy_validation_lambda_arn is required" .settings.data_pipeline.accuracy_validation_lambda_arn }}'
+              End: true
+        iam_policies:
+          - sid: InvokeValidations
+            actions: ["lambda:InvokeFunction"]
+            resources:
+              - "{{ .settings.data_pipeline.schema_validation_lambda_arn }}"
+              - "{{ .settings.data_pipeline.schema_validation_lambda_arn }}:*"
+              - "{{ .settings.data_pipeline.completeness_validation_lambda_arn }}"
+              - "{{ .settings.data_pipeline.completeness_validation_lambda_arn }}:*"
+              - "{{ .settings.data_pipeline.accuracy_validation_lambda_arn }}"
+              - "{{ .settings.data_pipeline.accuracy_validation_lambda_arn }}:*"
+        tags:
+          DataPipeline: "orchestration"
+          Workflow: "data-quality"
+
+    # =========================================================================
+    # SCHEDULING (EventBridge)
+    # =========================================================================
+    # One rule per instance on the default bus, each "<Environment>-<name>"
+    # and logging what it fires on to its own CloudWatch log group (the Cloud
+    # Posse aws-eventbridge model). Every instance lists kms/main itself: its
+    # own dependencies list replaces the one inherited from
+    # eventbridge/defaults. Step Functions targets use the state machine's own
+    # events role.
+
+    # Daily ETL at 02:00 UTC; execution_date is the time the schedule fired.
+    data-pipeline/eventbridge/daily-etl:
       metadata:
         component: eventbridge
         type: real
+        inherits:
+          - eventbridge/defaults
       vars:
-        rules:
-          # Daily ETL trigger
-          daily_etl_trigger:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-daily-etl-trigger"
-            description: "Triggers daily ETL workflow"
-            schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC daily
-            state: "ENABLED"
-            targets:
-              - id: "daily-etl-state-machine"
-                arn: !terraform.state data-pipeline/step-functions .state_machine_arns.daily_etl
-                role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
-                input:
-                  execution_date.$: "$.time"
-
-          # Hourly data quality check
-          hourly_quality_check:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-hourly-quality-check"
-            description: "Triggers hourly data quality checks"
-            schedule_expression: "rate(1 hour)"
-            state: "DISABLED"
-            targets:
-              - id: "data-quality-state-machine"
-                arn: !terraform.state data-pipeline/step-functions .state_machine_arns.data_quality
-                role_arn: "{{ .vars.eventbridge_step_functions_role_arn }}"
-
-          # Crawler completion events
-          crawler_completion:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-crawler-completion"
-            description: "Handle Glue crawler completion events"
-            event_pattern:
-              source:
-                - "aws.glue"
-              detail-type:
-                - "Glue Crawler State Change"
-              detail:
-                state:
-                  - "Succeeded"
-                  - "Failed"
-                # This pipeline's own crawlers (data-pipeline/glue-database).
-                crawlerName: !terraform.state data-pipeline/glue-database .crawler_names | [.[]]
-            targets:
-              - id: "process-crawler-completion"
-                arn: "{{ .vars.crawler_completion_lambda_arn }}"
-
+        name: "daily-etl-trigger"
+        cloudwatch_event_rule_description: "Triggers the daily ETL workflow"
+        schedule_expression: "cron(0 2 * * ? *)"  # 2 AM UTC daily
+        targets:
+          daily-etl:
+            arn: !terraform.state data-pipeline/stepfunctions/daily-etl .state_machine_arn
+            role_arn: !terraform.state data-pipeline/stepfunctions/daily-etl .events_role_arn
+            input_transformer:
+              input_paths:
+                time: "$.time"
+              input_template: '{"execution_date": "<time>"}'
         tags:
           DataPipeline: "scheduling"
-          Orchestration: "eventbridge"
-
-    # =========================================================================
-    # LOOKUP DATA (DynamoDB)
-    # =========================================================================
-
       dependencies:
         components:
-          - component: data-pipeline/step-functions
-          - component: data-pipeline/glue-database
-    data-pipeline/dynamodb-lookup:
-      metadata:
-        component: dynamodb
-        type: real
-      vars:
-        tables:
-          lookup:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-lookup"
-            billing_mode: "PAY_PER_REQUEST"
-            hash_key: "lookup_type"
-            range_key: "lookup_key"
-            attributes:
-              - name: "lookup_type"
-                type: "S"
-              - name: "lookup_key"
-                type: "S"
-            point_in_time_recovery: true
-            server_side_encryption:
-              enabled: true
-              kms_key_arn: "{{ .vars.dynamodb_kms_key_arn }}"
-            ttl:
-              enabled: true
-              attribute_name: "expires_at"
+          - component: kms/main
+          - component: data-pipeline/stepfunctions/daily-etl
 
+    # Hourly data quality checks. Off by default (the old rule was DISABLED);
+    # set metadata.enabled: true in a stack to run it.
+    data-pipeline/eventbridge/hourly-quality-check:
+      metadata:
+        component: eventbridge
+        type: real
+        enabled: false
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: "hourly-quality-check"
+        cloudwatch_event_rule_description: "Triggers hourly data quality checks"
+        schedule_expression: "rate(1 hour)"
+        targets:
+          data-quality:
+            arn: !terraform.state data-pipeline/stepfunctions/data-quality .state_machine_arn
+            role_arn: !terraform.state data-pipeline/stepfunctions/data-quality .events_role_arn
         tags:
-          DataPipeline: "enrichment"
-          DataStore: "lookup"
+          DataPipeline: "scheduling"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: data-pipeline/stepfunctions/data-quality
+
+    # This pipeline's crawlers finishing (data-pipeline/glue-database) go to
+    # the crawler-completion Lambda (REQUIREMENTS 3); the component adds its
+    # invoke permission for this rule.
+    data-pipeline/eventbridge/crawler-completion:
+      metadata:
+        component: eventbridge
+        type: real
+        inherits:
+          - eventbridge/defaults
+      vars:
+        name: "crawler-completion"
+        cloudwatch_event_rule_description: "Handles Glue crawler completion events"
+        cloudwatch_event_rule_pattern:
+          source:
+            - "aws.glue"
+          detail-type:
+            - "Glue Crawler State Change"
+          detail:
+            state:
+              - "Succeeded"
+              - "Failed"
+            crawlerName: !terraform.state data-pipeline/glue-database .crawler_names | [.[]]
+        targets:
+          process-crawler-completion:
+            arn: '{{ required "settings.data_pipeline.crawler_completion_lambda_arn is required" .settings.data_pipeline.crawler_completion_lambda_arn }}'
+        tags:
+          DataPipeline: "scheduling"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: data-pipeline/glue-database
 
     # =========================================================================
     # MONITORING
     # =========================================================================
 
+    # Resources are "<Environment>-data-pipeline-<suffix>" (name), alarms
+    # "<Environment>-<key>", all notifying the instance's KMS-encrypted alarm
+    # topic. No VPC in this template, so no infrastructure dashboard.
     data-pipeline/monitoring:
       metadata:
         component: monitoring
@@ -1358,227 +1628,209 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        dashboard_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline-dashboard"
+        name: "data-pipeline"
+        kms_key_id: !terraform.state kms/main .key_arn
 
-        # Enable all monitoring features
-        enable_resource_monitoring: true
+        # No certificates or VPC in this template.
+        enable_certificate_monitoring: false
+        create_dashboard: false
+        create_infrastructure_dashboard: false
 
-        # Custom dashboard
-        dashboards:
-          data_pipeline_overview:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline-overview"
+        metric_dashboards:
+          data-pipeline-overview:
             widgets:
-              # Kinesis metrics
-              - type: "metric"
-                properties:
-                  title: "Kinesis Ingestion Rate"
-                  metrics:
-                    - namespace: "AWS/Kinesis"
-                      metric: "IncomingRecords"
-                      dimensions:
-                        StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
-                      stat: "Sum"
-                      period: 60
-                    - namespace: "AWS/Kinesis"
-                      metric: "IncomingBytes"
-                      dimensions:
-                        StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
-                      stat: "Sum"
-                      period: 60
+              - title: "Kinesis Ingestion Rate"
+                period: 60
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/Kinesis"
+                    metric: "IncomingRecords"
+                    dimensions:
+                      StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
+                  - namespace: "AWS/Kinesis"
+                    metric: "IncomingBytes"
+                    dimensions:
+                      StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
+              - title: "Lambda Duration"
+                period: 60
+                stat: "Average"
+                metrics:
+                  - namespace: "AWS/Lambda"
+                    metric: "Duration"
+                    dimensions:
+                      FunctionName: !terraform.state data-pipeline/lambda-transformer .function_name
+                  - namespace: "AWS/Lambda"
+                    metric: "Duration"
+                    dimensions:
+                      FunctionName: !terraform.state data-pipeline/lambda-validator .function_name
+              - title: "Lambda Errors"
+                period: 60
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/Lambda"
+                    metric: "Errors"
+                    dimensions:
+                      FunctionName: !terraform.state data-pipeline/lambda-transformer .function_name
+                  - namespace: "AWS/Lambda"
+                    metric: "Errors"
+                    dimensions:
+                      FunctionName: !terraform.state data-pipeline/lambda-validator .function_name
+              - title: "Firehose Records Delivered"
+                period: 300
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/Firehose"
+                    metric: "DeliveryToS3.Records"
+                    dimensions:
+                      DeliveryStreamName: !terraform.state data-pipeline/firehose-raw .delivery_stream_name
+                  - namespace: "AWS/Firehose"
+                    metric: "DeliveryToS3.Records"
+                    dimensions:
+                      DeliveryStreamName: !terraform.state data-pipeline/firehose-processed .delivery_stream_name
+              - title: "Firehose Delivery Success"
+                period: 300
+                stat: "Average"
+                metrics:
+                  - namespace: "AWS/Firehose"
+                    metric: "DeliveryToS3.Success"
+                    dimensions:
+                      DeliveryStreamName: !terraform.state data-pipeline/firehose-raw .delivery_stream_name
+                  - namespace: "AWS/Firehose"
+                    metric: "DeliveryToS3.Success"
+                    dimensions:
+                      DeliveryStreamName: !terraform.state data-pipeline/firehose-processed .delivery_stream_name
+              - title: "ETL Workflow Status"
+                period: 86400
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/States"
+                    metric: "ExecutionsSucceeded"
+                    dimensions:
+                      StateMachineArn: !terraform.state data-pipeline/stepfunctions/daily-etl .state_machine_arn
+                  - namespace: "AWS/States"
+                    metric: "ExecutionsFailed"
+                    dimensions:
+                      StateMachineArn: !terraform.state data-pipeline/stepfunctions/daily-etl .state_machine_arn
+              - title: "Stream Dead-letter Queue Depth"
+                period: 60
+                stat: "Sum"
+                metrics:
+                  - namespace: "AWS/SQS"
+                    metric: "ApproximateNumberOfMessagesVisible"
+                    dimensions:
+                      QueueName: !terraform.state data-pipeline/sqs/stream-dlq .queue_name
 
-              # Lambda metrics
-              - type: "metric"
-                properties:
-                  title: "Lambda Transformer Performance"
-                  metrics:
-                    - namespace: "AWS/Lambda"
-                      metric: "Duration"
-                      dimensions:
-                        FunctionName: !terraform.state data-pipeline/lambda-transformer .function_name
-                      stat: "Average"
-                      period: 60
-                    - namespace: "AWS/Lambda"
-                      metric: "Errors"
-                      dimensions:
-                        FunctionName: !terraform.state data-pipeline/lambda-transformer .function_name
-                      stat: "Sum"
-                      period: 60
-
-              # Firehose metrics
-              - type: "metric"
-                properties:
-                  title: "Firehose Delivery"
-                  metrics:
-                    - namespace: "AWS/Firehose"
-                      metric: "DeliveryToS3.Records"
-                      dimensions:
-                        DeliveryStreamName: !terraform.state data-pipeline/firehose-raw .delivery_stream_name
-                      stat: "Sum"
-                      period: 300
-                    - namespace: "AWS/Firehose"
-                      metric: "DeliveryToS3.Success"
-                      dimensions:
-                        DeliveryStreamName: !terraform.state data-pipeline/firehose-raw .delivery_stream_name
-                      stat: "Average"
-                      period: 300
-
-              # Step Functions metrics
-              - type: "metric"
-                properties:
-                  title: "ETL Workflow Status"
-                  metrics:
-                    - namespace: "AWS/States"
-                      metric: "ExecutionsSucceeded"
-                      dimensions:
-                        StateMachineArn: !terraform.state data-pipeline/step-functions .state_machine_arns.daily_etl
-                      stat: "Sum"
-                      period: 86400
-                    - namespace: "AWS/States"
-                      metric: "ExecutionsFailed"
-                      dimensions:
-                        StateMachineArn: !terraform.state data-pipeline/step-functions .state_machine_arns.daily_etl
-                      stat: "Sum"
-                      period: 86400
-
-        # Alarms
-        alarms:
-          # Kinesis alarms
-          kinesis_iterator_age:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-kinesis-iterator-age"
-            metric_name: "GetRecords.IteratorAgeMilliseconds"
+        metric_alarms:
+          pipeline-kinesis-iterator-age:
             namespace: "AWS/Kinesis"
+            metric_name: "GetRecords.IteratorAgeMilliseconds"
+            dimensions:
+              StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 60000  # 1 minute
             evaluation_periods: 3
             period: 300
             statistic: "Maximum"
+          pipeline-kinesis-write-throttled:
+            namespace: "AWS/Kinesis"
+            metric_name: "WriteProvisionedThroughputExceeded"
             dimensions:
               StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
-
-          kinesis_write_throttled:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-kinesis-write-throttled"
-            metric_name: "WriteProvisionedThroughputExceeded"
-            namespace: "AWS/Kinesis"
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 1
             period: 60
             statistic: "Sum"
-            dimensions:
-              StreamName: !terraform.state data-pipeline/kinesis-ingest .stream_name
-
-          # Lambda alarms
-          lambda_errors:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-transformer-errors"
-            metric_name: "Errors"
+          pipeline-transformer-errors:
             namespace: "AWS/Lambda"
+            metric_name: "Errors"
+            dimensions:
+              FunctionName: !terraform.state data-pipeline/lambda-transformer .function_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 5
             evaluation_periods: 2
             period: 300
             statistic: "Sum"
-            dimensions:
-              FunctionName: !terraform.state data-pipeline/lambda-transformer .function_name
-
-          # Firehose alarms
-          firehose_delivery_failed:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-firehose-delivery-failed"
-            metric_name: "DeliveryToS3.DataFreshness"
+          pipeline-firehose-raw-freshness:
             namespace: "AWS/Firehose"
+            metric_name: "DeliveryToS3.DataFreshness"
+            dimensions:
+              DeliveryStreamName: !terraform.state data-pipeline/firehose-raw .delivery_stream_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 900  # 15 minutes
             evaluation_periods: 2
             period: 300
             statistic: "Maximum"
+          pipeline-firehose-processed-freshness:
+            namespace: "AWS/Firehose"
+            metric_name: "DeliveryToS3.DataFreshness"
             dimensions:
-              DeliveryStreamName: !terraform.state data-pipeline/firehose-raw .delivery_stream_name
-
-          # Step Functions alarms
-          etl_failed:
-            name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-etl-failed"
-            metric_name: "ExecutionsFailed"
+              DeliveryStreamName: !terraform.state data-pipeline/firehose-processed .delivery_stream_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 900  # 15 minutes
+            evaluation_periods: 2
+            period: 300
+            statistic: "Maximum"
+          pipeline-etl-failed:
             namespace: "AWS/States"
+            metric_name: "ExecutionsFailed"
+            dimensions:
+              StateMachineArn: !terraform.state data-pipeline/stepfunctions/daily-etl .state_machine_arn
             comparison_operator: "GreaterThanThreshold"
             threshold: 0
             evaluation_periods: 1
             period: 86400
             statistic: "Sum"
+          # Record batches the Lambdas gave up on.
+          pipeline-stream-dlq:
+            namespace: "AWS/SQS"
+            metric_name: "ApproximateNumberOfMessagesVisible"
             dimensions:
-              StateMachineArn: !terraform.state data-pipeline/step-functions .state_machine_arns.daily_etl
+              QueueName: !terraform.state data-pipeline/sqs/stream-dlq .queue_name
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 0
+            evaluation_periods: 1
+            period: 300
+            statistic: "Sum"
 
-        # SNS notifications
-        alarm_notifications_enabled: true
-        alarm_email_addresses: []
-        sns_topic_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-data-pipeline-alarms"
+        # On-call addresses per stack (REQUIREMENTS 6).
+        alarm_email_subscriptions: []
 
         tags:
           DataPipeline: "monitoring"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: data-pipeline/kinesis-ingest
+          - component: data-pipeline/lambda-transformer
+          - component: data-pipeline/lambda-validator
+          - component: data-pipeline/firehose-raw
+          - component: data-pipeline/firehose-processed
+          - component: data-pipeline/stepfunctions/daily-etl
+          - component: data-pipeline/sqs/stream-dlq
 
 # =============================================================================
-# ENVIRONMENT-SPECIFIC OVERRIDES
+# ENVIRONMENT-SPECIFIC OVERRIDES (examples, set on the instances above)
 # =============================================================================
 #
 # Development:
-#   data-pipeline/kinesis-ingest, data-pipeline/kinesis-enriched vars:
-#     stream_mode: "ON_DEMAND"
-#     retention_period: 24
-#   vars:
-#     firehose_buffer_size: 64
-#     firehose_buffer_interval: 60
-#     transformer_memory: 512
-#     transformer_concurrency: 10
-#     athena_bytes_limit: 1073741824  # 1 GB
-#     enable_cross_region_replication: false
+#   data-pipeline/kinesis-*: retention_period 24 (ON_DEMAND, the default)
+#   data-pipeline/firehose-*: buffering_size 64, buffering_interval 60
+#   data-pipeline/lambda-transformer: memory_size 512,
+#     reserved_concurrent_executions 10
+#   data-pipeline/athena: bytes_scanned_cutoff_per_query 1073741824  # 1 GB
 #
 # Staging:
-#   data-pipeline/kinesis-ingest, data-pipeline/kinesis-enriched vars:
-#     stream_mode: "ON_DEMAND"
-#     retention_period: 48
-#   vars:
-#     firehose_buffer_size: 128
-#     firehose_buffer_interval: 300
-#     transformer_memory: 1024
-#     transformer_concurrency: 50
-#     athena_bytes_limit: 5368709120  # 5 GB
-#     enable_cross_region_replication: false
+#   data-pipeline/kinesis-*: retention_period 48
+#   data-pipeline/lambda-transformer: memory_size 1024,
+#     reserved_concurrent_executions 50
+#   data-pipeline/athena: bytes_scanned_cutoff_per_query 5368709120  # 5 GB
 #
 # Production:
-#   data-pipeline/kinesis-ingest, data-pipeline/kinesis-enriched vars:
-#     stream_mode: "PROVISIONED"
-#     shard_count: 10
-#     retention_period: 168  # 7 days
-#   vars:
-#     firehose_buffer_size: 128
-#     firehose_buffer_interval: 300
-#     transformer_memory: 2048
-#     transformer_concurrency: 200
-#     athena_bytes_limit: 107374182400  # 100 GB
-#     enable_cross_region_replication: true
-#     enable_hourly_quality_check: "ENABLED"
-#     log_retention_days: 90
-
-# =============================================================================
-# REQUIRED VARIABLES
-# =============================================================================
-# lambda_logs_kms_key_id: "arn:aws:kms:..."
-# dynamodb_kms_key_arn: "arn:aws:kms:..."
-# log_bucket_name: "my-log-bucket"
-# firehose_kinesis_role_arn: "arn:aws:iam::..."
-# firehose_glue_role_arn: "arn:aws:iam::..."   # needs kms:Decrypt on kms/main (see below)
-# eventbridge_step_functions_role_arn: "arn:aws:iam::..."
-# data_pipeline_sns_topic_arn: "arn:aws:sns:..."
-# dlq_arn: "arn:aws:sqs:..."
-# alarm_email_addresses: ["ops@example.com"]
-#
-# data-pipeline/glue-database enables Data Catalog encryption with kms/main,
-# which is account-wide: every principal that reads the Glue catalog in this
-# account/region (firehose_glue_role_arn, the step-functions execution role,
-# Athena users, any other job or crawler role) needs kms:Decrypt on kms/main.
-# Otherwise catalog reads fail - for Firehose silently: Parquet conversion
-# cannot load the schema and every record lands under errors/.
-      dependencies:
-        components:
-          - component: data-pipeline/kinesis-ingest
-          - component: data-pipeline/lambda-transformer
-          - component: data-pipeline/firehose-raw
-          - component: data-pipeline/step-functions
+#   data-pipeline/kinesis-*: stream_mode PROVISIONED, shard_count 10,
+#     retention_period 168  # 7 days
+#   data-pipeline/lambda-transformer: memory_size 2048,
+#     reserved_concurrent_executions 200
+#   data-pipeline/athena: bytes_scanned_cutoff_per_query 107374182400  # 100 GB
+#   data-pipeline/eventbridge/hourly-quality-check: metadata.enabled true
+#   data-pipeline/lambda-*, data-pipeline/firehose-*: log_retention_days 90

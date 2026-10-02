@@ -7,3 +7,12 @@ import:
 settings:
   context:
     environment: pipeline
+  # The template's REQUIREMENTS 3. Placeholders.
+  data_pipeline:
+    transformer_version: "1.0.0"
+    validator_version: "1.0.0"
+    schema_registry_url: https://schemas.example.com
+    schema_validation_lambda_arn: arn:aws:lambda:us-east-1:000000000000:function:fixtures-validate-schema
+    completeness_validation_lambda_arn: arn:aws:lambda:us-east-1:000000000000:function:fixtures-validate-completeness
+    accuracy_validation_lambda_arn: arn:aws:lambda:us-east-1:000000000000:function:fixtures-validate-accuracy
+    crawler_completion_lambda_arn: arn:aws:lambda:us-east-1:000000000000:function:fixtures-crawler-completion
