@@ -30,7 +30,9 @@
 # which read its certificate ARNs, as does cloudfront (services), which also
 # writes alias records into the dns instances' zones. eks-addons reads its dns
 # instance's zone_ids, so it has its own addons layer after dns (and after
-# compute, for the cluster it installs into). The storage layer (s3, reading kms/main) precedes compute,
+# compute, for the cluster it installs into); alb, reading acm's certificate,
+# shares that layer, before the ecs-service instances (services) that add
+# listener rules to it. The storage layer (s3, reading kms/main) precedes compute,
 # whose lambda instances read s3/lambda-artifacts .bucket_id.
 # Every layer except backend has at least one enabled instance in every
 # workload stack (eks-backend-services/main, the last to gain instances, joined
@@ -291,7 +293,7 @@ workflows:
       # cert-manager are scoped to those zones), so it follows dns.
       - name: plan-addons
         type: atmos
-        command: terraform plan --query '.metadata.component == "eks-addons"'
+        command: terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
       - name: confirm_addons
         type: confirm
         prompt: Apply the addons layer plan above?
@@ -301,7 +303,7 @@ workflows:
         command: test "{{ .steps.confirm_addons.value }}" = "true" || { echo "Deployment cancelled before the addons layer."; exit 1; }
       - name: deploy-addons
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons"'
+        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
       - name: plan-services
         type: atmos
         command: >-
@@ -635,13 +637,13 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "acm"'
 
   deploy-addons:
-    description: "Deploy the addons layer: EKS add-ons (after the dns layer, whose zones they read)"
+    description: "Deploy the addons layer: EKS add-ons (after the dns layer, whose zones they read) and ALBs (after the certificates layer)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "eks-addons"'
+        command: terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
       - name: confirm
         type: confirm
         prompt: Deploy the addons layer?
@@ -651,7 +653,7 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons"'
+        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
 
   deploy-services:
     description: "Deploy the services layer: API Gateway, backend services and CloudFront distributions"

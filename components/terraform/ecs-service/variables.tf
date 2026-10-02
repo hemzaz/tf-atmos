@@ -29,8 +29,8 @@ variable "name" {
   description = "Short name. The service, task definition family and target group are named <Environment>-<name>, the log group /ecs/<Environment>-<name>, the roles <Environment>-<name>-task-execution and <Environment>-<name>-task"
 
   validation {
-    condition     = can(regex("^[a-zA-Z0-9-]{1,40}$", var.name))
-    error_message = "name must be 1-40 characters of letters, digits or hyphen (it is part of the target group name, which takes no underscore)."
+    condition     = can(regex("^[a-zA-Z0-9]([a-zA-Z0-9-]{0,38}[a-zA-Z0-9])?$", var.name))
+    error_message = "name must be 1-40 characters of letters, digits or hyphen, not starting or ending with a hyphen (it ends the target group name, which takes no underscore and no trailing hyphen)."
   }
 }
 
@@ -481,9 +481,16 @@ variable "assign_public_ip" {
 
 variable "exec_enabled" {
   type        = bool
-  description = "Enable ECS Exec (enable_execute_command). The created task role gets the ssmmessages permissions it needs (and kms:Decrypt on exec_kms_key_arn); a task_role_arn must grant them itself"
+  description = "Enable ECS Exec (enable_execute_command). The created task role gets the ssmmessages permissions it needs (and kms:Decrypt on exec_kms_key_arn); a task_role_arn must grant them itself. Needs readonly_root_filesystem = false on every container"
   default     = false
   nullable    = false
+
+  # AWS ECS Exec considerations: a read-only root filesystem is not supported
+  # (the SSM agent writes into the container).
+  validation {
+    condition     = var.exec_enabled == false || alltrue([for c in values(var.containers) : c.readonly_root_filesystem == false])
+    error_message = "exec_enabled needs readonly_root_filesystem = false on every container: ECS Exec does not support a read-only root filesystem."
+  }
 }
 
 variable "exec_kms_key_arn" {

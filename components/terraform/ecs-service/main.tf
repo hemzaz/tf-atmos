@@ -156,7 +156,7 @@ locals {
 # desired count belongs to Application Auto Scaling and is ignored after
 # creation; switching autoscaling on or off replaces the service.
 resource "aws_ecs_service" "this" {
-  count = local.enabled && !local.autoscaling_enabled ? 1 : 0
+  count = local.enabled && local.autoscaling_enabled == false ? 1 : 0
 
   name                               = local.prefix
   cluster                            = var.ecs_cluster_arn

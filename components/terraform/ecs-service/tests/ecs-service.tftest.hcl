@@ -35,6 +35,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_resource "aws_lb_listener_rule" {
+    defaults = {
+      arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener-rule/app/test-webapp-alb/50dc6c495c0c9188/f2f7dc8efc522ab2/0123456789abcdef"
+    }
+  }
+
   # launch_type and platform_version are optional+computed: when the
   # configuration leaves them null the mock fills these placeholders, which
   # the assertions read as "not set".
@@ -256,6 +262,8 @@ run "fargate_service_with_lb_and_autoscaling" {
       && output.task_role_arn == "arn:aws:iam::123456789012:role/test-web-task"
       && output.target_group_arn == aws_lb_target_group.this[0].arn
       && output.log_group_name == "/ecs/test-web"
+      && output.log_group_arn == "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-web"
+      && output.listener_rule_arn == aws_lb_listener_rule.this[0].arn
     )
     error_message = "Outputs expose the service, task definition, roles, target group and log group."
   }
@@ -419,6 +427,13 @@ run "exec_enabled_grants_ssmmessages" {
   command = plan
 
   variables {
+    containers = {
+      app = {
+        image                    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/web:1.0"
+        port_mappings            = [{ container_port = 8080 }]
+        readonly_root_filesystem = false
+      }
+    }
     task_policy_json = null
     exec_enabled     = true
     exec_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -713,4 +728,34 @@ run "ec2_rejects_fargate_only_settings" {
   }
 
   expect_failures = [var.ephemeral_storage_size, var.assign_public_ip]
+}
+
+run "exec_rejects_a_read_only_root_filesystem" {
+  command = plan
+
+  variables {
+    exec_enabled = true
+  }
+
+  expect_failures = [var.exec_enabled]
+}
+
+run "name_rejects_a_trailing_hyphen" {
+  command = plan
+
+  variables {
+    name = "web-"
+  }
+
+  expect_failures = [var.name]
+}
+
+run "name_rejects_a_leading_hyphen" {
+  command = plan
+
+  variables {
+    name = "-web"
+  }
+
+  expect_failures = [var.name]
 }

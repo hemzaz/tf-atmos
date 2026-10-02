@@ -42,3 +42,13 @@ output "log_group_name" {
   description = "The containers' CloudWatch log group (/ecs/<Environment>-<name>)"
   value       = one(aws_cloudwatch_log_group.this[*].name)
 }
+
+output "log_group_arn" {
+  description = "The containers' CloudWatch log group ARN"
+  value       = one(aws_cloudwatch_log_group.this[*].arn)
+}
+
+output "listener_rule_arn" {
+  description = "The listener rule forwarding to the service's target group (null without load_balancer)"
+  value       = one(aws_lb_listener_rule.this[*].arn)
+}

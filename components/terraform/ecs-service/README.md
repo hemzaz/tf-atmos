@@ -18,7 +18,8 @@ commented beside the code.
   (`vpc/main .private_subnet_ids`) and `security_group_ids` (a `securitygroup` instance's ids),
   and lists those instances in `dependencies.components`. With `load_balancer` it also reads an
   `alb` instance (`listener_arn` = `.https_listener_arn`) and `vpc/main .vpc_id`. It deploys in
-  the `services` layer of `workflows/deploy-full-stack.yaml`, after `ecs` (compute).
+  the `services` layer of `workflows/deploy-full-stack.yaml`, after `ecs` (compute) and `alb`
+  (addons).
 - Consumers: `monitoring` reads `.service_name` (with the cluster's `.cluster_name`) for the
   `AWS/ECS` dimensions and `.target_group_arn_suffix` for `AWS/ApplicationELB` ones.
 - `stacks/catalog/templates/web-application.yaml` predates this component (raw
@@ -54,11 +55,20 @@ commented beside the code.
 - `exec_enabled` gives the created task role the `ssmmessages` permissions and `kms:Decrypt` on
   `exec_kms_key_arn` (the cluster's ECS Exec key, when it sets one; the `ecs` component sets none
   today). A `task_role_arn` must grant them itself.
+- ECS Exec does not support a read-only root filesystem, so `exec_enabled` needs
+  `readonly_root_filesystem = false` on every container (validated).
+- ECS Exec session logging to CloudWatch Logs or S3 (the cluster's `execute_command_configuration`)
+  needs extra task role permissions on that log group or bucket; they are not wired, since the
+  `ecs` cluster sets no exec logging.
 - Root filesystems are read-only by default (`readonly_root_filesystem`): a container that writes
   to local disk (`/tmp` included) needs `false`, since the component mounts no volumes.
 - With `autoscaling` the service ignores `desired_count` after creation, and the service is a
   different resource: switching autoscaling on or off replaces the service (Cloud Posse's
-  `ignore_changes_desired_count` pattern). `alb_request_count_per_target` needs `load_balancer`.
+  `ignore_changes_desired_count` pattern). The replacement's CreateService for the same name can
+  fail while the old service is still draining. To switch in place, move the state first:
+  `terraform state mv 'aws_ecs_service.this[0]' 'aws_ecs_service.autoscaled[0]'` when enabling
+  autoscaling (the reverse when disabling), then apply. `alb_request_count_per_target` needs
+  `load_balancer`.
 - Every task definition change registers a new revision and rolls the service; the deployment
   circuit breaker (on, with rollback) returns to the last working revision if tasks fail.
 - The target group name is `<Environment>-<name>` (32 characters at most). Changing its port,
