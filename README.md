@@ -89,7 +89,8 @@ backend's trust: see [State backend](./docs/OPERATIONS.md#state-backend).
 ## Conventions
 
 - Cross-component values use YAML functions (`!terraform.state vpc/main .vpc_id`), never
-  `${...}`. Every instance read must be in the reader's `dependencies.components`
+  `${...}`. Every instance read must be in the reader's `dependencies.components`, and every
+  output read and var set must be declared by its module
   (`workflows/scripts/common/check-dependencies.py`).
 - Disable an instance with `metadata.enabled: false`, never by deleting it.
 - Component names are singular without hyphens (`securitygroup`); snake_case everywhere;

@@ -181,6 +181,11 @@ is the fallback for moves configuration cannot express. A moved-only change must
 object: an inline attribute promoted to a resource, a `ForceNew` replacement, or an instance
 switched to a different root module (import instead).
 
+A renamed output or variable breaks its stacks silently: Atmos writes an undeclared var into the
+varfile and Terraform drops it with a warning, and a `!terraform.state` read of a missing output
+yields null. `check-dependencies.py` (validate-all) fails both, so rename the stack side in the
+same PR.
+
 ## Lambda packages
 
 Function code lives in an application repo, not here (the Cloud Posse aws-lambda model). The

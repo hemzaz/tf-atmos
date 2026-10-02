@@ -22,7 +22,10 @@ workflows:
         command: atmos validate stacks
       # Two things nothing else checks:
       #  - every !terraform.state/!terraform.output target is an existing, enabled
-      #    instance listed in the reader's dependencies.components (deploy ordering);
+      #    instance listed in the reader's dependencies.components (deploy ordering),
+      #    and the output it reads is declared by the target's root module;
+      #  - every var an instance sets is declared by its root module (Atmos and
+      #    Terraform drop an undeclared one with only a warning);
       #  - every deployable instance maps to a component directory that exists.
       #    `atmos validate stacks` and validate-all both pass when it does not,
       #    because neither maps instances back to directories.
