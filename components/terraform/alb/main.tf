@@ -242,7 +242,7 @@ resource "aws_lb" "this" {
   internal           = var.internal
   load_balancer_type = "application"
   subnets            = var.subnets
-  security_groups    = [aws_security_group.this[0].id]
+  security_groups    = concat([aws_security_group.this[0].id], var.security_group_ids)
 
   idle_timeout                     = var.idle_timeout
   enable_deletion_protection       = var.deletion_protection
@@ -313,8 +313,38 @@ resource "aws_lb_listener" "https" {
   ssl_policy        = var.ssl_policy
   certificate_arn   = var.certificate_arn
 
+  # Forward to the default target group, or (listener_https_fixed_response)
+  # answer every request no listener rule matched with a fixed response.
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.default[0].arn
+    type             = var.listener_https_fixed_response == null ? "forward" : "fixed-response"
+    target_group_arn = var.listener_https_fixed_response == null ? aws_lb_target_group.default[0].arn : null
+
+    dynamic "fixed_response" {
+      for_each = var.listener_https_fixed_response == null ? [] : [var.listener_https_fixed_response]
+      content {
+        content_type = fixed_response.value.content_type
+        message_body = fixed_response.value.message_body
+        status_code  = fixed_response.value.status_code
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Route 53 alias records (dns_alias_enabled): A records to the load balancer,
+# as Cloud Posse's terraform-aws-route53-alias does for its callers.
+# ---------------------------------------------------------------------------
+
+resource "aws_route53_record" "alias" {
+  for_each = local.enabled && var.dns_alias_enabled ? toset(var.dns_aliases) : toset([])
+
+  zone_id = var.parent_zone_id
+  name    = each.value
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.this[0].dns_name
+    zone_id                = aws_lb.this[0].zone_id
+    evaluate_target_health = true
   }
 }

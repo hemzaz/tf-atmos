@@ -77,6 +77,27 @@ variable "additional_ingress_security_group_ids" {
   nullable    = false
 }
 
+# Cloud Posse aws-alb's security_group_ids: extra groups attached to the load
+# balancer itself (alongside its own), so a target's security group can admit
+# the ALB by a group the caller defined in an earlier layer (a securitygroup
+# instance) instead of reading this component's own group id.
+variable "security_group_ids" {
+  type        = list(string)
+  description = "Additional security group ids attached to the load balancer, alongside the component's own group (which holds the ingress rules). A target's security group can admit one of these as its source"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for id in var.security_group_ids : can(regex("^sg-[0-9a-f]+$", id))])
+    error_message = "security_group_ids entries must be security group ids (sg-...)."
+  }
+
+  validation {
+    condition     = length(var.security_group_ids) <= 4
+    error_message = "At most 4 security_group_ids: a load balancer takes 5 security groups and the component's own is one."
+  }
+}
+
 # ---------------------------------------------------------------------------
 # HTTPS listener. There is no port 80 listener: CloudFront terminates the
 # http -> https redirect at the edge, so the ALB only ever needs to answer
@@ -90,6 +111,32 @@ variable "certificate_arn" {
   validation {
     condition     = can(regex("^arn:aws[a-z-]*:acm:[a-z0-9-]+:[0-9]{12}:certificate/.+$", var.certificate_arn))
     error_message = "certificate_arn must be an ACM certificate ARN (arn:aws:acm:<region>:<account>:certificate/<id>)."
+  }
+}
+
+# Cloud Posse terraform-aws-alb's listener_https_fixed_response: the HTTPS
+# listener's default action returns this response instead of forwarding to the
+# default target group. Behind CloudFront, a 403 here plus listener rules that
+# require the distribution's secret origin-verify header (ecs-service
+# load_balancer.http_header) refuses every request that did not come through
+# the distribution.
+variable "listener_https_fixed_response" {
+  type = object({
+    content_type = string
+    message_body = string
+    status_code  = string
+  })
+  description = "Fixed response for the HTTPS listener's default action (content_type, message_body, status_code), replacing the forward to the default target group. Null (default) forwards"
+  default     = null
+
+  validation {
+    condition = var.listener_https_fixed_response == null || try(
+      contains(["text/plain", "text/css", "text/html", "application/javascript", "application/json"], var.listener_https_fixed_response.content_type)
+      && can(regex("^[2-5][0-9][0-9]$", var.listener_https_fixed_response.status_code))
+      && length(var.listener_https_fixed_response.message_body) <= 1024,
+      false
+    )
+    error_message = "listener_https_fixed_response needs content_type text/plain, text/css, text/html, application/javascript or application/json, a 2XX-5XX status_code and a message_body of at most 1024 characters."
   }
 }
 
@@ -257,4 +304,51 @@ variable "access_logs_force_destroy" {
   type        = bool
   description = "Let terraform destroy the access-logs bucket even when it holds objects"
   default     = false
+}
+
+# ---------------------------------------------------------------------------
+# Route 53 alias records to the load balancer (Cloud Posse's dns_alias_enabled
+# / parent_zone_id, as on the cloudfront component; the names are dns_aliases
+# here, since an ALB has no aliases of its own). A CloudFront origin needs
+# one: CloudFront checks the origin certificate against the origin hostname,
+# and ACM cannot issue for *.elb.amazonaws.com.
+# ---------------------------------------------------------------------------
+
+variable "dns_alias_enabled" {
+  type        = bool
+  description = "Create an A alias record to the load balancer for each of dns_aliases in parent_zone_id"
+  default     = false
+}
+
+variable "parent_zone_id" {
+  type        = string
+  description = "Route 53 hosted zone ID the alias records go in (a dns instance's zone_ids.<key>); required with dns_alias_enabled"
+  default     = null
+
+  validation {
+    condition     = var.parent_zone_id == null || can(regex("^Z[A-Z0-9]{1,31}$", coalesce(var.parent_zone_id, "-")))
+    error_message = "parent_zone_id must be a Route 53 hosted zone ID (Z...)."
+  }
+
+  validation {
+    condition     = !var.dns_alias_enabled || var.parent_zone_id != null && length(var.dns_aliases) > 0
+    error_message = "dns_alias_enabled needs parent_zone_id and at least one of dns_aliases."
+  }
+}
+
+variable "dns_aliases" {
+  type        = list(string)
+  description = "Fully qualified names (e.g. origin.app.example.com) aliased to the load balancer in parent_zone_id (dns_alias_enabled); certificate_arn must cover them"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for a in var.dns_aliases : can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", a))])
+    error_message = "dns_aliases entries must be lowercase host names without a trailing dot."
+  }
+
+  validation {
+    condition     = length(distinct(var.dns_aliases)) == length(var.dns_aliases)
+    error_message = "dns_aliases entries must be unique."
+  }
 }
