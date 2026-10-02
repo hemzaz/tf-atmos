@@ -62,6 +62,42 @@ resource "aws_cognito_user_pool" "this" {
   user_pool_add_ons {
     advanced_security_mode = var.advanced_security_mode
   }
+
+  # Cloud Posse aws-cognito's string_schemas (its number_schemas and generic
+  # schemas are not ported).
+  dynamic "schema" {
+    for_each = var.string_schemas
+    content {
+      name                     = schema.value.name
+      attribute_data_type      = schema.value.attribute_data_type
+      developer_only_attribute = schema.value.developer_only_attribute
+      mutable                  = schema.value.mutable
+      required                 = schema.value.required
+
+      string_attribute_constraints {
+        min_length = schema.value.string_attribute_constraints.min_length
+        max_length = schema.value.string_attribute_constraints.max_length
+      }
+    }
+  }
+}
+
+# OAuth resource servers (Cloud Posse aws-cognito's resource_servers): the
+# custom scopes a client_credentials client is granted.
+resource "aws_cognito_resource_server" "this" {
+  for_each = local.enabled ? { for r in var.resource_servers : r.identifier => r } : {}
+
+  identifier   = each.key
+  name         = each.value.name
+  user_pool_id = aws_cognito_user_pool.this[0].id
+
+  dynamic "scope" {
+    for_each = each.value.scope
+    content {
+      scope_name        = scope.value.scope_name
+      scope_description = scope.value.scope_description
+    }
+  }
 }
 
 resource "aws_cognito_user_pool_client" "this" {
@@ -96,6 +132,10 @@ resource "aws_cognito_user_pool_client" "this" {
   # Without this, an unauthenticated caller can tell a wrong password from an
   # unknown user, which enumerates the user directory.
   prevent_user_existence_errors = "ENABLED"
+
+  # A client's allowed_oauth_scopes may name a resource server's scopes, which
+  # must exist first.
+  depends_on = [aws_cognito_resource_server.this]
 }
 
 # Hosted UI / OAuth endpoints. Only created when a domain prefix is given; an

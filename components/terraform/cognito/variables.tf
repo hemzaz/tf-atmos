@@ -148,6 +148,75 @@ variable "domain_prefix" {
   }
 }
 
+variable "string_schemas" {
+  type = list(object({
+    name                     = string
+    attribute_data_type      = optional(string, "String")
+    developer_only_attribute = optional(bool, false)
+    mutable                  = optional(bool, true)
+    required                 = optional(bool, false)
+    string_attribute_constraints = optional(object({
+      min_length = optional(number, 0)
+      max_length = optional(number, 2048)
+    }), {})
+  }))
+  description = "String attributes of the pool's schema, as Cloud Posse aws-cognito's string_schemas. A custom attribute is named without its custom: prefix (tenant_id is custom:tenant_id). Attributes cannot be changed or removed once the pool exists; new ones can be added"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for s in var.string_schemas : s.attribute_data_type == "String"])
+    error_message = "string_schemas entries must have attribute_data_type String."
+  }
+
+  validation {
+    condition     = alltrue([for s in var.string_schemas : can(regex("^[A-Za-z0-9_]{1,20}$", s.name))])
+    error_message = "string_schemas names must be 1-20 letters, digits or underscores, without the custom: prefix."
+  }
+
+  validation {
+    condition     = length(distinct([for s in var.string_schemas : s.name])) == length(var.string_schemas)
+    error_message = "string_schemas names must be unique."
+  }
+
+  validation {
+    condition = alltrue([for s in var.string_schemas :
+      s.string_attribute_constraints.min_length >= 0
+      && s.string_attribute_constraints.min_length <= s.string_attribute_constraints.max_length
+      && s.string_attribute_constraints.max_length <= 2048
+    ])
+    error_message = "string_attribute_constraints need 0 <= min_length <= max_length <= 2048."
+  }
+}
+
+variable "resource_servers" {
+  type = list(object({
+    identifier = string
+    name       = string
+    scope = optional(list(object({
+      scope_name        = string
+      scope_description = string
+    })), [])
+  }))
+  description = "OAuth resource servers, as Cloud Posse aws-cognito's resource_servers. A client's allowed_oauth_scopes name their scopes as <identifier>/<scope_name> (client_credentials clients need them)"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = length(distinct([for r in var.resource_servers : r.identifier])) == length(var.resource_servers)
+    error_message = "resource_servers identifiers must be unique."
+  }
+
+  validation {
+    condition = alltrue([for r in var.resource_servers :
+      can(regex("^[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,256}$", r.identifier))
+      && alltrue([for s in r.scope : can(regex("^[\\x21\\x23-\\x2E\\x30-\\x5B\\x5D-\\x7E]{1,256}$", s.scope_name))])
+      && length(distinct([for s in r.scope : s.scope_name])) == length(r.scope)
+    ])
+    error_message = "Each resource server needs an identifier of 1-256 printable characters without spaces, quotes or backslashes, and unique scope names without slashes."
+  }
+}
+
 variable "clients" {
   type = map(object({
     generate_secret               = optional(bool, true)

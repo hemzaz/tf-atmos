@@ -28,6 +28,11 @@ output "client_ids" {
   value       = { for k, c in aws_cognito_user_pool_client.this : k => c.id }
 }
 
+output "resource_servers_scope_identifiers" {
+  description = "Scope identifiers (<identifier>/<scope_name>) keyed by resource server identifier. Cloud Posse aws-cognito's output of this name is a list of lists"
+  value       = { for k, r in aws_cognito_resource_server.this : k => r.scope_identifiers }
+}
+
 output "hosted_ui_domain" {
   description = "Cognito hosted UI domain, null when no domain_prefix was set"
   value       = one(aws_cognito_user_pool_domain.this[*].domain)
