@@ -1,9 +1,11 @@
 # batch
 
-AWS Batch managed compute environments (`EC2`, `SPOT`, `FARGATE`, `FARGATE_SPOT`) and the job
-queues that feed them, one map entry each, named `<Environment>-<name>-<key>`. Cloud Posse has no
-Batch component, so the shape follows this repo's map-based components. Job definitions are not
-in this component yet.
+AWS Batch managed compute environments (`EC2`, `SPOT`, `FARGATE`, `FARGATE_SPOT`), the job
+queues that feed them and container job definitions, one map entry each, named
+`<Environment>-<name>-<key>`. Job definitions come with their log group
+(`/aws/batch/<Environment>-<name>`, KMS-encrypted), a shared execution role and optional per-job
+roles. Cloud Posse has no Batch component, so the shape follows this repo's map-based components;
+the roles follow its ecs-service pattern (created unless an ARN is given).
 
 ## Wiring
 
@@ -14,8 +16,15 @@ in this component yet.
 - `job_queues.*.compute_environment_order` names `compute_environments` keys of the same instance,
   or a compute environment ARN from elsewhere.
 - Consumers (Step Functions `batch:submitJob`, EventBridge targets, job submitters) read
-  `.job_queue_arns.<key>`; CloudWatch dimensions read `.compute_environment_names` and
-  `.job_queue_names`.
+  `.job_queue_arns.<key>` and `.job_definition_names.<key>` (or `.job_definition_arn_prefixes`);
+  CloudWatch dimensions read `.compute_environment_names` and `.job_queue_names`. IAM for
+  submitters scopes `batch:SubmitJob` to the queue ARN and `<job_definition_arn_prefix>:*`.
+- `job_definitions` need `log_kms_key_arn` (`!terraform.state kms/main .key_arn`, with `kms/main`
+  in `dependencies.components`); its key policy must allow CloudWatch Logs
+  (`allow_cloudwatch_logs`, on in `catalog/kms/defaults`).
+- `secrets` take Secrets Manager secret ARNs (full, with the 6-character suffix; e.g. a
+  `secretsmanager` instance's output) or SSM parameter ARNs; set `secrets_kms_key_arn` when they
+  are encrypted with a customer managed key.
 - `stacks/catalog/templates/batch-processing.yaml` predates this component and still uses the
   old split `batch`/`batch-job-queue`/`batch-job-definition` inputs; it needs porting.
 
@@ -46,3 +55,34 @@ in this component yet.
   it is given (jobs need no inbound access).
 - Replacing a compute environment fails while a queue still references it: change the queue's
   order first, or replace both together.
+
+### Job definitions
+
+- Every change registers a new revision and deregisters the previous one, so
+  `.job_definition_arns` (revisioned) changes on every edit and a consumer holding the old ARN
+  submits to an inactive revision until it is re-applied. Step Functions, EventBridge targets and
+  submitters should use `.job_definition_names` or `.job_definition_arn_prefixes`, which
+  `SubmitJob` resolves to the latest active revision; use `.job_definition_arns` only to pin one.
+- The execution role (`<Environment>-<name>-job-execution`, or `execution_role_arn`) is used by
+  `FARGATE` definitions and by any definition with `secrets`. It can create streams in the
+  component log group, read exactly the definitions' secrets (Secrets Manager secret ARNs without
+  the json-key tail, SSM parameter ARNs, `kms:Decrypt` on `secrets_kms_key_arn` through those two
+  services) and, for Fargate, pull images: `ecr_repository_arns`, or every repository when empty
+  (as `AmazonECSTaskExecutionRolePolicy`). `EC2` definitions without secrets pull and log with
+  the instance role.
+- A job role is created (`<Environment>-<name>-<key>-job`) only for definitions with
+  `job_role_policy_arns` or `job_role_policy_json`; `job_role_arn` uses an existing one. Without
+  either the job has no AWS credentials.
+- Both roles trust `ecs-tasks.amazonaws.com` only with `aws:SourceAccount` = this account and
+  `aws:SourceArn` like `arn:aws:ecs:<region>:<account>:*` (AWS's confused-deputy guidance for
+  task roles; a cluster-specific ARN is not supported). A role given by ARN needs a trust that
+  allows ECS tasks.
+- Definitions log with `awslogs` to the component log group, stream prefix = the key (or
+  `log_stream_prefix`). Another log group would not be covered by the created execution role.
+- Fargate takes only the documented vCPU/memory pairs (0.25-16 vCPU), no `privileged`, `gpu`,
+  `ulimits`, shared memory or devices; `assign_public_ip` defaults to `DISABLED`, so the subnets
+  need a NAT gateway or VPC endpoints (ECR, S3, Logs, Secrets Manager/SSM) to pull and log. EC2
+  definitions take whole vCPUs and reject the Fargate-only settings.
+- Root filesystems are read-only by default (`readonly_root_filesystem`): a job that writes to
+  local disk (`/tmp` included) needs `false`, since the component mounts no volumes.
+- `scheduling_priority` only takes effect on a fair-share queue.

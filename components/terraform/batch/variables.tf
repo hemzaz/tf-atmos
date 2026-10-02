@@ -317,3 +317,296 @@ variable "job_queues" {
     error_message = "fair_share_policy compute_reservation must be 0-99 and share_decay_seconds 0-604800."
   }
 }
+
+# Container job definitions, one map entry each. Cloud Posse has no Batch
+# module, so container_properties is built from typed attributes (not raw
+# JSON) so the roles, the log group and the Fargate/EC2 rules can be derived
+# and validated here.
+variable "job_definitions" {
+  type = map(object({
+    # EC2 (also runs on SPOT environments) or FARGATE (also FARGATE_SPOT).
+    platform_capability = optional(string, "FARGATE")
+
+    image = string
+    # vCPUs and memory (MiB), sent as resourceRequirements. Fargate takes the
+    # documented combinations only (0.25-16 vCPU); EC2 whole vCPUs >= 1 and
+    # memory >= 4 MiB. gpu is EC2 only.
+    vcpu   = number
+    memory = number
+    gpu    = optional(number)
+
+    command = optional(list(string), [])
+    # Default values for Ref::<name> placeholders in command.
+    parameters  = optional(map(string), {})
+    environment = optional(map(string), {})
+    # Environment variable name -> Secrets Manager secret ARN (the full ARN
+    # with its 6-character suffix, optionally :json-key:version-stage:version-id)
+    # or SSM parameter ARN. The execution role is granted exactly these.
+    secrets = optional(map(string), {})
+
+    # Job role (what the job's code may call). Unset with no policies, the job
+    # runs without AWS credentials. job_role_policy_arns and/or
+    # job_role_policy_json create <Environment>-<name>-<key>-job; job_role_arn
+    # uses an existing role instead (and excludes both).
+    job_role_arn         = optional(string)
+    job_role_policy_arns = optional(list(string), [])
+    job_role_policy_json = optional(string)
+
+    # FARGATE only. The platform version defaults to LATEST, assign_public_ip
+    # to DISABLED (ENABLED only for public subnets without NAT), ephemeral
+    # storage to Fargate's 20 GiB, cpu_architecture to X86_64.
+    fargate_platform_version = optional(string)
+    assign_public_ip         = optional(string)
+    ephemeral_storage_gib    = optional(number)
+    cpu_architecture         = optional(string)
+
+    readonly_root_filesystem = optional(bool, true)
+    # EC2 only: Fargate rejects privileged containers.
+    privileged = optional(bool, false)
+    user       = optional(string)
+    # EC2 only.
+    ulimits = optional(list(object({
+      name       = string
+      soft_limit = number
+      hard_limit = number
+    })), [])
+    # init_process_enabled works on both; shared_memory_size (MiB) and devices
+    # are EC2 only.
+    linux_parameters = optional(object({
+      init_process_enabled = optional(bool)
+      shared_memory_size   = optional(number)
+      devices = optional(list(object({
+        host_path      = string
+        container_path = optional(string)
+        permissions    = optional(list(string))
+      })), [])
+    }))
+
+    # awslogs to the component's /aws/batch/<Environment>-<name> log group;
+    # the stream prefix defaults to the key.
+    log_stream_prefix = optional(string)
+
+    retry_strategy = optional(object({
+      attempts = optional(number, 1)
+      evaluate_on_exit = optional(list(object({
+        action           = string
+        on_exit_code     = optional(string)
+        on_reason        = optional(string)
+        on_status_reason = optional(string)
+      })), [])
+    }), {})
+    timeout_seconds     = optional(number)
+    propagate_tags      = optional(bool, true)
+    scheduling_priority = optional(number)
+
+    tags = optional(map(string), {})
+  }))
+  description = "Container job definitions by key, named <Environment>-<name>-<key>: platform_capability (FARGATE default, or EC2), image, vcpu, memory (MiB), gpu (EC2), command, parameters, environment, secrets (env name -> Secrets Manager or SSM parameter ARN), a job role (job_role_arn, or job_role_policy_arns/job_role_policy_json to create one), Fargate settings (fargate_platform_version, assign_public_ip DISABLED by default, ephemeral_storage_gib, cpu_architecture), readonly_root_filesystem (default true), privileged (EC2 only), user, ulimits (EC2), linux_parameters, log_stream_prefix, retry_strategy (1-10 attempts, evaluate_on_exit), timeout_seconds (>= 60), propagate_tags (default true), scheduling_priority and tags. Every change registers a new revision"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for k in keys(var.job_definitions) : can(regex("^[a-zA-Z0-9_-]{1,64}$", k))])
+    error_message = "job_definitions keys must be 1-64 characters of letters, digits, underscore or hyphen."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : contains(["EC2", "FARGATE"], d.platform_capability)])
+    error_message = "job_definitions platform_capability must be EC2 or FARGATE."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : try(trimspace(d.image) != "", false)])
+    error_message = "Every job definition needs a non-empty image."
+  }
+
+  # Fargate's documented vCPU/memory (MiB) combinations.
+  validation {
+    condition = alltrue([
+      for d in values(var.job_definitions) : d.platform_capability != "FARGATE" || contains(lookup({
+        "0.25" = [512, 1024, 2048]
+        "0.5"  = range(1024, 4097, 1024)
+        "1"    = range(2048, 8193, 1024)
+        "2"    = range(4096, 16385, 1024)
+        "4"    = range(8192, 30721, 1024)
+        "8"    = range(16384, 61441, 4096)
+        "16"   = range(32768, 122881, 8192)
+      }, tostring(d.vcpu), []), d.memory)
+    ])
+    error_message = "A FARGATE job definition needs a supported vcpu/memory (MiB) pair: 0.25 vCPU with 512, 1024 or 2048; 0.5 with 1024-4096; 1 with 2048-8192; 2 with 4096-16384; 4 with 8192-30720 (1024 steps); 8 with 16384-61440 (4096 steps); 16 with 32768-122880 (8192 steps)."
+  }
+
+  validation {
+    condition = alltrue([
+      for d in values(var.job_definitions) : d.platform_capability != "EC2" || (
+        d.vcpu >= 1 && floor(d.vcpu) == d.vcpu && d.memory >= 4 && floor(d.memory) == d.memory
+      )
+    ])
+    error_message = "An EC2 job definition needs a whole vcpu of at least 1 and a whole memory (MiB) of at least 4."
+  }
+
+  validation {
+    condition = alltrue([
+      for d in values(var.job_definitions) : d.platform_capability == "EC2" || alltrue([
+        d.gpu == null, !d.privileged, length(d.ulimits) == 0,
+        try(d.linux_parameters.shared_memory_size, null) == null,
+        length(try(d.linux_parameters.devices, [])) == 0,
+      ])
+    ])
+    error_message = "A FARGATE job definition takes no gpu, privileged, ulimits, linux_parameters.shared_memory_size or linux_parameters.devices (EC2 only)."
+  }
+
+  validation {
+    condition = alltrue([
+      for d in values(var.job_definitions) : d.platform_capability == "FARGATE" || alltrue([
+        d.fargate_platform_version == null, d.assign_public_ip == null,
+        d.ephemeral_storage_gib == null, d.cpu_architecture == null,
+      ])
+    ])
+    error_message = "fargate_platform_version, assign_public_ip, ephemeral_storage_gib and cpu_architecture apply to FARGATE job definitions only."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : d.gpu == null || try(d.gpu >= 1 && floor(d.gpu) == d.gpu, false)])
+    error_message = "gpu must be a whole number of at least 1."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : contains(["ENABLED", "DISABLED"], coalesce(d.assign_public_ip, "DISABLED"))])
+    error_message = "assign_public_ip must be ENABLED or DISABLED."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : contains(["X86_64", "ARM64"], coalesce(d.cpu_architecture, "X86_64"))])
+    error_message = "cpu_architecture must be X86_64 or ARM64."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : d.ephemeral_storage_gib == null || try(d.ephemeral_storage_gib >= 21 && d.ephemeral_storage_gib <= 200, false)])
+    error_message = "ephemeral_storage_gib must be between 21 and 200 (unset is Fargate's 20 GiB)."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for d in values(var.job_definitions) : [
+        for n, arn in d.secrets : can(regex("^[A-Za-z_][A-Za-z0-9_]*$", n)) && (
+          can(regex("^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[^:]+(:[^:]*:[^:]*:[^:]*)?$", arn)) ||
+          can(regex("^arn:aws[a-z-]*:ssm:[a-z0-9-]+:[0-9]{12}:parameter/.+$", arn))
+        )
+      ]
+    ]))
+    error_message = "secrets maps an environment variable name to a Secrets Manager secret ARN (arn:aws:secretsmanager:<region>:<account>:secret:<name>-<suffix>, optionally :<json-key>:<version-stage>:<version-id>) or an SSM parameter ARN (arn:aws:ssm:<region>:<account>:parameter/<name>). Names are rejected: the execution role is scoped to the ARNs."
+  }
+
+  validation {
+    condition = alltrue([
+      for d in values(var.job_definitions) : d.job_role_arn == null || (length(d.job_role_policy_arns) == 0 && d.job_role_policy_json == null)
+    ])
+    error_message = "job_role_arn uses an existing role: leave job_role_policy_arns and job_role_policy_json unset with it."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : d.job_role_arn == null || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$", d.job_role_arn))])
+    error_message = "job_role_arn must be an IAM role ARN."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for d in values(var.job_definitions) : [for a in d.job_role_policy_arns : can(regex("^arn:aws[a-z-]*:iam::(aws|[0-9]{12}):policy/.+$", a))]
+    ]))
+    error_message = "job_role_policy_arns entries must be IAM policy ARNs."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : d.job_role_policy_json == null || can(jsondecode(d.job_role_policy_json).Statement)])
+    error_message = "job_role_policy_json must be an IAM policy document (JSON with a Statement)."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : try(d.retry_strategy.attempts >= 1 && d.retry_strategy.attempts <= 10, false)])
+    error_message = "retry_strategy.attempts must be between 1 and 10."
+  }
+
+  validation {
+    condition = alltrue([
+      for d in values(var.job_definitions) : try(length(d.retry_strategy.evaluate_on_exit) <= 5 && alltrue([
+        for e in d.retry_strategy.evaluate_on_exit :
+        contains(["RETRY", "EXIT"], e.action) && anytrue([e.on_exit_code != null, e.on_reason != null, e.on_status_reason != null])
+      ]), false)
+    ])
+    error_message = "retry_strategy.evaluate_on_exit takes up to 5 entries, each with action RETRY or EXIT and at least one of on_exit_code, on_reason or on_status_reason."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : d.timeout_seconds == null || try(d.timeout_seconds >= 60, false)])
+    error_message = "timeout_seconds (the attempt duration) must be at least 60."
+  }
+
+  validation {
+    condition     = alltrue([for d in values(var.job_definitions) : d.scheduling_priority == null || try(d.scheduling_priority >= 0 && d.scheduling_priority <= 9999, false)])
+    error_message = "scheduling_priority must be between 0 and 9999 (it only applies on fair-share queues)."
+  }
+}
+
+# Cloud Posse ecs-service pattern: the component creates the execution role
+# unless it is given one.
+variable "execution_role_arn" {
+  type        = string
+  description = "Existing ECS task execution role for the job definitions that need one (FARGATE, or any with secrets). Null creates <Environment>-<name>-job-execution, scoped to the component's log group, ecr_repository_arns, the definitions' secrets and secrets_kms_key_arn"
+  default     = null
+
+  validation {
+    condition     = var.execution_role_arn == null || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$", var.execution_role_arn))
+    error_message = "execution_role_arn must be an IAM role ARN."
+  }
+}
+
+variable "ecr_repository_arns" {
+  type        = list(string)
+  description = "ECR repositories the created execution role may pull from (FARGATE jobs; EC2 jobs pull with the instance role). Empty allows every repository (\"*\"), as AmazonECSTaskExecutionRolePolicy does"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for a in var.ecr_repository_arns : can(regex("^arn:aws[a-z-]*:ecr:[a-z0-9-]+:[0-9]{12}:repository/.+$", a))])
+    error_message = "ecr_repository_arns entries must be ECR repository ARNs (arn:aws:ecr:<region>:<account>:repository/<name>)."
+  }
+}
+
+variable "secrets_kms_key_arn" {
+  type        = string
+  description = "Customer managed KMS key encrypting the definitions' secrets (Secrets Manager secrets, SecureString parameters). The created execution role gets kms:Decrypt on it through Secrets Manager and SSM only. Null for AWS managed keys"
+  default     = null
+
+  validation {
+    condition     = var.secrets_kms_key_arn == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.secrets_kms_key_arn))
+    error_message = "secrets_kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>), not an alias."
+  }
+}
+
+variable "log_kms_key_arn" {
+  type        = string
+  description = "KMS key ARN (the stack's kms/main .key_arn) encrypting the job log group /aws/batch/<Environment>-<name>; its policy must allow logs.<region>.amazonaws.com (kms allow_cloudwatch_logs). Required when job_definitions is not empty"
+  default     = null
+
+  validation {
+    condition     = var.log_kms_key_arn == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.log_kms_key_arn))
+    error_message = "log_kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>), not an alias."
+  }
+
+  validation {
+    condition     = var.log_kms_key_arn != null || length(var.job_definitions) == 0
+    error_message = "job_definitions need log_kms_key_arn (kms/main .key_arn) for their encrypted log group."
+  }
+}
+
+variable "log_retention_days" {
+  type        = number
+  description = "Days to retain the job log group (/aws/batch/<Environment>-<name>)"
+  default     = 90
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, ...)."
+  }
+}
