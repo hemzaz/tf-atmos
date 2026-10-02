@@ -41,6 +41,10 @@
 # compute, whose batch, lambda and glue state its definitions read (an athena
 # workgroup it shares the layer with is named, not read), and eventbridge
 # (services) follows it, targeting state machines, Batch queues, lambdas and queues.
+# waf (reading only kms/main) is in security, before the cloudfront instances
+# (services) that use a CLOUDFRONT-scope web ACL's arn; web-application/waf,
+# which associates with the template's alb (addons), is selected by name into
+# services instead.
 # Every layer except backend has at least one enabled instance in every
 # workload stack (eks-backend-services/main, the last to gain instances, joined
 # the compute layer in all 3 stacks); fnx-core-root has only the backend layer.
@@ -172,7 +176,8 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"'
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"
+          or .metadata.component == "waf" and .atmos_component != "web-application/waf"'
       - name: confirm_security
         type: confirm
         prompt: Apply the security layer plan above?
@@ -187,7 +192,8 @@ workflows:
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2"'
+          or .metadata.component == "inspector2" or .metadata.component == "waf"
+          and .atmos_component != "web-application/waf"'
       - name: plan-security-monitoring
         type: atmos
         command: terraform plan --query '.metadata.component == "security-monitoring"'
@@ -320,7 +326,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
-          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"
+          or .atmos_component == "web-application/waf"'
       - name: confirm_services
         type: confirm
         prompt: Apply the services layer plan above?
@@ -333,7 +340,8 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
           or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
-          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"
+          or .atmos_component == "web-application/waf"'
       - name: plan-monitoring
         type: atmos
         command: >-
@@ -493,7 +501,8 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"'
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"
+          or .metadata.component == "waf" and .atmos_component != "web-application/waf"'
       - name: confirm
         type: confirm
         prompt: Deploy the security layer?
@@ -508,7 +517,8 @@ workflows:
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2"'
+          or .metadata.component == "inspector2" or .metadata.component == "waf"
+          and .atmos_component != "web-application/waf"'
 
   deploy-security-monitoring:
     description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector, Security Hub and Inspector)"
@@ -681,7 +691,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
-          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"
+          or .atmos_component == "web-application/waf"'
       - name: confirm
         type: confirm
         prompt: Deploy the services layer?
@@ -694,7 +705,8 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
           or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
-          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"
+          or .atmos_component == "web-application/waf"'
 
   deploy-monitoring:
     description: "Deploy the monitoring layer: monitoring and cost optimization"
