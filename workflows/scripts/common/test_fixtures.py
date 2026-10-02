@@ -53,6 +53,33 @@ class FixturesTest(unittest.TestCase):
             self.assertEqual(fixtures.fatal(errors, "plan-sweep"), errors)
 
 
+class UnguardedTest(unittest.TestCase):
+    @staticmethod
+    def instance(stage, enabled=None):
+        github = {} if enabled is None else {"actions_enabled": enabled}
+        return {"settings": {"context": {"stage": stage}, "github": github}}
+
+    def test_fixture_instances_must_opt_out_of_actions(self):
+        stacks = {
+            "fnx-fixtures-a": {"components": {"terraform": {
+                "ok": self.instance("fixtures", False),
+                "unset": self.instance("fixtures"),
+                "on": self.instance("fixtures", True),
+            }}},
+            "fnx-dev-testenv-01": {"components": {"terraform": {"real": self.instance("dev")}}},
+        }
+        errors = fixtures.unguarded(stacks)
+        self.assertEqual(len(errors), 2, errors)
+        self.assertTrue(errors[0].startswith("fnx-fixtures-a: on is in stage fixtures"))
+        self.assertTrue(errors[1].startswith("fnx-fixtures-a: unset is in stage fixtures"))
+
+    def test_never_relaxed_by_the_allowlist(self):
+        # check-dependencies appends unguarded() after fatal(), so a known-broken
+        # fixture cannot hide a missing opt-out.
+        source = pathlib.Path(__file__).with_name("check-dependencies.py").read_text()
+        self.assertIn('fixtures.fatal(errors, "check-dependencies") + fixtures.unguarded(stacks)', source)
+
+
 class RealEntriesTest(unittest.TestCase):
     def test_every_entry_is_a_fixture_stack(self):
         # A stale or misspelt entry would silently relax nothing.

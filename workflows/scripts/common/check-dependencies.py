@@ -176,7 +176,7 @@ def main() -> int:
     components_dir = sys.argv[1] if len(sys.argv) > 1 else COMPONENTS_DIR
     stacks = json.load(sys.stdin)
     errors = check(stacks, components_dir) + undeclared_vars(stacks, components_dir)
-    errors = fixtures.fatal(errors, "check-dependencies")
+    errors = fixtures.fatal(errors, "check-dependencies") + fixtures.unguarded(stacks)
     for error in errors:
         print(f"ERROR {error}")
     if errors:

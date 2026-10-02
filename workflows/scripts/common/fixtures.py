@@ -34,6 +34,29 @@ def stacks(check: str) -> list[str]:
     return sorted(s for s in KNOWN_BROKEN_FIXTURES if known_broken(s, check))
 
 
+FIXTURE_STAGE = "fixtures"
+
+
+def unguarded(stacks_json: dict) -> list[str]:
+    """Instances in stage fixtures that CI plan/CD/drift would not skip.
+
+    Every one must resolve settings.github.actions_enabled: false (set once in
+    stacks/orgs/fnx/fixtures/_defaults.yaml); never relaxed by the allowlist.
+    """
+    errors = []
+    for stack_name, stack in sorted(stacks_json.items()):
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            settings = (instance or {}).get("settings") or {}
+            if (settings.get("context") or {}).get("stage") != FIXTURE_STAGE:
+                continue
+            if (settings.get("github") or {}).get("actions_enabled") is not False:
+                errors.append(
+                    f"{stack_name}: {name} is in stage {FIXTURE_STAGE} but does not resolve "
+                    "settings.github.actions_enabled: false, so CI/CD/drift would run it"
+                )
+    return errors
+
+
 def belongs(error: str, stack: str) -> bool:
     """Whether a check's error is about stack: it starts "<stack>: ", or, for
     check-deploy-layers, "<file> `<workflow>`: <stack>: "."""
