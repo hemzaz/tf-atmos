@@ -308,6 +308,59 @@ run "rejects_an_unknown_storage_class" {
   expect_failures = [var.lifecycle_configuration_rules]
 }
 
+run "no_cors_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_s3_bucket_cors_configuration.this) == 0
+    error_message = "Without cors_configuration the bucket gets no CORS configuration."
+  }
+}
+
+run "cors_rules_rendered" {
+  command = plan
+
+  variables {
+    cors_configuration = [{
+      allowed_headers = ["*"]
+      allowed_methods = ["GET", "PUT", "POST"]
+      allowed_origins = ["https://app.example.com"]
+      expose_headers  = ["ETag"]
+      max_age_seconds = 3600
+    }]
+  }
+
+  assert {
+    condition = (
+      length(aws_s3_bucket_cors_configuration.this[0].cors_rule) == 1
+      && one(aws_s3_bucket_cors_configuration.this[0].cors_rule).allowed_methods == toset(["GET", "PUT", "POST"])
+      && one(aws_s3_bucket_cors_configuration.this[0].cors_rule).allowed_origins == toset(["https://app.example.com"])
+      && one(aws_s3_bucket_cors_configuration.this[0].cors_rule).max_age_seconds == 3600
+    )
+    error_message = "Each cors_configuration entry is a cors_rule with its methods, origins and max age."
+  }
+}
+
+run "rejects_a_cors_rule_with_an_unknown_method" {
+  command = plan
+
+  variables {
+    cors_configuration = [{ allowed_methods = ["GET", "PATCH"], allowed_origins = ["https://app.example.com"] }]
+  }
+
+  expect_failures = [var.cors_configuration]
+}
+
+run "rejects_a_cors_rule_without_origins" {
+  command = plan
+
+  variables {
+    cors_configuration = [{ allowed_methods = ["GET"] }]
+  }
+
+  expect_failures = [var.cors_configuration]
+}
+
 run "rejects_a_generated_name_over_63_characters" {
   command = plan
 
