@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics", "AllowCloudFront"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics", "AllowCloudFront", "AllowLogDeliveryToS3"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -129,6 +129,31 @@ run "log_delivery_off_grants_nothing" {
       if contains(["AllowLogDelivery", "AllowLogDeliveryDataKeys"], try(s.Sid, ""))
     ]) == 0
     error_message = "With allow_log_delivery off, delivery.logs.amazonaws.com gets no statement (no Decrypt, no GenerateDataKey*)."
+  }
+}
+
+run "log_delivery_to_s3_is_scoped_to_this_accounts_delivery_sources" {
+  command = plan
+
+  variables {
+    allow_log_delivery_s3 = true
+  }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryToS3"]).Principal.Service == "delivery.logs.amazonaws.com"
+      && toset(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryToS3"]).Action) == toset(["kms:GenerateDataKey*", "kms:Decrypt"])
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryToS3"]).Condition == {
+        StringEquals = { "aws:SourceAccount" = "123456789012" }
+        ArnLike      = { "aws:SourceArn" = "arn:aws:logs:*:123456789012:delivery-source:*" }
+      }
+    )
+    error_message = "delivery.logs.amazonaws.com may generate data keys and decrypt only for this account's delivery sources (vended logs to an SSE-KMS bucket)."
+  }
+
+  assert {
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowLogDelivery", "AllowS3", "AllowCloudWatchLogs"], try(s.Sid, ""))]) == 0
+    error_message = "allow_log_delivery_s3 must not grant the other log or S3 statements."
   }
 }
 

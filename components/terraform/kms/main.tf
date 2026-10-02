@@ -19,6 +19,7 @@ module "kms" {
   key_service_users               = var.key_service_users
   allow_cloudwatch_logs           = var.allow_cloudwatch_logs
   allow_log_delivery              = var.allow_log_delivery
+  allow_log_delivery_s3           = var.allow_log_delivery_s3
   allow_eventbridge               = var.allow_eventbridge
   allow_cloudwatch_alarms         = var.allow_cloudwatch_alarms
   allow_cloudtrail                = var.allow_cloudtrail
