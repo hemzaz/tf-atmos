@@ -36,8 +36,8 @@ logging v2 to S3, and optional Route 53 alias records.
 - ALB origins: send a secret origin-verify header (`custom_headers`, e.g. `X-Origin-Verify`) and
   have the alb instance's HTTPS listener forward only requests carrying it (a listener rule on
   that header; the default action returns 403). Without it the ALB answers anyone who finds its
-  DNS name, bypassing the CloudFront WAF. Read the value from Secrets Manager or SSM (`!store`),
-  never a literal in a stack. The ALB side is the alb component's job.
+  DNS name, bypassing the CloudFront WAF. Read the value from Secrets Manager or SSM, never a
+  literal in a stack. The ALB side is the alb component's job.
 - `stacks/catalog/templates/serverless-api.yaml` (`serverless-api/cloudfront`) and
   `web-application.yaml` predate this component and still use the old nested
   `origins`/`viewer_certificate`/`ordered_cache_behaviors` inputs; they need porting (TTL blocks
@@ -59,17 +59,26 @@ logging v2 to S3, and optional Route 53 alias records.
   not on its certificate: point `domain_name` at a record the ALB certificate covers (e.g.
   `origin.<domain>`), and use `AllViewerExceptHostHeader` unless the certificate also covers the
   aliases.
-- Custom header values are redacted from plan output (`sensitive()`) but are stored in state, as
-  is every distribution attribute.
+- Custom header values are marked `sensitive()`. With any custom header, Terraform hides the whole
+  `origin` set in plan diffs (every origin's details, not only the header values), so review origin
+  changes with `terraform show -json` on the plan. The values are still stored in state, as is
+  every distribution attribute. Header names CloudFront refuses to add (Host, Cookie,
+  Cache-Control, `X-Amz-*`, `X-Edge-*` and the rest of the AWS list) are rejected.
 - Timeouts: `origin_read_timeout` (default 30 s) and `origin_keepalive_timeout` (default 5 s) are
   validated to 1-180 s; above 60 s needs a CloudFront quota increase first.
 - Lambda@Edge ARNs must be in us-east-1 and version-qualified (`:<version>`, not `$LATEST` or an
   alias); a behavior takes one function per event type, CloudFront Functions only on viewer
-  events, and a viewer event cannot have both kinds (all validated).
+  events, and a behavior with any CloudFront Function can use Lambda@Edge on origin events only,
+  as AWS does not combine the two in viewer events (all validated). `cached_methods` must be a
+  subset of `allowed_methods`.
 - `default_root_object` defaults to `index.html` only when the default behavior targets the S3
   origin; a custom default origin serves `/` itself unless one is set.
 - `enable_spa_fallback` answers S3's 403 and 404 with 200 and `/<default_root_object>`; it cannot
   be combined with a `custom_error_response` for 403 or 404.
+- Custom error responses, the SPA fallback included, apply to the whole distribution, not one
+  behavior: with an S3 SPA default and an `/api/*` behavior, the API's own 403 and 404 also become
+  200 `/index.html`. Serve such APIs from a separate distribution, or skip the fallback and route
+  client-side paths another way (e.g. a viewer-request CloudFront Function).
 - Logging v2 resources are created in us-east-1 whatever the stack region, named
   `<Environment>-<name>-cloudfront[-s3]` (60 characters of `[A-Za-z0-9_-]`, checked at plan).
   CloudWatch Logs adds a `delivery.logs.amazonaws.com` statement to the log bucket's policy when

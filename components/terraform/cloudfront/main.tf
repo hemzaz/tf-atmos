@@ -174,7 +174,8 @@ resource "aws_cloudfront_distribution" "this" {
       origin_path = origin.value.origin_path
 
       # Header values are often a shared secret (the ALB origin-verify
-      # header): keep them out of plan output. They are still in state.
+      # header): keep them out of plan output. This hides the whole origin
+      # set in plan diffs; the values are still in state.
       dynamic "custom_header" {
         for_each = origin.value.custom_headers
         content {

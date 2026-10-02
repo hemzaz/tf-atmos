@@ -141,6 +141,13 @@ variable "custom_origins" {
     condition     = alltrue([for o in var.custom_origins : length(o.custom_headers) <= 10 && length(distinct([for h in o.custom_headers : lower(h.name)])) == length(o.custom_headers) && alltrue([for h in o.custom_headers : can(regex("^[A-Za-z0-9-]{1,128}$", h.name))])])
     error_message = "Each custom origin takes at most 10 custom_headers with unique names of letters, digits and hyphens."
   }
+
+  # AWS Developer Guide, "Custom headers that CloudFront can't add to origin
+  # requests".
+  validation {
+    condition     = alltrue(flatten([for o in var.custom_origins : [for h in o.custom_headers : !(contains(["cache-control", "connection", "content-length", "cookie", "host", "if-match", "if-modified-since", "if-none-match", "if-range", "if-unmodified-since", "max-forwards", "pragma", "proxy-authenticate", "proxy-authorization", "proxy-connection", "range", "request-range", "te", "trailer", "transfer-encoding", "upgrade", "via", "x-real-ip"], lower(h.name)) || startswith(lower(h.name), "x-amz-") || startswith(lower(h.name), "x-edge-"))]]))
+    error_message = "custom_headers cannot use a header CloudFront refuses to add to origin requests: Cache-Control, Connection, Content-Length, Cookie, Host, If-Match, If-Modified-Since, If-None-Match, If-Range, If-Unmodified-Since, Max-Forwards, Pragma, Proxy-Authenticate, Proxy-Authorization, Proxy-Connection, Range, Request-Range, TE, Trailer, Transfer-Encoding, Upgrade, Via, X-Real-Ip, or any X-Amz-* or X-Edge-* header."
+  }
 }
 
 variable "default_origin_id" {
@@ -295,6 +302,11 @@ variable "cached_methods" {
     condition     = contains(["GET,HEAD", "GET,HEAD,OPTIONS"], join(",", sort(var.cached_methods)))
     error_message = "cached_methods must be [GET, HEAD] or [GET, HEAD, OPTIONS]."
   }
+
+  validation {
+    condition     = length(setsubtract(var.cached_methods, var.allowed_methods)) == 0
+    error_message = "cached_methods must be a subset of allowed_methods."
+  }
 }
 
 variable "compress" {
@@ -364,7 +376,7 @@ variable "lambda_function_association" {
     include_body = optional(bool, false)
     lambda_arn   = string
   }))
-  description = "Lambda@Edge functions on the default cache behavior: event_type viewer-request, viewer-response, origin-request or origin-response (one function each, a viewer event not also used by function_association), lambda_arn a version-qualified us-east-1 function ARN (arn:aws:lambda:us-east-1:<account>:function:<name>:<version>, not $LATEST or an alias), include_body for request events"
+  description = "Lambda@Edge functions on the default cache behavior: event_type viewer-request, viewer-response, origin-request or origin-response (one function each; only origin-request and origin-response when function_association is set, as CloudFront Functions and Lambda@Edge cannot be combined in viewer events), lambda_arn a version-qualified us-east-1 function ARN (arn:aws:lambda:us-east-1:<account>:function:<name>:<version>, not $LATEST or an alias), include_body for request events"
   default     = []
   nullable    = false
 
@@ -389,8 +401,8 @@ variable "lambda_function_association" {
   }
 
   validation {
-    condition     = length(setintersection([for l in var.lambda_function_association : l.event_type], [for f in var.function_association : f.event_type])) == 0
-    error_message = "A viewer event takes a CloudFront Function or a Lambda@Edge function, not both: an event_type is in both function_association and lambda_function_association."
+    condition     = length(var.function_association) == 0 || alltrue([for l in var.lambda_function_association : !startswith(l.event_type, "viewer-")])
+    error_message = "CloudFront Functions and Lambda@Edge cannot be combined in viewer events: with any function_association, lambda_function_association may use origin-request and origin-response only."
   }
 }
 
@@ -477,8 +489,18 @@ variable "ordered_cache" {
   }
 
   validation {
-    condition     = alltrue([for c in var.ordered_cache : length(distinct([for f in c.function_association : f.event_type])) == length(c.function_association) && length(distinct([for l in c.lambda_function_association : l.event_type])) == length(c.lambda_function_association) && length(setintersection([for l in c.lambda_function_association : l.event_type], [for f in c.function_association : f.event_type])) == 0])
-    error_message = "Each ordered_cache behavior takes at most one function per event type (so at most 2 CloudFront Functions), and a viewer event takes a CloudFront Function or a Lambda@Edge function, not both."
+    condition     = alltrue([for c in var.ordered_cache : length(distinct([for f in c.function_association : f.event_type])) == length(c.function_association) && length(distinct([for l in c.lambda_function_association : l.event_type])) == length(c.lambda_function_association)])
+    error_message = "Each ordered_cache behavior takes at most one function per event type (so at most 2 CloudFront Functions)."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.ordered_cache : length(c.function_association) == 0 || alltrue([for l in c.lambda_function_association : !startswith(l.event_type, "viewer-")])])
+    error_message = "CloudFront Functions and Lambda@Edge cannot be combined in viewer events: an ordered_cache behavior with a function_association may use Lambda@Edge on origin-request and origin-response only."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.ordered_cache : length(setsubtract(c.cached_methods, c.allowed_methods)) == 0])
+    error_message = "Each ordered_cache behavior's cached_methods must be a subset of its allowed_methods."
   }
 }
 

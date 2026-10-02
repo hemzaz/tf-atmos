@@ -542,6 +542,72 @@ run "rejects_function_and_lambda_on_one_viewer_event" {
   expect_failures = [var.lambda_function_association]
 }
 
+run "rejects_function_viewer_request_with_lambda_viewer_response" {
+  command = plan
+
+  variables {
+    function_association        = [{ event_type = "viewer-request", function_arn = "arn:aws:cloudfront::123456789012:function/a" }]
+    lambda_function_association = [{ event_type = "viewer-response", lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:test-auth:3" }]
+  }
+
+  expect_failures = [var.lambda_function_association]
+}
+
+run "rejects_function_viewer_response_with_lambda_viewer_request_in_ordered_behavior" {
+  command = plan
+
+  variables {
+    ordered_cache = [{
+      path_pattern                = "/app/*"
+      function_association        = [{ event_type = "viewer-response", function_arn = "arn:aws:cloudfront::123456789012:function/a" }]
+      lambda_function_association = [{ event_type = "viewer-request", lambda_arn = "arn:aws:lambda:us-east-1:123456789012:function:test-auth:3" }]
+    }]
+  }
+
+  expect_failures = [var.ordered_cache]
+}
+
+run "rejects_denied_custom_header_name" {
+  command = plan
+
+  variables {
+    custom_origins = [{ domain_name = "a.example.com", origin_id = "app", custom_headers = [{ name = "Host", value = "a" }] }]
+  }
+
+  expect_failures = [var.custom_origins]
+}
+
+run "rejects_x_amz_custom_header" {
+  command = plan
+
+  variables {
+    custom_origins = [{ domain_name = "a.example.com", origin_id = "app", custom_headers = [{ name = "X-Amz-Secret", value = "a" }] }]
+  }
+
+  expect_failures = [var.custom_origins]
+}
+
+run "rejects_cached_methods_outside_allowed_methods" {
+  command = plan
+
+  variables {
+    allowed_methods = ["GET", "HEAD"]
+    cached_methods  = ["GET", "HEAD", "OPTIONS"]
+  }
+
+  expect_failures = [var.cached_methods]
+}
+
+run "rejects_ordered_cached_methods_outside_allowed_methods" {
+  command = plan
+
+  variables {
+    ordered_cache = [{ path_pattern = "/static/*", allowed_methods = ["GET", "HEAD"], cached_methods = ["GET", "HEAD", "OPTIONS"] }]
+  }
+
+  expect_failures = [var.ordered_cache]
+}
+
 run "rejects_spa_fallback_on_custom_default_without_root_object" {
   command = plan
 
