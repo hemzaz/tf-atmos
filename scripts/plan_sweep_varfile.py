@@ -164,6 +164,26 @@ SYNTH = [
     (r'^state_machine_arn$',          'arn:aws:states:us-east-1:123456789012:stateMachine:example-state-machine'),
     (r'^events_role_arn$',            'arn:aws:iam::123456789012:role/example-events-role'),
     (r'^sns_topic_arn$',              'arn:aws:sns:us-east-1:123456789012:example-topic'),
+    # Output names read by stacks/catalog/templates/data-pipeline.yaml: the
+    # kinesis streams (consumer_arns per consumer key) and their IAM policy
+    # documents, the buckets, glue's database and per-key job/table/crawler
+    # maps, the dynamodb table, firehose and lambda names.
+    (r'^stream_arn$',                 'arn:aws:kinesis:us-east-1:123456789012:stream/example-stream'),
+    (r'^stream_name$',                'example-stream'),
+    (r'^consumer_arns?$',             'arn:aws:kinesis:us-east-1:123456789012:stream/example-stream/consumer/example-consumer:1700000000'),
+    (r'^(reader|writer|combined)_policy$',
+     '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"kinesis:PutRecord","Resource":"arn:aws:kinesis:us-east-1:123456789012:stream/example-stream"}]}'),
+    (r'^bucket_arn$',                 'arn:aws:s3:::example-bucket-123456789012'),
+    (r'^database_name$',              'example_database'),
+    (r'^database_arn$',               'arn:aws:glue:us-east-1:123456789012:database/example_database'),
+    # glue's table_arns map; dynamodb's table_arn below.
+    (r'^table_arns$',                 'arn:aws:glue:us-east-1:123456789012:table/example_database/example_table'),
+    (r'^table_arn$',                  'arn:aws:dynamodb:us-east-1:123456789012:table/example-table'),
+    (r'^job_names?$',                 'example-job'),
+    (r'^job_arns?$',                  'arn:aws:glue:us-east-1:123456789012:job/example-job'),
+    (r'^crawler_names?$',             'example-crawler'),
+    (r'^delivery_stream_name$',       'example-delivery-stream'),
+    (r'^function_name$',              'example-function'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry
