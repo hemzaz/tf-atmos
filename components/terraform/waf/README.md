@@ -12,6 +12,10 @@ and a CloudWatch log group with its own scoped log resource policy. Modelled on 
   Every instance reads `kms/main .key_arn` (the fnx stacks run in us-east-1, so this includes the
   CLOUDFRONT one).
 - A CloudFront distribution uses the `arn` output as its `web_acl_id`.
+- `workflows/deploy-full-stack.yaml` deploys waf in the `security` layer, before the `cloudfront`
+  instances (services) that read a CLOUDFRONT ACL's `arn`. An instance whose
+  `association_resource_arns` read a later layer's state goes in the layer after it:
+  `web-application/waf` (reading the alb, addons) is selected by name into `services`.
 
 ## Notes
 
