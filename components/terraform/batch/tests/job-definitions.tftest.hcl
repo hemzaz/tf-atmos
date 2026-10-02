@@ -146,7 +146,7 @@ run "ec2_definition_takes_ec2_only_settings" {
       jsondecode(aws_batch_job_definition.this["train"].container_properties).resourceRequirements == [
         { type = "VCPU", value = "8" }, { type = "MEMORY", value = "32768" }, { type = "GPU", value = "1" },
       ]
-      && !contains(keys(jsondecode(aws_batch_job_definition.this["train"].container_properties)), "privileged")
+      && contains(keys(jsondecode(aws_batch_job_definition.this["train"].container_properties)), "privileged") == false
       && jsondecode(aws_batch_job_definition.this["train"].container_properties).ulimits == [{ name = "nofile", softLimit = 65536, hardLimit = 65536 }]
       && jsondecode(aws_batch_job_definition.this["train"].container_properties).linuxParameters == {
         sharedMemorySize = 4096
@@ -404,7 +404,7 @@ run "fargate_settings_pass_through" {
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).fargatePlatformConfiguration.platformVersion == "1.4.0"
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).ephemeralStorage.sizeInGiB == 100
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).runtimePlatform == { cpuArchitecture = "ARM64", operatingSystemFamily = "LINUX" }
-      && !contains(keys(jsondecode(aws_batch_job_definition.this["arm"].container_properties)), "readonlyRootFilesystem")
+      && contains(keys(jsondecode(aws_batch_job_definition.this["arm"].container_properties)), "readonlyRootFilesystem") == false
       && jsondecode(aws_batch_job_definition.this["arm"].container_properties).user == "1000"
       && aws_batch_job_definition.this["arm"].scheduling_priority == 10
       && !aws_batch_job_definition.this["arm"].propagate_tags
