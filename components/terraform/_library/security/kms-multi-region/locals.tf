@@ -198,6 +198,39 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # Vended log delivery (CloudWatch Logs delivery, e.g. CloudFront standard
+  # logging v2) writing to an S3 bucket encrypted with this key: AWS's
+  # documented key-policy statement for an SSE-KMS delivery destination,
+  # narrowed to the data-key and decrypt actions an SSE-KMS PutObject (and a
+  # multipart upload) needs. The delivery source can be in another region than
+  # the key (CloudFront's is always us-east-1), so the region is a wildcard.
+  dynamic "statement" {
+    for_each = var.allow_log_delivery_s3 ? [1] : []
+
+    content {
+      sid       = "AllowLogDeliveryToS3"
+      actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["delivery.logs.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:logs:*:${data.aws_caller_identity.current.account_id}:delivery-source:*"]
+      }
+    }
+  }
+
   # EventBridge event buses and archives in this document's region. KMS calls
   # for a bus or an archive carry the encryption context
   # aws:events:event-bus:arn, which is always present; aws:SourceArn is not
