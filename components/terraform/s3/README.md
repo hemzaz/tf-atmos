@@ -30,5 +30,7 @@ default, TLS-only bucket policy.
   already trust `s3.amazonaws.com` at apply time; list them in `dependencies.components`.
   `kms/main`'s `allow_s3` covers encrypted SQS/SNS destinations.
 - `source_policy_documents` statements need unique `Sid`s.
-- Trimmed from Cloud Posse: replication, object lock, CORS, website, acceleration, intelligent
+- `cors_configuration` is Cloud Posse's input verbatim (browser uploads with presigned URLs need
+  it); methods are limited to the five S3 accepts and each rule needs an origin (validated).
+- Trimmed from Cloud Posse: replication, object lock, website, acceleration, intelligent
   tiering, the IAM user and ACLs.

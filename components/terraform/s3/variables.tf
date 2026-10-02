@@ -143,6 +143,38 @@ variable "lifecycle_configuration_rules" {
   }
 }
 
+variable "cors_configuration" {
+  type = list(object({
+    id              = optional(string)
+    allowed_headers = optional(list(string))
+    allowed_methods = optional(list(string))
+    allowed_origins = optional(list(string))
+    expose_headers  = optional(list(string))
+    max_age_seconds = optional(number)
+  }))
+  description = "CORS rules, as Cloud Posse's cors_configuration (one entry per cors_rule); empty for none"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = length(var.cors_configuration) <= 100
+    error_message = "cors_configuration takes at most 100 rules (the S3 limit)."
+  }
+
+  validation {
+    condition = alltrue([for r in var.cors_configuration :
+      length(coalesce(r.allowed_methods, [])) > 0
+      && length(setsubtract(coalesce(r.allowed_methods, []), ["GET", "PUT", "POST", "DELETE", "HEAD"])) == 0
+    ])
+    error_message = "Each cors_configuration rule needs allowed_methods, a non-empty subset of GET, PUT, POST, DELETE and HEAD."
+  }
+
+  validation {
+    condition     = alltrue([for r in var.cors_configuration : length(coalesce(r.allowed_origins, [])) > 0])
+    error_message = "Each cors_configuration rule needs at least one allowed_origins entry."
+  }
+}
+
 variable "source_policy_documents" {
   type        = list(string)
   description = "Bucket policy documents (JSON) merged with the TLS-only statement, e.g. to grant a CloudFront distribution read access. Statement IDs must be unique"
