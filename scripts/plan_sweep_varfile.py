@@ -7,7 +7,7 @@ Called by scripts/plan-sweep.sh once per stack/component pair, as
 and once at startup as `--self-test COMPONENTS_DIR TMPDIR` (which also runs
 by hand, from anywhere). Kept out of the shell script because it grew an HCL
 reader (plan_sweep_hcl.py) and a self-test; the contract with the shell is the
-five lines printed at the end, nothing else.
+six lines printed at the end, nothing else.
 
 --process-functions=false leaves Atmos's YAML functions as literal strings:
 '!terraform.state vpc/main .vpc_id' needs another component's state, and
@@ -854,6 +854,9 @@ class Builder:
     def __init__(self, resolver):
         self.resolver = resolver
         self.dropped, self.defects, self.warnings = [], [], []
+        # The TOP-LEVEL variable each dropped value sits in (self.dropped holds
+        # leaf keys, e.g. QUEUE_URL inside environment_variables).
+        self.dropped_top, self.top_key = [], None
         # !terraform references and every other function are counted apart:
         # the first is the number this file exists to drive up, the second
         # (!env, !store, ...) can only ever be guessed.
@@ -875,6 +878,7 @@ class Builder:
         if got is None:
             self.counts['dropped' if is_tf else 'other_dropped'] += 1
             self.dropped.append(key)
+            self.dropped_top.append(self.top_key or key)
             return SENTINEL, False
         self.counts['fallback' if is_tf else 'other_guessed'] += 1
         return got, True
@@ -922,6 +926,7 @@ def build(describe, stack, stacks_dir, components_dir):
     b = Builder(resolver)
     top = {}
     for k, x in (describe.get('vars') or {}).items():
+        b.top_key = k
         r = b.walk(k, x)
         if r is not SENTINEL:
             top[k] = r
@@ -949,6 +954,7 @@ def build(describe, stack, stacks_dir, components_dir):
                                  'TF_VAR_* only as JSON; write it as JSON, which Terraform '
                                  'also reads' % (k, e))
                 continue
+        b.top_key = name
         r = b.walk(name, x)
         if r is not SENTINEL:
             top[name] = r
@@ -1406,6 +1412,13 @@ def self_test(components_dir, tmp):
     check('!env is not counted as a !terraform reference',
           (b.counts['fallback'], b.counts['other_guessed'], b.counts['other_dropped']), (0, 1, 1))
 
+    # Dropped values are also reported by the TOP-LEVEL variable they sit in.
+    top, b = build({'vars': {'environment_variables': {'QUEUE_URL': '!terraform.state a/b .no_synth_leaf'},
+                             'other': ['!env NO_SYNTH_LEAF']}}, None, None, None)
+    check('dropped values report leaf keys and their top-level variables',
+          (sorted(b.dropped), sorted(b.dropped_top)),
+          (['QUEUE_URL', 'other'], ['environment_variables', 'other']))
+
     # An instance's env TF_VAR_<name> sets <name> (JSON is HCL), below vars,
     # as Terraform ranks a -var-file above the environment.
     top, b = build({'vars': {'a': 1}, 'env': {
@@ -1456,6 +1469,8 @@ def main(argv):
     # Line 5: warnings, joined by TAB: references that work but are stale --
     # an output the target does not declare, behind a '//' default that
     # therefore always applies. Reported, never failing.
+    #
+    # Line 6: top-level variables holding a dropped value, joined by comma.
     c = b.counts
     print(d.get('component') or (d.get('metadata') or {}).get('component') or '')
     print(','.join(sorted(set(b.dropped))))
@@ -1463,6 +1478,9 @@ def main(argv):
     print('%d %d %d %d %d' % (c['shaped'], c['fallback'], c['dropped'], c['other_guessed'],
                               c['other_dropped']))
     print('\t'.join(m.replace('\t', ' ').replace('\n', ' ') for m in b.warnings))
+    # Line 6: the top-level variables that hold a dropped value, so the
+    # verdict can tell a failure in one of them from a failure elsewhere.
+    print(','.join(sorted(set(b.dropped_top))))
     return 0
 
 

@@ -62,6 +62,11 @@
 # the default -- but it is stale: a STALE line, counted, never failing.
 # An env TF_VAR_* object or list that is not JSON is a FAIL too: the varfile
 # builder folds only JSON into the varfile.
+# A pair where the builder dropped a value it could not synthesize is
+# UNATTRIBUTABLE when it fails (the failure may be ours), and that does not fail
+# the run. Unless every INVALID diagnostic ("Invalid value for [input] variable")
+# names a variable the builder dropped nothing from: that is the component
+# rejecting the stack's own value, so the pair FAILs as it would with no drop.
 # INCONCLUSIVE and UNATTRIBUTABLE do not fail the run, but neither is ever
 # reported as a pass. A PASS says how the plan ended:
 # "full plan", or "stopped at an expected refusal" once everything before it
@@ -569,6 +574,41 @@ classify_diags() {
   '
 }
 
+# The variables each INVALID diagnostic names, one per line (an empty line when
+# it names none this can read). A failed validation block lists the values
+# behind its condition, `var.x is "bad"`, one per variable it reads; a failed
+# type constraint says `not suitable for var.x`.
+# Terraform omits sensitive and ephemeral variables from that value box, so a
+# validation reading a dropped sensitive one would be misattributed to FAIL; none
+# does today. If one appears, keep UNATTRIBUTABLE when any dropped_top variable
+# is sensitive or ephemeral.
+invalid_names() {
+  awk -F'\t' '
+    $1 == "INVALID" {
+      body = $4; found = 0
+      while (match(body, /var[.][A-Za-z0-9_]+ is /)) {
+        n = substr(body, RSTART + 4, RLENGTH - 8)
+        print n; found = 1
+        body = substr(body, RSTART + RLENGTH)
+      }
+      if (!found && $4 ~ /not suitable for var[.]/) {
+        n = $4; sub(/.*not suitable for var[.]/, "", n); sub(/[^A-Za-z0-9_].*/, "", n)
+        print n; found = 1
+      }
+      if (!found) print ""
+    }' "$1"
+}
+
+# True when there is an INVALID diagnostic and every one names a variable
+# outside $2, the comma-joined top-level variables the builder dropped a value
+# from: the component rejected a value this script did not touch, so it is the
+# stack's defect however many other values were dropped.
+invalid_attributable() {
+  invalid_names "$1" | awk -v d=",$2," '
+    { c++; if ($0 == "" || index(d, "," $0 ",")) bad = 1 }
+    END { exit !(c > 0 && !bad) }'
+}
+
 show_diags() {
   awk -F'\t' -v b="$2" '
     $1 == b {
@@ -680,6 +720,24 @@ if [ "$st_rc" -eq 0 ] || [ "$st_got" != "INVALID INVALID " ]; then
   printf '%s\n' "error: the parser cannot read this terraform's own plan output (exit $st_rc," >&2
   printf '%s\n' "       classified as '${st_got}', expected 'INVALID INVALID '), so every" >&2
   printf '%s\n' "       verdict would be wrong. See $st_mod/plan.txt" >&2
+  exit 2
+fi
+
+# The verdict rests on naming the variable each INVALID diagnostic is about, so
+# check that against the real plan above (a validation block and a type
+# constraint) and then the attribution rule itself.
+st_names=$(fold_diags "$st_mod/plan.txt" | classify_diags | invalid_names /dev/stdin | sort | tr '\n' ' ')
+st_ok=1
+[ "$st_names" = "x y " ] || st_ok=0
+fold_diags "$st_mod/plan.txt" | classify_diags >"$WORK/attr.diag"
+invalid_attributable "$WORK/attr.diag" "other" || st_ok=0      # INVALID on x, y; only 'other' dropped
+invalid_attributable "$WORK/attr.diag" "other,y" && st_ok=0    # y was dropped from: not attributable
+invalid_attributable "$WORK/attr.diag" "x" && st_ok=0          # x was dropped from: not attributable
+invalid_attributable "$WORK/attr.diag" "" || st_ok=0
+if [ "$st_ok" -ne 1 ]; then
+  KEEP_WORK=1
+  printf '%s\n' "error: the verdict cannot name the variable of an INVALID diagnostic (got '${st_names}'," >&2
+  printf '%s\n' "       expected 'x y '), so dropped values could not be told from the stack's own." >&2
   exit 2
 fi
 
@@ -796,6 +854,7 @@ for s in $STACKS; do
 
     comp=$(printf '%s\n' "$meta" | sed -n 1p)
     dropped=$(printf '%s\n' "$meta" | sed -n 2p)
+    dropped_top=$(printf '%s\n' "$meta" | sed -n 6p)
     ref_defects=$(printf '%s\n' "$meta" | sed -n 3p)
     ref_stale=$(printf '%s\n' "$meta" | sed -n 5p)
     read -r n_shaped n_fallback n_dropped n_oguess n_odrop <<<"$(printf '%s\n' "$meta" | sed -n 4p)"
@@ -882,8 +941,12 @@ for s in $STACKS; do
     # dropped variables first: the drop is usually in a variable the error never
     # names, so a bare count left the reader unable to rule our own damage in or
     # out, and a real defect could hide behind it.
+    #
+    # Except an INVALID naming only variables the builder left whole: that is
+    # the component rejecting the stack's own value, so it falls through to FAIL.
     elif [ "$ndropped" -gt 0 ] &&
-      { [ "$invalid" -gt 0 ] || [ "$missing" -gt 0 ] || [ "$other" -gt 0 ]; }; then
+      { [ "$invalid" -gt 0 ] || [ "$missing" -gt 0 ] || [ "$other" -gt 0 ]; } &&
+      ! { [ "$invalid" -gt 0 ] && invalid_attributable "$cls" "$dropped_top"; }; then
       printf '%-24s %-26s UNATTRIBUTABLE dropped: %s\n' "$s" "$c" "$dropped"
       for b in INVALID MISSING OTHER; do show_diags "$cls" "$b" 4; done
       unattributable=$((unattributable + 1))
