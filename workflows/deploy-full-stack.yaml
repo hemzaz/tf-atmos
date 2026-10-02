@@ -44,6 +44,21 @@ workflows:
   deploy:
     description: Deploy the complete stack layer by layer (backend -> monitoring), each layer planned, confirmed, then applied from its saved plan
     steps:
+      # Template fixture stacks (stage "fixtures", stacks/orgs/fnx/fixtures)
+      # exist for CI's checks and are never deployed. Every workflow below
+      # starts with these two steps (YAML aliases); without -s every stack is
+      # selected, fixtures included, so that is refused too.
+      - &fixtures-stages
+        name: stages
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[].settings.context.stage] | unique | join(",")'
+        output: none
+      - &refuse-fixtures
+        name: refuse-fixtures
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.
@@ -325,6 +340,8 @@ workflows:
   deploy-backend:
     description: "Deploy the backend layer: the Terraform state backend (only fnx-core-root has one)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "backend"'
@@ -342,6 +359,8 @@ workflows:
   deploy-iam:
     description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main in fnx-core-root)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "iam"'
@@ -359,6 +378,8 @@ workflows:
   deploy-kms:
     description: "Deploy the kms layer: customer-managed KMS keys (only stacks that define kms)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: kms_instances
         type: atmos
         command: >-
@@ -382,6 +403,8 @@ workflows:
   deploy-storage:
     description: "Deploy the storage layer: S3 buckets (they read kms/main), such as the lambda package bucket compute reads"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "s3"'
@@ -399,6 +422,8 @@ workflows:
   deploy-networking:
     description: "Deploy the networking layer: VPCs"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "vpc"'
@@ -416,6 +441,8 @@ workflows:
   deploy-connectivity:
     description: "Deploy the connectivity layer: security groups, VPC peering and bastion hosts (they read the VPCs)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
@@ -437,6 +464,8 @@ workflows:
   deploy-security:
     description: "Deploy the security layer: secrets, GuardDuty, Security Hub, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
@@ -462,6 +491,8 @@ workflows:
   deploy-security-monitoring:
     description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector and Security Hub)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "security-monitoring"'
@@ -479,6 +510,8 @@ workflows:
   deploy-compute:
     description: "Deploy the compute layer: EKS clusters, ECS, Batch compute environments and queues, Lambda functions and EC2 instances other than the bastion"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
@@ -500,6 +533,8 @@ workflows:
   deploy-platform:
     description: "Deploy the platform layer: External Secrets"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
@@ -519,6 +554,8 @@ workflows:
   deploy-data:
     description: "Deploy the data layer: databases, caches and backups"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
@@ -540,6 +577,8 @@ workflows:
   deploy-dns-zones:
     description: "Deploy the dns-zones layer: network/services' zones (delegated from network/main's zone in the dns layer)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.atmos_component == "network/services"'
@@ -557,6 +596,8 @@ workflows:
   deploy-dns:
     description: "Deploy the dns layer: Route 53 zones and records other than network/services (after the data layer, whose endpoints they point at, and the dns-zones layer, which they delegate)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "dns" and .atmos_component != "network/services"'
@@ -574,6 +615,8 @@ workflows:
   deploy-certificates:
     description: "Deploy the certificates layer: ACM certificates, DNS-validated in the dns layer's zones"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "acm"'
@@ -591,6 +634,8 @@ workflows:
   deploy-addons:
     description: "Deploy the addons layer: EKS add-ons (after the dns layer, whose zones they read)"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan --query '.metadata.component == "eks-addons"'
@@ -608,6 +653,8 @@ workflows:
   deploy-services:
     description: "Deploy the services layer: API Gateway and backend services"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-
@@ -628,6 +675,8 @@ workflows:
   deploy-monitoring:
     description: "Deploy the monitoring layer: monitoring and cost optimization"
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: >-

@@ -20,6 +20,20 @@ workflows:
         aws/aws-cli: "2.36.49"
         jqlang/jq: "1.8.2"
     steps:
+      # Template fixture stacks (stage "fixtures", stacks/orgs/fnx/fixtures) are
+      # never deployed: refuse them (see deploy-full-stack.yaml). Without -s every
+      # stack is selected, fixtures included, so that is refused too.
+      - &fixtures-stages
+        name: stages
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[].settings.context.stage] | unique | join(",")'
+        output: none
+      - &refuse-fixtures
+        name: refuse-fixtures
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       # A second cold start would fail at bucket creation after creating some
       # of the other resources in a fresh local state. Refuse up front.
       - name: refuse-if-bucket-exists
@@ -97,6 +111,8 @@ workflows:
     description: Plan and apply the state backend (backend/main in fnx-core-root) after its cold start
     stack: fnx-core-root
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: plan
         type: atmos
         command: terraform plan backend/main
@@ -114,6 +130,8 @@ workflows:
   full:
     description: Bootstrap a workload stack - IAM (including the CI roles) and networking. Needs the state backend (backend-cold-start) first.
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.

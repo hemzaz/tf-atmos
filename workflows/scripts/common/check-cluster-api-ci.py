@@ -42,6 +42,9 @@ import pathlib
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import fixtures  # noqa: E402
+
 CLUSTER_PROVIDER = re.compile(r'^\s*provider\s+"(kubernetes|helm|kubectl)"', re.MULTILINE)
 
 
@@ -256,9 +259,10 @@ def main() -> int:
         return 2
     cluster = cluster_components(pathlib.Path(sys.argv[1]))
     stacks = json.load(sys.stdin)
-    errors = check(stacks, cluster)
+    errors = fixtures.fatal(check(stacks, cluster), "check-cluster-api-ci")
     operator_errors, warnings = check_operators(stacks, cluster)
-    network_errors = check_network_paths(stacks, cluster)
+    operator_errors = fixtures.fatal(operator_errors, "check-cluster-api-ci")
+    network_errors = fixtures.fatal(check_network_paths(stacks, cluster), "check-cluster-api-ci")
     for warning in warnings:
         print(f"WARN {warning}")
     for error in errors + operator_errors + network_errors:

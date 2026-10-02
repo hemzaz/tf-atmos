@@ -22,6 +22,10 @@ import re
 import sys
 from typing import Any, Iterator, Optional
 
+# The sibling module, also when this file is loaded by path (tests, check-domains.py).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fixtures  # noqa: E402
+
 FUNCTIONS = ("!terraform.state", "!terraform.output")
 # Characters that open a yq expression rather than a stack name (Atmos 1.229.0 isExpressionStart).
 EXPRESSION_STARTS = tuple(".[{|'\"")
@@ -172,6 +176,7 @@ def main() -> int:
     components_dir = sys.argv[1] if len(sys.argv) > 1 else COMPONENTS_DIR
     stacks = json.load(sys.stdin)
     errors = check(stacks, components_dir) + undeclared_vars(stacks, components_dir)
+    errors = fixtures.fatal(errors, "check-dependencies") + fixtures.unguarded(stacks)
     for error in errors:
         print(f"ERROR {error}")
     if errors:

@@ -21,6 +21,20 @@ workflows:
   deploy-app:
     description: Deploy application layer components (secrets, Cognito, Lambda, ECS, then API Gateway and monitoring)
     steps:
+      # Template fixture stacks (stage "fixtures", stacks/orgs/fnx/fixtures) are
+      # never deployed: refuse them (see deploy-full-stack.yaml). Without -s every
+      # stack is selected, fixtures included, so that is refused too.
+      - &fixtures-stages
+        name: stages
+        type: atmos
+        command: >-
+          describe stacks --process-functions=false --format json
+          --query '[.[].components.terraform[].settings.context.stage] | unique | join(",")'
+        output: none
+      - &refuse-fixtures
+        name: refuse-fixtures
+        type: shell
+        command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       - name: check-foundation
         type: atmos
         command: terraform output vpc/main vpc_id
@@ -88,6 +102,8 @@ workflows:
   hot-deploy:
     description: Quick application deployment (Cognito, Lambda and API Gateway only)
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       # Unreviewed by design (see the header): no saved plans and no confirm. Each
       # instance is planned just before it is applied, in dependency order, so
       # apigateway sees cognito's and lambda's state.
@@ -102,6 +118,8 @@ workflows:
   component:
     description: Plan, confirm and deploy a single component
     steps:
+      - *fixtures-stages
+      - *refuse-fixtures
       - name: component
         type: input
         prompt: Component (e.g. apigateway/main)

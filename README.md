@@ -41,6 +41,7 @@ domain files (`globals`, `networking`, `security`, `compute`, `services`).
 | `fnx-core-root` | `core/us-east-1/root.yaml` | management account: the state backend (`backend/main`); not run by CI |
 | `fnx-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
 | `fnx-local-localemu` | `local/us-east-1/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
+| `fnx-fixtures-<name>` | `fixtures/us-east-1/<name>.yaml` | one per `stacks/catalog/templates/` file, checked by CI, never deployed ([details](./docs/OPERATIONS.md#template-fixtures)) |
 
 An instance name need not match its module: `metadata.component` decides. `network/main` and
 `network/services` are `dns` instances; `network/vpc-peering` is the `network` module.
