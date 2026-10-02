@@ -394,7 +394,7 @@ components:
           LOG_LEVEL: "INFO"
           ENVIRONMENT: "production"
           QUEUE_URL: !terraform.state sqs/data-transform .queue_url
-        custom_policy: !terraform.state sqs/data-transform .producer_policy
+        custom_policy: !terraform.state sqs/data-transform '.producer_policy | tojson'
         # The built-in egress reaches S3 only, and vpc/services has no SQS
         # endpoint: SQS's regional endpoint is reached through the NAT gateway.
         custom_egress_rules:

@@ -1091,7 +1091,7 @@ components:
         # input gets both grants from one !terraform.state read (see
         # elasticache's additional_policy_json variable for why this can't
         # be two separate !terraform.state reads combined in YAML instead).
-        additional_policy_json: !terraform.state microservices/secrets '.secret_access_policy.redis'
+        additional_policy_json: !terraform.state microservices/secrets '.secret_access_policy.redis | tojson'
 
         tags:
           Layer: "caching"
@@ -1573,7 +1573,7 @@ components:
         # (re)configures this resource perform and verify a real rotation
         # (ModifyReplicationGroup ROTATE -> AUTH test -> SET).
         rotate_immediately: true
-        custom_policy: !terraform.state microservices/elasticache .rotation_policy
+        custom_policy: !terraform.state microservices/elasticache '.rotation_policy | tojson'
         tags:
           Layer: "security"
           Platform: "microservices"
@@ -1606,7 +1606,7 @@ components:
         secretsmanager_source_arn: !terraform.state microservices/secrets .secret_arns.jwt_signing
         rotation_secret_arn: !terraform.state microservices/secrets .secret_arns.jwt_signing
         rotation_days: 30
-        custom_policy: !terraform.state microservices/secrets '.secret_access_policy.jwt_signing'
+        custom_policy: !terraform.state microservices/secrets '.secret_access_policy.jwt_signing | tojson'
         tags:
           Layer: "security"
           Platform: "microservices"

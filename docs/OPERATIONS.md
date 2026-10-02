@@ -315,4 +315,5 @@ liveness endpoint by design.
 | CI plan: AccessDenied on `PutObject` at `workspace new` | Read roles cannot create a workspace; the instance's first deploy does |
 | `Error acquiring the state lock` | Another run holds it; `list-locks`, then `force-unlock` if abandoned |
 | `!terraform.state` returns nothing | The referenced instance is not deployed in that stack yet; deploy in layer order |
+| A string input rejects a `!terraform.state` value as an object | The output is a JSON string (a `*_policy`); end the read with `\| tojson` |
 | ACM validation times out after 45 minutes | The stack's domain is not delegated; see [Deploying a stack](#deploying-a-stack) |
