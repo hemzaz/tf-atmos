@@ -165,7 +165,7 @@ run "aliases_certificate_and_dns_records" {
     condition = (
       toset(aws_cloudfront_distribution.this[0].aliases) == toset(["www.example.com", "example.com"])
       && aws_cloudfront_distribution.this[0].viewer_certificate[0].acm_certificate_arn == var.acm_certificate_arn
-      && !aws_cloudfront_distribution.this[0].viewer_certificate[0].cloudfront_default_certificate
+      && aws_cloudfront_distribution.this[0].viewer_certificate[0].cloudfront_default_certificate == false
       && aws_cloudfront_distribution.this[0].viewer_certificate[0].ssl_support_method == "sni-only"
       && aws_cloudfront_distribution.this[0].viewer_certificate[0].minimum_protocol_version == "TLSv1.2_2025"
     )
@@ -180,7 +180,7 @@ run "aliases_certificate_and_dns_records" {
       && aws_route53_record.alias["example.com/A"].name == "example.com"
       && one(aws_route53_record.alias["example.com/AAAA"].alias).name == "d111111abcdef8.cloudfront.net"
       && one(aws_route53_record.alias["example.com/AAAA"].alias).zone_id == "Z2FDTNDATAQYW2"
-      && !one(aws_route53_record.alias["example.com/AAAA"].alias).evaluate_target_health
+      && one(aws_route53_record.alias["example.com/AAAA"].alias).evaluate_target_health == false
     )
     error_message = "Each alias gets an A and an AAAA alias record to the distribution in parent_zone_id."
   }
