@@ -8,21 +8,22 @@
 #   - VPC with public/private/database subnets
 #   - CloudFront in front of everything, with a CLOUDFRONT-scope WAF, aliases
 #     for the app domain and www, and standard logging (v2) to an S3 bucket
-#   - An internet-facing ALB that only CloudFront can reach: its security
-#     group admits the CloudFront origin-facing prefix list, its HTTPS
-#     listener answers 403 by default, and the service's listener rule also
-#     requires CloudFront's secret X-Origin-Verify header. A REGIONAL WAF is
+#   - An internal ALB in the private subnets, reached by CloudFront only,
+#     through a CloudFront VPC origin (service-managed ENIs in the VPC): no
+#     internet path and no shared secret. Its security group admits the
+#     CloudFront origin-facing prefix list, its HTTPS listener answers 403
+#     unless a listener rule matches (defence in depth), and a REGIONAL WAF is
 #     associated with it as well.
 #   - An ECS Fargate service (Fargate and Fargate Spot) behind the ALB, with
 #     target-tracking autoscaling
 #   - RDS PostgreSQL and ElastiCache Redis (AUTH token, TLS) admitting only the
 #     application security group
 #   - One ACM certificate (app domain and *.app domain) for CloudFront and the
-#     ALB's origin name
+#     ALB's origin name (origin.<app domain>)
 #   - CloudWatch dashboard and alarms
 #
-# Request path: viewer -> CloudFront (WAF, aliases) -> origin.<app domain>
-# (the ALB, alias record) with X-Origin-Verify -> listener rule -> tasks.
+# Request path: viewer -> CloudFront (WAF, aliases) -> VPC origin -> the
+# internal ALB, TLS to origin.<app domain> -> listener rule -> tasks.
 #
 # Encryption: the stack's customer managed key, kms/main, encrypts the RDS
 # storage, Performance Insights and master user secret, the Redis cache and its
@@ -59,27 +60,18 @@
 #          dns_component: network/main           # dns instance holding app_domain_name's public zone
 #          dns_zone_key: main                    # that zone's key in its zone_ids output
 #          app_container_image: <account>.dkr.ecr.<region>.amazonaws.com/webapp:1.0
-#          # SSM parameter holding the X-Origin-Verify value (item 4).
-#          origin_verify_ssm_parameter: /<tenant>/<environment>/webapp/origin-verify
 #    A missing key fails every describe/plan of the stack with its name
 #    (gomplate `required`); `atmos validate stacks` does not render templates.
 #    settings.environment.account_id (set by every fnx stage _defaults) names
 #    the CloudFront log bucket in its own bucket policy.
 # 3. That dns instance manages app_domain_name's PUBLIC, delegated zone: ACM
-#    validates the certificate there, and the ALB (origin.<app domain>) and
-#    CloudFront (app domain, www) write their alias records into it.
-# 4. Manual, once per stack, before the services layer: create the origin-verify
-#    secret as an SSM SecureString on the default aws/ssm key (16-128 letters,
-#    digits, _ or -; ALB reads * and ? as wildcards), e.g.
-#      aws ssm put-parameter --type SecureString --name <parameter> \
-#        --value "$(openssl rand -hex 32)"
-#    CloudFront sends it and the ALB listener rule requires it; both read it at
-#    plan. After changing it, apply web-application/ecs-service and
-#    web-application/cloudfront: requests get the ALB's 403 until both match.
-# 5. A prod stack sets web-application/rds's environment: prod (its production
+#    validates the certificate there, and the ALB (origin.<app domain>, which
+#    resolves to its private addresses) and CloudFront (app domain, www) write
+#    their alias records into it.
+# 4. A prod stack sets web-application/rds's environment: prod (its production
 #    validations: multi_az, deletion_protection, backup retention) and sizes
 #    the instances up (see ENVIRONMENT-SPECIFIC OVERRIDES at the end).
-# 6. On-call addresses, if any, in web-application/monitoring's
+# 5. On-call addresses, if any, in web-application/monitoring's
 #    alarm_email_subscriptions.
 # =============================================================================
 
@@ -328,22 +320,39 @@ components:
         # components/terraform/alb/README.md).
         name: "webapp-alb"
 
+        # Internal, in the private subnets: CloudFront reaches it through a VPC
+        # origin (web-application/cloudfront), nothing else from the internet.
+        # VPC origins need an internet gateway in the VPC (the vpc component
+        # creates one for the public subnets) and are unsupported in use1-az3;
+        # the vpc instance uses use1-az1, az2 and az4.
+        internal: true
         vpc_id: !terraform.state web-application/vpc .vpc_id
-        subnets: !terraform.state web-application/vpc .public_subnet_ids
+        subnets: !terraform.state web-application/vpc .private_subnet_ids
         certificate_arn: !terraform.state web-application/acm .certificate_arns.main
         # The application group admits this one (see the securitygroups instance).
+        # Ingress stays the CloudFront origin-facing prefix list the component
+        # always admits: AWS allows it or the service-managed
+        # CloudFront-VPCOrigins-Service-SG for VPC origins, and that group only
+        # exists once web-application/cloudfront (services layer, after this
+        # addons-layer ALB) has created the first VPC origin, so it cannot be
+        # read here. An internal ALB has no internet path, so the prefix-list
+        # rule only matches traffic already in this VPC: CloudFront's
+        # VPC-origin ENIs. (Either way, any VPC origin for this ALB created in
+        # this account, or shared to another through RAM, can reach it.)
         security_group_ids:
           - !terraform.state web-application/securitygroups .security_group_ids.alb
 
-        # Only requests carrying CloudFront's X-Origin-Verify header reach the
-        # service (web-application/ecs-service's listener rule); the rest,
-        # anything that found the ALB's own DNS name, get this.
+        # Defence in depth: only web-application/ecs-service's listener rule
+        # forwards; anything else that reaches the listener gets this.
         listener_https_fixed_response:
           content_type: "text/plain"
           message_body: "Forbidden"
           status_code: "403"
 
-        # CloudFront's origin: a name the certificate covers (*.<app domain>).
+        # CloudFront's origin domain: a name the certificate covers
+        # (*.<app domain>). A VPC origin still checks the ALB certificate
+        # against the origin domain name, and internal-*.elb.amazonaws.com is
+        # not on it (components/terraform/cloudfront/README.md).
         dns_alias_enabled: true
         parent_zone_id: !terraform.state '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }} .zone_ids.{{ required "settings.web_application.dns_zone_key is required" .settings.web_application.dns_zone_key }}'
         dns_aliases:
@@ -474,8 +483,8 @@ components:
           Application: "web-application"
 
     # Services layer: after the cluster (compute), the data stores (data) and
-    # the ALB (addons). Behind CloudFront: the listener rule matches every path
-    # but only with the X-Origin-Verify header CloudFront sends.
+    # the ALB (addons). Behind CloudFront: the internal ALB is reachable only
+    # through the VPC origin, so the listener rule matches every path.
     web-application/ecs-service:
       metadata:
         component: ecs-service
@@ -549,9 +558,6 @@ components:
           priority: 100
           path_patterns:
             - "/*"
-          http_header:
-            name: "X-Origin-Verify"
-            value_ssm_parameter_name: '{{ required "settings.web_application.origin_verify_ssm_parameter is required" .settings.web_application.origin_verify_ssm_parameter }}'
           health_check:
             path: "/health"
 
@@ -724,10 +730,12 @@ components:
     # =========================================================================
     # CDN LAYER (services layer)
     # =========================================================================
-    # Custom origin only: the ALB, reached as origin.<app domain> (on the
-    # certificate) with the secret X-Origin-Verify header the ALB requires.
+    # One origin: the internal ALB as a CloudFront VPC origin (the component
+    # creates it; up to 15 minutes), TLS to origin.<app domain> (on the
+    # certificate). No origin-verify secret: the ALB has no internet path.
     # Host is not forwarded (AllViewerExceptHostHeader), so the ALB sees the
-    # origin name. The aliases' alias records go into the app domain's zone.
+    # origin name. No Lambda@Edge origin triggers (VPC origins do not support
+    # them). The aliases' alias records go into the app domain's zone.
 
     web-application/cloudfront:
       metadata:
@@ -742,10 +750,8 @@ components:
         custom_origins:
           - origin_id: "alb"
             domain_name: 'origin.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
-            custom_headers:
-              - name: "X-Origin-Verify"
-                value_ssm_parameter_name: '{{ required "settings.web_application.origin_verify_ssm_parameter is required" .settings.web_application.origin_verify_ssm_parameter }}'
-            custom_origin_config:
+            vpc_origin:
+              arn: !terraform.state web-application/alb .alb_arn
               origin_protocol_policy: "https-only"
               origin_ssl_protocols:
                 - "TLSv1.2"
@@ -845,8 +851,7 @@ components:
             period: 300
             statistic: "Sum"
           # The application's 4xx, not the ALB's: HTTPCode_ELB_4XX_Count also
-          # counts the listener's fixed 403 to every request that reaches the
-          # ALB without CloudFront's X-Origin-Verify header (scanners).
+          # counts the listener's fixed 403 and the ALB's own rejections.
           alb-target-4xx-errors:
             namespace: "AWS/ApplicationELB"
             metric_name: "HTTPCode_Target_4XX_Count"
