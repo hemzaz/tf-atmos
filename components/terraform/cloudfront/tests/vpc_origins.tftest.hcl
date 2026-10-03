@@ -56,7 +56,7 @@ run "internal_alb_vpc_origin" {
   assert {
     condition = (
       length(aws_cloudfront_vpc_origin.this) == 1
-      && one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).name == "test-webapp-cdn-alb"
+      && one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).name == "test-webapp-cdn-alb-c6437398"
       && one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).arn == "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/test-webapp-alb/0123456789abcdef"
       && one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).origin_protocol_policy == "https-only"
       && one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).https_port == 443
@@ -64,7 +64,23 @@ run "internal_alb_vpc_origin" {
       && toset(one(one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).origin_ssl_protocols).items) == toset(["TLSv1.2"])
       && one(one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).origin_ssl_protocols).quantity == 1
     )
-    error_message = "One VPC origin, <Environment>-<name>-<origin_id>, for the ALB: https-only, TLSv1.2, ports 80/443 by default."
+    error_message = "One VPC origin, <Environment>-<name>-<origin_id>-<config hash>, for the ALB: https-only, TLSv1.2, ports 80/443 by default."
+  }
+
+  # The replacement trigger carries the whole endpoint config. c6437398 is the
+  # first 8 hex digits of sha1 over the sorted-key, compact JSON of that
+  # config (arn, http_port 80, https_port 443, https-only, [TLSv1.2]),
+  # computed outside Terraform.
+  assert {
+    condition = (
+      terraform_data.vpc_origin["alb"].input.name == "test-webapp-cdn-alb-c6437398"
+      && terraform_data.vpc_origin["alb"].input.arn == "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/test-webapp-alb/0123456789abcdef"
+      && terraform_data.vpc_origin["alb"].input.https_port == 443
+      && terraform_data.vpc_origin["alb"].input.http_port == 80
+      && terraform_data.vpc_origin["alb"].input.origin_protocol_policy == "https-only"
+      && tolist(terraform_data.vpc_origin["alb"].input.origin_ssl_protocols) == tolist(["TLSv1.2"])
+    )
+    error_message = "terraform_data.vpc_origin's input is the VPC origin's endpoint config, name included."
   }
 
   assert {
@@ -85,6 +101,38 @@ run "internal_alb_vpc_origin" {
       && nonsensitive(one(one(aws_cloudfront_distribution.this[0].origin).custom_header).value) == "cloudfront"
     )
     error_message = "A VPC origin still takes custom headers."
+  }
+}
+
+# A config change (here https_port) changes the terraform_data input and the
+# name, so the VPC origin is replaced (replace_triggered_by) under a name that
+# does not collide with the one it replaces (create_before_destroy). Mock
+# providers cannot show replacement or its ordering (create, repoint the
+# distribution, delete): this proves the trigger's input changes, not the
+# apply sequence.
+run "config_change_changes_trigger_and_name" {
+  command = plan
+
+  variables {
+    custom_origins = [{
+      domain_name = "origin.app.example.com"
+      origin_id   = "alb"
+      vpc_origin = {
+        arn        = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/test-webapp-alb/0123456789abcdef"
+        https_port = 8443
+      }
+    }]
+  }
+
+  assert {
+    condition = (
+      terraform_data.vpc_origin["alb"].input.https_port == 8443
+      && terraform_data.vpc_origin["alb"].input.name == "test-webapp-cdn-alb-35075613"
+      && terraform_data.vpc_origin["alb"].input.name != "test-webapp-cdn-alb-c6437398"
+      && one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).name == "test-webapp-cdn-alb-35075613"
+      && one(aws_cloudfront_vpc_origin.this["alb"].vpc_origin_endpoint_config).https_port == 8443
+    )
+    error_message = "Changing https_port changes the replacement trigger's input and the VPC origin's name (new hash)."
   }
 }
 
@@ -162,7 +210,7 @@ run "disabled_creates_no_vpc_origin" {
   }
 
   assert {
-    condition     = length(aws_cloudfront_vpc_origin.this) == 0 && output.vpc_origin_ids == {}
+    condition     = length(aws_cloudfront_vpc_origin.this) == 0 && length(terraform_data.vpc_origin) == 0 && output.vpc_origin_ids == {}
     error_message = "enabled = false creates no VPC origin."
   }
 }
