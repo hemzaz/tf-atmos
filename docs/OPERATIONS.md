@@ -89,7 +89,7 @@ planned, confirmed, then applied from the saved plan. Each layer is also its own
 
 `backend`, `iam`, `kms`, `storage`, `networking`, `connectivity`, `security`,
 `security-monitoring`, `compute`, `platform`, `data`, `dns-zones`, `dns`, `certificates`,
-`addons`, `services`, `monitoring`.
+`addons`, `services`, `regional-waf`, `monitoring`.
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that
