@@ -34,6 +34,25 @@ workflows:
         name: refuse-fixtures
         type: shell
         command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
+      # First-deploy preflight, before anything touches AWS: fails while the
+      # stack about to be deployed (or the management account and the backend's
+      # access_roles, for fnx-core-root) still holds a placeholder account ID,
+      # organization ID, example domain or alert address, an empty EKS admin
+      # role or an unset prod RDS alarm target, or breaks the account model
+      # (workload account = management account; two stages in one account).
+      # docs/OPERATIONS.md#first-deploy-inputs. lint runs it warn-only.
+      - &preflight-targets
+        name: preflight_targets
+        type: atmos
+        command: describe stacks --process-functions=false --format json --query 'keys | join(",")'
+        output: none
+      - &preflight
+        name: preflight
+        type: shell
+        command: >-
+          atmos describe stacks --process-functions=false --format json
+          | python3 workflows/scripts/common/check-first-deploy-inputs.py
+          --stacks '{{ .steps.preflight_targets.value }}'
       # A second cold start would fail at bucket creation after creating some
       # of the other resources in a fresh local state. Refuse up front.
       - name: refuse-if-bucket-exists
@@ -132,6 +151,8 @@ workflows:
     steps:
       - *fixtures-stages
       - *refuse-fixtures
+      - *preflight-targets
+      - *preflight
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.
