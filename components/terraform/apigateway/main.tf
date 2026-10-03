@@ -104,7 +104,7 @@ resource "aws_api_gateway_stage" "rest_stage" {
   #checkov:skip=CKV_AWS_73:Deliberate, not a false positive. X-Ray bills per recorded trace, so tracing_enabled defaults to false and prod opts in (orgs/fnx/prod/.../services.yaml). Revisit if dev/staging ever need distributed tracing.
   #checkov:skip=CKV_AWS_120:The cache cluster is billed per hour, so it exists only with enable_caching (per method, cache_method_paths); see aws_api_gateway_method_settings.stage
   #checkov:skip=CKV2_AWS_51:Callers authenticate through the Cognito or Lambda authorizer (authorization_type); a client certificate authenticates API Gateway to a backend, and no backend here checks one
-  #checkov:skip=CKV2_AWS_77:False positive; aws_wafv2_web_acl.api_waf holds AWSManagedRulesKnownBadInputsRuleSet (Log4j) and is associated with this stage via count, which checkov's graph does not follow
+  #checkov:skip=CKV2_AWS_77:A WAF with the Log4j rule set is attached by enable_waf (aws_wafv2_web_acl.api_waf: prod's instances, dev/staging apigateway/data) or by the waf component (serverless-api template); dev/staging apigateway/main have none
   count = local.create_rest_api ? 1 : 0
 
   deployment_id = aws_api_gateway_deployment.rest_deployment[0].id
