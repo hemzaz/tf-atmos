@@ -10,7 +10,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 
 | Input | Where |
 |-------|-------|
-| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`. Each stage's `settings.environment.account_id`, `management_account_id`, the backend `access_roles` ARNs in `fnx-core-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. `scripts/new-environment.sh` adds a new account here (`AWS_ACCOUNT_ID`). The emulator and fixture stacks keep the emulator's `000000000000`; `settings.environment.aws_account_id` in `staging-01.yaml` and `production.yaml` is read by nothing |
+| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`. Each stage's `settings.environment.account_id`, `management_account_id`, the backend `access_roles` ARNs in `fnx-core-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. `scripts/new-environment.sh` adds a new account here (`AWS_ACCOUNT_ID`). The emulator and fixture stacks keep the emulator's `000000000000` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
@@ -115,8 +115,11 @@ atmos workflow hot-deploy -f deploy-application -s <stack>   # Cognito, Lambda, 
 atmos workflow deploy -f deploy-template -s <stack>          # a stack template (stacks/catalog/templates/)
 ```
 
-Of the stack templates only `microservices-platform` names components that all exist; the others
-fail at `deploy-template`. No stack deploys `idp-platform`.
+Template readiness follows `KNOWN_BROKEN_FIXTURES` in `workflows/scripts/common/fixtures.py`
+(see [Template fixtures](#template-fixtures)): `batch-processing` and `data-pipeline` pass every
+check; `microservices-platform` still fails `check-cluster-api-ci` and `check-deploy-layers`;
+`serverless-api` and `web-application` are not ported yet, so every check is relaxed for them. No
+stack deploys `idp-platform`.
 
 ## In-cluster components
 

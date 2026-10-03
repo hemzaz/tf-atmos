@@ -461,12 +461,10 @@ generate_stack_file() {
 import:
   - catalog/_base/defaults
 
-  # Mixins (order matters for precedence)
-  - mixins/tenant/${TENANT}
-  - mixins/stage/${STAGE}
+  # Region mixin (the tenant and stage mixins come with the stage defaults)
 ${region_mixin_import}
 
-  # Org and stage defaults (backend, toolchain, account)
+  # Stage defaults: org defaults (backend, toolchain, account map), tenant and stage mixins, account
   - orgs/${TENANT}/${STAGE}/_defaults
 
   # Component configurations
@@ -480,9 +478,6 @@ vars:
 settings:
   environment:
     account: ${ACCOUNT}
-    description: "${ENVIRONMENT} (${ENV_TYPE})"
-    namespace: ${ENVIRONMENT}
-    vpc_cidr: "${VPC_CIDR}"
   context:
     tenant: ${TENANT}
     stage: ${STAGE}
@@ -516,15 +511,9 @@ generate_component_files() {
         template_import="  - catalog/templates/${TEMPLATE}"
     fi
 
-    # Environment sizing, exposed to component templates as {{ .settings.environment.* }}
+    # The one settings.environment key the generated components read
     local is_prod="false"
     [[ "$ENV_TYPE" == "production" ]] && is_prod="true"
-    local instance_type="t3.medium" db_instance_class="db.t3.micro"
-    local log_retention=30 backup_retention=7
-    case "$ENV_TYPE" in
-        production) instance_type="m5.large"; db_instance_class="db.r5.large"; log_retention=90; backup_retention=30 ;;
-        staging) instance_type="t3.large"; db_instance_class="db.t3.medium" ;;
-    esac
 
     write_file "$(components_dir)/globals.yaml" << EOF
 ---
@@ -541,13 +530,6 @@ vars:
 
 settings:
   environment:
-    env_type: ${ENV_TYPE}
-    instance_type_default: "${instance_type}"
-    rds_instance_class_default: "${db_instance_class}"
-    log_retention_days: ${log_retention}
-    backup_retention_days: ${backup_retention}
-    enable_deletion_protection: ${is_prod}
-    enable_multi_az: ${is_prod}
     enable_vpc_flow_logs: ${is_prod}
 EOF
 
