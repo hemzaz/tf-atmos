@@ -111,9 +111,12 @@ locals {
   eks_unsupported_zone_ids = ["use1-az3", "usw1-az2", "cac1-az3"]
 }
 
+# count, not for_each: the ids can be unknown at plan time (a vpc created in
+# the same apply), and for_each keys must be known. Only the list's length has
+# to be. Cloud Posse's eks-cluster takes subnet_ids as given and does no lookup.
 data "aws_subnet" "cluster" {
-  for_each = local.enabled ? toset(var.subnet_ids) : toset([])
-  id       = each.value
+  count = local.enabled ? length(var.subnet_ids) : 0
+  id    = var.subnet_ids[count.index]
 }
 
 #trivy:ignore:AWS-0040 Public endpoint is off unless cluster_endpoint_public_access = true
@@ -188,7 +191,7 @@ resource "aws_eks_cluster" "default" {
     # Fails at plan what CreateCluster rejects later (UnsupportedAvailabilityZoneException).
     precondition {
       condition = length([
-        for id, subnet in data.aws_subnet.cluster : id if contains(local.eks_unsupported_zone_ids, subnet.availability_zone_id)
+        for subnet in data.aws_subnet.cluster : subnet.id if contains(local.eks_unsupported_zone_ids, subnet.availability_zone_id)
       ]) == 0
       error_message = "EKS does not place a cluster in AZ IDs ${join(", ", local.eks_unsupported_zone_ids)}; a subnet_ids entry is in one of them. Use other subnets (vpc availability_zone_ids)."
     }

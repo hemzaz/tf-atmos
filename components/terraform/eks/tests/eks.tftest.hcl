@@ -609,7 +609,7 @@ run "cluster_subnet_in_use1_az3_is_rejected" {
   command = plan
 
   override_data {
-    target = data.aws_subnet.cluster["subnet-4e5f6a7b"]
+    target = data.aws_subnet.cluster[1]
     values = {
       availability_zone_id = "use1-az3"
     }
@@ -622,14 +622,14 @@ run "cluster_subnets_in_supported_zone_ids_are_accepted" {
   command = plan
 
   override_data {
-    target = data.aws_subnet.cluster["subnet-0a1b2c3d"]
+    target = data.aws_subnet.cluster[0]
     values = {
       availability_zone_id = "use1-az1"
     }
   }
 
   override_data {
-    target = data.aws_subnet.cluster["subnet-4e5f6a7b"]
+    target = data.aws_subnet.cluster[1]
     values = {
       availability_zone_id = "use1-az4"
     }
@@ -638,5 +638,21 @@ run "cluster_subnets_in_supported_zone_ids_are_accepted" {
   assert {
     condition     = length(aws_eks_cluster.default) == 1
     error_message = "Subnets in use1-az1 and use1-az4 pass the zone-ID precondition."
+  }
+}
+
+# subnet_ids that are unknown at plan time (a vpc created in the same apply)
+# must not break the zone lookup: its shape depends on the list's length only.
+# With for_each over the ids this plan fails ("Invalid for_each argument").
+run "unknown_subnet_ids_at_plan_time" {
+  command = plan
+
+  module {
+    source = "./tests/unknown_subnet_ids"
+  }
+
+  assert {
+    condition     = length(aws_subnet.this) == 2
+    error_message = "The component plans with two subnet ids that are unknown until apply."
   }
 }
