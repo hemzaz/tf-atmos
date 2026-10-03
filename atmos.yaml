@@ -119,6 +119,12 @@ schemas:
 templates:
   settings:
     enabled: true
+    # Two passes: settings.environment.account_id and management_account_id
+    # are templates over settings.account_map (stacks/orgs/fnx/_defaults.yaml),
+    # and every `{{ .settings.environment.account_id }}` elsewhere renders to
+    # that template in the first pass and to the ID in the second.
+    # So a literal `{{` that must reach Terraform or helm needs escaping twice.
+    evaluations: 2
     sprig:
       enabled: true
     gomplate:

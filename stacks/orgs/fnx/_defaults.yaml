@@ -50,7 +50,49 @@ terraform:
       use_lockfile: true
       assume_role:
         role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend{{ if eq .settings.context.stage "core" }}-core{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
+
+  # Account guard: every stack's default AWS provider refuses to run in any
+  # account but the stack's own (Atmos writes this into each component's
+  # providers_override.tf.json; Terraform merges it into the unaliased
+  # provider "aws" block). A wrong profile or role fails at provider
+  # configuration, before any plan or apply. Cloud Posse's Atmos reference
+  # sets this very argument in the stack `providers` section
+  # (atmos.tools/stacks/providers, "AWS Provider"); its components reach the
+  # same end by assuming a role that account-map's iam-roles module derives
+  # for the stack's account.
+  # The override never reaches an aliased block: backup's `replica` shares the
+  # default provider's credentials, so the default's guard already stops it,
+  # and dns's `dns_account` assumes a role in another account on purpose.
+  # The emulator stacks unset this (stacks/orgs/fnx/local/_defaults.yaml).
+  providers:
+    aws:
+      allowed_account_ids:
+        - "{{ .settings.environment.account_id }}"
 settings:
+  # ONE account map: the only place account IDs are written. Shaped like the
+  # outputs of Cloud Posse's account-map component (full_account_map: account
+  # name -> id, plus the names of the root and identity accounts), so the
+  # tf-atmos org layer (turnkey Wave E) can replace it with that component's
+  # output without touching any reader. Keys are the account names: `root` is
+  # the management account (stack fnx-core-root); the workload accounts are
+  # each stage's settings.environment.account. Wave E adds Cloud Posse's other
+  # core accounts (audit, security, network, identity, artifacts); until then
+  # the identity account is root. Placeholder IDs: see
+  # docs/OPERATIONS.md#first-deploy-inputs.
+  #
+  # Readers: settings.environment.management_account_id (below) and each
+  # stage's settings.environment.account_id (stacks/orgs/fnx/<stage>/_defaults.yaml),
+  # plus the CI role ARNs in fnx-core-root's backend access_roles. Those
+  # settings are templates read by other templates, which is why atmos.yaml
+  # renders templates in two evaluations.
+  account_map:
+    full_account_map:
+      root: "123456789012"
+      dev: "123456789012"
+      staging: "123456789012"
+      prod: "123456789012"
+    root_account_account_name: root
+    identity_account_account_name: root
   # The ONE region of the state bucket (backend/main, fnx-core-root). Every stack's backend
   # reads it, not the stack's own region: a DR or EU stack still keeps its state here.
   # check-state-keys.py fails a stack whose backend region differs from backend/main's.
@@ -58,6 +100,6 @@ settings:
     region: us-east-1
   environment:
     namespace: fnx
-    management_account_id: "123456789012"
+    management_account_id: '{{ index .settings.account_map.full_account_map .settings.account_map.root_account_account_name }}'
   context:
     tenant: fnx
