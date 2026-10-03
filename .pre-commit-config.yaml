@@ -2,10 +2,13 @@
 # Pre-commit hooks: a fast local mirror of the CI gate
 # =============================================================================
 # The gate is CI (.github/workflows/terraform-ci.yml), which runs the Atmos
-# workflows in workflows/lint.yaml. The commit-stage hooks below are the cheap,
-# file-scoped part of it, with CI's own flags. The heavy parts (tflint over
-# every component and stack, checkov over components/terraform) are
-# manual-stage hooks that run the CI commands themselves:
+# workflows in workflows/lint.yaml. terraform_fmt, yamllint, atmos validate
+# stacks and the HCL parse guard are the cheap, file-scoped part of it, with
+# CI's own flags. The other commit-stage hooks (file hygiene, check-yaml/json,
+# detect-secrets, flake8 E9/F, bandit, shellcheck errors) are local-only: CI
+# does not run them yet. The heavy parts (tflint over every component and
+# stack, checkov over components/terraform) are manual-stage hooks that run
+# the CI commands themselves:
 #
 #   pre-commit install                                  # once
 #   pre-commit run --all-files                          # commit stage, every file
