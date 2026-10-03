@@ -60,14 +60,6 @@ repos:
         name: Terraform lint
         args:
           - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
-      - id: terraform_checkov
-        exclude: '/tests/'
-        name: Terraform security scan (Checkov)
-        args:
-          - --args=--quiet
-          - --args=--framework=terraform
-          - --args=--skip-path=/tests/
-          - --args=--skip-check=CKV_AWS_79,CKV_AWS_115  # Skip specific checks if needed
 
   # Atmos stack configuration
   - repo: local
@@ -85,6 +77,31 @@ repos:
         entry: python3 scripts/check-hcl-unary-newline.py
         language: system
         files: \.tf$
+      # The CI gate's checkov run (workflows/lint.yaml security-scan), same pin
+      # and flags: the whole components/terraform directory, because the
+      # baseline's paths are relative to it, so a finding baselined in CI passes
+      # here too. No --skip-check: CI skips nothing beyond the baseline and the
+      # inline #checkov:skip comments. Manual stage only: a full directory scan on
+      # every .tf commit is too heavy for a workstation, and CI runs it anyway.
+      # Run it with `pre-commit run --hook-stage manual checkov`.
+      - id: checkov
+        name: Terraform security scan (Checkov, as the CI gate)
+        entry: checkov
+        language: python
+        stages: [manual]
+        additional_dependencies: ['checkov==3.3.21']
+        pass_filenames: false
+        files: ^(components/terraform/.*\.tf|\.checkov\.baseline)$
+        exclude: '/tests/'
+        args:
+          - --directory=components/terraform
+          - --framework=terraform
+          - --skip-path=/tests/
+          - --quiet
+          - --compact
+          - --soft-fail-on=LOW,MEDIUM
+          - --hard-fail-on=HIGH,CRITICAL
+          - --baseline=.checkov.baseline
 
   # Security scanning
   - repo: https://github.com/Yelp/detect-secrets
@@ -174,5 +191,5 @@ ci:
   autoupdate_branch: ''
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
   autoupdate_schedule: weekly
-  skip: [terraform_docs, terraform_tflint, terraform_checkov]
+  skip: [terraform_docs, terraform_tflint, checkov]
   submodules: false

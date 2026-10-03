@@ -19,7 +19,8 @@ ENV AWS_CLI_VERSION=2.36.49
 ENV KUBECTL_VERSION=1.37.0
 ENV HELM_VERSION=4.3.0
 ENV TFLINT_VERSION=0.64.0
-ENV CHECKOV_VERSION=3.3.19
+ENV CHECKOV_VERSION=3.3.21
+ENV TRIVY_VERSION=0.75.0
 ENV INFRACOST_VERSION=0.10.45
 ENV PYTHON_VERSION=3.11
 
@@ -136,12 +137,15 @@ RUN pip3 install --no-cache-dir --upgrade pip==26.2.1 setuptools==84.0.0 wheel==
     pip-audit==2.10.1 \
     detect-secrets==1.5.0
 
-# Install Trivy (security scanner)
-RUN wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor -o /usr/share/keyrings/trivy.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/trivy.list \
-    && apt-get update \
-    && apt-get install -y trivy \
-    && rm -rf /var/lib/apt/lists/*
+# Install Trivy (security scanner), the version workflows/lint.yaml pins. Not from
+# Aqua's apt repo: it carries only one (stale) version, so it cannot be pinned.
+RUN base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}" \
+    && curl -fsSLO "${base}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+    && curl -fsSLO "${base}/trivy_${TRIVY_VERSION}_checksums.txt" \
+    && grep "  trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz$" "trivy_${TRIVY_VERSION}_checksums.txt" | sha256sum -c - \
+    && tar -xzf "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -C /usr/local/bin trivy \
+    && rm -f trivy_* \
+    && trivy --version
 
 # tfsec is not installed: it is deprecated and Trivy (`trivy config`) covers its checks.
 

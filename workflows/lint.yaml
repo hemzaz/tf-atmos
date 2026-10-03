@@ -5,41 +5,49 @@
 #   atmos workflow lint -f lint
 #   atmos workflow tflint-init -f lint            # install tflint + its .tflint.hcl plugins (network)
 #   atmos workflow actionlint -f lint             # lint .github/workflows (actionlint)
-#   atmos workflow security-scan -f lint          # PR gate: SARIF reports, fails on NEW HIGH/CRITICAL
+#   atmos workflow security-scan -f lint          # PR gate: Trivy + Checkov, fails on NEW HIGH/CRITICAL
 #   atmos workflow security-scan-report -f lint   # nightly: full backlog (no baselines), never fails
 #   atmos workflow security-baseline -f lint      # regenerate .trivyignore.yaml and .checkov.baseline
 #
-# The PR gates (lint, security-scan) only fail on findings that are not in the
-# committed baselines (.trivyignore.yaml, .checkov.baseline). Regenerate the
-# baselines deliberately, to burn findings down, never to make a PR pass.
+# The security-scan gate only fails on findings that are not in the committed
+# baselines (.trivyignore.yaml, .checkov.baseline). Regenerate the baselines
+# deliberately, to burn findings down, never to make a PR pass.
+#
+# One trivy gate, in security-scan, not also in lint: both CI jobs run on the
+# same changed paths (terraform-ci.yml `changes`), and security-scan already
+# holds the other baselined gate (checkov) and writes the reports. lint used to
+# run the identical trivy command a second time.
+#
+# Scanner pins: checkov 3.3.21 (3.3.22 has no GitHub release, so the toolchain
+# cannot install it) and trivy v0.75.0. Keep .pre-commit-config.yaml,
+# Dockerfile.devops, .atmos.env and templates/workflows/ on the same versions.
 #
 # tflint and trivy publish GitHub release tags with a `v` prefix (v0.64.0,
-# v0.74.0) and sign each release with a GitHub Attestation tied to that exact
+# v0.75.0) and sign each release with a GitHub Attestation tied to that exact
 # tag ref. The toolchain's cosign verification compares the pin here against
 # `refs/tags/<pin>`, so an unprefixed pin ("0.64.0") never matches the
 # certificate's workflow ref and install fails with "expected GitHub Workflow
 # Ref not found in certificate" (tflint) / "expected GithubWorkflowRef to be
-# ...got refs/tags/v0.74.0" (trivy). Keep the `v`. terraform, go-yamllint,
+# ...got refs/tags/v<version>" (trivy). Keep the `v`. terraform, go-yamllint,
 # jq, aws-cli and checkov are verified differently (or their upstream tags
 # have no `v`) and are confirmed to install correctly unprefixed.
 #
 # Every trivy run passes --skip-check-update and an empty, throwaway
 # --cache-dir. Without the flag trivy downloads the floating check bundle
 # mirror.gcr.io/aquasec/trivy-checks:2 at run time (580 checks vs the 563
-# embedded in v0.74.0), so the gate and the baseline changed with no change in
-# this repo. The flag alone still loads a bundle already in the trivy cache
+# embedded in the binary), so the gate and the baseline changed with no change
+# in this repo. The flag alone still loads a bundle already in the trivy cache
 # (~/.cache/trivy on a developer machine), so the empty cache makes a local run
 # use exactly the embedded checks CI uses. New checks arrive by bumping the pin,
 # with a baseline regeneration.
 workflows:
   lint:
-    description: Lint Terraform code, YAML files and run a Terraform security scan
+    description: Lint Terraform code and YAML files (the Trivy/Checkov gate is security-scan)
     dependencies:
       tools:
         terraform: "1.16.3"
         tflint: "v0.64.0"
         wasilibs/go-yamllint: "1.38.0"
-        trivy: "v0.74.0"
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
@@ -65,12 +73,6 @@ workflows:
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
               python3 scripts/check-hcl-unary-newline.py components/terraform modules
-          - name: security-scan
-            type: shell
-            command: >-
-              cache=$(mktemp -d); trap 'rm -rf "$cache"' EXIT;
-              trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests'
-              --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
       # No-op when the plugins are already installed (CI runs tflint-init first,
       # with a token for GitHub rate limits, so this step needs no network).
       - name: tflint-plugins
@@ -248,8 +250,8 @@ workflows:
     description: Scan Terraform code with Trivy and Checkov (SARIF in reports/); fails on HIGH/CRITICAL findings
     dependencies:
       tools:
-        trivy: "v0.74.0"
-        checkov: "3.3.19"
+        trivy: "v0.75.0"
+        checkov: "3.3.21"
     steps:
       - name: reports-dir
         type: shell
@@ -421,8 +423,8 @@ workflows:
     description: Report-only scan for the nightly workflow (SARIF in reports/); never fails on findings
     dependencies:
       tools:
-        trivy: "v0.74.0"
-        checkov: "3.3.19"
+        trivy: "v0.75.0"
+        checkov: "3.3.21"
     steps:
       - name: reports-dir
         type: shell
@@ -524,8 +526,8 @@ workflows:
     description: Regenerate the PR-gate baselines (.trivyignore.yaml, .checkov.baseline) from the current code
     dependencies:
       tools:
-        trivy: "v0.74.0"
-        checkov: "3.3.19"
+        trivy: "v0.75.0"
+        checkov: "3.3.21"
     steps:
       - name: reports-dir
         type: shell
