@@ -92,8 +92,10 @@ run "s3_backup_on_two_flow_logs" {
   assert {
     condition = anytrue([
       for st in jsondecode(aws_kms_key.flow_logs[0].policy).Statement :
-      st.Principal == { Service = "delivery.logs.amazonaws.com" } && contains(st.Action, "kms:GenerateDataKey*")
+      st.Principal == { Service = "delivery.logs.amazonaws.com" } && st.Action == "kms:GenerateDataKey*"
+      && st.Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+      && st.Condition.ArnLike["aws:SourceArn"] == "arn:aws:logs:us-east-1:123456789012:*"
     ])
-    error_message = "With flow_logs_s3_backup the component key must let delivery.logs.amazonaws.com encrypt the S3 copy."
+    error_message = "With flow_logs_s3_backup the component key must let delivery.logs.amazonaws.com kms:GenerateDataKey* (and nothing else) for this account's CloudWatch Logs."
   }
 }
