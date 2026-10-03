@@ -34,7 +34,8 @@ repos:
       - id: check-executables-have-shebangs
         name: Check executables have shebangs
 
-  # Terraform formatting
+  # Terraform formatting. exclude '/tests/' (and checkov's --skip-path): terraform
+  # test helper modules (e.g. eks/tests/unknown_subnet_ids) are not root modules.
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.109.1
     hooks:
@@ -43,24 +44,29 @@ repos:
         args:
           - --args=-recursive
       - id: terraform_validate
+        exclude: '/tests/'
         name: Terraform validate
         args:
           - --hook-config=--retry-once-with-cleanup=true
       - id: terraform_docs
+        exclude: '/tests/'
         name: Generate Terraform docs
         args:
           - --hook-config=--path-to-file=README.md
           - --hook-config=--add-to-existing-file=true
           - --hook-config=--create-file-if-not-exist=true
       - id: terraform_tflint
+        exclude: '/tests/'
         name: Terraform lint
         args:
           - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
       - id: terraform_checkov
+        exclude: '/tests/'
         name: Terraform security scan (Checkov)
         args:
           - --args=--quiet
           - --args=--framework=terraform
+          - --args=--skip-path=/tests/
           - --args=--skip-check=CKV_AWS_79,CKV_AWS_115  # Skip specific checks if needed
 
   # Atmos stack configuration

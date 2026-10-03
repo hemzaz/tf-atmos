@@ -1,17 +1,11 @@
 ---
-# us-west-2. Same shape as mixins/region/us-east-1.yaml. EKS supports clusters
-# in these AZ IDs; vpc instances set availability_zone_ids themselves
-# (components/terraform/vpc/README.md).
+# us-west-2. Same shape as mixins/region/us-east-1.yaml. vpc instances set
+# availability_zone_ids themselves (components/terraform/vpc/README.md).
 import:
   - catalog/vpc/defaults
 
 vars:
   region: us-west-2
 settings:
-  environment:
-    availability_zone_ids:
-      - usw2-az1
-      - usw2-az2
-      - usw2-az3
   context:
     environment: us-west-2

@@ -57,5 +57,6 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
 - `name` must not start with the Environment; resource names are `<Environment>-<name>`.
 - A public endpoint needs non-empty `public_access_cidrs` without `/0`.
 - A precondition reads each `subnet_ids` entry (`data.aws_subnet`) and fails the plan for a subnet in
-  an AZ ID EKS rejects for clusters (`use1-az3`, `usw1-az2`, `cac1-az3`); the vpcs pick AZ IDs.
+  an AZ ID EKS rejects for clusters (`use1-az3`, `usw1-az2`, `cac1-az3`); the vpcs pick AZ IDs. With
+  subnet ids unknown until apply (vpc in the same apply) it fails at apply instead, still before CreateCluster.
 - `upgrade_policy` defaults to `STANDARD` (AWS treats null as paid `EXTENDED`).

@@ -49,7 +49,7 @@ workflows:
             command: yamllint -d relaxed stacks workflows atmos.yaml
           - name: security-scan
             type: shell
-            command: trivy config --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
+            command: trivy config --skip-dirs '**/tests' --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
       # No-op when the plugins are already installed (CI runs tflint-init first,
       # with a token for GitHub rate limits, so this step needs no network).
       - name: tflint-plugins
@@ -256,7 +256,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-guard
         type: script
@@ -357,14 +357,18 @@ workflows:
           - name: trivy
             type: shell
             command: >-
-              trivy config --format sarif --output reports/trivy.sarif
+              trivy config --skip-dirs '**/tests' --format sarif --output reports/trivy.sarif
               --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore.yaml components/terraform
           # Checkov only knows check severities with a Prisma Cloud API key; without
           # one, a failed check matches neither list and therefore fails the gate.
+          # --skip-path '/tests/' and trivy's --skip-dirs '**/tests' (every run here,
+          # the baselines' too): terraform test helper modules (e.g.
+          # eks/tests/unknown_subnet_ids, which links the component's own files)
+          # are not deployed code.
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/'
               --output sarif --output-file-path reports --quiet
               --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL --baseline .checkov.baseline
 
@@ -386,7 +390,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/'
           --output json --output-file-path reports --soft-fail --compact
       - name: checkov-coverage-print
         type: script
@@ -427,12 +431,12 @@ workflows:
           - name: trivy
             type: shell
             command: >-
-              trivy config --format sarif --output reports/trivy.sarif
+              trivy config --skip-dirs '**/tests' --format sarif --output reports/trivy.sarif
               --severity HIGH,CRITICAL --exit-code 0 components/terraform
           - name: checkov
             type: shell
             command: >-
-              checkov --directory components/terraform --framework terraform
+              checkov --directory components/terraform --framework terraform --skip-path '/tests/'
               --output sarif --output-file-path reports --soft-fail --quiet
 
   security-baseline:
@@ -449,7 +453,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          trivy config --format json --output reports/trivy-baseline.json
+          trivy config --skip-dirs '**/tests' --format json --output reports/trivy-baseline.json
           --severity HIGH,CRITICAL --exit-code 0 components/terraform
       - name: trivy-baseline
         type: script
@@ -477,7 +481,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          checkov --directory components/terraform --framework terraform
+          checkov --directory components/terraform --framework terraform --skip-path '/tests/'
           --create-baseline --soft-fail --quiet --compact
       - name: move-checkov-baseline
         type: shell

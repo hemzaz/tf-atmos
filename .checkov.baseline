@@ -506,17 +506,6 @@
                     ]
                 }
             ]
-        },
-        {
-            "file": "/vpc/nat-gateway.tf",
-            "findings": [
-                {
-                    "resource": "aws_availability_zones.available",
-                    "check_ids": [
-                        "CKV_AWS_394"
-                    ]
-                }
-            ]
         }
     ]
 }

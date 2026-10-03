@@ -20,19 +20,6 @@ locals {
   }
 }
 
-# Get available AZs for better NAT gateway placement
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
-data "aws_availability_zone" "available" {
-  # Only queried when NAT gateways are actually created; aws_eip.nat is the sole
-  # consumer. Without this gate the lookup ran on every plan, including in VPCs
-  # with no NAT gateway at all.
-  count = local.nat_gateway_count > 0 ? length(var.public_subnets) : 0
-  name  = var.nat_gateway_azs != null && length(var.nat_gateway_azs) > count.index ? var.nat_gateway_azs[count.index] : data.aws_availability_zones.available.names[count.index % length(data.aws_availability_zones.available.names)]
-}
-
 resource "aws_eip" "nat" {
   for_each = local.nat_gateways
   domain   = "vpc"
@@ -41,7 +28,8 @@ resource "aws_eip" "nat" {
     var.tags,
     {
       Name = "${var.tags["Environment"]}-nat-eip-${each.value.number + 1}"
-      AZ   = data.aws_availability_zone.available[each.value.subnet_index].name
+      # The AZ of the public subnet hosting the gateway, not an assumed index.
+      AZ = aws_subnet.public[each.key].availability_zone
     }
   )
 }
