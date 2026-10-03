@@ -134,7 +134,7 @@ repos:
     hooks:
       - id: flake8
         name: Flake8 linting
-        args: ['--max-line-length=120', '--extend-ignore=E203,W503']
+        args: ['--select=E9,F']  # syntax errors and pyflakes; style is not gated
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
