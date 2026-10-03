@@ -14,7 +14,9 @@
 #   - default_root_object defaults to index.html only when the default
 #     behavior targets the S3 origin (upstream: always index.html).
 #   - custom_origins and ordered_cache differences are listed beside those
-#     variables in variables.tf. Origin groups (failover), s3_origins and
+#     variables in variables.tf, among them VPC origins (custom_origins[].
+#     vpc_origin, aws_cloudfront_vpc_origin), which neither
+#     terraform-aws-cloudfront-s3-cdn nor terraform-aws-cloudfront-cdn models. Origin groups (failover), s3_origins and
 #     trusted signers / key groups are not modelled.
 #   - The bucket is not created here and its policy is not written here
 #     (upstream creates the bucket, or overrides an existing bucket's policy
@@ -116,6 +118,20 @@ locals {
       type = pair[1]
     }
   } : {}
+
+  # A custom origin's transport when custom_origin_config is null (the
+  # variable's per-field defaults).
+  custom_origin_config_defaults = {
+    http_port                = 80
+    https_port               = 443
+    origin_protocol_policy   = "https-only"
+    origin_ssl_protocols     = ["TLSv1.2"]
+    origin_keepalive_timeout = 5
+    origin_read_timeout      = 30
+  }
+
+  # One CloudFront VPC origin per custom origin with vpc_origin, by origin_id.
+  vpc_origins = local.enabled ? { for o in var.custom_origins : o.origin_id => o.vpc_origin if o.vpc_origin != null } : {}
 }
 
 data "aws_partition" "current" {}
@@ -144,6 +160,31 @@ resource "aws_cloudfront_origin_access_control" "this" {
       error_message = "The distribution name (<Environment>-<name>, \"${local.name}\") must be 64 characters or fewer (the origin access control name limit)."
     }
   }
+}
+
+# VPC origins (custom_origins[].vpc_origin): CloudFront reaches an internal
+# ALB, an NLB or an EC2 instance in private subnets through service-managed
+# ENIs. Not in Cloud Posse (see variables.tf). AWS takes up to 15 minutes to
+# deploy one; the first in a VPC also creates the service-managed
+# CloudFront-VPCOrigins-Service-SG (AWS Developer Guide, "Restrict access with
+# VPC origins").
+resource "aws_cloudfront_vpc_origin" "this" {
+  for_each = local.vpc_origins
+
+  vpc_origin_endpoint_config {
+    name                   = "${local.name}-${each.key}"
+    arn                    = each.value.arn
+    http_port              = each.value.http_port
+    https_port             = each.value.https_port
+    origin_protocol_policy = each.value.origin_protocol_policy
+
+    origin_ssl_protocols {
+      items    = each.value.origin_ssl_protocols
+      quantity = length(each.value.origin_ssl_protocols)
+    }
+  }
+
+  tags = { Name = "${local.name}-${each.key}" }
 }
 
 resource "aws_cloudfront_distribution" "this" {
@@ -193,13 +234,29 @@ resource "aws_cloudfront_distribution" "this" {
         }
       }
 
-      custom_origin_config {
-        http_port                = origin.value.custom_origin_config.http_port
-        https_port               = origin.value.custom_origin_config.https_port
-        origin_protocol_policy   = origin.value.custom_origin_config.origin_protocol_policy
-        origin_ssl_protocols     = origin.value.custom_origin_config.origin_ssl_protocols
-        origin_keepalive_timeout = origin.value.custom_origin_config.origin_keepalive_timeout
-        origin_read_timeout      = origin.value.custom_origin_config.origin_read_timeout
+      # A public custom origin (custom_origin_config, or its defaults when
+      # null) ...
+      dynamic "custom_origin_config" {
+        for_each = origin.value.vpc_origin == null ? [coalesce(origin.value.custom_origin_config, local.custom_origin_config_defaults)] : []
+        content {
+          http_port                = custom_origin_config.value.http_port
+          https_port               = custom_origin_config.value.https_port
+          origin_protocol_policy   = custom_origin_config.value.origin_protocol_policy
+          origin_ssl_protocols     = custom_origin_config.value.origin_ssl_protocols
+          origin_keepalive_timeout = custom_origin_config.value.origin_keepalive_timeout
+          origin_read_timeout      = custom_origin_config.value.origin_read_timeout
+        }
+      }
+
+      # ... or a VPC origin: protocol, ports and TLS versions live on the
+      # aws_cloudfront_vpc_origin, the timeouts here.
+      dynamic "vpc_origin_config" {
+        for_each = origin.value.vpc_origin == null ? [] : [origin.value.vpc_origin]
+        content {
+          vpc_origin_id            = aws_cloudfront_vpc_origin.this[origin.value.origin_id].id
+          origin_keepalive_timeout = vpc_origin_config.value.origin_keepalive_timeout
+          origin_read_timeout      = vpc_origin_config.value.origin_read_timeout
+        }
       }
 
       dynamic "origin_shield" {
