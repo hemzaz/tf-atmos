@@ -34,7 +34,6 @@ INSTALL_SESSION_MANAGER=true
 INSTALL_HELM=true
 INSTALL_KUBECTL=true
 INSTALL_YAMLLINT=true
-INSTALL_TFSEC=true
 INSTALL_TFLINT=true
 INSTALL_CHECKOV=false
 # Cookiecutter was removed in favor of Copier
@@ -43,9 +42,8 @@ TERRAFORM_VERSION="${TERRAFORM_VERSION:-1.16.3}"
 ATMOS_VERSION="${ATMOS_VERSION:-1.229.0}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-1.37.0}"
 HELM_VERSION="${HELM_VERSION:-4.3.0}"
-TFSEC_VERSION="${TFSEC_VERSION:-1.28.14}"
 TFLINT_VERSION="${TFLINT_VERSION:-0.64.0}"
-CHECKOV_VERSION="${CHECKOV_VERSION:-3.3.19}"
+CHECKOV_VERSION="${CHECKOV_VERSION:-3.3.21}"
 COPIER_VERSION="${COPIER_VERSION:-9.18.2}"
 INSTALL_DIR="/usr/local/bin"
 USER_INSTALL_DIR="$HOME/.local/bin"
@@ -77,7 +75,6 @@ show_help() {
   echo "  --skip-helm             Skip Helm installation"
   echo "  --skip-kubectl          Skip kubectl installation"
   echo "  --skip-yamllint         Skip yamllint installation"
-  echo "  --skip-tfsec            Skip tfsec installation"
   echo "  --skip-tflint           Skip tflint installation"
   echo "  --install-checkov       Install checkov (not installed by default)"
   # Cookiecutter option removed
@@ -86,7 +83,6 @@ show_help() {
   echo "  --atmos-version VER     Set Atmos version (default: $ATMOS_VERSION)"
   echo "  --kubectl-version VER   Set kubectl version (default: $KUBECTL_VERSION)"
   echo "  --helm-version VER      Set Helm version (default: $HELM_VERSION)"
-  echo "  --tfsec-version VER     Set TFSec version (default: $TFSEC_VERSION)"
   echo "  --tflint-version VER    Set TFLint version (default: $TFLINT_VERSION)"
   echo "  --checkov-version VER   Set Checkov version (default: $CHECKOV_VERSION)"
   echo "  --copier-version VER    Set Copier version (default: $COPIER_VERSION)"
@@ -99,7 +95,7 @@ show_help() {
   echo -e "${BOLD}Examples:${RESET}"
   echo "  $0 --skip-aws-cli --terraform-version 1.6.0"
   echo "  $0 --system --ci"
-  echo "  $0 --install-checkov --tfsec-version 1.28.13 --checkov-version 3.2.382"
+  echo "  $0 --install-checkov --checkov-version 3.3.21"
   echo
 }
 
@@ -703,55 +699,6 @@ install_helm() {
   fi
 }
 
-# Install tfsec
-install_tfsec() {
-  if [[ "$INSTALL_TFSEC" != "true" ]]; then
-    return
-  fi
-  
-  if command -v tfsec &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
-    local TFSEC_INSTALLED_VERSION=$(tfsec --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
-    if [[ "$TFSEC_INSTALLED_VERSION" == "$TFSEC_VERSION" ]]; then
-      echo -e "${GREEN}tfsec $TFSEC_VERSION is already installed${RESET}"
-      return
-    else
-      echo -e "${YELLOW}Updating tfsec from $TFSEC_INSTALLED_VERSION to $TFSEC_VERSION${RESET}"
-    fi
-  else
-    echo -e "${BLUE}Installing tfsec $TFSEC_VERSION...${RESET}"
-  fi
-  
-  # Install tfsec
-  if [[ "$OS" == "darwin" ]]; then
-    if command -v brew &>/dev/null; then
-      brew install tfsec
-    else
-      # Download specific version if Homebrew is not available
-      install_tfsec_binary
-    fi
-  else
-    # Download and install tfsec
-    install_tfsec_binary
-  fi
-}
-
-# Helper function to install tfsec binary
-install_tfsec_binary() {
-  local TFSEC_URL="https://github.com/aquasecurity/tfsec/releases/download/v${TFSEC_VERSION}/tfsec-${OS}-${ARCH}"
-  local TFSEC_BIN="$INSTALL_TARGET_DIR/tfsec"
-  
-  if curl -sSL "$TFSEC_URL" -o "$TFSEC_BIN"; then
-    if [[ "$SYSTEM_INSTALL" == "true" ]]; then
-      sudo chmod +x "$TFSEC_BIN"
-    else
-      chmod +x "$TFSEC_BIN"
-    fi
-    echo -e "${GREEN}tfsec $TFSEC_VERSION installed: $(tfsec --version)${RESET}"
-  else
-    echo -e "${RED}Failed to install tfsec $TFSEC_VERSION${RESET}"
-  fi
-}
-
 # Install tflint
 install_tflint() {
   if [[ "$INSTALL_TFLINT" != "true" ]]; then
@@ -954,10 +901,6 @@ while [[ $# -gt 0 ]]; do
       INSTALL_YAMLLINT=false
       shift
       ;;
-    --skip-tfsec)
-      INSTALL_TFSEC=false
-      shift
-      ;;
     --skip-tflint)
       INSTALL_TFLINT=false
       shift
@@ -985,10 +928,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --helm-version)
       HELM_VERSION="$2"
-      shift 2
-      ;;
-    --tfsec-version)
-      TFSEC_VERSION="$2"
       shift 2
       ;;
     --tflint-version)
@@ -1053,7 +992,6 @@ install_aws_cli
 install_session_manager_plugin
 install_kubectl
 install_helm
-install_tfsec
 install_tflint
 install_checkov
 install_copier
@@ -1088,10 +1026,6 @@ fi
 
 if [[ "$INSTALL_SESSION_MANAGER" == "true" ]]; then
   echo -e "  • ${GREEN}Session Manager Plugin $(session-manager-plugin --version)${RESET}" 2>/dev/null || echo -e "  • ${RED}Session Manager Plugin not installed${RESET}"
-fi
-
-if [[ "$INSTALL_TFSEC" == "true" ]]; then
-  echo -e "  • ${GREEN}$(tfsec --version)${RESET}" 2>/dev/null || echo -e "  • ${RED}tfsec not installed${RESET}"
 fi
 
 if [[ "$INSTALL_TFLINT" == "true" ]]; then

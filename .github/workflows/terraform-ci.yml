@@ -157,7 +157,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
         run: atmos workflow tflint-init -f lint
-      - name: Lint (fmt, yamllint, tflint, trivy)
+      - name: Lint (fmt, yamllint, tflint, HCL parse guard)
         run: atmos workflow lint -f lint
       - name: Validate config, stacks and root modules
         run: atmos workflow validate-all -f validate-enhanced

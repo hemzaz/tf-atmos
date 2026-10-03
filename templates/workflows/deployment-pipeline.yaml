@@ -18,7 +18,8 @@ workflows:
       tools:
         terraform: "1.16.3"
         wasilibs/go-yamllint: "1.38.0"
-        trivy: "0.74.0"
+        # Same pin (keep the `v`) and flags as workflows/lint.yaml's security-scan; its header says why.
+        trivy: "v0.75.0"
     steps:
       - name: validate-config
         type: atmos
@@ -38,7 +39,7 @@ workflows:
             command: yamllint -d relaxed stacks workflows atmos.yaml
           - name: security-scan
             type: shell
-            command: trivy config --skip-dirs '**/tests' --exit-code 1 --severity HIGH,CRITICAL components/terraform
+            command: trivy config --skip-check-update --skip-dirs '**/tests' --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
       - type: toast
         level: success
         content: Static checks passed

@@ -115,17 +115,22 @@ if [ -z "$SKIP_CHECKOV" ]; then
   echo "=========================================="
   echo ""
 
+  # The CI gate's flags (workflows/lint.yaml security-scan, checkov 3.3.21): only
+  # findings missing from .checkov.baseline fail, and nothing else is skipped
+  # (inline #checkov:skip comments carry the reasoned exceptions).
   if checkov --directory "$COMPONENTS_DIR" \
     --framework terraform \
     --skip-path '/tests/' \
     --compact \
     --quiet \
-    --skip-check CKV_AWS_144,CKV_AWS_145 \
+    --soft-fail-on LOW,MEDIUM \
+    --hard-fail-on HIGH,CRITICAL \
+    --baseline "$PROJECT_ROOT/.checkov.baseline" \
     --output cli; then
     echo -e "${GREEN}✓ Security scan passed${NC}"
   else
-    echo -e "${YELLOW}! Security scan found issues (review above)${NC}"
-    # Don't fail on checkov warnings
+    echo -e "${RED}✗ Security scan found findings not in .checkov.baseline (see above)${NC}"
+    FAILURES=$((FAILURES + 1))
   fi
 
   echo ""
