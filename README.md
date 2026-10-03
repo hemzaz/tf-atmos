@@ -14,7 +14,6 @@ models something, copy its variable names, types and defaults; use typed objects
 ```
 atmos.yaml               Atmos config: version constraint, paths, name_template, Native CI, scaffolds
 components/terraform/    48 root modules (+ _library/ shared modules); each has a README
-modules/terraform/       provider-less shared modules
 stacks/orgs/fnx/         org defaults (_defaults.yaml: tags, Terraform version, S3 backend) and the stacks
 stacks/catalog/          abstract component defaults; templates/ holds opt-in stack templates
 stacks/mixins/           tenant, stage and region mixins

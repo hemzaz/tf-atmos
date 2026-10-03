@@ -16,7 +16,7 @@ locals {
 
 # UNSUPPORTED: this component nests the eks, rds and acm root components (each with its
 # own provider block), a legacy-module pattern. No stack deploys it; planning fails
-# unless acknowledge_unsupported is set, until the shared logic moves to modules/terraform.
+# unless acknowledge_unsupported is set, until the shared logic moves to components/terraform/_library.
 resource "terraform_data" "unsupported" {
   lifecycle {
     precondition {

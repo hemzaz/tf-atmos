@@ -9,7 +9,7 @@ check, and CloudWatch alarms.
 
 Unsupported. No stack deploys it, and a `terraform_data.unsupported` precondition fails every plan
 unless `acknowledge_unsupported = true`. Nesting root components with provider blocks is a legacy
-pattern; the shared logic has to move to `modules/terraform` before this is adopted.
+pattern; the shared logic has to move to `components/terraform/_library` before this is adopted.
 
 ## Notes
 
