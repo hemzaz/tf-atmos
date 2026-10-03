@@ -85,6 +85,8 @@ resource "aws_route53_delegation_set" "dns_account_delegation_sets" {
 
 # Root zone - conditionally create if requested
 resource "aws_route53_zone" "root_zone" {
+  #checkov:skip=CKV2_AWS_38:TODO(owner): DNSSEC is not modelled for any zone (it needs an asymmetric KMS key in us-east-1 and a DS record at the registrar); no stack creates this zone (create_root_zone: false)
+  #checkov:skip=CKV2_AWS_39:No stack creates this zone (create_root_zone: false); the zones a stack does create get query logging through zones.<key>.enable_query_logging
   count = var.create_root_zone ? 1 : 0
 
   name          = var.root_domain

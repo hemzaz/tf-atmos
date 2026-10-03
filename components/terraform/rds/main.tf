@@ -94,6 +94,7 @@ resource "aws_db_subnet_group" "main" {
 }
 
 # Enhanced security group with detailed rules
+#trivy:ignore:AWS-0104 Egress is unrestricted by policy (owner decision): the 443 egress reaches AWS APIs; ingress admits only allowed_security_groups or custom_ingress_rules CIDRs, never a /0
 resource "aws_security_group" "rds" {
   name        = "${var.tags["Environment"]}-${var.identifier}-sg"
   description = "Security group for ${var.identifier} RDS instance"
@@ -165,6 +166,7 @@ resource "aws_security_group" "rds" {
 
 # Security group for RDS Proxy (if enabled)
 resource "aws_security_group" "rds_proxy" {
+  #checkov:skip=CKV2_AWS_5:Attached to the proxy (aws_db_proxy vpc_security_group_ids); checkov's graph does not follow the count index in aws_security_group.rds_proxy[0].id
   count = var.enable_rds_proxy ? 1 : 0
 
   name        = "${var.tags["Environment"]}-${var.identifier}-proxy-sg"
@@ -412,6 +414,7 @@ resource "aws_db_instance" "read_replica" {
 }
 
 resource "aws_db_instance" "main" {
+  #checkov:skip=CKV_AWS_129:Log exports are an input (enabled_cloudwatch_logs_exports, [] by default as in Cloud Posse's terraform-aws-rds); prod and the web-application template set them
   identifier            = "${var.tags["Environment"]}-${var.identifier}"
   engine                = var.engine
   engine_version        = var.engine_version

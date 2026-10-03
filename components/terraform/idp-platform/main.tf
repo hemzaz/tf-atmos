@@ -183,6 +183,7 @@ resource "aws_elasticache_parameter_group" "redis" {
 # logs.<region>.amazonaws.com use it for this account's log groups
 # (kms allow_cloudwatch_logs, on in kms/defaults).
 resource "aws_cloudwatch_log_group" "redis_slow_log" {
+  #checkov:skip=CKV_AWS_338:Retention is an input (log_retention_days) and a per-stack cost decision, as on the repo's other log groups
   name              = "/aws/elasticache/${local.name_prefix}-idp-redis/slow-log"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_arn
@@ -200,6 +201,8 @@ resource "aws_elasticache_subnet_group" "redis" {
 }
 
 resource "aws_elasticache_replication_group" "redis" {
+  #checkov:skip=CKV_AWS_191:TODO(owner): at-rest encryption uses the AWS managed key; a CMK (kms_key_id) forces replacement. Goes away with idp-platform's deletion (owner decision D5)
+  #checkov:skip=CKV_AWS_31:False positive, the check reads only auth_token; transit encryption is on and the token is set write-only through auth_token_wo (as elasticache/main.tf)
   replication_group_id = "${local.name_prefix}-redis"
   description          = "Redis cluster for IDP platform"
 
@@ -259,6 +262,13 @@ resource "aws_elasticache_replication_group" "redis" {
 
 # S3 buckets for various IDP needs
 resource "aws_s3_bucket" "idp_storage" {
+  #checkov:skip=CKV2_AWS_6:TODO(owner): techdocs is deliberately public (aws_s3_bucket_public_access_block.idp_storage); the other four block all public access, which checkov cannot evaluate through for_each. Goes away with idp-platform (D5)
+  #checkov:skip=CKV_AWS_18:TODO(owner): no server access logs; they need an SSE-S3 target bucket (new bucket, cost). Goes away with idp-platform (D5)
+  #checkov:skip=CKV_AWS_144:Cross-region replication is out of scope for this unsupported component, which owner decision D5 deletes
+  #checkov:skip=CKV_AWS_145:The logs bucket uses SSE-S3 because ALB access log delivery does not support SSE-KMS; the other four use KMS
+  #checkov:skip=CKV_AWS_21:TODO(owner): uploads (user content, CORS PUT/DELETE) is not versioned, so an overwrite or delete is unrecoverable; artifacts, backups and techdocs are versioned and logs expire. Interim until D5
+  #checkov:skip=CKV2_AWS_61:Only logs expires (aws_s3_bucket_lifecycle_configuration.idp_logs); the other buckets keep their data until it is deleted
+  #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications from these buckets
   for_each = local.storage_buckets
 
   bucket = "${local.name_prefix}-idp-${each.key}"
@@ -281,7 +291,15 @@ resource "aws_s3_bucket_ownership_controls" "idp_storage" {
 }
 
 # techdocs stays publicly readable, as before
+#trivy:ignore:AWS-0086 TODO(owner): techdocs is deliberately public; the other four buckets block everything. Goes away with idp-platform (D5)
+#trivy:ignore:AWS-0087 TODO(owner): techdocs is deliberately public; the other four buckets block everything. Goes away with idp-platform (D5)
+#trivy:ignore:AWS-0091 TODO(owner): techdocs is deliberately public; the other four buckets block everything. Goes away with idp-platform (D5)
+#trivy:ignore:AWS-0093 TODO(owner): techdocs is deliberately public; the other four buckets block everything. Goes away with idp-platform (D5)
 resource "aws_s3_bucket_public_access_block" "idp_storage" {
+  #checkov:skip=CKV_AWS_53:TODO(owner): techdocs is deliberately public; the other four buckets block everything (checkov cannot evaluate each.key). Goes away with idp-platform (D5)
+  #checkov:skip=CKV_AWS_54:TODO(owner): techdocs is deliberately public; the other four buckets block everything (checkov cannot evaluate each.key). Goes away with idp-platform (D5)
+  #checkov:skip=CKV_AWS_55:TODO(owner): techdocs is deliberately public; the other four buckets block everything (checkov cannot evaluate each.key). Goes away with idp-platform (D5)
+  #checkov:skip=CKV_AWS_56:TODO(owner): techdocs is deliberately public; the other four buckets block everything (checkov cannot evaluate each.key). Goes away with idp-platform (D5)
   for_each = local.storage_buckets
 
   bucket = aws_s3_bucket.idp_storage[each.key].id
@@ -329,6 +347,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "idp_logs" {
     expiration {
       days = 90
     }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -352,12 +374,18 @@ resource "aws_s3_bucket_policy" "idp_logs" {
 }
 
 # Load balancer for IDP services
+#trivy:ignore:AWS-0053 Internet-facing by design: aws_security_group.alb admits 443 only from allowed_cidr_blocks, whose validation rejects a /0
 resource "aws_lb" "idp_platform" {
+  #checkov:skip=CKV_AWS_150:Deletion protection is on in prod (environment == "prod") and off elsewhere so dev and staging can be torn down
+  #checkov:skip=CKV2_AWS_28:TODO(owner): no WAF web ACL on this ALB (a waf instance would add cost). Goes away with idp-platform (D5)
   name               = "${local.name_prefix}-idp-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = data.aws_subnets.public.ids
+
+  # As stacks/catalog/alb/defaults.yaml and alb-controller-ingress-group set it.
+  drop_invalid_header_fields = true
 
   enable_deletion_protection = var.environment == "prod" ? true : false
 
@@ -403,6 +431,8 @@ module "acm_certificate" {
 
 # Route53 hosted zone and records
 resource "aws_route53_zone" "main" {
+  #checkov:skip=CKV2_AWS_38:TODO(owner): no DNSSEC (needs an asymmetric KMS key in us-east-1 and a DS record at the registrar). Goes away with idp-platform (D5)
+  #checkov:skip=CKV2_AWS_39:TODO(owner): no query logging (new us-east-1 log group, cost); the dns component models it. Goes away with idp-platform (D5)
   name          = var.domain_name
   force_destroy = false
 
@@ -450,7 +480,9 @@ resource "aws_cloudwatch_metric_alarm" "idp_platform_health" {
 }
 
 # SNS topic for alerts
+#trivy:ignore:AWS-0095 TODO(owner): unencrypted; a key needs a policy letting cloudwatch.amazonaws.com publish (kms allow_cloudwatch_alarms). Goes away with idp-platform (D5)
 resource "aws_sns_topic" "alerts" {
+  #checkov:skip=CKV_AWS_26:TODO(owner): unencrypted; a key needs a policy letting cloudwatch.amazonaws.com publish (kms allow_cloudwatch_alarms). Goes away with idp-platform (D5)
   name = "${local.name_prefix}-idp-alerts"
 
   tags = merge(local.tags, {
@@ -500,6 +532,8 @@ data "aws_kms_key" "s3" {
 
 # Secrets Manager secrets for sensitive configuration
 resource "aws_secretsmanager_secret" "idp_config" {
+  #checkov:skip=CKV_AWS_149:TODO(owner): encrypted with the AWS managed key; a CMK needs kms:Decrypt for every consumer. Goes away with idp-platform (D5)
+  #checkov:skip=CKV2_AWS_57:Rotated by bumping secrets_version (write-only value, re-sent with the Redis token); no rotation Lambda
   name                    = "${local.name_prefix}/idp-platform/config"
   description             = "Configuration secrets for IDP platform"
   recovery_window_in_days = var.environment == "prod" ? 30 : 0
@@ -544,6 +578,8 @@ resource "aws_secretsmanager_secret_version" "idp_config" {
 # (hashicorp/random) is local and needs no AWS call at plan.
 # Bump secrets_version to rotate: both write-only values are then re-sent.
 resource "aws_secretsmanager_secret" "redis_auth" {
+  #checkov:skip=CKV_AWS_149:TODO(owner): encrypted with the AWS managed key; a CMK needs kms:Decrypt for every consumer. Goes away with idp-platform (D5)
+  #checkov:skip=CKV2_AWS_57:Rotated by bumping secrets_version, which re-sends the token to the cache and this secret in one apply; no rotation Lambda
   name                    = "${local.name_prefix}/idp-platform/redis-auth-token"
   description             = "ElastiCache AUTH token for the IDP platform Redis"
   recovery_window_in_days = var.environment == "prod" ? 30 : 0

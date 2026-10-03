@@ -82,6 +82,7 @@ locals {
 
 # REST API
 resource "aws_api_gateway_rest_api" "rest_api" {
+  #checkov:skip=CKV_AWS_237:create_before_destroy sits on the deployment, as in Cloud Posse's terraform-aws-api-gateway; replacing the REST API replaces its stage and deployment anyway
   count = local.create_rest_api ? 1 : 0
 
   name        = local.name_prefix
@@ -101,6 +102,9 @@ resource "aws_api_gateway_rest_api" "rest_api" {
 # REST API Stage
 resource "aws_api_gateway_stage" "rest_stage" {
   #checkov:skip=CKV_AWS_73:Deliberate, not a false positive. X-Ray bills per recorded trace, so tracing_enabled defaults to false and prod opts in (orgs/fnx/prod/.../services.yaml). Revisit if dev/staging ever need distributed tracing.
+  #checkov:skip=CKV_AWS_120:The cache cluster is billed per hour, so it exists only with enable_caching (per method, cache_method_paths); see aws_api_gateway_method_settings.stage
+  #checkov:skip=CKV2_AWS_51:Callers authenticate through the Cognito or Lambda authorizer (authorization_type); a client certificate authenticates API Gateway to a backend, and no backend here checks one
+  #checkov:skip=CKV2_AWS_77:A WAF with the Log4j rule set is attached by enable_waf (aws_wafv2_web_acl.api_waf: prod's instances, dev/staging apigateway/data) or by the waf component (serverless-api template); dev/staging apigateway/main have none
   count = local.create_rest_api ? 1 : 0
 
   deployment_id = aws_api_gateway_deployment.rest_deployment[0].id
@@ -354,6 +358,7 @@ resource "aws_apigatewayv2_api_mapping" "http_mapping" {
 
 # CloudWatch Log Group for API Gateway
 resource "aws_cloudwatch_log_group" "api_logs" {
+  #checkov:skip=CKV_AWS_338:Retention is an input (log_retention_days) and a per-stack cost decision, as on the repo's other log groups
   count = local.logs_enabled ? 1 : 0
 
   name              = "/aws/apigateway/${local.name_prefix}"
@@ -472,6 +477,7 @@ resource "aws_api_gateway_resource" "resource" {
 
 # API Gateway methods, keyed by "<HTTP_METHOD> <resource_path>"
 resource "aws_api_gateway_method" "method" {
+  #checkov:skip=CKV2_AWS_53:This component models no request models or validators; the integration backends validate their own input
   for_each = local.create_rest_api ? local.api_methods : {}
 
   rest_api_id   = aws_api_gateway_rest_api.rest_api[0].id
@@ -572,6 +578,7 @@ resource "aws_route53_record" "api_domain" {
 
 # WAF for API Gateway protection
 resource "aws_wafv2_web_acl" "api_waf" {
+  #checkov:skip=CKV2_AWS_31:TODO(owner): no WAF logging; it needs an aws-waf-logs-* destination (new log group, cost). The waf component already models one (enable_logging)
   count = var.enable_waf ? 1 : 0
 
   name  = "${local.name_prefix}-waf"

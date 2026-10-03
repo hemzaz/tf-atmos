@@ -110,7 +110,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -eu
-          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.trivyignore\.yaml|\.checkov\.baseline|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
+          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
           emulator_re='^(atmos\.yaml|components/terraform/.*|stacks/.*|workflows/.*|\.github/workflows/(emulator|terraform-ci)\.yml)$'
           workflows_re='^(\.github/workflows/.*\.ya?ml|\.github/atmos-image/.*|scripts/sync-atmos-image\.sh)$'
           if [ -n "${BASE_SHA//0/}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
@@ -249,8 +249,8 @@ jobs:
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     # The gate only: no SARIF upload. It used to upload reports/ to code
-    # scanning, which added nothing: the SARIF comes from the --baseline run, so
-    # it carried 0 results, and its category (terraform-ci.yml:security-scan)
+    # scanning, which added nothing: the SARIF then came from a baselined run,
+    # so it carried 0 results, and its category (terraform-ci.yml:security-scan)
     # never matched master's configuration (security-scan.yml:scan), so every
     # PR check run was NEUTRAL ("1 configuration ... not found"). Code scanning
     # is fed by the nightly security-scan.yml; this job's pass/fail is the gate.
