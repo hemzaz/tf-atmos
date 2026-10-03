@@ -659,4 +659,3 @@ resource "aws_cloudwatch_metric_alarm" "business_metrics" {
   alarm_description   = "Business metric ${each.key}: ${each.value.description}"
   alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
 }
-

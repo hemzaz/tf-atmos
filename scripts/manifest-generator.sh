@@ -7,7 +7,7 @@
 #
 # Usage:
 #   ./scripts/manifest-generator.sh stack fnx-dev-testenv-01      # Generate stack manifest
-#   ./scripts/manifest-generator.sh component vpc/main               # Generate component manifest  
+#   ./scripts/manifest-generator.sh component vpc/main               # Generate component manifest
 #   ./scripts/manifest-generator.sh template new-stack           # Generate new stack template
 #   ./scripts/manifest-generator.sh resource s3-bucket          # Generate resource template
 
@@ -47,16 +47,16 @@ print_usage() {
 generate_stack_manifest() {
     local stack="$1"
     local output_file="${2:-manifests/${stack}-manifest.yaml}"
-    
+
     echo -e "${CYAN}📋 Generating manifest for stack: ${stack}${NC}"
-    
+
     # Create output directory
     mkdir -p "$(dirname "$output_file")"
-    
+
     # Generate manifest using Atmos
     if atmos describe stacks -s "$stack" --format yaml > "$output_file" 2>/dev/null; then
         echo -e "${GREEN}✅ Stack manifest generated: ${output_file}${NC}"
-        
+
         # Add metadata
         cat << EOF >> "$output_file"
 
@@ -65,14 +65,14 @@ generate_stack_manifest() {
 # Stack: $stack
 # Generator: manifest-generator.sh
 EOF
-        
+
         # Show summary
         local components=$(grep -c "components:" "$output_file" || echo "0")
         echo -e "${BLUE}📊 Manifest Summary:${NC}"
         echo -e "  Stack: ${YELLOW}$stack${NC}"
         echo -e "  File: ${YELLOW}$output_file${NC}"
         echo -e "  Size: ${YELLOW}$(wc -l < "$output_file") lines${NC}"
-        
+
     else
         echo -e "${RED}❌ Failed to generate manifest for stack: $stack${NC}"
         return 1
@@ -83,11 +83,11 @@ generate_component_manifest() {
     local component="$1"
     local stack="${2:-fnx-dev-testenv-01}"
     local output_file="${3:-manifests/components/${component}-manifest.yaml}"
-    
+
     echo -e "${CYAN}📦 Generating manifest for component: ${component}${NC}"
-    
+
     mkdir -p "$(dirname "$output_file")"
-    
+
     # Generate component-specific manifest
     cat << EOF > "$output_file"
 # Component Manifest: $component
@@ -100,7 +100,7 @@ source: components/terraform/$component
 
 configuration:
 EOF
-    
+
     # Try to extract configuration from Atmos
     if atmos describe component "$component" -s "$stack" --format yaml >> "$output_file" 2>/dev/null; then
         echo -e "${GREEN}✅ Component manifest generated: ${output_file}${NC}"
@@ -110,7 +110,7 @@ EOF
   # Configuration will be populated from stack context
   # Component: $component
   # Stack: $stack
-  
+
 metadata:
   generator: manifest-generator.sh
   timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
@@ -139,11 +139,11 @@ generate_stack_template() {
 generate_component_template() {
     local component_name="$1"
     local output_dir="components/terraform/${component_name}"
-    
+
     echo -e "${CYAN}🧩 Generating component template: ${component_name}${NC}"
-    
+
     mkdir -p "$output_dir"
-    
+
     # Generate main.tf
     cat << EOF > "$output_dir/main.tf"
 # Terraform Component: $component_name
@@ -151,7 +151,7 @@ generate_component_template() {
 
 locals {
   name_prefix = "\${var.tenant}-\${var.environment}"
-  
+
   tags = merge(var.tags, {
     Component = "$component_name"
     ManagedBy = "atmos"
@@ -165,11 +165,11 @@ resource "null_resource" "${component_name}_placeholder" {
     name_prefix = local.name_prefix
     component   = "$component_name"
   }
-  
+
   provisioner "local-exec" {
     command = "echo 'Component $component_name initialized with name prefix: \${local.name_prefix}'"
   }
-  
+
   tags = local.tags
 }
 EOF
@@ -181,7 +181,7 @@ EOF
 variable "tenant" {
   type        = string
   description = "Tenant name"
-  
+
   validation {
     condition     = can(regex("^[a-z0-9-]+$", var.tenant))
     error_message = "Tenant must contain only lowercase letters, numbers, and hyphens."
@@ -191,7 +191,7 @@ variable "tenant" {
 variable "environment" {
   type        = string
   description = "Environment name"
-  
+
   validation {
     condition     = can(regex("^[a-z0-9-]+$", var.environment))
     error_message = "Environment must contain only lowercase letters, numbers, and hyphens."
@@ -202,7 +202,7 @@ variable "region" {
   type        = string
   description = "AWS region"
   default     = "us-east-1"
-  
+
   validation {
     condition     = can(regex("^[a-z0-9-]+$", var.region))
     error_message = "Region must be a valid AWS region."
@@ -261,7 +261,7 @@ EOF
     cat << EOF > "$output_dir/provider.tf"
 terraform {
   required_version = ">= 1.16.0, < 2.0.0"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -346,11 +346,11 @@ EOF
 generate_resource_template() {
     local resource_type="$1"
     local output_file="${2:-templates/resources/${resource_type}.tf.template}"
-    
+
     echo -e "${CYAN}🔧 Generating resource template: ${resource_type}${NC}"
-    
+
     mkdir -p "$(dirname "$output_file")"
-    
+
     case "$resource_type" in
         "aws_s3_bucket")
             cat << 'EOF' > "$output_file"
@@ -370,7 +370,7 @@ resource "aws_s3_bucket_versioning" "this" {
 
 resource "aws_s3_bucket_encryption" "this" {
   bucket = aws_s3_bucket.this.id
-  
+
   server_side_encryption_configuration {
     rule {
       apply_server_side_encryption_by_default {
@@ -410,7 +410,7 @@ resource "aws_vpc" "this" {
   cidr_block           = var.cidr_block
   enable_dns_hostnames = var.enable_dns_hostnames
   enable_dns_support   = var.enable_dns_support
-  
+
   tags = merge(local.tags, {
     Name = "${local.name_prefix}-vpc"
   })
@@ -419,7 +419,7 @@ resource "aws_vpc" "this" {
 resource "aws_internet_gateway" "this" {
   count  = var.create_internet_gateway ? 1 : 0
   vpc_id = aws_vpc.this.id
-  
+
   tags = merge(local.tags, {
     Name = "${local.name_prefix}-igw"
   })
@@ -473,7 +473,7 @@ EOF
 resource "$resource_type" "this" {
   # Add resource configuration here
   # Refer to Terraform documentation for $resource_type
-  
+
   tags = local.tags
 }
 
@@ -492,7 +492,7 @@ output "${resource_type}_id" {
 EOF
             ;;
     esac
-    
+
     echo -e "${GREEN}✅ Resource template generated: ${output_file}${NC}"
 }
 
@@ -500,45 +500,45 @@ list_templates() {
     echo -e "${CYAN}📋 Available Templates${NC}"
     echo -e "${YELLOW}────────────────────────────────────────────────────────${NC}"
     echo ""
-    
+
     echo -e "${WHITE}Stack Templates:${NC}"
     echo -e "  ${GREEN}minimal-stack${NC}      - Basic VPC + Security Groups"
-    echo -e "  ${GREEN}full-stack${NC}         - Complete production infrastructure" 
+    echo -e "  ${GREEN}full-stack${NC}         - Complete production infrastructure"
     echo -e "  ${GREEN}microservices${NC}      - Container-optimized with EKS + addons"
     echo -e "  ${GREEN}serverless${NC}         - Lambda + API Gateway + DynamoDB"
     echo ""
-    
+
     echo -e "${WHITE}Component Templates:${NC}"
     echo -e "  ${GREEN}web-service${NC}        - ECS Fargate service with ALB"
     echo -e "  ${GREEN}api-service${NC}        - REST API with auto-scaling"
     echo -e "  ${GREEN}worker-service${NC}     - Background processing service"
     echo -e "  ${GREEN}cache-layer${NC}        - Redis/ElastiCache cluster"
     echo ""
-    
+
     echo -e "${WHITE}Workflow Templates:${NC}"
     echo -e "  ${GREEN}deployment-pipeline${NC} - Complete CI/CD pipeline"
     echo -e "  ${GREEN}disaster-recovery${NC}   - Backup and restore workflows"
     echo -e "  ${GREEN}security-scan${NC}       - Security validation workflow"
     echo ""
-    
+
     echo -e "${WHITE}Configuration Templates:${NC}"
     echo -e "  ${GREEN}production${NC}          - Security-hardened, HA configuration"
     echo -e "  ${GREEN}development${NC}         - Cost-optimized, developer-friendly"
     echo -e "  ${GREEN}staging${NC}             - Pre-production testing environment"
     echo ""
-    
+
     echo -e "${WHITE}Resource Templates:${NC}"
     echo -e "  ${BLUE}s3-bucket-secure${NC}        - Production S3 bucket with encryption"
     echo -e "  ${BLUE}lambda-function${NC}         - Lambda with monitoring & permissions"
     echo -e "  ${BLUE}rds-cluster${NC}             - Aurora cluster with HA"
     echo -e "  ${BLUE}eks-cluster${NC}             - EKS cluster with best practices"
     echo ""
-    
+
     echo -e "${WHITE}Quick Examples:${NC}"
     echo -e "  ${GREEN}# Create production environment${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack prod-02 fnx prod prod-02${NC}"
     echo -e ""
-    echo -e "  ${GREEN}# Generate web service component${NC}"  
+    echo -e "  ${GREEN}# Generate web service component${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh template component api-gateway${NC}"
     echo -e ""
     echo -e "  ${GREEN}# Copy an environment-profile mixin, then import it last in the stack${NC}"

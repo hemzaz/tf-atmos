@@ -18,7 +18,7 @@ get_repo_root() {
 load_env_file() {
   local repo_root="${1:-$(get_repo_root)}"
   local env_file="${repo_root}/.atmos.env"
-  
+
   if [[ -f "${env_file}" ]]; then
     echo -e "${BLUE}Loading tool versions from .atmos.env...${RESET}"
     # shellcheck source=../.atmos.env
@@ -41,7 +41,7 @@ load_env_file() {
 # Verify Copier installation with proper version check
 verify_copier_installation() {
   local required_version="${1:-${COPIER_VERSION:-9.18.2}}"
-  
+
   if ! command -v copier &> /dev/null; then
     echo -e "${YELLOW}Copier not found. Installing...${RESET}"
     pip install "copier>=${required_version}"
@@ -49,7 +49,7 @@ verify_copier_installation() {
   else
     local installed_version=$(copier --version | cut -d' ' -f2)
     echo -e "${GREEN}Using installed Copier version: ${installed_version}${RESET}"
-    
+
     # Compare versions correctly using sort -V
     if ! [[ "$(printf '%s\n' "$required_version" "$installed_version" | sort -V | head -n1)" = "$required_version" ]]; then
       echo -e "${YELLOW}WARNING: Recommended minimum Copier version is ${required_version}, but found ${installed_version}${RESET}"
@@ -60,7 +60,7 @@ verify_copier_installation() {
 }
 
 # AWS API retry wrapper with exponential backoff
-# 
+#
 # This function addresses the ISSUES.md item:
 # "No retry mechanism for AWS API calls - Makes operations brittle in environments with API rate limits"
 #
@@ -71,8 +71,8 @@ verify_copier_installation() {
 # - Detailed logging of retry attempts
 #
 # Usage: aws_with_retry [max_attempts] [initial_sleep] [command...]
-# 
-# Example: 
+#
+# Example:
 #   aws_with_retry 5 1 aws s3 cp my-file.txt s3://my-bucket/
 #   aws_with_retry 3 2 aws secretsmanager get-secret-value --secret-id my-secret
 #
@@ -93,38 +93,38 @@ aws_with_retry() {
   local sleep_time=$initial_sleep
   local exit_code=0
   local output=""
-  
+
   # Remove the first two arguments (max_attempts and initial_sleep)
   shift 2
-  
+
   # The remaining arguments form the AWS command to execute
   local cmd=("$@")
-  
+
   # Start retry loop
   while (( attempt <= max_attempts )); do
     # Display attempt information for verbose output
     if [[ $attempt -gt 1 ]]; then
       echo -e "${YELLOW}Retry attempt $attempt of $max_attempts for command: ${cmd[*]}${RESET}" >&2
     fi
-    
+
     # Execute the command and capture output and exit code
     output=$("${cmd[@]}" 2>&1)
     exit_code=$?
-    
+
     # Check if command succeeded
     if [[ $exit_code -eq 0 ]]; then
       # Command succeeded, output the result and return success
       echo "$output"
       return 0
     fi
-    
+
     # If this was the last attempt, return the failure
     if [[ $attempt -eq $max_attempts ]]; then
       echo -e "${RED}Command failed after $max_attempts attempts: ${cmd[*]}${RESET}" >&2
       echo -e "${RED}Last error: $output${RESET}" >&2
       return $exit_code
     fi
-    
+
     # Check for various AWS error types that are retryable
     if echo "$output" | grep -q -e "RequestLimitExceeded" -e "ThrottlingException" -e "Throttling" \
                               -e "RequestThrottled" -e "TooManyRequestsException" \
@@ -136,16 +136,16 @@ aws_with_retry() {
       echo -e "${RED}Non-retryable error: $output${RESET}" >&2
       return $exit_code
     fi
-    
+
     # Calculate sleep time with exponential backoff (2^attempt * initial_sleep) + random jitter
     sleep_time=$(( (2 ** (attempt - 1)) * initial_sleep + (RANDOM % initial_sleep) ))
     echo -e "${YELLOW}Waiting ${sleep_time}s before retrying...${RESET}" >&2
     sleep $sleep_time
-    
+
     # Increment attempt counter
     (( attempt++ ))
   done
-  
+
   # This should never be reached due to the returns in the loop
   echo "$output"
   return $exit_code
@@ -158,7 +158,7 @@ validate_aws_credentials() {
     echo -e "${YELLOW}AWS CLI not installed. Authentication will not be validated.${RESET}"
     return 1
   fi
-  
+
   # Use retry mechanism for credential validation
   if aws_with_retry 3 1 aws sts get-caller-identity >/dev/null 2>&1; then
     echo -e "${GREEN}AWS credentials valid!${RESET}"
@@ -173,7 +173,7 @@ validate_aws_credentials() {
 get_aws_region() {
   local default_region="${1:-us-west-2}"
   local region=""
-  
+
   # Try to get the default region from AWS config
   if [ -n "$AWS_REGION" ]; then
     region="$AWS_REGION"
@@ -183,7 +183,7 @@ get_aws_region() {
     # Use retry mechanism for region retrieval
     region=$(aws_with_retry 3 1 aws configure get region 2>/dev/null)
   fi
-  
+
   # Default if we can't detect it
   if [ -z "$region" ]; then
     region="$default_region"
@@ -191,7 +191,7 @@ get_aws_region() {
   else
     echo -e "${BLUE}Using AWS region: ${region}${RESET}"
   fi
-  
+
   echo "$region"
 }
 
@@ -200,9 +200,9 @@ get_availability_zones() {
   local region="${1:-$(get_aws_region)}"
   local max_zones="${2:-3}"
   local availability_zones=""
-  
+
   echo -e "${BLUE}Determining availability zones for region ${region}...${RESET}"
-  
+
   if command -v aws >/dev/null && validate_aws_credentials >/dev/null 2>&1; then
     # Try to get actual availability zones from AWS if the AWS CLI is available
     # Use retry mechanism for AZ retrieval with 3 attempts and 2 second initial delay
@@ -214,11 +214,11 @@ get_availability_zones() {
       for az in ${AZ_LIST}; do
         AZ_ARRAY+=("\"${az}\"")
       done
-      
+
       # Take first N AZs or fewer if less are available
       local AZ_COUNT=${#AZ_ARRAY[@]}
       AZ_COUNT=$(( AZ_COUNT > max_zones ? max_zones : AZ_COUNT ))
-      
+
       availability_zones="["
       for ((i=0; i<AZ_COUNT; i++)); do
         availability_zones+="${AZ_ARRAY[$i]}"
@@ -227,7 +227,7 @@ get_availability_zones() {
         fi
       done
       availability_zones+="]"
-      
+
       echo -e "${GREEN}Using actual AZs: ${availability_zones}${RESET}"
     else
       # Fallback to pattern if AWS CLI fails
@@ -239,7 +239,7 @@ get_availability_zones() {
     echo -e "${YELLOW}AWS CLI not available or credentials invalid, using fallback pattern${RESET}"
     availability_zones="[\"${region}a\", \"${region}b\", \"${region}c\"]"
   fi
-  
+
   echo "$availability_zones"
 }
 
@@ -265,25 +265,25 @@ validate_cidr() {
 validate_env_name() {
   local env_name="$1"
   local strict="${2:-false}"
-  
+
   # Basic validation - must be valid identifier
   if ! [[ $env_name =~ ^[a-zA-Z0-9][a-zA-Z0-9\-]*$ ]]; then
     echo -e "${RED}Error: Environment name must be a valid identifier starting with a letter or number${RESET}"
     return 1
   fi
-  
+
   # Pattern validation - recommended to follow name-## pattern
   if ! [[ $env_name =~ ^[a-z0-9]+-[0-9]{2}$ ]]; then
     echo -e "${YELLOW}Warning: Environment name should follow pattern: name-## for consistency${RESET}"
-    
+
     # If in strict mode, return error
     if [[ "$strict" == "true" ]]; then
       return 1
     fi
-    
+
     # Check if running in CI/CD environment
     local is_ci=$(is_ci_environment)
-    
+
     # In interactive mode, ask for confirmation
     if [[ -t 0 && "$is_ci" == "false" ]]; then
       echo -n "Continue anyway? (y/n): "
@@ -295,7 +295,7 @@ validate_env_name() {
       echo -e "${YELLOW}Running in non-interactive mode, continuing despite warning...${RESET}"
     fi
   fi
-  
+
   return 0
 }
 
@@ -311,7 +311,7 @@ is_ci_environment() {
 # Validate email format
 validate_email() {
   local email="$1"
-  
+
   if [[ $email =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
     return 0
   else
@@ -324,11 +324,11 @@ validate_email() {
 ensure_directory() {
   local dir="$1"
   local force="${2:-false}"
-  
+
   if [[ -d "$dir" ]]; then
     if [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
       echo -e "${YELLOW}Warning: Directory exists and is not empty: $dir${RESET}"
-      
+
       if [[ "$force" == "true" ]]; then
         echo -e "${YELLOW}Force option specified, removing existing directory${RESET}"
         rm -rf "$dir"
@@ -354,33 +354,33 @@ ensure_directory() {
   else
     mkdir -p "$dir"
   fi
-  
+
   return 0
 }
 
 # Check AWS CLI version and installation
 check_aws_cli() {
   local min_version="${1:-2.0.0}"
-  
+
   if ! command -v aws >/dev/null; then
     echo -e "${YELLOW}AWS CLI not installed${RESET}"
     return 1
   fi
-  
+
   local version=$(aws --version 2>&1 | grep -o "aws-cli/[0-9]*\.[0-9]*\.[0-9]*" | cut -d/ -f2)
-  
+
   if [[ -z "$version" ]]; then
     echo -e "${YELLOW}Could not determine AWS CLI version${RESET}"
     return 1
   fi
-  
+
   echo -e "${GREEN}AWS CLI version ${version} installed${RESET}"
-  
+
   # Compare versions
   if ! [[ "$(printf '%s\n' "$min_version" "$version" | sort -V | head -n1)" = "$min_version" ]]; then
     echo -e "${YELLOW}WARNING: Recommended minimum AWS CLI version is ${min_version}, but found ${version}${RESET}"
   fi
-  
+
   return 0
 }
 
@@ -389,37 +389,37 @@ validate_path() {
   local path="$1"
   local base_dir="${2:-$(get_repo_root)}"
   local allow_outside="${3:-false}"
-  
+
   # Check if path is empty
   if [[ -z "$path" ]]; then
     echo -e "${RED}Error: Path cannot be empty${RESET}"
     return 1
   fi
-  
+
   # Normalize path (resolve .. and .)
   local real_path=$(realpath -m "$path")
   local real_base=$(realpath -m "$base_dir")
-  
+
   # Check if path contains suspicious characters
   if [[ "$path" =~ [[:cntrl:]\&\;\`\$\\\|\{\}\<\>] ]]; then
     echo -e "${RED}Error: Path contains invalid characters: $path${RESET}"
     return 1
   fi
-  
+
   # Check if path exists
   if [[ ! -e "$real_path" ]]; then
     echo -e "${YELLOW}Warning: Path does not exist: $real_path${RESET}"
     # Don't fail if path doesn't exist - this function only validates path format
     # The caller should check existence if needed
   fi
-  
+
   # Check path traversal (if not allowing outside paths)
   if [[ "$allow_outside" != "true" && "$real_path" != "$real_base"* ]]; then
     echo -e "${RED}Error: Path is outside of base directory: $real_path${RESET}"
     echo -e "${RED}Base directory: $real_base${RESET}"
     return 1
   fi
-  
+
   return 0
 }
 
@@ -427,7 +427,7 @@ validate_path() {
 detect_os_and_arch() {
   local os=""
   local arch=""
-  
+
   # Detect OS
   case "$OSTYPE" in
     linux*)
@@ -441,7 +441,7 @@ detect_os_and_arch() {
       return 1
       ;;
   esac
-  
+
   # Detect architecture
   local uname_arch=$(uname -m)
   case "$uname_arch" in
@@ -456,7 +456,7 @@ detect_os_and_arch() {
       return 1
       ;;
   esac
-  
+
   echo -e "${GREEN}Detected OS: $os, Architecture: $arch${RESET}"
   echo "$os:$arch"
 }

@@ -14,30 +14,30 @@ RESET="\033[0m"
 # Function to check requirements
 function check_requirements {
   local MISSING_REQS=false
-  
+
   echo -e "${BLUE}Checking requirements...${RESET}"
-  
+
   if ! command -v ssh-keygen &> /dev/null; then
     echo -e "${RED}✘ ssh-keygen is not installed. Please install OpenSSH.${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ ssh-keygen is installed${RESET}"
   fi
-  
+
   if ! command -v aws &> /dev/null; then
     echo -e "${RED}✘ AWS CLI is not installed. Please install it: https://aws.amazon.com/cli/${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ AWS CLI is installed${RESET}"
   fi
-  
+
   if ! command -v jq &> /dev/null; then
     echo -e "${RED}✘ jq is not installed. Please install it: brew install jq / apt install jq${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ jq is installed${RESET}"
   fi
-  
+
   if [[ "$MISSING_REQS" == "true" ]]; then
     echo -e "${RED}Please install missing requirements and try again.${RESET}"
     exit 1
@@ -47,7 +47,7 @@ function check_requirements {
 # Function to validate AWS credentials
 function validate_aws_credentials {
   echo -e "${BLUE}Validating AWS credentials...${RESET}"
-  
+
   if ! aws sts get-caller-identity --profile "$PROFILE" &> /dev/null; then
     echo -e "${RED}✘ AWS credentials are not valid or not configured for profile ${PROFILE}.${RESET}"
     echo -e "${YELLOW}Please run 'aws configure --profile ${PROFILE}' or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables.${RESET}"

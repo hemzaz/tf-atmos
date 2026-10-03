@@ -62,14 +62,14 @@ function show_usage {
 # Function to check SSH-specific requirements
 function check_ssh_requirements {
   local MISSING_REQS=false
-  
+
   if ! command -v ssh &> /dev/null; then
     echo -e "${RED}✘ ssh is not installed. Please install OpenSSH.${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ ssh is installed${RESET}"
   fi
-  
+
   if [[ "$USE_SSM" == "true" ]]; then
     if ! command -v session-manager-plugin &> /dev/null; then
       echo -e "${YELLOW}⚠ AWS Session Manager Plugin is not installed.${RESET}"
@@ -79,7 +79,7 @@ function check_ssh_requirements {
       echo -e "${GREEN}✓ AWS Session Manager Plugin is installed${RESET}"
     fi
   fi
-  
+
   if [[ "$MISSING_REQS" == "true" ]]; then
     echo -e "${RED}Please install missing requirements and try again.${RESET}"
     exit 1
@@ -93,13 +93,13 @@ function validate_inputs {
     echo -e "${RED}Error: Secret name is required. Use -s or --secret.${RESET}"
     show_usage
   fi
-  
+
   # Either instance ID, environment, or host is required
   if [[ -z "$INSTANCE_ID" && -z "$ENVIRONMENT" && -z "$HOST" ]]; then
     echo -e "${RED}Error: Either instance ID, environment, or host is required.${RESET}"
     show_usage
   fi
-  
+
   # Validate environment format if provided
   if [[ -n "$ENVIRONMENT" ]]; then
     # Check for valid environment name format (e.g., prod, staging, dev, etc.)
@@ -107,26 +107,26 @@ function validate_inputs {
       echo -e "${RED}Error: Environment name can only contain alphanumeric characters, hyphens, and underscores.${RESET}"
       exit 1
     fi
-    
+
     # Enforce minimum length
     if [[ ${#ENVIRONMENT} -lt 2 ]]; then
       echo -e "${RED}Error: Environment name must be at least 2 characters long.${RESET}"
       exit 1
     fi
   fi
-  
+
   # If using host, it's required
   if [[ -z "$INSTANCE_ID" && -z "$HOST" ]]; then
     echo -e "${RED}Error: When using environment-wide keys, a host is required for validation.${RESET}"
     show_usage
   fi
-  
+
   # Validate key type
   if [[ "$KEY_TYPE" != "rsa" && "$KEY_TYPE" != "ed25519" ]]; then
     echo -e "${RED}Error: Key type must be either 'rsa' or 'ed25519'.${RESET}"
     exit 1
   fi
-  
+
   # Validate key bits (only applicable for RSA)
   if [[ "$KEY_TYPE" == "rsa" ]]; then
     if [[ "$KEY_BITS" -lt 2048 || "$KEY_BITS" -gt 8192 ]]; then
@@ -134,7 +134,7 @@ function validate_inputs {
       exit 1
     fi
   fi
-  
+
   # If region not provided, use AWS CLI default
   if [[ -z "$REGION" ]]; then
     REGION=$(aws configure get region --profile "$PROFILE")
@@ -143,12 +143,12 @@ function validate_inputs {
       exit 1
     fi
   fi
-  
+
   # Extract key name from secret path if not specified
   if [[ -z "$KEY_NAME" ]]; then
     KEY_NAME=$(basename "$SECRET_NAME")
   fi
-  
+
   echo -e "${BLUE}Using parameters:${RESET}"
   echo -e "  Secret:          ${SECRET_NAME}"
   if [[ -n "$INSTANCE_ID" ]]; then
@@ -177,13 +177,13 @@ function validate_inputs {
 # Function to get the existing key
 function get_existing_key {
   echo -e "${BLUE}Retrieving existing key from Secrets Manager...${RESET}"
-  
+
   # Create backup directory
   mkdir -p "$BACKUP_DIR"
-  
+
   # Set backup key file path
   local BACKUP_KEY_FILE="${BACKUP_DIR}/${KEY_NAME}-backup"
-  
+
   # Get the secret
   if ! SECRET_VALUE=$(aws secretsmanager get-secret-value \
     --secret-id "$SECRET_NAME" \
@@ -194,18 +194,18 @@ function get_existing_key {
     echo -e "${RED}Error: Failed to retrieve secret. Check secret name and permissions.${RESET}"
     exit 1
   fi
-  
+
   # Extract private key and public key
   if ! PRIVATE_KEY=$(echo "$SECRET_VALUE" | jq -r '.private_key // empty'); then
     echo -e "${RED}Error: Failed to parse secret JSON. Invalid format.${RESET}"
     exit 1
   fi
-  
+
   # If empty or not found, try alternate formats
   if [[ -z "$PRIVATE_KEY" ]]; then
     # Try alternative field names
     PRIVATE_KEY=$(echo "$SECRET_VALUE" | jq -r '.private_key_pem // .["private_key"] // empty')
-    
+
     # If still empty, check if the entire secret is the key
     if [[ -z "$PRIVATE_KEY" ]]; then
       # Check if the content looks like a private key
@@ -217,14 +217,14 @@ function get_existing_key {
       fi
     fi
   fi
-  
+
   # Get public key if available
   PUBLIC_KEY=$(echo "$SECRET_VALUE" | jq -r '.public_key // .public_key_openssh // empty')
-  
+
   # Save private key to backup file
   echo "$PRIVATE_KEY" > "$BACKUP_KEY_FILE"
   chmod 600 "$BACKUP_KEY_FILE"
-  
+
   # If we have a public key, save it too
   if [[ -n "$PUBLIC_KEY" ]]; then
     echo "$PUBLIC_KEY" > "${BACKUP_KEY_FILE}.pub"
@@ -235,11 +235,11 @@ function get_existing_key {
     ssh-keygen -y -f "$BACKUP_KEY_FILE" > "${BACKUP_KEY_FILE}.pub"
     chmod 644 "${BACKUP_KEY_FILE}.pub"
   fi
-  
+
   echo -e "${GREEN}✓ Existing key retrieved and backed up${RESET}"
   echo -e "  Backup private key: ${BACKUP_KEY_FILE}"
   echo -e "  Backup public key:  ${BACKUP_KEY_FILE}.pub"
-  
+
   # Check if we have instance ID or need to extract it
   if [[ -z "$INSTANCE_ID" && -z "$HOST" ]]; then
     # Try to get instance ID from secret
@@ -259,7 +259,7 @@ function get_existing_key {
         fi
       fi
     fi
-    
+
     # If still no instance ID and no host, we need one to proceed
     if [[ -z "$INSTANCE_ID" && -z "$HOST" ]]; then
       echo -e "${RED}Error: Could not determine instance ID from secret.${RESET}"
@@ -275,12 +275,12 @@ function verify_connectivity {
     echo -e "${YELLOW}Skipping connectivity verification as requested.${RESET}"
     return
   fi
-  
+
   echo -e "${BLUE}Verifying connectivity with existing key...${RESET}"
-  
+
   local BACKUP_KEY_FILE="${BACKUP_DIR}/${KEY_NAME}-backup"
   local SSH_OPTIONS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
-  
+
   # Determine the host to connect to
   if [[ -z "$HOST" && -n "$INSTANCE_ID" ]]; then
     if [[ "$USE_SSM" == "true" ]]; then
@@ -311,7 +311,7 @@ function verify_connectivity {
         --region "$REGION" \
         --profile "$PROFILE" \
         --output text)
-      
+
       if [[ -z "$HOST" || "$HOST" == "None" ]]; then
         # Try private IP if public not available
         HOST=$(aws ec2 describe-instances \
@@ -320,7 +320,7 @@ function verify_connectivity {
           --region "$REGION" \
           --profile "$PROFILE" \
           --output text)
-        
+
         if [[ -z "$HOST" || "$HOST" == "None" ]]; then
           echo -e "${RED}✘ Could not determine instance IP address.${RESET}"
           if [[ "$FORCE" != "true" ]]; then
@@ -332,11 +332,11 @@ function verify_connectivity {
           fi
         fi
       fi
-      
+
       echo -e "${GREEN}✓ Using host: ${HOST}${RESET}"
     fi
   fi
-  
+
   # If we have a host, try SSH connection
   if [[ -n "$HOST" ]]; then
     echo -e "${BLUE}Verifying SSH connectivity to ${HOST}...${RESET}"
@@ -357,37 +357,37 @@ function verify_connectivity {
 # Function to generate new key
 function generate_new_key {
   echo -e "${BLUE}Generating new SSH key...${RESET}"
-  
+
   # Create output directory
   mkdir -p "$OUTPUT_DIR"
-  
+
   # Set file paths
   local KEY_FILE="${OUTPUT_DIR}/${KEY_NAME}"
   local KEY_FILE_PUB="${KEY_FILE}.pub"
-  
+
   # Check if files already exist
   if [[ -f "$KEY_FILE" || -f "$KEY_FILE_PUB" ]]; then
     echo -e "${YELLOW}Key files already exist. Overwriting.${RESET}"
     rm -f "$KEY_FILE" "$KEY_FILE_PUB"
   fi
-  
+
   # Generate key
   if [[ "$KEY_TYPE" == "rsa" ]]; then
     ssh-keygen -t rsa -b "$KEY_BITS" -f "$KEY_FILE" -N "" -C "Rotated key for ${SECRET_NAME} $(date +%Y-%m-%d)"
   else
     ssh-keygen -t ed25519 -f "$KEY_FILE" -N "" -C "Rotated key for ${SECRET_NAME} $(date +%Y-%m-%d)"
   fi
-  
+
   # Verify key files were created
   if [[ ! -f "$KEY_FILE" || ! -f "$KEY_FILE_PUB" ]]; then
     echo -e "${RED}Error: Failed to generate SSH key files.${RESET}"
     exit 1
   fi
-  
+
   # Set secure permissions
   chmod 600 "$KEY_FILE"
   chmod 644 "$KEY_FILE_PUB"
-  
+
   echo -e "${GREEN}✓ New SSH key generated successfully${RESET}"
   echo -e "  Private key: ${KEY_FILE}"
   echo -e "  Public key:  ${KEY_FILE_PUB}"
@@ -399,18 +399,18 @@ function update_authorized_keys {
     echo -e "${YELLOW}No host or instance ID available for authorized_keys update.${RESET}"
     return
   fi
-  
+
   echo -e "${BLUE}Updating authorized_keys on target...${RESET}"
-  
+
   local BACKUP_KEY_FILE="${BACKUP_DIR}/${KEY_NAME}-backup"
   local NEW_KEY_FILE="${OUTPUT_DIR}/${KEY_NAME}"
   local NEW_KEY_PUB=$(cat "${NEW_KEY_FILE}.pub")
   local SSH_OPTIONS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
-  
+
   # Use SSM if available and requested
   if [[ -n "$INSTANCE_ID" && "$USE_SSM" == "true" ]]; then
     echo -e "${BLUE}Using SSM Session Manager to update authorized_keys...${RESET}"
-    
+
     # Create a temporary script to run on the instance that tests the key before fully deploying
     local TEMP_SCRIPT=$(mktemp)
     cat > "$TEMP_SCRIPT" << EOF
@@ -442,14 +442,14 @@ touch /tmp/ssh_key_test_in_progress
 
 echo "Temporary authorized_keys file created for validation"
 EOF
-    
+
     # Execute the setup script via SSM using a more secure approach
-    # First, create the parameters JSON file with proper escaping 
+    # First, create the parameters JSON file with proper escaping
     PARAMS_FILE=$(mktemp)
-    
+
     # Ensure cleanup of temp file
     trap 'rm -f "$PARAMS_FILE"' EXIT
-    
+
     # Content is properly escaped using a heredoc to prevent injection
     # Use jq to create a valid JSON structure rather than string interpolation
     cat <<EOF > "$PARAMS_FILE"
@@ -464,7 +464,7 @@ EOF
   ]
 }
 EOF
-    
+
     # Execute the command with the file parameter rather than inline string
     if ! aws ssm send-command \
       --instance-ids "$INSTANCE_ID" \
@@ -482,7 +482,7 @@ EOF
       fi
     else
       echo -e "${GREEN}✓ Key validation setup completed${RESET}"
-      
+
       # Create the commit script that will be executed after validation
       local COMMIT_SCRIPT=$(mktemp)
       cat > "$COMMIT_SCRIPT" << EOF
@@ -509,21 +509,21 @@ rm -f /tmp/validate_key.sh
 rm -f /tmp/ssh_key_test_in_progress
 rm -f /tmp/ssh_key_validation_success
 EOF
-      
+
       # Now we need to try to connect with the new key to validate it works
       echo -e "${BLUE}Validating new key before committing...${RESET}"
       # Wait a moment for SSM to complete setup
       sleep 2
-      
+
       # Check if we have a host to connect to for validation
       if [[ -n "$HOST" ]]; then
         # Try to connect with the new key to execute the validation script
         if ssh $SSH_OPTIONS -i "$NEW_KEY_FILE" "${USER}@${HOST}" "DISPLAY=:0 TERM=xterm-256color SSH_AUTH_SOCK= ~/.ssh/authorized_keys.new bash /tmp/validate_key.sh" | grep -q "KEY_VALIDATION_SUCCESS"; then
           echo -e "${GREEN}✓ New key validation successful${RESET}"
-          
+
           # Mark validation as successful
           ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "touch /tmp/ssh_key_validation_success"
-          
+
           # Execute the commit script
           if ! aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
@@ -549,7 +549,7 @@ rm /tmp/commit_keys.sh]" \
             exit 1
           else
             echo -e "${YELLOW}Forcing key update despite validation failure...${RESET}"
-            
+
             # Force direct update of authorized_keys
             if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "echo '$NEW_KEY_PUB' >> ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"; then
               echo -e "${RED}✘ Failed to force update authorized_keys.${RESET}"
@@ -561,7 +561,7 @@ rm /tmp/commit_keys.sh]" \
         fi
       else
         echo -e "${YELLOW}No host available for key validation. Proceeding with direct update...${RESET}"
-        
+
         # Execute direct update via SSM
         if ! aws ssm send-command \
           --instance-ids "$INSTANCE_ID" \
@@ -597,13 +597,13 @@ rm /tmp/direct_update.sh]" \
         fi
       fi
     fi
-    
+
     # Clean up temp files
     rm -f "$TEMP_SCRIPT" "$COMMIT_SCRIPT" 2>/dev/null || true
   elif [[ -n "$HOST" ]]; then
     # Use SSH with existing key to update authorized_keys
     echo -e "${BLUE}Using SSH to update authorized_keys on ${HOST}...${RESET}"
-    
+
     # First create a temporary authorized_keys file with the new key for validation
     if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cp ~/.ssh/authorized_keys ~/.ssh/authorized_keys.new 2>/dev/null || touch ~/.ssh/authorized_keys.new && echo '$NEW_KEY_PUB' >> ~/.ssh/authorized_keys.new && chmod 600 ~/.ssh/authorized_keys.new"; then
       echo -e "${RED}✘ Failed to create temporary authorized_keys file.${RESET}"
@@ -621,12 +621,12 @@ rm /tmp/direct_update.sh]" \
         fi
       fi
     fi
-    
+
     # Now try to connect with the new key to validate it works
     echo -e "${BLUE}Validating new key before committing...${RESET}"
     if ssh $SSH_OPTIONS -i "$NEW_KEY_FILE" -o "AuthorizedKeysFile=.ssh/authorized_keys.new" "${USER}@${HOST}" "echo 'KEY_VALIDATION_SUCCESS'" | grep -q "KEY_VALIDATION_SUCCESS"; then
       echo -e "${GREEN}✓ New key validation successful${RESET}"
-      
+
       # Commit the new authorized_keys file
       if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mv ~/.ssh/authorized_keys.new ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"; then
         echo -e "${RED}✘ Failed to commit new authorized_keys file.${RESET}"
@@ -641,7 +641,7 @@ rm /tmp/direct_update.sh]" \
         exit 1
       else
         echo -e "${YELLOW}Forcing key update despite validation failure...${RESET}"
-        
+
         # Force direct update of authorized_keys
         if ! ssh $SSH_OPTIONS -i "$BACKUP_KEY_FILE" "${USER}@${HOST}" "mv ~/.ssh/authorized_keys.new ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"; then
           echo -e "${RED}✘ Failed to force update authorized_keys.${RESET}"
@@ -665,12 +665,12 @@ function verify_new_key {
     echo -e "${YELLOW}Skipping new key connectivity verification.${RESET}"
     return
   fi
-  
+
   echo -e "${BLUE}Verifying connectivity with new key...${RESET}"
-  
+
   local NEW_KEY_FILE="${OUTPUT_DIR}/${KEY_NAME}"
   local SSH_OPTIONS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
-  
+
   # If we have a host, try direct SSH connection
   if [[ -n "$HOST" ]]; then
     echo -e "${BLUE}Verifying SSH connectivity to ${HOST} with new key...${RESET}"
@@ -711,13 +711,13 @@ function verify_new_key {
 # Function to update the secret
 function update_secret {
   echo -e "${BLUE}Updating AWS Secrets Manager secret...${RESET}"
-  
+
   local NEW_KEY_FILE="${OUTPUT_DIR}/${KEY_NAME}"
-  
+
   # Read key files
   local PRIVATE_KEY=$(cat "$NEW_KEY_FILE")
   local PUBLIC_KEY=$(cat "${NEW_KEY_FILE}.pub")
-  
+
   # Get existing secret to preserve metadata
   if ! SECRET_VALUE=$(aws secretsmanager get-secret-value \
     --secret-id "$SECRET_NAME" \
@@ -728,7 +728,7 @@ function update_secret {
     echo -e "${RED}Error: Failed to retrieve existing secret.${RESET}"
     exit 1
   fi
-  
+
   # Parse existing secret
   if ! echo "$SECRET_VALUE" | jq -e . >/dev/null 2>&1; then
     # Not valid JSON, create new structure
@@ -783,7 +783,7 @@ function update_secret {
         "previous_rotation": (.updated_at // "unknown")
       }')
   fi
-  
+
   # Update the secret
   if ! aws secretsmanager update-secret \
     --secret-id "$SECRET_NAME" \
@@ -795,7 +795,7 @@ function update_secret {
     echo -e "${RED}Please manually update the secret or restore the backup.${RESET}"
     exit 1
   fi
-  
+
   echo -e "${GREEN}✓ Secret updated successfully${RESET}"
 }
 
@@ -804,9 +804,9 @@ function update_ec2_keypair {
   if [[ -z "$INSTANCE_ID" && -z "$ENVIRONMENT" ]]; then
     return
   fi
-  
+
   echo -e "${BLUE}Checking if key needs to be imported to EC2...${RESET}"
-  
+
   # Get existing secret to check metadata
   if ! SECRET_VALUE=$(aws secretsmanager get-secret-value \
     --secret-id "$SECRET_NAME" \
@@ -817,17 +817,17 @@ function update_ec2_keypair {
     echo -e "${RED}Error: Failed to retrieve updated secret.${RESET}"
     return
   fi
-  
+
   # Extract EC2 key name if available
   local EC2_KEY_NAME=$(echo "$SECRET_VALUE" | jq -r '.key_name // empty')
-  
+
   if [[ -n "$EC2_KEY_NAME" ]]; then
     echo -e "${BLUE}Found EC2 key name: ${EC2_KEY_NAME}${RESET}"
-    
+
     # Check if key exists in EC2
     if aws ec2 describe-key-pairs --key-names "$EC2_KEY_NAME" --region "$REGION" --profile "$PROFILE" &>/dev/null; then
       echo -e "${BLUE}Existing EC2 key pair found. Deleting and recreating...${RESET}"
-      
+
       # Delete the existing key
       if ! aws ec2 delete-key-pair --key-name "$EC2_KEY_NAME" --region "$REGION" --profile "$PROFILE"; then
         echo -e "${RED}Error: Failed to delete existing EC2 key pair.${RESET}"
@@ -837,7 +837,7 @@ function update_ec2_keypair {
     else
       echo -e "${BLUE}No existing EC2 key pair found. Will import fresh.${RESET}"
     fi
-    
+
     # Import the new key
     local NEW_KEY_FILE="${OUTPUT_DIR}/${KEY_NAME}"
     if ! aws ec2 import-key-pair \
@@ -849,7 +849,7 @@ function update_ec2_keypair {
       echo -e "${RED}You may need to manually import the new public key to EC2.${RESET}"
       return
     fi
-    
+
     echo -e "${GREEN}✓ EC2 key pair updated successfully${RESET}"
   else
     echo -e "${YELLOW}No EC2 key name found in secret. Skipping EC2 key pair update.${RESET}"
@@ -859,10 +859,10 @@ function update_ec2_keypair {
 # Function to perform cleanup
 function cleanup {
   echo -e "${BLUE}Performing cleanup...${RESET}"
-  
+
   # Keep the backup and generated keys by default
   # But provide instructions for secure cleanup
-  
+
   echo -e "${YELLOW}Key rotation complete. For security:${RESET}"
   echo -e "${YELLOW}1. Verify the new key works with your instances${RESET}"
   echo -e "${YELLOW}2. Run these commands to securely delete sensitive files:${RESET}"
