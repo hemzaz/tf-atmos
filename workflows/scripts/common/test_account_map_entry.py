@@ -109,6 +109,18 @@ class AccountMapEntryTest(unittest.TestCase):
         self.assertNotIn("\r\r", text)
         self.assertEqual(text.count("\n"), text.count("\r\n"))
 
+    def test_keeps_crlf_when_last_entry_ends_the_file(self):
+        text = 'settings:\r\n  account_map:\r\n    full_account_map:\r\n      root: "123456789012"'
+        self.write(text, newline="")
+        entry.run("add", self.path, "qa", "210987654321")
+        self.assertEqual(self.read(), text + '\r\n      qa: "210987654321"\r\n')
+
+    def test_header_with_trailing_comment(self):
+        self.write(ORG.replace("    full_account_map:\n", "    full_account_map:   # ids\n"))
+        self.assertIn("(123456789012)", entry.run("check", self.path, "dev"))
+        entry.run("add", self.path, "qa", "210987654321")
+        self.assertIn('      dev: "123456789012"\n      qa: "210987654321"\n', self.read())
+
     def test_rejects_unquoted_numeric_value(self):
         self.write(ORG.replace('root: "123456789012"', "root: 012345678901"))
         with self.assertRaisesRegex(entry.MapError, "unquoted value 012345678901; quote it"):
