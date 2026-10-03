@@ -48,9 +48,8 @@
 #     succeed; only idempotency is affected, and only here.
 import:
   - catalog/_base/defaults
-  - mixins/tenant/fnx
   - mixins/region/us-east-1
-  - orgs/fnx/local/_defaults
+  - orgs/fnx/local/_defaults  # also the tenant mixin
   - catalog/emulator/aws
   - catalog/vpc/defaults
   - catalog/kms/defaults
@@ -69,11 +68,7 @@ terraform:
 
 settings:
   environment:
-    description: "Local Floci sandbox"
-    namespace: sandbox
     account: local
-    aws_account_id: "000000000000"
-    vpc_cidr: "10.90.0.0/16"
     enable_vpc_flow_logs: false
   context:
     tenant: fnx

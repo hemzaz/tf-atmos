@@ -9,12 +9,10 @@ import:
   # Import base configuration first
   - catalog/_base/defaults
 
-  # Import mixins (order matters for variable precedence)
-  - mixins/tenant/fnx
-  - mixins/stage/staging
+  # Region mixin (the tenant and stage mixins come with the stage defaults)
   - mixins/region/us-east-1
 
-  # Import org defaults
+  # Import stage defaults (org defaults, tenant and stage mixins)
   - orgs/fnx/staging/_defaults
 
   # Import component-specific configurations
@@ -28,16 +26,9 @@ vars:
   # Core variables for stack naming
   region: us-east-1
 
-  # AWS Account ID
-  # Plain value: Go templates (e.g. IAM ARNs) are rendered before YAML functions,
-  # so an !env value could not be interpolated into them.
 settings:
   environment:
     account: staging
-    aws_account_id: "123456789012"
-    vpc_cidr: "10.10.0.0/16"
-    description: "Staging-01 Environment - Production Validation"
-    namespace: staging-01
   context:
     tenant: fnx
     environment: staging-01

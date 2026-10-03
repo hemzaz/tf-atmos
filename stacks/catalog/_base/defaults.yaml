@@ -10,8 +10,3 @@ vars:
   tags:
     Provisioner: "Atmos"
     Project: "tf-atmos"
-settings:
-  environment:
-    default_tags_enabled: true
-    encryption_enabled: true
-    monitoring_enabled: true
