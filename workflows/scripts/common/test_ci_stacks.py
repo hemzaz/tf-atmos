@@ -1,7 +1,11 @@
 """Tests for ci-stacks.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import importlib.util
+import io
 import pathlib
+import sys
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location("ci_stacks", pathlib.Path(__file__).with_name("ci-stacks.py"))
 ci_stacks = importlib.util.module_from_spec(_spec)
@@ -112,6 +116,40 @@ class NoSingleStageTest(unittest.TestCase):
                 with self.subTest(bad=bad, select=select.__name__), \
                         self.assertRaisesRegex(ValueError, "'fnx-odd-odd-01' has no single settings.context.stage"):
                     select(stacks)
+
+
+class MainStreamsTest(unittest.TestCase):
+    """stdout is the stack list only; errors reach stderr, which check_output passes through."""
+
+    def run_main(self, stacks, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(ci_stacks, "describe_stacks", lambda: stacks), \
+                mock.patch.object(sys, "argv", ["ci-stacks.py", *argv]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            return ci_stacks.main(), out.getvalue(), err.getvalue()
+
+    def test_list_goes_to_stdout(self):
+        self.assertEqual(
+            self.run_main(TODAY), (0, "fnx-dev-testenv-01\nfnx-staging-staging-01\nfnx-prod-production\n", "")
+        )
+
+    def test_refusals_go_to_stderr_only(self):
+        cases = (
+            (dict(TODAY, **{"fnx-qa-qa-01": stack("qa")}), (), "has stage 'qa'"),
+            (dict(TODAY, **{"fnx-odd-odd-01": {"components": {"terraform": {}}}}), ("--plan-sweep",),
+             "no single settings.context.stage"),
+            (TODAY, ("--check", "fnx-typo"), "Unknown stack 'fnx-typo'"),
+            (TODAY, ("--check", "fnx-local-sandbox"), "actions_enabled: false"),
+        )
+        for stacks, argv, fragment in cases:
+            with self.subTest(argv=argv, fragment=fragment):
+                rc, out, err = self.run_main(stacks, *argv)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertTrue(err.startswith("::error::"), err)
+                self.assertIn(fragment, err)
+
+    def test_check_echoes_an_accepted_stack_on_stdout(self):
+        self.assertEqual(self.run_main(TODAY, "--check", "fnx-prod-production"), (0, "fnx-prod-production\n", ""))
 
 
 if __name__ == "__main__":

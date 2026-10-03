@@ -18,6 +18,9 @@ stacks the same way):
   --plan-sweep     scripts/plan-sweep.sh's default: every stack except the
                    stages in PLAN_SWEEP_EXCLUDED_STAGES.
 
+stdout carries only stack names; every ::error:: goes to stderr, so a caller
+that captures stdout (subprocess.check_output) still shows the reason.
+
 Order: settings.context.stage by STAGE_ORDER (dev, staging, prod), other
 stages (plan-sweep's fixtures) after them, ties by stack name. A selected stack
 without exactly one stage is an error in both list modes.
@@ -119,14 +122,14 @@ def main() -> int:
     if args.check is not None:
         error = check(stacks, args.check)
         if error:
-            print(f"::error::{error}")
+            print(f"::error::{error}", file=sys.stderr)
             return 1
         print(args.check)
         return 0
     try:
         names = plan_sweep_stacks(stacks) if args.plan_sweep else ci_stacks(stacks)
     except ValueError as error:
-        print(f"::error::{error}")
+        print(f"::error::{error}", file=sys.stderr)
         return 1
     if not names:
         print("::error::no stacks selected", file=sys.stderr)
