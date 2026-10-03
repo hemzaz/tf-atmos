@@ -212,6 +212,21 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
+      # First-deploy preflight, WARN-ONLY here: the repo holds placeholders
+      # (account and organization IDs, example domains and alert addresses,
+      # empty EKS admin roles...) until the first deploy, so lint prints each
+      # one and never fails on them (--warn exits 0). bootstrap.yaml runs the
+      # same check fatally before anything touches AWS.
+      # docs/OPERATIONS.md#first-deploy-inputs.
+      - name: first-deploy-inputs
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_first_deploy_inputs.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-first-deploy-inputs.py --warn < "$stacks_json"
       - type: toast
         level: success
         content: Lint checks passed
