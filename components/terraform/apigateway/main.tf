@@ -32,7 +32,7 @@ locals {
   # Domain configuration
   domain_enabled = var.domain_name != null && var.certificate_arn != null
 
-  # Logging configuration 
+  # Logging configuration
   logs_enabled = var.enable_logging
 
   # CORS applies to HTTP APIs (REST APIs answer OPTIONS through their methods).

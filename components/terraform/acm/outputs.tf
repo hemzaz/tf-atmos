@@ -49,20 +49,20 @@ output "export_instructions" {
   description = "Instructions for exporting certificates from ACM"
   value       = <<-EOT
     CERTIFICATE EXPORT INSTRUCTIONS:
-    
+
     AWS ACM does not allow certificate export through the API. To export your certificates:
-    
+
     1. Use the provided script in the scripts/certificates/ directory:
        ./scripts/certificates/export-cert.sh -a <CERTIFICATE_ARN> -r <REGION> -u
-    
+
     2. This will export the certificate files locally and optionally upload them
        to AWS Secrets Manager with the -u flag.
-    
+
     3. To use certificates with External Secrets in Kubernetes, set:
        use_external_secrets = true
        secrets_manager_secret_path = "certificates/your-domain-cert"
-    
-    4. Do NOT attempt to use certificate_keys or certificate_crts outputs directly 
+
+    4. Do NOT attempt to use certificate_keys or certificate_crts outputs directly
        as they contain placeholder values only.
   EOT
 }

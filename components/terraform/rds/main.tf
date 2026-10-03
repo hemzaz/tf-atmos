@@ -552,8 +552,3 @@ resource "aws_cloudwatch_metric_alarm" "backup_retention" {
     DBInstanceIdentifier = aws_db_instance.main.identifier
   }
 }
-
-
-
-
-

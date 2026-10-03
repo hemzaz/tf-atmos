@@ -117,32 +117,32 @@ fi
 # If a new ACM ARN is provided, update the certificate
 if [ -n "${ACM_CERT_ARN:-}" ]; then
     echo "New ACM certificate ARN provided: $ACM_CERT_ARN"
-    
+
     # Get certificate details from AWS ACM
     echo "Fetching certificate details from ACM..."
     # Build command array for aws_with_retry
     DESCRIBE_CERT_CMD=(aws acm describe-certificate
         --certificate-arn "$ACM_CERT_ARN"
         --region "$AWS_REGION")
-    
+
     # Add profile option if specified
     [ -n "$PROFILE_OPT" ] && DESCRIBE_CERT_CMD+=($PROFILE_OPT)
-    
+
     # Execute with retry - 4 attempts, starting with 1 second delay
     CERT_DETAILS=$(aws_with_retry 4 1 "${DESCRIBE_CERT_CMD[@]}")
-    
+
     # Extract domain name and other details
     DOMAIN_NAME=$(echo "$CERT_DETAILS" | jq -r '.Certificate.DomainName')
     CERT_STATUS=$(echo "$CERT_DETAILS" | jq -r '.Certificate.Status')
     EXPIRY_DATE=$(echo "$CERT_DETAILS" | jq -r '.Certificate.NotAfter // empty')
     CERT_TYPE=$(echo "$CERT_DETAILS" | jq -r '.Certificate.Type // "IMPORTED"')
-    
+
     # Validate certificate
     if [ "$CERT_STATUS" != "ISSUED" ]; then
         echo "Error: Certificate is not in ISSUED state. Current status: $CERT_STATUS"
         exit 1
     fi
-    
+
     # Convert AWS timestamp to human-readable date if it exists
     EXPIRY_DATE_HUMAN=""
     if [ -n "$EXPIRY_DATE" ]; then
@@ -164,74 +164,74 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
             EXPIRY_DATE_HUMAN="$EXPIRY_DATE"
         fi
     fi
-    
+
     echo "Domain: $DOMAIN_NAME"
     echo "Status: $CERT_STATUS"
     echo "Type: $CERT_TYPE"
     echo "Expires: $EXPIRY_DATE_HUMAN"
-    
+
     # Get certificate from ACM with retry mechanism
     # Build command array for aws_with_retry
     GET_CERT_CMD=(aws acm get-certificate
         --certificate-arn "$ACM_CERT_ARN"
         --region "$AWS_REGION")
-        
+
     # Add profile option if specified
     [ -n "$PROFILE_OPT" ] && GET_CERT_CMD+=($PROFILE_OPT)
-    
+
     # Execute with retry - 4 attempts, starting with 1 second delay
     CERT_DATA=$(aws_with_retry 4 1 "${GET_CERT_CMD[@]}")
-        
+
     # Validate that we received certificate data
     if [ -z "$CERT_DATA" ]; then
         echo "Error: Failed to retrieve certificate data from ACM"
         exit 1
     fi
-    
+
     # Get certificate and chain, handling possible base64 encoding
     CERTIFICATE=$(echo "$CERT_DATA" | jq -r '.Certificate')
     CERTIFICATE_CHAIN=$(echo "$CERT_DATA" | jq -r '.CertificateChain')
-    
+
     # Validate certificate data was extracted
     if [ -z "$CERTIFICATE" ]; then
         echo "Error: Failed to extract certificate from ACM response"
         exit 1
     fi
-    
+
     # Check if certificate is base64-encoded and decode if needed
     if [[ "$CERTIFICATE" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] && ! [[ "$CERTIFICATE" =~ "BEGIN CERTIFICATE" ]]; then
         echo "Certificate appears to be base64-encoded, decoding..."
         CERTIFICATE=$(echo "$CERTIFICATE" | base64 -d)
-        
+
         if [ -z "$CERTIFICATE_CHAIN" ] || [[ "$CERTIFICATE_CHAIN" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]; then
             CERTIFICATE_CHAIN=$(echo "$CERTIFICATE_CHAIN" | base64 -d)
         fi
     fi
-    
+
     # Create a temporary directory with appropriate permissions for certificate files
     TEMP_DIR=$(mktemp -d)
-    
+
     # Secure the temp directory with strict permissions
     chmod 700 "$TEMP_DIR"
-    
+
     # Set up comprehensive trap handlers to ensure cleanup in all exit scenarios
     # This ensures temp files are removed even with forced terminations
     cleanup() {
         echo "Cleaning up temporary files in $TEMP_DIR"
         rm -rf "$TEMP_DIR"
     }
-    
+
     # Handle normal exit
     trap cleanup EXIT
-    
-    # Handle other signals (INT = Ctrl+C, TERM = termination, HUP = terminal closed, 
+
+    # Handle other signals (INT = Ctrl+C, TERM = termination, HUP = terminal closed,
     # QUIT = quit signal, ABRT = abort, SEGV = segmentation fault, PIPE = broken pipe)
     trap 'cleanup; echo "Caught signal - exiting"; exit 1' HUP INT QUIT TERM ABRT SEGV PIPE
-    
+
     # Save certificate to file and ensure proper certificate chain order (leaf → intermediate → root)
     echo "$CERTIFICATE" > "$TEMP_DIR/tls.crt"
     echo "$CERTIFICATE_CHAIN" > "$TEMP_DIR/chain.crt"
-    
+
     # Validate certificate chain order
     if grep -q "BEGIN CERTIFICATE" "$TEMP_DIR/chain.crt"; then
         # Create proper chain with leaf first, then intermediates, then root
@@ -249,11 +249,11 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
         # No chain certificates, just use the leaf certificate
         cp "$TEMP_DIR/tls.crt" "$TEMP_DIR/fullchain.crt"
     fi
-    
+
     # For AWS-managed certificates, we need the private key
     if [ "$CERT_TYPE" != "IMPORTED" ]; then
         echo "This is an AWS-managed certificate. Private key is not available from ACM."
-        
+
         # Non-interactive mode: check if PRIVATE_KEY_FILE was provided via environment variable
         if [ -n "${PRIVATE_KEY_FILE:-}" ]; then
             KEY_PATH="${PRIVATE_KEY_FILE}"
@@ -272,39 +272,39 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
                 fi
             fi
         fi
-        
+
         if [ ! -f "$KEY_PATH" ]; then
             echo "Error: Private key file not found at $KEY_PATH."
             exit 1
         fi
-        
+
         # Copy the private key
         cp "$KEY_PATH" "$TEMP_DIR/tls.key"
     else
         echo "This is an imported certificate. You may need to provide the original private key."
-        
+
         # Non-interactive mode: check if PRIVATE_KEY_FILE was provided via environment variable
         if [ -n "${PRIVATE_KEY_FILE:-}" ]; then
             KEY_PATH="${PRIVATE_KEY_FILE}"
             echo "Using private key from environment variable: $KEY_PATH"
-            
+
             if [ ! -f "$KEY_PATH" ]; then
                 echo "Error: Private key file not found at $KEY_PATH."
                 exit 1
             fi
-            
+
             # Copy the private key
             cp "$KEY_PATH" "$TEMP_DIR/tls.key"
         else
             # Check if a command line argument was provided
             if [ -n "${KEY_PATH:-}" ]; then
                 echo "Using private key from command line: $KEY_PATH"
-                
+
                 if [ ! -f "$KEY_PATH" ]; then
                     echo "Error: Private key file not found at $KEY_PATH."
                     exit 1
                 fi
-                
+
                 # Copy the private key
                 cp "$KEY_PATH" "$TEMP_DIR/tls.key"
             else
@@ -316,12 +316,12 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
                             echo "Error: Private key file not found at $KEY_PATH."
                             exit 1
                         fi
-                        
+
                         # Copy the private key
                         cp "$KEY_PATH" "$TEMP_DIR/tls.key"
                     else
                         echo "Using existing private key from the secret..."
-                        
+
                         # Get existing secret with retry mechanism
                         # Build command array for aws_with_retry
                         GET_SECRET_CMD=(aws secretsmanager get-secret-value
@@ -329,16 +329,16 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
                             --region "$AWS_REGION"
                             --query 'SecretString'
                             --output text)
-                        
+
                         # Add profile option if specified
                         [ -n "$PROFILE_OPT" ] && GET_SECRET_CMD+=($PROFILE_OPT)
-                        
+
                         # Execute with retry - 4 attempts, starting with 2 second delay
                         SECRET_VALUE=$(aws_with_retry 4 2 "${GET_SECRET_CMD[@]}")
-                        
+
                         # Extract private key
                         echo "$SECRET_VALUE" | jq -r '.["tls.key"] // empty' > "$TEMP_DIR/tls.key"
-                        
+
                         if [ ! -s "$TEMP_DIR/tls.key" ]; then
                             echo "Error: Could not extract private key from existing secret."
                             exit 1
@@ -348,7 +348,7 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
             fi
         fi
     fi
-                
+
                 # Create JSON for the updated secret
                 cat > "$TEMP_DIR/secret.json" << EOF
 {
@@ -360,41 +360,41 @@ if [ -n "${ACM_CERT_ARN:-}" ]; then
   "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 EOF
-                
+
                 # Update the secret in AWS Secrets Manager
     echo "Updating secret in AWS Secrets Manager: $SECRET_NAME"
-    
+
     # Use aws_with_retry for reliable AWS API calls with retries
     # Using 5 attempts with 2-second initial delay
     UPDATE_CMD=(aws secretsmanager update-secret
         --secret-id "$SECRET_NAME"
         --secret-string "$(cat "$TEMP_DIR/secret.json")"
         --region "$AWS_REGION")
-    
+
     # Add profile option if specified
     [ -n "$PROFILE_OPT" ] && UPDATE_CMD+=($PROFILE_OPT)
-    
+
     # Capture the output of the update command to validate success
     UPDATE_RESULT=$(aws_with_retry 5 2 "${UPDATE_CMD[@]}" 2>&1)
-    
+
     # Check if the update was successful
     if [ $? -ne 0 ]; then
         echo "❌ Failed to update secret in AWS Secrets Manager after multiple attempts:"
         echo "$UPDATE_RESULT"
         exit 1
     fi
-    
+
     # Verify the secret was actually updated by checking its metadata
     # Using 3 attempts with 1-second initial delay for verification
     VERIFY_CMD=(aws secretsmanager describe-secret
         --secret-id "$SECRET_NAME"
         --region "$AWS_REGION")
-    
+
     # Add profile option if specified
     [ -n "$PROFILE_OPT" ] && VERIFY_CMD+=($PROFILE_OPT)
-    
+
     VERIFY_RESULT=$(aws_with_retry 3 1 "${VERIFY_CMD[@]}" 2>&1)
-    
+
     if [ $? -ne 0 ]; then
         echo "⚠️ Secret was updated but verification failed:"
         echo "$VERIFY_RESULT"
@@ -404,7 +404,7 @@ EOF
         # Use a more robust way to handle various date formats
         LAST_CHANGED=$(echo "$VERIFY_RESULT" | jq -r '.LastChangedDate')
         NOW_EPOCH=$(date +%s)
-        
+
         # Handle timestamps more robustly
         if [[ "$LAST_CHANGED" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
             # Already an epoch timestamp
@@ -422,7 +422,7 @@ EOF
                 LAST_CHANGED_EPOCH=$(date -d "$LAST_CHANGED" +%s 2>/dev/null || echo "$NOW_EPOCH")
             fi
         fi
-        
+
         if [ $((NOW_EPOCH - LAST_CHANGED_EPOCH)) -gt 60 ]; then
             echo "⚠️ Secret update may not have been applied. LastChangedDate is not recent."
             echo "Please verify the secret was updated correctly."
@@ -436,7 +436,7 @@ fi
 echo "Checking for ExternalSecret in Kubernetes..."
 if ! kubectl get externalsecret -n "$NAMESPACE" $CONTEXT_OPT 2>/dev/null | grep -q "$K8S_SECRET"; then
     echo "ExternalSecret not found. Creating it now..."
-    
+
     # Create the ExternalSecret
     cat > /tmp/external-secret.yaml << EOF
 apiVersion: external-secrets.io/v1
@@ -464,14 +464,14 @@ spec:
       key: "$SECRET_NAME"
       property: tls.key
 EOF
-    
+
     kubectl apply -f /tmp/external-secret.yaml $CONTEXT_OPT
     rm /tmp/external-secret.yaml
-    
+
     echo "✅ ExternalSecret created"
 else
     echo "ExternalSecret already exists. Triggering a refresh..."
-    
+
     # Check if ExternalSecret actually exists before annotating
     if kubectl get externalsecret "$K8S_SECRET" -n "$NAMESPACE" $CONTEXT_OPT &>/dev/null; then
         # Add annotation to force refresh
@@ -479,13 +479,13 @@ else
         kubectl annotate externalsecret "$K8S_SECRET" -n "$NAMESPACE" $CONTEXT_OPT \
             externalsecrets.io/force-sync="$TIMESTAMP" \
             --overwrite
-        
+
         echo "✅ ExternalSecret refresh triggered"
     else
         echo "⚠️ ExternalSecret exists but couldn't be accessed. Refresh not triggered."
         echo "This could be due to permission issues or a namespace mismatch."
     fi
-    
+
 fi
 
 # Wait for the secret refresh to complete with timeout and validation
@@ -507,7 +507,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
             # Linux date command format
             SECRET_UPDATE_EPOCH=$(date -d "$SECRET_UPDATE_TIME" +%s 2>/dev/null)
         fi
-        
+
         # Get current time
         CURRENT_EPOCH=$(date +%s)
         # If the secret was updated within the last minute, consider it done
@@ -516,7 +516,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
             break
         fi
     fi
-    
+
     # Sleep and increment counter
     sleep $INTERVAL
     ELAPSED=$((ELAPSED + INTERVAL))
@@ -544,7 +544,7 @@ PODS_WITH_SECRET=$(kubectl get pods -n "$NAMESPACE" $CONTEXT_OPT -o json | \
 if [ -n "$PODS_WITH_SECRET" ]; then
     echo "The following pods mount this secret and may need a restart:"
     echo "$PODS_WITH_SECRET"
-    
+
     # Handle pod restart based on AUTO_RESTART_PODS or CI_MODE
     AUTO_RESTART="false"
     if [ "${AUTO_RESTART_PODS:-false}" == "true" ] || [ "${CI_MODE:-false}" == "true" ]; then
@@ -557,7 +557,7 @@ if [ -n "$PODS_WITH_SECRET" ]; then
             AUTO_RESTART="true"
         fi
     fi
-    
+
     if [[ "$AUTO_RESTART" == "true" ]]; then
         for POD in $PODS_WITH_SECRET; do
             echo "Restarting pod: $POD"

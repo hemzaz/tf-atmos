@@ -39,19 +39,19 @@ log() {
     shift
     local message="$*"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
+
     # Console output with colors
     case "$level" in
         INFO)  echo -e "${BLUE}[INFO]${NC} $message" ;;
         SUCCESS) echo -e "${GREEN}[SUCCESS]${NC} $message" ;;
         WARNING) echo -e "${YELLOW}[WARNING]${NC} $message" ;;
         ERROR) echo -e "${RED}[ERROR]${NC} $message" >&2 ;;
-        STEP) 
+        STEP)
             CURRENT_STEP=$((CURRENT_STEP + 1))
-            echo -e "${PURPLE}[STEP $CURRENT_STEP/$TOTAL_STEPS]${NC} ${BOLD}$message${NC}" 
+            echo -e "${PURPLE}[STEP $CURRENT_STEP/$TOTAL_STEPS]${NC} ${BOLD}$message${NC}"
             ;;
     esac
-    
+
     # Log to file (without colors)
     echo "[$timestamp] [$level] $message" >> "$ONBOARD_LOG"
 }
@@ -60,12 +60,12 @@ show_progress() {
     local percent=$((CURRENT_STEP * 100 / TOTAL_STEPS))
     local filled=$((percent / 5))
     local empty=$((20 - filled))
-    
+
     printf "\r${CYAN}Progress: ["
     printf "%${filled}s" | tr ' ' '='
     printf "%${empty}s" | tr ' ' '-'
     printf "] %d%%${NC}" "$percent"
-    
+
     if [ "$CURRENT_STEP" -eq "$TOTAL_STEPS" ]; then
         echo
     fi
@@ -74,7 +74,7 @@ show_progress() {
 check_command() {
     local cmd="$1"
     local install_info="${2:-}"
-    
+
     if command -v "$cmd" &> /dev/null; then
         log SUCCESS "$cmd is installed"
         return 0
@@ -107,14 +107,14 @@ show_welcome() {
     echo -e "  📚 Set up IDE and development shortcuts"
     echo -e "  🚀 Test end-to-end workflow"
     echo
-    
+
     # Get developer info
     echo -e "${WHITE}First, let's get some information about you:${NC}"
     read -p "Your name (for git config): " DEVELOPER_NAME
     read -p "Your email (for git config): " DEVELOPER_EMAIL
     read -p "Preferred AWS region [us-east-1]: " AWS_REGION
     AWS_REGION=${AWS_REGION:-us-east-1}
-    
+
     echo
     read -p "Ready to start? This will take about 8-10 minutes. [y/N] " -n 1 -r
     echo
@@ -122,7 +122,7 @@ show_welcome() {
         echo "Onboarding cancelled"
         exit 0
     fi
-    
+
     # Create logs directory
     mkdir -p "$(dirname "$ONBOARD_LOG")"
     log INFO "Starting developer onboarding for $DEVELOPER_NAME <$DEVELOPER_EMAIL>"
@@ -132,17 +132,17 @@ show_welcome() {
 
 check_prerequisites() {
     log STEP "Checking system prerequisites"
-    
+
     local missing_tools=()
     local os_type=$(uname -s)
-    
+
     log INFO "Operating System: $os_type"
-    
+
     # Essential tools
     check_command "git" "macOS: xcode-select --install | Linux: sudo apt-get install git" || missing_tools+=("git")
     check_command "curl" "Usually pre-installed" || missing_tools+=("curl")
     check_command "docker" "Visit: https://docs.docker.com/get-docker/" || missing_tools+=("docker")
-    
+
     # Check Docker daemon
     if command -v docker &> /dev/null; then
         if docker info &> /dev/null; then
@@ -152,24 +152,24 @@ check_prerequisites() {
             missing_tools+=("docker-daemon")
         fi
     fi
-    
+
     # Check for package managers
     local has_package_manager=false
     if command -v brew &> /dev/null; then
         log SUCCESS "Homebrew package manager available"
         has_package_manager=true
     elif command -v apt-get &> /dev/null; then
-        log SUCCESS "APT package manager available"  
+        log SUCCESS "APT package manager available"
         has_package_manager=true
     elif command -v yum &> /dev/null; then
         log SUCCESS "YUM package manager available"
         has_package_manager=true
     fi
-    
+
     if [ "$has_package_manager" = false ]; then
         log WARNING "No supported package manager found. Manual installation may be required."
     fi
-    
+
     # Check Python
     if command -v python3 &> /dev/null; then
         local python_version=$(python3 --version | cut -d' ' -f2)
@@ -178,11 +178,11 @@ check_prerequisites() {
         log WARNING "Python3 is not installed"
         missing_tools+=("python3")
     fi
-    
+
     # If we have missing tools, try to install them
     if [ ${#missing_tools[@]} -gt 0 ]; then
         log WARNING "Missing tools detected: ${missing_tools[*]}"
-        
+
         if command -v brew &> /dev/null; then
             read -p "Install missing tools with Homebrew? [y/N] " -n 1 -r
             echo
@@ -191,19 +191,19 @@ check_prerequisites() {
             fi
         fi
     fi
-    
+
     show_progress
 }
 
 install_with_brew() {
     local tools=("$@")
     log INFO "Installing tools with Homebrew..."
-    
+
     for tool in "${tools[@]}"; do
         case "$tool" in
             "git") brew install git ;;
             "python3") brew install python3 ;;
-            "docker") 
+            "docker")
                 log INFO "Installing Docker Desktop..."
                 brew install --cask docker
                 log WARNING "Please start Docker Desktop manually after installation"
@@ -217,7 +217,7 @@ install_with_brew() {
 
 install_infrastructure_tools() {
     log STEP "Installing infrastructure tools"
-    
+
     # Install Terraform
     if ! check_command "terraform" "Visit: https://terraform.io/downloads"; then
         if command -v brew &> /dev/null; then
@@ -227,7 +227,7 @@ install_infrastructure_tools() {
             log WARNING "Please install Terraform manually from https://terraform.io/downloads"
         fi
     fi
-    
+
     # Install Atmos
     if ! check_command "atmos" "Visit: https://atmos.tools/install"; then
         if command -v brew &> /dev/null; then
@@ -237,7 +237,7 @@ install_infrastructure_tools() {
             log WARNING "Please install Atmos manually from https://atmos.tools/install"
         fi
     fi
-    
+
     # Install AWS CLI
     if ! check_command "aws" "Visit: https://aws.amazon.com/cli/"; then
         if command -v brew &> /dev/null; then
@@ -247,17 +247,17 @@ install_infrastructure_tools() {
             log WARNING "Please install AWS CLI manually from https://aws.amazon.com/cli/"
         fi
     fi
-    
+
     show_progress
 }
 
 setup_git_configuration() {
     log STEP "Configuring Git"
-    
+
     # Set up git configuration
     git config --global user.name "$DEVELOPER_NAME"
     git config --global user.email "$DEVELOPER_EMAIL"
-    
+
     # Useful git aliases for infrastructure work
     git config --global alias.co checkout
     git config --global alias.br branch
@@ -267,31 +267,31 @@ setup_git_configuration() {
     git config --global alias.last 'log -1 HEAD'
     git config --global alias.visual '!gitk'
     git config --global alias.hist 'log --pretty=format:"%h %ad | %s%d [%an]" --graph --date=short'
-    
+
     # Infrastructure-specific aliases
     git config --global alias.tf-check 'diff --name-only HEAD~1 HEAD | grep "\.tf$"'
-    
+
     log SUCCESS "Git configured for $DEVELOPER_NAME <$DEVELOPER_EMAIL>"
     show_progress
 }
 
 setup_python_environment() {
     log STEP "Setting up Python environment"
-    
+
     cd "$PROJECT_ROOT"
-    
+
     # Create virtual environment if it doesn't exist
     if [ ! -d "venv" ]; then
         log INFO "Creating Python virtual environment..."
         python3 -m venv venv
     fi
-    
+
     # Activate virtual environment
     source venv/bin/activate
-    
+
     # Upgrade pip
     pip install --upgrade pip
-    
+
     show_progress
 }
 
@@ -302,7 +302,7 @@ setup_development_environment() {
 
     # Create developer-specific configuration
     log INFO "Creating developer configuration..."
-    
+
     # Create personal .env file
     if [ ! -f ".env.local" ]; then
         cat > .env.local << EOF
@@ -327,18 +327,18 @@ ENABLE_DEVELOPMENT_SHORTCUTS=true
 EOF
         log SUCCESS "Created personal configuration file: .env.local"
     fi
-    
+
     show_progress
 }
 
 setup_ide_configuration() {
     log STEP "Setting up IDE configuration"
-    
+
     # VS Code settings
     local vscode_dir="$PROJECT_ROOT/.vscode"
     if [ ! -d "$vscode_dir" ]; then
         mkdir -p "$vscode_dir"
-        
+
         # VS Code settings
         cat > "$vscode_dir/settings.json" << 'EOF'
 {
@@ -366,7 +366,7 @@ setup_ide_configuration() {
   }
 }
 EOF
-        
+
         # VS Code extensions recommendations
         cat > "$vscode_dir/extensions.json" << 'EOF'
 {
@@ -382,7 +382,7 @@ EOF
   ]
 }
 EOF
-        
+
         # VS Code tasks
         cat > "$vscode_dir/tasks.json" << 'EOF'
 {
@@ -402,7 +402,7 @@ EOF
     },
     {
       "label": "Lint Code",
-      "type": "shell", 
+      "type": "shell",
       "command": "make lint",
       "group": "build"
     },
@@ -415,10 +415,10 @@ EOF
   ]
 }
 EOF
-        
+
         log SUCCESS "VS Code configuration created"
     fi
-    
+
     # Create development aliases file
     cat > "$PROJECT_ROOT/.dev_aliases" << 'EOF'
 # Development aliases for infrastructure work
@@ -431,7 +431,7 @@ alias k='kubectl'
 
 # Infrastructure commands
 alias validate='make validate'
-alias lint='make lint' 
+alias lint='make lint'
 alias plan='make plan'
 alias apply='make apply'
 alias status='make status'
@@ -451,14 +451,14 @@ alias stack-staging='atmos list components -s fnx-staging-staging-01'
 echo "🌍 Infrastructure development aliases loaded!"
 echo "💡 Try: validate, plan, apply, a-stacks, stack-dev"
 EOF
-    
+
     log SUCCESS "Development aliases created (source .dev_aliases to use)"
     show_progress
 }
 
 validate_access_and_permissions() {
     log STEP "Validating access and permissions"
-    
+
     # Check AWS credentials
     log INFO "Checking AWS access..."
     if aws sts get-caller-identity > /dev/null 2>&1; then
@@ -471,12 +471,12 @@ validate_access_and_permissions() {
         log INFO "Configure with: aws configure"
         log INFO "Or set up environment variables/profiles"
     fi
-    
+
     # Check Atmos configuration
     log INFO "Checking Atmos configuration..."
     if [ -f "atmos.yaml" ]; then
         log SUCCESS "atmos.yaml found"
-        
+
         if atmos list stacks > /dev/null 2>&1; then
             local stack_count=$(atmos list stacks | wc -l)
             log SUCCESS "Atmos can list $stack_count stacks"
@@ -486,7 +486,7 @@ validate_access_and_permissions() {
     else
         log ERROR "atmos.yaml not found - are you in the right directory?"
     fi
-    
+
     # Check Terraform
     log INFO "Checking Terraform..."
     if terraform version > /dev/null 2>&1; then
@@ -495,7 +495,7 @@ validate_access_and_permissions() {
     else
         log WARNING "Terraform not found or not working"
     fi
-    
+
     # Check Docker
     log INFO "Checking Docker..."
     if docker info > /dev/null 2>&1; then
@@ -503,13 +503,13 @@ validate_access_and_permissions() {
     else
         log WARNING "Docker daemon not accessible"
     fi
-    
+
     show_progress
 }
 
 test_end_to_end_workflow() {
     log STEP "Testing end-to-end workflow"
-    
+
     # Test Makefile
     log INFO "Testing Makefile..."
     if make help > /dev/null 2>&1; then
@@ -517,7 +517,7 @@ test_end_to_end_workflow() {
     else
         log WARNING "Makefile may have issues"
     fi
-    
+
     # Test Atmos workflow discovery
     log INFO "Testing Atmos workflows..."
     if atmos list workflows > /dev/null 2>&1; then
@@ -525,7 +525,7 @@ test_end_to_end_workflow() {
     else
         log WARNING "Atmos workflow listing may have issues"
     fi
-    
+
     # Test infrastructure validation (non-destructive)
     log INFO "Testing infrastructure validation..."
     if make validate > "$ONBOARD_LOG.validate" 2>&1; then
@@ -533,23 +533,23 @@ test_end_to_end_workflow() {
     else
         log WARNING "Infrastructure validation had issues (check logs)"
     fi
-    
+
     # Test quick commands
     log INFO "Testing quick status commands..."
-    
+
     # Test stack listing
     if make list-stacks > /dev/null 2>&1; then
         log SUCCESS "Stack listing works"
     else
         log WARNING "Stack listing may have issues"
     fi
-    
+
     show_progress
 }
 
 create_quick_reference() {
     log STEP "Creating quick reference materials"
-    
+
     # Create desktop quick reference
     cat > "$PROJECT_ROOT/QUICK_START.md" << EOF
 # 🚀 Quick Start Guide - Infrastructure Development
@@ -597,7 +597,7 @@ atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 
 1. **Start your day**: \`make status\` or \`make doctor\`
 2. **Make changes**: Edit Terraform files
-3. **Validate**: \`make validate\` 
+3. **Validate**: \`make validate\`
 4. **Plan**: \`make plan\` (always safe)
 5. **Apply**: \`make apply\` (with confirmation)
 
@@ -625,7 +625,7 @@ atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 ---
 *Generated by developer onboarding on $(date)*
 EOF
-    
+
     # Create shell aliases activation
     if [ -f "$HOME/.bashrc" ]; then
         if ! grep -q ".dev_aliases" "$HOME/.bashrc"; then
@@ -635,7 +635,7 @@ EOF
             log SUCCESS "Added aliases to ~/.bashrc"
         fi
     fi
-    
+
     if [ -f "$HOME/.zshrc" ]; then
         if ! grep -q ".dev_aliases" "$HOME/.zshrc"; then
             echo "" >> "$HOME/.zshrc"
@@ -644,16 +644,16 @@ EOF
             log SUCCESS "Added aliases to ~/.zshrc"
         fi
     fi
-    
+
     show_progress
 }
 
 generate_completion_report() {
     log STEP "Generating completion report"
-    
+
     local end_time=$(date)
     local duration=$(( $(date +%s) - start_time ))
-    
+
     # Generate detailed report
     cat > "$PROJECT_ROOT/logs/onboarding-report-$(date +%Y%m%d-%H%M%S).md" << EOF
 # Developer Onboarding Report
@@ -714,7 +714,7 @@ make list-stacks     # Available environments
 ---
 *Auto-generated by onboarding script*
 EOF
-    
+
     show_progress
 }
 
@@ -764,10 +764,10 @@ show_completion() {
 
 main() {
     local start_time=$(date +%s)
-    
+
     # Change to project root
     cd "$PROJECT_ROOT"
-    
+
     # Run onboarding steps
     show_welcome
     check_prerequisites
@@ -780,11 +780,11 @@ main() {
     test_end_to_end_workflow
     create_quick_reference
     generate_completion_report
-    
+
     # Calculate duration
     local end_time=$(date)
     duration=$(( $(date +%s) - start_time ))
-    
+
     show_completion
 }
 

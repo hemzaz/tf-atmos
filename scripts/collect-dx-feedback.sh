@@ -52,14 +52,14 @@ json_escape() {
 
 collect_system_metrics() {
     log "Collecting system performance metrics..."
-    
+
     local start_time=$(date +%s)
-    
+
     # Test common command performance
     local validate_time=0
     local plan_time=0
     local status_time=0
-    
+
     if command -v make >/dev/null 2>&1; then
         log "Testing 'make validate' performance..."
         local validate_start=$(date +%s)
@@ -69,7 +69,7 @@ collect_system_metrics() {
         else
             warning "Validate timed out or failed"
         fi
-        
+
         log "Testing 'make status' performance..."
         local status_start=$(date +%s)
         if timeout 30 make status >/dev/null 2>&1; then
@@ -79,17 +79,17 @@ collect_system_metrics() {
             warning "Status timed out or failed"
         fi
     fi
-    
+
     # System information
     local os_type=$(uname -s)
     local cpu_count=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "unknown")
     local memory_gb=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}' || echo "unknown")
-    
+
     # Tool versions
     local terraform_version=$(terraform version 2>/dev/null | head -1 | cut -d' ' -f2 || echo "not installed")
     local atmos_version=$(atmos version 2>/dev/null || echo "not installed")
     local docker_version=$(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',' || echo "not installed")
-    
+
     cat << EOF
 {
   "timestamp": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
@@ -104,7 +104,7 @@ collect_system_metrics() {
     },
     "tool_versions": {
       "terraform": "$terraform_version",
-      "atmos": "$atmos_version", 
+      "atmos": "$atmos_version",
       "docker": "$docker_version"
     }
   },
@@ -113,30 +113,30 @@ EOF
 
 collect_usage_metrics() {
     log "Collecting usage metrics..."
-    
+
     # Count recent workflow executions
     local workflow_runs=0
     local successful_runs=0
     local failed_runs=0
-    
+
     if [ -d "$PROJECT_ROOT/logs" ]; then
         # Count log files from last 7 days
         workflow_runs=$(find "$PROJECT_ROOT/logs" -name "*.log" -mtime -7 | wc -l | tr -d ' ')
-        
+
         # Simple success/failure heuristic based on log content
         if [ "$workflow_runs" -gt 0 ]; then
             successful_runs=$(find "$PROJECT_ROOT/logs" -name "*.log" -mtime -7 -exec grep -l "completed successfully\|✅" {} \; | wc -l | tr -d ' ')
             failed_runs=$(find "$PROJECT_ROOT/logs" -name "*.log" -mtime -7 -exec grep -l "failed\|error\|❌" {} \; | wc -l | tr -d ' ')
         fi
     fi
-    
+
     # Most used commands (simple heuristic)
     local commands_file="$HOME/.bash_history"
     local top_commands=""
     if [ -f "$commands_file" ]; then
         top_commands=$(grep -E "make|atmos" "$commands_file" 2>/dev/null | tail -20 | head -5 | tr '\n' ',' | sed 's/,$//')
     fi
-    
+
     cat << EOF
   "usage_metrics": {
     "workflow_runs_7_days": $workflow_runs,
@@ -149,7 +149,7 @@ EOF
 
 collect_interactive_feedback() {
     log "Collecting interactive feedback..."
-    
+
     echo
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}         ${WHITE}Developer Experience Feedback Survey${NC}              ${CYAN}║${NC}"
@@ -157,24 +157,24 @@ collect_interactive_feedback() {
     echo
     echo -e "${WHITE}Help us improve your development experience! (2-3 minutes)${NC}"
     echo
-    
+
     # Overall satisfaction
     echo -e "${WHITE}1. Overall satisfaction with the development environment (1-10):${NC}"
     read -p "   Rating (1=terrible, 10=amazing): " overall_rating
     overall_rating=${overall_rating:-5}
-    
+
     # Onboarding experience
     echo
     echo -e "${WHITE}2. How easy was it to get started? (1-10):${NC}"
     read -p "   Rating (1=very difficult, 10=very easy): " onboarding_rating
     onboarding_rating=${onboarding_rating:-5}
-    
+
     # Documentation quality
     echo
     echo -e "${WHITE}3. How helpful is the documentation? (1-10):${NC}"
     read -p "   Rating (1=confusing, 10=excellent): " docs_rating
     docs_rating=${docs_rating:-5}
-    
+
     # Tool satisfaction
     echo
     echo -e "${WHITE}4. Which tools do you use most? (select all that apply)${NC}"
@@ -184,7 +184,7 @@ collect_interactive_feedback() {
     echo "   d) development environment (Docker)"
     read -p "   Enter letters (e.g., 'a,b'): " tools_used
     tools_used=${tools_used:-""}
-    
+
     # Pain points
     echo
     echo -e "${WHITE}5. What's your biggest pain point?${NC}"
@@ -195,30 +195,30 @@ collect_interactive_feedback() {
     echo "   e) Other"
     read -p "   Select one (a-e): " pain_point
     pain_point=${pain_point:-"e"}
-    
+
     # Time to productivity
     echo
     echo -e "${WHITE}6. How long did it take to become productive?${NC}"
     echo "   a) < 1 hour"
-    echo "   b) 1-4 hours"  
+    echo "   b) 1-4 hours"
     echo "   c) 1 day"
     echo "   d) 2-3 days"
     echo "   e) > 1 week"
     read -p "   Select one (a-e): " productivity_time
     productivity_time=${productivity_time:-"c"}
-    
+
     # Feature requests
     echo
     echo -e "${WHITE}7. What feature would help you most?${NC}"
     read -p "   Describe briefly: " feature_request
     feature_request=${feature_request:-"No suggestions"}
-    
+
     # Free-form feedback
     echo
     echo -e "${WHITE}8. Any other feedback or suggestions?${NC}"
     read -p "   Comments: " additional_feedback
     additional_feedback=${additional_feedback:-"None"}
-    
+
     # Generate JSON for interactive feedback
     cat << EOF
   "interactive_feedback": {
@@ -236,21 +236,21 @@ EOF
 
 collect_error_patterns() {
     log "Analyzing error patterns..."
-    
+
     local common_errors=""
     local error_frequency=0
-    
+
     if [ -d "$PROJECT_ROOT/logs" ]; then
         # Find common error patterns
         common_errors=$(find "$PROJECT_ROOT/logs" -name "*.log" -mtime -7 -exec grep -i "error\|failed" {} \; | \
                        sort | uniq -c | sort -nr | head -3 | \
                        awk '{for(i=2;i<=NF;i++) printf $i" "; print ""}' | \
                        tr '\n' '|' | sed 's/|$//')
-        
+
         error_frequency=$(find "$PROJECT_ROOT/logs" -name "*.log" -mtime -7 -exec grep -c -i "error\|failed" {} \; | \
                          awk '{sum+=$1} END {print sum+0}')
     fi
-    
+
     cat << EOF
   "error_analysis": {
     "common_errors_7_days": $(json_escape "$common_errors"),
@@ -261,10 +261,10 @@ EOF
 
 generate_recommendations() {
     log "Generating personalized recommendations..."
-    
+
     # Simple recommendation engine based on collected data
     local recommendations=()
-    
+
     # Check if user seems to struggle with performance
     if [ -f "$FEEDBACK_FILE.tmp" ]; then
         local validate_time=$(jq -r '.system_metrics.performance.validate_time_seconds // 0' "$FEEDBACK_FILE.tmp" 2>/dev/null || echo 0)
@@ -272,18 +272,18 @@ generate_recommendations() {
             recommendations+=("Consider optimizing your AWS credentials setup - validation is taking longer than expected")
         fi
     fi
-    
+
     # Check error frequency
     local error_freq=$(jq -r '.error_analysis.error_frequency_7_days // 0' "$FEEDBACK_FILE.tmp" 2>/dev/null || echo 0)
     if [ "$error_freq" -gt 5 ]; then
         recommendations+=("You've encountered several errors recently - consider running 'make doctor' for diagnostics")
     fi
-    
+
     # Always include some general recommendations
     recommendations+=("Discover the available Atmos workflows: 'atmos list workflows'")
     recommendations+=("Use 'make help' to discover time-saving shortcuts")
     recommendations+=("Check out the DEVELOPER_GUIDE.md for advanced tips")
-    
+
     # Convert to JSON array
     local rec_json="["
     for i in "${!recommendations[@]}"; do
@@ -293,7 +293,7 @@ generate_recommendations() {
         fi
     done
     rec_json+="]"
-    
+
     cat << EOF
   "recommendations": $rec_json
 }
@@ -306,22 +306,22 @@ EOF
 
 generate_dx_metrics_summary() {
     log "Generating DX metrics summary..."
-    
+
     # Aggregate data from all feedback files
     local total_responses=0
     local avg_satisfaction=0
     local avg_onboarding=0
-    
+
     if compgen -G "$FEEDBACK_DIR/feedback-*.json" > /dev/null; then
         total_responses=$(ls "$FEEDBACK_DIR"/feedback-*.json | wc -l | tr -d ' ')
-        
+
         # Calculate averages (simplified)
         if [ "$total_responses" -gt 0 ]; then
             avg_satisfaction=$(jq -s 'map(.interactive_feedback.overall_satisfaction // 0) | add / length' "$FEEDBACK_DIR"/feedback-*.json 2>/dev/null || echo 0)
             avg_onboarding=$(jq -s 'map(.interactive_feedback.onboarding_ease // 0) | add / length' "$FEEDBACK_DIR"/feedback-*.json 2>/dev/null || echo 0)
         fi
     fi
-    
+
     cat > "$FEEDBACK_DIR/dx-summary.json" << EOF
 {
   "generated_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
@@ -331,14 +331,14 @@ generate_dx_metrics_summary() {
     "average_onboarding_ease": $avg_onboarding,
     "improvement_areas": [
       "Documentation clarity",
-      "Command performance", 
+      "Command performance",
       "Error message quality"
     ],
     "next_review": "$(date -u -d '+7 days' '+%Y-%m-%d' 2>/dev/null || date -u -v+7d '+%Y-%m-%d' 2>/dev/null || echo 'unknown')"
   }
 }
 EOF
-    
+
     success "DX metrics summary generated: $FEEDBACK_DIR/dx-summary.json"
 }
 
@@ -348,16 +348,16 @@ show_feedback_summary() {
     echo -e "${CYAN}║${NC}                    ${WHITE}Feedback Summary${NC}                         ${CYAN}║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo
-    
+
     if [ -f "$FEEDBACK_DIR/dx-summary.json" ]; then
         local total_responses=$(jq -r '.summary.total_feedback_responses' "$FEEDBACK_DIR/dx-summary.json" 2>/dev/null || echo 0)
         local avg_satisfaction=$(jq -r '.summary.average_satisfaction' "$FEEDBACK_DIR/dx-summary.json" 2>/dev/null || echo 0)
-        
+
         echo -e "${WHITE}Total Feedback Responses:${NC} $total_responses"
         echo -e "${WHITE}Average Satisfaction:${NC} $avg_satisfaction/10"
         echo
     fi
-    
+
     echo -e "${WHITE}Your feedback has been saved and will help improve the platform!${NC}"
     echo
     echo -e "${BLUE}🎯 What happens next:${NC}"
@@ -375,12 +375,12 @@ show_feedback_summary() {
 
 main() {
     local mode="${1:-interactive}"
-    
+
     case "$mode" in
         "interactive")
             echo -e "${CYAN}🔍 Starting Developer Experience feedback collection...${NC}"
             echo
-            
+
             # Create temporary file to build JSON
             {
                 collect_system_metrics
@@ -389,13 +389,13 @@ main() {
                 collect_error_patterns
                 generate_recommendations
             } > "$FEEDBACK_FILE"
-            
+
             success "Feedback collected: $FEEDBACK_FILE"
-            
+
             generate_dx_metrics_summary
             show_feedback_summary
             ;;
-            
+
         "metrics-only")
             log "Collecting metrics without interactive feedback..."
             {
@@ -405,11 +405,11 @@ main() {
                 collect_error_patterns
                 generate_recommendations
             } > "$FEEDBACK_FILE"
-            
+
             generate_dx_metrics_summary
             success "Metrics collected: $FEEDBACK_FILE"
             ;;
-            
+
         "summary")
             generate_dx_metrics_summary
             if [ -f "$FEEDBACK_DIR/dx-summary.json" ]; then
@@ -419,11 +419,11 @@ main() {
                 warning "No feedback data found. Run with no arguments to collect feedback."
             fi
             ;;
-            
+
         *)
             echo "Usage: $0 [interactive|metrics-only|summary]"
             echo "  interactive  - Full feedback collection with user prompts (default)"
-            echo "  metrics-only - Collect system metrics without user interaction"  
+            echo "  metrics-only - Collect system metrics without user interaction"
             echo "  summary      - Show aggregated feedback summary"
             exit 1
             ;;

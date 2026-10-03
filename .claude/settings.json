@@ -5,7 +5,7 @@
     "bash": {
       "auto_approve": [
         "atmos describe*",
-        "atmos list*", 
+        "atmos list*",
         "atmos validate*",
         "atmos workflow lint*",
         "atmos workflow validate*",

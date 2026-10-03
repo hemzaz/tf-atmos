@@ -59,7 +59,7 @@ locals {
     }
   ]...)
 
-  # Flatten Helm releases across all clusters 
+  # Flatten Helm releases across all clusters
   # Same pattern as addons - composite keys with cluster context added to each release
   helm_releases = merge([
     for cluster_key, cluster in local.clusters : {

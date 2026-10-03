@@ -682,4 +682,3 @@ run "null_compute_environment_order_is_rejected" {
 
   expect_failures = [var.job_queues]
 }
-
