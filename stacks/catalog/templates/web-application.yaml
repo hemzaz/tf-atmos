@@ -236,7 +236,11 @@ components:
         inherits:
           - s3/defaults
       vars:
-        # <Environment>-cdn-logs-<account id>
+        # <Environment>-cdn-logs-<account id>. The s3 component takes
+        # <Environment> from tags.Environment; the bucket policy below uses
+        # settings.context.environment, which is the same value only because
+        # stacks/orgs/fnx/_defaults.yaml sets tags.Environment from it. Change
+        # both together (vars are not reliably resolved at template time).
         name: cdn-logs
         lifecycle_configuration_rules:
           - id: "expire-logs"
@@ -298,7 +302,7 @@ components:
           main:
             domain_name: '{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
             subject_alternative_names:
-              - '*.{{ .settings.web_application.app_domain_name }}'
+              - '*.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
             validation_method: "DNS"
         zone_id: !terraform.state '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }} .zone_ids.{{ required "settings.web_application.dns_zone_key is required" .settings.web_application.dns_zone_key }}'
 
@@ -307,7 +311,7 @@ components:
           Application: "web-application"
       dependencies:
         components:
-          - component: '{{ .settings.web_application.dns_component }}'
+          - component: '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }}'
 
     # =========================================================================
     # LOAD BALANCER LAYER (addons layer)
@@ -341,9 +345,9 @@ components:
 
         # CloudFront's origin: a name the certificate covers (*.<app domain>).
         dns_alias_enabled: true
-        parent_zone_id: !terraform.state '{{ .settings.web_application.dns_component }} .zone_ids.{{ .settings.web_application.dns_zone_key }}'
+        parent_zone_id: !terraform.state '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }} .zone_ids.{{ required "settings.web_application.dns_zone_key is required" .settings.web_application.dns_zone_key }}'
         dns_aliases:
-          - 'origin.{{ .settings.web_application.app_domain_name }}'
+          - 'origin.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
 
         access_logs_prefix: "webapp"
 
@@ -355,7 +359,7 @@ components:
           - component: web-application/vpc
           - component: web-application/acm
           - component: web-application/securitygroups
-          - component: '{{ .settings.web_application.dns_component }}'
+          - component: '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }}'
 
     # =========================================================================
     # WAF PROTECTION (REGIONAL, regional-waf layer)
@@ -394,13 +398,11 @@ components:
           - name: "AWSManagedRulesLinuxRuleSet"
             priority: 40
 
-        # Rate limiting
-        rate_based_statement_rules:
-          - name: "RateLimitRule"
-            priority: 1
-            limit: 2000
-            aggregate_key_type: "IP"
-            action: "block"
+        # No rate_based_statement_rules: the ALB admits only CloudFront, so
+        # this ACL sees CloudFront edge IPs and an IP limit would throttle
+        # whole edges shared by many viewers. waf-cloudfront rate-limits by
+        # viewer IP; this component has no FORWARDED_IP aggregation
+        # (components/terraform/waf/variables.tf).
 
         tags:
           Layer: "security"
@@ -739,10 +741,10 @@ components:
 
         custom_origins:
           - origin_id: "alb"
-            domain_name: 'origin.{{ .settings.web_application.app_domain_name }}'
+            domain_name: 'origin.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
             custom_headers:
               - name: "X-Origin-Verify"
-                value_ssm_parameter_name: '{{ .settings.web_application.origin_verify_ssm_parameter }}'
+                value_ssm_parameter_name: '{{ required "settings.web_application.origin_verify_ssm_parameter is required" .settings.web_application.origin_verify_ssm_parameter }}'
             custom_origin_config:
               origin_protocol_policy: "https-only"
               origin_ssl_protocols:
@@ -775,11 +777,11 @@ components:
 
         # Aliases (custom domains) on the us-east-1 certificate
         aliases:
-          - '{{ .settings.web_application.app_domain_name }}'
-          - 'www.{{ .settings.web_application.app_domain_name }}'
+          - '{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
+          - 'www.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
         acm_certificate_arn: !terraform.state web-application/acm .certificate_arns.main
         dns_alias_enabled: true
-        parent_zone_id: !terraform.state '{{ .settings.web_application.dns_component }} .zone_ids.{{ .settings.web_application.dns_zone_key }}'
+        parent_zone_id: !terraform.state '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }} .zone_ids.{{ required "settings.web_application.dns_zone_key is required" .settings.web_application.dns_zone_key }}'
 
         # Standard logging (v2) to the template's log bucket
         logging_enabled: true
@@ -798,7 +800,7 @@ components:
           - component: web-application/alb
           - component: web-application/waf-cloudfront
           - component: web-application/s3/cdn-logs
-          - component: '{{ .settings.web_application.dns_component }}'
+          - component: '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }}'
 
     # =========================================================================
     # MONITORING LAYER
