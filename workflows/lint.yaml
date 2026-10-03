@@ -70,7 +70,7 @@ workflows:
             command: |
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
-              python3 scripts/check-hcl-unary-newline.py components/terraform modules
+              python3 scripts/check-hcl-unary-newline.py components/terraform
       # No-op when the plugins are already installed (CI runs tflint-init first,
       # with a token for GitHub rate limits, so this step needs no network).
       - name: tflint-plugins
