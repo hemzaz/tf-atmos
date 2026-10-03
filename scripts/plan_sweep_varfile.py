@@ -195,6 +195,10 @@ SYNTH = [
     # CLOUDFRONT-scope waf ACL (its output is plain `arn`), the alb, the ecs
     # service, and rds/elasticache endpoints and secrets. The secrets carry the
     # 6-character suffix ecs-service's secrets validation requires.
+    # ^cluster_arn$ (ecs) and ^arn$ (waf) match by output name alone, for every
+    # component (synth() sees only the output name): a future read of
+    # another component's `.cluster_arn` or `.arn` gets an ECS cluster / WAF
+    # ACL ARN, so it needs a narrower, component-aware rule.
     (r'^cluster_arn$',                'arn:aws:ecs:us-east-1:123456789012:cluster/example-cluster'),
     (r'^vpc_cidr$',                   '10.0.0.0/16'),
     (r'^arn$',                        'arn:aws:wafv2:us-east-1:123456789012:global/webacl/example-acl/12345678-1234-1234-1234-123456789012'),
