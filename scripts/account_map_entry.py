@@ -46,7 +46,8 @@ def header_lines(lines):
         while stack and stack[-1][0] >= indent:
             stack.pop()
         stack.append((indent, m.group(2)))
-        if tuple(k for _, k in stack) == MAP_PATH and not m.group(3).strip():
+        value = re.sub(r"(^|\s)#.*$", "", m.group(3)).strip()
+        if tuple(k for _, k in stack) == MAP_PATH and not value:
             found.append(i)
     return found
 
@@ -121,7 +122,9 @@ def run(mode, path, account, account_id=""):
     if mode == "check":
         return f"account '{account}' will be added to the account map ({account_id})"
 
-    eol = "\r\n" if lines[last].endswith("\r\n") else "\n"
+    # The file's own line ending: the first line that has one (the last entry
+    # may be the file's last line, with none).
+    eol = next(("\r\n" if ln.endswith("\r\n") else "\n" for ln in lines if ln.endswith("\n")), "\n")
     if not lines[last].endswith(("\n", "\r")):
         lines[last] += eol
     lines.insert(last + 1, f'{" " * indent}{account}: "{account_id}"{eol}')
