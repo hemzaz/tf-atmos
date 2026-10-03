@@ -14,7 +14,7 @@
     "Simple Fetch MCP": {
       "command": "npx",
       "args": [
-        "-y", 
+        "-y",
         "mcp-fetch-server@latest"
       ]
     },

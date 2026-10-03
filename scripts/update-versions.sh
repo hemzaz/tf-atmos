@@ -72,14 +72,14 @@ get_current_version() {
 fetch_latest_version() {
   local tool=$1
   local tool_key="${tool}"
-  
+
   if [[ "$MODE" == "lts" ]]; then
     tool_key="${tool}_LTS"
   fi
-  
+
   local api_info=""
   local pattern=""
-  
+
   # Lookup API info based on tool (bash 3.x compatible)
   case "$tool_key" in
     "TERRAFORM_VERSION"|"TERRAFORM_VERSION_LTS")
@@ -115,31 +115,31 @@ fetch_latest_version() {
       return 1
       ;;
   esac
-  
+
   # Special handling for Copier which uses a direct command rather than a URL
   if [[ "$tool" == "COPIER_VERSION" ]]; then
     echo -e "${BLUE}Fetching latest version for $tool from PyPI...${RESET}" >&2
     local result=$(eval "$api_info")
-    
+
     if [[ -z "$result" ]]; then
       echo -e "${YELLOW}Could not determine latest version for $tool${RESET}" >&2
       return 1
     fi
-    
+
     echo "$result"
     return 0
   fi
-  
+
   # Standard handling for other tools
   echo -e "${BLUE}Fetching latest version for $tool from $api_info...${RESET}" >&2
-  
+
   local result=$(curl -s "$api_info" | grep -Eo "$pattern" | head -1 | sed -E 's/.*([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
-  
+
   if [[ -z "$result" ]]; then
     echo -e "${YELLOW}Could not determine latest version for $tool${RESET}" >&2
     return 1
   fi
-  
+
   echo "$result"
 }
 
@@ -148,12 +148,12 @@ update_version() {
   local tool=$1
   local new_version=$2
   local current_version=$(get_current_version "$tool")
-  
+
   if [[ "$current_version" == "$new_version" ]]; then
     echo -e "${GREEN}$tool is already at version $new_version${RESET}"
     return 0
   fi
-  
+
   if [[ "$CHECK_ONLY" == "true" ]]; then
     if [[ "$current_version" == "Not set" ]]; then
       echo -e "${YELLOW}$tool is not set, latest version is $new_version${RESET}"
@@ -162,7 +162,7 @@ update_version() {
     fi
     return 0
   fi
-  
+
   if [[ "$current_version" == "Not set" ]]; then
     echo -e "${YELLOW}Adding $tool=$new_version to .atmos.env${RESET}"
     echo "$tool=$new_version" >> "$ENV_FILE"
@@ -176,13 +176,13 @@ update_version() {
 # Process a single tool
 process_tool() {
   local tool=$1
-  
+
   # Validate tool name
   if ! grep -q "^$tool=" "$ENV_FILE" && [[ "$CHECK_ONLY" == "false" ]] && [[ "$MODE" != "specific" ]]; then
     echo -e "${YELLOW}Warning: $tool not found in .atmos.env file${RESET}"
     # Don't return an error, as we'll add it if updating
   fi
-  
+
   if [[ "$MODE" == "specific" ]]; then
     if [[ -z "$VERSION" ]]; then
       echo -e "${RED}Error: Must specify a version with -v/--version when using specific mode${RESET}"
@@ -202,7 +202,7 @@ process_tool() {
 process_tools() {
   local success_count=0
   local fail_count=0
-  
+
   for tool in "${TOOLS[@]}"; do
     if process_tool "$tool"; then
       ((success_count++))
@@ -210,7 +210,7 @@ process_tools() {
       ((fail_count++))
     fi
   done
-  
+
   echo
   echo -e "${GREEN}Successfully processed $success_count tool(s)${RESET}"
   if [[ $fail_count -gt 0 ]]; then
@@ -226,37 +226,37 @@ show_all_tools() {
   for tool in $TOOL_CATEGORY_CORE; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
-  
+
   echo
   echo -e "${BOLD}Security Tools:${RESET}"
   for tool in $TOOL_CATEGORY_SECURITY; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
-  
+
   echo
   echo -e "${BOLD}AWS Tools:${RESET}"
   for tool in $TOOL_CATEGORY_AWS; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
-  
+
   echo
   echo -e "${BOLD}Terraform Providers:${RESET}"
   for tool in $TOOL_CATEGORY_PROVIDERS; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
-  
+
   echo
   echo -e "${BOLD}CI/CD Tools:${RESET}"
   for tool in $TOOL_CATEGORY_CICD; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
-  
+
   echo
   echo -e "${BOLD}Templating Tools:${RESET}"
   for tool in $TOOL_CATEGORY_TEMPLATING; do
     echo -e "${BLUE}$tool${RESET}: $(get_current_version "$tool")"
   done
-  
+
   echo
   echo -e "Use ${YELLOW}$0 <tool_name>${RESET} to update a specific tool or ${YELLOW}$0 -g <group>${RESET} to update a group of tools."
 }
@@ -293,7 +293,7 @@ while [[ $# -gt 0 ]]; do
       BATCH_MODE=true
       group="$2"
       tools_string=""
-      
+
       case "$group" in
         "core")
           tools_string="$TOOL_CATEGORY_CORE"
@@ -321,7 +321,7 @@ while [[ $# -gt 0 ]]; do
           exit 1
           ;;
       esac
-      
+
       # Split the string into array (bash 3.x compatible)
       IFS=' ' read -ra TOOLS <<< "$tools_string"
       shift 2
