@@ -9,8 +9,9 @@ stacks the same way):
   (default)        stacks a hosted runner deploys, plans and checks: every stack
                    except those whose terraform instances ALL set
                    settings.github.actions_enabled: false (fnx-core-root,
-                   fnx-local-*, fnx-fixtures-*). terraform-cd.yml, and
-                   drift-detection.yml's identical inline rule.
+                   fnx-local-*, fnx-fixtures-*). terraform-cd.yml and
+                   drift-detection.yml. Every selected stack's stage must be
+                   in STAGE_ORDER, or CD could not place it in the promotion.
   --check STACK    exit 1 with an ::error:: unless STACK is in that list
                    (workflow_dispatch inputs of terraform-cd.yml and
                    disaster-recovery.yml).
@@ -18,7 +19,8 @@ stacks the same way):
                    stages in PLAN_SWEEP_EXCLUDED_STAGES.
 
 Order: settings.context.stage by STAGE_ORDER (dev, staging, prod), other
-stages after them, ties by stack name.
+stages (plan-sweep's fixtures) after them, ties by stack name. A selected stack
+without exactly one stage is an error in both list modes.
 """
 import argparse
 import json
@@ -59,6 +61,14 @@ def ci_disabled(config: dict) -> bool:
 
 
 def ordered(stacks: dict, names) -> list:
+    """`names` by stage rank, then name; ValueError for a stack without exactly one stage."""
+    names = list(names)
+    for name in names:
+        if stage(stacks[name]) is None:
+            raise ValueError(
+                f"{name!r} has no single settings.context.stage (no terraform instances, or mixed stages)"
+            )
+
     def key(name):
         s = stage(stacks[name])
         return (STAGE_ORDER.index(s) if s in STAGE_ORDER else len(STAGE_ORDER), name)
@@ -67,13 +77,21 @@ def ordered(stacks: dict, names) -> list:
 
 
 def ci_stacks(stacks: dict) -> list:
-    return ordered(stacks, (name for name, config in stacks.items() if not ci_disabled(config)))
+    """The CI stacks in promotion order; ValueError for a stage outside STAGE_ORDER."""
+    names = ordered(stacks, (name for name, config in stacks.items() if not ci_disabled(config)))
+    for name in names:
+        if stage(stacks[name]) not in STAGE_ORDER:
+            raise ValueError(
+                f"{name!r} has stage {stage(stacks[name])!r}, which is not in STAGE_ORDER {STAGE_ORDER}: "
+                "add it to STAGE_ORDER in workflows/scripts/common/ci-stacks.py where it belongs in the "
+                "promotion, or CD cannot order it"
+            )
+    return names
 
 
 def plan_sweep_stacks(stacks: dict) -> list:
-    return ordered(
-        stacks, (name for name, config in stacks.items() if stage(config) not in PLAN_SWEEP_EXCLUDED_STAGES)
-    )
+    names = [name for name, config in stacks.items() if stage(config) not in PLAN_SWEEP_EXCLUDED_STAGES]
+    return ordered(stacks, names)
 
 
 def check(stacks: dict, name: str) -> str:
@@ -105,7 +123,11 @@ def main() -> int:
             return 1
         print(args.check)
         return 0
-    names = plan_sweep_stacks(stacks) if args.plan_sweep else ci_stacks(stacks)
+    try:
+        names = plan_sweep_stacks(stacks) if args.plan_sweep else ci_stacks(stacks)
+    except ValueError as error:
+        print(f"::error::{error}")
+        return 1
     if not names:
         print("::error::no stacks selected", file=sys.stderr)
         return 1
