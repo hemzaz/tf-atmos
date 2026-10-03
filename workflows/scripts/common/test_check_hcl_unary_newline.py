@@ -131,6 +131,18 @@ class Hits(unittest.TestCase):
     def test_negative_number_literal(self):
         self.assertTrue(hits(paren("-1", "* 2")))
 
+    def test_attribute_or_index_continuing_on_the_next_line(self):
+        for lines, op in (
+            (("!var", ".b"), "."),
+            (("-var", ".b"), "."),
+            (("!var.l", "[0]"), "["),
+            (("!var.l", "[*].b"), "["),
+            (("!(var.a)", ".b"), "."),
+            (("!f(a)", ".b"), "."),
+        ):
+            with self.subTest(lines=lines):
+                self.assertEqual(hits(paren(*lines)), [(3, 4, op)])
+
     def test_blank_and_comment_lines_between(self):
         self.assertTrue(hits(paren("!a", "", "&& c")))
         self.assertTrue(hits(paren("!a # why", "# more", "&& c")))
@@ -241,6 +253,17 @@ class Cli(unittest.TestCase):
 
     def test_missing_path_exits_two(self):
         self.assertEqual(self.run_main("/nonexistent/path")[0], 2)
+
+    def test_non_utf8_file_is_reported_not_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pathlib.Path(tmp, "latin1.tf").write_bytes(
+                b'locals {\n  x = "caf\xe9"\n}\n'
+            )
+            pathlib.Path(tmp, "bad.tf").write_text(paren("!a", "&& b"))
+            rc, out = self.run_main(tmp)
+            self.assertEqual(rc, 1)  # the hit elsewhere still wins
+            pathlib.Path(tmp, "bad.tf").unlink()
+            self.assertEqual(self.run_main(tmp)[0], 2)
 
 
 if __name__ == "__main__":
