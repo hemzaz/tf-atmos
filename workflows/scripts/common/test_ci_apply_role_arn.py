@@ -1,7 +1,14 @@
 """Tests for ci-apply-role-arn.py (stdlib only): python3 -m unittest discover -s workflows/scripts/common"""
+import contextlib
 import importlib.util
+import io
+import json
+import os
 import pathlib
+import subprocess
+import sys
 import unittest
+from unittest import mock
 
 _spec = importlib.util.spec_from_file_location(
     "ci_apply_role_arn", pathlib.Path(__file__).with_name("ci-apply-role-arn.py")
@@ -62,6 +69,32 @@ class PlanRoleArnTest(unittest.TestCase):
     def test_unknown_kind_fails(self):
         with self.assertRaisesRegex(ValueError, "unknown role kind"):
             ci_apply_role_arn.role_arn(ci(), "admin")
+
+
+class MainTest(unittest.TestCase):
+    def run_main(self, check_output, *argv):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"STACK": "fnx-core-root"}, clear=False), \
+                mock.patch.object(sys, "argv", ["ci-apply-role-arn.py", *argv]), \
+                mock.patch.object(ci_apply_role_arn.subprocess, "check_output", check_output), \
+                contextlib.redirect_stdout(out):
+            os.environ.pop("GITHUB_OUTPUT", None)
+            return ci_apply_role_arn.main(), out.getvalue()
+
+    def test_stack_without_iam_ci_fails_with_an_annotation(self):
+        def describe_fails(cmd):
+            raise subprocess.CalledProcessError(1, cmd)
+
+        for argv in ((), ("--kind", "plan")):
+            with self.subTest(argv=argv):
+                rc, out = self.run_main(describe_fails, *argv)
+                self.assertEqual(rc, 1)
+                self.assertEqual(out, "::error::fnx-core-root: no iam/ci instance (atmos describe failed)\n")
+
+    def test_resolved_role_is_printed(self):
+        rc, out = self.run_main(lambda cmd: json.dumps(ci(ci_apply_role_enabled=False)), "--kind", "plan")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, "fnx-core-root: arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan\n")
 
 
 if __name__ == "__main__":

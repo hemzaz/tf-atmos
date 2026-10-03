@@ -51,9 +51,13 @@ def main() -> int:
     if not stack:
         print("STACK is required", file=sys.stderr)
         return 1
-    ci = json.loads(subprocess.check_output(
-        ["atmos", "describe", "component", "iam/ci", "-s", stack,
-         "--process-functions=false", "--provenance=false", "--format", "json"]))
+    try:
+        ci = json.loads(subprocess.check_output(
+            ["atmos", "describe", "component", "iam/ci", "-s", stack,
+             "--process-functions=false", "--provenance=false", "--format", "json"]))
+    except subprocess.CalledProcessError:
+        print(f"::error::{stack}: no iam/ci instance (atmos describe failed)")
+        return 1
     try:
         arn = role_arn(ci, kind)
     except (KeyError, ValueError) as error:
