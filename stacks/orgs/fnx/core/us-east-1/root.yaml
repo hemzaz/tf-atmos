@@ -19,7 +19,7 @@ import:
   - catalog/backend/defaults
 
 vars:
-  region: us-east-1
+  region: "{{ .settings.tfstate.region }}"
 
 settings:
   environment:
