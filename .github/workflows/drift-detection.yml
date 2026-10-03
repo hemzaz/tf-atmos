@@ -78,7 +78,7 @@ jobs:
           if only_stack:
               checked = subprocess.run([*helper, "--check", only_stack], capture_output=True, text=True)
               if checked.returncode != 0:
-                  raise SystemExit(checked.stdout.strip() or checked.stderr.strip())
+                  raise SystemExit(checked.stderr.strip())
               selected = [only_stack]
           else:
               # Sorted by name, as this matrix always was (its jobs run in parallel).
