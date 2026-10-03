@@ -94,7 +94,7 @@ resource "aws_db_subnet_group" "main" {
 }
 
 # Enhanced security group with detailed rules
-#trivy:ignore:AWS-0104 Egress is unrestricted by policy (owner decision): the 443 egress reaches AWS APIs; ingress admits only allowed_security_groups, never a /0 CIDR
+#trivy:ignore:AWS-0104 Egress is unrestricted by policy (owner decision): the 443 egress reaches AWS APIs; ingress admits only allowed_security_groups or custom_ingress_rules CIDRs, never a /0
 resource "aws_security_group" "rds" {
   name        = "${var.tags["Environment"]}-${var.identifier}-sg"
   description = "Security group for ${var.identifier} RDS instance"
