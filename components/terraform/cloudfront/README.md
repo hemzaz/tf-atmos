@@ -71,8 +71,12 @@ logging v2 to S3, and optional Route 53 alias records.
     (`CannotUpdateEntityWhileInUse`), so any endpoint change (ARN, ports, protocol, TLS versions)
     replaces it instead: create a new one, named `<Environment>-<name>-<origin_id>-<config
     hash>` so the two names never collide, repoint the distribution, delete the old one. Each step
-    waits for deployment, so expect a long apply. Not verified against AWS: whether a second VPC
-    origin for the same ARN may exist while the old one is still there;
+    waits for deployment (`wait_for_deployment`, the default), so expect a long apply. With
+    `wait_for_deployment = false`, deleting the old VPC origin can fail as still in use, because
+    UpdateDistribution returns while the distribution is still InProgress. Not verified against
+    AWS: whether a second VPC origin for the same ARN may exist while the old one is still there.
+    If AWS refuses it, add the origin under a new `origin_id`, apply, then remove the old entry:
+    the same create, switch, delete order, without replacing the same key;
   - replacing the ALB (alb component, addons layer, e.g. a name or subnet change) while the VPC
     origin (this component, services layer) still points at it may be refused by AWS, or leave the
     origin broken until this component is re-applied: plan the cloudfront instance right after
