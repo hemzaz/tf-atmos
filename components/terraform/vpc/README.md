@@ -24,6 +24,10 @@ names follow Cloud Posse `aws-vpc` where an input maps one to one.
   The local (emulator) stacks keep names.
 - Empty `flow_logs_kms_key_arn` makes the component create its own key; a caller's key needs a
   `logs.<region>.amazonaws.com` statement scoped by `kms:EncryptionContext:aws:logs:arn`.
+- `flow_logs_s3_backup` adds a second flow log into an archive bucket (bucket policy for
+  `delivery.logs.amazonaws.com`, as Cloud Posse's `vpc-flow-logs-s3-bucket`). A caller
+  `flow_logs_kms_key_arn` must grant that service `kms:GenerateDataKey*`/`kms:Encrypt`; kms/main's
+  `allow_log_delivery` grants only `kms:Decrypt`, so with kms/main the S3 copy fails to deliver.
 - `map_public_ip_on_launch` defaults to `false` (Cloud Posse defaults to `true`).
 - `manage_default_security_group` (default `true`) strips every rule from the AWS default SG.
 - There is no ElastiCache subnet tier; caches use `private_subnet_ids`.

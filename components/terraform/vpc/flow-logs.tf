@@ -20,10 +20,12 @@ resource "aws_kms_key" "flow_logs" {
   enable_key_rotation     = true
 
   # Account administration plus CloudWatch Logs, which cannot use the key without a grant
-  # here. A key policy cannot reference its own ARN; "*" means "this key".
+  # here. A key policy cannot reference its own ARN; "*" means "this key". With
+  # flow_logs_s3_backup, also the log delivery service that writes the S3 copy into
+  # the SSE-KMS archive bucket (Cloud Posse's vpc-flow-logs-s3-bucket key statement).
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Sid       = "EnableAccountAdministration"
         Effect    = "Allow"
@@ -49,7 +51,25 @@ resource "aws_kms_key" "flow_logs" {
           }
         }
       },
-    ]
+      ], var.flow_logs_s3_backup ? [
+      {
+        Sid       = "AllowLogDeliveryS3Archive"
+        Effect    = "Allow"
+        Principal = { Service = "delivery.logs.amazonaws.com" }
+        Action = [
+          "kms:Encrypt*",
+          "kms:Decrypt*",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*",
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
+          ArnLike      = { "aws:SourceArn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:*" }
+        }
+      },
+    ] : [])
   })
 
   tags = merge(
@@ -70,7 +90,7 @@ resource "aws_kms_alias" "flow_logs" {
 
 # CloudWatch Log Group for Flow Logs
 resource "aws_cloudwatch_log_group" "flow_logs" {
-  #checkov:skip=CKV_AWS_338:Retention is an input (flow_logs_retention_days) and a per-stack cost decision; flow_logs_s3_backup keeps a year in S3
+  #checkov:skip=CKV_AWS_338:CloudWatch retention is var.flow_logs_retention_days (default 30), a per-stack cost decision; set flow_logs_s3_backup for a year in S3 (aws_flow_log.s3)
   count = var.vpc_flow_logs_enabled ? 1 : 0
 
   name              = "/aws/vpc/flowlogs/${aws_vpc.main.id}"
@@ -428,6 +448,114 @@ resource "aws_s3_bucket_lifecycle_configuration" "flow_logs" {
       days_after_initiation = 7
     }
   }
+}
+
+# Lets the log delivery service write the S3 copy, as Cloud Posse's
+# vpc-flow-logs-s3-bucket does (AWSLogDeliveryWrite / AWSLogDeliveryAclCheck,
+# scoped to this account), plus TLS-only access. No s3:x-amz-acl condition:
+# the bucket keeps S3's default BucketOwnerEnforced ownership, under which
+# delivery sends no ACL header and such a condition would deny every write.
+data "aws_iam_policy_document" "flow_logs_bucket" {
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
+
+  statement {
+    sid       = "AWSLogDeliveryWrite"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.flow_logs[0].arn}/AWSLogs/${data.aws_caller_identity.current.account_id}/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
+    }
+  }
+
+  statement {
+    sid       = "AWSLogDeliveryAclCheck"
+    actions   = ["s3:GetBucketAcl"]
+    resources = [aws_s3_bucket.flow_logs[0].arn]
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:*"]
+    }
+  }
+
+  statement {
+    sid       = "ForceSSLOnlyAccess"
+    effect    = "Deny"
+    actions   = ["s3:*"]
+    resources = [aws_s3_bucket.flow_logs[0].arn, "${aws_s3_bucket.flow_logs[0].arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "flow_logs" {
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
+
+  bucket = aws_s3_bucket.flow_logs[0].id
+  policy = data.aws_iam_policy_document.flow_logs_bucket[0].json
+
+  depends_on = [aws_s3_bucket_public_access_block.flow_logs]
+}
+
+# The long-term copy: a second flow log of the same VPC and traffic into the
+# archive bucket (90 days Standard, then IA, Glacier, expiry at 365). S3
+# destinations need no IAM role; delivery.logs.amazonaws.com writes under the
+# bucket policy above and encrypts with local.flow_logs_kms_key_arn.
+resource "aws_flow_log" "s3" {
+  count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
+
+  vpc_id                   = aws_vpc.main.id
+  traffic_type             = var.vpc_flow_logs_traffic_type
+  log_destination_type     = "s3"
+  log_destination          = aws_s3_bucket.flow_logs[0].arn
+  max_aggregation_interval = var.vpc_flow_logs_max_aggregation_interval
+  log_format               = aws_flow_log.main[0].log_format
+
+  tags = merge(
+    var.tags,
+    {
+      Name        = "${var.tags["Environment"]}-vpc-flow-log-s3"
+      Purpose     = "network-traffic-archive"
+      TrafficType = var.vpc_flow_logs_traffic_type
+    }
+  )
+
+  depends_on = [aws_s3_bucket_policy.flow_logs]
 }
 
 # Data source for current account ID
