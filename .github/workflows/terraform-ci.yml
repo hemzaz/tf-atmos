@@ -1,10 +1,10 @@
 # Pull request / merge queue checks with Atmos Native CI.
 # Required configuration:
 #   vars.AWS_REGION          region for OIDC credentials (defaults to us-east-1)
-#   vars.AWS_PLAN_ROLE_ARN   read-only IAM role trusted for this repo's GitHub OIDC tokens
-#   (plan jobs are skipped while it is unset)
-#   vars.AWS_PROD_PLAN_ROLE_ARN  production's own plan role (master subject only), used for the
-#                                master-only (prod) plans on push; required once prod is planned
+#   vars.AWS_PLAN_ROLE_ARN   any non-empty value marks AWS as configured (plan jobs are
+#                            skipped while it is unset). Each plan assumes its own stack's
+#                            iam/ci plan role, derived by workflows/scripts/common/ci-apply-role-arn.py
+#                            --kind plan, not this variable's value.
 # Terraform and scanners are installed by the Atmos toolchain (dependencies.tools).
 #
 # Supply chain pins:
@@ -20,7 +20,7 @@
 #     Regenerate locks with `atmos workflow providers-lock -f providers`.
 #
 # GitHub-side controls this file relies on (they cannot be expressed in YAML):
-#   - Plan role trust (AWS_PLAN_ROLE_ARN, read-only): aud = sts.amazonaws.com, sub =
+#   - Plan role trust (each stack's iam/ci <prefix>-plan, read-only): aud = sts.amazonaws.com, sub =
 #     repo:<org>/<repo>:pull_request (plus :ref:refs/heads/<default branch> for the
 #     drift and DR workflows). It must never be the deploy role, since plans run PR code.
 #     Production's plan role trusts only the default-branch sub (owner decision D3):
@@ -559,9 +559,7 @@ jobs:
               if skipped:
                   print(f"::notice::Not planned (settings.github.actions_enabled: false): {', '.join(skipped)}")
               matrix["include"] = [
-                  dict(i, master_only=not pr_plans_enabled(
-                      settings.get(i.get("stack"), {}).get(i.get("component"))))
-                  for i in matrix["include"]
+                  i for i in matrix["include"]
                   if (i.get("stack"), i.get("component")) not in excluded
                   and keep_for_event(settings, (i.get("stack"), i.get("component")))
               ]
@@ -587,8 +585,7 @@ jobs:
                       continue
                   if pr_plans_enabled(spec) == on_push:
                       continue
-                  include.append({"stack": stack, "component": component,
-                                  "master_only": not pr_plans_enabled(spec)})
+                  include.append({"stack": stack, "component": component})
           with open(out_file, "a") as out:
               out.write(f"matrix={json.dumps({'include': include})}\n")
           print(f"{len(include)} instances")
@@ -621,17 +618,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Master-only stacks (production) are planned with THEIR plan role,
-      # vars.AWS_PROD_PLAN_ROLE_ARN: the only principal the prod read-only
-      # state role trusts, and itself trusted only for the master subject.
-      - name: Require the production plan role
-        if: matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN == ''
-        run: |
-          echo "::error::vars.AWS_PROD_PLAN_ROLE_ARN (fnx-prod-production's iam/ci ci_plan_role_arn) is not set"
-          exit 1
+      # Every stack is planned with ITS OWN iam/ci plan role, in its own
+      # account: the only principal its stage's read-only state role trusts.
+      # Production's is trusted only for the master subject (D3).
+      - id: role
+        name: Resolve the stack's CI plan role
+        env:
+          STACK: ${{ matrix.stack }}
+        run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind plan
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ matrix.master_only && vars.AWS_PROD_PLAN_ROLE_ARN || vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # TFSTATE_ACCESS=read makes the stack backend assume a READ-only state
       # role (stacks/orgs/fnx/_defaults.yaml): the prod one for a prod stack,

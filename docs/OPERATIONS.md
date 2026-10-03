@@ -71,11 +71,15 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 
 | Variable | Value |
 |----------|-------|
-| `AWS_PLAN_ROLE_ARN` | a dev or staging `iam/ci` `ci_plan_role_arn`: PR plans, dev/staging drift, DR checks. Unset = AWS jobs skip |
-| `AWS_PROD_PLAN_ROLE_ARN` | prod's `iam/ci` `ci_plan_role_arn`: prod plans on master, prod drift |
+| `AWS_PLAN_ROLE_ARN` | the "AWS is configured" switch: unset = AWS jobs skip. Any non-empty value enables them (by convention a `ci_plan_role_arn`); no job assumes it |
 | `AWS_REGION` | optional override (default `us-east-1`) |
 
-CD derives each stack's apply role from its `iam/ci` (`workflows/scripts/common/ci-apply-role-arn.py`).
+No role ARN is a variable. Every AWS job assumes its stack's own `iam/ci` role, in that stack's
+account, derived by `workflows/scripts/common/ci-apply-role-arn.py` as
+`arn:aws:iam::<settings.environment.account_id>:role/<ci_role_name_prefix>-<kind>`: `--kind plan`
+for PR/master plans, drift and DR checks; `--kind apply` (default) for CD. This is Cloud Posse's
+per-account planner/terraform role pair (`github-oidc-role`); moving to an account map changes only
+the script's `account_id()`. `AWS_PROD_PLAN_ROLE_ARN` is gone; delete it from the repository.
 For CI across several accounts from one OIDC provider, see
 [examples/github-oidc-hub-spoke](../examples/github-oidc-hub-spoke/README.md).
 
