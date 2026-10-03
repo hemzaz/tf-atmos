@@ -22,6 +22,13 @@
 # ...got refs/tags/v0.74.0" (trivy). Keep the `v`. terraform, go-yamllint,
 # jq, aws-cli and checkov are verified differently (or their upstream tags
 # have no `v`) and are confirmed to install correctly unprefixed.
+#
+# Every trivy run passes --skip-check-update. Without it trivy downloads the
+# floating check bundle mirror.gcr.io/aquasec/trivy-checks:2 at run time (580
+# checks vs the 563 embedded in v0.74.0), so the gate and the baseline changed
+# with no change in this repo. With it, the checks are the ones embedded in the
+# pinned binary (or a bundle already in the local trivy cache; CI starts empty):
+# new checks arrive by bumping the pin, with a baseline regeneration.
 workflows:
   lint:
     description: Lint Terraform code, YAML files and run a Terraform security scan
@@ -58,7 +65,7 @@ workflows:
               python3 scripts/check-hcl-unary-newline.py components/terraform modules
           - name: security-scan
             type: shell
-            command: trivy config --skip-dirs '**/tests' --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
+            command: trivy config --skip-check-update --skip-dirs '**/tests' --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
       # No-op when the plugins are already installed (CI runs tflint-init first,
       # with a token for GitHub rate limits, so this step needs no network).
       - name: tflint-plugins
@@ -388,7 +395,7 @@ workflows:
           - name: trivy
             type: shell
             command: >-
-              trivy config --skip-dirs '**/tests' --format sarif --output reports/trivy.sarif
+              trivy config --skip-check-update --skip-dirs '**/tests' --format sarif --output reports/trivy.sarif
               --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore.yaml components/terraform
           # Checkov only knows check severities with a Prisma Cloud API key; without
           # one, a failed check matches neither list and therefore fails the gate.
@@ -462,13 +469,36 @@ workflows:
           - name: trivy
             type: shell
             command: >-
-              trivy config --skip-dirs '**/tests' --format sarif --output reports/trivy.sarif
+              trivy config --skip-check-update --skip-dirs '**/tests' --format sarif --output reports/trivy.sarif
               --severity HIGH,CRITICAL --exit-code 0 components/terraform
           - name: checkov
             type: shell
             command: >-
               checkov --directory components/terraform --framework terraform --skip-path '/tests/'
               --output sarif --output-file-path reports --soft-fail --quiet
+      # checkov writes each inline `#checkov:skip=<ID>:<reason>` as a SARIF result
+      # with `suppressions`, and GitHub code scanning lists those as open alerts
+      # (76 of them). The skip and its reason live beside the code; drop them
+      # from the published SARIF so the alerts are only real findings.
+      - name: drop-suppressed-sarif-results
+        type: script
+        interpreter: python3
+        script: |
+          import glob
+          import json
+
+          for path in sorted(glob.glob("reports/*.sarif")):
+              with open(path) as f:
+                  sarif = json.load(f)
+              dropped = 0
+              for run in sarif.get("runs", []):
+                  results = run.get("results") or []
+                  kept = [r for r in results if not r.get("suppressions")]
+                  dropped += len(results) - len(kept)
+                  run["results"] = kept
+              with open(path, "w") as f:
+                  json.dump(sarif, f)
+              print(f"{path}: dropped {dropped} suppressed result(s)")
 
   security-baseline:
     description: Regenerate the PR-gate baselines (.trivyignore.yaml, .checkov.baseline) from the current code
@@ -484,7 +514,7 @@ workflows:
         type: shell
         output: none
         command: >-
-          trivy config --skip-dirs '**/tests' --format json --output reports/trivy-baseline.json
+          trivy config --skip-check-update --skip-dirs '**/tests' --format json --output reports/trivy-baseline.json
           --severity HIGH,CRITICAL --exit-code 0 components/terraform
       - name: trivy-baseline
         type: script
