@@ -33,6 +33,9 @@ One Secrets Manager secret per `secrets` entry, with an optional value, resource
     instance fed that way fails the sweep on "needs a non-empty value"; the dropped name is listed.
   - Atmos debug/trace logging can print the component environment: don't run such an instance with
     `--logs-level=Debug` or `Trace`.
+  - The weak-pattern check reads a JSON object's top-level values only. A nested object or list
+    value is checked as its re-encoded JSON, key names included, so a key such as `db_password` inside
+    one can be reported as a weak pattern: keep `secret_data` JSON flat.
 - Neither: the secret is created empty, for an operator or application to fill.
 - `secrets[*].secret_data` was removed and is rejected.
 

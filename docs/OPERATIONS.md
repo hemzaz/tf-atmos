@@ -192,9 +192,10 @@ Each `stacks/catalog/templates/<t>.yaml` has a never-deployed stack `fnx-fixture
 (`stacks/orgs/fnx/fixtures/us-east-1/<name>.yaml`; short names, since templates put the environment
 into length-limited AWS names), so lint, validate-all and plan-sweep check templates no real stack
 imports. A fixture listed in `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) has
-the listed checks' failures printed as `KNOWN-BROKEN` without failing; a template port PR removes
-its entry, which makes the fixture strict. plan-sweep does not sweep a fixture whose entry is `ALL`
-(check-dependencies still reports it); narrowing or removing the entry puts it back in the sweep.
+the listed checks' failures printed as `KNOWN-BROKEN` without failing (`ALL` lists every check); a
+template port PR removes its entry, which makes the fixture strict. plan-sweep skips a fixture whose
+entry is `ALL` with one `SKIP` line, even when you name it on the command line (check-dependencies
+still reports it); to sweep it, narrow the entry to the checks that still fail.
 
 ## Lambda packages
 
@@ -259,8 +260,9 @@ stacks' `security.yaml` (advisory until branch protection requires code-owner re
   validate-all, plan-sweep and terraform-test), so an unlocked provider fails init.
   `atmos.yaml` sets `init.upgrade: never` for the same reason. After a `required_providers`
   change, or to take newer releases within the constraints:
-  `atmos workflow providers-lock -f providers` (`UPGRADE=false` keeps the locked versions), then
-  commit the locks. A new major is a deliberate constraint change; Dependabot ignores majors.
+  `atmos workflow providers-lock -f providers` (`UPGRADE=false` keeps the locked versions; a
+  `COMPONENTS="kms vpc"` subset run defaults to `UPGRADE=false`, so add `UPGRADE=true` to take newer
+  releases there), then commit the locks. A new major is a deliberate constraint change; Dependabot ignores majors.
 - **Atmos image.** Every workflow runs `ghcr.io/cloudposse/atmos:<tag>@sha256:<digest>`, one
   literal repeated (there is no `vars` override: a digest needs a fixed tag). Dependabot bumps the
   copy in `.github/atmos-image/Dockerfile`; run `bash scripts/sync-atmos-image.sh` on its branch

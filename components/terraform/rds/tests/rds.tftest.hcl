@@ -44,6 +44,16 @@ run "default_has_no_custom_ingress_rules" {
   }
 }
 
+run "retired_ca_cert_identifier_is_rejected" {
+  command = plan
+
+  variables {
+    ca_cert_identifier = "rds-ca-2019"
+  }
+
+  expect_failures = [var.ca_cert_identifier]
+}
+
 run "custom_ingress_open_to_everywhere_is_rejected" {
   command = plan
 

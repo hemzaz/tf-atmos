@@ -82,16 +82,26 @@ WORK="$(mktemp -d)"
 # no lock yet (a new component) gets a discovery lock from step 1's init; it is
 # marked with $WORK/new-<root> and removed on failure rather than left behind.
 cleanup() {
-  local rc=$?
+  local rc=$? restored=0 removed=0
   if [ "$rc" -ne 0 ]; then
     for c in "${roots[@]}"; do
       if [ -f "$WORK/prev-$c.lock.hcl" ]; then
         mv -f "$WORK/prev-$c.lock.hcl" "$TF_DIR/$c/.terraform.lock.hcl"
+        restored=$((restored + 1))
       elif [ -f "$WORK/new-$c" ]; then
         rm -f "$TF_DIR/$c/.terraform.lock.hcl"
+        removed=$((removed + 1))
       fi
     done
-    echo "providers-lock: failed; the previous lock files are restored" >&2
+    if [ "$restored" -gt 0 ] && [ "$removed" -gt 0 ]; then
+      echo "providers-lock: failed; $restored previous lock file(s) restored, $removed new lock file(s) removed" >&2
+    elif [ "$restored" -gt 0 ]; then
+      echo "providers-lock: failed; the previous lock files are restored" >&2
+    elif [ "$removed" -gt 0 ]; then
+      echo "providers-lock: failed; the new lock file(s) it had created were removed (no previous lock to restore)" >&2
+    else
+      echo "providers-lock: failed; no lock file had been changed" >&2
+    fi
   fi
   rm -rf "$WORK"
 }

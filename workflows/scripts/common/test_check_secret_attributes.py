@@ -66,6 +66,14 @@ class CheckSecretAttributesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_secret_attributes.allowed_attributes('variable "other" {\n  type = string\n}\n')
 
+    def test_nested_object_type_raises(self):
+        nested = (
+            'variable "secrets" {\n  type = map(object({\n    name = string\n'
+            '    rotation = object({\n      days = number\n    })\n  }))\n}\n'
+        )
+        with self.assertRaisesRegex(ValueError, "nests an object"):
+            check_secret_attributes.allowed_attributes(nested)
+
 
 if __name__ == "__main__":
     unittest.main()

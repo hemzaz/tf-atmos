@@ -32,6 +32,10 @@ def allowed_attributes(variables_tf: str) -> set[str]:
     )
     if match is None:
         raise ValueError(f'variable "{VARIABLE}" with a map(object({{...}})) type not found')
+    if "object(" in match.group(1):
+        # The match ends at the first `}))`, so a nested object would be cut
+        # short and its attributes read as the entry's own.
+        raise ValueError(f'variable "{VARIABLE}" nests an object(...) type, which this check cannot read')
     names = {m.group(1) for line in match.group(1).splitlines() if (m := ATTRIBUTE.match(line))}
     if not names:
         raise ValueError(f'variable "{VARIABLE}" declares no attributes')

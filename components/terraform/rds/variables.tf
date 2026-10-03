@@ -127,8 +127,9 @@ variable "ca_cert_identifier" {
   default     = null
 
   validation {
-    condition     = var.ca_cert_identifier == null || can(regex("^rds-ca-[a-z0-9-]+$", var.ca_cert_identifier))
-    error_message = "ca_cert_identifier must be an RDS CA identifier such as rds-ca-rsa2048-g1, or null."
+    # The CAs RDS issues today; rds-ca-2019 and rds-ca-2015 are retired.
+    condition     = var.ca_cert_identifier == null || contains(["rds-ca-rsa2048-g1", "rds-ca-rsa4096-g1", "rds-ca-ecc384-g1"], coalesce(var.ca_cert_identifier, "-"))
+    error_message = "ca_cert_identifier must be rds-ca-rsa2048-g1, rds-ca-rsa4096-g1, rds-ca-ecc384-g1, or null (retired CAs such as rds-ca-2019 are rejected)."
   }
 }
 
