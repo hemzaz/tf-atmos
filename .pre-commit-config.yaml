@@ -1,12 +1,29 @@
 # =============================================================================
-# Pre-commit Hooks Configuration for Terraform/Atmos Infrastructure
+# Pre-commit hooks: a fast local mirror of the CI gate
 # =============================================================================
-# Install: pre-commit install
-# Run manually: pre-commit run --all-files
-# Update: pre-commit autoupdate
+# The gate is CI (.github/workflows/terraform-ci.yml), which runs the Atmos
+# workflows in workflows/lint.yaml. terraform_fmt, yamllint, atmos validate
+# stacks and the HCL parse guard are the cheap, file-scoped part of it, with
+# CI's own flags. The other commit-stage hooks (file hygiene, check-yaml/json,
+# detect-secrets, flake8 E9/F, bandit, shellcheck errors) are local-only: CI
+# does not run them yet. The heavy parts (tflint over every component and
+# stack, checkov over components/terraform) are manual-stage hooks that run
+# the CI commands themselves:
+#
+#   pre-commit install                                  # once
+#   pre-commit run --all-files                          # commit stage, every file
+#   pre-commit run --hook-stage manual --all-files      # + the full lint gate and checkov
+#
+# Not here on purpose:
+# - terraform_docs: component READMEs are purpose + wiring + gotchas, never
+#   generated input/output tables (CLAUDE.md).
+# - terraform_validate / terraform_tflint (per directory): the atmos-lint hook
+#   runs the real tflint gate (instances with stack vars and every component
+#   directory); validate-all runs in CI.
+# - markdownlint, black, isort: CI enforces none of them.
 
 repos:
-  # General file checks
+  # File hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -14,11 +31,15 @@ repos:
         name: Trim trailing whitespace
       - id: end-of-file-fixer
         name: Fix end of files
+      # Helm chart templates are Go templates, not YAML.
       - id: check-yaml
         name: Check YAML syntax
-        args: ['--unsafe']  # Allow custom tags
+        args: ['--unsafe']  # Atmos YAML functions (!terraform.state, ...) are custom tags
+        exclude: '/charts/[^/]+/templates/'
+      # policies/*.json are templatefile() templates (unquoted ${...}), not JSON.
       - id: check-json
         name: Check JSON syntax
+        exclude: '^components/terraform/[^/]+/policies/'
       - id: check-added-large-files
         name: Check for large files
         args: ['--maxkb=1024']
@@ -34,8 +55,7 @@ repos:
       - id: check-executables-have-shebangs
         name: Check executables have shebangs
 
-  # Terraform formatting. exclude '/tests/' (and checkov's --skip-path): terraform
-  # test helper modules (e.g. eks/tests/unknown_subnet_ids) are not root modules.
+  # Same check as the lint gate's terraform-fmt step.
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.109.1
     hooks:
@@ -43,27 +63,17 @@ repos:
         name: Terraform format
         args:
           - --args=-recursive
-      - id: terraform_validate
-        exclude: '/tests/'
-        name: Terraform validate
-        args:
-          - --hook-config=--retry-once-with-cleanup=true
-      - id: terraform_docs
-        exclude: '/tests/'
-        name: Generate Terraform docs
-        args:
-          - --hook-config=--path-to-file=README.md
-          - --hook-config=--add-to-existing-file=true
-          - --hook-config=--create-file-if-not-exist=true
-      - id: terraform_tflint
-        exclude: '/tests/'
-        name: Terraform lint
-        args:
-          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
 
-  # Atmos stack configuration
   - repo: local
     hooks:
+      # The lint gate's yamllint step: same config (relaxed), same paths.
+      - id: yamllint
+        name: YAML lint (as the CI gate)
+        entry: yamllint -d relaxed
+        language: python
+        additional_dependencies: ['yamllint==1.38.0']
+        files: ^(stacks/|workflows/|atmos\.yaml$)
+        types: [yaml]
       - id: atmos-validate-stacks
         name: Atmos validate stacks
         entry: atmos validate stacks
@@ -77,6 +87,16 @@ repos:
         entry: python3 scripts/check-hcl-unary-newline.py
         language: system
         files: \.tf$
+      # Manual stage: the whole lint gate (fmt, yamllint, parse guard, tflint
+      # over every stack instance and component directory), exactly as CI runs
+      # it. Needs `atmos workflow tflint-init -f lint` once.
+      - id: atmos-lint
+        name: Atmos lint gate (as CI)
+        entry: atmos workflow lint -f lint
+        language: system
+        stages: [manual]
+        pass_filenames: false
+        always_run: true
       # The CI gate's checkov run (workflows/lint.yaml security-scan), same pin
       # and flags over the whole components/terraform directory. No
       # --skip-check: CI skips nothing beyond the inline #checkov:skip
@@ -101,39 +121,23 @@ repos:
           - --soft-fail-on=LOW,MEDIUM
           - --hard-fail-on=HIGH,CRITICAL
 
-  # Security scanning
+  # Secrets. .secrets.baseline records the audited false positives; refresh it
+  # with `detect-secrets scan --baseline .secrets.baseline` and audit new entries.
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
       - id: detect-secrets
         name: Detect secrets
         args: ['--baseline', '.secrets.baseline']
-        exclude: package-lock.json
+        exclude: '(package-lock\.json|\.terraform\.lock\.hcl)$'
 
-  # Python code quality
-  - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 26.5.1
-    hooks:
-      - id: black
-        name: Black Python formatter
-        language_version: python3
-        files: \.(py)$
-
+  # Python: correctness and security, not style.
   - repo: https://github.com/PyCQA/flake8
     rev: 7.3.0
     hooks:
       - id: flake8
         name: Flake8 linting
-        args: ['--max-line-length=120', '--extend-ignore=E203,W503']
-        files: \.(py)$
-
-  - repo: https://github.com/PyCQA/isort
-    rev: 9.0.1
-    hooks:
-      - id: isort
-        name: isort import sorting
-        args: ['--profile', 'black', '--line-length', '120']
-        files: \.(py)$
+        args: ['--select=E9,F']  # syntax errors and pyflakes; style is not gated
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
@@ -141,33 +145,17 @@ repos:
       - id: bandit
         name: Bandit security checks
         args: ['-ll', '--skip=B101,B601']
-        files: \.(py)$
 
-  # Shell script linting
+  # Shell scripts: errors only (warnings are style; actionlint shellchecks the
+  # workflow run blocks in CI).
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
         name: Shellcheck
-        args: ['--severity=warning']
+        args: ['--severity=error']
 
-  # YAML linting
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.38.0
-    hooks:
-      - id: yamllint
-        name: YAML lint
-        args: ['-d', '{extends: default, rules: {line-length: {max: 120}, document-start: disable}}']
-
-  # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.49.1
-    hooks:
-      - id: markdownlint
-        name: Markdown lint
-        args: ['--fix']
-
-  # Git commit message linting
+  # Conventional commit messages
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.18.0
     hooks:
@@ -175,19 +163,5 @@ repos:
         name: Check commit message
         stages: [commit-msg]
 
-# Global configuration
 default_language_version:
-  python: python3.11
-
-# CI configuration
-ci:
-  autofix_commit_msg: |
-    [pre-commit.ci] auto fixes from pre-commit.com hooks
-
-    for more information, see https://pre-commit.ci
-  autofix_prs: true
-  autoupdate_branch: ''
-  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
-  autoupdate_schedule: weekly
-  skip: [terraform_docs, terraform_tflint, checkov]
-  submodules: false
+  python: python3
