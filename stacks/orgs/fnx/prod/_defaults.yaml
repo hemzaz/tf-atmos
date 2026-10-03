@@ -23,18 +23,6 @@ settings:
     account: prod
     # From the account map (stacks/orgs/fnx/_defaults.yaml), keyed by `account`.
     account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
-    aws_profile: "prod"
-    instance_type_default: "m5.large"
-    rds_instance_class_default: "db.r5.large"
-    log_retention_days: 90
-    backup_retention_days: 30
-    enable_deletion_protection: true
-    enable_multi_az: true
-    enable_encryption: true
-    enable_enhanced_monitoring: true
-    enable_performance_insights: true
-    performance_insights_retention: 7
-    min_availability_zones: 3
   context:
     stage: prod
   # Owner decision D3: production is planned from master only. terraform-ci.yml

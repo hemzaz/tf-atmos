@@ -22,9 +22,6 @@ vars:
   region: "{{ .settings.tfstate.region }}"
 
 settings:
-  environment:
-    description: "Management account - organization-wide shared infrastructure"
-    namespace: root
   context:
     tenant: fnx
     environment: root
