@@ -53,21 +53,21 @@
 #       web_acl_id: !terraform.state waf/cdn .arn   # a scope CLOUDFRONT waf instance
 #       enable_spa_fallback: true
 #
-#   cdn/app:                          # ALB-backed app, no S3 origin
+#   cdn/app:                          # internal ALB as a VPC origin, no S3 origin
 #     metadata:
 #       component: cloudfront
 #       inherits: [cloudfront/defaults]
 #     dependencies:
 #       components:
 #         - component: acm/main
+#         - component: alb/app                # internal: true, private subnets
 #     vars:
 #       name: app
 #       custom_origins:
 #         - origin_id: alb
 #           domain_name: origin.app.example.com   # a name the ALB certificate covers
-#           custom_headers:                       # the ALB listener rule requires it
-#             - name: X-Origin-Verify
-#               value: "<secret from Secrets Manager/SSM, never a literal>"
+#           vpc_origin:
+#             arn: !terraform.state alb/app .alb_arn
 #       default_origin_id: alb
 #       allowed_methods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
 #       cache_policy_id: CachingDisabled
