@@ -13,13 +13,19 @@ every instance with backend_type s3:
   - backend.key is exactly "terraform.tfstate" (every instance uses it; a key
     like "fnx-dev-x/terraform.tfstate" would put prod state under "*/fnx-dev-*").
 An instance breaking any of these lands its state where another stage's role can read
-or write it (or where its own cannot). Exits 1 on any violation.
+or write it (or where its own cannot).
+
+Every s3 backend also points at the one bucket's region: backend.region must equal the
+region of the stack that deploys the "backend" component (backend/main, fnx-core-root),
+not the stack's own, or init of a DR/EU stack fails against a region with no bucket.
+Exits 1 on any violation.
 """
 import json
 import sys
 from typing import Optional
 
 STATE_KEY = "terraform.tfstate"
+BACKEND_COMPONENT = "backend"
 
 
 def is_deployable(instance: dict) -> bool:
@@ -33,8 +39,22 @@ def stage_prefix(instance: dict) -> Optional[str]:
     return f"{tenant}-{stage}-" if tenant and stage else None
 
 
+def bucket_regions(stacks: dict) -> set:
+    """Regions of the stacks that deploy the state bucket (the "backend" component)."""
+    regions = set()
+    for stack in stacks.values():
+        for instance in ((stack.get("components") or {}).get("terraform") or {}).values():
+            if is_deployable(instance) and instance.get("component") == BACKEND_COMPONENT:
+                regions.add((instance.get("vars") or {}).get("region"))
+    return regions
+
+
 def check(stacks: dict) -> list[str]:
     errors = []
+    regions = bucket_regions(stacks)
+    if len(regions) != 1 or None in regions:
+        errors.append(f"expected exactly one deployed '{BACKEND_COMPONENT}' region, found {sorted(map(str, regions))}")
+    bucket_region = next(iter(regions)) if len(regions) == 1 else None
     for stack_name, stack in sorted(stacks.items()):
         instances = (stack.get("components") or {}).get("terraform") or {}
         for name, instance in sorted(instances.items()):
@@ -55,6 +75,9 @@ def check(stacks: dict) -> list[str]:
                 errors.append(f"{where} has no backend.workspace_key_prefix")
             elif "/" in key_prefix:
                 errors.append(f"{where} workspace_key_prefix {key_prefix!r} contains '/'")
+            region = (instance.get("backend") or {}).get("region")
+            if bucket_region is not None and region != bucket_region:
+                errors.append(f"{where} backend.region {region!r} is not the state bucket's region {bucket_region!r}")
             if key != STATE_KEY:
                 slash = " (contains '/')" if isinstance(key, str) and "/" in key else ""
                 errors.append(f"{where} backend.key {key!r} is not {STATE_KEY!r}{slash}")
@@ -70,7 +93,8 @@ def main() -> int:
         return 1
     print(
         "every s3-backend instance's workspace starts with its stack's <tenant>-<stage>- "
-        "and its workspace_key_prefix has no '/' and its backend.key is terraform.tfstate"
+        "and its workspace_key_prefix has no '/' and its backend.key is terraform.tfstate "
+        "and its backend.region is the state bucket's"
     )
     return 0
 
