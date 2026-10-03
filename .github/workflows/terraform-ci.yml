@@ -110,7 +110,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           set -eu
-          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.trivyignore\.yaml|\.checkov\.baseline|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
+          terraform_re='^(atmos\.yaml|components/.*|stacks/.*|workflows/.*|scripts/.*|\.tflint\.hcl|\.github/workflows/terraform-ci\.yml)$'
           emulator_re='^(atmos\.yaml|components/terraform/.*|stacks/.*|workflows/.*|\.github/workflows/(emulator|terraform-ci)\.yml)$'
           workflows_re='^(\.github/workflows/.*\.ya?ml|\.github/atmos-image/.*|scripts/sync-atmos-image\.sh)$'
           if [ -n "${BASE_SHA//0/}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
