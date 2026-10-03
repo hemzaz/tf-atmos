@@ -10,6 +10,7 @@ Terraform/Atmos IaC for the `fnx` tenant. Layout, stacks, quickstart and convent
 atmos describe component <component> -s <stack> --process-functions=false   # resolved config, offline
 atmos workflow lint -f lint && atmos workflow validate-all -f validate-enhanced  # the gate before committing
 bash scripts/plan-sweep.sh [<stack>...]    # proves variable validations without AWS
+atmos workflow security-scan -f lint       # local Trivy + Checkov gate (new HIGH/CRITICAL only)
 ```
 
 Nothing has been applied to AWS yet, so refactors need no state migration.
@@ -46,6 +47,7 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 ## Before marking work complete
 
 - [ ] `atmos workflow lint -f lint` and `atmos workflow validate-all -f validate-enhanced` pass
+  (security-scan runs in CI; run it locally when touching scanner config or adding resources)
 - [ ] README conventions followed (Cloud Posse shape, naming, tags, `metadata.enabled: false`)
 - [ ] Component READMEs stay purpose + wiring + gotchas, no input/output tables
 - [ ] Docs that name a changed command, workflow, role or path are updated

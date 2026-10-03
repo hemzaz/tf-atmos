@@ -81,11 +81,14 @@ repos:
       # and flags: the whole components/terraform directory, because the
       # baseline's paths are relative to it, so a finding baselined in CI passes
       # here too. No --skip-check: CI skips nothing beyond the baseline and the
-      # inline #checkov:skip comments.
+      # inline #checkov:skip comments. Manual stage only: a full directory scan on
+      # every .tf commit is too heavy for a workstation, and CI runs it anyway.
+      # Run it with `pre-commit run --hook-stage manual checkov`.
       - id: checkov
         name: Terraform security scan (Checkov, as the CI gate)
         entry: checkov
         language: python
+        stages: [manual]
         additional_dependencies: ['checkov==3.3.21']
         pass_filenames: false
         files: ^(components/terraform/.*\.tf|\.checkov\.baseline)$

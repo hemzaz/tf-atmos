@@ -24,6 +24,7 @@ NC='\033[0m' # No Color
 
 # Track failures
 FAILURES=0
+CHECKOV_FAILED=false
 
 # Function to check if command exists
 command_exists() {
@@ -130,7 +131,7 @@ if [ -z "$SKIP_CHECKOV" ]; then
     echo -e "${GREEN}✓ Security scan passed${NC}"
   else
     echo -e "${RED}✗ Security scan found findings not in .checkov.baseline (see above)${NC}"
-    FAILURES=$((FAILURES + 1))
+    CHECKOV_FAILED=true
   fi
 
   echo ""
@@ -173,14 +174,19 @@ echo "Validation Summary"
 echo "=========================================="
 echo ""
 
-if [ $FAILURES -eq 0 ]; then
+if [ $FAILURES -eq 0 ] && [ "$CHECKOV_FAILED" = false ]; then
   echo -e "${GREEN}✓ All validations passed!${NC}"
   echo ""
   echo "Components validated:"
   find "$COMPONENTS_DIR" -maxdepth 1 -type d | tail -n +2 | wc -l | xargs echo "  - Components:"
   exit 0
 else
-  echo -e "${RED}✗ $FAILURES component(s) failed validation${NC}"
+  if [ $FAILURES -gt 0 ]; then
+    echo -e "${RED}✗ $FAILURES component(s) failed validation${NC}"
+  fi
+  if [ "$CHECKOV_FAILED" = true ]; then
+    echo -e "${RED}✗ checkov: findings not in .checkov.baseline${NC}"
+  fi
   echo ""
   echo "Please fix the errors above and re-run this script."
   exit 1
