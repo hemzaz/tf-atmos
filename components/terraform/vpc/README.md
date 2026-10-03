@@ -26,8 +26,8 @@ names follow Cloud Posse `aws-vpc` where an input maps one to one.
   `logs.<region>.amazonaws.com` statement scoped by `kms:EncryptionContext:aws:logs:arn`.
 - `flow_logs_s3_backup` adds a second flow log into an archive bucket (bucket policy for
   `delivery.logs.amazonaws.com`, as Cloud Posse's `vpc-flow-logs-s3-bucket`). A caller
-  `flow_logs_kms_key_arn` must grant that service `kms:GenerateDataKey*`/`kms:Encrypt`; kms/main's
-  `allow_log_delivery` grants only `kms:Decrypt`, so with kms/main the S3 copy fails to deliver.
+  `flow_logs_kms_key_arn` must grant that service `kms:GenerateDataKey*`: kms/main does through
+  `allow_log_delivery` (on in `kms/defaults`).
 - `map_public_ip_on_launch` defaults to `false` (Cloud Posse defaults to `true`).
 - `manage_default_security_group` (default `true`) strips every rule from the AWS default SG.
 - There is no ElastiCache subnet tier; caches use `private_subnet_ids`.

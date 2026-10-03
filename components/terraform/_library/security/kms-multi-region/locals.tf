@@ -198,6 +198,38 @@ data "aws_iam_policy_document" "default" {
     }
   }
 
+  # The same service writing vended logs into an SSE-KMS S3 bucket (VPC flow
+  # logs' S3 copy, vpc flow_logs_s3_backup) needs data keys, scoped as the AWS
+  # flow-logs docs and Cloud Posse's vpc-flow-logs-s3-bucket key policy do:
+  # this account, and a CloudWatch Logs source ARN in this document's region.
+  # A separate statement so AllowLogDelivery's Decrypt keeps its exact scope.
+  dynamic "statement" {
+    for_each = var.allow_log_delivery ? [1] : []
+
+    content {
+      sid       = "AllowLogDeliveryDataKeys"
+      actions   = ["kms:GenerateDataKey*"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["delivery.logs.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:logs:${each.key}:${data.aws_caller_identity.current.account_id}:*"]
+      }
+    }
+  }
+
   # EventBridge event buses and archives in this document's region. KMS calls
   # for a bus or an archive carry the encryption context
   # aws:events:event-bus:arn, which is always present; aws:SourceArn is not
