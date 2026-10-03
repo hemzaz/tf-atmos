@@ -47,6 +47,15 @@ workflows:
           - name: yamllint
             type: shell
             command: yamllint -d relaxed stacks workflows atmos.yaml
+          # checkov's HCL parser rejects a unary !x/-x that ends a line before a
+          # leading && / || (terraform accepts it) and then skips the whole file;
+          # security-scan's coverage guard only catches that later. Fails fast here.
+          - name: hcl-unary-newline
+            type: shell
+            command: |
+              set -eu
+              python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
+              python3 scripts/check-hcl-unary-newline.py components/terraform modules
           - name: security-scan
             type: shell
             command: trivy config --skip-dirs '**/tests' --exit-code 1 --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml components/terraform
@@ -264,6 +273,7 @@ workflows:
         script: |
           import json
           import os
+          import subprocess
           import sys
 
           with open("reports/results_json.json") as f:
@@ -303,6 +313,27 @@ workflows:
               print(f"FAIL: checkov could not parse {parsing_errors} file(s):")
               for path in parse_error_files:
                   print(f"  - {path}")
+                  # checkov logs the parser exception only at DEBUG; re-run just this
+                  # file (failure path only) and print the lark error, which names the
+                  # line and the unexpected token. The usual cause is a unary !x/-x
+                  # ending a line before a leading && / || (see
+                  # scripts/check-hcl-unary-newline.py, run by `atmos workflow lint`).
+                  try:
+                      debug = subprocess.run(
+                          ["checkov", "-f", path, "--framework", "terraform", "--quiet", "--compact"],
+                          env={**os.environ, "LOG_LEVEL": "DEBUG"},
+                          capture_output=True,
+                          text=True,
+                      )
+                  except OSError as exc:
+                      print(f"    could not re-run checkov for the parser error: {exc}")
+                      continue
+                  errors = [
+                      line.strip()
+                      for line in (debug.stdout + debug.stderr).splitlines()
+                      if line.startswith("lark.exceptions.")
+                  ]
+                  print(f"    {errors[-1] if errors else 'no parser exception in the DEBUG log'}")
               sys.exit(1)
 
           # components/terraform currently yields ~570 resources across every
