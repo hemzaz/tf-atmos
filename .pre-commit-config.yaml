@@ -78,6 +78,13 @@ repos:
         language: system
         pass_filenames: false
         files: ^(atmos\.yaml|stacks/)
+      # checkov skips a file whose unary !x/-x ends a line before a leading
+      # && / || (scripts/check-hcl-unary-newline.py has the details).
+      - id: hcl-unary-newline
+        name: HCL unary operand before a leading operator (checkov parse guard)
+        entry: python3 scripts/check-hcl-unary-newline.py
+        language: system
+        files: \.tf$
 
   # Security scanning
   - repo: https://github.com/Yelp/detect-secrets
