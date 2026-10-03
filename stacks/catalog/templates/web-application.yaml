@@ -358,11 +358,11 @@ components:
           - component: '{{ .settings.web_application.dns_component }}'
 
     # =========================================================================
-    # WAF PROTECTION (REGIONAL, services layer)
+    # WAF PROTECTION (REGIONAL, regional-waf layer)
     # =========================================================================
-    # Associated with the ALB, so it deploys after it: deploy-full-stack's
-    # services layer selects this instance by name (every other waf instance
-    # is in the security layer).
+    # Associated with the ALB, so it deploys after it: deploy-full-stack puts
+    # every scope REGIONAL waf in its regional-waf layer, after addons and
+    # services (CLOUDFRONT ones are in security).
 
     web-application/waf:
       metadata:
@@ -842,9 +842,12 @@ components:
             evaluation_periods: 2
             period: 300
             statistic: "Sum"
-          alb-4xx-errors:
+          # The application's 4xx, not the ALB's: HTTPCode_ELB_4XX_Count also
+          # counts the listener's fixed 403 to every request that reaches the
+          # ALB without CloudFront's X-Origin-Verify header (scanners).
+          alb-target-4xx-errors:
             namespace: "AWS/ApplicationELB"
-            metric_name: "HTTPCode_ELB_4XX_Count"
+            metric_name: "HTTPCode_Target_4XX_Count"
             dimensions:
               LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
             comparison_operator: "GreaterThanThreshold"

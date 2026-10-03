@@ -11,8 +11,9 @@ Usage:
 A layered workflow is a run of phases. A `terraform plan --query '<q>'` step
 starts a phase (it saves a planfile for every instance <q> selects); the
 `terraform deploy --from-plan --query '<q>'` steps after it apply those
-planfiles. Queries are `.metadata.component` / `.atmos_component` `==` / `!=`
-"<value>" terms joined by ` or ` and ` and `. yq (v4.52) gives `and` and `or`
+planfiles. Queries are `.metadata.component` / `.atmos_component` / `.vars.scope`
+`==` / `!=` "<value>" terms joined by ` or ` and ` and ` (`.vars.scope` splits waf
+instances by their CLOUDFRONT/REGIONAL scope; it compares the literal var). yq (v4.52) gives `and` and `or`
 equal precedence and groups them to the right, so `a or b and c` is
 `a or (b and c)` but `a and b or c` is `a and (b or c)`. Only the last ` or `
 operand may contain ` and `; then right-grouping equals or-of-ands, which this
@@ -61,7 +62,7 @@ PLAN_ONE = re.compile(r"^terraform plan (?P<instance>[\w./-]+)$")
 DEPLOY_ONE = re.compile(r"^terraform deploy (?P<instance>[\w./-]+) --from-plan$")
 # Any terraform step that plans or applies; a checked workflow must use only the forms above.
 TERRAFORM_STEP = re.compile(r"^terraform (plan|deploy|apply)\b")
-TERM = re.compile(r'^\.(?P<field>metadata\.component|atmos_component) (?P<op>==|!=) "(?P<value>[^"]+)"$')
+TERM = re.compile(r'^\.(?P<field>metadata\.component|atmos_component|vars\.scope) (?P<op>==|!=) "(?P<value>[^"]+)"$')
 # A dependencies.components entry with a `stack` other than its own, or any of
 # these context keys, names an instance in another stack: not ordered here.
 CROSS_STACK_CONTEXT_KEYS = ("namespace", "tenant", "environment", "stage")
@@ -97,7 +98,11 @@ def parse_query(query: str) -> Optional[Query]:
 
 
 def selects(query: Query, name: str, instance: dict) -> bool:
-    fields = {"metadata.component": (instance.get("metadata") or {}).get("component"), "atmos_component": name}
+    fields = {
+        "metadata.component": (instance.get("metadata") or {}).get("component"),
+        "atmos_component": name,
+        "vars.scope": (instance.get("vars") or {}).get("scope"),
+    }
     return any(
         all((fields[field] == value) == (op == "==") for field, op, value in terms) for terms in query
     )
@@ -130,7 +135,7 @@ def phases(steps: list[dict], where: str) -> tuple[list[dict], list[str]]:
                 query = parse_query(match.group("query"))
             if query is None:
                 errors.append(
-                    f"{where}: step {name}: query is not an or/and of .metadata.component/.atmos_component "
+                    f"{where}: step {name}: query is not an or/and of .metadata.component/.atmos_component/.vars.scope "
                     "terms with ` and ` only after the last ` or `"
                 )
             elif kind == "plan":
