@@ -2,7 +2,8 @@
 
 One CloudFront distribution per instance in front of an optional S3 bucket it does not own
 (reached through origin access control: sigv4, always signed) and custom origins (ALB, API
-Gateway, any HTTPS server). Modelled on Cloud Posse `terraform-aws-cloudfront-s3-cdn` (the module
+Gateway, any HTTPS server), each optionally a VPC origin (an internal ALB, an NLB or an EC2
+instance in private subnets). Modelled on Cloud Posse `terraform-aws-cloudfront-s3-cdn` (the module
 behind `aws-spa-s3-cloudfront`) as plain resources; the deviations are listed at the top of
 `main.tf` and beside `custom_origins` / `ordered_cache` in `variables.tf`. Covers aliases with a
 us-east-1 ACM certificate (SNI, TLSv1.2_2021 by default), managed or custom cache / origin request
@@ -33,12 +34,18 @@ logging v2 to S3, and optional Route 53 alias records.
 - Optional tightening: `s3_origin_policy_json` grants this distribution only; add it to the origin
   s3 instance's `source_policy_documents` (and drop `allow_cloudfront_oac_read`) once the
   distribution exists.
-- ALB origins: send a secret origin-verify header (`custom_headers`, e.g. `X-Origin-Verify`, with
-  `value_ssm_parameter_name`, never a literal `value` in a stack) and have the alb instance's
-  HTTPS listener forward only requests carrying it: the alb's `listener_https_fixed_response` 403
-  as the default action and the `ecs-service` listener rule's `load_balancer.http_header` on the
-  same parameter. Without it the ALB answers anyone who finds its DNS name, bypassing the
-  CloudFront WAF. `web-application/cloudfront` is wired this way.
+- ALB origins, preferred: a VPC origin. Make the alb instance `internal: true` in private
+  subnets and give the custom origin `vpc_origin.arn` from the alb's `.alb_arn` (list the alb in
+  `dependencies.components`; it deploys in addons, before this component). The component creates
+  the `aws_cloudfront_vpc_origin`; CloudFront reaches the ALB through service-managed ENIs, so the
+  ALB has no internet path and needs no shared secret. `web-application/cloudfront` is wired this
+  way. Not in Cloud Posse (no VPC-origin input upstream): an accepted deviation.
+- ALB origins, public: an internet-facing ALB answers anyone who finds its DNS name, bypassing
+  the CloudFront WAF, unless it requires a secret origin-verify header (`custom_headers` with
+  `value_ssm_parameter_name`, never a literal `value` in a stack; the alb's
+  `listener_https_fixed_response` 403 and the `ecs-service` listener rule's
+  `load_balancer.http_header` on the same parameter). The secret is then readable by the plan role
+  and in plan and state; use it only where a VPC origin cannot work.
 - `stacks/catalog/templates/serverless-api.yaml` (`serverless-api/cloudfront`) predates this
   component and still uses the old nested `origins`/`viewer_certificate`/`ordered_cache_behaviors`
   inputs; it needs porting (TTL blocks become cache policies), its separate dns records that read
@@ -59,6 +66,36 @@ logging v2 to S3, and optional Route 53 alias records.
   not on its certificate: point `domain_name` at a record the ALB certificate covers (e.g.
   `origin.<domain>`), and use `AllViewerExceptHostHeader` unless the certificate also covers the
   aliases.
+- VPC origins (AWS Developer Guide, "Restrict access with VPC origins"):
+  - a VPC origin takes up to 15 minutes to deploy. AWS refuses to update one a distribution uses
+    (`CannotUpdateEntityWhileInUse`), so any endpoint change (ARN, ports, protocol, TLS versions)
+    replaces it instead: create a new one, named `<Environment>-<name>-<origin_id>-<config
+    hash>` so the two names never collide, repoint the distribution, delete the old one. Each step
+    waits for deployment (`wait_for_deployment`, the default), so expect a long apply. With
+    `wait_for_deployment = false`, deleting the old VPC origin can fail as still in use, because
+    UpdateDistribution returns while the distribution is still InProgress. Not verified against
+    AWS: whether a second VPC origin for the same ARN may exist while the old one is still there.
+    If AWS refuses it, add the origin under a new `origin_id`, apply, then remove the old entry:
+    the same create, switch, delete order, without replacing the same key;
+  - replacing the ALB (alb component, addons layer, e.g. a name or subnet change) while the VPC
+    origin (this component, services layer) still points at it may be refused by AWS, or leave the
+    origin broken until this component is re-applied: plan the cloudfront instance right after
+    such an alb change;
+  - the target's VPC needs an internet gateway (it marks the VPC as reachable; traffic does not
+    use it) and a free IPv4 address in the target's subnets for CloudFront's ENI;
+  - the first VPC origin in a VPC creates the service-managed `CloudFront-VPCOrigins-Service-SG`.
+    It does not exist before this component applies, so a target security group deployed earlier
+    admits the CloudFront origin-facing prefix list instead (the alb component always does);
+    never create a group whose name starts with that prefix;
+  - unsupported: Lambda@Edge origin-request and origin-response triggers on a behavior targeting
+    the origin (validated), gRPC, Gateway Load Balancers and NLBs with TLS listeners; inbound NACL
+    rules are not evaluated, outbound ones must allow ephemeral ports back;
+  - not every AZ: us-east-1 excludes `use1-az3` (also `usw1-az2`, `apne1-az3`, `cac1-az3`); keep
+    the target's subnets out of them;
+  - HTTPS still checks the origin certificate against `domain_name` (above): keep a covered name
+    such as `origin.<domain>` (a Route 53 alias to the internal ALB) rather than its
+    `internal-*.elb.amazonaws.com` name;
+  - custom headers still work, but are no longer needed for access control.
 - A `value_ssm_parameter_name` header is read at plan (`data.aws_ssm_parameter`, decrypted): the
   planning role needs `ssm:GetParameter` on it, and `kms:Decrypt` for a customer managed key;
   keep it on the default `aws/ssm` key, which `ReadOnlyAccess` (the CI plan role) can use through

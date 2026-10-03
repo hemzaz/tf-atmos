@@ -7,12 +7,13 @@ Modelled on Cloud Posse `aws-alb`, written as plain resources.
 
 ## Wiring
 
-- Used only by the `web-application` template: `web-application/alb` (addons layer) reads the
-  template's `vpc` (public subnets), `acm` certificate, the dns instance's zone (`parent_zone_id`
+- Used only by the `web-application` template: `web-application/alb` (addons layer, `internal:
+  true`) reads the template's `vpc` (private subnets), `acm` certificate, the dns instance's zone (`parent_zone_id`
   for `origin.<app_domain>`) and the `securitygroups` instance's `alb` group
   (`security_group_ids`), which the application group admits.
-- Consumers: `web-application/waf` associates with `.alb_arn`, `ecs-service` adds its listener
-  rule to `.https_listener_arn`, `monitoring` uses `.alb_arn_suffix`.
+- Consumers: `web-application/waf` associates with `.alb_arn`, `web-application/cloudfront` makes
+  `.alb_arn` a CloudFront VPC origin, `ecs-service` adds its listener rule to
+  `.https_listener_arn`, `monitoring` uses `.alb_arn_suffix`.
 
 ## Notes
 
@@ -28,10 +29,15 @@ Modelled on Cloud Posse `aws-alb`, written as plain resources.
 - CloudFront validates the origin certificate by hostname, and ACM cannot issue for
   `*.elb.amazonaws.com`: point the origin at a name in `dns_aliases` (e.g. `origin.<app_domain>`)
   that `certificate_arn` covers.
-- Behind CloudFront, set `listener_https_fixed_response` to a 403 and give each listener rule the
-  distribution's secret origin-verify header as a condition (`ecs-service`
-  `load_balancer.http_header`), so the ALB refuses requests that bypass the distribution and its
-  WAF. The default target group then receives nothing.
+- Behind CloudFront, prefer `internal: true` in private subnets with the cloudfront instance's
+  `vpc_origin` on `.alb_arn`: the ALB has no internet path and needs no shared secret. The
+  CloudFront prefix-list rule is what admits the VPC origin's traffic: AWS allows either that list
+  or the service-managed `CloudFront-VPCOrigins-Service-SG`, which only exists after the first
+  VPC origin (cloudfront, a later layer) is created. Keep the subnets out of `use1-az3` (no VPC
+  origins there). An internet-facing ALB behind CloudFront instead needs
+  `listener_https_fixed_response` 403 plus a secret origin-verify header condition on each
+  listener rule (`ecs-service` `load_balancer.http_header`), so the ALB refuses requests that
+  bypass the distribution and its WAF. A 403 default action is worth keeping either way.
 - Access logs use this component's own SSE-S3 bucket (ALB log delivery does not support SSE-KMS),
   named `<Environment>-<name>-access-logs-<account-id>`.
 - Keep `name` short: ALB and target group names are limited to 32 characters.

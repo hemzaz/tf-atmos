@@ -14,7 +14,6 @@ settings:
     dns_component: network/main
     dns_zone_key: main
     app_container_image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/webapp:1.0
-    origin_verify_ssm_parameter: /fnx/webapp/origin-verify
 
 components:
   terraform:
