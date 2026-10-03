@@ -61,6 +61,7 @@ resource "aws_key_pair" "generated" {
 }
 
 resource "aws_secretsmanager_secret" "ssh_key" {
+  #checkov:skip=CKV2_AWS_57:Holds the private half of aws_key_pair.generated; a new key pair means a new instance key, which a rotation Lambda cannot do, so the secret is not rotated
   count = local.generate_key && var.store_ssh_keys_in_secrets_manager ? 1 : 0
 
   name        = "ssh-key/${local.environment}/${var.name}"

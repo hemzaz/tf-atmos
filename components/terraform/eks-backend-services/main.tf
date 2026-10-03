@@ -392,6 +392,11 @@ resource "kubernetes_config_map_v1" "backend_services_config" {
 
 # Deployments for backend services
 resource "kubernetes_deployment_v1" "backend_services" {
+  #checkov:skip=CKV_K8S_14:False positive; images come from the *_image variables, whose validation requires an explicit non-"latest" tag or a digest
+  #checkov:skip=CKV_K8S_15:Tags are pinned and never "latest" (*_image validation), so IfNotPresent still pulls every new tag
+  #checkov:skip=CKV_K8S_22:TODO(owner): read_only_root_filesystem would break any image that writes outside the /tmp emptyDir; enable it once the four service images are confirmed to
+  #checkov:skip=CKV_K8S_35:The services read DATABASE_URL and the Redis credentials from environment variables synced by External Secrets; mounting them as files is an application change
+  #checkov:skip=CKV_K8S_43:The *_image variables accept a tag or a @sha256 digest; pinning digests is a release-pipeline choice, and "latest" is rejected
   for_each = local.backend_services
 
   metadata {
