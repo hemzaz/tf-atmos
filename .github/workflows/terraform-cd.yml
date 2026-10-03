@@ -55,11 +55,13 @@ on:
       - stacks/**
   workflow_dispatch:
     inputs:
+      # A string, not a choice list: any stack `ci-stacks.py --check` accepts
+      # (every stack except the actions_enabled: false ones), so a new stack
+      # needs no edit here.
       stack:
-        description: Atmos stack
+        description: Atmos stack (one that python3 workflows/scripts/common/ci-stacks.py lists)
         required: true
-        type: choice
-        options: [fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production]
+        type: string
       component:
         description: Component to target (empty = every component in the stack)
         required: false
@@ -117,41 +119,24 @@ jobs:
         run: |
           import json, os, subprocess
 
-          # Promotion order; stacks not listed here deploy last.
-          ORDER = ["fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-prod-production"]
           head = os.environ["GITHUB_SHA"]
           push_base = os.environ.get("PUSH_BASE", "")
 
           def git(*args):
               return subprocess.run(["git", *args], capture_output=True, text=True)
 
-          # fnx-local-* target the Floci/LocalEmu emulators (account_id
-          # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have no
-          # CI apply role;
-          # emulator.yml covers them instead. Excluded via
-          # settings.github.actions_enabled (the same key Cloud Posse's own
-          # atmos-terraform-plan/-apply actions read; data-driven, survives a
-          # stack rename) rather than matching the `fnx-local-` name prefix.
-          # This matrix is per-stack, so a stack is excluded only when EVERY
-          # one of its terraform components opts out; a stack with some
-          # opted-out instances (the in-cluster components) stays, and the
-          # deploy job skips just those (ci-components.py).
-          stack_settings = json.loads(subprocess.check_output(
-              ["atmos", "describe", "stacks", "--process-functions=false",
-               "--format", "json", "--sections", "settings"]))
-          disabled = set()
-          for stack, config in stack_settings.items():
-              components = (config.get("components") or {}).get("terraform") or {}
-              if components and all(
-                  (((spec or {}).get("settings") or {}).get("github") or {}).get("actions_enabled") is False
-                  for spec in components.values()
-              ):
-                  disabled.add(stack)
-
-          stacks = [s for s in stack_settings.keys() if s not in disabled]
-          stacks.sort(key=lambda s: (ORDER.index(s) if s in ORDER else len(ORDER), s))
-          if disabled:
-              print(f"::notice::Excluding CI-disabled stacks: {sorted(disabled)}")
+          # Every stack except those whose terraform instances ALL set
+          # settings.github.actions_enabled: false (fnx-core-root, the
+          # emulator-only fnx-local-*, the fnx-fixtures-* templates), in
+          # promotion order by settings.context.stage (dev, staging, prod,
+          # then any other stage): ci-stacks.py, derived from
+          # `atmos describe stacks`, so a new stack needs no edit here. A
+          # stack with only some opted-out instances (the in-cluster
+          # components) stays; the deploy job skips just those
+          # (ci-components.py).
+          stacks = subprocess.check_output(
+              ["python3", "workflows/scripts/common/ci-stacks.py"], text=True).split()
+          print(f"CI stacks, in deploy order: {stacks}")
 
           include = []
           for stack in stacks:
@@ -285,14 +270,13 @@ jobs:
 
   dispatch:
     name: ${{ inputs.action }} ${{ inputs.stack }} ${{ inputs.component }}
-    # Re-check the stack against the known list: API callers are not bound to the
-    # choice options. No `environment:` (see deploy-affected): the sub stays the
-    # default-branch ref, which the apply roles trust.
+    # The stack is checked by its first step, before any credential. No
+    # `environment:` (see deploy-affected): the sub stays the default-branch
+    # ref, which the apply roles trust.
     if: >-
       vars.AWS_PLAN_ROLE_ARN != '' &&
       github.event_name == 'workflow_dispatch' &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
-      contains(fromJson('["fnx-dev-testenv-01","fnx-staging-staging-01","fnx-prod-production"]'), inputs.stack)
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
@@ -310,6 +294,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Unknown and actions_enabled: false stacks are refused here, before
+      # any credential.
+      - name: Check the stack
+        run: python3 workflows/scripts/common/ci-stacks.py --check "$STACK"
       - id: role
         name: Resolve the stack's CI apply role
         run: python3 workflows/scripts/common/ci-apply-role-arn.py
