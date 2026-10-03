@@ -22,7 +22,8 @@ resource "aws_kms_key" "flow_logs" {
   # Account administration plus CloudWatch Logs, which cannot use the key without a grant
   # here. A key policy cannot reference its own ARN; "*" means "this key". With
   # flow_logs_s3_backup, also the log delivery service that writes the S3 copy into
-  # the SSE-KMS archive bucket (Cloud Posse's vpc-flow-logs-s3-bucket key statement).
+  # the SSE-KMS archive bucket: kms:GenerateDataKey* only, as kms/main's
+  # allow_log_delivery grants it.
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat([
@@ -56,14 +57,8 @@ resource "aws_kms_key" "flow_logs" {
         Sid       = "AllowLogDeliveryS3Archive"
         Effect    = "Allow"
         Principal = { Service = "delivery.logs.amazonaws.com" }
-        Action = [
-          "kms:Encrypt*",
-          "kms:Decrypt*",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:Describe*",
-        ]
-        Resource = "*"
+        Action    = "kms:GenerateDataKey*"
+        Resource  = "*"
         Condition = {
           StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
           ArnLike      = { "aws:SourceArn" = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:*" }
@@ -452,9 +447,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "flow_logs" {
 
 # Lets the log delivery service write the S3 copy, as Cloud Posse's
 # vpc-flow-logs-s3-bucket does (AWSLogDeliveryWrite / AWSLogDeliveryAclCheck,
-# scoped to this account), plus TLS-only access. No s3:x-amz-acl condition:
-# the bucket keeps S3's default BucketOwnerEnforced ownership, under which
-# delivery sends no ACL header and such a condition would deny every write.
+# scoped to this account), plus TLS-only access. AWS's policy also requires
+# s3:x-amz-acl = bucket-owner-full-control; it is left out because the bucket
+# keeps S3's default BucketOwnerEnforced ownership, so ACLs are disabled and
+# the condition adds nothing.
 data "aws_iam_policy_document" "flow_logs_bucket" {
   count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
