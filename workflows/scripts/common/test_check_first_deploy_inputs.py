@@ -104,6 +104,29 @@ class PlaceholderTest(unittest.TestCase):
                 stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", vpc_main={"token": value})
                 self.assertEqual(errors(stacks), [])
 
+    def test_account_regex_cases(self):
+        matches = (
+            # after a hex-ish "-xxxx-" segment (review-301's misses)
+            "backups-2026-123456789012", "fnx-feed-123456789012", "logs-cafe-123456789012",
+            # ARN, JSON, S3 log prefix, role name, bare
+            "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-plan",
+            '{"Principal": {"AWS": "123456789012"}}',
+            "AWSLogs/123456789012/",
+            "fnx-dev-123456789012-ci",
+            "123456789012", "000000000000",
+        )
+        non_matches = (
+            "00000000-0000-0000-0000-000000000000",
+            "a1b2c3d4-0000-4abc-8def-123456789012",
+            "sha256:deadbeef000000000000cafe",  # pragma: allowlist secret (test value)
+        )
+        for value in matches:
+            with self.subTest(match=value):
+                self.assertTrue(preflight.ACCOUNT_RE.search(value))
+        for value in non_matches:
+            with self.subTest(non_match=value):
+                self.assertFalse(preflight.ACCOUNT_RE.search(value))
+
     def test_placeholder_in_a_name_still_matches(self):
         for value in ("fnx-dev-lambda-artifacts-123456789012", "my-data-123456789012", "000000000000"):  # pragma: allowlist secret (placeholder IDs)
             with self.subTest(value=value):

@@ -42,10 +42,11 @@ MANAGEMENT_STAGES = {"core"}
 
 PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
 # A 12-digit run that is not part of a longer hex token (a digest) and not a
-# UUID's last group (00000000-0000-0000-0000-000000000000: "-<4 hex>-" before
-# it). Names like "<bucket>-123456789012" still match.
+# UUID's last group: the lookbehind is the whole 8-4-4-4 UUID prefix, so
+# names like "backups-2026-123456789012" or "logs-cafe-123456789012" still match.
 ACCOUNT_RE = re.compile(
-    r"(?<![0-9a-fA-F])(?<!-[0-9a-fA-F]{4}-)(?:%s)(?![0-9a-fA-F])" % "|".join(PLACEHOLDER_ACCOUNTS)
+    r"(?<![0-9a-fA-F])(?<![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-)(?:%s)(?![0-9a-fA-F])"
+    % "|".join(PLACEHOLDER_ACCOUNTS)
 )
 WARN_LIMIT = 10
 ORG_RE = re.compile(r"\bo-x{10}\b", re.IGNORECASE)
