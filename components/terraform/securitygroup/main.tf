@@ -46,6 +46,7 @@ resource "random_id" "rule_change_forces_new_security_group" {
 }
 
 resource "aws_security_group" "this" {
+  #checkov:skip=CKV2_AWS_5:A standalone group (Cloud Posse's aws-security-group); the consuming components attach it through its security_group_ids output
   for_each = local.security_groups
 
   # name_prefix, not name, because of create_before_destroy below: replacing a
