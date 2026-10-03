@@ -19,7 +19,10 @@ import:
 
 # This account IS the account map's root account, settings.environment.management_account_id
 # (orgs/fnx/_defaults.yaml). account_id says so too, for the provider account
-# guard (terraform.providers.aws.allowed_account_ids there).
+# guard (terraform.providers.aws.allowed_account_ids there). It looks up
+# root_account_account_name, not `account`: this stage's account is named
+# "core" (stage = account, in the name template), while the map names the
+# management account Cloud Posse's way, "root".
 settings:
   environment:
     account: core

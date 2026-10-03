@@ -166,7 +166,9 @@ ${BOLD}FILES CREATED:${RESET}
 
 ${BOLD}NOTES:${RESET}
     - stacks/orgs/<tenant>/_defaults.yaml (backend, toolchain) must already exist
-    - A new stage's _defaults.yaml takes account_id from \$AWS_ACCOUNT_ID
+    - Account IDs live only in settings.account_map.full_account_map
+      (stacks/orgs/<tenant>/_defaults.yaml). A new account needs \$AWS_ACCOUNT_ID
+      (12 digits): the script adds it there, and fails without it
     - VPC CIDR is auto-assigned if not specified based on environment type
     - All stacks share one state backend (backend/main in fnx-core-root), created once with:
       atmos workflow backend-cold-start -f bootstrap
@@ -325,10 +327,14 @@ validate_inputs() {
         errors=$((errors + 1))
     fi
 
-    # The org defaults carry the S3 backend and the Terraform toolchain pin
+    # The org defaults carry the S3 backend, the Terraform toolchain pin and
+    # the account map, the only place account IDs are written
     if [[ ! -f "${REPO_ROOT}/stacks/orgs/${TENANT}/_defaults.yaml" ]]; then
         log_error "Missing stacks/orgs/${TENANT}/_defaults.yaml (backend and toolchain defaults)"
         log_info "Create it first, e.g. from stacks/orgs/fnx/_defaults.yaml"
+        errors=$((errors + 1))
+    elif ! python3 "${SCRIPT_DIR}/account_map_entry.py" check \
+            "${REPO_ROOT}/stacks/orgs/${TENANT}/_defaults.yaml" "$ACCOUNT" ${AWS_ACCOUNT_ID:+"$AWS_ACCOUNT_ID"}; then
         errors=$((errors + 1))
     fi
 
@@ -381,6 +387,15 @@ generate_shared_files() {
     local tenant_mixin="${REPO_ROOT}/stacks/mixins/tenant/${TENANT}.yaml"
     local stage_mixin="${REPO_ROOT}/stacks/mixins/stage/${STAGE}.yaml"
     local stage_defaults="${REPO_ROOT}/stacks/orgs/${TENANT}/${STAGE}/_defaults.yaml"
+    local org_defaults="${REPO_ROOT}/stacks/orgs/${TENANT}/_defaults.yaml"
+
+    # The account's ID goes into the account map (checked in validate_inputs);
+    # a no-op when the account is already there.
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_info "[DRY-RUN] Would make sure account '${ACCOUNT}' is in the account map (orgs/${TENANT}/_defaults)"
+    else
+        python3 "${SCRIPT_DIR}/account_map_entry.py" add "$org_defaults" "$ACCOUNT" ${AWS_ACCOUNT_ID:+"$AWS_ACCOUNT_ID"}
+    fi
 
     if [[ -f "$tenant_mixin" ]]; then
         log_info "Tenant mixin already exists: mixins/tenant/${TENANT}"
@@ -407,10 +422,6 @@ EOF
     if [[ -f "$stage_defaults" ]]; then
         log_info "Stage defaults already exist: orgs/${TENANT}/${STAGE}/_defaults"
     else
-        # account_id feeds the backend component (catalog/backend/defaults)
-        if [[ -z "${AWS_ACCOUNT_ID:-}" ]]; then
-            log_warning "AWS_ACCOUNT_ID is not set: fill settings.environment.account_id in orgs/${TENANT}/${STAGE}/_defaults.yaml"
-        fi
         write_file "$stage_defaults" << EOF
 ---
 import:
@@ -421,7 +432,8 @@ import:
 settings:
   environment:
     account: ${ACCOUNT}
-    account_id: "${AWS_ACCOUNT_ID:-}"
+    # From the account map (stacks/orgs/${TENANT}/_defaults.yaml), keyed by account.
+    account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
 EOF
     fi
 }
