@@ -681,10 +681,12 @@ variable "load_balancer" {
     error_message = "load_balancer needs 1 to 5 host_headers and path_patterns values, http_header counting as one more (a listener rule takes at most 5 condition values)."
   }
 
+  # `contains(...) == false`, not `!contains(...)`: checkov's HCL parser
+  # rejects a `!` that opens a continuation line and then skips the file.
   validation {
     condition = try(var.load_balancer.http_header, null) == null || try(
       can(regex("^[A-Za-z0-9-]{1,40}$", var.load_balancer.http_header.name))
-      && !contains(["host", "cookie"], lower(var.load_balancer.http_header.name))
+      && contains(["host", "cookie"], lower(var.load_balancer.http_header.name)) == false
       && can(regex("^/?[A-Za-z0-9_./-]+$", var.load_balancer.http_header.value_ssm_parameter_name))
       && length(var.load_balancer.http_header.value_ssm_parameter_name) <= 2048,
       false
