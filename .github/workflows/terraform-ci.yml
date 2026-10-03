@@ -249,8 +249,8 @@ jobs:
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     # The gate only: no SARIF upload. It used to upload reports/ to code
-    # scanning, which added nothing: the SARIF comes from the --baseline run, so
-    # it carried 0 results, and its category (terraform-ci.yml:security-scan)
+    # scanning, which added nothing: the SARIF then came from a baselined run,
+    # so it carried 0 results, and its category (terraform-ci.yml:security-scan)
     # never matched master's configuration (security-scan.yml:scan), so every
     # PR check run was NEUTRAL ("1 configuration ... not found"). Code scanning
     # is fed by the nightly security-scan.yml; this job's pass/fail is the gate.
