@@ -63,7 +63,7 @@ atmos describe component vpc/main -s fnx-dev-testenv-01 --process-functions=fals
 atmos validate stacks                               # offline
 atmos workflow tflint-init -f lint                  # once
 atmos workflow lint -f lint                         # fmt, yamllint, state-key check, TFLint
-atmos workflow security-scan -f lint                # Trivy + Checkov gate (new HIGH/CRITICAL only)
+atmos workflow security-scan -f lint                # Trivy + Checkov gate (any HIGH/CRITICAL not suppressed inline)
 atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
 bash scripts/plan-sweep.sh fnx-dev-testenv-01       # plan with resolved variables, no AWS account needed
 atmos workflow providers-lock -f providers          # after a required_providers change: rewrite the committed locks

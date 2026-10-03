@@ -116,9 +116,9 @@ if [ -z "$SKIP_CHECKOV" ]; then
   echo "=========================================="
   echo ""
 
-  # The CI gate's flags (workflows/lint.yaml security-scan, checkov 3.3.21): only
-  # findings missing from .checkov.baseline fail, and nothing else is skipped
-  # (inline #checkov:skip comments carry the reasoned exceptions).
+  # The CI gate's flags (workflows/lint.yaml security-scan, checkov 3.3.21): every
+  # HIGH/CRITICAL finding fails; there is no baseline, and the only exceptions
+  # are the reasoned inline #checkov:skip comments.
   if checkov --directory "$COMPONENTS_DIR" \
     --framework terraform \
     --skip-path '/tests/' \
@@ -126,11 +126,10 @@ if [ -z "$SKIP_CHECKOV" ]; then
     --quiet \
     --soft-fail-on LOW,MEDIUM \
     --hard-fail-on HIGH,CRITICAL \
-    --baseline "$PROJECT_ROOT/.checkov.baseline" \
     --output cli; then
     echo -e "${GREEN}✓ Security scan passed${NC}"
   else
-    echo -e "${RED}✗ Security scan found findings not in .checkov.baseline (see above)${NC}"
+    echo -e "${RED}✗ Security scan found findings (see above)${NC}"
     CHECKOV_FAILED=true
   fi
 
@@ -185,7 +184,7 @@ else
     echo -e "${RED}✗ $FAILURES component(s) failed validation${NC}"
   fi
   if [ "$CHECKOV_FAILED" = true ]; then
-    echo -e "${RED}✗ checkov: findings not in .checkov.baseline${NC}"
+    echo -e "${RED}✗ checkov: findings${NC}"
   fi
   echo ""
   echo "Please fix the errors above and re-run this script."
