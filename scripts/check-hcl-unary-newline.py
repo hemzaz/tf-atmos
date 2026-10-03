@@ -3,7 +3,8 @@
 
 checkov (3.3.19-3.3.22 pin bc-python-hcl2 0.4.3) cannot parse an expression where a
 unary `!x` / `-x` operand ends a line and the next code line starts with a binary
-operator (`&&`, `||`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `+`, `-`, `*`, `/`, `%`, `?`):
+operator (`&&`, `||`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `+`, `-`, `*`, `/`, `%`, `?`), or
+continues the operand with `.attr` / `[index]`:
 
     condition = (
       var.enabled
@@ -20,7 +21,8 @@ the operator at the end of the line instead of the start of the next, or one lin
 
 Usage: check-hcl-unary-newline.py [PATH...]   (default: components/terraform modules)
 A directory is searched for *.tf; a file argument is checked whatever its extension.
-Exit 0 when clean, 1 on a hit, 2 on a missing path. Pure stdlib (runs in the CI image).
+Exit 0 when clean, 1 on a hit, 2 on a missing or unreadable path. Pure stdlib (runs in the
+CI image).
 """
 
 import os
@@ -31,7 +33,8 @@ DEFAULT_PATHS = ("components/terraform", "modules")
 SKIP_DIRS = {".terraform", ".git"}
 
 # Leading binary operators checkov rejects after a unary operand (verified one by one
-# against bc-python-hcl2 0.4.3). A leading `:` parses, so it is not listed.
+# against bc-python-hcl2 0.4.3). A leading `:` parses, so it is not listed (except after
+# a for expression's `in !x`, which also fails but needs a parser to tell apart).
 LEADING_BINARY = {
     "&&",
     "||",
@@ -246,10 +249,14 @@ def find_hits(src):
                 j = end
                 while j < len(tokens) and tokens[j].kind == "NL":
                     j += 1
+                # `.attr` / `[index]` continuing the operand on the next line
+                # fails the same way (`!var\n.b`, `!var.l\n[0]`).
                 if (
                     j < len(tokens)
                     and tokens[j].kind == "OP"
-                    and tokens[j].text in LEADING_BINARY
+                    and (
+                        tokens[j].text in LEADING_BINARY or tokens[j].text in (".", "[")
+                    )
                 ):
                     yield t.line, tokens[j].line, tokens[j].text
         prev, prev_unary = t, is_unary
@@ -277,10 +284,17 @@ def main(argv):
             file=sys.stderr,
         )
         return 2
-    hits = 0
+    hits = unreadable = 0
     for path in iter_tf_files(paths):
-        with open(path, encoding="utf-8") as fh:
-            src = fh.read()
+        try:
+            with open(path, encoding="utf-8") as fh:
+                src = fh.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            unreadable += 1
+            print(
+                f"check-hcl-unary-newline: cannot read {path}: {exc}", file=sys.stderr
+            )
+            continue
         lines = src.splitlines()
         for unary_line, op_line, op in find_hits(src):
             hits += 1
@@ -294,7 +308,8 @@ def main(argv):
     if hits:
         print(f"check-hcl-unary-newline: {hits} hit(s)")
         return 1
-    return 0
+    # terraform rejects a non-UTF-8 .tf too, so an unreadable file is an error, not a pass.
+    return 2 if unreadable else 0
 
 
 if __name__ == "__main__":

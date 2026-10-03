@@ -318,12 +318,16 @@ workflows:
                   # line and the unexpected token. The usual cause is a unary !x/-x
                   # ending a line before a leading && / || (see
                   # scripts/check-hcl-unary-newline.py, run by `atmos workflow lint`).
-                  debug = subprocess.run(
-                      ["checkov", "-f", path, "--framework", "terraform", "--quiet", "--compact"],
-                      env={**os.environ, "LOG_LEVEL": "DEBUG"},
-                      capture_output=True,
-                      text=True,
-                  )
+                  try:
+                      debug = subprocess.run(
+                          ["checkov", "-f", path, "--framework", "terraform", "--quiet", "--compact"],
+                          env={**os.environ, "LOG_LEVEL": "DEBUG"},
+                          capture_output=True,
+                          text=True,
+                      )
+                  except OSError as exc:
+                      print(f"    could not re-run checkov for the parser error: {exc}")
+                      continue
                   errors = [
                       line.strip()
                       for line in (debug.stdout + debug.stderr).splitlines()
