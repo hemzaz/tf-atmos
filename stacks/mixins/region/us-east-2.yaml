@@ -8,10 +8,5 @@ import:
 vars:
   region: us-east-2
 settings:
-  environment:
-    availability_zone_ids:
-      - use2-az1
-      - use2-az2
-      - use2-az3
   context:
     environment: us-east-2

@@ -129,3 +129,20 @@ run "unknown_id_fails_the_plan" {
 
   expect_failures = [aws_vpc.main]
 }
+
+run "nat_eip_az_tag_is_the_hosting_subnets_az" {
+  command = plan
+
+  variables {
+    nat_gateway_enabled  = true
+    nat_gateway_strategy = "one_per_az"
+  }
+
+  assert {
+    condition = (
+      aws_eip.nat["10.30.192.0/22"].tags["AZ"] == "us-east-1a"
+      && aws_eip.nat["10.30.196.0/22"].tags["AZ"] == "us-east-1c"
+    )
+    error_message = "Each NAT EIP's AZ tag is the AZ of the public subnet hosting its gateway (use1-az4 -> us-east-1a, use1-az1 -> us-east-1c here)."
+  }
+}
