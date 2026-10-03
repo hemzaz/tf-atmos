@@ -32,7 +32,9 @@ stage's state without going through the access roles.
 One bucket, `fnx-terraform-state`, in the management account, with native S3 lockfiles
 (`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-core-root`, and every stack's
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
-with management-account administrator credentials:
+with management-account administrator credentials. The bucket lives in one region,
+`settings.tfstate.region` (`us-east-1`), and every stack's backend uses it whatever the stack's own
+region is, so a DR or EU stack keeps its state here too:
 
 ```bash
 atmos workflow backend-cold-start -f bootstrap   # once: apply with local state, then migrate it into the bucket
@@ -58,7 +60,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
   `<tenant>-<account>-<environment>-ci-plan`/`-apply` roles there, and any operator role that
   runs Terraform against a stage.
 - `check-state-keys.py` (in `lint` and `validate-all`) keeps every state key inside its stage's
-  prefix, which the role patterns rely on. `s3:ListBucket` is bucket-wide, so every role sees key
+  prefix, which the role patterns rely on, and every backend region equal to `backend/main`'s. `s3:ListBucket` is bucket-wide, so every role sees key
   names across stages, never contents.
 - The CI apply role (`iam/ci`, `AdministratorAccess`) trusts only the default-branch subject
   (`repo:<org>/<repo>:ref:refs/heads/<default branch>`). `terraform-cd.yml` uses no GitHub

@@ -45,12 +45,17 @@ terraform:
     s3:
       bucket: "{{ .settings.context.tenant }}-terraform-state"
       key: "terraform.tfstate"
-      region: "{{ .vars.region }}"
+      region: "{{ .settings.tfstate.region }}"
       encrypt: true
       use_lockfile: true
       assume_role:
         role_arn: 'arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend{{ if eq .settings.context.stage "core" }}-core{{ else }}{{ if eq .settings.context.stage "prod" }}-prod{{ end }}{{ if eq (env "TFSTATE_ACCESS") "read" }}-read{{ end }}{{ end }}-role'
 settings:
+  # The ONE region of the state bucket (backend/main, fnx-core-root). Every stack's backend
+  # reads it, not the stack's own region: a DR or EU stack still keeps its state here.
+  # check-state-keys.py fails a stack whose backend region differs from backend/main's.
+  tfstate:
+    region: us-east-1
   environment:
     namespace: fnx
     management_account_id: "123456789012"

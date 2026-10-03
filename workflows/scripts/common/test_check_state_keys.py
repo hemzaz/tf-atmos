@@ -10,18 +10,29 @@ check_state_keys = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_state_keys)
 
 
-def instance(workspace, key_prefix="vpc", stage="prod", backend_type="s3", key="terraform.tfstate", **metadata):
+def instance(workspace, key_prefix="vpc", stage="prod", backend_type="s3", key="terraform.tfstate",
+             region="us-east-1", component=None, **metadata):
     return {
         "metadata": metadata,
+        "component": component,
+        "vars": {"region": region},
         "backend_type": backend_type,
-        "backend": {"workspace_key_prefix": key_prefix, "key": key},
+        "backend": {"workspace_key_prefix": key_prefix, "key": key, "region": region},
         "workspace": workspace,
         "settings": {"context": {"tenant": "fnx", "stage": stage}},
     }
 
 
+def core_stack(region="us-east-1"):
+    backend = instance("fnx-core-root", key_prefix="backend", stage="core", region=region, component="backend")
+    return {"components": {"terraform": {"backend/main": backend}}}
+
+
 def stacks_with(**components):
-    return {"fnx-prod-production": {"components": {"terraform": components}}}
+    return {
+        "fnx-core-root": core_stack(),
+        "fnx-prod-production": {"components": {"terraform": components}},
+    }
 
 
 class CheckStateKeysTest(unittest.TestCase):
@@ -84,6 +95,26 @@ class CheckStateKeysTest(unittest.TestCase):
 
     def test_missing_state_key_fails(self):
         self.assert_errors(stacks_with(**{"vpc/main": instance("fnx-prod-production", key=None)}), "backend.key None")
+
+    def test_backend_region_of_the_bucket_passes(self):
+        self.assert_errors(stacks_with(**{"vpc/main": instance("fnx-prod-production", region="us-east-1")}))
+
+    def test_backend_region_of_the_stack_fails(self):
+        # An EU/DR stack whose backend followed its own region would init against a region with no bucket
+        stacks = stacks_with(**{"vpc/main": instance("fnx-prod-production")})
+        stacks["fnx-prod-production"]["components"]["terraform"]["vpc/main"]["backend"]["region"] = "eu-west-1"
+        self.assert_errors(stacks, "backend.region 'eu-west-1' is not the state bucket's region 'us-east-1'")
+
+    def test_missing_backend_stack_fails(self):
+        stacks = stacks_with(**{"vpc/main": instance("fnx-prod-production")})
+        del stacks["fnx-core-root"]
+        self.assert_errors(stacks, "expected exactly one deployed 'backend' region")
+
+    def test_bucket_region_is_the_backend_stacks_own(self):
+        # backend/main moved to another region: stacks still pointing at us-east-1 now fail
+        stacks = stacks_with(**{"vpc/main": instance("fnx-prod-production")})
+        stacks["fnx-core-root"] = core_stack(region="eu-west-1")
+        self.assert_errors(stacks, "backend.region 'us-east-1' is not the state bucket's region 'eu-west-1'")
 
     def test_missing_context_fails(self):
         bad = instance("fnx-prod-production")
