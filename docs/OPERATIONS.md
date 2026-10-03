@@ -78,8 +78,9 @@ No role ARN is a variable. Every AWS job assumes its stack's own `iam/ci` role, 
 account, derived by `workflows/scripts/common/ci-apply-role-arn.py` as
 `arn:aws:iam::<settings.environment.account_id>:role/<ci_role_name_prefix>-<kind>`: `--kind plan`
 for PR/master plans, drift and DR checks; `--kind apply` (default) for CD. This is Cloud Posse's
-per-account planner/terraform role pair (`github-oidc-role`); moving to an account map changes only
-the script's `account_id()`. `AWS_PROD_PLAN_ROLE_ARN` is gone; delete it from the repository.
+per-account planner/terraform role pair (`github-oidc-role`). `settings.environment.account_id`
+already comes from the account map (Account IDs, above), so a new or changed account needs no
+script change. `AWS_PROD_PLAN_ROLE_ARN` is gone; delete it from the repository.
 For CI across several accounts from one OIDC provider, see
 [examples/github-oidc-hub-spoke](../examples/github-oidc-hub-spoke/README.md).
 

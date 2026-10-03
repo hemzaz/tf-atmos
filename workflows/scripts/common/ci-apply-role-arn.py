@@ -10,8 +10,9 @@ role is not a repository or GitHub Environment variable: it is
 arn:aws:iam::<settings.environment.account_id>:role/<ci_role_name_prefix>-<kind>.
 The apply role trusts only the branch-pinned ref subject (Cloud Posse's
 trusted_github_repos); the plan role trusts ci_plan_role_subjects.
-account_id() is the one place that picks the account, so a later account map
-(Cloud Posse's core-account model) only has to change it.
+settings.environment.account_id is read from the account map
+(settings.account_map.full_account_map, stacks/orgs/fnx/_defaults.yaml), so
+account changes need no edit here; account_id() is the one lookup.
 """
 import argparse
 import json
