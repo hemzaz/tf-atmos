@@ -89,7 +89,7 @@ planned, confirmed, then applied from the saved plan. Each layer is also its own
 
 `backend`, `iam`, `kms`, `storage`, `networking`, `connectivity`, `security`,
 `security-monitoring`, `compute`, `platform`, `data`, `dns-zones`, `dns`, `certificates`,
-`addons`, `services`, `monitoring`.
+`addons`, `services`, `regional-waf`, `monitoring`.
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that
@@ -114,8 +114,9 @@ atmos workflow hot-deploy -f deploy-application -s <stack>   # Cognito, Lambda, 
 atmos workflow deploy -f deploy-template -s <stack>          # a stack template (stacks/catalog/templates/)
 ```
 
-Of the stack templates only `microservices-platform` names components that all exist; the others
-fail at `deploy-template`. No stack deploys `idp-platform`.
+Of the stack templates only `serverless-api` still names inputs its components do not declare
+(its fixture is known-broken); the others' fixtures pass the checks, `microservices-platform`
+with a known deploy-layer gap. No stack deploys `idp-platform`.
 
 ## In-cluster components
 

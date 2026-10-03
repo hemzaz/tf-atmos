@@ -16,6 +16,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_data "aws_ssm_parameter" {
+    defaults = {
+      value = "Origin-Verify-0123456789abcdef"
+    }
+  }
+
   mock_resource "aws_cloudwatch_log_group" {
     defaults = {
       arn = "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/test-web"
@@ -624,6 +630,105 @@ run "load_balancer_needs_a_condition" {
       priority       = 100
     }
     autoscaling = null
+  }
+
+  expect_failures = [var.load_balancer]
+}
+
+run "load_balancer_http_header_reads_its_value_from_ssm" {
+  command = plan
+
+  variables {
+    load_balancer = {
+      listener_arn   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/test-webapp-alb/50dc6c495c0c9188/f2f7dc8efc522ab2"
+      vpc_id         = "vpc-0abc"
+      container_name = "app"
+      container_port = 8080
+      priority       = 100
+      path_patterns  = ["/*"]
+      http_header    = { name = "X-Origin-Verify", value_ssm_parameter_name = "/webapp/origin-verify" }
+    }
+  }
+
+  assert {
+    condition = (
+      data.aws_ssm_parameter.http_header[0].name == "/webapp/origin-verify"
+      && length(aws_lb_listener_rule.this[0].condition) == 2
+      && length([for c in aws_lb_listener_rule.this[0].condition : c if length(c.http_header) == 1]) == 1
+      && one(one([for c in aws_lb_listener_rule.this[0].condition : c if length(c.http_header) == 1]).http_header).http_header_name == "X-Origin-Verify"
+      && nonsensitive(one(one([for c in aws_lb_listener_rule.this[0].condition : c if length(c.http_header) == 1]).http_header).values) == toset(["Origin-Verify-0123456789abcdef"])
+    )
+    error_message = "http_header adds a condition on that header, its one value read from the SSM parameter."
+  }
+}
+
+run "load_balancer_without_http_header_reads_no_parameter" {
+  command = plan
+
+  assert {
+    condition     = length(data.aws_ssm_parameter.http_header) == 0
+    error_message = "No SSM read without load_balancer.http_header."
+  }
+}
+
+run "load_balancer_http_header_rejects_a_wildcard_value" {
+  command = plan
+
+  variables {
+    load_balancer = {
+      listener_arn   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/test-webapp-alb/50dc6c495c0c9188/f2f7dc8efc522ab2"
+      vpc_id         = "vpc-0abc"
+      container_name = "app"
+      container_port = 8080
+      priority       = 100
+      path_patterns  = ["/*"]
+      http_header    = { name = "X-Origin-Verify", value_ssm_parameter_name = "/webapp/origin-verify" }
+    }
+  }
+
+  override_data {
+    target          = data.aws_ssm_parameter.http_header[0]
+    override_during = plan
+    values = {
+      value = "matches-anything-0123*"
+    }
+  }
+
+  expect_failures = [aws_lb_listener_rule.this]
+}
+
+run "load_balancer_http_header_rejects_host" {
+  command = plan
+
+  variables {
+    load_balancer = {
+      listener_arn   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/test-webapp-alb/50dc6c495c0c9188/f2f7dc8efc522ab2"
+      vpc_id         = "vpc-0abc"
+      container_name = "app"
+      container_port = 8080
+      priority       = 100
+      path_patterns  = ["/*"]
+      http_header    = { name = "Host", value_ssm_parameter_name = "/webapp/origin-verify" }
+    }
+  }
+
+  expect_failures = [var.load_balancer]
+}
+
+run "load_balancer_http_header_counts_toward_five_values" {
+  command = plan
+
+  variables {
+    load_balancer = {
+      listener_arn   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/test-webapp-alb/50dc6c495c0c9188/f2f7dc8efc522ab2"
+      vpc_id         = "vpc-0abc"
+      container_name = "app"
+      container_port = 8080
+      priority       = 100
+      host_headers   = ["a.example.com", "b.example.com"]
+      path_patterns  = ["/a/*", "/b/*", "/c/*"]
+      http_header    = { name = "X-Origin-Verify", value_ssm_parameter_name = "/webapp/origin-verify" }
+    }
   }
 
   expect_failures = [var.load_balancer]

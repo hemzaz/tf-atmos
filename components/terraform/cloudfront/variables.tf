@@ -71,9 +71,13 @@ variable "custom_origins" {
     domain_name = string
     origin_id   = string
     origin_path = optional(string, "")
+    # value, or value_ssm_parameter_name: the value read at plan from that SSM
+    # (SecureString) parameter, for a secret such as the ALB origin-verify
+    # header, which must never be written in a stack. Exactly one.
     custom_headers = optional(list(object({
-      name  = string
-      value = string
+      name                     = string
+      value                    = optional(string)
+      value_ssm_parameter_name = optional(string)
     })), [])
     custom_origin_config = optional(object({
       http_port                = optional(number, 80)
@@ -88,7 +92,7 @@ variable "custom_origins" {
       region  = optional(string, null)
     }), null)
   }))
-  description = "Custom (non-S3) origins, Cloud Posse's custom_origins: domain_name (a host name, no scheme or path), origin_id (unique; what default_origin_id and ordered_cache target_origin_id name), origin_path, custom_headers (sent to the origin on every request; an ALB origin gets a secret origin-verify header its listener rule requires, see README), custom_origin_config (https-only and TLSv1.2 by default; read timeout 30 s and keepalive 5 s by default, 1-180 s, above 60 s needs a CloudFront quota increase) and origin_shield"
+  description = "Custom (non-S3) origins, Cloud Posse's custom_origins: domain_name (a host name, no scheme or path), origin_id (unique; what default_origin_id and ordered_cache target_origin_id name), origin_path, custom_headers (name and value or value_ssm_parameter_name, sent to the origin on every request; an ALB origin gets a secret origin-verify header its listener rule requires, read from SSM, see README), custom_origin_config (https-only and TLSv1.2 by default; read timeout 30 s and keepalive 5 s by default, 1-180 s, above 60 s needs a CloudFront quota increase) and origin_shield"
   default     = []
   nullable    = false
 
@@ -140,6 +144,14 @@ variable "custom_origins" {
   validation {
     condition     = alltrue([for o in var.custom_origins : length(o.custom_headers) <= 10 && length(distinct([for h in o.custom_headers : lower(h.name)])) == length(o.custom_headers) && alltrue([for h in o.custom_headers : can(regex("^[A-Za-z0-9-]{1,128}$", h.name))])])
     error_message = "Each custom origin takes at most 10 custom_headers with unique names of letters, digits and hyphens."
+  }
+
+  validation {
+    condition = alltrue(flatten([for o in var.custom_origins : [
+      for h in o.custom_headers : (h.value == null) != (h.value_ssm_parameter_name == null)
+      && (h.value_ssm_parameter_name == null || (can(regex("^/?[A-Za-z0-9_./-]+$", coalesce(h.value_ssm_parameter_name, "-"))) && length(coalesce(h.value_ssm_parameter_name, "-")) <= 2048))
+    ]]))
+    error_message = "Each custom_headers entry sets exactly one of value or value_ssm_parameter_name, an SSM parameter name (e.g. /app/origin-verify), not an ARN."
   }
 
   # AWS Developer Guide, "Custom headers that CloudFront can't add to origin

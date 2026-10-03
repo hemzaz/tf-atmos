@@ -14,7 +14,6 @@ ALL = frozenset({"*"})
 
 KNOWN_BROKEN_FIXTURES = {
     "fnx-fixtures-serverless": ALL,
-    "fnx-fixtures-webapp": ALL,
     # Clean on dependencies, outputs, vars and plan-sweep. No operator path to
     # its private EKS endpoint (no bastion), deploy-full-stack has no layer for
     # ses or alb-controller-ingress-group, and its eventbridge rules read their

@@ -172,6 +172,29 @@ class CheckDeployLayersTest(unittest.TestCase):
         )}
         self.assert_errors(stacks, workflow_files(*layers))
 
+    def test_same_type_split_by_scope(self):
+        # A CLOUDFRONT waf before the services layer, a REGIONAL one (associated with
+        # an API of that layer) after it, whatever the instances are called.
+        layers = (
+            ("security", ['.metadata.component == "waf" and .vars.scope == "CLOUDFRONT"']),
+            ("services", ["apigateway"]),
+            ("edge", ['.metadata.component == "waf" and .vars.scope == "REGIONAL"']),
+        )
+        stacks = {"s1": stack(
+            waf__cdn=instance("waf", {"scope": "CLOUDFRONT"}),
+            api__main=instance("apigateway"),
+            api__waf=instance(
+                "waf", {"scope": "REGIONAL", "arns": ["!terraform.state api/main .stage_arn"]},
+                [{"component": "api/main"}],
+            ),
+        )}
+        self.assert_errors(stacks, workflow_files(*layers))
+
+    def test_waf_without_a_scope_var_is_in_no_scope_layer(self):
+        layers = (("security", ['.metadata.component == "waf" and .vars.scope == "CLOUDFRONT"']),)
+        stacks = {"s1": stack(waf__main=instance("waf"))}
+        self.assert_errors(stacks, workflow_files(*layers), "waf/main (metadata.component 'waf') is in no layer")
+
     def test_same_type_read_in_one_layer_fails(self):
         stacks = {"s1": stack(
             ec2__bastion=instance("ec2"),
