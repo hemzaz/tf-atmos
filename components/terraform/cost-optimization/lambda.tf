@@ -35,6 +35,12 @@ data "archive_file" "scheduler_lambda" {
 }
 
 resource "aws_lambda_function" "scheduler" {
+  #checkov:skip=CKV_AWS_115:Runs on a schedule, one invocation at a time; a reservation would subtract from the account pool and fails on accounts still at the default limit of 10
+  #checkov:skip=CKV_AWS_116:Invoked asynchronously by its EventBridge rules; a failure raises aws_cloudwatch_metric_alarm.scheduler_errors and the next scheduled run retries
+  #checkov:skip=CKV_AWS_117:Calls only AWS APIs; there is no VPC resource for it to reach
+  #checkov:skip=CKV_AWS_173:The environment holds no secrets (names, flags, tag filters); Lambda encrypts it with the AWS managed key
+  #checkov:skip=CKV_AWS_272:Packaged from lambda/*.py in this repo by archive_file; no signing profile, as code signing is off by default in Cloud Posse's terraform-aws-lambda-function
+  #checkov:skip=CKV_AWS_50:X-Ray bills per trace and a scheduled maintenance function has no request path to trace
   count = local.current_settings.auto_shutdown ? 1 : 0
 
   function_name = "${local.name}-scheduler"
@@ -174,6 +180,12 @@ data "archive_file" "savings_analyzer_lambda" {
 }
 
 resource "aws_lambda_function" "savings_analyzer" {
+  #checkov:skip=CKV_AWS_115:Runs on a schedule, one invocation at a time; a reservation would subtract from the account pool and fails on accounts still at the default limit of 10
+  #checkov:skip=CKV_AWS_116:Invoked asynchronously by its EventBridge rule; a failure raises aws_cloudwatch_metric_alarm.savings_analyzer_errors and the next scheduled run retries
+  #checkov:skip=CKV_AWS_117:Calls only AWS APIs; there is no VPC resource for it to reach
+  #checkov:skip=CKV_AWS_173:The environment holds no secrets (a name and a topic ARN); Lambda encrypts it with the AWS managed key
+  #checkov:skip=CKV_AWS_272:Packaged from lambda/*.py in this repo by archive_file; no signing profile, as code signing is off by default in Cloud Posse's terraform-aws-lambda-function
+  #checkov:skip=CKV_AWS_50:X-Ray bills per trace and a scheduled maintenance function has no request path to trace
   function_name = "${local.name}-savings-analyzer"
   role          = aws_iam_role.savings_analyzer.arn
   handler       = "index.handler"
@@ -263,6 +275,12 @@ data "archive_file" "cleanup_lambda" {
 }
 
 resource "aws_lambda_function" "resource_cleanup" {
+  #checkov:skip=CKV_AWS_115:Runs on a schedule, one invocation at a time; a reservation would subtract from the account pool and fails on accounts still at the default limit of 10
+  #checkov:skip=CKV_AWS_116:Invoked asynchronously by its EventBridge rule; a failure raises aws_cloudwatch_metric_alarm.resource_cleanup_errors and the next scheduled run retries
+  #checkov:skip=CKV_AWS_117:Calls only AWS APIs; there is no VPC resource for it to reach
+  #checkov:skip=CKV_AWS_173:The environment holds no secrets (flags, a tag and a topic ARN); Lambda encrypts it with the AWS managed key
+  #checkov:skip=CKV_AWS_272:Packaged from lambda/*.py in this repo by archive_file; no signing profile, as code signing is off by default in Cloud Posse's terraform-aws-lambda-function
+  #checkov:skip=CKV_AWS_50:X-Ray bills per trace and a scheduled maintenance function has no request path to trace
   function_name = "${local.name}-resource-cleanup"
   role          = aws_iam_role.resource_cleanup.arn
   handler       = "index.handler"
