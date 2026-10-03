@@ -1,7 +1,6 @@
 ---
-# us-east-2 (the DR region). Same shape as mixins/region/us-east-1.yaml. EKS
-# supports clusters in all three AZ IDs here; vpc instances set
-# availability_zone_ids themselves (components/terraform/vpc/README.md).
+# us-east-2 (the DR region). Same shape as mixins/region/us-east-1.yaml. vpc
+# instances set availability_zone_ids themselves (components/terraform/vpc/README.md).
 import:
   - catalog/vpc/defaults
 
