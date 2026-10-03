@@ -32,8 +32,12 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           atmos workflow security-scan-report -f lint
+      # security-scan-report has already dropped the inline-skipped
+      # (`suppressions`) results. Upload only when a scan wrote SARIF: when
+      # the scan step dies first, upload-sarif would only add a second,
+      # misleading failure ("No SARIF files found").
       - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        if: always()
+        if: always() && hashFiles('reports/*.sarif') != ''
         with:
           sarif_file: reports
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
