@@ -248,9 +248,14 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+    # The gate only: no SARIF upload. It used to upload reports/ to code
+    # scanning, which added nothing: the SARIF comes from the --baseline run, so
+    # it carried 0 results, and its category (terraform-ci.yml:security-scan)
+    # never matched master's configuration (security-scan.yml:scan), so every
+    # PR check run was NEUTRAL ("1 configuration ... not found"). Code scanning
+    # is fed by the nightly security-scan.yml; this job's pass/fail is the gate.
     permissions:
       contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -258,16 +263,10 @@ jobs:
       # Same "dubious ownership" cause as the plan-sweep job above: the
       # workspace is owned by the runner's user, the container runs as root,
       # and checkout's own safe.directory entry doesn't reach later steps.
-      # trivy/checkov don't touch git, but upload-sarif does (it shells out to
-      # `git rev-parse` for the commit oid and ref), so it needs this too.
-      - name: Trivy + Checkov (SARIF)
+      - name: Trivy + Checkov
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           atmos workflow security-scan -f lint
-      - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        if: always()
-        with:
-          sarif_file: reports
 
   terraform-test:
     # Runs `terraform test` (tests/*.tftest.hcl) for every component that has
