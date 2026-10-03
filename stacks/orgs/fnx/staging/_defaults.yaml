@@ -20,12 +20,5 @@ settings:
     account: staging
     # From the account map (stacks/orgs/fnx/_defaults.yaml), keyed by `account`.
     account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
-    aws_profile: "staging"
-    instance_type_default: "t3.medium"
-    rds_instance_class_default: "db.t3.medium"
-    log_retention_days: 14
-    backup_retention_days: 7
-    enable_deletion_protection: false
-    enable_multi_az: false
   context:
     stage: staging

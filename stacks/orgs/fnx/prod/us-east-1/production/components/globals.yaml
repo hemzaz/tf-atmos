@@ -48,18 +48,7 @@ settings:
     # the dns instances' zone_ids output, never from settings. example.com is a
     # placeholder base until the owner sets the real domain.
     domain_name: "fnx.example.com"
-    description: "Production Environment - Business Critical Infrastructure"
-    owner: "Platform Team"
-    version: "1.0.0"
     stage: "production"
-    region: "us-east-1"
-
-  # Compliance requirements
-    compliance:
-      hipaa: false
-      pci: true
-      sox: true
-      gdpr: true
 
   # Monitoring contacts - 24/7 coverage
     monitoring:
@@ -73,19 +62,6 @@ settings:
       # components/terraform/cost-optimization/variables.tf).
       budget_monthly_limit: "10000"
 
-  # Change management - strict controls
-    change_management:
-      approval_required: true
-      change_window: "weekday-maintenance"
-      emergency_contact: "prod-emergency@example.com"
-      rollback_required: true
-
-  # SLA requirements
-    sla:
-      availability: "99.9%"
-      rpo: "1 hour"
-      rto: "4 hours"
-    tenant_name: production
     eks_kubernetes_version: "1.36"
     eks_public_access: false
     rds_engine: "postgres"
@@ -101,27 +77,7 @@ settings:
       platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
-    secrets_manager_path_prefix: "production/fnx/certificates"
-    enable_container_insights: true
     enable_vpc_flow_logs: true
-    enable_enhanced_monitoring: true
-    enable_guard_duty: true
-    enable_security_hub: true
-    security:
-      vpc_flow_logs: true
-      encryption_at_rest: true
-      encryption_in_transit: true
-      ssl_enforcement: true
-      kms_key_rotation: true
-      imdsv2_required: true
-
-  # Production-specific settings
-    enable_debug_logging: false
-    retention_days: 90
-    backup_retention_days: 30
-    multi_az: true
-    cross_zone_load_balancing: true
-    min_availability_zones: 3
   context:
     environment: production
 
