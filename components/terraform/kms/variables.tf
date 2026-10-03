@@ -160,7 +160,7 @@ variable "allow_cloudwatch_logs" {
 
 variable "allow_log_delivery" {
   type        = bool
-  description = "Let the CloudWatch Logs delivery service (delivery.logs.amazonaws.com) decrypt with the key (kms:Decrypt), scoped by aws:SourceAccount. Needed when a resource whose logs/execution history ship via CloudWatch Logs delivery (for example a Step Functions state machine's log group) is itself encrypted with this key"
+  description = "Let the CloudWatch Logs delivery service (delivery.logs.amazonaws.com) decrypt with the key (kms:Decrypt), scoped by aws:SourceAccount. Needed when a resource whose logs/execution history ship via CloudWatch Logs delivery (for example a Step Functions state machine's log group) is itself encrypted with this key. It also grants kms:GenerateDataKey* scoped by aws:SourceAccount and an aws:SourceArn of this account's CloudWatch Logs, so vended logs (the vpc flow_logs_s3_backup copy) can be written to an SSE-KMS S3 bucket under this key"
   default     = false
 }
 
