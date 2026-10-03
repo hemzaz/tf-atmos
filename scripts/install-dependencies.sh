@@ -102,15 +102,15 @@ show_help() {
 # Detect the operating system
 detect_os() {
   echo -e "${BLUE}Detecting operating system...${RESET}"
-  
+
   if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     OS="linux"
-    
+
     # Determine Linux distribution
     if [[ -f /etc/os-release ]]; then
       . /etc/os-release
       DISTRO=$ID
-      
+
       if [[ "$DISTRO" == "ubuntu" || "$DISTRO" == "debian" ]]; then
         PKG_MANAGER="apt-get"
         PKG_UPDATE="apt-get update"
@@ -132,7 +132,7 @@ detect_os() {
       else
         echo -e "${YELLOW}Unknown Linux distribution: $DISTRO${RESET}"
         echo -e "${YELLOW}Will try to detect package manager...${RESET}"
-        
+
         if command -v apt-get &>/dev/null; then
           PKG_MANAGER="apt-get"
           PKG_UPDATE="apt-get update"
@@ -154,25 +154,25 @@ detect_os() {
       echo -e "${RED}Could not determine Linux distribution. Please install dependencies manually.${RESET}"
       exit 1
     fi
-    
+
     echo -e "${GREEN}Linux detected: $DISTRO${RESET}"
     echo -e "${GREEN}Package manager: $PKG_MANAGER${RESET}"
-    
+
   elif [[ "$OSTYPE" == "darwin"* ]]; then
     OS="darwin"
-    
+
     # Check if Homebrew is installed
     if ! command -v brew &>/dev/null; then
       echo -e "${YELLOW}Homebrew not installed. Installing Homebrew...${RESET}"
-      
+
       # First download the script to verify it
       BREW_INSTALL_SCRIPT="/tmp/homebrew_install.sh"
       BREW_SCRIPT_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
       BREW_EXPECTED_SHA256="72bc41560c34e4518dbb822a280400cbba02c0c3d3340ad831ca8eda77c9bfb7"  # Replace with current hash
-      
+
       echo -e "${BLUE}Downloading Homebrew install script...${RESET}"
       curl -fsSL --proto '=https' --tlsv1.2 "$BREW_SCRIPT_URL" -o "$BREW_INSTALL_SCRIPT"
-      
+
       # Verify the checksum
       if command -v shasum &>/dev/null; then
         ACTUAL_SHA256=$(shasum -a 256 "$BREW_INSTALL_SCRIPT" | cut -d' ' -f1)
@@ -183,7 +183,7 @@ detect_os() {
         echo -e "${YELLOW}Skipping Homebrew installation for security${RESET}"
         return 1
       fi
-      
+
       if [[ "$ACTUAL_SHA256" != "$BREW_EXPECTED_SHA256" ]]; then
         echo -e "${RED}Homebrew installer checksum verification failed!${RESET}"
         echo -e "${RED}Expected: $BREW_EXPECTED_SHA256${RESET}"
@@ -192,12 +192,12 @@ detect_os() {
         rm -f "$BREW_INSTALL_SCRIPT"
         return 1
       fi
-      
+
       echo -e "${GREEN}Homebrew installer verified successfully.${RESET}"
       chmod +x "$BREW_INSTALL_SCRIPT"
       /bin/bash "$BREW_INSTALL_SCRIPT"
       rm -f "$BREW_INSTALL_SCRIPT"
-      
+
       # Add Homebrew to PATH if needed
       if [[ -f /opt/homebrew/bin/brew ]]; then
         echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
@@ -209,18 +209,18 @@ detect_os() {
     else
       echo -e "${GREEN}Homebrew is already installed.${RESET}"
     fi
-    
+
     PKG_MANAGER="brew"
     PKG_UPDATE="brew update"
     PKG_INSTALL="brew install"
-    
+
     echo -e "${GREEN}macOS detected${RESET}"
-    
+
   else
     echo -e "${RED}Unsupported operating system: $OSTYPE${RESET}"
     exit 1
   fi
-  
+
   # Determine architecture
   ARCH=$(uname -m)
   if [[ "$ARCH" == "x86_64" ]]; then
@@ -244,7 +244,7 @@ detect_os() {
     echo -e "${RED}Unsupported architecture: $ARCH${RESET}"
     exit 1
   fi
-  
+
   echo -e "${GREEN}Architecture: $ARCH${RESET}"
 }
 
@@ -252,13 +252,13 @@ detect_os() {
 setup_install_dir() {
   if [[ "$SYSTEM_INSTALL" == "true" ]]; then
     INSTALL_TARGET_DIR="$INSTALL_DIR"
-    
+
     echo -e "${BLUE}Setting up system-wide installation in $INSTALL_TARGET_DIR...${RESET}"
-    
+
     # Check if we have sudo access
     if ! sudo -n true 2>/dev/null; then
       echo -e "${YELLOW}System-wide installation requires sudo access.${RESET}"
-      
+
       if [[ "$CI_MODE" == "true" ]]; then
         echo -e "${RED}CI mode enabled but no sudo access. Switching to user installation.${RESET}"
         SYSTEM_INSTALL="false"
@@ -272,7 +272,7 @@ setup_install_dir() {
         fi
       fi
     fi
-    
+
     # Create installation directory if it doesn't exist
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
       if [[ ! -d "$INSTALL_TARGET_DIR" ]]; then
@@ -281,18 +281,18 @@ setup_install_dir() {
     fi
   else
     INSTALL_TARGET_DIR="$USER_INSTALL_DIR"
-    
+
     echo -e "${BLUE}Setting up user installation in $INSTALL_TARGET_DIR...${RESET}"
-    
+
     # Create user installation directory if it doesn't exist
     if [[ ! -d "$INSTALL_TARGET_DIR" ]]; then
       mkdir -p "$INSTALL_TARGET_DIR"
     fi
-    
+
     # Add the user bin directory to PATH if not already there
     if [[ ":$PATH:" != *":$INSTALL_TARGET_DIR:"* ]]; then
       echo -e "${YELLOW}Adding $INSTALL_TARGET_DIR to PATH...${RESET}"
-      
+
       # Determine shell configuration file
       local SHELL_CONFIG=""
       if [[ -f "$HOME/.zshrc" ]]; then
@@ -306,12 +306,12 @@ setup_install_dir() {
         SHELL_CONFIG="$HOME/.bashrc"
         touch "$SHELL_CONFIG"
       fi
-      
+
       # Add directory to PATH
       echo "export PATH=\"$INSTALL_TARGET_DIR:\$PATH\"" >> "$SHELL_CONFIG"
       echo -e "${YELLOW}Added $INSTALL_TARGET_DIR to PATH in $SHELL_CONFIG${RESET}"
       echo -e "${YELLOW}Please restart your shell or run 'source $SHELL_CONFIG' after installation${RESET}"
-      
+
       # Also add to current session
       export PATH="$INSTALL_TARGET_DIR:$PATH"
     fi
@@ -321,9 +321,9 @@ setup_install_dir() {
 # Install or update system packages
 install_system_packages() {
   local PACKAGES=()
-  
+
   echo -e "${BLUE}Installing required system packages...${RESET}"
-  
+
   # Determine required packages based on the OS
   if [[ "$OS" == "linux" ]]; then
     if [[ "$PKG_MANAGER" == "apt-get" ]]; then
@@ -338,7 +338,7 @@ install_system_packages() {
       if [[ "$INSTALL_JQ" == "true" ]]; then PACKAGES+=(jq); fi
       PACKAGES+=(curl unzip python3 python3-pip)
     fi
-    
+
     # Update package lists
     echo -e "${BLUE}Updating package lists...${RESET}"
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
@@ -346,7 +346,7 @@ install_system_packages() {
     else
       $PKG_UPDATE
     fi
-    
+
     # Install packages
     if [[ ${#PACKAGES[@]} -gt 0 ]]; then
       echo -e "${BLUE}Installing packages: ${PACKAGES[*]}${RESET}"
@@ -356,12 +356,12 @@ install_system_packages() {
         $PKG_INSTALL "${PACKAGES[@]}"
       fi
     fi
-    
+
     # Install YQ
     if [[ "$INSTALL_YQ" == "true" ]]; then
       install_yq
     fi
-    
+
     # Install yamllint via pip if not available via package manager
     if [[ "$INSTALL_YAMLLINT" == "true" && "$PKG_MANAGER" != "apt-get" ]]; then
       echo -e "${BLUE}Installing yamllint via pip...${RESET}"
@@ -371,12 +371,12 @@ install_system_packages() {
         pip3 install --user yamllint
       fi
     fi
-    
+
   elif [[ "$OS" == "darwin" ]]; then
     # Update Homebrew
     echo -e "${BLUE}Updating Homebrew...${RESET}"
     brew update
-    
+
     # Install packages with Homebrew
     local BREW_PACKAGES=()
     if [[ "$INSTALL_GIT" == "true" ]]; then BREW_PACKAGES+=(git); fi
@@ -384,7 +384,7 @@ install_system_packages() {
     if [[ "$INSTALL_JQ" == "true" ]]; then BREW_PACKAGES+=(jq); fi
     if [[ "$INSTALL_YQ" == "true" ]]; then BREW_PACKAGES+=(yq); fi
     if [[ "$INSTALL_YAMLLINT" == "true" ]]; then BREW_PACKAGES+=(yamllint); fi
-    
+
     if [[ ${#BREW_PACKAGES[@]} -gt 0 ]]; then
       echo -e "${BLUE}Installing Homebrew packages: ${BREW_PACKAGES[*]}${RESET}"
       brew install "${BREW_PACKAGES[@]}"
@@ -397,18 +397,18 @@ install_yq() {
   if [[ "$INSTALL_YQ" != "true" ]]; then
     return
   fi
-  
+
   if command -v yq &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     echo -e "${GREEN}YQ is already installed: $(yq --version)${RESET}"
     return
   fi
-  
+
   echo -e "${BLUE}Installing YQ...${RESET}"
-  
+
   # Download and install YQ
   local YQ_URL="https://github.com/mikefarah/yq/releases/latest/download/yq_${OS}_${ARCH}"
   local YQ_BIN="$INSTALL_TARGET_DIR/yq"
-  
+
   if curl -sSL "$YQ_URL" -o "$YQ_BIN"; then
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
       sudo chmod +x "$YQ_BIN"
@@ -426,7 +426,7 @@ install_terraform() {
   if [[ "$INSTALL_TERRAFORM" != "true" ]]; then
     return
   fi
-  
+
   if command -v terraform &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     local TF_INSTALLED_VERSION=$(terraform version -json | jq -r '.terraform_version')
     if [[ "$TF_INSTALLED_VERSION" == "$TERRAFORM_VERSION" ]]; then
@@ -438,14 +438,14 @@ install_terraform() {
   else
     echo -e "${BLUE}Installing Terraform $TERRAFORM_VERSION...${RESET}"
   fi
-  
+
   # Download and install Terraform
   local TF_URL="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_${OS}_${TERRAFORM_ARCH}.zip"
   local TF_ZIP="/tmp/terraform.zip"
-  
+
   if curl -sSL "$TF_URL" -o "$TF_ZIP"; then
     unzip -o "$TF_ZIP" -d /tmp
-    
+
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
       sudo mv /tmp/terraform "$INSTALL_TARGET_DIR/terraform"
       sudo chmod +x "$INSTALL_TARGET_DIR/terraform"
@@ -453,7 +453,7 @@ install_terraform() {
       mv /tmp/terraform "$INSTALL_TARGET_DIR/terraform"
       chmod +x "$INSTALL_TARGET_DIR/terraform"
     fi
-    
+
     rm "$TF_ZIP"
     echo -e "${GREEN}Terraform $TERRAFORM_VERSION installed${RESET}"
   else
@@ -466,7 +466,7 @@ install_atmos() {
   if [[ "$INSTALL_ATMOS" != "true" ]]; then
     return
   fi
-  
+
   if command -v atmos &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     local ATMOS_INSTALLED_VERSION=$(atmos version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
     if [[ "$ATMOS_INSTALLED_VERSION" == "$ATMOS_VERSION" ]]; then
@@ -478,18 +478,18 @@ install_atmos() {
   else
     echo -e "${BLUE}Installing Atmos $ATMOS_VERSION...${RESET}"
   fi
-  
+
   # Download and install Atmos
   # Use array to properly handle command construction and prevent injection
   local ATMOS_URL="https://github.com/cloudposse/atmos/releases/download/v${ATMOS_VERSION}/atmos_${OS}_${ATMOS_ARCH}"
   local ATMOS_BIN="$INSTALL_TARGET_DIR/atmos"
-  
-  # Validate URL format before using it 
+
+  # Validate URL format before using it
   if [[ ! "$ATMOS_URL" =~ ^https://github\.com/cloudposse/atmos/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/atmos_(linux|darwin)_(amd64|arm64)$ ]]; then
     echo -e "${RED}Invalid Atmos URL format. Aborting for security.${RESET}"
     return 1
   fi
-  
+
   # Use command arrays instead of string interpolation
   if curl -sSL --proto '=https' --tlsv1.2 "$ATMOS_URL" -o "$ATMOS_BIN"; then
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
@@ -508,18 +508,18 @@ install_aws_cli() {
   if [[ "$INSTALL_AWS_CLI" != "true" ]]; then
     return
   fi
-  
+
   if command -v aws &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     echo -e "${GREEN}AWS CLI is already installed: $(aws --version)${RESET}"
     return
   fi
-  
+
   echo -e "${BLUE}Installing AWS CLI...${RESET}"
-  
+
   if [[ "$OS" == "darwin" ]]; then
     # macOS installation
     local AWS_CLI_PKG="/tmp/AWSCLIV2.pkg"
-    
+
     if curl -sSL "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "$AWS_CLI_PKG"; then
       sudo installer -pkg "$AWS_CLI_PKG" -target /
       rm "$AWS_CLI_PKG"
@@ -530,16 +530,16 @@ install_aws_cli() {
   elif [[ "$OS" == "linux" ]]; then
     # Linux installation
     local AWS_CLI_ZIP="/tmp/awscliv2.zip"
-    
+
     if curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "$AWS_CLI_ZIP"; then
       unzip -o "$AWS_CLI_ZIP" -d /tmp
-      
+
       if [[ "$SYSTEM_INSTALL" == "true" ]]; then
         sudo /tmp/aws/install --update
       else
         /tmp/aws/install --update --bin-dir "$INSTALL_TARGET_DIR" --install-dir "$HOME/.aws-cli"
       fi
-      
+
       rm -rf /tmp/aws /tmp/awscliv2.zip
       echo -e "${GREEN}AWS CLI installed: $(aws --version)${RESET}"
     else
@@ -553,18 +553,18 @@ install_session_manager_plugin() {
   if [[ "$INSTALL_SESSION_MANAGER" != "true" ]]; then
     return
   fi
-  
+
   if command -v session-manager-plugin &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     echo -e "${GREEN}Session Manager Plugin is already installed: $(session-manager-plugin --version)${RESET}"
     return
   fi
-  
+
   echo -e "${BLUE}Installing AWS Session Manager Plugin...${RESET}"
-  
+
   if [[ "$OS" == "darwin" ]]; then
     # macOS installation
     local SSM_PKG="/tmp/sessionmanager-bundle.pkg"
-    
+
     if [[ "$ARCH" == "arm64" ]]; then
       if curl -sSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/mac_arm64/sessionmanager-bundle.pkg" -o "$SSM_PKG"; then
         sudo installer -pkg "$SSM_PKG" -target /
@@ -585,18 +585,18 @@ install_session_manager_plugin() {
   elif [[ "$OS" == "linux" ]]; then
     # Linux installation
     local SSM_ZIP="/tmp/session-manager-plugin.zip"
-    
+
     if [[ "$ARCH" == "x86_64" ]]; then
       if curl -sSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.zip" -o "$SSM_ZIP"; then
         unzip -o "$SSM_ZIP" -d /tmp
-        
+
         if [[ "$SYSTEM_INSTALL" == "true" ]]; then
           sudo /tmp/sessionmanager-bundle/install -i /usr/local/sessionmanagerplugin -b /usr/local/bin/session-manager-plugin
         else
           mkdir -p "$HOME/.sessionmanagerplugin"
           /tmp/sessionmanager-bundle/install -i "$HOME/.sessionmanagerplugin" -b "$INSTALL_TARGET_DIR/session-manager-plugin"
         fi
-        
+
         rm -rf /tmp/sessionmanager-bundle /tmp/session-manager-plugin.zip
         echo -e "${GREEN}Session Manager Plugin installed${RESET}"
       else
@@ -605,14 +605,14 @@ install_session_manager_plugin() {
     elif [[ "$ARCH" == "arm64" || "$ARCH" == "aarch64" ]]; then
       if curl -sSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_arm64/session-manager-plugin.zip" -o "$SSM_ZIP"; then
         unzip -o "$SSM_ZIP" -d /tmp
-        
+
         if [[ "$SYSTEM_INSTALL" == "true" ]]; then
           sudo /tmp/sessionmanager-bundle/install -i /usr/local/sessionmanagerplugin -b /usr/local/bin/session-manager-plugin
         else
           mkdir -p "$HOME/.sessionmanagerplugin"
           /tmp/sessionmanager-bundle/install -i "$HOME/.sessionmanagerplugin" -b "$INSTALL_TARGET_DIR/session-manager-plugin"
         fi
-        
+
         rm -rf /tmp/sessionmanager-bundle /tmp/session-manager-plugin.zip
         echo -e "${GREEN}Session Manager Plugin installed${RESET}"
       else
@@ -629,7 +629,7 @@ install_kubectl() {
   if [[ "$INSTALL_KUBECTL" != "true" ]]; then
     return
   fi
-  
+
   if command -v kubectl &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     local KUBECTL_INSTALLED_VERSION=$(kubectl version --client -o json | jq -r '.clientVersion.gitVersion' | sed 's/^v//')
     if [[ "$KUBECTL_INSTALLED_VERSION" == "$KUBECTL_VERSION" ]]; then
@@ -641,11 +641,11 @@ install_kubectl() {
   else
     echo -e "${BLUE}Installing kubectl $KUBECTL_VERSION...${RESET}"
   fi
-  
+
   # Download and install kubectl
   local KUBECTL_URL="https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/${OS}/${KUBECTL_ARCH}/kubectl"
   local KUBECTL_BIN="$INSTALL_TARGET_DIR/kubectl"
-  
+
   if curl -sSL "$KUBECTL_URL" -o "$KUBECTL_BIN"; then
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
       sudo chmod +x "$KUBECTL_BIN"
@@ -663,7 +663,7 @@ install_helm() {
   if [[ "$INSTALL_HELM" != "true" ]]; then
     return
   fi
-  
+
   if command -v helm &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     local HELM_INSTALLED_VERSION=$(helm version --short | sed 's/^v//')
     if [[ "$HELM_INSTALLED_VERSION" == "$HELM_VERSION" ]]; then
@@ -675,15 +675,15 @@ install_helm() {
   else
     echo -e "${BLUE}Installing Helm $HELM_VERSION...${RESET}"
   fi
-  
+
   # Download and install Helm
   local HELM_BASENAME="helm-v${HELM_VERSION}-${OS}-${HELM_ARCH}"
   local HELM_URL="https://get.helm.sh/${HELM_BASENAME}.tar.gz"
   local HELM_TAR="/tmp/${HELM_BASENAME}.tar.gz"
-  
+
   if curl -sSL "$HELM_URL" -o "$HELM_TAR"; then
     tar -zxf "$HELM_TAR" -C /tmp
-    
+
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
       sudo mv "/tmp/${OS}-${HELM_ARCH}/helm" "$INSTALL_TARGET_DIR/helm"
       sudo chmod +x "$INSTALL_TARGET_DIR/helm"
@@ -691,7 +691,7 @@ install_helm() {
       mv "/tmp/${OS}-${HELM_ARCH}/helm" "$INSTALL_TARGET_DIR/helm"
       chmod +x "$INSTALL_TARGET_DIR/helm"
     fi
-    
+
     rm -rf "/tmp/${OS}-${HELM_ARCH}" "$HELM_TAR"
     echo -e "${GREEN}Helm $HELM_VERSION installed${RESET}"
   else
@@ -704,7 +704,7 @@ install_tflint() {
   if [[ "$INSTALL_TFLINT" != "true" ]]; then
     return
   fi
-  
+
   if command -v tflint &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     local TFLINT_INSTALLED_VERSION=$(tflint --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//')
     if [[ "$TFLINT_INSTALLED_VERSION" == "$TFLINT_VERSION" ]]; then
@@ -716,7 +716,7 @@ install_tflint() {
   else
     echo -e "${BLUE}Installing tflint $TFLINT_VERSION...${RESET}"
   fi
-  
+
   # Install tflint
   if [[ "$OS" == "darwin" ]]; then
     if command -v brew &>/dev/null; then
@@ -735,10 +735,10 @@ install_tflint() {
 install_tflint_binary() {
   local TFLINT_URL="https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_${OS}_${ARCH}.zip"
   local TFLINT_ZIP="/tmp/tflint.zip"
-  
+
   if curl -sSL "$TFLINT_URL" -o "$TFLINT_ZIP"; then
     unzip -o "$TFLINT_ZIP" -d /tmp
-    
+
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
       sudo mv /tmp/tflint "$INSTALL_TARGET_DIR/tflint"
       sudo chmod +x "$INSTALL_TARGET_DIR/tflint"
@@ -746,7 +746,7 @@ install_tflint_binary() {
       mv /tmp/tflint "$INSTALL_TARGET_DIR/tflint"
       chmod +x "$INSTALL_TARGET_DIR/tflint"
     fi
-    
+
     rm "$TFLINT_ZIP"
     echo -e "${GREEN}tflint $TFLINT_VERSION installed: $(tflint --version)${RESET}"
   else
@@ -759,7 +759,7 @@ install_checkov() {
   if [[ "$INSTALL_CHECKOV" != "true" ]]; then
     return
   fi
-  
+
   if command -v checkov &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     local CHECKOV_INSTALLED_VERSION=$(checkov --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
     if [[ "$CHECKOV_INSTALLED_VERSION" == "$CHECKOV_VERSION" ]]; then
@@ -771,7 +771,7 @@ install_checkov() {
   else
     echo -e "${BLUE}Installing checkov $CHECKOV_VERSION...${RESET}"
   fi
-  
+
   # Install checkov via pip
   if command -v pip3 &>/dev/null; then
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
@@ -789,7 +789,7 @@ install_checkov() {
     else
       $PKG_INSTALL python3-pip
     fi
-    
+
     if command -v pip3 &>/dev/null; then
       if [[ "$SYSTEM_INSTALL" == "true" ]]; then
         sudo pip3 install checkov==$CHECKOV_VERSION
@@ -810,7 +810,7 @@ install_copier() {
   if [[ "$INSTALL_COPIER" != "true" ]]; then
     return
   fi
-  
+
   if command -v copier &>/dev/null && [[ "$FORCE_REINSTALL" != "true" ]]; then
     local COPIER_INSTALLED_VERSION=$(pip3 show copier 2>/dev/null | grep -E '^Version:' | cut -d' ' -f2)
     if [[ "$COPIER_INSTALLED_VERSION" == "$COPIER_VERSION" ]]; then
@@ -822,7 +822,7 @@ install_copier() {
   else
     echo -e "${BLUE}Installing copier $COPIER_VERSION...${RESET}"
   fi
-  
+
   # Install copier via pip
   if command -v pip3 &>/dev/null; then
     if [[ "$SYSTEM_INSTALL" == "true" ]]; then
@@ -840,7 +840,7 @@ install_copier() {
     else
       $PKG_INSTALL python3-pip
     fi
-    
+
     if command -v pip3 &>/dev/null; then
       if [[ "$SYSTEM_INSTALL" == "true" ]]; then
         sudo pip3 install copier==$COPIER_VERSION

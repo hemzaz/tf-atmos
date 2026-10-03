@@ -73,23 +73,23 @@ function show_usage {
 # Function to check requirements
 function check_requirements {
   local MISSING_REQS=false
-  
+
   echo -e "${BLUE}Checking requirements...${RESET}"
-  
+
   if ! command -v aws &> /dev/null; then
     echo -e "${RED}✘ AWS CLI is not installed. Please install it: https://aws.amazon.com/cli/${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ AWS CLI is installed${RESET}"
   fi
-  
+
   if ! command -v jq &> /dev/null; then
     echo -e "${RED}✘ jq is not installed. Please install it: brew install jq / apt install jq${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ jq is installed${RESET}"
   fi
-  
+
   if [[ "$MISSING_REQS" == "true" ]]; then
     echo -e "${RED}Please install missing requirements and try again.${RESET}"
     exit 1
@@ -106,24 +106,24 @@ function validate_inputs {
       exit 1
     fi
   fi
-  
+
   # Validate output format
   if [[ "$OUTPUT_FORMAT" != "text" && "$OUTPUT_FORMAT" != "json" && "$OUTPUT_FORMAT" != "html" ]]; then
     echo -e "${RED}Error: Output format must be 'text', 'json', or 'html'.${RESET}"
     exit 1
   fi
-  
+
   # Validate JSON output file is provided if JSON format is selected
   if [[ "$OUTPUT_FORMAT" == "json" && -z "$JSON_OUTPUT_FILE" ]]; then
     echo -e "${YELLOW}Warning: JSON output file not specified. Will print to stdout.${RESET}"
   fi
-  
+
   # Validate Jira parameters if Jira is used
   if [[ -n "$JIRA_URL" && ( -z "$JIRA_USER" || -z "$JIRA_API_TOKEN" || -z "$JIRA_PROJECT" ) ]]; then
     echo -e "${RED}Error: Jira URL, user, API token, and project are all required for Jira integration.${RESET}"
     exit 1
   fi
-  
+
   echo -e "${BLUE}Using parameters:${RESET}"
   echo -e "  AWS Region:          ${REGION}"
   echo -e "  AWS Profile:         ${PROFILE}"
@@ -153,7 +153,7 @@ function validate_inputs {
 # Function to validate AWS credentials
 function validate_aws_credentials {
   echo -e "${BLUE}Validating AWS credentials...${RESET}"
-  
+
   if ! aws sts get-caller-identity --profile "$PROFILE" &> /dev/null; then
     echo -e "${RED}✘ AWS credentials are not valid or not configured for profile ${PROFILE}.${RESET}"
     echo -e "${YELLOW}Please run 'aws configure --profile ${PROFILE}' or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables.${RESET}"
@@ -169,7 +169,7 @@ function validate_aws_credentials {
 # Function to calculate days until expiration using a cross-platform approach
 function days_until_expiration {
   local EXPIRY_DATE="$1"
-  
+
   # First try to use jq for date calculation if available (most reliable cross-platform solution)
   if command -v jq &>/dev/null; then
     # Normalize the date format first
@@ -181,12 +181,12 @@ function days_until_expiration {
       # Convert other formats to ISO format
       NORMALIZED_DATE="$EXPIRY_DATE"
     fi
-    
+
     # Use jq for date calculation
     local NOW=$(date +%s)
     local EXPIRY_SECONDS=$(echo "{\"expiry\":\"$NORMALIZED_DATE\", \"now\":$NOW}" | \
       jq -r 'try ((.expiry | fromdateiso8601) - .now) // empty')
-    
+
     # If jq calculation succeeded
     if [[ -n "$EXPIRY_SECONDS" ]]; then
       local DAYS_REMAINING=$(( $EXPIRY_SECONDS / 86400 ))
@@ -194,11 +194,11 @@ function days_until_expiration {
       return
     fi
   fi
-  
+
   # Fallback to using platform-specific date commands
   local EXPIRY_SECONDS
   local NOW_SECONDS=$(date +%s)
-  
+
   # Handle different date formats and platforms
   if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS approach
@@ -222,7 +222,7 @@ function days_until_expiration {
     # Generic fallback for other platforms - try various approaches
     # Try Linux style
     EXPIRY_SECONDS=$(date -d "$EXPIRY_DATE" +%s 2>/dev/null)
-    
+
     # If that fails, try macOS style
     if [[ -z "$EXPIRY_SECONDS" ]]; then
       if [[ "$EXPIRY_DATE" == *"T"* ]]; then
@@ -231,7 +231,7 @@ function days_until_expiration {
         EXPIRY_SECONDS=$(date -j -f "%Y-%m-%d %H:%M:%S" "$EXPIRY_DATE" +%s 2>/dev/null)
       fi
     fi
-    
+
     # If all else fails, log an error but don't crash
     if [[ -z "$EXPIRY_SECONDS" ]]; then
       echo "Error: Could not parse date format on this platform. Using default of 30 days." >&2
@@ -239,7 +239,7 @@ function days_until_expiration {
       return
     fi
   fi
-  
+
   local DAYS_REMAINING=$(( ($EXPIRY_SECONDS - $NOW_SECONDS) / 86400 ))
   echo "$DAYS_REMAINING"
 }
@@ -247,7 +247,7 @@ function days_until_expiration {
 # Function to check status based on days remaining
 function check_status {
   local DAYS="$1"
-  
+
   if [[ "$DAYS" -le "$CRITICAL_DAYS" ]]; then
     echo "CRITICAL"
   elif [[ "$DAYS" -le "$WARNING_DAYS" ]]; then
@@ -260,7 +260,7 @@ function check_status {
 # Function to get status color
 function status_color {
   local STATUS="$1"
-  
+
   if [[ "$STATUS" == "CRITICAL" ]]; then
     echo "${RED}"
   elif [[ "$STATUS" == "WARNING" ]]; then
@@ -275,30 +275,30 @@ function check_acm_certificates {
   if [[ "$CHECK_ACM" != "true" ]]; then
     return
   fi
-  
+
   echo -e "${BLUE}Checking ACM certificates...${RESET}"
-  
+
   # Initialize results array
   ACM_RESULTS=()
-  
+
   # List all certificates in ACM
   CERTS=$(aws acm list-certificates \
     --region "$REGION" \
     --profile "$PROFILE" \
     --query "CertificateSummaryList[*].[CertificateArn, DomainName]" \
     --output json)
-  
+
   # Check if we found any certificates
   if [[ $(echo "$CERTS" | jq 'length') -eq 0 ]]; then
     echo -e "${YELLOW}⚠ No certificates found in ACM.${RESET}"
     return
   fi
-  
+
   # Process each certificate
   for i in $(seq 0 $(echo "$CERTS" | jq 'length - 1')); do
     ARN=$(echo "$CERTS" | jq -r ".[$i][0]")
     DOMAIN=$(echo "$CERTS" | jq -r ".[$i][1]")
-    
+
     # Get certificate details
     CERT_DETAILS=$(aws acm describe-certificate \
       --certificate-arn "$ARN" \
@@ -306,22 +306,22 @@ function check_acm_certificates {
       --profile "$PROFILE" \
       --query "Certificate.[Status, NotAfter, Subject, Type]" \
       --output json)
-    
+
     STATUS=$(echo "$CERT_DETAILS" | jq -r ".[0]")
     EXPIRY_DATE=$(echo "$CERT_DETAILS" | jq -r ".[1]")
     SUBJECT=$(echo "$CERT_DETAILS" | jq -r ".[2]")
     TYPE=$(echo "$CERT_DETAILS" | jq -r ".[3]")
-    
+
     # Skip certificates that are not ISSUED
     if [[ "$STATUS" != "ISSUED" ]]; then
       continue
     fi
-    
+
     # Calculate days until expiration
     if [[ -n "$EXPIRY_DATE" && "$EXPIRY_DATE" != "null" ]]; then
       DAYS_REMAINING=$(days_until_expiration "$EXPIRY_DATE")
       CERT_STATUS=$(check_status "$DAYS_REMAINING")
-      
+
       # Add to results array
       ACM_RESULTS+=("${DOMAIN}|${ARN}|${EXPIRY_DATE}|${DAYS_REMAINING}|${CERT_STATUS}|${TYPE}")
     else
@@ -329,7 +329,7 @@ function check_acm_certificates {
       ACM_RESULTS+=("${DOMAIN}|${ARN}|N/A|N/A|OK|${TYPE}")
     fi
   done
-  
+
   # Output results
   echo -e "${GREEN}✓ Found ${#ACM_RESULTS[@]} ACM certificates${RESET}"
 }
@@ -339,31 +339,31 @@ function check_secrets_manager {
   if [[ "$CHECK_SECRETS" != "true" ]]; then
     return
   fi
-  
+
   echo -e "${BLUE}Checking certificates in Secrets Manager...${RESET}"
-  
+
   # Initialize results array
   SECRETS_RESULTS=()
-  
+
   # List all secrets
   SECRETS=$(aws secretsmanager list-secrets \
     --region "$REGION" \
     --profile "$PROFILE" \
     --query "SecretList[*].[ARN, Name, Tags]" \
     --output json)
-  
+
   # Check if we found any secrets
   if [[ $(echo "$SECRETS" | jq 'length') -eq 0 ]]; then
     echo -e "${YELLOW}⚠ No secrets found in Secrets Manager.${RESET}"
     return
   fi
-  
+
   # Process each secret
   for i in $(seq 0 $(echo "$SECRETS" | jq 'length - 1')); do
     ARN=$(echo "$SECRETS" | jq -r ".[$i][0]")
     NAME=$(echo "$SECRETS" | jq -r ".[$i][1]")
     TAGS=$(echo "$SECRETS" | jq -r ".[$i][2]")
-    
+
     # Skip secrets that don't appear to be certificates
     if [[ ! "$NAME" == *"cert"* && ! "$NAME" == *"tls"* && ! "$NAME" == *"ssl"* ]]; then
       # Check tags for certificate indicators
@@ -371,7 +371,7 @@ function check_secrets_manager {
         continue
       fi
     fi
-    
+
     # Get secret value
     SECRET_VALUE=$(aws secretsmanager get-secret-value \
       --secret-id "$ARN" \
@@ -379,26 +379,26 @@ function check_secrets_manager {
       --profile "$PROFILE" \
       --query "SecretString" \
       --output text)
-    
+
     # Check if it's JSON
     if echo "$SECRET_VALUE" | jq -e . >/dev/null 2>&1; then
       # Check for expiry date in JSON
       EXPIRY_DATE=$(echo "$SECRET_VALUE" | jq -r '.expiry // .expiration // .expire_date // .not_after // .notAfter // empty')
-      
+
       if [[ -z "$EXPIRY_DATE" || "$EXPIRY_DATE" == "null" ]]; then
         # Check for a certificate in PEM format
         if [[ "$SECRET_VALUE" == *"CERTIFICATE"* ]]; then
           # Extract certificate to check expiry
           TMP_CERT=$(mktemp)
           echo "$SECRET_VALUE" | jq -r '.["tls.crt"] // .certificate // .cert // empty' > "$TMP_CERT"
-          
+
           # If empty, try to extract the whole secret if it looks like a certificate
           if [[ ! -s "$TMP_CERT" ]]; then
             if [[ "$SECRET_VALUE" == *"BEGIN CERTIFICATE"* ]]; then
               echo "$SECRET_VALUE" > "$TMP_CERT"
             fi
           fi
-          
+
           # Check certificate expiration
           if [[ -s "$TMP_CERT" ]]; then
             EXPIRY_DATE=$(openssl x509 -in "$TMP_CERT" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
@@ -406,18 +406,18 @@ function check_secrets_manager {
           fi
         fi
       fi
-      
+
       # If we have an expiry date, calculate days remaining
       if [[ -n "$EXPIRY_DATE" && "$EXPIRY_DATE" != "null" ]]; then
         DAYS_REMAINING=$(days_until_expiration "$EXPIRY_DATE")
         SECRET_STATUS=$(check_status "$DAYS_REMAINING")
-        
+
         # Extract domain name if available
         DOMAIN=$(echo "$SECRET_VALUE" | jq -r '.domain // empty')
         if [[ -z "$DOMAIN" ]]; then
           DOMAIN=$(basename "$NAME")
         fi
-        
+
         # Add to results array
         SECRETS_RESULTS+=("${DOMAIN}|${ARN}|${EXPIRY_DATE}|${DAYS_REMAINING}|${SECRET_STATUS}|Secret")
       fi
@@ -425,21 +425,21 @@ function check_secrets_manager {
       # Non-JSON certificate value
       TMP_CERT=$(mktemp)
       echo "$SECRET_VALUE" > "$TMP_CERT"
-      
+
       # Check certificate expiration
       EXPIRY_DATE=$(openssl x509 -in "$TMP_CERT" -noout -enddate 2>/dev/null | sed 's/notAfter=//')
       rm "$TMP_CERT"
-      
+
       if [[ -n "$EXPIRY_DATE" ]]; then
         DAYS_REMAINING=$(days_until_expiration "$EXPIRY_DATE")
         SECRET_STATUS=$(check_status "$DAYS_REMAINING")
-        
+
         # Add to results array
         SECRETS_RESULTS+=("$(basename "$NAME")|${ARN}|${EXPIRY_DATE}|${DAYS_REMAINING}|${SECRET_STATUS}|Secret")
       fi
     fi
   done
-  
+
   # Output results
   echo -e "${GREEN}✓ Found ${#SECRETS_RESULTS[@]} certificate secrets${RESET}"
 }
@@ -449,31 +449,31 @@ function check_ssh_keys {
   if [[ "$CHECK_SSH_KEYS" != "true" ]]; then
     return
   fi
-  
+
   echo -e "${BLUE}Checking SSH keys in Secrets Manager...${RESET}"
-  
+
   # Initialize results array
   SSH_RESULTS=()
-  
+
   # List all secrets
   SECRETS=$(aws secretsmanager list-secrets \
     --region "$REGION" \
     --profile "$PROFILE" \
     --query "SecretList[*].[ARN, Name, Tags]" \
     --output json)
-  
+
   # Check if we found any secrets
   if [[ $(echo "$SECRETS" | jq 'length') -eq 0 ]]; then
     echo -e "${YELLOW}⚠ No secrets found in Secrets Manager.${RESET}"
     return
   fi
-  
+
   # Process each secret
   for i in $(seq 0 $(echo "$SECRETS" | jq 'length - 1')); do
     ARN=$(echo "$SECRETS" | jq -r ".[$i][0]")
     NAME=$(echo "$SECRETS" | jq -r ".[$i][1]")
     TAGS=$(echo "$SECRETS" | jq -r ".[$i][2]")
-    
+
     # Skip secrets that don't appear to be SSH keys
     if [[ ! "$NAME" == *"ssh"* && ! "$NAME" == *"key"* ]]; then
       # Check tags for SSH key indicators
@@ -481,7 +481,7 @@ function check_ssh_keys {
         continue
       fi
     fi
-    
+
     # Get secret value
     SECRET_VALUE=$(aws secretsmanager get-secret-value \
       --secret-id "$ARN" \
@@ -489,17 +489,17 @@ function check_ssh_keys {
       --profile "$PROFILE" \
       --query "SecretString" \
       --output text)
-    
+
     # Check if it's JSON
     if echo "$SECRET_VALUE" | jq -e . >/dev/null 2>&1; then
       # Check for created_at or updated_at in JSON
       CREATED_DATE=$(echo "$SECRET_VALUE" | jq -r '.created_at // .updated_at // empty')
-      
+
       if [[ -n "$CREATED_DATE" && "$CREATED_DATE" != "null" ]]; then
         # Calculate days since creation
         DAYS_AGE=$(days_until_expiration "$CREATED_DATE")
         DAYS_AGE=$((-DAYS_AGE))  # Convert to positive number
-        
+
         # For SSH keys, we're not really checking expiration but age
         # We'll use the same thresholds but in days since creation
         if [[ "$DAYS_AGE" -gt "$WARNING_DAYS" ]]; then
@@ -509,15 +509,15 @@ function check_ssh_keys {
         else
           SSH_STATUS="OK"
         fi
-        
+
         # Extract key information
         KEY_NAME=$(echo "$SECRET_VALUE" | jq -r '.key_name // empty')
         if [[ -z "$KEY_NAME" ]]; then
           KEY_NAME=$(basename "$NAME")
         fi
-        
+
         KEY_TYPE=$(echo "$SECRET_VALUE" | jq -r '.key_type // "ssh-key"')
-        
+
         # Add to results array
         SSH_RESULTS+=("${KEY_NAME}|${ARN}|${CREATED_DATE}|${DAYS_AGE}|${SSH_STATUS}|${KEY_TYPE}")
       elif echo "$SECRET_VALUE" | jq -r '.private_key // empty' | grep -q "PRIVATE KEY"; then
@@ -527,9 +527,9 @@ function check_ssh_keys {
         if [[ -z "$KEY_NAME" ]]; then
           KEY_NAME=$(basename "$NAME")
         fi
-        
+
         KEY_TYPE=$(echo "$SECRET_VALUE" | jq -r '.key_type // "ssh-key"')
-        
+
         # Add to results array with unknown age but mark as warning due to missing metadata
         SSH_RESULTS+=("${KEY_NAME}|${ARN}|Unknown|Unknown|WARNING|${KEY_TYPE}")
       fi
@@ -539,7 +539,7 @@ function check_ssh_keys {
       SSH_RESULTS+=("$(basename "$NAME")|${ARN}|Unknown|Unknown|WARNING|ssh-key")
     fi
   done
-  
+
   # Output results
   echo -e "${GREEN}✓ Found ${#SSH_RESULTS[@]} SSH key secrets${RESET}"
 }
@@ -552,53 +552,53 @@ function display_text_results {
     echo -e "${BOLD}ACM Certificates:${RESET}"
     printf "%-40s %-20s %-30s %-15s %-10s\n" "Domain" "Expires" "Days Remaining" "Status" "Type"
     echo "--------------------------------------------------------------------------------------------------------"
-    
+
     for RESULT in "${ACM_RESULTS[@]}"; do
       IFS="|" read -r DOMAIN ARN EXPIRY DAYS STATUS TYPE <<< "$RESULT"
       STATUS_COL=$(status_color "$STATUS")
       printf "%-40s %-20s %-30s ${STATUS_COL}%-15s${RESET} %-10s\n" "$DOMAIN" "$EXPIRY" "$DAYS" "$STATUS" "$TYPE"
     done
   fi
-  
+
   # Display Secrets Manager certificates
   if [[ "$CHECK_SECRETS" == "true" && ${#SECRETS_RESULTS[@]} -gt 0 ]]; then
     echo
     echo -e "${BOLD}Secrets Manager Certificates:${RESET}"
     printf "%-40s %-20s %-30s %-15s %-10s\n" "Name" "Expires" "Days Remaining" "Status" "Type"
     echo "--------------------------------------------------------------------------------------------------------"
-    
+
     for RESULT in "${SECRETS_RESULTS[@]}"; do
       IFS="|" read -r NAME ARN EXPIRY DAYS STATUS TYPE <<< "$RESULT"
       STATUS_COL=$(status_color "$STATUS")
       printf "%-40s %-20s %-30s ${STATUS_COL}%-15s${RESET} %-10s\n" "$NAME" "$EXPIRY" "$DAYS" "$STATUS" "$TYPE"
     done
   fi
-  
+
   # Display SSH keys
   if [[ "$CHECK_SSH_KEYS" == "true" && ${#SSH_RESULTS[@]} -gt 0 ]]; then
     echo
     echo -e "${BOLD}SSH Keys:${RESET}"
     printf "%-40s %-20s %-30s %-15s %-10s\n" "Name" "Created" "Days Old" "Status" "Type"
     echo "--------------------------------------------------------------------------------------------------------"
-    
+
     for RESULT in "${SSH_RESULTS[@]}"; do
       IFS="|" read -r NAME ARN CREATED DAYS STATUS TYPE <<< "$RESULT"
       STATUS_COL=$(status_color "$STATUS")
       printf "%-40s %-20s %-30s ${STATUS_COL}%-15s${RESET} %-10s\n" "$NAME" "$CREATED" "$DAYS" "$STATUS" "$TYPE"
     done
   fi
-  
+
   # Display summary
   echo
   echo -e "${BOLD}Summary:${RESET}"
   echo -e "Total ACM certificates: ${#ACM_RESULTS[@]}"
   echo -e "Total certificate secrets: ${#SECRETS_RESULTS[@]}"
   echo -e "Total SSH keys: ${#SSH_RESULTS[@]}"
-  
+
   # Count warnings and criticals
   WARNING_COUNT=0
   CRITICAL_COUNT=0
-  
+
   for RESULT in "${ACM_RESULTS[@]}" "${SECRETS_RESULTS[@]}" "${SSH_RESULTS[@]}"; do
     IFS="|" read -r _ _ _ _ STATUS _ <<< "$RESULT"
     if [[ "$STATUS" == "WARNING" ]]; then
@@ -607,7 +607,7 @@ function display_text_results {
       ((CRITICAL_COUNT++))
     fi
   done
-  
+
   echo -e "${YELLOW}Warning: ${WARNING_COUNT}${RESET}"
   echo -e "${RED}Critical: ${CRITICAL_COUNT}${RESET}"
 }
@@ -688,7 +688,7 @@ EOF
   # Count warnings and criticals
   WARNING_COUNT=0
   CRITICAL_COUNT=0
-  
+
   for RESULT in "${ACM_RESULTS[@]}" "${SECRETS_RESULTS[@]}" "${SSH_RESULTS[@]}"; do
     IFS="|" read -r _ _ _ _ STATUS _ <<< "$RESULT"
     if [[ "$STATUS" == "WARNING" ]]; then
@@ -850,7 +850,7 @@ EOF
   # Count warnings and criticals
   WARNING_COUNT=0
   CRITICAL_COUNT=0
-  
+
   for RESULT in "${ACM_RESULTS[@]}" "${SECRETS_RESULTS[@]}" "${SSH_RESULTS[@]}"; do
     IFS="|" read -r _ _ _ _ STATUS _ <<< "$RESULT"
     if [[ "$STATUS" == "WARNING" ]]; then
@@ -891,7 +891,7 @@ function send_notifications {
   # Only send notifications if there are warnings or criticals
   WARNING_COUNT=0
   CRITICAL_COUNT=0
-  
+
   for RESULT in "${ACM_RESULTS[@]}" "${SECRETS_RESULTS[@]}" "${SSH_RESULTS[@]}"; do
     IFS="|" read -r _ _ _ _ STATUS _ <<< "$RESULT"
     if [[ "$STATUS" == "WARNING" ]]; then
@@ -900,19 +900,19 @@ function send_notifications {
       ((CRITICAL_COUNT++))
     fi
   done
-  
+
   if [[ "$WARNING_COUNT" -eq 0 && "$CRITICAL_COUNT" -eq 0 ]]; then
     echo -e "${GREEN}✓ No warnings or criticals found. Skipping notifications.${RESET}"
     return
   fi
-  
+
   # Prepare notification message
   NOTIFICATION_SUBJECT="[${REGION}] Certificate Monitoring: ${CRITICAL_COUNT} critical, ${WARNING_COUNT} warning"
-  
+
   # Send to Slack
   if [[ -n "$SLACK_WEBHOOK" ]]; then
     echo -e "${BLUE}Sending Slack notification...${RESET}"
-    
+
     # Create Slack message
     SLACK_MESSAGE=$(cat <<EOF
 {
@@ -1016,11 +1016,11 @@ EOF
       echo -e "${RED}✘ Failed to send Slack notification${RESET}"
     fi
   fi
-  
+
   # Send to SNS
   if [[ -n "$SNS_TOPIC" ]]; then
     echo -e "${BLUE}Sending SNS notification...${RESET}"
-    
+
     # Create SNS message
     SNS_MESSAGE=$(cat <<EOF
 Certificate Monitoring Report
@@ -1043,21 +1043,21 @@ EOF
     # Add critical certificates
     if [[ "$CRITICAL_COUNT" -gt 0 ]]; then
       SNS_MESSAGE+="Critical Certificates:\n"
-      
+
       for RESULT in "${ACM_RESULTS[@]}" "${SECRETS_RESULTS[@]}" "${SSH_RESULTS[@]}"; do
         IFS="|" read -r NAME ARN EXPIRY DAYS STATUS TYPE <<< "$RESULT"
         if [[ "$STATUS" == "CRITICAL" ]]; then
           SNS_MESSAGE+="- ${NAME} (${TYPE}): ${EXPIRY} (${DAYS} days)\n"
         fi
       done
-      
+
       SNS_MESSAGE+="\n"
     fi
-    
+
     # Add warning certificates
     if [[ "$WARNING_COUNT" -gt 0 ]]; then
       SNS_MESSAGE+="Warning Certificates:\n"
-      
+
       for RESULT in "${ACM_RESULTS[@]}" "${SECRETS_RESULTS[@]}" "${SSH_RESULTS[@]}"; do
         IFS="|" read -r NAME ARN EXPIRY DAYS STATUS TYPE <<< "$RESULT"
         if [[ "$STATUS" == "WARNING" ]]; then
@@ -1065,7 +1065,7 @@ EOF
         fi
       done
     fi
-    
+
     # Send to SNS
     if aws sns publish \
       --topic-arn "$SNS_TOPIC" \
@@ -1078,23 +1078,23 @@ EOF
       echo -e "${RED}✘ Failed to send SNS notification${RESET}"
     fi
   fi
-  
+
   # Send to email (via SNS)
   if [[ -n "$EMAIL" ]]; then
     echo -e "${BLUE}Sending email notification...${RESET}"
-    
+
     # Create a temporary SNS topic for email if email is provided but no SNS topic
     if [[ -z "$SNS_TOPIC" ]]; then
       echo -e "${BLUE}Creating temporary SNS topic for email...${RESET}"
-      
+
       # Create SNS topic
       SNS_TOPIC_RESPONSE=$(aws sns create-topic \
         --name "certificate-monitor-temp-$(date +%s)" \
         --region "$REGION" \
         --profile "$PROFILE")
-      
+
       TEMP_SNS_TOPIC=$(echo "$SNS_TOPIC_RESPONSE" | jq -r '.TopicArn')
-      
+
       # Subscribe email to topic
       aws sns subscribe \
         --topic-arn "$TEMP_SNS_TOPIC" \
@@ -1102,40 +1102,40 @@ EOF
         --notification-endpoint "$EMAIL" \
         --region "$REGION" \
         --profile "$PROFILE" &>/dev/null
-      
+
       echo -e "${YELLOW}⚠ A confirmation email has been sent to ${EMAIL}. Please confirm the subscription.${RESET}"
       echo -e "${YELLOW}⚠ Email notification will only be sent after confirmation.${RESET}"
-      
+
       # Set SNS topic for sending
       SNS_TOPIC="$TEMP_SNS_TOPIC"
-      
+
       # Wait for confirmation (5 minutes max)
       echo -e "${BLUE}Waiting for email confirmation (press Ctrl+C to skip)...${RESET}"
       for i in {1..30}; do
         sleep 10
-        
+
         # Check if subscription is confirmed
         SUBSCRIPTION_RESPONSE=$(aws sns list-subscriptions-by-topic \
           --topic-arn "$TEMP_SNS_TOPIC" \
           --region "$REGION" \
           --profile "$PROFILE")
-        
+
         SUBSCRIPTION_STATUS=$(echo "$SUBSCRIPTION_RESPONSE" | jq -r '.Subscriptions[0].SubscriptionArn')
-        
+
         if [[ "$SUBSCRIPTION_STATUS" != "PendingConfirmation" ]]; then
           echo -e "${GREEN}✓ Email subscription confirmed${RESET}"
           break
         fi
-        
+
         echo -n "."
       done
-      
+
       echo
     fi
-    
+
     # Create email message (same as SNS message)
     EMAIL_MESSAGE="$SNS_MESSAGE"
-    
+
     # Send via SNS
     if aws sns publish \
       --topic-arn "$SNS_TOPIC" \
@@ -1147,40 +1147,40 @@ EOF
     else
       echo -e "${RED}✘ Failed to send email notification${RESET}"
     fi
-    
+
     # Clean up temporary SNS topic
     if [[ -n "$TEMP_SNS_TOPIC" ]]; then
       echo -e "${BLUE}Cleaning up temporary SNS topic...${RESET}"
-      
+
       # Delete all subscriptions
       SUBSCRIPTION_RESPONSE=$(aws sns list-subscriptions-by-topic \
         --topic-arn "$TEMP_SNS_TOPIC" \
         --region "$REGION" \
         --profile "$PROFILE")
-      
+
       SUBSCRIPTION_ARN=$(echo "$SUBSCRIPTION_RESPONSE" | jq -r '.Subscriptions[0].SubscriptionArn')
-      
+
       if [[ "$SUBSCRIPTION_ARN" != "PendingConfirmation" ]]; then
         aws sns unsubscribe \
           --subscription-arn "$SUBSCRIPTION_ARN" \
           --region "$REGION" \
           --profile "$PROFILE" &>/dev/null
       fi
-      
+
       # Delete topic
       aws sns delete-topic \
         --topic-arn "$TEMP_SNS_TOPIC" \
         --region "$REGION" \
         --profile "$PROFILE" &>/dev/null
-      
+
       echo -e "${GREEN}✓ Temporary SNS topic cleaned up${RESET}"
     fi
   fi
-  
+
   # Create Jira tickets
   if [[ -n "$JIRA_URL" && -n "$JIRA_USER" && -n "$JIRA_API_TOKEN" && -n "$JIRA_PROJECT" ]]; then
     echo -e "${BLUE}Creating Jira tickets for critical certificates...${RESET}"
-    
+
     # Only create tickets for critical certificates
     for RESULT in "${ACM_RESULTS[@]}" "${SECRETS_RESULTS[@]}" "${SSH_RESULTS[@]}"; do
       IFS="|" read -r NAME ARN EXPIRY DAYS STATUS TYPE <<< "$RESULT"
@@ -1205,7 +1205,7 @@ EOF
 }
 EOF
 )
-        
+
         # Send to Jira
         JIRA_RESPONSE=$(curl -s -X POST \
           -H "Content-Type: application/json" \
@@ -1213,9 +1213,9 @@ EOF
           -u "${JIRA_USER}:${JIRA_API_TOKEN}" \
           --data "$JIRA_ISSUE_DATA" \
           "${JIRA_URL}/rest/api/2/issue")
-        
+
         JIRA_KEY=$(echo "$JIRA_RESPONSE" | jq -r '.key // empty')
-        
+
         if [[ -n "$JIRA_KEY" ]]; then
           echo -e "${GREEN}✓ Created Jira ticket ${JIRA_KEY} for ${NAME}${RESET}"
         else

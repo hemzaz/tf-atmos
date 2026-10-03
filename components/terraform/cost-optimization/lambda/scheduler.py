@@ -6,7 +6,6 @@ Automatically starts and stops EC2 instances and RDS databases based on schedule
 import boto3
 import json
 import os
-from datetime import datetime
 import logging
 
 # Configure logging
@@ -25,33 +24,33 @@ def handler(event, context):
     environment = os.environ.get('ENVIRONMENT', 'dev')
     action = event.get('action', 'CHECK')
     tag_filters = json.loads(os.environ.get('TAG_FILTERS', '{}'))
-    
+
     logger.info(f"Starting scheduler: Environment={environment}, Action={action}")
-    
+
     results = {
         'ec2_instances': [],
         'rds_instances': [],
         'autoscaling_groups': []
     }
-    
+
     try:
         # Process EC2 instances
         results['ec2_instances'] = process_ec2_instances(action, tag_filters)
-        
+
         # Process RDS instances
         results['rds_instances'] = process_rds_instances(action, tag_filters)
-        
+
         # Process Auto Scaling Groups
         results['autoscaling_groups'] = process_autoscaling_groups(action, tag_filters)
-        
+
         # Log summary
         logger.info(f"Scheduler completed: {json.dumps(results)}")
-        
+
         return {
             'statusCode': 200,
             'body': json.dumps(results)
         }
-        
+
     except Exception as e:
         # Re-raise rather than returning a 500: EventBridge ignores an
         # invoked Lambda's return value, so catching-and-returning would
@@ -65,25 +64,25 @@ def process_ec2_instances(action, tag_filters):
     Start or stop EC2 instances based on action
     """
     results = []
-    
+
     # Build filter for instances
     filters = [
         {'Name': f'tag:{k}', 'Values': [v]} for k, v in tag_filters.items()
     ]
     filters.append({'Name': 'instance-state-name', 'Values': ['running', 'stopped']})
-    
+
     # Get instances
     response = ec2.describe_instances(Filters=filters)
-    
+
     for reservation in response['Reservations']:
         for instance in reservation['Instances']:
             instance_id = instance['InstanceId']
             current_state = instance['State']['Name']
-            
+
             # Get instance name tag
-            name_tag = next((tag['Value'] for tag in instance.get('Tags', []) 
+            name_tag = next((tag['Value'] for tag in instance.get('Tags', [])
                            if tag['Key'] == 'Name'), instance_id)
-            
+
             if action == 'START' and current_state == 'stopped':
                 ec2.start_instances(InstanceIds=[instance_id])
                 logger.info(f"Started EC2 instance: {name_tag} ({instance_id})")
@@ -93,7 +92,7 @@ def process_ec2_instances(action, tag_filters):
                     'action': 'started',
                     'previous_state': current_state
                 })
-                
+
             elif action == 'STOP' and current_state == 'running':
                 # Check for do-not-stop tag
                 if not has_tag(instance.get('Tags', []), 'DoNotStop', 'true'):
@@ -107,7 +106,7 @@ def process_ec2_instances(action, tag_filters):
                     })
                 else:
                     logger.info(f"Skipped EC2 instance with DoNotStop tag: {name_tag}")
-    
+
     return results
 
 def process_rds_instances(action, tag_filters):
@@ -115,29 +114,29 @@ def process_rds_instances(action, tag_filters):
     Start or stop RDS instances based on action
     """
     results = []
-    
+
     # Get all RDS instances
     response = rds.describe_db_instances()
-    
+
     for db_instance in response['DBInstances']:
         db_id = db_instance['DBInstanceIdentifier']
         current_status = db_instance['DBInstanceStatus']
-        
+
         # Get tags for the instance
         tags_response = rds.list_tags_for_resource(
             ResourceName=db_instance['DBInstanceArn']
         )
         tags = {tag['Key']: tag['Value'] for tag in tags_response['TagList']}
-        
+
         # Check if instance matches tag filters
         if not all(tags.get(k) == v for k, v in tag_filters.items()):
             continue
-        
+
         # Check for MultiAZ (don't stop MultiAZ instances)
         if db_instance.get('MultiAZ', False):
             logger.info(f"Skipped MultiAZ RDS instance: {db_id}")
             continue
-        
+
         if action == 'START' and current_status == 'stopped':
             rds.start_db_instance(DBInstanceIdentifier=db_id)
             logger.info(f"Started RDS instance: {db_id}")
@@ -146,7 +145,7 @@ def process_rds_instances(action, tag_filters):
                 'action': 'started',
                 'previous_status': current_status
             })
-            
+
         elif action == 'STOP' and current_status == 'available':
             # Check for do-not-stop tag
             if tags.get('DoNotStop') != 'true':
@@ -159,7 +158,7 @@ def process_rds_instances(action, tag_filters):
                 })
             else:
                 logger.info(f"Skipped RDS instance with DoNotStop tag: {db_id}")
-    
+
     return results
 
 def process_autoscaling_groups(action, tag_filters):
@@ -167,29 +166,28 @@ def process_autoscaling_groups(action, tag_filters):
     Scale Auto Scaling Groups up or down based on action
     """
     results = []
-    
+
     # Get all Auto Scaling Groups
     response = autoscaling.describe_auto_scaling_groups()
-    
+
     for asg in response['AutoScalingGroups']:
         asg_name = asg['AutoScalingGroupName']
-        
+
         # Check tags
         tags = {tag['Key']: tag['Value'] for tag in asg.get('Tags', [])}
-        
+
         # Check if ASG matches tag filters
         if not all(tags.get(k) == v for k, v in tag_filters.items()):
             continue
-        
+
         current_desired = asg['DesiredCapacity']
         current_min = asg['MinSize']
-        current_max = asg['MaxSize']
-        
+
         if action == 'START':
             # Restore to tagged capacity or default
             desired = int(tags.get('NormalCapacity', '2'))
             min_size = int(tags.get('NormalMinSize', '1'))
-            
+
             if current_desired == 0:
                 autoscaling.update_auto_scaling_group(
                     AutoScalingGroupName=asg_name,
@@ -203,7 +201,7 @@ def process_autoscaling_groups(action, tag_filters):
                     'previous_capacity': current_desired,
                     'new_capacity': desired
                 })
-                
+
         elif action == 'STOP':
             # Scale down to 0 if not critical
             if tags.get('Critical') != 'true':
@@ -224,7 +222,7 @@ def process_autoscaling_groups(action, tag_filters):
                         'PropagateAtLaunch': False
                     }
                 ])
-                
+
                 # Scale down to 0
                 autoscaling.update_auto_scaling_group(
                     AutoScalingGroupName=asg_name,
@@ -240,7 +238,7 @@ def process_autoscaling_groups(action, tag_filters):
                 })
             else:
                 logger.info(f"Skipped critical ASG: {asg_name}")
-    
+
     return results
 
 def has_tag(tags, key, value):

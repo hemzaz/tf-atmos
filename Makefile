@@ -85,7 +85,7 @@ api-lint: ## Run linting (lint workflow)
 	@atmos workflow lint -f lint
 
 # =============================================================================
-# Terminal Ergonomics & Power Features  
+# Terminal Ergonomics & Power Features
 # =============================================================================
 
 watch-validate: ## Continuously watch validation status
@@ -230,7 +230,7 @@ alias infra-workflows='atmos list workflows'
 endef
 export SHELL_FUNCTIONS
 
-shell-functions: ## Generate shell functions for .bashrc/.zshrc  
+shell-functions: ## Generate shell functions for .bashrc/.zshrc
 	@echo "$(CYAN)🐚 Shell Functions for .bashrc or .zshrc$(NC)"
 	@echo "$(YELLOW)────────────────────────────────────────────────────$(NC)"
 	@printf '%s\n' "$$SHELL_FUNCTIONS"
@@ -482,7 +482,7 @@ h: help ## Alias for help
 dev: ## Switch to development environment
 	@$(MAKE) STACK=fnx-dev-testenv-01 status
 
-staging: ## Switch to staging environment  
+staging: ## Switch to staging environment
 	@$(MAKE) STACK=fnx-staging-staging-01 status
 
 prod: ## Switch to production environment

@@ -4,7 +4,7 @@
 # ==============================================================================
 # This script exports certificates from AWS ACM and prepares them for use with
 # Kubernetes secrets and AWS Secrets Manager.
-# 
+#
 # IMPORTANT: This script requires the following:
 # - AWS CLI installed and configured
 # - jq installed (brew install jq / apt install jq)
@@ -58,30 +58,30 @@ function show_usage {
 # Function to check required commands
 function check_requirements {
   local MISSING_REQS=false
-  
+
   echo -e "${BLUE}Checking requirements...${RESET}"
-  
+
   if ! command -v aws &> /dev/null; then
     echo -e "${RED}✘ AWS CLI is not installed. Please install it: https://aws.amazon.com/cli/${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ AWS CLI is installed${RESET}"
   fi
-  
+
   if ! command -v jq &> /dev/null; then
     echo -e "${RED}✘ jq is not installed. Please install it: brew install jq / apt install jq${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ jq is installed${RESET}"
   fi
-  
+
   if ! command -v openssl &> /dev/null; then
     echo -e "${RED}✘ openssl is not installed. Please install it.${RESET}"
     MISSING_REQS=true
   else
     echo -e "${GREEN}✓ openssl is installed${RESET}"
   fi
-  
+
   if [[ "$MISSING_REQS" == "true" ]]; then
     echo -e "${RED}Please install missing requirements and try again.${RESET}"
     exit 1
@@ -91,7 +91,7 @@ function check_requirements {
 # Function to validate AWS credentials
 function validate_aws_credentials {
   echo -e "${BLUE}Validating AWS credentials...${RESET}"
-  
+
   if ! aws sts get-caller-identity &> /dev/null; then
     echo -e "${RED}✘ AWS credentials are not valid or not configured.${RESET}"
     echo -e "${YELLOW}Please run 'aws configure' or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables.${RESET}"
@@ -100,7 +100,7 @@ function validate_aws_credentials {
     local IDENTITY=$(aws sts get-caller-identity --query 'Arn' --output text)
     echo -e "${GREEN}✓ AWS credentials are valid${RESET}"
     echo -e "  Authenticated as: ${IDENTITY}"
-    
+
     # Check if region is set
     if [[ -z "$REGION" ]]; then
       REGION=$(aws configure get region)
@@ -116,19 +116,19 @@ function validate_aws_credentials {
 # Function to validate certificate ARN
 function validate_certificate_arn {
   echo -e "${BLUE}Validating certificate ARN...${RESET}"
-  
+
   if [[ -z "$CERT_ARN" ]]; then
     echo -e "${RED}✘ Certificate ARN is required. Use -a/--arn to specify it.${RESET}"
     show_usage
     exit 1
   fi
-  
+
   # Extract the full ARN if shortened version was provided
   if [[ ! "$CERT_ARN" == arn:aws:acm:*:*:certificate/* ]]; then
     local CERT_ID=${CERT_ARN##*/}
     # If it's not a full ARN, try to find the full ARN
     local FULL_ARN=$(aws acm list-certificates --region "$REGION" --query "CertificateSummaryList[?contains(CertificateArn, '${CERT_ID}')].CertificateArn" --output text)
-    
+
     if [[ -z "$FULL_ARN" ]]; then
       echo -e "${RED}✘ Could not find certificate with ID: $CERT_ID${RESET}"
       exit 1
@@ -139,7 +139,7 @@ function validate_certificate_arn {
   else
     echo -e "${GREEN}✓ Certificate ARN format is valid${RESET}"
   fi
-  
+
   # Check if certificate exists
   if ! aws acm describe-certificate --certificate-arn "$CERT_ARN" --region "$REGION" &> /dev/null; then
     echo -e "${RED}✘ Certificate not found or you don't have permission to access it.${RESET}"
@@ -152,45 +152,45 @@ function validate_certificate_arn {
 # Function to get certificate details
 function get_certificate_details {
   echo -e "${BLUE}Retrieving certificate details...${RESET}"
-  
+
   local CERT_DETAILS=$(aws acm describe-certificate --certificate-arn "$CERT_ARN" --region "$REGION")
-  
+
   # Get certificate domain name
   DOMAIN_NAME=$(echo "$CERT_DETAILS" | jq -r '.Certificate.DomainName')
   echo -e "${GREEN}✓ Certificate domain: $DOMAIN_NAME${RESET}"
-  
+
   # Get alternative names
   SANS=$(echo "$CERT_DETAILS" | jq -r '.Certificate.SubjectAlternativeNames | join(", ")')
   if [[ ! -z "$SANS" ]]; then
     echo -e "${GREEN}✓ Subject Alternative Names: $SANS${RESET}"
   fi
-  
+
   # Get status
   STATUS=$(echo "$CERT_DETAILS" | jq -r '.Certificate.Status')
   echo -e "${GREEN}✓ Certificate status: $STATUS${RESET}"
-  
+
   if [[ "$STATUS" != "ISSUED" ]]; then
     echo -e "${RED}✘ Certificate is not in ISSUED state. Cannot export.${RESET}"
     exit 1
   fi
-  
+
   # Get expiration date
   EXPIRY=$(echo "$CERT_DETAILS" | jq -r '.Certificate.NotAfter')
   if [[ ! -z "$EXPIRY" ]]; then
     echo -e "${GREEN}✓ Expires on: $EXPIRY${RESET}"
-    
+
     # Check if certificate is expiring soon
     EXPIRY_SECONDS=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "$EXPIRY" +%s 2>/dev/null || date -d "$EXPIRY" +%s)
     NOW_SECONDS=$(date +%s)
     DAYS_REMAINING=$(( ($EXPIRY_SECONDS - $NOW_SECONDS) / 86400 ))
-    
+
     if [[ $DAYS_REMAINING -lt 30 ]]; then
       echo -e "${RED}⚠ WARNING: Certificate expires in $DAYS_REMAINING days!${RESET}"
     elif [[ $DAYS_REMAINING -lt 60 ]]; then
       echo -e "${YELLOW}⚠ WARNING: Certificate expires in $DAYS_REMAINING days.${RESET}"
     fi
   fi
-  
+
   # Set default secret name if not provided
   if [[ -z "$SECRET_NAME" ]]; then
     # Replace dots with hyphens and create a clean domain name
@@ -205,25 +205,25 @@ function get_certificate_details {
 # Function to export certificate
 function export_certificate {
   echo -e "${BLUE}Exporting certificate...${RESET}"
-  
+
   # Create output directory if it doesn't exist
   mkdir -p "$OUTPUT_DIR"
-  
+
   # Export certificate and private key
   local CERT_EXPORT=$(aws acm export-certificate --certificate-arn "$CERT_ARN" --passphrase $(openssl rand -base64 32) --region "$REGION")
-  
+
   # Extract certificate and private key
   echo "$CERT_EXPORT" | jq -r '.Certificate' > "$OUTPUT_DIR/$DOMAIN_NAME.crt"
   echo "$CERT_EXPORT" | jq -r '.PrivateKey' > "$OUTPUT_DIR/$DOMAIN_NAME.key"
   echo "$CERT_EXPORT" | jq -r '.CertificateChain' > "$OUTPUT_DIR/$DOMAIN_NAME-chain.crt"
-  
+
   echo -e "${GREEN}✓ Certificate exported to $OUTPUT_DIR/$DOMAIN_NAME.crt${RESET}"
   echo -e "${GREEN}✓ Private key exported to $OUTPUT_DIR/$DOMAIN_NAME.key${RESET}"
   echo -e "${GREEN}✓ Certificate chain exported to $OUTPUT_DIR/$DOMAIN_NAME-chain.crt${RESET}"
-  
+
   # Create kubernetes secret format
   echo -e "${BLUE}Creating Kubernetes secret format...${RESET}"
-  
+
   # Create kubernetes secret file
   cat > "$OUTPUT_DIR/$DOMAIN_NAME-k8s-secret.yaml" << EOF
 apiVersion: v1
@@ -236,12 +236,12 @@ data:
   tls.crt: $(cat "$OUTPUT_DIR/$DOMAIN_NAME.crt" | base64 | tr -d '\n')
   tls.key: $(cat "$OUTPUT_DIR/$DOMAIN_NAME.key" | base64 | tr -d '\n')
 EOF
-  
+
   echo -e "${GREEN}✓ Kubernetes secret created at $OUTPUT_DIR/$DOMAIN_NAME-k8s-secret.yaml${RESET}"
-  
+
   # Create JSON format for Secrets Manager
   echo -e "${BLUE}Creating JSON format for Secrets Manager...${RESET}"
-  
+
   # Create JSON file
   cat > "$OUTPUT_DIR/$DOMAIN_NAME-secret.json" << EOF
 {
@@ -249,14 +249,14 @@ EOF
   "tls.key": $(cat "$OUTPUT_DIR/$DOMAIN_NAME.key" | jq -sR .)
 }
 EOF
-  
+
   echo -e "${GREEN}✓ Secrets Manager JSON created at $OUTPUT_DIR/$DOMAIN_NAME-secret.json${RESET}"
-  
+
   # Set permissions on all sensitive files to be readable only by the owner
   chmod 600 "$OUTPUT_DIR/$DOMAIN_NAME.key"
   chmod 600 "$OUTPUT_DIR/$DOMAIN_NAME-secret.json"
   chmod 600 "$OUTPUT_DIR/$DOMAIN_NAME-k8s-secret.yaml"
-  
+
   # Set a trap to ensure secure deletion of sensitive files on script exit/error
   trap 'echo -e "${YELLOW}Cleaning up sensitive files...${RESET}"; find "$OUTPUT_DIR" -name "*.key" -exec shred -u {} \; 2>/dev/null || true; find "$OUTPUT_DIR" -name "*-secret.json" -exec shred -u {} \; 2>/dev/null || true' EXIT INT TERM
 }
@@ -264,7 +264,7 @@ EOF
 # Function to upload to Secrets Manager
 function upload_to_secrets_manager {
   echo -e "${BLUE}Uploading certificate to AWS Secrets Manager...${RESET}"
-  
+
   # Check if secret exists
   if aws secretsmanager describe-secret --secret-id "$SECRET_NAME" --region "$REGION" &> /dev/null; then
     echo -e "${YELLOW}Secret $SECRET_NAME already exists. Updating...${RESET}"
@@ -279,7 +279,7 @@ function upload_to_secrets_manager {
       --region "$REGION" \
       --tags Key=Domain,Value="$DOMAIN_NAME" Key=ManagedBy,Value="certificate-export-script"
   fi
-  
+
   echo -e "${GREEN}✓ Certificate uploaded to Secrets Manager with name: $SECRET_NAME${RESET}"
 }
 
