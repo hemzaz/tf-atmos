@@ -161,6 +161,35 @@ run "rejects_rotation_days_out_of_range" {
   expect_failures = [aws_secretsmanager_secret_rotation.this]
 }
 
+run "rejects_rotation_days_over_90" {
+  command = plan
+
+  variables {
+    secrets = {
+      redis = {
+        name                     = "auth-token"
+        path                     = "cache"
+        generate_random_password = true
+        rotation_lambda_arn      = "arn:aws:lambda:us-east-1:123456789012:function:test-redis-auth-rotation"
+        rotation_automatically   = true
+        rotation_days            = 91
+      }
+    }
+  }
+
+  expect_failures = [aws_secretsmanager_secret_rotation.this]
+}
+
+run "rejects_default_rotation_days_over_90" {
+  command = plan
+
+  variables {
+    default_rotation_days = 91
+  }
+
+  expect_failures = [var.default_rotation_days]
+}
+
 run "secret_access_policy_grants_exactly_one_secret_and_its_key" {
   # apply, not plan: the policy's Resource elements are the secret's own arn,
   # a computed attribute unknown until apply even under mock_provider.

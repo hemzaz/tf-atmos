@@ -166,7 +166,7 @@ resource "aws_secretsmanager_secret_policy" "this" {
 # component's own rotation_secret_arn creates this same kind of resource from
 # the Lambda's own component instance, where the ordering is safe.
 resource "aws_secretsmanager_secret_rotation" "this" {
-  #checkov:skip=CKV_AWS_304:The interval is a per-secret input (rotation_days, else default_rotation_days: 30 in stacks/catalog/secretsmanager/defaults.yaml), which checkov cannot resolve through for_each
+  #checkov:skip=CKV_AWS_304:False positive; rotation_days (else default_rotation_days) is validated to 1-90 days, but checkov cannot resolve it through for_each
   for_each = local.rotation_enabled
 
   secret_id           = aws_secretsmanager_secret.this[each.key].id
@@ -195,8 +195,8 @@ resource "aws_secretsmanager_secret_rotation" "this" {
     }
 
     precondition {
-      condition     = each.value.rotation_days >= 1 && each.value.rotation_days <= 365
-      error_message = "The rotation_days value must be between 1 and 365."
+      condition     = each.value.rotation_days >= 1 && each.value.rotation_days <= 90
+      error_message = "The rotation_days value must be between 1 and 90 (rotate at least quarterly)."
     }
   }
 }
