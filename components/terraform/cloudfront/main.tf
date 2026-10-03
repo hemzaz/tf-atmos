@@ -130,8 +130,21 @@ locals {
     origin_read_timeout      = 30
   }
 
-  # One CloudFront VPC origin per custom origin with vpc_origin, by origin_id.
-  vpc_origins = local.enabled ? { for o in var.custom_origins : o.origin_id => o.vpc_origin if o.vpc_origin != null } : {}
+  # One CloudFront VPC origin per custom origin with vpc_origin, by origin_id:
+  # its endpoint config, named <Environment>-<name>-<origin_id>-<hash>. The
+  # hash (first 8 hex digits of the config's sha1) gives every config its own
+  # name, so a replacement (below) never reuses the name of the VPC origin it
+  # replaces while both exist.
+  vpc_origin_configs = local.enabled ? { for o in var.custom_origins : o.origin_id => {
+    arn                    = o.vpc_origin.arn
+    http_port              = o.vpc_origin.http_port
+    https_port             = o.vpc_origin.https_port
+    origin_protocol_policy = o.vpc_origin.origin_protocol_policy
+    origin_ssl_protocols   = sort(distinct(o.vpc_origin.origin_ssl_protocols))
+  } if o.vpc_origin != null } : {}
+  vpc_origins = { for k, c in local.vpc_origin_configs : k => merge(c, {
+    name = "${local.name}-${k}-${substr(sha1(jsonencode(c)), 0, 8)}"
+  }) }
 }
 
 data "aws_partition" "current" {}
@@ -168,11 +181,26 @@ resource "aws_cloudfront_origin_access_control" "this" {
 # deploy one; the first in a VPC also creates the service-managed
 # CloudFront-VPCOrigins-Service-SG (AWS Developer Guide, "Restrict access with
 # VPC origins").
+#
+# Never updated in place: UpdateVpcOrigin answers CannotUpdateEntityWhileInUse
+# (409) while a distribution uses the VPC origin (CloudFront API Reference,
+# UpdateVpcOrigin; the Developer Guide's "Update a VPC origin" detaches it
+# first), and the provider plans endpoint changes as in-place updates. Any
+# change to the endpoint config (ARN, ports, protocol, TLS versions, name)
+# changes this terraform_data, which replaces the VPC origin
+# create-before-destroy: create the new one, repoint the distribution's
+# vpc_origin_config at it, delete the old one.
+resource "terraform_data" "vpc_origin" {
+  for_each = local.vpc_origins
+
+  input = each.value
+}
+
 resource "aws_cloudfront_vpc_origin" "this" {
   for_each = local.vpc_origins
 
   vpc_origin_endpoint_config {
-    name                   = "${local.name}-${each.key}"
+    name                   = each.value.name
     arn                    = each.value.arn
     http_port              = each.value.http_port
     https_port             = each.value.https_port
@@ -184,7 +212,12 @@ resource "aws_cloudfront_vpc_origin" "this" {
     }
   }
 
-  tags = { Name = "${local.name}-${each.key}" }
+  tags = { Name = each.value.name }
+
+  lifecycle {
+    create_before_destroy = true
+    replace_triggered_by  = [terraform_data.vpc_origin[each.key]]
+  }
 }
 
 resource "aws_cloudfront_distribution" "this" {

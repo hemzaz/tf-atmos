@@ -67,8 +67,16 @@ logging v2 to S3, and optional Route 53 alias records.
   `origin.<domain>`), and use `AllViewerExceptHostHeader` unless the certificate also covers the
   aliases.
 - VPC origins (AWS Developer Guide, "Restrict access with VPC origins"):
-  - a VPC origin takes up to 15 minutes to deploy, on create and on every change; changing one
-    already attached to a distribution is detach, update, re-attach, so expect a long apply;
+  - a VPC origin takes up to 15 minutes to deploy. AWS refuses to update one a distribution uses
+    (`CannotUpdateEntityWhileInUse`), so any endpoint change (ARN, ports, protocol, TLS versions)
+    replaces it instead: create a new one, named `<Environment>-<name>-<origin_id>-<config
+    hash>` so the two names never collide, repoint the distribution, delete the old one. Each step
+    waits for deployment, so expect a long apply. Not verified against AWS: whether a second VPC
+    origin for the same ARN may exist while the old one is still there;
+  - replacing the ALB (alb component, addons layer, e.g. a name or subnet change) while the VPC
+    origin (this component, services layer) still points at it may be refused by AWS, or leave the
+    origin broken until this component is re-applied: plan the cloudfront instance right after
+    such an alb change;
   - the target's VPC needs an internet gateway (it marks the VPC as reachable; traffic does not
     use it) and a free IPv4 address in the target's subnets for CloudFront's ENI;
   - the first VPC origin in a VPC creates the service-managed `CloudFront-VPCOrigins-Service-SG`.

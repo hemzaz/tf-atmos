@@ -95,7 +95,8 @@ variable "custom_origins" {
       origin_read_timeout      = optional(number, 30)
     }), null)
     # arn: the ALB, NLB or EC2 instance; the rest as custom_origin_config.
-    # The component creates the aws_cloudfront_vpc_origin, <Environment>-<name>-<origin_id>.
+    # The component creates the aws_cloudfront_vpc_origin,
+    # <Environment>-<name>-<origin_id>-<config hash>, and replaces it on any change.
     vpc_origin = optional(object({
       arn                      = string
       http_port                = optional(number, 80)

@@ -65,9 +65,11 @@
 #    settings.environment.account_id (set by every fnx stage _defaults) names
 #    the CloudFront log bucket in its own bucket policy.
 # 3. That dns instance manages app_domain_name's PUBLIC, delegated zone: ACM
-#    validates the certificate there, and the ALB (origin.<app domain>, which
-#    resolves to its private addresses) and CloudFront (app domain, www) write
-#    their alias records into it.
+#    validates the certificate there, and the ALB (origin.<app domain>) and
+#    CloudFront (app domain, www) write their alias records into it.
+#    origin.<app domain> therefore publishes the internal ALB's private IPs in
+#    public DNS. That is accepted: CloudFront needs a name the certificate
+#    covers. A private hosted zone for it is a possible later change.
 # 4. A prod stack sets web-application/rds's environment: prod (its production
 #    validations: multi_az, deletion_protection, backup retention) and sizes
 #    the instances up (see ENVIRONMENT-SPECIFIC OVERRIDES at the end).
