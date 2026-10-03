@@ -36,6 +36,8 @@ locals {
 #trivy:ignore:AWS-0093 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
 #trivy:ignore:AWS-0132 False positive: aws_s3_bucket_server_side_encryption_configuration.kms applies the state CMK via for_each
 resource "aws_s3_bucket" "terraform_state" {
+  #checkov:skip=CKV_AWS_144:TODO(owner): replicate state to the DR region (us-east-2)? Off as in Cloud Posse's tfstate-backend (s3_replication_enabled = false); adds a replica bucket, a role and cost
+  #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications; Terraform reads and locks state directly
   bucket = var.bucket_name
 
   lifecycle {
@@ -49,6 +51,8 @@ resource "aws_s3_bucket" "terraform_state" {
 #trivy:ignore:AWS-0093 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
 #trivy:ignore:AWS-0132 False positive: aws_s3_bucket_server_side_encryption_configuration.kms applies the state CMK via for_each
 resource "aws_s3_bucket" "terraform_state_logs" {
+  #checkov:skip=CKV_AWS_144:Log bucket; cross-region replication is out of scope (Cloud Posse's tfstate-backend replicates only with s3_replication_enabled)
+  #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications on a log bucket
   bucket = "${var.bucket_name}-logs"
 
   lifecycle {
@@ -66,6 +70,8 @@ resource "aws_s3_bucket" "terraform_state_access_logs" {
   #checkov:skip=CKV_AWS_21:False positive, aws_s3_bucket_versioning.logs covers this bucket via for_each
   #checkov:skip=CKV_AWS_145:S3 server access log delivery requires SSE-S3 on the target bucket
   #checkov:skip=CKV_AWS_18:This is the access log target; logging it into itself would loop
+  #checkov:skip=CKV_AWS_144:Access-log bucket; cross-region replication is out of scope (Cloud Posse's tfstate-backend replicates only with s3_replication_enabled)
+  #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications on an access-log bucket
   count = var.enable_access_logging ? 1 : 0
 
   bucket = "${var.bucket_name}-access-logs"

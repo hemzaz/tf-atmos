@@ -70,6 +70,7 @@ resource "aws_kms_alias" "flow_logs" {
 
 # CloudWatch Log Group for Flow Logs
 resource "aws_cloudwatch_log_group" "flow_logs" {
+  #checkov:skip=CKV_AWS_338:Retention is an input (flow_logs_retention_days) and a per-stack cost decision; flow_logs_s3_backup keeps a year in S3
   count = var.vpc_flow_logs_enabled ? 1 : 0
 
   name              = "/aws/vpc/flowlogs/${aws_vpc.main.id}"
@@ -350,6 +351,9 @@ resource "aws_s3_bucket" "flow_logs" {
   #checkov:skip=CKV2_AWS_61:False positive, aws_s3_bucket_lifecycle_configuration.flow_logs covers this bucket
   #checkov:skip=CKV_AWS_21:False positive, aws_s3_bucket_versioning.flow_logs covers this bucket
   #checkov:skip=CKV_AWS_145:False positive, aws_s3_bucket_server_side_encryption_configuration.flow_logs uses the flow logs CMK
+  #checkov:skip=CKV_AWS_18:This bucket is a log archive; access logs of a log bucket are out of scope (as alb's access_logs bucket)
+  #checkov:skip=CKV_AWS_144:Log archive; cross-region replication is out of scope (as alb's access_logs bucket)
+  #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications on a log archive
   count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
   bucket = "${var.tags["Environment"]}-vpc-flow-logs-${data.aws_caller_identity.current.account_id}"
