@@ -11,11 +11,11 @@
 #   #checkov:skip=CKV_AWS_123:<honest reason>   # inside the resource block
 #   #trivy:ignore:AWS-0123 <honest reason>      # immediately above the block
 #
-# NEVER add an entry to .checkov.baseline or .trivyignore.yaml to make a scan
-# pass. Those baselines exist to burn findings down, and regenerating them to
-# turn a PR green hides the finding instead of fixing it. Only write
-# "False positive" when the rule genuinely does not apply to this resource -
-# if the risk is real but accepted, say so and say why.
+# There is no scanner baseline: the PR gate fails on every finding that is
+# not fixed or suppressed inline. Only write "False positive" when the rule
+# genuinely does not apply to this resource - if the risk is real but
+# accepted, say so and say why. A risk the owner has not accepted yet starts
+# its reason with "TODO(owner):".
 
 locals {
 {{- if .Config.use_enabled_gating }}

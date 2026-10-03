@@ -236,7 +236,7 @@ or `aws sqs start-message-move-task --source-arn <dlq arn>`. A change to `data-t
 | Task | Command |
 |------|---------|
 | Drift (hourly in CI, [in-cluster components](#in-cluster-components) excluded) | `atmos workflow drift-detection -f drift-detection -s <stack>` |
-| Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-baseline -f lint` rewrites the baselines: review the diff, never use it to force a PR green |
+| Security scan | `atmos workflow security-scan -f lint` (fails on HIGH/CRITICAL); `security-scan-report -f lint` lists every finding without failing. No baselines: fix a finding or suppress it inline with a reason (`#checkov:skip=<ID>:<reason>` in the block, `#trivy:ignore:<ID> <reason>` above it) |
 | Security Hub findings | `atmos workflow security-audit -f security-hardening -s <stack>` |
 | Compliance | `atmos workflow check -f compliance-check -s <stack>`; `report` writes `compliance-report.md` |
 | Hardening | `STACK=<stack> atmos workflow harden -f security-hardening` (plans and applies `cloudtrail`, `awsconfig`, `guardduty`, `securityhub`), `harden-iam` (password policy) |
