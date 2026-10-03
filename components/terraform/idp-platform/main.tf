@@ -266,7 +266,7 @@ resource "aws_s3_bucket" "idp_storage" {
   #checkov:skip=CKV_AWS_18:TODO(owner): no server access logs; they need an SSE-S3 target bucket (new bucket, cost). Goes away with idp-platform (D5)
   #checkov:skip=CKV_AWS_144:Cross-region replication is out of scope for this unsupported component, which owner decision D5 deletes
   #checkov:skip=CKV_AWS_145:The logs bucket uses SSE-S3 because ALB access log delivery does not support SSE-KMS; the other four use KMS
-  #checkov:skip=CKV_AWS_21:artifacts, backups and techdocs are versioned (aws_s3_bucket_versioning.idp_storage); logs expire after 90 days and uploads are not versioned
+  #checkov:skip=CKV_AWS_21:TODO(owner): uploads (user content, CORS PUT/DELETE) is not versioned, so an overwrite or delete is unrecoverable; artifacts, backups and techdocs are versioned and logs expire. Interim until D5
   #checkov:skip=CKV2_AWS_61:Only logs expires (aws_s3_bucket_lifecycle_configuration.idp_logs); the other buckets keep their data until it is deleted
   #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications from these buckets
   for_each = local.storage_buckets
@@ -374,10 +374,8 @@ resource "aws_s3_bucket_policy" "idp_logs" {
 }
 
 # Load balancer for IDP services
-#trivy:ignore:AWS-0052 TODO(owner): invalid header fields are passed through (drop_invalid_header_fields is false, as in Cloud Posse's terraform-aws-alb). Goes away with idp-platform (D5)
 #trivy:ignore:AWS-0053 Internet-facing by design: aws_security_group.alb admits 443 only from allowed_cidr_blocks, whose validation rejects a /0
 resource "aws_lb" "idp_platform" {
-  #checkov:skip=CKV_AWS_131:TODO(owner): invalid header fields are passed through (drop_invalid_header_fields is false, as in Cloud Posse's terraform-aws-alb). Goes away with idp-platform (D5)
   #checkov:skip=CKV_AWS_150:Deletion protection is on in prod (environment == "prod") and off elsewhere so dev and staging can be torn down
   #checkov:skip=CKV2_AWS_28:TODO(owner): no WAF web ACL on this ALB (a waf instance would add cost). Goes away with idp-platform (D5)
   name               = "${local.name_prefix}-idp-alb"
@@ -385,6 +383,9 @@ resource "aws_lb" "idp_platform" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = data.aws_subnets.public.ids
+
+  # As stacks/catalog/alb/defaults.yaml and alb-controller-ingress-group set it.
+  drop_invalid_header_fields = true
 
   enable_deletion_protection = var.environment == "prod" ? true : false
 
