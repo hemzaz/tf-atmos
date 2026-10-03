@@ -26,7 +26,7 @@ BATCH_MODE=false
 # Tool categories for batch updates (bash 3.x compatible)
 # Using variables instead of associative arrays
 TOOL_CATEGORY_CORE="TERRAFORM_VERSION ATMOS_VERSION KUBECTL_VERSION HELM_VERSION"
-TOOL_CATEGORY_SECURITY="TFSEC_VERSION TFLINT_VERSION CHECKOV_VERSION"
+TOOL_CATEGORY_SECURITY="TFLINT_VERSION CHECKOV_VERSION"
 TOOL_CATEGORY_AWS="AWS_CLI_VERSION SESSION_MANAGER_VERSION"
 TOOL_CATEGORY_PROVIDERS="TF_PROVIDER_AWS_VERSION TF_PROVIDER_KUBERNETES_VERSION TF_PROVIDER_HELM_VERSION TF_PROVIDER_TLS_VERSION TF_PROVIDER_TIME_VERSION TF_PROVIDER_KUBECTL_VERSION"
 TOOL_CATEGORY_CICD="YAMLLINT_VERSION PRECOMMIT_VERSION TERRAFORM_DOCS_VERSION"
@@ -96,10 +96,6 @@ fetch_latest_version() {
       ;;
     "HELM_VERSION"|"HELM_VERSION_LTS")
       api_info="https://api.github.com/repos/helm/helm/releases/latest"
-      pattern="\"tag_name\":\"v([0-9]+\.[0-9]+\.[0-9]+)\""
-      ;;
-    "TFSEC_VERSION")
-      api_info="https://api.github.com/repos/aquasecurity/tfsec/releases/latest"
       pattern="\"tag_name\":\"v([0-9]+\.[0-9]+\.[0-9]+)\""
       ;;
     "TFLINT_VERSION")

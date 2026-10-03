@@ -24,6 +24,7 @@ NC='\033[0m' # No Color
 
 # Track failures
 FAILURES=0
+CHECKOV_FAILED=false
 
 # Function to check if command exists
 command_exists() {
@@ -115,17 +116,22 @@ if [ -z "$SKIP_CHECKOV" ]; then
   echo "=========================================="
   echo ""
 
+  # The CI gate's flags (workflows/lint.yaml security-scan, checkov 3.3.21): only
+  # findings missing from .checkov.baseline fail, and nothing else is skipped
+  # (inline #checkov:skip comments carry the reasoned exceptions).
   if checkov --directory "$COMPONENTS_DIR" \
     --framework terraform \
     --skip-path '/tests/' \
     --compact \
     --quiet \
-    --skip-check CKV_AWS_144,CKV_AWS_145 \
+    --soft-fail-on LOW,MEDIUM \
+    --hard-fail-on HIGH,CRITICAL \
+    --baseline "$PROJECT_ROOT/.checkov.baseline" \
     --output cli; then
     echo -e "${GREEN}✓ Security scan passed${NC}"
   else
-    echo -e "${YELLOW}! Security scan found issues (review above)${NC}"
-    # Don't fail on checkov warnings
+    echo -e "${RED}✗ Security scan found findings not in .checkov.baseline (see above)${NC}"
+    CHECKOV_FAILED=true
   fi
 
   echo ""
@@ -168,14 +174,19 @@ echo "Validation Summary"
 echo "=========================================="
 echo ""
 
-if [ $FAILURES -eq 0 ]; then
+if [ $FAILURES -eq 0 ] && [ "$CHECKOV_FAILED" = false ]; then
   echo -e "${GREEN}✓ All validations passed!${NC}"
   echo ""
   echo "Components validated:"
   find "$COMPONENTS_DIR" -maxdepth 1 -type d | tail -n +2 | wc -l | xargs echo "  - Components:"
   exit 0
 else
-  echo -e "${RED}✗ $FAILURES component(s) failed validation${NC}"
+  if [ $FAILURES -gt 0 ]; then
+    echo -e "${RED}✗ $FAILURES component(s) failed validation${NC}"
+  fi
+  if [ "$CHECKOV_FAILED" = true ]; then
+    echo -e "${RED}✗ checkov: findings not in .checkov.baseline${NC}"
+  fi
   echo ""
   echo "Please fix the errors above and re-run this script."
   exit 1
