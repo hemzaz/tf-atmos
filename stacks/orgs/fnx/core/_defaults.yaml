@@ -17,13 +17,13 @@ import:
   - orgs/fnx/_defaults
   - mixins/tenant/fnx
 
-# This account IS settings.environment.management_account_id (orgs/fnx/_defaults.yaml).
-# Instances set `account_id: "{{ .settings.environment.management_account_id }}"`
-# themselves: Atmos renders templates in one pass, so a settings value that is
-# itself a template would reach Terraform unrendered.
+# This account IS the account map's root account, settings.environment.management_account_id
+# (orgs/fnx/_defaults.yaml). account_id says so too, for the provider account
+# guard (terraform.providers.aws.allowed_account_ids there).
 settings:
   environment:
     account: core
+    account_id: '{{ index .settings.account_map.full_account_map .settings.account_map.root_account_account_name }}'
   context:
     stage: core
   # Kept out of the CI plan/deploy/drift matrices (terraform-ci.yml,

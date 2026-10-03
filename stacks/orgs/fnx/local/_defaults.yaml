@@ -8,6 +8,14 @@ import:
   - orgs/fnx/_defaults
   - mixins/tenant/fnx
 
+# No provider account guard here: the Floci lane's provider config skips
+# requesting the account ID, and the AWS provider then rejects any
+# allowed_account_ids list (it compares against an empty ID). Removes the
+# org-wide terraform.providers.aws.allowed_account_ids (orgs/fnx/_defaults.yaml).
+terraform:
+  providers:
+    aws: !unset
+
 settings:
   environment:
     account: local
