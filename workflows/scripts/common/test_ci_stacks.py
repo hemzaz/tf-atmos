@@ -50,14 +50,29 @@ class TodayTest(unittest.TestCase):
 
 class NewStackTest(unittest.TestCase):
     def test_a_new_stack_flows_in_without_edits(self):
-        stacks = dict(TODAY, **{"fnx-prod-production-eu": stack("prod"), "fnx-qa-qa-01": stack("qa")})
+        stacks = dict(TODAY, **{"fnx-prod-production-eu": stack("prod"), "fnx-dev-testenv-02": stack("dev")})
         self.assertEqual(
             ci_stacks.ci_stacks(stacks),
-            ["fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-prod-production", "fnx-prod-production-eu",
-             "fnx-qa-qa-01"],
+            ["fnx-dev-testenv-01", "fnx-dev-testenv-02", "fnx-staging-staging-01", "fnx-prod-production",
+             "fnx-prod-production-eu"],
         )
         self.assertEqual(ci_stacks.check(stacks, "fnx-prod-production-eu"), "")
-        self.assertIn("fnx-qa-qa-01", ci_stacks.plan_sweep_stacks(stacks))
+        self.assertIn("fnx-prod-production-eu", ci_stacks.plan_sweep_stacks(stacks))
+
+    def test_a_ci_stack_in_an_unordered_stage_fails(self):
+        # CD would otherwise deploy a new qa stage after production.
+        stacks = dict(TODAY, **{"fnx-qa-qa-01": stack("qa")})
+        with self.assertRaisesRegex(ValueError, r"'fnx-qa-qa-01' has stage 'qa'.*add it to STAGE_ORDER"):
+            ci_stacks.ci_stacks(stacks)
+        # plan-sweep only orders its run, so a new stage is swept (after prod, with the fixtures).
+        self.assertEqual(
+            ci_stacks.plan_sweep_stacks(stacks),
+            ["fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-prod-production",
+             "fnx-fixtures-batch", "fnx-fixtures-webapp", "fnx-qa-qa-01"],
+        )
+
+    def test_a_ci_disabled_stack_in_an_unordered_stage_is_fine(self):
+        self.assertNotIn("fnx-fixtures-batch", ci_stacks.ci_stacks(TODAY))
 
 
 class CheckTest(unittest.TestCase):
@@ -78,9 +93,25 @@ class HelpersTest(unittest.TestCase):
     def test_a_stack_with_no_instances_is_not_ci_disabled(self):
         self.assertFalse(ci_stacks.ci_disabled({"components": {}}))
 
-    def test_mixed_or_missing_stage_sorts_last(self):
-        stacks = {"b": {"components": {"terraform": {}}}, "a": stack("dev"), "c": stack("weird")}
-        self.assertEqual(ci_stacks.ordered(stacks, ["b", "c", "a"]), ["a", "b", "c"])
+    def test_other_stages_sort_after_prod(self):
+        stacks = {"b": stack("prod"), "a": stack("fixtures"), "c": stack("dev")}
+        self.assertEqual(ci_stacks.ordered(stacks, ["a", "b", "c"]), ["c", "b", "a"])
+
+
+class NoSingleStageTest(unittest.TestCase):
+    empty = {"components": {"terraform": {}}}
+    mixed = {"components": {"terraform": {
+        "a": {"settings": {"context": {"stage": "dev"}}},
+        "b": {"settings": {"context": {"stage": "prod"}}},
+    }}}
+
+    def test_both_list_modes_fail(self):
+        for bad in (self.empty, self.mixed):
+            stacks = dict(TODAY, **{"fnx-odd-odd-01": bad})
+            for select in (ci_stacks.ci_stacks, ci_stacks.plan_sweep_stacks):
+                with self.subTest(bad=bad, select=select.__name__), \
+                        self.assertRaisesRegex(ValueError, "'fnx-odd-odd-01' has no single settings.context.stage"):
+                    select(stacks)
 
 
 if __name__ == "__main__":
