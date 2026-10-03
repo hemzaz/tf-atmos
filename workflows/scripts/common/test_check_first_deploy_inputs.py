@@ -96,6 +96,21 @@ class PlaceholderTest(unittest.TestCase):
         stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", vpc_main={"cidr_note": "91234567890123"})
         self.assertEqual(errors(stacks), [])
 
+    def test_uuid_and_hex_runs_are_not_placeholders(self):
+        for value in ("00000000-0000-0000-0000-000000000000", "a1b2c3d4-0000-4abc-8def-123456789012",
+                      "sha256:deadbeef000000000000cafe", "f123456789012"):  # pragma: allowlist secret (test values, not secrets)
+            with self.subTest(value=value):
+                stacks = clean()
+                stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", vpc_main={"token": value})
+                self.assertEqual(errors(stacks), [])
+
+    def test_placeholder_in_a_name_still_matches(self):
+        for value in ("fnx-dev-lambda-artifacts-123456789012", "my-data-123456789012", "000000000000"):  # pragma: allowlist secret (placeholder IDs)
+            with self.subTest(value=value):
+                stacks = clean()
+                stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", vpc_main={"bucket": value})
+                self.assert_one(stacks, "fnx-dev-testenv-01", "vars.bucket", "Account IDs")
+
     def test_placeholder_org_id(self):
         stacks = clean()
         stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", iam_ci={
@@ -235,6 +250,28 @@ class MainTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("WARN fnx-dev-testenv-01: settings.environment.account_id", out)
         self.assertNotIn("ERROR", out)
+
+    def many_placeholder_stacks(self):
+        stacks = clean()
+        stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", vpc_main={
+            "emails": [f"ops{i}@example.com" for i in range(preflight.WARN_LIMIT + 5)]})
+        return stacks
+
+    def test_warn_mode_shows_the_first_findings_and_the_counts(self):
+        rc, out, _ = self.run_main(self.many_placeholder_stacks(), "--warn")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.count("\nWARN ") + out.startswith("WARN "), preflight.WARN_LIMIT)
+        self.assertNotIn("NOTICE repository", out)
+        self.assertIn("... 5 more WARN and 3 NOTICE line(s) not shown; see them all with --warn --all", out)
+        self.assertIn(f"By row: Alert recipients {preflight.WARN_LIMIT + 5}", out)
+
+    def test_warn_all_and_fatal_mode_show_everything(self):
+        for argv, label in ((("--warn", "--all"), "WARN"), ((), "ERROR")):
+            with self.subTest(argv=argv):
+                _, out, _ = self.run_main(self.many_placeholder_stacks(), *argv)
+                self.assertEqual(out.count(f"{label} fnx-dev-testenv-01"), preflight.WARN_LIMIT + 5)
+                self.assertEqual(out.count("NOTICE repository"), 3)
+                self.assertNotIn("not shown", out)
 
     def test_clean_passes(self):
         rc, out, _ = self.run_main(clean())

@@ -132,6 +132,10 @@ workflows:
     steps:
       - *fixtures-stages
       - *refuse-fixtures
+      # access_roles changes (a new stack's CI role ARNs) ship here after the
+      # cold start: a placeholder ARN must not reach the live bucket policy.
+      - *preflight-targets
+      - *preflight
       - name: plan
         type: atmos
         command: terraform plan backend/main

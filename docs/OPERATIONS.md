@@ -47,9 +47,10 @@ the following, naming the stack, the key and the row above:
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
 packages, GitHub, deploy tags) as notices. The `local` and `fixtures` stacks are exempt.
-`bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`, `full`)
-before any AWS call. `atmos workflow lint` runs it with `--warn`, printing every placeholder
-without failing. It stands in for Cloud Posse's cold-start checks: there, `account-map` holds the
+`bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
+`backend-only`, `full`) before any AWS call. `atmos workflow lint` runs it with `--warn`: it
+never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
+them all). It stands in for Cloud Posse's cold-start checks: there, `account-map` holds the
 account IDs and the accounts layer is deployed and verified first
 ([deploy accounts](https://docs.cloudposse.com/layers/accounts/deploy-accounts/),
 [aws-account-map](https://github.com/cloudposse-terraform-components/aws-account-map)).

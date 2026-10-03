@@ -41,7 +41,13 @@ EXEMPT_STAGES = {"local", "fixtures"}
 MANAGEMENT_STAGES = {"core"}
 
 PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
-ACCOUNT_RE = re.compile(r"(?<!\d)(?:%s)(?!\d)" % "|".join(PLACEHOLDER_ACCOUNTS))
+# A 12-digit run that is not part of a longer hex token (a digest) and not a
+# UUID's last group (00000000-0000-0000-0000-000000000000: "-<4 hex>-" before
+# it). Names like "<bucket>-123456789012" still match.
+ACCOUNT_RE = re.compile(
+    r"(?<![0-9a-fA-F])(?<!-[0-9a-fA-F]{4}-)(?:%s)(?![0-9a-fA-F])" % "|".join(PLACEHOLDER_ACCOUNTS)
+)
+WARN_LIMIT = 10
 ORG_RE = re.compile(r"\bo-x{10}\b", re.IGNORECASE)
 EXAMPLE_DOMAIN_RE = re.compile(
     r"(?:^|[.@/])(?:example\.(?:com|net|org)|[a-z0-9-]+\.(?:example|test|invalid))(?![a-z0-9-])",
@@ -206,7 +212,9 @@ def check(stacks: dict, only=None) -> list:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--stacks", default="", help="comma-separated stacks to check (default: every deployable stack)")
-    parser.add_argument("--warn", action="store_true", help="print errors as WARN and exit 0")
+    parser.add_argument("--warn", action="store_true",
+                        help=f"print errors as WARN and exit 0; only the first {WARN_LIMIT} unless --all")
+    parser.add_argument("--all", action="store_true", help="with --warn, print every finding")
     args = parser.parse_args()
 
     stacks = json.load(sys.stdin)
@@ -219,10 +227,16 @@ def main() -> int:
     exempt = [s for s in only if environment(stacks[s]).get("_stage") in EXEMPT_STAGES]
     if exempt:
         print(f"NOTICE never deployed to a real account, not checked: {', '.join(exempt)}")
-    findings = check(stacks, only)
+    findings = sorted(check(stacks, only), key=lambda f: (f.level != "error", f.stack, f.row, f.key))
     errors = [f for f in findings if f.level == "error"]
-    for finding in sorted(findings, key=lambda f: (f.level != "error", f.stack, f.row, f.key)):
+    # Fatal mode (and --all) prints every finding; --warn (lint, every run)
+    # prints the first WARN_LIMIT errors and the per-row counts.
+    shown = findings if (args.all or not args.warn) else errors[:WARN_LIMIT]
+    for finding in shown:
         print(finding.line(args.warn))
+    if len(shown) < len(findings):
+        print(f"... {len(errors) - len(shown)} more WARN and {len(findings) - len(errors)} NOTICE line(s) not shown; "
+              "see them all with --warn --all, or run without --warn")
     checked = ", ".join(sorted(set(only) - set(exempt))) if only else "every deployable stack"
     if errors:
         rows = {}
