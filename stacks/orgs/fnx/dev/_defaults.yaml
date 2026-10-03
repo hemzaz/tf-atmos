@@ -7,5 +7,6 @@ import:
 settings:
   environment:
     account: dev
-    account_id: "123456789012"
+    # From the account map (stacks/orgs/fnx/_defaults.yaml), keyed by `account`.
+    account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
     aws_profile: "dev"
