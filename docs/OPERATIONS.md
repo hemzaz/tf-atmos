@@ -60,8 +60,8 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
   `<tenant>-<account>-<environment>-ci-plan`/`-apply` roles there, and any operator role that
   runs Terraform against a stage.
 - `check-state-keys.py` (in `lint` and `validate-all`) keeps every state key inside its stage's
-  prefix, which the role patterns rely on, and every backend region equal to `backend/main`'s. `s3:ListBucket` is bucket-wide, so every role sees key
-  names across stages, never contents.
+  prefix, which the role patterns rely on, and every backend region equal to `backend/main`'s.
+  `s3:ListBucket` is bucket-wide, so every role sees key names across stages, never contents.
 - The CI apply role (`iam/ci`, `AdministratorAccess`) trusts only the default-branch subject
   (`repo:<org>/<repo>:ref:refs/heads/<default branch>`). `terraform-cd.yml` uses no GitHub
   Environment: **every merge deploys, prod included, with no manual approval**. Default-branch

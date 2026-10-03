@@ -116,6 +116,38 @@ class CheckStateKeysTest(unittest.TestCase):
         stacks["fnx-core-root"] = core_stack(region="eu-west-1")
         self.assert_errors(stacks, "backend.region 'us-east-1' is not the state bucket's region 'eu-west-1'")
 
+    def test_non_s3_backend_region_is_ignored(self):
+        self.assert_errors(stacks_with(**{
+            "local": instance("fnx-prod-production", backend_type="local", region="eu-west-1"),
+        }))
+
+    def test_two_backend_regions_fail(self):
+        stacks = stacks_with(**{"vpc/main": instance("fnx-prod-production")})
+        other = instance("fnx-core-eu", key_prefix="backend", stage="core", region="eu-west-1", component="backend")
+        stacks["fnx-core-eu"] = {"components": {"terraform": {"backend/main": other}}}
+        self.assert_errors(stacks, "expected exactly one deployed 'backend' region")
+
+    def test_abstract_and_disabled_backend_do_not_count(self):
+        stacks = stacks_with(**{"vpc/main": instance("fnx-prod-production")})
+        for name, flag in (("abstract", {"type": "abstract"}), ("off", {"enabled": False})):
+            other = instance("fnx-core-x", key_prefix="backend", stage="core", region="eu-west-1",
+                             component="backend", **flag)
+            stacks["fnx-core-root"]["components"]["terraform"][name] = other
+        self.assert_errors(stacks)
+
+    def test_unset_region_fails(self):
+        # An unset settings.tfstate.region renders "<no value>" everywhere; equal strings must not pass
+        stacks = {
+            "fnx-core-root": core_stack(region="<no value>"),
+            "fnx-prod-production": {"components": {"terraform": {
+                "vpc/main": instance("fnx-prod-production", region="<no value>"),
+            }}},
+        }
+        errors = check_state_keys.check(stacks)
+        self.assertEqual(len(errors), 3, errors)
+        self.assertIn("state bucket's region '<no value>' is not an AWS region", errors[0])
+        self.assertTrue(all("is not an AWS region" in error for error in errors), errors)
+
     def test_missing_context_fails(self):
         bad = instance("fnx-prod-production")
         bad["settings"] = {}
