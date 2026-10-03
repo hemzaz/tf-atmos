@@ -41,6 +41,10 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   operator (`&&`, `||`, ...) and skips the file: write `x == false` or `(!x)`. The lint step
   `hcl-unary-newline` (`scripts/check-hcl-unary-newline.py`) catches it.
 - CI runs in the `ghcr.io/cloudposse/atmos` Linux container; shell that works on macOS may not.
+- No scanner baselines: fix a checkov/trivy finding or suppress it inline with a reason
+  (`#checkov:skip=<ID>:<reason>` inside the block, `#trivy:ignore:<ID> <reason>` on the line above);
+  a risk the owner has not accepted starts with `TODO(owner):`. checkov's HCL parser drops a whole
+  file on a line ending in a unary `!x` followed by a line starting with a binary operator.
 - Every root module commits `.terraform.lock.hcl` and every init uses `-lockfile=readonly`: after
   a `required_providers` change run `atmos workflow providers-lock -f providers` and commit the locks.
 
