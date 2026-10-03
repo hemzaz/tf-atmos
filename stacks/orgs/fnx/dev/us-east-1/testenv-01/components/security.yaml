@@ -38,9 +38,11 @@ components:
         components:
           - component: backend/main
             stack: fnx-core-root
-    # GitHub Actions OIDC role. This is what repo variable AWS_PLAN_ROLE_ARN
-    # must point at before CI can run a real plan; every AWS job currently skips
-    # because it is unset. The trust policy is pinned to exact subject claims -
+    # GitHub Actions OIDC roles. CI plans, drift and DR checks for this stack
+    # assume its plan role, and CD its apply role, each derived from this
+    # instance (workflows/scripts/common/ci-apply-role-arn.py). Every AWS job
+    # skips until repo variable AWS_PLAN_ROLE_ARN (only an "AWS is configured"
+    # switch) is set. The trust policy is pinned to exact subject claims -
     # never a wildcard - so no other repo can assume it.
     iam/ci:
       metadata:

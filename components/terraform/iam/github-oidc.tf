@@ -6,7 +6,9 @@
 #           prod's instance trusts the default branch only - see
 #           ci_plan_role_subjects in its security.yaml),
 #           drift-detection.yml and disaster-recovery.yml (default branch).
-#           Read-only; its ARN is the repo variable AWS_PLAN_ROLE_ARN.
+#           Read-only. Each workflow derives this stack's ARN from its iam/ci
+#           config (workflows/scripts/common/ci-apply-role-arn.py --kind plan);
+#           repo variable AWS_PLAN_ROLE_ARN only switches the AWS jobs on.
 #   apply - assumed by terraform-cd.yml, which runs only on the default branch
 #           and uses no GitHub Environment, so its token's sub is
 #           repo:<org>/<repo>:ref:refs/heads/<branch> - the only subject this

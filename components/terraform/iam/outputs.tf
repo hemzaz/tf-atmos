@@ -24,7 +24,7 @@ output "github_oidc_provider_arn" {
 }
 
 output "ci_plan_role_arn" {
-  description = "ARN of the read-only GitHub Actions plan role; set it as the repository variable AWS_PLAN_ROLE_ARN"
+  description = "ARN of the read-only GitHub Actions plan role (CI derives the same ARN per stack with ci-apply-role-arn.py --kind plan; no repository variable holds it)"
   value       = one(aws_iam_role.ci_plan[*].arn)
 }
 
