@@ -117,6 +117,7 @@ if [ -z "$SKIP_CHECKOV" ]; then
 
   if checkov --directory "$COMPONENTS_DIR" \
     --framework terraform \
+    --skip-path '/tests/' \
     --compact \
     --quiet \
     --skip-check CKV_AWS_144,CKV_AWS_145 \
