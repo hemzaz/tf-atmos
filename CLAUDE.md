@@ -36,6 +36,9 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   `iam`, `idp-platform`, `kms`, `secretsmanager`); many use it in resource names.
 - `idp-platform` calls `../eks`, `../rds`, `../acm` as modules: grep for `source = "../<component>"`
   before changing their variables.
+- checkov's HCL parser rejects a unary `!x`/`-x` that ends a line before a line starting with a binary
+  operator (`&&`, `||`, ...) and skips the file: write `x == false` or `(!x)`. The lint step
+  `hcl-unary-newline` (`scripts/check-hcl-unary-newline.py`) catches it.
 - CI runs in the `ghcr.io/cloudposse/atmos` Linux container; shell that works on macOS may not.
 - Every root module commits `.terraform.lock.hcl` and every init uses `-lockfile=readonly`: after
   a `required_providers` change run `atmos workflow providers-lock -f providers` and commit the locks.
