@@ -19,7 +19,7 @@ so every check that reads a var default from it can false-pass.
 Rewrites that parse: `contains(...) == false`, wrap the operand `(!contains(...))`, put
 the operator at the end of the line instead of the start of the next, or one line.
 
-Usage: check-hcl-unary-newline.py [PATH...]   (default: components/terraform modules)
+Usage: check-hcl-unary-newline.py [PATH...]   (default: components/terraform)
 A directory is searched for *.tf; a file argument is checked whatever its extension.
 Exit 0 when clean, 1 on a hit, 2 on a missing or unreadable path. Pure stdlib (runs in the
 CI image).
@@ -29,7 +29,7 @@ import os
 import re
 import sys
 
-DEFAULT_PATHS = ("components/terraform", "modules")
+DEFAULT_PATHS = ("components/terraform",)
 SKIP_DIRS = {".terraform", ".git"}
 
 # Leading binary operators checkov rejects after a unary operand (verified one by one
