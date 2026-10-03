@@ -21,11 +21,14 @@ not the stack's own, or init of a DR/EU stack fails against a region with no buc
 Exits 1 on any violation.
 """
 import json
+import re
 import sys
 from typing import Optional
 
 STATE_KEY = "terraform.tfstate"
 BACKEND_COMPONENT = "backend"
+# A template over an unset setting renders "<no value>" for both sides, which would compare equal.
+AWS_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
 
 
 def is_deployable(instance: dict) -> bool:
@@ -55,6 +58,9 @@ def check(stacks: dict) -> list[str]:
     if len(regions) != 1 or None in regions:
         errors.append(f"expected exactly one deployed '{BACKEND_COMPONENT}' region, found {sorted(map(str, regions))}")
     bucket_region = next(iter(regions)) if len(regions) == 1 else None
+    if bucket_region is not None and not AWS_REGION.match(str(bucket_region)):
+        errors.append(f"the state bucket's region {bucket_region!r} is not an AWS region (settings.tfstate.region unset?)")
+        bucket_region = None
     for stack_name, stack in sorted(stacks.items()):
         instances = (stack.get("components") or {}).get("terraform") or {}
         for name, instance in sorted(instances.items()):
@@ -76,7 +82,9 @@ def check(stacks: dict) -> list[str]:
             elif "/" in key_prefix:
                 errors.append(f"{where} workspace_key_prefix {key_prefix!r} contains '/'")
             region = (instance.get("backend") or {}).get("region")
-            if bucket_region is not None and region != bucket_region:
+            if not AWS_REGION.match(str(region)):
+                errors.append(f"{where} backend.region {region!r} is not an AWS region (settings.tfstate.region unset?)")
+            elif bucket_region is not None and region != bucket_region:
                 errors.append(f"{where} backend.region {region!r} is not the state bucket's region {bucket_region!r}")
             if key != STATE_KEY:
                 slash = " (contains '/')" if isinstance(key, str) and "/" in key else ""
