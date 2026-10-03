@@ -122,6 +122,7 @@ data "aws_subnet" "cluster" {
 #trivy:ignore:AWS-0040 Public endpoint is off unless cluster_endpoint_public_access = true
 resource "aws_eks_cluster" "default" {
   #checkov:skip=CKV_AWS_38:Public endpoint is off unless cluster_endpoint_public_access = true
+  #checkov:skip=CKV_AWS_339:False positive; checkov 3.3.19's supported-version list predates Kubernetes 1.36, the version the stacks pin. Remove when the checkov pin is bumped past the 1.36 release
   count = local.enabled ? 1 : 0
 
   name     = local.cluster_name

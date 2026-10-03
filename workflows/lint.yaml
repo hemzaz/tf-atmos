@@ -5,18 +5,17 @@
 #   atmos workflow lint -f lint
 #   atmos workflow tflint-init -f lint            # install tflint + its .tflint.hcl plugins (network)
 #   atmos workflow actionlint -f lint             # lint .github/workflows (actionlint)
-#   atmos workflow security-scan -f lint          # PR gate: Trivy + Checkov, fails on NEW HIGH/CRITICAL
-#   atmos workflow security-scan-report -f lint   # nightly: full backlog (no baselines), never fails
-#   atmos workflow security-baseline -f lint      # regenerate .trivyignore.yaml and .checkov.baseline
+#   atmos workflow security-scan -f lint          # PR gate: Trivy + Checkov, fails on HIGH/CRITICAL
+#   atmos workflow security-scan-report -f lint   # nightly: every finding, never fails
 #
-# The security-scan gate only fails on findings that are not in the committed
-# baselines (.trivyignore.yaml, .checkov.baseline). Regenerate the baselines
-# deliberately, to burn findings down, never to make a PR pass.
+# There are no scanner baselines: the security-scan gate fails on every
+# finding that is not fixed or suppressed inline in the resource
+# (#checkov:skip=<ID>:<reason>, #trivy:ignore:<ID> <reason>).
 #
 # One trivy gate, in security-scan, not also in lint: both CI jobs run on the
 # same changed paths (terraform-ci.yml `changes`), and security-scan already
-# holds the other baselined gate (checkov) and writes the reports. lint used to
-# run the identical trivy command a second time.
+# holds the checkov gate and writes the reports. lint used to run the identical
+# trivy command a second time.
 #
 # Scanner pins: checkov 3.3.21 (3.3.22 has no GitHub release, so the toolchain
 # cannot install it) and trivy v0.75.0. Keep .pre-commit-config.yaml,
@@ -35,11 +34,10 @@
 # Every trivy run passes --skip-check-update and an empty, throwaway
 # --cache-dir. Without the flag trivy downloads the floating check bundle
 # mirror.gcr.io/aquasec/trivy-checks:2 at run time (580 checks vs the 563
-# embedded in the binary), so the gate and the baseline changed with no change
+# embedded in the binary), so the gate's findings changed with no change
 # in this repo. The flag alone still loads a bundle already in the trivy cache
 # (~/.cache/trivy on a developer machine), so the empty cache makes a local run
-# use exactly the embedded checks CI uses. New checks arrive by bumping the pin,
-# with a baseline regeneration.
+# use exactly the embedded checks CI uses. New checks arrive by bumping the pin.
 workflows:
   lint:
     description: Lint Terraform code and YAML files (the Trivy/Checkov gate is security-scan)
@@ -256,20 +254,10 @@ workflows:
       - name: reports-dir
         type: shell
         command: mkdir -p reports
-      # checkov's --baseline flag (used by the `checkov` step below) reduces the
-      # printed passed/failed/skipped counts to only the delta versus baseline:
-      # checkov/common/output/baseline.py Baseline.compare_and_reduce_reports()
-      # keeps a passed/skipped check only if it matches a baseline entry, and
-      # drops a failed check that matches one -- everything else (the vast
-      # majority of a healthy scan) is filtered out of the report entirely.
-      # That is correct for a burn-down gate (fail only on genuinely NEW
-      # findings), but it means the baselined run's own summary line stays
-      # near-zero even when every component was fully scanned, which is what
-      # made this gate look like it had stopped scanning. This unbaselined,
-      # always-soft-fail pass measures real coverage and fails the job if it
-      # collapses, independent of whether the baselined gate below happens to
-      # pass.
-      # --quiet is deliberately NOT passed here (unlike the baselined `checkov`
+      # This always-soft-fail pass measures real coverage (resources scanned,
+      # parsing errors) and fails the job if it collapses, independent of
+      # whether the gate below happens to pass.
+      # --quiet is deliberately NOT passed here (unlike the `checkov` gate
       # step below): checkov's JSON output only includes the per-file
       # `results.parsing_errors` list (needed by the guard below) when --quiet
       # is absent -- with --quiet, get_dict() takes the "is_quiet" branch and
@@ -351,9 +339,8 @@ workflows:
               sys.exit(1)
 
           # components/terraform currently yields ~570 resources across every
-          # root module. A collapse to a handful (as happened when this number
-          # was only ever read off the --baseline run below, see the comment
-          # above) means checkov stopped actually scanning almost everything.
+          # root module. A collapse to a handful means checkov stopped actually
+          # scanning almost everything.
           # Lower this only alongside a deliberate removal of components.
           min_resources = 400
           if resources < min_resources:
@@ -405,11 +392,11 @@ workflows:
               cache=$(mktemp -d); trap 'rm -rf "$cache"' EXIT;
               trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests'
               --format sarif --output reports/trivy.sarif
-              --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore.yaml components/terraform
+              --severity HIGH,CRITICAL --exit-code 1 components/terraform
           # Checkov only knows check severities with a Prisma Cloud API key; without
           # one, a failed check matches neither list and therefore fails the gate.
-          # --skip-path '/tests/' and trivy's --skip-dirs '**/tests' (every run here,
-          # the baselines' too): terraform test helper modules (e.g.
+          # --skip-path '/tests/' and trivy's --skip-dirs '**/tests' (every run here):
+          # terraform test helper modules (e.g.
           # eks/tests/unknown_subnet_ids, which links the component's own files)
           # are not deployed code.
           - name: checkov
@@ -417,7 +404,7 @@ workflows:
             command: >-
               checkov --directory components/terraform --framework terraform --skip-path '/tests/'
               --output sarif --output-file-path reports --quiet
-              --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL --baseline .checkov.baseline
+              --soft-fail-on LOW,MEDIUM --hard-fail-on HIGH,CRITICAL
 
   security-scan-report:
     description: Report-only scan for the nightly workflow (SARIF in reports/); never fails on findings
@@ -521,60 +508,3 @@ workflows:
               with open(path, "w") as f:
                   json.dump(sarif, f)
               print(f"{path}: dropped {dropped} suppressed result(s)")
-
-  security-baseline:
-    description: Regenerate the PR-gate baselines (.trivyignore.yaml, .checkov.baseline) from the current code
-    dependencies:
-      tools:
-        trivy: "v0.75.0"
-        checkov: "3.3.21"
-    steps:
-      - name: reports-dir
-        type: shell
-        command: mkdir -p reports
-      - name: trivy-findings
-        type: shell
-        output: none
-        command: >-
-          cache=$(mktemp -d); trap 'rm -rf "$cache"' EXIT;
-          trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests'
-          --format json --output reports/trivy-baseline.json
-          --severity HIGH,CRITICAL --exit-code 0 components/terraform
-      - name: trivy-baseline
-        type: script
-        interpreter: python3
-        script: |
-          import datetime, json
-
-          findings = set()
-          for result in json.load(open("reports/trivy-baseline.json")).get("Results") or []:
-              for m in result.get("Misconfigurations") or []:
-                  if m.get("Status") == "FAIL":
-                      findings.add((m["ID"], result["Target"]))
-          lines = [
-              f"# Trivy baseline {datetime.date.today()} - burn down, don't add.",
-              "# HIGH/CRITICAL misconfigurations present when the baseline was taken; the PR",
-              "# gate ignores exactly these (rule, file) pairs. Regenerate with",
-              "# `atmos workflow security-baseline -f lint`.",
-              "misconfigurations:",
-          ]
-          for rule, target in sorted(findings):
-              lines += [f"  - id: {rule}", "    paths:", f'      - "{target}"']
-          open(".trivyignore.yaml", "w").write("\n".join(lines) + "\n")
-          print(f"{len(findings)} trivy findings baselined")
-      - name: checkov-baseline
-        type: shell
-        output: none
-        command: >-
-          checkov --directory components/terraform --framework terraform --skip-path '/tests/'
-          --create-baseline --soft-fail --quiet --compact
-      - name: move-checkov-baseline
-        type: shell
-        command: mv components/terraform/.checkov.baseline .checkov.baseline
-      # checkov names a count-guarded singleton `x[0]` or `x` depending on the
-      # size of the whole directory scan, and --baseline matches names exactly.
-      # Record both spellings so an unrelated PR can't flip baselined findings
-      # to "new" (see the script's docstring).
-      - name: checkov-baseline-index-twins
-        type: shell
-        command: python3 workflows/scripts/common/checkov-baseline-index-twins.py .checkov.baseline components/terraform

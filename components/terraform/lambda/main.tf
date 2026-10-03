@@ -264,6 +264,7 @@ resource "aws_iam_role_policy" "event_sources" {
 
 # Create log group before the Lambda function to avoid circular dependencies
 resource "aws_cloudwatch_log_group" "lambda" {
+  #checkov:skip=CKV_AWS_338:Retention is an input (log_retention_days) and a per-stack cost decision, as on the repo's other log groups
   name              = "/aws/lambda/${var.tags["Environment"]}-${var.function_name}"
   retention_in_days = var.log_retention_days
   kms_key_id        = var.kms_key_id
@@ -289,6 +290,7 @@ locals {
 }
 
 resource "aws_security_group" "lambda" {
+  #checkov:skip=CKV2_AWS_5:Attached to the function (aws_lambda_function.main vpc_config); checkov's graph does not follow the count index in aws_security_group.lambda[0].id
   count       = length(var.subnet_ids) > 0 ? 1 : 0
   name        = "${var.tags["Environment"]}-${var.function_name}-sg"
   description = "Security group for ${var.function_name} Lambda function"
@@ -349,6 +351,8 @@ resource "aws_security_group" "lambda" {
 }
 
 resource "aws_lambda_function" "main" {
+  #checkov:skip=CKV_AWS_272:Packages are built and uploaded by the application repo's pipeline; no signing profile, as code signing is off by default in Cloud Posse's terraform-aws-lambda-function
+  #checkov:skip=CKV_AWS_50:X-Ray tracing is an input (tracing_mode) and bills per trace; set per instance
   function_name     = "${var.tags["Environment"]}-${var.function_name}"
   role              = aws_iam_role.lambda.arn
   handler           = var.handler

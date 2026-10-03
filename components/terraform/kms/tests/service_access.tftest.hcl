@@ -103,6 +103,33 @@ run "log_delivery_is_scoped_to_this_account" {
     condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowCloudWatchLogs"]) == 0
     error_message = "allow_log_delivery must not grant AllowCloudWatchLogs; the two flags are independent."
   }
+
+  assert {
+    condition = (
+      one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryDataKeys"]).Principal.Service == "delivery.logs.amazonaws.com"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryDataKeys"]).Action == "kms:GenerateDataKey*"
+      && one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryDataKeys"]).Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+      && startswith(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryDataKeys"]).Condition.ArnLike["aws:SourceArn"], "arn:aws:logs:")
+      && endswith(one([for s in jsondecode(module.kms.key_policy).Statement : s if try(s.Sid, "") == "AllowLogDeliveryDataKeys"]).Condition.ArnLike["aws:SourceArn"], ":123456789012:*")
+    )
+    error_message = "allow_log_delivery must let delivery.logs.amazonaws.com kms:GenerateDataKey* (vended logs into SSE-KMS S3, e.g. the vpc flow-log copy), scoped to this account and its CloudWatch Logs source ARNs."
+  }
+}
+
+run "log_delivery_off_grants_nothing" {
+  command = plan
+
+  variables {
+    allow_log_delivery = false
+  }
+
+  assert {
+    condition = length([
+      for s in jsondecode(module.kms.key_policy).Statement : s
+      if contains(["AllowLogDelivery", "AllowLogDeliveryDataKeys"], try(s.Sid, ""))
+    ]) == 0
+    error_message = "With allow_log_delivery off, delivery.logs.amazonaws.com gets no statement (no Decrypt, no GenerateDataKey*)."
+  }
 }
 
 run "cloudfront_is_scoped_to_this_accounts_distributions" {

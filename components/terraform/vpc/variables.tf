@@ -394,7 +394,7 @@ variable "port_scan_alarm_threshold" {
 
 variable "flow_logs_s3_backup" {
   type        = bool
-  description = "Enable S3 bucket for long-term Flow Logs storage and archival"
+  description = "Also send the flow logs to an S3 archive bucket (a second aws_flow_log; one year, Standard then IA then Glacier). The bucket is SSE-KMS with flow_logs_kms_key_arn, so a caller key must let delivery.logs.amazonaws.com generate data keys (kms/main's allow_log_delivery does); the component's own key gets that statement"
   default     = false
 }
 

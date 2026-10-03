@@ -96,7 +96,7 @@ variable "secrets" {
         own apply time -- a Lambda that itself reads this secret (the common case) cannot satisfy that
         on the secret's first apply; use rotation_managed_externally for that instead, and configure
         rotation from the Lambda's own component instance (the lambda component's rotation_secret_arn)
-      - rotation_days: Days between automatic rotation (defaults to default_rotation_days)
+      - rotation_days: Days between automatic rotation, 1-90 (defaults to default_rotation_days)
       - rotation_automatically: Whether to enable automatic rotation (defaults to default_rotation_automatically)
       - rotate_immediately: Whether enabling rotation invokes rotation_lambda_arn right away (defaults to default_rotate_immediately)
       - rotation_managed_externally: Set true when a SEPARATE component instance's own
@@ -188,8 +188,8 @@ variable "default_rotation_days" {
   default     = 30
 
   validation {
-    condition     = var.default_rotation_days >= 1 && var.default_rotation_days <= 365
-    error_message = "default_rotation_days must be between 1 and 365."
+    condition     = var.default_rotation_days >= 1 && var.default_rotation_days <= 90
+    error_message = "default_rotation_days must be between 1 and 90 (rotate at least quarterly)."
   }
 }
 

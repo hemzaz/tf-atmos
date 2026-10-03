@@ -28,8 +28,8 @@ tflint's `terraform_unused_declarations` happy. Replace them with real outputs.
   vars - that is what broke the scanners repo-wide before.
 - Resources are tagged via the provider's `default_tags`, not per resource.
 - Suppress scanner findings inline (`#checkov:skip=<ID>:<reason>`,
-  `#trivy:ignore:<ID> <reason>`) with an honest reason. Never add entries to
-  `.checkov.baseline` or `.trivyignore.yaml` to make a scan pass.
+  `#trivy:ignore:<ID> <reason>`) with an honest reason. There is no scanner
+  baseline to add a finding to.
 
 ## Usage
 

@@ -37,15 +37,12 @@ workflows:
           - name: yamllint
             type: shell
             command: yamllint -d relaxed stacks workflows atmos.yaml
-          # trivy exits "ignore file not found" on a missing --ignorefile, so pass it
-          # only when the repo has one.
           - name: security-scan
             type: shell
             command: >-
-              set --; if [ -f .trivyignore.yaml ]; then set -- --ignorefile .trivyignore.yaml; fi;
               cache=$(mktemp -d); trap 'rm -rf "$cache"' EXIT;
               trivy config --cache-dir "$cache" --skip-check-update --skip-dirs '**/tests'
-              --exit-code 1 --severity HIGH,CRITICAL "$@" components/terraform
+              --exit-code 1 --severity HIGH,CRITICAL components/terraform
       - type: toast
         level: success
         content: Static checks passed
