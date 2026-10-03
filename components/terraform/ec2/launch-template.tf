@@ -100,6 +100,7 @@ resource "aws_instance" "from_launch_template" {
   #checkov:skip=CKV_AWS_79:http_tokens comes from the launch template, which requires IMDSv2 unless a stack sets metadata_http_tokens_required = false
   #checkov:skip=CKV_AWS_126:detailed monitoring is set by the launch template (monitoring, default true)
   #checkov:skip=CKV_AWS_135:ebs_optimized is set by the launch template
+  #checkov:skip=CKV2_AWS_41:The IAM instance profile is set by the launch template (iam_instance_profile, aws_iam_instance_profile.default)
   count = local.enabled && local.from_template ? 1 : 0
 
   launch_template {
