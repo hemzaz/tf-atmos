@@ -44,7 +44,7 @@
 # credentials objected", never "this component works".
 #
 # Usage:
-#   bash scripts/plan-sweep.sh                       # the three real stacks and the template fixtures
+#   bash scripts/plan-sweep.sh                       # every real stack and template fixture (ci-stacks.py --plan-sweep)
 #   bash scripts/plan-sweep.sh fnx-prod-production   # only these stacks
 #
 # A template fixture listed for plan-sweep in KNOWN_BROKEN_FIXTURES
@@ -128,17 +128,22 @@ if ! printf '%s\n' "$yq_version" | grep -Eq 'mikefarah/yq.* version v?4\.'; then
   exit 2
 fi
 
-# The default is the three real stacks plus every template fixture
-# (stacks/orgs/fnx/fixtures). A fixture listing that fails is this script's
-# failure, not a sweep that silently drops the fixtures.
+# The default is every stack from `atmos describe stacks` except the stages
+# workflows/scripts/common/ci-stacks.py names in PLAN_SWEEP_EXCLUDED_STAGES
+# (core: the backend only; local: the emulator lanes), real stacks first in
+# promotion order, then the template fixtures (stacks/orgs/fnx/fixtures). A new
+# stack is swept with no edit here. A listing that fails, or one without the
+# fixtures, is this script's failure, not a sweep that silently drops stacks.
 if [ -z "$STACKS" ]; then
-  fixture_stacks=$(atmos list stacks) || exit 2
-  fixture_stacks=$(printf '%s\n' "$fixture_stacks" | grep '^fnx-fixtures-' | tr '\n' ' ')
-  if [ -z "$fixture_stacks" ]; then
-    printf '%s\n' "error: no fnx-fixtures-* stacks listed; refusing to sweep without them." >&2
-    exit 2
-  fi
-  STACKS="fnx-dev-testenv-01 fnx-staging-staging-01 fnx-prod-production $fixture_stacks"
+  STACKS=$(python3 -B workflows/scripts/common/ci-stacks.py --plan-sweep) || exit 2
+  STACKS=$(printf '%s\n' "$STACKS" | tr '\n' ' ')
+  case " $STACKS" in
+    *" fnx-fixtures-"*) ;;
+    *)
+      printf '%s\n' "error: no fnx-fixtures-* stacks listed; refusing to sweep without them." >&2
+      exit 2
+      ;;
+  esac
 fi
 KNOWN_BROKEN=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("plan-sweep")))') || exit 2
 UNSWEPT=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.unswept()))') || exit 2
