@@ -20,11 +20,40 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on each stack's `iam/ci` (`components/security.yaml`), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
+| EKS cluster admins | `map_additional_iam_roles` in each stack's `components/globals.yaml`: see [In-cluster components](#in-cluster-components). While empty, nobody can apply the in-cluster components |
 
 Every workload `account_id` must differ from `management_account_id`. The stage split of state
 access below holds only then: a workload stack in the management account puts its
 `AdministratorAccess` apply role in the bucket's own account, where it reads and writes every
 stage's state without going through the access roles.
+
+**Preflight.** Run it before the first deploy, and again once the inputs are filled in:
+
+```bash
+atmos describe stacks --process-functions=false --format json \
+  | python3 workflows/scripts/common/check-first-deploy-inputs.py [--stacks <stack>,...]
+```
+
+It reads the resolved stacks, so it checks each value wherever it is written. It fails on each of
+the following, naming the stack, the key and the row above:
+
+- a placeholder account ID (`123456789012`, `000000000000`), ARNs included;
+- `o-xxxxxxxxxx`;
+- an `example.com`/`.test` domain or alert address;
+- an empty EKS admin role list;
+- an unset prod RDS alarm target;
+- a workload account equal to the management account;
+- two stages sharing one account.
+
+It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
+packages, GitHub, deploy tags) as notices. The `local` and `fixtures` stacks are exempt.
+`bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
+`backend-only`, `full`) before any AWS call. `atmos workflow lint` runs it with `--warn`: it
+never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
+them all). It stands in for Cloud Posse's cold-start checks: there, `account-map` holds the
+account IDs and the accounts layer is deployed and verified first
+([deploy accounts](https://docs.cloudposse.com/layers/accounts/deploy-accounts/),
+[aws-account-map](https://github.com/cloudposse-terraform-components/aws-account-map)).
 
 ## State backend
 
