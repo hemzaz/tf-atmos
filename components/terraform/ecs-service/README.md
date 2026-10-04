@@ -22,9 +22,9 @@ commented beside the code.
   (addons).
 - Consumers: `monitoring` reads `.service_name` (with the cluster's `.cluster_name`) for the
   `AWS/ECS` dimensions and `.target_group_arn_suffix` for `AWS/ApplicationELB` ones.
-- `stacks/catalog/templates/web-application.yaml` predates this component (raw
-  `task_definition`/`container_definitions`, `cluster_arn`, `enable_autoscaling`); it needs
-  porting to `containers`, `ecs_cluster_arn`, `load_balancer` and `autoscaling`.
+- `web-application/ecs-service` (`stacks/catalog/templates/web-application.yaml`) is the one
+  instance: behind CloudFront, its listener rule requires the origin-verify header
+  (`load_balancer.http_header`) and the alb's default action is a fixed 403.
 
 ## Notes
 
@@ -75,6 +75,15 @@ commented beside the code.
   protocol or VPC replaces it, which fails while the listener rule still forwards to it: change
   the rule (or remove `load_balancer`) first.
 - The listener rule's `priority` must be unique on the listener.
+- `load_balancer.http_header` adds a header condition whose one value is read at plan from an SSM
+  parameter (`data.aws_ssm_parameter`, decrypted): the planning role needs `ssm:GetParameter` on
+  it and, for a SecureString on a customer managed key, `kms:Decrypt`. Keep it on the default
+  `aws/ssm` key: `ReadOnlyAccess` (the CI plan role) grants `ssm:Get*`, and that key's policy
+  admits the account's principals through SSM. The value is in plan and state
+  (sensitive), as any listener rule condition is. It must be 16-128 letters, digits, `_` or `-`
+  (ALB reads `*` and `?` as wildcards). After changing the parameter, apply this component and the
+  `cloudfront` instance that sends the header: requests fail with the default action until both
+  match.
 - Part 2, not here: service connect and service discovery, blue-green deployments
   (`CODE_DEPLOY`), more than one target group, sidecars beyond the `containers` map
   (`dependsOn`, FireLens), and EFS or other volumes.

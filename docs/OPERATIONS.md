@@ -124,7 +124,7 @@ planned, confirmed, then applied from the saved plan. Each layer is also its own
 
 `backend`, `iam`, `kms`, `storage`, `networking`, `connectivity`, `security`,
 `security-monitoring`, `compute`, `platform`, `data`, `dns-zones`, `dns`, `certificates`,
-`addons`, `services`, `monitoring`.
+`addons`, `services`, `regional-waf`, `monitoring`.
 
 The selection of each layer is in `workflows/deploy-full-stack.yaml`. An instance that reads
 another's state must be in a later layer; `check-deploy-layers.py` (validate-all) enforces that
@@ -150,9 +150,9 @@ atmos workflow deploy -f deploy-template -s <stack>          # a stack template 
 ```
 
 Template readiness follows `KNOWN_BROKEN_FIXTURES` in `workflows/scripts/common/fixtures.py`
-(see [Template fixtures](#template-fixtures)): `batch-processing` and `data-pipeline` pass every
-check; `microservices-platform` still fails `check-cluster-api-ci` and `check-deploy-layers`;
-`serverless-api` and `web-application` are not ported yet, so every check is relaxed for them. No
+(see [Template fixtures](#template-fixtures)): `batch-processing`, `data-pipeline` and
+`web-application` pass every check; `microservices-platform` still fails `check-cluster-api-ci` and
+`check-deploy-layers`; `serverless-api` is not ported yet, so every check is relaxed for it. No
 stack deploys `idp-platform`.
 
 ## In-cluster components

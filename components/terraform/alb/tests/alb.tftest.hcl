@@ -250,3 +250,120 @@ run "access_logs_can_be_disabled" {
     error_message = "The load balancer has no access_logs block when disabled."
   }
 }
+
+run "fixed_response_replaces_the_forward_default_action" {
+  command = plan
+
+  variables {
+    listener_https_fixed_response = {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "403"
+    }
+  }
+
+  assert {
+    condition = (
+      one(aws_lb_listener.https[0].default_action).type == "fixed-response"
+      && one(aws_lb_listener.https[0].default_action).target_group_arn == null
+      && one(one(aws_lb_listener.https[0].default_action).fixed_response).status_code == "403"
+      && one(one(aws_lb_listener.https[0].default_action).fixed_response).content_type == "text/plain"
+      && one(one(aws_lb_listener.https[0].default_action).fixed_response).message_body == "Forbidden"
+    )
+    error_message = "listener_https_fixed_response makes the default action a fixed 403 that forwards nowhere."
+  }
+}
+
+run "default_action_has_no_fixed_response_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(one(aws_lb_listener.https[0].default_action).fixed_response) == 0
+    error_message = "Without listener_https_fixed_response the default action only forwards."
+  }
+}
+
+run "fixed_response_rejects_an_invalid_status_code" {
+  command = plan
+
+  variables {
+    listener_https_fixed_response = {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "600"
+    }
+  }
+
+  expect_failures = [var.listener_https_fixed_response]
+}
+
+run "additional_security_groups_are_attached_to_the_load_balancer" {
+  command = plan
+
+  variables {
+    security_group_ids = ["sg-0123456789abcdef0"]
+  }
+
+  override_resource {
+    target          = aws_security_group.this
+    override_during = plan
+    values = {
+      id = "sg-0aaaaaaaaaaaaaaaa"
+    }
+  }
+
+  assert {
+    condition     = aws_lb.this[0].security_groups == toset(["sg-0aaaaaaaaaaaaaaaa", "sg-0123456789abcdef0"])
+    error_message = "security_group_ids are attached alongside the component's own group."
+  }
+}
+
+run "security_group_ids_rejects_a_non_id" {
+  command = plan
+
+  variables {
+    security_group_ids = ["application"]
+  }
+
+  expect_failures = [var.security_group_ids]
+}
+
+run "dns_aliases_create_alias_records_to_the_load_balancer" {
+  command = plan
+
+  variables {
+    dns_alias_enabled = true
+    parent_zone_id    = "Z0123456789ABCDEFGHIJ"
+    dns_aliases       = ["origin.app.example.com"]
+  }
+
+  assert {
+    condition = (
+      length(aws_route53_record.alias) == 1
+      && aws_route53_record.alias["origin.app.example.com"].type == "A"
+      && aws_route53_record.alias["origin.app.example.com"].zone_id == "Z0123456789ABCDEFGHIJ"
+      && one(aws_route53_record.alias["origin.app.example.com"].alias).evaluate_target_health
+    )
+    error_message = "Each dns_aliases entry gets an A alias record in parent_zone_id."
+  }
+}
+
+run "no_alias_records_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_route53_record.alias) == 0
+    error_message = "dns_alias_enabled defaults to false."
+  }
+}
+
+run "dns_alias_enabled_needs_a_zone" {
+  command = plan
+
+  variables {
+    dns_alias_enabled = true
+    dns_aliases       = ["origin.app.example.com"]
+  }
+
+  expect_failures = [var.parent_zone_id]
+}

@@ -11,6 +11,12 @@ mock_provider "aws" {
     }
   }
 
+  mock_data "aws_ssm_parameter" {
+    defaults = {
+      value = "Origin-Verify-0123456789abcdef"
+    }
+  }
+
   mock_resource "aws_cloudfront_distribution" {
     defaults = {
       id             = "E2EXAMPLE12345"
@@ -97,6 +103,77 @@ run "alb_only_distribution" {
     )
     error_message = "The default behavior targets the ALB with the chosen policies, and no root object is set for a custom default origin."
   }
+}
+
+run "custom_header_value_read_from_ssm" {
+  command = plan
+
+  variables {
+    origin_bucket_regional_domain_name = null
+    custom_origins = [{
+      domain_name    = "origin.app.example.com"
+      origin_id      = "alb"
+      custom_headers = [{ name = "X-Origin-Verify", value_ssm_parameter_name = "/webapp/origin-verify" }]
+    }]
+    default_origin_id = "alb"
+  }
+
+  assert {
+    condition = (
+      length(data.aws_ssm_parameter.custom_header) == 1
+      && data.aws_ssm_parameter.custom_header["/webapp/origin-verify"].name == "/webapp/origin-verify"
+      && one(one(aws_cloudfront_distribution.this[0].origin).custom_header).name == "X-Origin-Verify"
+      && nonsensitive(one(one(aws_cloudfront_distribution.this[0].origin).custom_header).value) == "Origin-Verify-0123456789abcdef"
+    )
+    error_message = "A value_ssm_parameter_name header sends the SSM parameter's value."
+  }
+}
+
+run "literal_custom_header_reads_no_parameter" {
+  command = plan
+
+  variables {
+    origin_bucket_regional_domain_name = null
+    custom_origins = [{
+      domain_name    = "origin.app.example.com"
+      origin_id      = "alb"
+      custom_headers = [{ name = "X-Origin-Verify", value = "s3cr3t-shared-value" }]
+    }]
+    default_origin_id = "alb"
+  }
+
+  assert {
+    condition     = length(data.aws_ssm_parameter.custom_header) == 0
+    error_message = "A literal header value reads no SSM parameter."
+  }
+}
+
+run "rejects_custom_header_with_value_and_parameter" {
+  command = plan
+
+  variables {
+    custom_origins = [{
+      domain_name    = "origin.app.example.com"
+      origin_id      = "alb"
+      custom_headers = [{ name = "X-Origin-Verify", value = "s3cr3t-shared-value", value_ssm_parameter_name = "/webapp/origin-verify" }]
+    }]
+  }
+
+  expect_failures = [var.custom_origins]
+}
+
+run "rejects_custom_header_without_a_value" {
+  command = plan
+
+  variables {
+    custom_origins = [{
+      domain_name    = "origin.app.example.com"
+      origin_id      = "alb"
+      custom_headers = [{ name = "X-Origin-Verify" }]
+    }]
+  }
+
+  expect_failures = [var.custom_origins]
 }
 
 run "s3_and_api_origins_with_ordered_behaviors" {

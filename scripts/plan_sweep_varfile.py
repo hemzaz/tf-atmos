@@ -190,6 +190,25 @@ SYNTH = [
     (r'^crawler_names?$',             'example-crawler'),
     (r'^delivery_stream_name$',       'example-delivery-stream'),
     (r'^function_name$',              'example-function'),
+    # Output names read by stacks/catalog/templates/web-application.yaml: the
+    # ecs cluster, the vpc CIDR (egress rules), the
+    # CLOUDFRONT-scope waf ACL (its output is plain `arn`), the alb, the ecs
+    # service, and rds/elasticache endpoints and secrets. The secrets carry the
+    # 6-character suffix ecs-service's secrets validation requires.
+    # ^cluster_arn$ (ecs) and ^arn$ (waf) match by output name alone, for every
+    # component (synth() sees only the output name): a future read of
+    # another component's `.cluster_arn` or `.arn` gets an ECS cluster / WAF
+    # ACL ARN, so it needs a narrower, component-aware rule.
+    (r'^cluster_arn$',                'arn:aws:ecs:us-east-1:123456789012:cluster/example-cluster'),
+    (r'^vpc_cidr$',                   '10.0.0.0/16'),
+    (r'^arn$',                        'arn:aws:wafv2:us-east-1:123456789012:global/webacl/example-acl/12345678-1234-1234-1234-123456789012'),
+    (r'^alb_arn$',                    'arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/example-alb/1234567890123456'),
+    (r'^alb_arn_suffix$',             'app/example-alb/1234567890123456'),
+    (r'^service_name$',               'example-service'),
+    (r'^instance_identifier$',        'example-db'),
+    (r'^instance_name$',              'example'),
+    (r'^(instance|primary_endpoint)_address$', 'example.abcdefghijkl.us-east-1.rds.amazonaws.com'),
+    (r'^(password|auth_token)_secret_arn$', 'arn:aws:secretsmanager:us-east-1:123456789012:secret:example-secret-AbCdEf'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry

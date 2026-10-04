@@ -164,6 +164,12 @@ variable "allow_log_delivery" {
   default     = false
 }
 
+variable "allow_log_delivery_s3" {
+  type        = bool
+  description = "Let the CloudWatch Logs delivery service (delivery.logs.amazonaws.com) encrypt the objects it delivers to an S3 bucket encrypted with the key (kms:GenerateDataKey*, kms:Decrypt), scoped by aws:SourceAccount and aws:SourceArn to this account's delivery sources. Needed for vended logs (CloudFront standard logging v2) to an s3 bucket on this key"
+  default     = false
+}
+
 variable "allow_eventbridge" {
   type        = bool
   description = "Let EventBridge (events.amazonaws.com) use the key for event buses and archives of this account and region (scoped by kms:EncryptionContext:aws:events:event-bus:arn; DescribeKey by aws:SourceAccount) and for rules publishing to this account's SNS topics encrypted with it (kms:EncryptionContext:aws:sns:topicArn only: SNS does not support aws:SourceAccount/aws:SourceArn in the KMS policy for EventBridge-to-encrypted topics), and for rules and bus dead-letter queues delivering to this account's SQS queues encrypted with it (scoped by aws:SourceAccount and aws:SourceArn rule/* or event-bus/*)"

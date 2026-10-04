@@ -8,7 +8,7 @@
 # Usage:
 #   atmos workflow deploy -f deploy-full-stack -s <stack>             # all layers
 #   atmos workflow deploy-<layer> -f deploy-full-stack -s <stack>     # one layer
-#   layers: backend, iam, kms, storage, networking, connectivity, security, security-monitoring, compute, platform, data, dns-zones, dns, certificates, addons, services, monitoring
+#   layers: backend, iam, kms, storage, networking, connectivity, security, security-monitoring, compute, platform, data, dns-zones, dns, certificates, addons, services, regional-waf, monitoring
 #
 # A layer plans all its instances before it applies any of them, so an instance
 # that reads another's state (!terraform.state / !terraform.output) must be in a
@@ -41,9 +41,16 @@
 # compute, whose batch, lambda and glue state its definitions read (an athena
 # workgroup it shares the layer with is named, not read), and eventbridge
 # (services) follows it, targeting state machines, Batch queues, lambdas and queues.
-# Every layer except backend has at least one enabled instance in every
-# workload stack (eks-backend-services/main, the last to gain instances, joined
-# the compute layer in all 3 stacks); fnx-core-root has only the backend layer.
+# waf instances split by scope (vars.scope, which every waf instance sets): a
+# CLOUDFRONT web ACL (reading only kms/main) is in security, before the
+# cloudfront instances (services) that use its arn; a REGIONAL one associates
+# with an alb (addons) or an apigateway stage (services), so it has its own
+# regional-waf layer after services.
+# Every layer except backend and regional-waf (no workload stack has a waf
+# instance yet; an empty layer plans "No components matched") has at least one
+# enabled instance in every workload stack (eks-backend-services/main, the last
+# to gain instances, joined the compute layer in all 3 stacks); fnx-core-root
+# has only the backend layer.
 #
 # Every enabled, non-abstract instance of every stack must be selected by exactly
 # one layer, in that order. validate-all enforces it with
@@ -172,7 +179,8 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"'
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"
+          or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm_security
         type: confirm
         prompt: Apply the security layer plan above?
@@ -187,7 +195,8 @@ workflows:
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2"'
+          or .metadata.component == "inspector2" or .metadata.component == "waf"
+          and .vars.scope == "CLOUDFRONT"'
       - name: plan-security-monitoring
         type: atmos
         command: terraform plan --query '.metadata.component == "security-monitoring"'
@@ -334,6 +343,19 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
           or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
           or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+      - name: plan-regional-waf
+        type: atmos
+        command: terraform plan --query '.metadata.component == "waf" and .vars.scope == "REGIONAL"'
+      - name: confirm_regional_waf
+        type: confirm
+        prompt: Apply the regional-waf layer plan above?
+        default: false
+      - name: guard-regional-waf
+        type: shell
+        command: test "{{ .steps.confirm_regional_waf.value }}" = "true" || { echo "Deployment cancelled before the regional-waf layer."; exit 1; }
+      - name: deploy-regional-waf
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "waf" and .vars.scope == "REGIONAL"'
       - name: plan-monitoring
         type: atmos
         command: >-
@@ -493,7 +515,8 @@ workflows:
           terraform plan --query '.metadata.component == "secretsmanager" or .metadata.component == "guardduty"
           or .metadata.component == "securityhub" or .metadata.component == "cloudtrail"
           or .metadata.component == "awsconfig" or .metadata.component == "cognito"
-          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"'
+          or .metadata.component == "apigateway-account" or .metadata.component == "inspector2"
+          or .metadata.component == "waf" and .vars.scope == "CLOUDFRONT"'
       - name: confirm
         type: confirm
         prompt: Deploy the security layer?
@@ -508,7 +531,8 @@ workflows:
           or .metadata.component == "guardduty" or .metadata.component == "securityhub"
           or .metadata.component == "cloudtrail" or .metadata.component == "awsconfig"
           or .metadata.component == "cognito" or .metadata.component == "apigateway-account"
-          or .metadata.component == "inspector2"'
+          or .metadata.component == "inspector2" or .metadata.component == "waf"
+          and .vars.scope == "CLOUDFRONT"'
 
   deploy-security-monitoring:
     description: "Deploy the security-monitoring layer: security finding routing (reads the GuardDuty detector, Security Hub and Inspector)"
@@ -695,6 +719,25 @@ workflows:
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
           or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
           or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+
+  deploy-regional-waf:
+    description: "Deploy the regional-waf layer: REGIONAL web ACLs, after the ALBs (addons) and API Gateway stages (services) they associate with"
+    steps:
+      - *fixtures-stages
+      - *refuse-fixtures
+      - name: plan
+        type: atmos
+        command: terraform plan --query '.metadata.component == "waf" and .vars.scope == "REGIONAL"'
+      - name: confirm
+        type: confirm
+        prompt: Deploy the regional-waf layer?
+        default: false
+      - name: guard
+        type: shell
+        command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
+      - name: deploy
+        type: atmos
+        command: terraform deploy --from-plan --query '.metadata.component == "waf" and .vars.scope == "REGIONAL"'
 
   deploy-monitoring:
     description: "Deploy the monitoring layer: monitoring and cost optimization"

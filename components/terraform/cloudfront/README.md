@@ -33,16 +33,16 @@ logging v2 to S3, and optional Route 53 alias records.
 - Optional tightening: `s3_origin_policy_json` grants this distribution only; add it to the origin
   s3 instance's `source_policy_documents` (and drop `allow_cloudfront_oac_read`) once the
   distribution exists.
-- ALB origins: send a secret origin-verify header (`custom_headers`, e.g. `X-Origin-Verify`) and
-  have the alb instance's HTTPS listener forward only requests carrying it (a listener rule on
-  that header; the default action returns 403). Without it the ALB answers anyone who finds its
-  DNS name, bypassing the CloudFront WAF. Read the value from Secrets Manager or SSM, never a
-  literal in a stack. The ALB side is the alb component's job.
-- `stacks/catalog/templates/serverless-api.yaml` (`serverless-api/cloudfront`) and
-  `web-application.yaml` predate this component and still use the old nested
-  `origins`/`viewer_certificate`/`ordered_cache_behaviors` inputs; they need porting (TTL blocks
-  become cache policies). Their separate dns records that read the distribution become
-  `dns_alias_enabled`.
+- ALB origins: send a secret origin-verify header (`custom_headers`, e.g. `X-Origin-Verify`, with
+  `value_ssm_parameter_name`, never a literal `value` in a stack) and have the alb instance's
+  HTTPS listener forward only requests carrying it: the alb's `listener_https_fixed_response` 403
+  as the default action and the `ecs-service` listener rule's `load_balancer.http_header` on the
+  same parameter. Without it the ALB answers anyone who finds its DNS name, bypassing the
+  CloudFront WAF. `web-application/cloudfront` is wired this way.
+- `stacks/catalog/templates/serverless-api.yaml` (`serverless-api/cloudfront`) predates this
+  component and still uses the old nested `origins`/`viewer_certificate`/`ordered_cache_behaviors`
+  inputs; it needs porting (TTL blocks become cache policies), its separate dns records that read
+  the distribution becoming `dns_alias_enabled`.
 - Consumers read `.distribution_id` (invalidations, the `AWS/CloudFront` `DistributionId`
   dimension), `.distribution_arn`, `.distribution_domain_name` and `.distribution_hosted_zone_id`.
 
@@ -59,6 +59,10 @@ logging v2 to S3, and optional Route 53 alias records.
   not on its certificate: point `domain_name` at a record the ALB certificate covers (e.g.
   `origin.<domain>`), and use `AllViewerExceptHostHeader` unless the certificate also covers the
   aliases.
+- A `value_ssm_parameter_name` header is read at plan (`data.aws_ssm_parameter`, decrypted): the
+  planning role needs `ssm:GetParameter` on it, and `kms:Decrypt` for a customer managed key;
+  keep it on the default `aws/ssm` key, which `ReadOnlyAccess` (the CI plan role) can use through
+  SSM. Changing the parameter changes the distribution at the next apply.
 - Custom header values are marked `sensitive()`. With any custom header, Terraform hides the whole
   `origin` set in plan diffs (every origin's details, not only the header values), so review origin
   changes with `terraform show -json` on the plan. The values are still stored in state, as is

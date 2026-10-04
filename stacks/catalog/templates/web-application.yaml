@@ -6,15 +6,29 @@
 #
 # Architecture:
 #   - VPC with public/private/database subnets
-#   - ALB with WAF protection
-#   - ECS Fargate or EC2 Auto-scaling for compute
-#   - RDS Aurora or single instance for database
-#   - ElastiCache Redis for caching
-#   - CloudFront for CDN
-#   - Route53 for DNS
-#   - ACM for SSL/TLS certificates
-#   - CloudWatch for monitoring
-#   - Security groups and NACLs for network security
+#   - CloudFront in front of everything, with a CLOUDFRONT-scope WAF, aliases
+#     for the app domain and www, and standard logging (v2) to an S3 bucket
+#   - An internet-facing ALB that only CloudFront can reach: its security
+#     group admits the CloudFront origin-facing prefix list, its HTTPS
+#     listener answers 403 by default, and the service's listener rule also
+#     requires CloudFront's secret X-Origin-Verify header. A REGIONAL WAF is
+#     associated with it as well.
+#   - An ECS Fargate service (Fargate and Fargate Spot) behind the ALB, with
+#     target-tracking autoscaling
+#   - RDS PostgreSQL and ElastiCache Redis (AUTH token, TLS) admitting only the
+#     application security group
+#   - One ACM certificate (app domain and *.app domain) for CloudFront and the
+#     ALB's origin name
+#   - CloudWatch dashboard and alarms
+#
+# Request path: viewer -> CloudFront (WAF, aliases) -> origin.<app domain>
+# (the ALB, alias record) with X-Origin-Verify -> listener rule -> tasks.
+#
+# Encryption: the stack's customer managed key, kms/main, encrypts the RDS
+# storage, Performance Insights and master user secret, the Redis cache and its
+# AUTH token secret, the ECS log group, the WAF log groups, the CloudFront log
+# bucket and the monitoring alarm topic. The ALB access-log bucket is SSE-S3
+# (ALB log delivery does not support SSE-KMS).
 #
 # Cost Estimates (Monthly):
 #   Development:  ~$150-300/month
@@ -23,18 +37,63 @@
 #
 # Deployment Time: 25-40 minutes
 #
-# Usage:
-#   atmos terraform plan web-application -s <tenant>-<account>-<environment>
-#   atmos terraform apply web-application -s <tenant>-<account>-<environment>
+# Usage (instances are web-application/<part>):
+#   atmos terraform plan web-application/alb -s <tenant>-<stage>-<environment>
+#   atmos workflow deploy -f deploy-full-stack -s <tenant>-<stage>-<environment>
+#
+# =============================================================================
+# REQUIREMENTS FOR THE IMPORTING STACK
+# =============================================================================
+# 1. A kms/main instance (every fnx org stack has one, in components/security.yaml,
+#    from catalog/kms/defaults). This template does not define it: doing so would
+#    deep-merge over that stack's own alias_name/description. It must keep the
+#    grants catalog/kms/defaults turns on (allow_cloudwatch_logs for the ECS and
+#    WAF log groups, allow_cloudwatch_alarms for the alarm topic) and also set
+#      allow_log_delivery_s3: true
+#    so CloudFront's log delivery (delivery.logs.amazonaws.com) can write into
+#    the SSE-KMS log bucket.
+# 2. settings.web_application, the inputs this template cannot create:
+#      settings:
+#        web_application:
+#          app_domain_name: app.example.com      # CloudFront aliases: it and www.<it>
+#          dns_component: network/main           # dns instance holding app_domain_name's public zone
+#          dns_zone_key: main                    # that zone's key in its zone_ids output
+#          app_container_image: <account>.dkr.ecr.<region>.amazonaws.com/webapp:1.0
+#          # SSM parameter holding the X-Origin-Verify value (item 4).
+#          origin_verify_ssm_parameter: /<tenant>/<environment>/webapp/origin-verify
+#    A missing key fails every describe/plan of the stack with its name
+#    (gomplate `required`); `atmos validate stacks` does not render templates.
+#    settings.environment.account_id (set by every fnx stage _defaults) names
+#    the CloudFront log bucket in its own bucket policy.
+# 3. That dns instance manages app_domain_name's PUBLIC, delegated zone: ACM
+#    validates the certificate there, and the ALB (origin.<app domain>) and
+#    CloudFront (app domain, www) write their alias records into it.
+# 4. Manual, once per stack, before the services layer: create the origin-verify
+#    secret as an SSM SecureString on the default aws/ssm key (16-128 letters,
+#    digits, _ or -; ALB reads * and ? as wildcards), e.g.
+#      aws ssm put-parameter --type SecureString --name <parameter> \
+#        --value "$(openssl rand -hex 32)"
+#    CloudFront sends it and the ALB listener rule requires it; both read it at
+#    plan. After changing it, apply web-application/ecs-service and
+#    web-application/cloudfront: requests get the ALB's 403 until both match.
+# 5. A prod stack sets web-application/rds's environment: prod (its production
+#    validations: multi_az, deletion_protection, backup retention) and sizes
+#    the instances up (see ENVIRONMENT-SPECIFIC OVERRIDES at the end).
+# 6. On-call addresses, if any, in web-application/monitoring's
+#    alarm_email_subscriptions.
 # =============================================================================
 
 import:
   - catalog/_base/defaults
   - catalog/vpc/defaults
-  - catalog/securitygroup/defaults
+  - catalog/s3/defaults
   - catalog/acm/defaults
   - catalog/alb/defaults
   - catalog/waf/defaults
+  - catalog/ecs-service/defaults
+  - catalog/rds/defaults
+  - catalog/elasticache/defaults
+  - catalog/cloudfront/defaults
   - catalog/monitoring/defaults
 
 # =============================================================================
@@ -54,8 +113,6 @@ components:
         inherits:
           - vpc/defaults
       vars:
-        name: "webapp"
-
         # VPC CIDR configuration
         # Development uses smaller CIDR, production uses larger
         ipv4_primary_cidr_block: "10.10.0.0/16"
@@ -99,8 +156,15 @@ components:
           Application: "web-application"
 
     # =========================================================================
-    # SECURITY LAYER
+    # SECURITY GROUPS (connectivity layer)
     # =========================================================================
+    # "alb" has no rules: the ALB attaches it beside its own group (the alb
+    # component's security_group_ids), and "application" admits the ALB by it.
+    # The ALB's own group, which holds the CloudFront ingress and open egress,
+    # only exists after the addons layer, so reading it here would read a
+    # later layer. RDS and ElastiCache create their own groups, admitting
+    # "application" (allowed_security_groups / allowed_security_group_ids).
+    # source_security_group_id is a sibling key of this map.
 
     web-application/securitygroups:
       metadata:
@@ -109,16 +173,18 @@ components:
       vars:
         vpc_id: !terraform.state web-application/vpc .vpc_id
 
-        # source_security_group_id below is either a sibling key in this map
-        # (resolved to that group's id once the group exists) or, for
-        # "http-from-alb", a literal sg- id read from the alb component (the
-        # ALB owns its own security group; there is no sibling "alb" group in
-        # this map any more). An unknown key or malformed id fails
-        # var.security_groups validation at plan.
         security_groups:
+          alb:
+            preserve_security_group_id: true
+            # The ALB's own group already allows all egress.
+            allow_all_egress: false
+            description: "Attached to the web application ALB; the application group admits it"
+
           # Application Security Group - allows traffic from the ALB only
           application:
             preserve_security_group_id: true
+            # Only the egress rules below.
+            allow_all_egress: false
             description: "Security group for web application containers"
             ingress_rules:
               - key: "http-from-alb"
@@ -126,7 +192,7 @@ components:
                 from_port: 8080
                 to_port: 8080
                 protocol: "tcp"
-                source_security_group_id: !terraform.state web-application/alb .security_group_id
+                source_security_group_id: "alb"
             egress_rules:
               - key: "https-aws"
                 description: "HTTPS to AWS services"
@@ -140,54 +206,91 @@ components:
                 from_port: 5432
                 to_port: 5432
                 protocol: "tcp"
-                source_security_group_id: "database"
+                cidr_blocks: !terraform.state web-application/vpc '.vpc_cidr | [.]'
               - key: "redis"
                 description: "Redis cache access"
                 from_port: 6379
                 to_port: 6379
                 protocol: "tcp"
-                source_security_group_id: "cache"
-
-          # Database Security Group - allows traffic from application only
-          database:
-            preserve_security_group_id: true
-            description: "Security group for RDS database"
-            ingress_rules:
-              - key: "postgres-from-app"
-                description: "PostgreSQL from application"
-                from_port: 5432
-                to_port: 5432
-                protocol: "tcp"
-                source_security_group_id: "application"
-            egress_rules: []
-
-          # Cache Security Group - allows traffic from application only
-          cache:
-            preserve_security_group_id: true
-            description: "Security group for ElastiCache"
-            ingress_rules:
-              - key: "redis-from-app"
-                description: "Redis from application"
-                from_port: 6379
-                to_port: 6379
-                protocol: "tcp"
-                source_security_group_id: "application"
-            egress_rules: []
+                cidr_blocks: !terraform.state web-application/vpc '.vpc_cidr | [.]'
         tags:
           Layer: "security"
           Application: "web-application"
-
-    # =========================================================================
-    # SSL/TLS CERTIFICATES
-    # =========================================================================
-
       dependencies:
         components:
           - component: web-application/vpc
-          # For the application group's "http-from-alb" rule, which reads the
-          # ALB's own security group id. The ALB does not depend on this
-          # component (it owns its security group), so this is not a cycle.
-          - component: web-application/alb
+
+    # =========================================================================
+    # CLOUDFRONT LOG BUCKET (storage layer)
+    # =========================================================================
+    # CloudFront standard logging (v2) delivers through CloudWatch Logs
+    # (delivery.logs.amazonaws.com), which would add this statement to the
+    # bucket policy itself on first delivery; the s3 component would revert
+    # that, so it is declared here (components/terraform/cloudfront/README.md).
+    # The bucket is SSE-KMS on kms/main: requirement 1 (allow_log_delivery_s3).
+
+    web-application/s3/cdn-logs:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        # <Environment>-cdn-logs-<account id>. The s3 component takes
+        # <Environment> from tags.Environment; the bucket policy below uses
+        # settings.context.environment, which is the same value only because
+        # stacks/orgs/fnx/_defaults.yaml sets tags.Environment from it. Change
+        # both together (vars are not reliably resolved at template time).
+        name: cdn-logs
+        lifecycle_configuration_rules:
+          - id: "expire-logs"
+            abort_incomplete_multipart_upload_days: 7
+            expiration:
+              days: 90
+            noncurrent_version_expiration:
+              noncurrent_days: 30
+        source_policy_documents:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "AWSLogDeliveryWrite",
+                  "Effect": "Allow",
+                  "Principal": {"Service": "delivery.logs.amazonaws.com"},
+                  "Action": "s3:PutObject",
+                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-cdn-logs-{{ .settings.environment.account_id }}/*",
+                  "Condition": {
+                    "StringEquals": {
+                      "s3:x-amz-acl": "bucket-owner-full-control",
+                      "aws:SourceAccount": "{{ .settings.environment.account_id }}"
+                    },
+                    "ArnLike": {"aws:SourceArn": "arn:aws:logs:us-east-1:{{ .settings.environment.account_id }}:delivery-source:*"}
+                  }
+                },
+                {
+                  "Sid": "AWSLogDeliveryAclCheck",
+                  "Effect": "Allow",
+                  "Principal": {"Service": "delivery.logs.amazonaws.com"},
+                  "Action": "s3:GetBucketAcl",
+                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-cdn-logs-{{ .settings.environment.account_id }}",
+                  "Condition": {
+                    "StringEquals": {"aws:SourceAccount": "{{ .settings.environment.account_id }}"},
+                    "ArnLike": {"aws:SourceArn": "arn:aws:logs:us-east-1:{{ .settings.environment.account_id }}:delivery-source:*"}
+                  }
+                }
+              ]
+            }
+        tags:
+          Layer: "cdn"
+          Application: "web-application"
+
+    # =========================================================================
+    # SSL/TLS CERTIFICATES (certificates layer)
+    # =========================================================================
+    # One us-east-1 certificate serves CloudFront (app domain, www) and the
+    # ALB's origin name (origin.<app domain>), both under the wildcard SAN.
+
     web-application/acm:
       metadata:
         component: acm
@@ -197,18 +300,21 @@ components:
       vars:
         dns_domains:
           main:
-            domain_name: "{{ .vars.app_domain_name }}"
+            domain_name: '{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
             subject_alternative_names:
-              - "*.{{ .vars.app_domain_name }}"
+              - '*.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
             validation_method: "DNS"
-        zone_id: "{{ .vars.route53_zone_id }}"
+        zone_id: !terraform.state '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }} .zone_ids.{{ required "settings.web_application.dns_zone_key is required" .settings.web_application.dns_zone_key }}'
 
         tags:
           Layer: "security"
           Application: "web-application"
+      dependencies:
+        components:
+          - component: '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }}'
 
     # =========================================================================
-    # LOAD BALANCER LAYER
+    # LOAD BALANCER LAYER (addons layer)
     # =========================================================================
 
     web-application/alb:
@@ -219,38 +325,49 @@ components:
           - alb/defaults
       vars:
         # Short name: the component prefixes it with Environment (see
-        # components/terraform/alb/README.md). ecs-service, cloudfront and
-        # monitoring (later tasks / below) read this instance's outputs --
-        # alb_arn, alb_arn_suffix, alb_dns_name, alb_zone_id,
-        # https_listener_arn, default_target_group_arn, security_group_id,
-        # access_logs_bucket_id.
+        # components/terraform/alb/README.md).
         name: "webapp-alb"
 
         vpc_id: !terraform.state web-application/vpc .vpc_id
         subnets: !terraform.state web-application/vpc .public_subnet_ids
         certificate_arn: !terraform.state web-application/acm .certificate_arns.main
+        # The application group admits this one (see the securitygroups instance).
+        security_group_ids:
+          - !terraform.state web-application/securitygroups .security_group_ids.alb
 
-        # The default target group is what web-application/ecs-service
-        # registers its tasks into (see the load_balancer.target_group_arn
-        # reference below); the webapp container (see its portMappings /
-        # healthCheck below) serves /health on 8080, not the target group's
-        # default "/".
-        health_check_path: "/health"
+        # Only requests carrying CloudFront's X-Origin-Verify header reach the
+        # service (web-application/ecs-service's listener rule); the rest,
+        # anything that found the ALB's own DNS name, get this.
+        listener_https_fixed_response:
+          content_type: "text/plain"
+          message_body: "Forbidden"
+          status_code: "403"
+
+        # CloudFront's origin: a name the certificate covers (*.<app domain>).
+        dns_alias_enabled: true
+        parent_zone_id: !terraform.state '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }} .zone_ids.{{ required "settings.web_application.dns_zone_key is required" .settings.web_application.dns_zone_key }}'
+        dns_aliases:
+          - 'origin.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
 
         access_logs_prefix: "webapp"
 
         tags:
           Layer: "load-balancer"
           Application: "web-application"
-
-    # =========================================================================
-    # WAF PROTECTION
-    # =========================================================================
-
       dependencies:
         components:
           - component: web-application/vpc
           - component: web-application/acm
+          - component: web-application/securitygroups
+          - component: '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }}'
+
+    # =========================================================================
+    # WAF PROTECTION (REGIONAL, regional-waf layer)
+    # =========================================================================
+    # Associated with the ALB, so it deploys after it: deploy-full-stack puts
+    # every scope REGIONAL waf in its regional-waf layer, after addons and
+    # services (CLOUDFRONT ones are in security).
+
     web-application/waf:
       metadata:
         component: waf
@@ -281,13 +398,11 @@ components:
           - name: "AWSManagedRulesLinuxRuleSet"
             priority: 40
 
-        # Rate limiting
-        rate_based_statement_rules:
-          - name: "RateLimitRule"
-            priority: 1
-            limit: 2000
-            aggregate_key_type: "IP"
-            action: "block"
+        # No rate_based_statement_rules: the ALB admits only CloudFront, so
+        # this ACL sees CloudFront edge IPs and an IP limit would throttle
+        # whole edges shared by many viewers. waf-cloudfront rate-limits by
+        # viewer IP; this component has no FORWARDED_IP aggregation
+        # (components/terraform/waf/variables.tf).
 
         tags:
           Layer: "security"
@@ -299,12 +414,10 @@ components:
           - component: kms/main
 
     # =========================================================================
-    # WAF PROTECTION (CLOUDFRONT SCOPE)
+    # WAF PROTECTION (CLOUDFRONT SCOPE, security layer)
     # =========================================================================
-    # No association: a CLOUDFRONT-scope web ACL is attached by setting the
-    # distribution's web_acl_id to this instance's `arn` output, which the
-    # later web-application/cloudfront task reads (see the cloudfront section
-    # below). region is pinned to us-east-1 -- an AWS requirement for
+    # No association: web-application/cloudfront sets its web_acl_id to this
+    # instance's `arn`. region is pinned to us-east-1 -- an AWS requirement for
     # CLOUDFRONT-scope web ACLs -- independent of this stack's own region.
     web-application/waf-cloudfront:
       metadata:
@@ -345,148 +458,142 @@ components:
     # COMPUTE LAYER - ECS FARGATE
     # =========================================================================
 
+    # Fargate only: the component gives the cluster the FARGATE and FARGATE_SPOT
+    # capacity providers; the service below picks its strategy.
     web-application/ecs-cluster:
       metadata:
         component: ecs
         type: real
       vars:
-        cluster_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp"
-
-        # Fargate-only cluster (no EC2 instances to manage)
+        cluster_name: "{{ .settings.context.environment }}-webapp"
         fargate_only: true
         enable_container_insights: true
-
-        # Capacity providers
-        capacity_providers:
-          - "FARGATE"
-          - "FARGATE_SPOT"
-
-        default_capacity_provider_strategy:
-          - capacity_provider: "FARGATE"
-            weight: 1
-            base: 1
-          - capacity_provider: "FARGATE_SPOT"
-            weight: 4
 
         tags:
           Layer: "compute"
           Application: "web-application"
 
+    # Services layer: after the cluster (compute), the data stores (data) and
+    # the ALB (addons). Behind CloudFront: the listener rule matches every path
+    # but only with the X-Origin-Verify header CloudFront sends.
     web-application/ecs-service:
       metadata:
         component: ecs-service
         type: real
+        inherits:
+          - ecs-service/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-service"
-        cluster_arn: !terraform.state web-application/ecs-cluster .cluster_arn
+        # <Environment>-webapp: the service, task family and target group.
+        name: "webapp"
+        ecs_cluster_arn: !terraform.state web-application/ecs-cluster .cluster_arn
 
-        # Task definition
-        task_definition:
-          family: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp"
-          cpu: 256
-          memory: 512
-          network_mode: "awsvpc"
-          requires_compatibilities:
-            - "FARGATE"
-          execution_role_arn: "{{ .vars.ecs_execution_role_arn }}"
-          task_role_arn: "{{ .vars.ecs_task_role_arn }}"
+        # Task size (a Fargate cpu/memory pair)
+        task_cpu: 256
+        task_memory: 512
 
-          container_definitions:
-            - name: "webapp"
-              image: "{{ .vars.app_container_image }}"
-              essential: true
-              portMappings:
-                - containerPort: 8080
-                  protocol: "tcp"
-              environment:
-                - name: "ENVIRONMENT"
-                  value: "{{ .settings.context.environment }}"
-                - name: "DATABASE_HOST"
-                  value: !terraform.state web-application/rds .endpoint
-                - name: "REDIS_HOST"
-                  value: !terraform.state web-application/elasticache .endpoint
-              secrets:
-                - name: "DATABASE_PASSWORD"
-                  valueFrom: "{{ .vars.database_password_secret_arn }}"
-              logConfiguration:
-                logDriver: "awslogs"
-                options:
-                  awslogs-group: "/ecs/{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp"
-                  awslogs-region: "{{ .vars.region }}"
-                  awslogs-stream-prefix: "webapp"
-              healthCheck:
-                command:
-                  - "CMD-SHELL"
-                  - "curl -f http://localhost:8080/health || exit 1"
-                interval: 30
-                timeout: 5
-                retries: 3
-                startPeriod: 60
+        containers:
+          webapp:
+            image: '{{ required "settings.web_application.app_container_image is required" .settings.web_application.app_container_image }}'
+            port_mappings:
+              - container_port: 8080
+            environment:
+              ENVIRONMENT: "{{ .settings.context.environment }}"
+              DATABASE_HOST: !terraform.state web-application/rds .instance_address
+              DATABASE_PORT: "5432"
+              DATABASE_NAME: !terraform.state web-application/rds .instance_name
+              REDIS_HOST: !terraform.state web-application/elasticache .primary_endpoint_address
+              REDIS_PORT: "6379"
+            # The RDS-managed master secret ({username, password}) and the
+            # cache's AUTH token secret ({auth_token}), by JSON key. RDS
+            # requires TLS (rds.force_ssl) and Redis has transit encryption on.
+            secrets:
+              DATABASE_USERNAME: !terraform.state web-application/rds '.password_secret_arn + ":username::"'
+              DATABASE_PASSWORD: !terraform.state web-application/rds '.password_secret_arn + ":password::"'
+              REDIS_AUTH_TOKEN: !terraform.state web-application/elasticache '.auth_token_secret_arn + ":auth_token::"'
+            healthcheck:
+              command:
+                - "CMD-SHELL"
+                - "curl -f http://localhost:8080/health || exit 1"
+              interval: 30
+              timeout: 5
+              retries: 3
+              start_period: 60
+        # Both secrets are encrypted with kms/main (rds
+        # master_user_secret_kms_key_id, elasticache auth_token_secret_kms_key_id).
+        secrets_kms_key_arn: !terraform.state kms/main .key_arn
 
         # Service configuration
         desired_count: 2
         deployment_minimum_healthy_percent: 50
         deployment_maximum_percent: 200
 
+        # One task always on FARGATE, the rest 1:4 FARGATE:FARGATE_SPOT.
+        capacity_provider_strategies:
+          - capacity_provider: "FARGATE"
+            weight: 1
+            base: 1
+          - capacity_provider: "FARGATE_SPOT"
+            weight: 4
+
         # Network configuration
-        network_configuration:
-          subnets: !terraform.state web-application/vpc .private_subnet_ids
-          security_groups:
-            - !terraform.state web-application/securitygroups .security_group_ids.application
-          assign_public_ip: false
+        subnet_ids: !terraform.state web-application/vpc .private_subnet_ids
+        security_group_ids:
+          - !terraform.state web-application/securitygroups .security_group_ids.application
 
         # Load balancer configuration
         load_balancer:
-          target_group_arn: !terraform.state web-application/alb .default_target_group_arn
+          listener_arn: !terraform.state web-application/alb .https_listener_arn
+          vpc_id: !terraform.state web-application/vpc .vpc_id
           container_name: "webapp"
           container_port: 8080
+          priority: 100
+          path_patterns:
+            - "/*"
+          http_header:
+            name: "X-Origin-Verify"
+            value_ssm_parameter_name: '{{ required "settings.web_application.origin_verify_ssm_parameter is required" .settings.web_application.origin_verify_ssm_parameter }}'
+          health_check:
+            path: "/health"
 
         # Auto-scaling configuration
-        enable_autoscaling: true
         autoscaling:
           min_capacity: 2
           max_capacity: 10
-          target_tracking_policies:
-            - name: "cpu"
-              target_value: 70
-              predefined_metric_type: "ECSServiceAverageCPUUtilization"
-              scale_in_cooldown: 300
-              scale_out_cooldown: 60
-            - name: "memory"
-              target_value: 80
-              predefined_metric_type: "ECSServiceAverageMemoryUtilization"
-              scale_in_cooldown: 300
-              scale_out_cooldown: 60
-
-        # Deployment circuit breaker
-        deployment_circuit_breaker:
-          enable: true
-          rollback: true
+          cpu_utilization_target: 70
+          memory_utilization_target: 80
+          scale_in_cooldown: 300
+          scale_out_cooldown: 60
 
         tags:
           Layer: "compute"
           Application: "web-application"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: web-application/vpc
+          - component: web-application/ecs-cluster
+          - component: web-application/alb
+          - component: web-application/securitygroups
+          - component: web-application/rds
+          - component: web-application/elasticache
 
     # =========================================================================
     # DATABASE LAYER
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: web-application/ecs-cluster
-          - component: web-application/alb
-          - component: web-application/securitygroups
     web-application/rds:
       metadata:
         component: rds
         type: real
+        inherits:
+          - rds/defaults
       vars:
-        identifier: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db"
+        # <Environment>-webapp-db
+        identifier: "webapp-db"
 
-        # Engine configuration
+        # Engine configuration (the parameter group family derives from it)
         engine: "postgres"
-        engine_version: "15.4"
-        family: "postgres15"
+        engine_version: "15"
 
         # Instance configuration
         # dev: db.t3.micro, staging: db.t3.small, prod: db.r6g.large
@@ -494,18 +601,20 @@ components:
         allocated_storage: 20
         max_allocated_storage: 100
         storage_type: "gp3"
-        storage_encrypted: true
+        kms_key_id: !terraform.state kms/main .key_arn
+        master_user_secret_kms_key_id: !terraform.state kms/main .key_arn
 
         # Database configuration
         db_name: "webapp"
         username: "webapp_admin"
         port: 5432
 
-        # Network configuration
-        db_subnet_group_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db-subnet"
+        # Network configuration: the database subnets, a security group of
+        # its own admitting the application group.
+        vpc_id: !terraform.state web-application/vpc .vpc_id
         subnet_ids: !terraform.state web-application/vpc .database_subnet_ids
-        vpc_security_group_ids:
-          - !terraform.state web-application/securitygroups .security_group_ids.database
+        allowed_security_groups:
+          - !terraform.state web-application/securitygroups .security_group_ids.application
         publicly_accessible: false
 
         # High availability
@@ -515,18 +624,14 @@ components:
         # Backup configuration
         backup_retention_period: 7
         # RDS rejects a maintenance window that overlaps the backup window and
-        # wants >= 30 minutes of separation. These two were adjacent (backup
-        # closing at 04:00, maintenance opening at 04:00) - the same defect #142
-        # fixed in the component default and in staging and prod. Anyone copying
-        # this template would have hit it at CreateDBInstance.
+        # wants >= 30 minutes of separation.
         backup_window: "03:00-04:00"
         maintenance_window: "sun:04:30-sun:05:30"
-        copy_tags_to_snapshot: true
-        delete_automated_backups: false
 
         # Performance and monitoring
         performance_insights_enabled: true
         performance_insights_retention_period: 7
+        performance_insights_kms_key_id: !terraform.state kms/main .key_arn
         monitoring_interval: 60
         enabled_cloudwatch_logs_exports:
           - "postgresql"
@@ -536,73 +641,73 @@ components:
         # Enable for production
         deletion_protection: false
         skip_final_snapshot: true
-        final_snapshot_identifier: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-db-final"
 
-        # Parameter group
+        # Parameter group, over the component's defaults (rds.force_ssl = 1,
+        # log_statement = ddl)
         parameters:
-          # ddl, not all: "all" logs every statement, secrets included
-          - name: "log_statement"
-            value: "ddl"
           - name: "log_min_duration_statement"
             value: "1000"
           - name: "shared_preload_libraries"
             value: "pg_stat_statements"
+            apply_method: "pending-reboot"
 
         tags:
           Layer: "database"
           Application: "web-application"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: web-application/vpc
+          - component: web-application/securitygroups
 
     # =========================================================================
     # CACHING LAYER
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: web-application/vpc
-          - component: web-application/securitygroups
     web-application/elasticache:
       metadata:
         component: elasticache
         type: real
+        inherits:
+          - elasticache/defaults
       vars:
-        cluster_id: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cache"
+        # The replication group is <Environment>-webapp-cache.
+        cluster_id: "webapp-cache"
 
-        # Engine configuration
-        engine: "redis"
         engine_version: "7.0"
 
         # Node configuration
         # dev: cache.t3.micro, staging: cache.t3.small, prod: cache.r6g.large
+        # with num_cache_nodes >= 2, automatic failover and Multi-AZ.
         node_type: "cache.t3.micro"
         num_cache_nodes: 1
+        automatic_failover_enabled: false
+        multi_az_enabled: false
 
-        # Network configuration
-        subnet_group_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cache-subnet"
-        subnet_ids: !terraform.state web-application/vpc .private_subnet_ids
-        security_group_ids:
-          - !terraform.state web-application/securitygroups .security_group_ids.cache
-
-        # Port configuration
+        # Network configuration: the database subnets, a security group of
+        # its own admitting the application group.
+        vpc_id: !terraform.state web-application/vpc .vpc_id
+        subnet_ids: !terraform.state web-application/vpc .database_subnet_ids
+        allowed_security_group_ids:
+          - !terraform.state web-application/securitygroups .security_group_ids.application
         port: 6379
 
         # Cluster mode (for production)
         cluster_mode_enabled: false
 
-        # Security
-        at_rest_encryption_enabled: true
-        transit_encryption_enabled: true
-        auth_token_enabled: true
+        # Security: at rest on kms/main, TLS, and an AUTH token the component
+        # generates into the redis-auth/<Environment>/webapp-cache secret,
+        # which the service reads (REDIS_AUTH_TOKEN).
+        kms_key_id: !terraform.state kms/main .key_arn
+        auth_token_secret_kms_key_id: !terraform.state kms/main .key_arn
 
-        # Maintenance
+        # Maintenance (non-overlapping windows)
         maintenance_window: "sun:05:00-sun:06:00"
         snapshot_retention_limit: 1
         snapshot_window: "04:00-05:00"
 
-        # Auto minor version upgrade
-        auto_minor_version_upgrade: true
-
         # Parameter group
-        parameter_group_family: "redis7"
+        family: "redis7"
         parameters:
           - name: "maxmemory-policy"
             value: "volatile-lru"
@@ -610,174 +715,97 @@ components:
         tags:
           Layer: "caching"
           Application: "web-application"
-
-    # =========================================================================
-    # CDN LAYER
-    # =========================================================================
-
       dependencies:
         components:
+          - component: kms/main
           - component: web-application/vpc
           - component: web-application/securitygroups
+
+    # =========================================================================
+    # CDN LAYER (services layer)
+    # =========================================================================
+    # Custom origin only: the ALB, reached as origin.<app domain> (on the
+    # certificate) with the secret X-Origin-Verify header the ALB requires.
+    # Host is not forwarded (AllViewerExceptHostHeader), so the ALB sees the
+    # origin name. The aliases' alias records go into the app domain's zone.
+
     web-application/cloudfront:
       metadata:
         component: cloudfront
         type: real
+        inherits:
+          - cloudfront/defaults
       vars:
-        distribution_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-cdn"
+        # <Environment>-webapp-cdn
+        name: "webapp-cdn"
 
-        # Origin configuration
-        origins:
-          alb:
-            domain_name: !terraform.state web-application/alb .alb_dns_name
-            origin_id: "alb-origin"
+        custom_origins:
+          - origin_id: "alb"
+            domain_name: 'origin.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
+            custom_headers:
+              - name: "X-Origin-Verify"
+                value_ssm_parameter_name: '{{ required "settings.web_application.origin_verify_ssm_parameter is required" .settings.web_application.origin_verify_ssm_parameter }}'
             custom_origin_config:
-              http_port: 80
-              https_port: 443
               origin_protocol_policy: "https-only"
               origin_ssl_protocols:
                 - "TLSv1.2"
               origin_read_timeout: 60
               origin_keepalive_timeout: 5
+        default_origin_id: "alb"
 
-        # Default cache behavior
-        default_cache_behavior:
-          target_origin_id: "alb-origin"
-          viewer_protocol_policy: "redirect-to-https"
-          allowed_methods:
-            - "GET"
-            - "HEAD"
-            - "OPTIONS"
-            - "PUT"
-            - "POST"
-            - "PATCH"
-            - "DELETE"
-          cached_methods:
-            - "GET"
-            - "HEAD"
-          compress: true
-          # Use managed cache policy for dynamic content
-          cache_policy_id: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # CachingDisabled
-          origin_request_policy_id: "216adef6-5c7f-47e4-b989-5492eafa07d3"  # AllViewer
-          response_headers_policy_id: "67f7725c-6f97-4210-82d7-5512b31e9d03"  # SecurityHeadersPolicy
+        # Default cache behavior: dynamic content, not cached
+        allowed_methods:
+          - "GET"
+          - "HEAD"
+          - "OPTIONS"
+          - "PUT"
+          - "POST"
+          - "PATCH"
+          - "DELETE"
+        cached_methods:
+          - "GET"
+          - "HEAD"
+        cache_policy_id: "CachingDisabled"
+        origin_request_policy_id: "AllViewerExceptHostHeader"
+        response_headers_policy_id: "SecurityHeadersPolicy"
 
-        # Additional cache behaviors for static assets
-        ordered_cache_behaviors:
+        # Static assets are cached
+        ordered_cache:
           - path_pattern: "/static/*"
-            target_origin_id: "alb-origin"
-            viewer_protocol_policy: "redirect-to-https"
-            allowed_methods:
-              - "GET"
-              - "HEAD"
-            cached_methods:
-              - "GET"
-              - "HEAD"
-            compress: true
-            cache_policy_id: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # CachingOptimized
-            ttl:
-              default: 86400
-              max: 31536000
-              min: 0
-          - path_pattern: "/api/*"
-            target_origin_id: "alb-origin"
-            viewer_protocol_policy: "redirect-to-https"
-            allowed_methods:
-              - "GET"
-              - "HEAD"
-              - "OPTIONS"
-              - "PUT"
-              - "POST"
-              - "PATCH"
-              - "DELETE"
-            cached_methods:
-              - "GET"
-              - "HEAD"
-            compress: true
-            cache_policy_id: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # CachingDisabled
+            target_origin_id: "alb"
+            cache_policy_id: "CachingOptimized"
 
-        # SSL/TLS configuration
-        viewer_certificate:
-          acm_certificate_arn: !terraform.state web-application/acm .certificate_arns.main
-          ssl_support_method: "sni-only"
-          minimum_protocol_version: "TLSv1.2_2021"
-
-        # Aliases (custom domains)
+        # Aliases (custom domains) on the us-east-1 certificate
         aliases:
-          - "{{ .vars.app_domain_name }}"
-          - "www.{{ .vars.app_domain_name }}"
+          - '{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
+          - 'www.{{ required "settings.web_application.app_domain_name is required" .settings.web_application.app_domain_name }}'
+        acm_certificate_arn: !terraform.state web-application/acm .certificate_arns.main
+        dns_alias_enabled: true
+        parent_zone_id: !terraform.state '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }} .zone_ids.{{ required "settings.web_application.dns_zone_key is required" .settings.web_application.dns_zone_key }}'
 
-        # Geographic restrictions (optional)
-        geo_restriction:
-          restriction_type: "none"
+        # Standard logging (v2) to the template's log bucket
+        logging_enabled: true
+        access_log_bucket_arn: !terraform.state web-application/s3/cdn-logs .bucket_arn
+        log_prefix: "webapp"
 
-        # Logging
-        logging:
-          enabled: true
-          bucket: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-cloudfront-logs.s3.amazonaws.com"
-          prefix: "webapp/"
-          include_cookies: false
-
-        # Price class
-        price_class: "PriceClass_100"
-
-        # Enable HTTP/2 and HTTP/3
-        http_version: "http2and3"
-
-        # IPv6
-        is_ipv6_enabled: true
-
-        # WAF integration (CloudFront requires scope: CLOUDFRONT in us-east-1)
-        web_acl_id: "{{ .vars.cloudfront_waf_acl_id }}"
+        # WAF (scope CLOUDFRONT, us-east-1)
+        web_acl_id: !terraform.state web-application/waf-cloudfront .arn
 
         tags:
           Layer: "cdn"
           Application: "web-application"
-
-    # =========================================================================
-    # DNS LAYER
-    # =========================================================================
-
       dependencies:
         components:
-          - component: web-application/alb
           - component: web-application/acm
-    web-application/dns:
-      metadata:
-        component: dns
-        type: real
-      vars:
-        zone_id: "{{ .vars.route53_zone_id }}"
-
-        records:
-          # Root domain pointing to CloudFront
-          root:
-            name: "{{ .vars.app_domain_name }}"
-            type: "A"
-            alias:
-              name: !terraform.state web-application/cloudfront .domain_name
-              zone_id: !terraform.state web-application/cloudfront .hosted_zone_id
-              evaluate_target_health: false
-
-          # WWW subdomain pointing to CloudFront
-          www:
-            name: "www.{{ .vars.app_domain_name }}"
-            type: "A"
-            alias:
-              name: !terraform.state web-application/cloudfront .domain_name
-              zone_id: !terraform.state web-application/cloudfront .hosted_zone_id
-              evaluate_target_health: false
-
-        tags:
-          Layer: "dns"
-          Application: "web-application"
+          - component: web-application/alb
+          - component: web-application/waf-cloudfront
+          - component: web-application/s3/cdn-logs
+          - component: '{{ required "settings.web_application.dns_component is required" .settings.web_application.dns_component }}'
 
     # =========================================================================
     # MONITORING LAYER
     # =========================================================================
 
-      dependencies:
-        components:
-          - component: web-application/cloudfront
     web-application/monitoring:
       metadata:
         component: monitoring
@@ -785,202 +813,162 @@ components:
         inherits:
           - monitoring/defaults
       vars:
-        dashboard_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-dashboard"
+        # <Environment>-webapp-<suffix>
+        name: webapp
+        # kms/main allows CloudWatch alarms to publish to the encrypted topic
+        # (catalog/kms/defaults allow_cloudwatch_alarms).
+        kms_key_id: !terraform.state kms/main .key_arn
 
-        # Enable monitoring features
-        enable_resource_monitoring: true
+        create_dashboard: true
+        vpc_id: !terraform.state web-application/vpc .vpc_id
+        certificate_arns: !terraform.state web-application/acm .certificate_arns // {} | [.[]]
+        certificate_names: !terraform.state web-application/acm .certificate_domains // {} | keys
+        certificate_domains: !terraform.state web-application/acm .certificate_domains // {} | [.[]]
 
-        # ALB alarms
-        alb_alarms:
-          - name: "alb-5xx-errors"
-            metric_name: "HTTPCode_ELB_5XX_Count"
+        # Dashboard dimensions
+        load_balancers: !terraform.state web-application/alb .alb_arn_suffix | [.]
+        ecs_clusters: !terraform.state web-application/ecs-cluster .cluster_name | [.]
+        rds_instances: !terraform.state web-application/rds .instance_identifier | [.]
+        elasticache_clusters: !terraform.state web-application/elasticache .member_clusters
+
+        # Alarms, named <Environment>-<key>
+        metric_alarms:
+          # ALB
+          alb-5xx-errors:
             namespace: "AWS/ApplicationELB"
+            metric_name: "HTTPCode_ELB_5XX_Count"
+            dimensions:
+              LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
             comparison_operator: "GreaterThanThreshold"
             threshold: 10
             evaluation_periods: 2
             period: 300
             statistic: "Sum"
+          # The application's 4xx, not the ALB's: HTTPCode_ELB_4XX_Count also
+          # counts the listener's fixed 403 to every request that reaches the
+          # ALB without CloudFront's X-Origin-Verify header (scanners).
+          alb-target-4xx-errors:
+            namespace: "AWS/ApplicationELB"
+            metric_name: "HTTPCode_Target_4XX_Count"
             dimensions:
               LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
-          - name: "alb-4xx-errors"
-            metric_name: "HTTPCode_ELB_4XX_Count"
-            namespace: "AWS/ApplicationELB"
             comparison_operator: "GreaterThanThreshold"
             threshold: 100
             evaluation_periods: 2
             period: 300
             statistic: "Sum"
+          alb-target-response-time:
+            namespace: "AWS/ApplicationELB"
+            metric_name: "TargetResponseTime"
             dimensions:
               LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
-          - name: "alb-target-response-time"
-            metric_name: "TargetResponseTime"
-            namespace: "AWS/ApplicationELB"
             comparison_operator: "GreaterThanThreshold"
             threshold: 2
             evaluation_periods: 2
             period: 300
             statistic: "Average"
-            dimensions:
-              LoadBalancer: !terraform.state web-application/alb .alb_arn_suffix
-
-        # ECS alarms
-        ecs_alarms:
-          - name: "ecs-cpu-high"
-            metric_name: "CPUUtilization"
+          # ECS
+          ecs-cpu-high:
             namespace: "AWS/ECS"
+            metric_name: "CPUUtilization"
+            dimensions:
+              ClusterName: !terraform.state web-application/ecs-cluster .cluster_name
+              ServiceName: !terraform.state web-application/ecs-service .service_name
             comparison_operator: "GreaterThanThreshold"
             threshold: 80
             evaluation_periods: 2
             period: 300
             statistic: "Average"
-            dimensions:
-              ClusterName: !terraform.state web-application/ecs-cluster .cluster_name
-              ServiceName: !terraform.state web-application/ecs-service .service_name
-          - name: "ecs-memory-high"
+          ecs-memory-high:
+            namespace: "AWS/ECS"
             metric_name: "MemoryUtilization"
-            namespace: "AWS/ECS"
-            comparison_operator: "GreaterThanThreshold"
-            threshold: 80
-            evaluation_periods: 2
-            period: 300
-            statistic: "Average"
             dimensions:
               ClusterName: !terraform.state web-application/ecs-cluster .cluster_name
               ServiceName: !terraform.state web-application/ecs-service .service_name
-
-        # RDS alarms
-        rds_alarms:
-          - name: "rds-cpu-high"
-            metric_name: "CPUUtilization"
-            namespace: "AWS/RDS"
             comparison_operator: "GreaterThanThreshold"
             threshold: 80
             evaluation_periods: 2
             period: 300
             statistic: "Average"
-            dimensions:
-              DBInstanceIdentifier: !terraform.state web-application/rds .identifier
-          - name: "rds-connections-high"
-            metric_name: "DatabaseConnections"
+          # RDS
+          rds-cpu-high:
             namespace: "AWS/RDS"
+            metric_name: "CPUUtilization"
+            dimensions:
+              DBInstanceIdentifier: !terraform.state web-application/rds .instance_identifier
+            comparison_operator: "GreaterThanThreshold"
+            threshold: 80
+            evaluation_periods: 2
+            period: 300
+            statistic: "Average"
+          rds-connections-high:
+            namespace: "AWS/RDS"
+            metric_name: "DatabaseConnections"
+            dimensions:
+              DBInstanceIdentifier: !terraform.state web-application/rds .instance_identifier
             comparison_operator: "GreaterThanThreshold"
             threshold: 100
             evaluation_periods: 2
             period: 300
             statistic: "Average"
-            dimensions:
-              DBInstanceIdentifier: !terraform.state web-application/rds .identifier
-          - name: "rds-free-storage-low"
-            metric_name: "FreeStorageSpace"
+          rds-free-storage-low:
             namespace: "AWS/RDS"
+            metric_name: "FreeStorageSpace"
+            dimensions:
+              DBInstanceIdentifier: !terraform.state web-application/rds .instance_identifier
             comparison_operator: "LessThanThreshold"
             threshold: 5368709120  # 5GB in bytes
             evaluation_periods: 2
             period: 300
             statistic: "Average"
-            dimensions:
-              DBInstanceIdentifier: !terraform.state web-application/rds .identifier
-
-        # ElastiCache alarms
-        elasticache_alarms:
-          - name: "cache-cpu-high"
-            metric_name: "CPUUtilization"
+          # ElastiCache: per node; the primary is the first member cluster.
+          cache-cpu-high:
             namespace: "AWS/ElastiCache"
+            metric_name: "CPUUtilization"
+            dimensions:
+              CacheClusterId: !terraform.state web-application/elasticache .member_clusters[0]
             comparison_operator: "GreaterThanThreshold"
             threshold: 75
             evaluation_periods: 2
             period: 300
             statistic: "Average"
-            dimensions:
-              CacheClusterId: !terraform.state web-application/elasticache .cluster_id
-          - name: "cache-memory-high"
-            metric_name: "DatabaseMemoryUsagePercentage"
+          cache-memory-high:
             namespace: "AWS/ElastiCache"
+            metric_name: "DatabaseMemoryUsagePercentage"
+            dimensions:
+              CacheClusterId: !terraform.state web-application/elasticache .member_clusters[0]
             comparison_operator: "GreaterThanThreshold"
             threshold: 80
             evaluation_periods: 2
             period: 300
             statistic: "Average"
-            dimensions:
-              CacheClusterId: !terraform.state web-application/elasticache .cluster_id
-
-        # SNS for notifications
-        alarm_notifications_enabled: true
-        alarm_email_addresses: []
-        sns_topic_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-webapp-alarms"
 
         tags:
           Layer: "monitoring"
           Application: "web-application"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: web-application/vpc
+          - component: web-application/acm
+          - component: web-application/alb
+          - component: web-application/ecs-cluster
+          - component: web-application/ecs-service
+          - component: web-application/rds
+          - component: web-application/elasticache
 
 # =============================================================================
 # ENVIRONMENT-SPECIFIC OVERRIDES
 # =============================================================================
-
-# Development environment defaults
-# Import this file and override vars for development
-# Development overrides - use with:
-# import: [catalog/templates/web-application, catalog/templates/web-application-dev]
-# Or override in your stack file:
+# Override the instances' vars in the importing stack, e.g. for production:
 #
-# vars:
-#   nat_gateway_strategy: "single"
-#   db_instance_class: "db.t3.micro"
-#   db_multi_az: false
-#   cache_node_type: "cache.t3.micro"
-#   desired_count: 1
-#   autoscaling_min: 1
-#   autoscaling_max: 3
-
-# Staging environment defaults
-# vars:
-#   nat_gateway_strategy: "single"
-#   db_instance_class: "db.t3.small"
-#   db_multi_az: false
-#   cache_node_type: "cache.t3.small"
-#   desired_count: 2
-#   autoscaling_min: 2
-#   autoscaling_max: 5
-
-# Production environment defaults
-# vars:
-#   nat_gateway_strategy: "one_per_az"
-#   db_instance_class: "db.r6g.large"
-#   db_multi_az: true
-#   db_deletion_protection: true
-#   db_skip_final_snapshot: false
-#   db_backup_retention: 30
-#   cache_node_type: "cache.r6g.large"
-#   cache_num_nodes: 2
-#   cache_cluster_mode: true
-#   desired_count: 3
-#   autoscaling_min: 3
-#   autoscaling_max: 20
-#   cloudfront_price_class: "PriceClass_All"
-
-# =============================================================================
-# REQUIRED VARIABLES
-# =============================================================================
-# These must be provided when using this template:
+#   web-application/vpc:          nat_gateway_strategy: "one_per_az"
+#   web-application/rds:          environment: prod, instance_class: "db.r6g.large",
+#                                 multi_az: true, deletion_protection: true,
+#                                 skip_final_snapshot: false, backup_retention_period: 30
+#   web-application/elasticache:  node_type: "cache.r6g.large", num_cache_nodes: 2,
+#                                 automatic_failover_enabled: true, multi_az_enabled: true
+#   web-application/ecs-service:  desired_count: 3, autoscaling: {min_capacity: 3, max_capacity: 20, ...}
+#   web-application/cloudfront:   price_class: "PriceClass_All"
 #
-# app_domain_name: "example.com"
-# route53_zone_id: "Z1234567890ABC"
-# app_container_image: "123456789.dkr.ecr.us-east-1.amazonaws.com/webapp:latest"
-# database_password_secret_arn: "arn:aws:secretsmanager:..."
-# ecs_execution_role_arn: "arn:aws:iam::..."
-# ecs_task_role_arn: "arn:aws:iam::..."
-#
-# Optional:
-# alarm_email_addresses: ["ops@example.com"]
-# cloudfront_waf_acl_id: "" (a later task wires this to
-#   !terraform.state web-application/waf-cloudfront .arn and adds
-#   web-application/waf-cloudfront to web-application/cloudfront's
-#   dependencies.components; until then it is unset)
-# (WAF logging goes to a component-created CloudWatch log group -- see
-# components/terraform/waf/README.md -- not an external log_destination_arn.)
-      dependencies:
-        components:
-          - component: web-application/ecs-service
-          - component: web-application/alb
-          - component: web-application/rds
-          - component: web-application/elasticache
+# Development: desired_count 1 and autoscaling min_capacity 1, max_capacity 3.
