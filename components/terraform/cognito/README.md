@@ -1,7 +1,10 @@
 # cognito
 
-One Cognito user pool, an app client per `clients` entry, and an optional hosted-UI domain. It
-gives `apigateway` a real pool for `COGNITO_USER_POOLS` authorization.
+One Cognito user pool, an app client per `clients` entry, OAuth resource servers
+(`resource_servers`), custom string attributes (`string_schemas`), and an optional hosted-UI
+domain. It gives `apigateway` a real pool for `COGNITO_USER_POOLS` authorization.
+`resource_servers` and `string_schemas` take Cloud Posse `aws-cognito`'s names and shapes (typed;
+its `schemas`/`number_schemas` are not ported).
 
 ## Wiring
 
@@ -21,3 +24,10 @@ gives `apigateway` a real pool for `COGNITO_USER_POOLS` authorization.
 - Self-signup is off (`allow_admin_create_user_only = true`), `prevent_user_existence_errors` is
   always on, and `ALLOW_USER_PASSWORD_AUTH` is rejected (use SRP).
 - Browser and mobile clients must set `generate_secret: false`.
+- A `client_credentials` client needs a confidential client (`generate_secret`), a
+  `domain_prefix` (the token endpoint) and scopes from `resource_servers`, named
+  `<identifier>/<scope_name>` in its `allowed_oauth_scopes`, and no other OAuth flow (all
+  validated). Clients are created after the resource servers.
+- `string_schemas` attributes cannot be changed or removed once the pool exists (AWS); adding one
+  is in place. Name custom attributes without `custom:`; only standard attributes can be
+  `required` (validated).

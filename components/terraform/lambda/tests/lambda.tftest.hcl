@@ -410,3 +410,26 @@ run "rejects_two_packaging_sources_at_once" {
 
   expect_failures = [aws_lambda_function.main]
 }
+
+run "description_reaches_the_function" {
+  command = plan
+
+  variables {
+    description = "Main API handler"
+  }
+
+  assert {
+    condition     = aws_lambda_function.main.description == "Main API handler"
+    error_message = "description is the function's description."
+  }
+}
+
+run "description_over_256_characters_is_rejected" {
+  command = plan
+
+  variables {
+    description = join("", [for i in range(257) : "x"])
+  }
+
+  expect_failures = [var.description]
+}

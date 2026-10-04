@@ -354,6 +354,7 @@ resource "aws_lambda_function" "main" {
   #checkov:skip=CKV_AWS_272:Packages are built and uploaded by the application repo's pipeline; no signing profile, as code signing is off by default in Cloud Posse's terraform-aws-lambda-function
   #checkov:skip=CKV_AWS_50:X-Ray tracing is an input (tracing_mode) and bills per trace; set per instance
   function_name     = "${var.tags["Environment"]}-${var.function_name}"
+  description       = var.description
   role              = aws_iam_role.lambda.arn
   handler           = var.handler
   runtime           = var.runtime
