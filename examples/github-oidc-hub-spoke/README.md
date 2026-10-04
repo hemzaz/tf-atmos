@@ -22,11 +22,14 @@ list it in the instance's `metadata.inherits`.
    `external_id` (or `trusted_principal_org_id`); its preconditions require all three. Never set
    `github_oidc_provider_arn` in a spoke to the hub's provider, and never trust the spoke's own
    account id.
-5. Set the repository variable `AWS_PLAN_ROLE_ARN` to the hub plan role. `terraform-cd.yml`
-   gets the apply role from `workflows/scripts/common/ci-apply-role-arn.py`, which builds
-   `arn:aws:iam::<settings.environment.account_id>:role/<ci_role_name_prefix>-apply` from each
-   stack's `iam/ci`, i.e. the workload account's own role. Nothing points it at a hub: change the
-   script to return the hub's `-ci-apply` ARN.
+5. Set the repository variable `AWS_PLAN_ROLE_ARN` (it only switches the AWS jobs on). Every
+   workflow gets its role from `workflows/scripts/common/ci-apply-role-arn.py`, which builds
+   `arn:aws:iam::<settings.environment.account_id>:role/<ci_role_name_prefix>-<plan|apply>` from
+   each stack's `iam/ci`, i.e. the workload account's own roles. Nothing points it at a hub,
+   and changing `account_id()` alone is not enough: a spoke's instance sets
+   `github_oidc_enabled: false` (`stacks/catalog/iam/oidc-spoke.yaml`), so `role_arn()` refuses it
+   before the account is read. Make `main()` describe the hub stack's IAM instance instead of
+   the spoke's `iam/ci`, so both the account and `ci_role_name_prefix` come from the hub.
 6. Enable `ci_apply_role_enabled` only after steps 1-5 work.
 
 Check without AWS: `bash scripts/plan-sweep.sh <stack>`. `InvalidClientTokenId` is expected;
