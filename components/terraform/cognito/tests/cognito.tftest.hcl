@@ -161,3 +161,108 @@ run "unknown_tier_is_rejected" {
 
   expect_failures = [var.user_pool_tier]
 }
+
+run "required_custom_attribute_is_rejected" {
+  command = plan
+
+  variables {
+    string_schemas = [{ name = "tenant_id", required = true }]
+  }
+
+  expect_failures = [var.string_schemas]
+}
+
+run "required_standard_attribute_is_accepted" {
+  command = plan
+
+  variables {
+    string_schemas = [{ name = "email", required = true }]
+  }
+
+  assert {
+    condition     = one([for s in aws_cognito_user_pool.this[0].schema : s.required if s.name == "email"])
+    error_message = "A standard attribute can be required."
+  }
+}
+
+run "resource_server_with_an_empty_scope_description_is_rejected" {
+  command = plan
+
+  variables {
+    resource_servers = [{
+      identifier = "api"
+      name       = "API"
+      scope      = [{ scope_name = "read", scope_description = "" }]
+    }]
+  }
+
+  expect_failures = [var.resource_servers]
+}
+
+run "client_credentials_without_a_secret_is_rejected" {
+  command = plan
+
+  variables {
+    domain_prefix    = "fnx-test-api"
+    resource_servers = [{ identifier = "api", name = "API", scope = [{ scope_name = "read", scope_description = "Read" }] }]
+    clients = {
+      api = {
+        generate_secret      = false
+        allowed_oauth_flows  = ["client_credentials"]
+        allowed_oauth_scopes = ["api/read"]
+      }
+    }
+  }
+
+  expect_failures = [var.clients]
+}
+
+run "client_credentials_mixed_with_code_is_rejected" {
+  command = plan
+
+  variables {
+    domain_prefix    = "fnx-test-api"
+    resource_servers = [{ identifier = "api", name = "API", scope = [{ scope_name = "read", scope_description = "Read" }] }]
+    clients = {
+      api = {
+        allowed_oauth_flows  = ["client_credentials", "code"]
+        allowed_oauth_scopes = ["api/read"]
+      }
+    }
+  }
+
+  expect_failures = [var.clients]
+}
+
+run "client_credentials_without_a_domain_is_rejected" {
+  command = plan
+
+  variables {
+    resource_servers = [{ identifier = "api", name = "API", scope = [{ scope_name = "read", scope_description = "Read" }] }]
+    clients = {
+      api = {
+        allowed_oauth_flows  = ["client_credentials"]
+        allowed_oauth_scopes = ["api/read"]
+      }
+    }
+  }
+
+  expect_failures = [var.clients]
+}
+
+run "undeclared_resource_server_scope_is_rejected" {
+  command = plan
+
+  variables {
+    domain_prefix    = "fnx-test-api"
+    resource_servers = [{ identifier = "api", name = "API", scope = [{ scope_name = "read", scope_description = "Read" }] }]
+    clients = {
+      api = {
+        allowed_oauth_flows  = ["client_credentials"]
+        allowed_oauth_scopes = ["api/write"]
+      }
+    }
+  }
+
+  expect_failures = [var.clients]
+}

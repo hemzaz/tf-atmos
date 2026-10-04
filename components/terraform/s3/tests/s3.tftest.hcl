@@ -374,3 +374,13 @@ run "rejects_a_generated_name_over_63_characters" {
 
   expect_failures = [aws_s3_bucket.this[0]]
 }
+
+run "rejects_a_cors_rule_with_a_negative_max_age" {
+  command = plan
+
+  variables {
+    cors_configuration = [{ allowed_methods = ["GET"], allowed_origins = ["https://example.com"], max_age_seconds = -1 }]
+  }
+
+  expect_failures = [var.cors_configuration]
+}

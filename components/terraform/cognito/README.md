@@ -26,7 +26,8 @@ its `schemas`/`number_schemas` are not ported).
 - Browser and mobile clients must set `generate_secret: false`.
 - A `client_credentials` client needs a confidential client (`generate_secret`), a
   `domain_prefix` (the token endpoint) and scopes from `resource_servers`, named
-  `<identifier>/<scope_name>` in its `allowed_oauth_scopes`. Clients are created after the
-  resource servers.
+  `<identifier>/<scope_name>` in its `allowed_oauth_scopes`, and no other OAuth flow (all
+  validated). Clients are created after the resource servers.
 - `string_schemas` attributes cannot be changed or removed once the pool exists (AWS); adding one
-  is in place. Name custom attributes without `custom:`.
+  is in place. Name custom attributes without `custom:`; only standard attributes can be
+  `required` (validated).

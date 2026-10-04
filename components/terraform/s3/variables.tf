@@ -173,6 +173,11 @@ variable "cors_configuration" {
     condition     = alltrue([for r in var.cors_configuration : length(coalesce(r.allowed_origins, [])) > 0])
     error_message = "Each cors_configuration rule needs at least one allowed_origins entry."
   }
+
+  validation {
+    condition     = alltrue([for r in var.cors_configuration : r.max_age_seconds == null || try(r.max_age_seconds >= 0, false)])
+    error_message = "cors_configuration max_age_seconds must not be negative."
+  }
 }
 
 variable "source_policy_documents" {
