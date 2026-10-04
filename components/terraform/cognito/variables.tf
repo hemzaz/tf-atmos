@@ -272,7 +272,7 @@ variable "clients" {
   # AWS rejects these client_credentials combinations at apply.
   validation {
     condition = alltrue([for c in values(var.clients) :
-      !contains(c.allowed_oauth_flows, "client_credentials")
+      contains(c.allowed_oauth_flows, "client_credentials") == false
       || (c.generate_secret && length(setsubtract(c.allowed_oauth_flows, ["client_credentials"])) == 0)
     ])
     error_message = "A client_credentials client needs generate_secret = true and no other allowed_oauth_flows (code, implicit)."
