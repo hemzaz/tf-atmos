@@ -43,18 +43,7 @@ settings:
     # the dns instances' zone_ids output, never from settings. example.com is a
     # placeholder base until the owner sets the real domain.
     domain_name: "staging.fnx.example.com"
-    description: "Staging environment for production validation"
-    owner: "Platform Team"
-    version: "1.0.0"
     stage: "staging"
-    region: "us-east-1"
-
-  # Compliance requirements - staging should match prod
-    compliance:
-      hipaa: false
-      pci: false
-      sox: false
-      gdpr: true
 
   # Monitoring contacts
     monitoring:
@@ -64,11 +53,6 @@ settings:
       # components/terraform/cost-optimization/variables.tf).
       budget_monthly_limit: "2000"
 
-  # Change management
-    change_management:
-      approval_required: true
-      change_window: "business-hours"
-    tenant_name: staging-01
     eks_kubernetes_version: "1.36"
     eks_public_access: false
     rds_engine: "postgres"
@@ -84,18 +68,7 @@ settings:
       platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
-    secrets_manager_path_prefix: "staging/fnx/certificates"
-    enable_container_insights: true
     enable_vpc_flow_logs: true
-    enable_enhanced_monitoring: true
-    security:
-      vpc_flow_logs: true
-      encryption_at_rest: true
-      ssl_enforcement: true
-
-  # Staging-specific settings
-    enable_debug_logging: true
-    retention_days: 14
   context:
     environment: staging-01
 

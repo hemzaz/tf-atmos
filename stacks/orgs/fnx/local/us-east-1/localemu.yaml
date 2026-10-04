@@ -83,9 +83,8 @@
 # <=1.103.0 and localemu 1.2.0 cannot be installed at all.
 import:
   - catalog/_base/defaults
-  - mixins/tenant/fnx
   - mixins/region/us-east-1
-  - orgs/fnx/local/_defaults
+  - orgs/fnx/local/_defaults  # also the tenant mixin
   - catalog/vpc/defaults
 
 vars:
@@ -100,11 +99,7 @@ terraform:
 
 settings:
   environment:
-    description: "Local LocalEmu lane"
-    namespace: localemu
     account: local
-    aws_account_id: "000000000000"
-    vpc_cidr: "10.91.0.0/16"
     enable_vpc_flow_logs: false
   context:
     tenant: fnx

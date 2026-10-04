@@ -99,7 +99,6 @@ settings:
   tfstate:
     region: us-east-1
   environment:
-    namespace: fnx
     management_account_id: '{{ index .settings.account_map.full_account_map .settings.account_map.root_account_account_name }}'
   context:
     tenant: fnx

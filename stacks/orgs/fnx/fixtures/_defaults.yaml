@@ -24,7 +24,6 @@ settings:
     account: fixtures
     # Placeholder, never deployed.
     account_id: "000000000000"
-    aws_profile: "fixtures"
   context:
     stage: fixtures
   github:

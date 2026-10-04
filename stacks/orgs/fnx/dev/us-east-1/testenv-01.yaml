@@ -6,12 +6,10 @@ import:
   # Import base configuration first
   - catalog/_base/defaults
 
-  # Import mixins (order matters for variable precedence)
-  - mixins/tenant/fnx
-  - mixins/stage/dev
+  # Region mixin (the tenant and stage mixins come with the stage defaults)
   - mixins/region/us-east-1
 
-  # Import org defaults
+  # Import stage defaults (org defaults, tenant and stage mixins)
   - orgs/fnx/dev/_defaults
 
   # Import component-specific configurations
@@ -27,11 +25,7 @@ vars:
   region: us-east-1
 settings:
   environment:
-    description: "TestEnv-01 Environment"
-    namespace: testenv-01
     account: dev
-    aws_account_id: !env AWS_ACCOUNT_ID REQUIRED_ACCOUNT_ID
-    vpc_cidr: "10.0.0.0/16"
   context:
     tenant: fnx
     environment: testenv-01

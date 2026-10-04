@@ -83,8 +83,8 @@ components:
         # No named `key_administrators` here. The root-account statement above
         # already delegates key administration to IAM (the Cloud Posse aws-kms
         # design), and a templated ARN is unsafe in a shared base: Go templates
-        # render before YAML functions, so in dev `aws_account_id` (an `!env`
-        # tag) lands in the ARN as raw text and CreateKey rejects the policy.
+        # render before YAML functions, so an `!env` (or other YAML function)
+        # value lands in the ARN as raw text and CreateKey rejects the policy.
         # No instance names one either (prod doesn't): KMS validates every
         # named principal at CreateKey/PutKeyPolicy time, and this repo's IaC
         # creates no admin role to name (see prod's security.yaml). Add named
