@@ -18,7 +18,8 @@ vars:
 settings:
   environment:
     account: staging
-    account_id: "123456789012"
+    # From the account map (stacks/orgs/fnx/_defaults.yaml), keyed by `account`.
+    account_id: '{{ index .settings.account_map.full_account_map .settings.environment.account }}'
     aws_profile: "staging"
     instance_type_default: "t3.medium"
     rds_instance_class_default: "db.t3.medium"

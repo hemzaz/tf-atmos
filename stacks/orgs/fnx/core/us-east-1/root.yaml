@@ -43,15 +43,16 @@ components:
         # Who may use the state. The CI roles are named from iam/ci's
         # ci_role_name_prefix ("<tenant>-<account>-<environment>-ci", see each
         # workload stack's components/security.yaml) in that stack's
-        # settings.environment.account_id - strings, not !terraform.state:
+        # account, its settings.account_map entry (stacks/orgs/fnx/_defaults.yaml)
+        # - strings, not !terraform.state:
         # iam/ci deploys after this instance, and CI roles never read the
         # core state. The trust is an aws:PrincipalArn condition, so the roles do
         # not have to exist yet (see components/terraform/backend/iam.tf).
         # Add a stack's roles here when adding a stack. The administrator who
         # applies this instance is always trusted as well (Cloud Posse's
         # caller rule); list any other human/admin role ARN explicitly.
-        # Account IDs are the repository's placeholders - see
-        # docs/OPERATIONS.md#first-deploy-inputs.
+        # The account IDs come from the account map; its values are the
+        # repository's placeholders - see docs/OPERATIONS.md#first-deploy-inputs.
         #
         # Human operators: every rolearn in a workload stack's eks
         # map_additional_iam_roles (its components/globals.yaml) applies that
@@ -64,22 +65,22 @@ components:
           read:
             # Dev/staging state: their CI plan roles (PR plans, drift).
             allowed_principal_arns:
-              - "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-plan"
-              - "arn:aws:iam::123456789012:role/fnx-staging-staging-01-ci-plan"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-dev-testenv-01-ci-plan"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-staging-staging-01-ci-plan"
           prod_read:
             # Prod state: ONLY prod's plan role, which trusts the master
             # branch subject alone (owner decision D3) - never PR code.
             allowed_principal_arns:
-              - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-prod-production-ci-plan"
           write:
             # Dev/staging state: their CI apply roles (master branch subject
             # only, see iam/ci ci_apply_role_trusted_repos).
             allowed_principal_arns:
-              - "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-apply"
-              - "arn:aws:iam::123456789012:role/fnx-staging-staging-01-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-dev-testenv-01-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-staging-staging-01-ci-apply"
           prod_write:
             # Prod state: ONLY prod's apply role.
             allowed_principal_arns:
-              - "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-prod-production-ci-apply"
           # core_write: no principals listed - the applying administrator only
           # (stacks/catalog/backend/defaults.yaml).
