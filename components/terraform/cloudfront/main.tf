@@ -14,7 +14,9 @@
 #   - default_root_object defaults to index.html only when the default
 #     behavior targets the S3 origin (upstream: always index.html).
 #   - custom_origins and ordered_cache differences are listed beside those
-#     variables in variables.tf. Origin groups (failover), s3_origins and
+#     variables in variables.tf, among them VPC origins (custom_origins[].
+#     vpc_origin, aws_cloudfront_vpc_origin), which neither
+#     terraform-aws-cloudfront-s3-cdn nor terraform-aws-cloudfront-cdn models. Origin groups (failover), s3_origins and
 #     trusted signers / key groups are not modelled.
 #   - The bucket is not created here and its policy is not written here
 #     (upstream creates the bucket, or overrides an existing bucket's policy
@@ -116,6 +118,33 @@ locals {
       type = pair[1]
     }
   } : {}
+
+  # A custom origin's transport when custom_origin_config is null (the
+  # variable's per-field defaults).
+  custom_origin_config_defaults = {
+    http_port                = 80
+    https_port               = 443
+    origin_protocol_policy   = "https-only"
+    origin_ssl_protocols     = ["TLSv1.2"]
+    origin_keepalive_timeout = 5
+    origin_read_timeout      = 30
+  }
+
+  # One CloudFront VPC origin per custom origin with vpc_origin, by origin_id:
+  # its endpoint config, named <Environment>-<name>-<origin_id>-<hash>. The
+  # hash (first 8 hex digits of the config's sha1) gives every config its own
+  # name, so a replacement (below) never reuses the name of the VPC origin it
+  # replaces while both exist.
+  vpc_origin_configs = local.enabled ? { for o in var.custom_origins : o.origin_id => {
+    arn                    = o.vpc_origin.arn
+    http_port              = o.vpc_origin.http_port
+    https_port             = o.vpc_origin.https_port
+    origin_protocol_policy = o.vpc_origin.origin_protocol_policy
+    origin_ssl_protocols   = sort(distinct(o.vpc_origin.origin_ssl_protocols))
+  } if o.vpc_origin != null } : {}
+  vpc_origins = { for k, c in local.vpc_origin_configs : k => merge(c, {
+    name = "${local.name}-${k}-${substr(sha1(jsonencode(c)), 0, 8)}"
+  }) }
 }
 
 data "aws_partition" "current" {}
@@ -143,6 +172,51 @@ resource "aws_cloudfront_origin_access_control" "this" {
       condition     = length(local.name) <= 64
       error_message = "The distribution name (<Environment>-<name>, \"${local.name}\") must be 64 characters or fewer (the origin access control name limit)."
     }
+  }
+}
+
+# VPC origins (custom_origins[].vpc_origin): CloudFront reaches an internal
+# ALB, an NLB or an EC2 instance in private subnets through service-managed
+# ENIs. Not in Cloud Posse (see variables.tf). AWS takes up to 15 minutes to
+# deploy one; the first in a VPC also creates the service-managed
+# CloudFront-VPCOrigins-Service-SG (AWS Developer Guide, "Restrict access with
+# VPC origins").
+#
+# Never updated in place: UpdateVpcOrigin answers CannotUpdateEntityWhileInUse
+# (409) while a distribution uses the VPC origin (CloudFront API Reference,
+# UpdateVpcOrigin; the Developer Guide's "Update a VPC origin" detaches it
+# first), and the provider plans endpoint changes as in-place updates. Any
+# change to the endpoint config (ARN, ports, protocol, TLS versions, name)
+# changes this terraform_data, which replaces the VPC origin
+# create-before-destroy: create the new one, repoint the distribution's
+# vpc_origin_config at it, delete the old one.
+resource "terraform_data" "vpc_origin" {
+  for_each = local.vpc_origins
+
+  input = each.value
+}
+
+resource "aws_cloudfront_vpc_origin" "this" {
+  for_each = local.vpc_origins
+
+  vpc_origin_endpoint_config {
+    name                   = each.value.name
+    arn                    = each.value.arn
+    http_port              = each.value.http_port
+    https_port             = each.value.https_port
+    origin_protocol_policy = each.value.origin_protocol_policy
+
+    origin_ssl_protocols {
+      items    = each.value.origin_ssl_protocols
+      quantity = length(each.value.origin_ssl_protocols)
+    }
+  }
+
+  tags = { Name = each.value.name }
+
+  lifecycle {
+    create_before_destroy = true
+    replace_triggered_by  = [terraform_data.vpc_origin[each.key]]
   }
 }
 
@@ -193,13 +267,29 @@ resource "aws_cloudfront_distribution" "this" {
         }
       }
 
-      custom_origin_config {
-        http_port                = origin.value.custom_origin_config.http_port
-        https_port               = origin.value.custom_origin_config.https_port
-        origin_protocol_policy   = origin.value.custom_origin_config.origin_protocol_policy
-        origin_ssl_protocols     = origin.value.custom_origin_config.origin_ssl_protocols
-        origin_keepalive_timeout = origin.value.custom_origin_config.origin_keepalive_timeout
-        origin_read_timeout      = origin.value.custom_origin_config.origin_read_timeout
+      # A public custom origin (custom_origin_config, or its defaults when
+      # null) ...
+      dynamic "custom_origin_config" {
+        for_each = origin.value.vpc_origin == null ? [coalesce(origin.value.custom_origin_config, local.custom_origin_config_defaults)] : []
+        content {
+          http_port                = custom_origin_config.value.http_port
+          https_port               = custom_origin_config.value.https_port
+          origin_protocol_policy   = custom_origin_config.value.origin_protocol_policy
+          origin_ssl_protocols     = custom_origin_config.value.origin_ssl_protocols
+          origin_keepalive_timeout = custom_origin_config.value.origin_keepalive_timeout
+          origin_read_timeout      = custom_origin_config.value.origin_read_timeout
+        }
+      }
+
+      # ... or a VPC origin: protocol, ports and TLS versions live on the
+      # aws_cloudfront_vpc_origin, the timeouts here.
+      dynamic "vpc_origin_config" {
+        for_each = origin.value.vpc_origin == null ? [] : [origin.value.vpc_origin]
+        content {
+          vpc_origin_id            = aws_cloudfront_vpc_origin.this[origin.value.origin_id].id
+          origin_keepalive_timeout = vpc_origin_config.value.origin_keepalive_timeout
+          origin_read_timeout      = vpc_origin_config.value.origin_read_timeout
+        }
       }
 
       dynamic "origin_shield" {

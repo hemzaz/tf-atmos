@@ -63,9 +63,15 @@ variable "origin_path" {
 }
 
 # Custom origins: Cloud Posse's custom_origins (ALB, API Gateway, any HTTP
-# server). Deviations: custom_origin_config is optional (all its fields have
-# defaults), origin_access_control_id and response_completion_timeout are not
-# modelled, and custom header values are redacted from plans.
+# server). Deviations: custom_origin_config is optional (null takes the
+# defaults below), origin_access_control_id and response_completion_timeout
+# are not modelled, and custom header values are redacted from plans.
+# vpc_origin is not in Cloud Posse (terraform-aws-cloudfront-cdn and
+# terraform-aws-cloudfront-s3-cdn have no VPC-origin input): it makes the
+# origin a CloudFront VPC origin (an internal ALB, an NLB or an EC2 instance
+# in private subnets, reached through CloudFront-managed ENIs) instead of a
+# public custom origin, so the origin needs no internet path and no shared
+# secret header. AWS Developer Guide, "Restrict access with VPC origins".
 variable "custom_origins" {
   type = list(object({
     domain_name = string
@@ -79,6 +85,7 @@ variable "custom_origins" {
       value                    = optional(string)
       value_ssm_parameter_name = optional(string)
     })), [])
+    # null: these defaults, unless vpc_origin is set (exactly one of them).
     custom_origin_config = optional(object({
       http_port                = optional(number, 80)
       https_port               = optional(number, 443)
@@ -86,13 +93,25 @@ variable "custom_origins" {
       origin_ssl_protocols     = optional(list(string), ["TLSv1.2"])
       origin_keepalive_timeout = optional(number, 5)
       origin_read_timeout      = optional(number, 30)
-    }), {})
+    }), null)
+    # arn: the ALB, NLB or EC2 instance; the rest as custom_origin_config.
+    # The component creates the aws_cloudfront_vpc_origin,
+    # <Environment>-<name>-<origin_id>-<config hash>, and replaces it on any change.
+    vpc_origin = optional(object({
+      arn                      = string
+      http_port                = optional(number, 80)
+      https_port               = optional(number, 443)
+      origin_protocol_policy   = optional(string, "https-only")
+      origin_ssl_protocols     = optional(list(string), ["TLSv1.2"])
+      origin_keepalive_timeout = optional(number, 5)
+      origin_read_timeout      = optional(number, 30)
+    }), null)
     origin_shield = optional(object({
       enabled = optional(bool, false)
       region  = optional(string, null)
     }), null)
   }))
-  description = "Custom (non-S3) origins, Cloud Posse's custom_origins: domain_name (a host name, no scheme or path), origin_id (unique; what default_origin_id and ordered_cache target_origin_id name), origin_path, custom_headers (name and value or value_ssm_parameter_name, sent to the origin on every request; an ALB origin gets a secret origin-verify header its listener rule requires, read from SSM, see README), custom_origin_config (https-only and TLSv1.2 by default; read timeout 30 s and keepalive 5 s by default, 1-180 s, above 60 s needs a CloudFront quota increase) and origin_shield"
+  description = "Custom (non-S3) origins, Cloud Posse's custom_origins: domain_name (a host name, no scheme or path), origin_id (unique; what default_origin_id and ordered_cache target_origin_id name), origin_path, custom_headers (name and value or value_ssm_parameter_name, sent to the origin on every request; an ALB origin gets a secret origin-verify header its listener rule requires, read from SSM, see README), custom_origin_config (https-only and TLSv1.2 by default; read timeout 30 s and keepalive 5 s by default, 1-180 s, above 60 s needs a CloudFront quota increase), vpc_origin (instead of custom_origin_config: arn of an internal ALB, an NLB or an EC2 instance in private subnets, and the same transport fields and defaults; the component creates the CloudFront VPC origin, see README) and origin_shield"
   default     = []
   nullable    = false
 
@@ -117,23 +136,35 @@ variable "custom_origins" {
   }
 
   validation {
-    condition     = alltrue([for o in var.custom_origins : contains(["https-only", "http-only", "match-viewer"], o.custom_origin_config.origin_protocol_policy)])
-    error_message = "custom_origin_config origin_protocol_policy must be https-only (default), http-only or match-viewer."
+    condition     = alltrue([for o in var.custom_origins : contains(["https-only", "http-only", "match-viewer"], try(o.vpc_origin.origin_protocol_policy, o.custom_origin_config.origin_protocol_policy, "https-only"))])
+    error_message = "custom_origin_config (or vpc_origin) origin_protocol_policy must be https-only (default), http-only or match-viewer."
   }
 
   validation {
-    condition     = alltrue([for o in var.custom_origins : length(o.custom_origin_config.origin_ssl_protocols) > 0 && length(setsubtract(o.custom_origin_config.origin_ssl_protocols, ["TLSv1", "TLSv1.1", "TLSv1.2"])) == 0])
-    error_message = "custom_origin_config origin_ssl_protocols must be a non-empty subset of TLSv1, TLSv1.1 and TLSv1.2 (SSLv3 is rejected); the default is [TLSv1.2]."
+    condition     = alltrue([for p in [for o in var.custom_origins : try(o.vpc_origin.origin_ssl_protocols, o.custom_origin_config.origin_ssl_protocols, ["TLSv1.2"])] : length(p) > 0 && length(setsubtract(p, ["TLSv1", "TLSv1.1", "TLSv1.2"])) == 0])
+    error_message = "custom_origin_config (or vpc_origin) origin_ssl_protocols must be a non-empty subset of TLSv1, TLSv1.1 and TLSv1.2 (SSLv3 is rejected); the default is [TLSv1.2]."
   }
 
   validation {
-    condition     = alltrue(flatten([for o in var.custom_origins : [for p in [o.custom_origin_config.http_port, o.custom_origin_config.https_port] : contains([80, 443], p) || (p >= 1024 && p <= 65535)]]))
-    error_message = "custom_origin_config http_port and https_port must be 80, 443 or 1024-65535 (the ports CloudFront connects to)."
+    condition     = alltrue(flatten([for o in var.custom_origins : [for p in [try(o.vpc_origin.http_port, o.custom_origin_config.http_port, 80), try(o.vpc_origin.https_port, o.custom_origin_config.https_port, 443)] : contains([80, 443], p) || (p >= 1024 && p <= 65535)]]))
+    error_message = "custom_origin_config (or vpc_origin) http_port and https_port must be 80, 443 or 1024-65535 (the ports CloudFront connects to)."
   }
 
   validation {
-    condition     = alltrue(flatten([for o in var.custom_origins : [for t in [o.custom_origin_config.origin_read_timeout, o.custom_origin_config.origin_keepalive_timeout] : t >= 1 && t <= 180 && floor(t) == t]]))
-    error_message = "custom_origin_config origin_read_timeout and origin_keepalive_timeout must be whole seconds from 1 to 180 (above 60 needs a CloudFront quota increase)."
+    condition     = alltrue(flatten([for o in var.custom_origins : [for t in [try(o.vpc_origin.origin_read_timeout, o.custom_origin_config.origin_read_timeout, 30), try(o.vpc_origin.origin_keepalive_timeout, o.custom_origin_config.origin_keepalive_timeout, 5)] : t >= 1 && t <= 180 && floor(t) == t]]))
+    error_message = "custom_origin_config (or vpc_origin) origin_read_timeout and origin_keepalive_timeout must be whole seconds from 1 to 180 (above 60 needs a CloudFront quota increase)."
+  }
+
+  validation {
+    condition     = alltrue([for o in var.custom_origins : o.custom_origin_config == null || o.vpc_origin == null])
+    error_message = "Each custom origin sets custom_origin_config or vpc_origin, not both (a VPC origin carries its own protocol, ports and timeouts)."
+  }
+
+  # An internal ALB (loadbalancer/app), an NLB (loadbalancer/net) or an EC2
+  # instance: the VPC origin resource types AWS accepts.
+  validation {
+    condition     = alltrue([for o in var.custom_origins : o.vpc_origin == null || can(regex("^arn:aws[a-z-]*:(elasticloadbalancing:[a-z0-9-]+:[0-9]{12}:loadbalancer/(app|net)/[A-Za-z0-9-]{1,32}/[0-9a-f]{16}|ec2:[a-z0-9-]+:[0-9]{12}:instance/i-[0-9a-f]{8,17})$", try(o.vpc_origin.arn, "")))])
+    error_message = "Each vpc_origin arn must be an Application or Network Load Balancer ARN (arn:aws:elasticloadbalancing:<region>:<account>:loadbalancer/app|net/<name>/<id>) or an EC2 instance ARN (arn:aws:ec2:<region>:<account>:instance/i-<id>)."
   }
 
   validation {
@@ -416,6 +447,13 @@ variable "lambda_function_association" {
     condition     = length(var.function_association) == 0 || alltrue([for l in var.lambda_function_association : !startswith(l.event_type, "viewer-")])
     error_message = "CloudFront Functions and Lambda@Edge cannot be combined in viewer events: with any function_association, lambda_function_association may use origin-request and origin-response only."
   }
+
+  # VPC origins do not support Lambda@Edge origin request and origin response
+  # triggers (AWS Developer Guide, "Restrict access with VPC origins").
+  validation {
+    condition     = length([for o in var.custom_origins : o if o.origin_id == var.default_origin_id && o.vpc_origin != null]) == 0 || alltrue([for l in var.lambda_function_association : startswith(l.event_type, "viewer-")])
+    error_message = "The default behavior targets a vpc_origin origin: lambda_function_association may use viewer-request and viewer-response only (VPC origins do not support Lambda@Edge origin triggers)."
+  }
 }
 
 # Ordered cache behaviors: Cloud Posse's ordered_cache, matched in list order
@@ -513,6 +551,13 @@ variable "ordered_cache" {
   validation {
     condition     = alltrue([for c in var.ordered_cache : length(setsubtract(c.cached_methods, c.allowed_methods)) == 0])
     error_message = "Each ordered_cache behavior's cached_methods must be a subset of its allowed_methods."
+  }
+
+  # VPC origins do not support Lambda@Edge origin request and origin response
+  # triggers (AWS Developer Guide, "Restrict access with VPC origins").
+  validation {
+    condition     = alltrue([for c in var.ordered_cache : length([for o in var.custom_origins : o if o.origin_id == c.target_origin_id && o.vpc_origin != null]) == 0 || alltrue([for l in c.lambda_function_association : startswith(l.event_type, "viewer-")])])
+    error_message = "An ordered_cache behavior targeting a vpc_origin origin may use Lambda@Edge on viewer-request and viewer-response only (VPC origins do not support Lambda@Edge origin triggers)."
   }
 }
 

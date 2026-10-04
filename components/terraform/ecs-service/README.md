@@ -23,8 +23,9 @@ commented beside the code.
 - Consumers: `monitoring` reads `.service_name` (with the cluster's `.cluster_name`) for the
   `AWS/ECS` dimensions and `.target_group_arn_suffix` for `AWS/ApplicationELB` ones.
 - `web-application/ecs-service` (`stacks/catalog/templates/web-application.yaml`) is the one
-  instance: behind CloudFront, its listener rule requires the origin-verify header
-  (`load_balancer.http_header`) and the alb's default action is a fixed 403.
+  instance: behind CloudFront through an internal ALB (a CloudFront VPC origin), its listener rule
+  matches every path and the alb's default action is a fixed 403. `load_balancer.http_header`
+  (a secret origin-verify header) is for an internet-facing ALB; the template does not use it.
 
 ## Notes
 
