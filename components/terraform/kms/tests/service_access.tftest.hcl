@@ -36,7 +36,7 @@ run "no_service_statements_by_default" {
   assert {
     condition = length([
       for s in jsondecode(module.kms.key_policy).Statement : s
-      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics", "AllowCloudFront", "AllowLogDeliveryToS3"], try(s.Sid, ""))
+      if contains(["AllowCloudWatchLogs", "AllowLogDelivery", "AllowLogDeliveryDataKeys", "AllowEventBridge", "AllowEventBridgeDescribeKey", "AllowEventBridgeSNSTopics", "AllowEventBridgeSQSQueues", "AllowCloudWatchAlarmsSNSTopics", "AllowCloudTrailEncryptLogs", "AllowCloudTrailDecrypt", "AllowCloudTrailDescribeKey", "AllowSNS", "AllowS3", "AllowAutoScalingEBSUsage", "AllowAutoScalingEBSGrant", "AllowBackupSNSTopics", "AllowCloudFront", "AllowLogDeliveryToS3"], try(s.Sid, ""))
     ]) == 0
     error_message = "Service statements are opt-in."
   }
@@ -152,7 +152,7 @@ run "log_delivery_to_s3_is_scoped_to_this_accounts_delivery_sources" {
   }
 
   assert {
-    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowLogDelivery", "AllowS3", "AllowCloudWatchLogs"], try(s.Sid, ""))]) == 0
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowLogDelivery", "AllowLogDeliveryDataKeys", "AllowS3", "AllowCloudWatchLogs"], try(s.Sid, ""))]) == 0
     error_message = "allow_log_delivery_s3 must not grant the other log or S3 statements."
   }
 }
@@ -178,7 +178,7 @@ run "cloudfront_is_scoped_to_this_accounts_distributions" {
   }
 
   assert {
-    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowS3", "AllowLogDelivery"], try(s.Sid, ""))]) == 0
+    condition     = length([for s in jsondecode(module.kms.key_policy).Statement : s if contains(["AllowS3", "AllowLogDelivery", "AllowLogDeliveryDataKeys"], try(s.Sid, ""))]) == 0
     error_message = "allow_cloudfront must not grant other services anything."
   }
 }
