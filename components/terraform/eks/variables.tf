@@ -239,7 +239,7 @@ variable "cluster_log_retention_period" {
 
 variable "enable_cluster_protection" {
   type        = bool
-  description = "Enable EKS deletion protection when tags.Environment is prod or production"
+  description = "Enable EKS deletion protection when tags.Stage is prod or production"
   default     = true
 }
 

@@ -560,10 +560,12 @@ variable "allow_http_egress" {
   description = "Allow HTTP (port 80) egress for package downloads. Not recommended for production."
   default     = false
 
+  # Keyed on the Stage tag (settings.context.stage): Environment is the
+  # stack's environment, a region code under the Q4 names, not the tier.
   validation {
     condition = (
       !var.allow_http_egress ||
-      !contains(["prod", "production"], lower(lookup(var.tags, "Environment", "dev")))
+      !contains(["prod", "production"], lower(lookup(var.tags, "Stage", "dev")))
     )
     error_message = "HTTP egress is not allowed in production environments. Use HTTPS (port 443) only."
   }

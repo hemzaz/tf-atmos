@@ -108,8 +108,10 @@ locals {
   common_env_vars = concat(
     [
       {
+        # The tier (var.environment, settings.context.stage), not
+        # tags.Environment, which becomes a region code under the Q4 names.
         name  = "ENVIRONMENT"
-        value = var.tags["Environment"]
+        value = var.environment
       },
       {
         name  = "LOG_LEVEL"

@@ -72,6 +72,10 @@ variables {
   domain_name             = "example.com"
   acknowledge_unsupported = true
   kms_key_arn             = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+  tags = {
+    Tenant      = "fnx"
+    Environment = "ue1"
+  }
 }
 
 run "redis_auth_token_is_generated_and_written_write_only" {
@@ -156,4 +160,34 @@ run "rejects_non_arn_kms_key" {
   }
 
   expect_failures = [var.kms_key_arn]
+}
+
+# S3 names are global: the buckets carry the full id, tenant-environment-stage.
+run "storage_buckets_use_the_full_id" {
+  command = plan
+
+  assert {
+    condition     = aws_s3_bucket.idp_storage["artifacts"].bucket == "fnx-ue1-dev-idp-artifacts"
+    error_message = "Buckets are <Tenant>-<Environment>-<environment>-idp-<purpose>."
+  }
+}
+
+run "rejects_tags_without_environment" {
+  command = plan
+
+  variables {
+    tags = { Tenant = "fnx" }
+  }
+
+  expect_failures = [var.tags]
+}
+
+run "rejects_a_bucket_name_over_63_characters" {
+  command = plan
+
+  variables {
+    tags = { Tenant = "fnx", Environment = "a-very-long-environment-name-that-overflows-s3" }
+  }
+
+  expect_failures = [var.tags]
 }
