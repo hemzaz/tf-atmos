@@ -7,14 +7,18 @@ object-key patterns, an exact pair per stack, "*/<stack>/*" and "*/<stack>-*"
 (stacks/catalog/backend/defaults.yaml). A state key is
 "<workspace_key_prefix>/<workspace>/<backend.key>" (+ ".tflock"). This evaluates
 the deployed backend component's access_roles patterns against every key, with
-S3's semantics ("*" spans "/"), and requires, for every instance with
-backend_type s3:
+IAM's resource-ARN wildcards ("*" any run of characters, "/" included; "?" any
+one character), and requires, for every instance with backend_type s3:
   - each of its state objects matches some role, including the role its
     backend assumes (backend.assume_role.role_arn);
   - every role that matches one of its stage's state objects matches all of them;
   - stages whose backends assume the same role (dev and staging) are matched by
     the same roles, and stages that assume different roles share no role;
-  - every role matches some state object (a role reaching nothing has lost its stage).
+  - every role matches some state object (a role reaching nothing has lost its stage);
+  - every pattern matches some state object, so a pair left behind by a rename or
+    a removed stack fails. A "*/<stack>-*" pattern (a stack's derived
+    instances) may match nothing while its "*/<stack>/*" companion on the same
+    role matches: most stacks have no derived instance.
 This holds whatever the stack names look like, so it does not depend on where
 the stage sits in name_template. Stage fixtures is skipped: its stacks are
 never deployed and have no access role. Layout checks stay for every instance:
@@ -62,9 +66,31 @@ def backend_instances(stacks: dict) -> list[dict]:
     ]
 
 
+WILDCARDS = {"*": ".*", "?": "."}
+
+
 def pattern_matches(pattern: str, key: str) -> bool:
-    """S3 object-key pattern match: "*" matches any run of characters, "/" included."""
-    return re.fullmatch(".*".join(map(re.escape, pattern.split("*"))), key, re.DOTALL) is not None
+    """IAM resource-ARN wildcard match: "*" any run of characters ("/" included), "?" any one."""
+    regex = "".join(WILDCARDS.get(char) or re.escape(char) for char in pattern)
+    return re.fullmatch(regex, key, re.DOTALL) is not None
+
+
+def dead_patterns(roles: dict, live: set) -> list[str]:
+    """Patterns that match no state object, except a live stack's "-*" companion."""
+    errors = []
+    for name in sorted(roles):
+        patterns = roles[name].get("object_key_patterns") or []
+        for pattern in patterns:
+            if (name, pattern) in live:
+                continue
+            companion = pattern[:-2] + "/*" if pattern.endswith("-*") else None
+            if companion in patterns and (name, companion) in live:
+                continue
+            errors.append(
+                f"access role {name!r} pattern {pattern!r} matches no state object "
+                "(a stack renamed or removed?)"
+            )
+    return errors
 
 
 def assumed_role_name(instance: dict) -> Optional[str]:
@@ -102,11 +128,14 @@ def check_roles(objects: list[tuple], roles: dict) -> list[str]:
     matched_by_stage: dict = {}  # stage -> every role matching one of its objects
     assumed_by_stage: dict = {}  # stage -> the roles its backends assume (its tier)
     matched = []
+    live: set = set()  # (role, pattern) pairs that match some state object
     for stage, where, obj, role_name in objects:
-        hits = frozenset(
-            name for name, role in roles.items()
-            if any(pattern_matches(p, obj) for p in role.get("object_key_patterns") or [])
-        )
+        pairs = {
+            (name, p) for name, role in roles.items()
+            for p in role.get("object_key_patterns") or [] if pattern_matches(p, obj)
+        }
+        live |= pairs
+        hits = frozenset(name for name, _ in pairs)
         matched.append((stage, where, obj, hits))
         matched_by_stage.setdefault(stage, set()).update(hits)
         assumed_by_stage.setdefault(stage, set()).add(names.get(role_name, role_name))
@@ -143,6 +172,7 @@ def check_roles(objects: list[tuple], roles: dict) -> list[str]:
     for name in sorted(roles):
         if not any(name in hits for hits in matched_by_stage.values()):
             errors.append(f"access role {name!r} matches no state object")
+    errors += dead_patterns(roles, live)
     # The state object and its lock repeat the per-instance role error.
     return list(dict.fromkeys(errors))
 

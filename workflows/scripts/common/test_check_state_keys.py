@@ -99,6 +99,19 @@ class CheckStateKeysTest(unittest.TestCase):
         self.assertFalse(check_state_keys.pattern_matches("*/fnx-prod-production/*", "vpc/fnx-prod-productionx/t"))
         self.assertFalse(check_state_keys.pattern_matches("*/fnx.prod/*", "vpc/fnxXprod/t"))
 
+    def test_question_mark_is_one_character(self):
+        # IAM resource ARNs: "?" matches exactly one character, "/" included
+        self.assertTrue(check_state_keys.pattern_matches("*/fnx-ue?-prod/*", "vpc/fnx-ue1-prod/t"))
+        self.assertTrue(check_state_keys.pattern_matches("vpc?fnx/*", "vpc/fnx/t"))
+        self.assertFalse(check_state_keys.pattern_matches("*/fnx-ue?-prod/*", "vpc/fnx-ue-prod/t"))
+        self.assertFalse(check_state_keys.pattern_matches("*/fnx-ue?-prod/*", "vpc/fnx-ue12-prod/t"))
+
+    def test_question_mark_spanning_stages_fails(self):
+        # "fnx-?ev-*"-style patterns are evaluated, not taken literally
+        roles = access_roles(read=pair("fnx-dev-testenv-01") + pair("fnx-staging-staging-01") + ["*/fnx-?ore-root/*"])
+        self.assert_has(stacks_with(roles=roles, **{"vpc/main": prod()}),
+                        "['read'] match state of stages 'core' and 'dev', which assume different roles")
+
     # The stage split
 
     def test_stack_workspace_passes(self):
@@ -171,7 +184,29 @@ class CheckStateKeysTest(unittest.TestCase):
     def test_role_reaching_no_state_fails(self):
         roles = access_roles(prod_read=["*/fnx-prod-prod/*"])
         self.assert_errors(stacks_with(roles=roles, **{"vpc/main": prod()}),
-                           "access role 'prod_read' matches no state object")
+                           "access role 'prod_read' matches no state object",
+                           "access role 'prod_read' pattern '*/fnx-prod-prod/*' matches no state object")
+
+    def test_dead_pair_of_a_renamed_stack_fails(self):
+        # The old name's pair left beside the new one after a rename
+        roles = access_roles(non_prod=("fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-dev-old"))
+        self.assert_errors(
+            stacks_with(roles=roles, **{"vpc/main": prod()}),
+            "access role 'read' pattern '*/fnx-dev-old/*' matches no state object",
+            "access role 'read' pattern '*/fnx-dev-old-*' matches no state object",
+            "access role 'write' pattern '*/fnx-dev-old/*' matches no state object",
+            "access role 'write' pattern '*/fnx-dev-old-*' matches no state object",
+        )
+
+    def test_derived_pattern_of_a_live_stack_may_match_nothing(self):
+        # No derived instance anywhere: every "*/<stack>-*" matches nothing, beside its live "/*"
+        self.assert_errors(stacks_with(**{"vpc/main": prod()}))
+
+    def test_lone_derived_pattern_matching_nothing_fails(self):
+        roles = access_roles(prod_read=pair("fnx-prod-production") + ["*/fnx-prod-other-*"],
+                             prod_write=pair("fnx-prod-production") + ["*/fnx-prod-other-*"])
+        self.assert_has(stacks_with(roles=roles, **{"vpc/main": prod()}),
+                        "access role 'prod_read' pattern '*/fnx-prod-other-*' matches no state object")
 
     def test_own_role_outside_its_patterns_fails(self):
         # The non-prod write role lost staging: staging's apply could not write its own state

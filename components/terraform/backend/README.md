@@ -40,9 +40,11 @@ instances), listed on its stage's roles in `stacks/catalog/backend/defaults.yaml
 - A read-only plan cannot create a workspace: a CI plan of a never-applied instance fails at
   `workspace new` until its first deploy.
 - A new stack must get its pattern pair on its stage's roles (a new stage, its own roles) before its
-  first `init`. `check-state-keys.py` evaluates the patterns against every state key and fails a
-  key no role matches, or one matched by another stage's role. The pairs don't depend on where the
-  stage sits in the stack name.
+  first `init`. `check-state-keys.py` evaluates the patterns against every state key, with IAM's
+  `*` and `?` wildcards, and fails a key no role matches, or one matched by another stage's role.
+  It also fails a pattern that matches no state key, such as a pair left behind by a renamed or
+  removed stack; a `*/<stack>-*` pattern is exempt while its `*/<stack>/*` pattern matches. The
+  pairs don't depend on where the stage sits in the stack name.
 - Every `allowed_principal_arns` entry must name the account its role lives in; the committed ARNs
   use placeholder account IDs (see [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#first-deploy-inputs)).
 - All three buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.
