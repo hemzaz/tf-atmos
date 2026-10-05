@@ -78,7 +78,7 @@ workflows:
         default: false
       - name: guard-compute
         type: shell
-        command: test "{{ .steps.confirm_compute.value }}" = "true" || { echo "Deployment cancelled after the first phase."; exit 1; }
+        command: test "{{ .steps.confirm_compute.value }}" = "true" || { echo "Deployment cancelled after the second phase."; exit 1; }
       - name: deploy-compute
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
