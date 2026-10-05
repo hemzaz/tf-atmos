@@ -282,8 +282,10 @@ resource "aws_lambda_permission" "http_route_invoke" {
   # them survive replace(" ", "-")/replace("/", "_") -- so a short sha1 of
   # the full key is appended instead of trying to sanitise every character
   # HTTP API route keys allow; it also keeps two keys that would normalise
-  # to the same string (e.g. "GET /a}" and "GET /a{") distinct.
-  statement_id  = "AllowHttpRouteInvoke-${substr(sha1(each.key), 0, 16)}"
+  # to the same string (e.g. "GET /a}" and "GET /a{") distinct. The API's name
+  # is hashed in too, so two APIs routing one function on the same route_key
+  # write different statement_ids.
+  statement_id  = "AllowHttpRouteInvoke-${substr(sha1("${local.name_prefix}|${each.key}"), 0, 16)}"
   action        = "lambda:InvokeFunction"
   function_name = each.value.lambda_function_name
   principal     = "apigateway.amazonaws.com"

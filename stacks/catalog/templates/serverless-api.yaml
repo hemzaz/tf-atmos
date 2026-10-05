@@ -80,8 +80,8 @@
 #          powertools_layer_arn: arn:aws:lambda:<region>:017000801446:layer:<name>:<version>
 #    A missing key fails every describe/plan of the stack with its name
 #    (gomplate `required`); `atmos validate stacks` does not render templates.
-#    settings.environment.account_id (set by every fnx stage _defaults) names
-#    the CloudFront log bucket in its own bucket policy.
+#    settings.environment.account_id (set by every fnx stage _defaults)
+#    scopes the CloudFront log bucket's delivery policy to this account.
 # 5. That dns instance manages app_domain_name's PUBLIC, delegated zone: ACM
 #    validates the certificates there, and the API's custom domain and
 #    CloudFront write their alias records into it.
@@ -350,9 +350,11 @@ components:
     # =========================================================================
     # STATIC ASSETS, UPLOADS AND CDN LOGS (S3, storage layer)
     # =========================================================================
-    # Each bucket is <Environment>-<name>-<account id>, SSE-KMS on kms/main
-    # with versioning (s3/defaults); the component blocks public access.
-    # <name> carries the tenant and stage: bucket names are global.
+    # Bucket names are global, so each starts with the full id
+    # (bucket_name: <tenant>-<environment>-<stage>-api-<purpose>, as
+    # batch-processing's); name is still required by the s3 component. SSE-KMS
+    # on kms/main with versioning (s3/defaults); the component blocks public
+    # access.
     #
     # Two buckets, not one with prefixes: origin access control grants
     # CloudFront the whole origin bucket (allow_cloudfront_oac_read, as Cloud
@@ -371,7 +373,8 @@ components:
         inherits:
           - s3/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-assets"
+        name: "api-assets"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-assets"
         allow_cloudfront_oac_read: true
         lifecycle_configuration_rules:
           - id: "noncurrent-versions"
@@ -392,7 +395,8 @@ components:
         inherits:
           - s3/defaults
       vars:
-        name: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-uploads"
+        name: "api-uploads"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-uploads"
         cors_configuration:
           - allowed_headers:
               - "*"
@@ -413,8 +417,11 @@ components:
             transition:
               - days: 30
                 storage_class: "STANDARD_IA"
+              # Instant Retrieval: uploads are read back through presigned
+              # GETs, which a GLACIER (Flexible Retrieval) object refuses with
+              # InvalidObjectState until restored.
               - days: 90
-                storage_class: "GLACIER"
+                storage_class: "GLACIER_IR"
           - id: "expire-temp"
             filter_and:
               prefix: "temp/"
@@ -440,12 +447,12 @@ components:
         inherits:
           - s3/defaults
       vars:
-        # <Environment>-<tenant>-<stage>-api-cdn-logs-<account id>. The s3 component takes
-        # <Environment> from tags.Environment; the bucket policy below uses
-        # settings.context.environment, which is the same value only because
-        # stacks/orgs/fnx/_defaults.yaml sets tags.Environment from it. Change
-        # both together (vars are not reliably resolved at template time).
-        name: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-cdn-logs"
+        # <tenant>-<environment>-<stage>-api-cdn-logs. The bucket policy
+        # below names the same bucket from the same settings.context values;
+        # change both together (vars are not reliably resolved at template
+        # time).
+        name: "api-cdn-logs"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs"
         lifecycle_configuration_rules:
           - id: "expire-logs"
             abort_incomplete_multipart_upload_days: 7
@@ -463,7 +470,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:PutObject",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-cdn-logs-{{ .settings.environment.account_id }}/*",
+                  "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs/*",
                   "Condition": {
                     "StringEquals": {
                       "s3:x-amz-acl": "bucket-owner-full-control",
@@ -477,7 +484,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:GetBucketAcl",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-cdn-logs-{{ .settings.environment.account_id }}",
+                  "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs",
                   "Condition": {
                     "StringEquals": {"aws:SourceAccount": "{{ .settings.environment.account_id }}"},
                     "ArnLike": {"aws:SourceArn": "arn:aws:logs:us-east-1:{{ .settings.environment.account_id }}:delivery-source:*"}
