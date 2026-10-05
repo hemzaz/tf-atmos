@@ -28,7 +28,7 @@ workflows:
       - name: template
         type: choose
         prompt: Template to deploy
-        options: [web-application, microservices, serverless-api, data-pipeline, batch-processing]
+        options: [web-application, microservices, serverless-api, data-pipeline, batch-processing, idp-platform]
       - name: validate
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos
         # step, and `atmos validate`/`list stacks` reject that flag.
@@ -99,6 +99,15 @@ workflows:
         type: atmos
         command: terraform deploy --query '.atmos_component | test("^batch-processing/")'
 
+  deploy-idp-platform:
+    description: Quick deploy of the idp-platform template (catalog/templates/idp-platform)
+    steps:
+      - *fixtures-stages
+      - *refuse-fixtures
+      - name: deploy
+        type: atmos
+        command: terraform deploy --query '.atmos_component | test("^idp-platform/")'
+
   deploy-parallel:
     description: Deploy a template running independent components concurrently
     steps:
@@ -107,7 +116,7 @@ workflows:
       - name: template
         type: choose
         prompt: Template to deploy
-        options: [web-application, microservices, serverless-api, data-pipeline, batch-processing]
+        options: [web-application, microservices, serverless-api, data-pipeline, batch-processing, idp-platform]
       - name: deploy
         type: atmos
         command: terraform deploy --max-concurrency 4 --query '.atmos_component | test("^{{ .steps.template.value }}/")'
