@@ -33,7 +33,8 @@ its `schemas`/`number_schemas` are not ported).
   account: fine for dev, not for real sign-ups. `DEVELOPER` sends through the verified SES
   identity `source_arn` (validated), whose sending authorization policy must allow
   `cognito-idp.amazonaws.com`, and whose account must be out of the SES sandbox to reach
-  unverified recipients. `""` counts as unset.
+  unverified recipients. `""` counts as unset. `from_email_address` with `COGNITO_DEFAULT` is
+  rejected (stricter than Cloud Posse, which passes it to AWS, where it has no effect).
 - `string_schemas` attributes cannot be changed or removed once the pool exists (AWS); adding one
   is in place. Name custom attributes without `custom:`; only standard attributes can be
   `required` (validated).
