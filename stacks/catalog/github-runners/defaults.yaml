@@ -1,0 +1,40 @@
+---
+##################################################
+# Catalog Configuration for self-hosted GitHub Actions runners
+##################################################
+# Ephemeral EC2 runners in a stack's VPC (the Cloud Posse aws-github-runners
+# model), so CI reaches the private EKS API. One instance per workload-account
+# VPC; instances inherit this base and set vpc_id / subnet_ids (the vpc
+# instance's .vpc_id / .private_subnet_ids) and declare that vpc instance and
+# the stack's github-action-token-rotator instance in dependencies.components.
+#
+# runner_labels is the stack's full id, from context (never a literal stack
+# name), which CI's self-hosted jobs ask for: runs-on: [self-hosted, <full id>].
+# github_scope is this repository: repository runners, since its owner is a
+# user account, which has no organization runners.
+
+components:
+  terraform:
+    github-runners/defaults:
+      metadata:
+        component: github-runners
+        type: abstract
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        github_scope: hemzaz/tf-atmos
+        runner_labels:
+          - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}"
+        # Bump both together, from the release notes' linux-x64 SHA.
+        runner_version: "2.337.0"
+        runner_sha256: "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
+        registration_token_parameter_name: /github/runners/registration-token
+        kms_key_arn: !terraform.state kms/main .key_arn
+        ephemeral: true
+        instance_type: t3.medium
+        min_size: 0
+        max_size: 4
+        tags:
+          Component: "GitHubRunners"
