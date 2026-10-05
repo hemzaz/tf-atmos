@@ -225,6 +225,19 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-ci-state-roles.py < "$stacks_json"
+      # The stack templates leave the prod values of their rds and elasticache
+      # instances to the importing stack; this fails a stage prod instance
+      # without them (deletion protection, Multi-AZ/failover, final snapshot,
+      # 7+ days of backups or snapshots). Also run by validate-all.
+      - name: check-prod-protection
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_prod_protection.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-prod-protection.py components/terraform < "$stacks_json"
       # First-deploy preflight, WARN-ONLY here: the repo holds placeholders
       # (account and organization IDs, example domains and alert addresses,
       # empty EKS admin roles...) until the first deploy, so lint prints each
