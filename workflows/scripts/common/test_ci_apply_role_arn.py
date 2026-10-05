@@ -17,7 +17,7 @@ ci_apply_role_arn = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci_apply_role_arn)
 
 
-def ci(account="123456789012", prefix="fnx-prod-production-ci", **overrides):
+def ci(account="123456789012", prefix="fnx-production-prod-ci", **overrides):
     variables = {"github_oidc_enabled": True, "ci_apply_role_enabled": True, "ci_role_name_prefix": prefix}
     variables.update(overrides)
     return {"settings": {"environment": {"account_id": account}}, "vars": variables}
@@ -28,7 +28,7 @@ class ApplyRoleArnTest(unittest.TestCase):
         # The name the backend's prod_write role trusts (stacks/orgs/fnx/core/us-east-1/root.yaml)
         self.assertEqual(
             ci_apply_role_arn.role_arn(ci()),
-            "arn:aws:iam::123456789012:role/fnx-prod-production-ci-apply",
+            "arn:aws:iam::123456789012:role/fnx-production-prod-ci-apply",
         )
         self.assertEqual(ci_apply_role_arn.role_arn(ci(), "apply"), ci_apply_role_arn.role_arn(ci()))
 
@@ -48,14 +48,14 @@ class PlanRoleArnTest(unittest.TestCase):
     def test_arn_is_the_stack_accounts_plan_role(self):
         # Each stack's own account and prefix: staging no longer plans with dev's role.
         self.assertEqual(
-            ci_apply_role_arn.role_arn(ci(account="210987654321", prefix="fnx-staging-staging-01-ci"), "plan"),
-            "arn:aws:iam::210987654321:role/fnx-staging-staging-01-ci-plan",
+            ci_apply_role_arn.role_arn(ci(account="210987654321", prefix="fnx-staging-01-staging-ci"), "plan"),
+            "arn:aws:iam::210987654321:role/fnx-staging-01-staging-ci-plan",
         )
 
     def test_plan_role_does_not_need_the_apply_role(self):
         self.assertEqual(
             ci_apply_role_arn.role_arn(ci(ci_apply_role_enabled=False), "plan"),
-            "arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan",
+            "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan",
         )
 
     def test_disabled_oidc_fails(self):
@@ -94,7 +94,7 @@ class MainTest(unittest.TestCase):
     def test_resolved_role_is_printed(self):
         rc, out = self.run_main(lambda cmd: json.dumps(ci(ci_apply_role_enabled=False)), "--kind", "plan")
         self.assertEqual(rc, 0)
-        self.assertEqual(out, "fnx-core-root: arn:aws:iam::123456789012:role/fnx-prod-production-ci-plan\n")
+        self.assertEqual(out, "fnx-core-root: arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan\n")
 
 
 if __name__ == "__main__":

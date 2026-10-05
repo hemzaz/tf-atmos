@@ -74,8 +74,8 @@ components:
         account_id: "{{ .settings.environment.account_id }}"
 
         create_cross_account_role: true
-        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci-exec"
-        policy_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci-exec"
+        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-ci-exec"
+        policy_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-ci-exec"
 
         # Lifecycle tier, not the environment instance name: the component
         # validates dev/development/staging/stage/prod/production.

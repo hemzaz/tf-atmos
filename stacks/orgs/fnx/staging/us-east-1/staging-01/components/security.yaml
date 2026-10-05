@@ -69,7 +69,7 @@ components:
         # Roles become <prefix>-plan and <prefix>-apply. Naming convention from
         # catalog/iam/defaults.yaml, so context.environment (the instance name)
         # is the right key here -- unlike the `environment` variable, a tier.
-        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci"
+        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-ci"
         # Owner decision: the APPLY role is enabled; it is terraform-cd.yml's
         # deploy role (the ARN is derived from this instance) and the EKS
         # ClusterAdmin access entry (catalog/eks/defaults.yaml). Its trust is

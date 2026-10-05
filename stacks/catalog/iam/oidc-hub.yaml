@@ -95,7 +95,7 @@ components:
         github_oidc_default_branch: "master"
 
         # Roles become <prefix>-plan and <prefix>-apply. Limit is 58 characters.
-        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-ci"
+        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-ci"
 
         # MUST be overridden for hub-and-spoke. The component default is
         # ReadOnlyAccess, which reads the HUB account -- useless for planning a

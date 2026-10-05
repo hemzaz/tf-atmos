@@ -213,6 +213,18 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
+      # backend/main trusts each stack's CI roles as literal ARNs; this fails
+      # an iam/ci plan or apply role (<ci_role_name_prefix>-plan/-apply) its
+      # stage's backend read or write role does not trust. Also run by validate-all.
+      - name: check-ci-state-roles
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_ci_state_roles.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-ci-state-roles.py < "$stacks_json"
       # First-deploy preflight, WARN-ONLY here: the repo holds placeholders
       # (account and organization IDs, example domains and alert addresses,
       # empty EKS admin roles...) until the first deploy, so lint prints each

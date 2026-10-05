@@ -73,8 +73,8 @@ variables {
     read = {
       role_name = "fnx-terraform-backend-read-role"
       allowed_principal_arns = [
-        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan",
-        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-plan",
+        "arn:aws:iam::222222222222:role/fnx-testenv-01-dev-ci-plan",
+        "arn:aws:iam::333333333333:role/fnx-staging-01-staging-ci-plan",
       ]
       write_enabled       = false
       object_key_patterns = ["*/fnx-dev-testenv-01/*", "*/fnx-dev-testenv-01-*", "*/fnx-staging-staging-01/*", "*/fnx-staging-staging-01-*"]
@@ -82,14 +82,14 @@ variables {
     prod_read = {
       role_name              = "fnx-terraform-backend-prod-read-role"
       write_enabled          = false
-      allowed_principal_arns = ["arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan"]
+      allowed_principal_arns = ["arn:aws:iam::444444444444:role/fnx-production-prod-ci-plan"]
       object_key_patterns    = ["*/fnx-prod-production/*", "*/fnx-prod-production-*"]
     }
     write = {
       role_name = "fnx-terraform-backend-role"
       allowed_principal_arns = [
-        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-apply",
-        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-apply",
+        "arn:aws:iam::222222222222:role/fnx-testenv-01-dev-ci-apply",
+        "arn:aws:iam::333333333333:role/fnx-staging-01-staging-ci-apply",
       ]
       write_enabled       = true
       object_key_patterns = ["*/fnx-dev-testenv-01/*", "*/fnx-dev-testenv-01-*", "*/fnx-staging-staging-01/*", "*/fnx-staging-staging-01-*"]
@@ -97,7 +97,7 @@ variables {
     prod_write = {
       role_name              = "fnx-terraform-backend-prod-role"
       write_enabled          = true
-      allowed_principal_arns = ["arn:aws:iam::444444444444:role/fnx-prod-production-ci-apply"]
+      allowed_principal_arns = ["arn:aws:iam::444444444444:role/fnx-production-prod-ci-apply"]
       object_key_patterns    = ["*/fnx-prod-production/*", "*/fnx-prod-production-*"]
     }
     core_write = {
@@ -173,21 +173,21 @@ run "trust_is_limited_to_named_principals_and_the_caller" {
     condition = (
       local.access_role_principal_arns["read"] == tolist([
         "arn:aws:iam::111111111111:role/admin",
-        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan",
-        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-plan",
+        "arn:aws:iam::222222222222:role/fnx-testenv-01-dev-ci-plan",
+        "arn:aws:iam::333333333333:role/fnx-staging-01-staging-ci-plan",
       ])
       && local.access_role_principal_arns["write"] == tolist([
         "arn:aws:iam::111111111111:role/admin",
-        "arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-apply",
-        "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-apply",
+        "arn:aws:iam::222222222222:role/fnx-testenv-01-dev-ci-apply",
+        "arn:aws:iam::333333333333:role/fnx-staging-01-staging-ci-apply",
       ])
       && local.access_role_principal_arns["prod_read"] == tolist([
         "arn:aws:iam::111111111111:role/admin",
-        "arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan",
+        "arn:aws:iam::444444444444:role/fnx-production-prod-ci-plan",
       ])
       && local.access_role_principal_arns["prod_write"] == tolist([
         "arn:aws:iam::111111111111:role/admin",
-        "arn:aws:iam::444444444444:role/fnx-prod-production-ci-apply",
+        "arn:aws:iam::444444444444:role/fnx-production-prod-ci-apply",
       ])
       && local.access_role_principal_arns["core_write"] == tolist(["arn:aws:iam::111111111111:role/admin"])
     )
@@ -226,13 +226,13 @@ run "root_user_caller_is_not_trusted" {
       read = {
         role_name              = "fnx-terraform-backend-read-role"
         write_enabled          = false
-        allowed_principal_arns = ["arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan"]
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/fnx-testenv-01-dev-ci-plan"]
       }
     }
   }
 
   assert {
-    condition     = local.access_role_principal_arns["read"] == tolist(["arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan"])
+    condition     = local.access_role_principal_arns["read"] == tolist(["arn:aws:iam::222222222222:role/fnx-testenv-01-dev-ci-plan"])
     error_message = "A root-user caller must never be added to a role's trust."
   }
 }
@@ -564,7 +564,7 @@ run "rejects_empty_object_key_patterns" {
       read = {
         role_name              = "fnx-terraform-backend-read-role"
         write_enabled          = false
-        allowed_principal_arns = ["arn:aws:iam::222222222222:role/fnx-dev-testenv-01-ci-plan"]
+        allowed_principal_arns = ["arn:aws:iam::222222222222:role/fnx-testenv-01-dev-ci-plan"]
         object_key_patterns    = []
       }
     }

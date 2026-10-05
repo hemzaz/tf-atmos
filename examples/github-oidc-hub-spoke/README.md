@@ -3,7 +3,7 @@
 CI for several AWS accounts from **one** OIDC provider. An account can hold only one provider for
 `token.actions.githubusercontent.com`, and a provider is account-local, so the provider and both
 CI roles (`<prefix>-ci-plan`, `<prefix>-ci-apply`) live in a hub account and reach each workload
-account's `<tenant>-<account>-<environment>-ci-exec` role with `sts:AssumeRole`.
+account's `<tenant>-<environment>-<stage>-ci-exec` role with `sts:AssumeRole`.
 
 Templates, with usage in their header comments: `stacks/catalog/iam/oidc-hub.yaml` and
 `stacks/catalog/iam/oidc-spoke.yaml`. Both are abstract: a stack must `import` the file **and**
