@@ -38,10 +38,11 @@ workflows:
       - name: check-foundation
         type: atmos
         command: terraform output vpc/main vpc_id
-      # Three plan/confirm/apply phases. A phase plans every instance before it
-      # applies any, and apigateway reads cognito/main .user_pool_arn and
-      # lambda/data-processor through !terraform.state, so Cognito and Lambda are
-      # applied in the first phase and API Gateway is planned only after that.
+      # Four plan/confirm/apply phases. A phase plans every instance before it
+      # applies any. A Lambda may read the user pool, so Cognito is applied in
+      # the first phase and Lambda and ECS in the second; apigateway reads
+      # cognito/main .user_pool_arn and lambda/data-processor through
+      # !terraform.state, so API Gateway is planned only after that.
       # monitoring/main and monitoring/data in turn read apigateway/main and
       # apigateway/data (.api_name, .rest_api_stage_name), so monitoring is its
       # own phase, planned only after API Gateway is applied - the same
@@ -51,11 +52,10 @@ workflows:
         type: atmos
         command: >-
           terraform plan --log-order grouped --query '.metadata.component == "secretsmanager"
-          or .metadata.component == "external-secrets" or .metadata.component == "cognito"
-          or .metadata.component == "lambda" or .metadata.component == "ecs"'
+          or .metadata.component == "external-secrets" or .metadata.component == "cognito"'
       - name: confirm_prerequisites
         type: confirm
-        prompt: Apply the secrets, Cognito, Lambda and ECS plans above?
+        prompt: Apply the secrets and Cognito plans above?
         default: false
       - name: guard-prerequisites
         type: shell
@@ -66,6 +66,19 @@ workflows:
       - name: deploy-identity
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "cognito"'
+      # Lambdas read the user pool (serverless-api/lambda-api-handler's
+      # USER_POOL_ID), so they are planned only after Cognito is applied, as in
+      # deploy-full-stack (security before compute).
+      - name: plan-compute
+        type: atmos
+        command: terraform plan --log-order grouped --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
+      - name: confirm_compute
+        type: confirm
+        prompt: Apply the Lambda and ECS plans above?
+        default: false
+      - name: guard-compute
+        type: shell
+        command: test "{{ .steps.confirm_compute.value }}" = "true" || { echo "Deployment cancelled after the second phase."; exit 1; }
       - name: deploy-compute
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "lambda" or .metadata.component == "ecs"'
@@ -78,7 +91,7 @@ workflows:
         default: false
       - name: guard-api
         type: shell
-        command: test "{{ .steps.confirm_api.value }}" = "true" || { echo "Deployment cancelled after the second phase."; exit 1; }
+        command: test "{{ .steps.confirm_api.value }}" = "true" || { echo "Deployment cancelled after the third phase."; exit 1; }
       - name: deploy-api
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "apigateway"'
@@ -91,7 +104,7 @@ workflows:
         default: false
       - name: guard-monitoring
         type: shell
-        command: test "{{ .steps.confirm_monitoring.value }}" = "true" || { echo "Deployment cancelled after the third phase."; exit 1; }
+        command: test "{{ .steps.confirm_monitoring.value }}" = "true" || { echo "Deployment cancelled after the fourth phase."; exit 1; }
       - name: deploy-monitoring
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "monitoring"'

@@ -28,6 +28,9 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
 - `api_resources` hang off the API root unless `parent_id` names another resource; methods and
   integrations still address them as `"/<path_part>"`, and every integration needs a matching
   method. The cache `method_path` uses the resource's full path (`v1/products/GET`).
+- A `COGNITO_USER_POOLS` method without `authorization_scopes` accepts ID tokens only; with them
+  it accepts access tokens carrying one of the scopes (a `client_credentials` client's token,
+  `<resource server identifier>/<scope>`), and no longer ID tokens.
 - `cors_configuration` and `http_routes` apply to HTTP APIs only; a REST API ignores them silently
   (staging and prod set CORS on REST instances, a known gap).
 - `api_name` output is null for an HTTP API.

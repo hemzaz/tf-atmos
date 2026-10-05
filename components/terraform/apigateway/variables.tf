@@ -305,6 +305,11 @@ variable "api_methods" {
     authorizer_id      = optional(string)
     api_key_required   = optional(bool, false)
     request_parameters = optional(map(bool), {})
+    # OAuth scopes a COGNITO_USER_POOLS method accepts (aws_api_gateway_method
+    # authorization_scopes). Empty: API Gateway takes the caller's ID token.
+    # Set: it takes an access token carrying at least one of them, as a
+    # client_credentials client's token is.
+    authorization_scopes = optional(list(string), [])
   }))
   description = "List of methods for the REST API. Addressed by resource_path (\"/\" for the API root, \"/<path_part>\" for an api_resources entry) because a stack cannot know this API's resource IDs before apply. Every method needs a matching api_integrations entry with the same resource_path and http_method."
   default     = []
@@ -366,6 +371,11 @@ variable "api_methods" {
       if m.authorization == "COGNITO_USER_POOLS"
     ])
     error_message = "A method with authorization COGNITO_USER_POOLS needs either its own authorizer_id or authorizer_type set to COGNITO_USER_POOLS on this component."
+  }
+
+  validation {
+    condition     = alltrue([for m in var.api_methods : length(m.authorization_scopes) == 0 || m.authorization == "COGNITO_USER_POOLS"])
+    error_message = "api_methods[*].authorization_scopes only applies to a method with authorization COGNITO_USER_POOLS."
   }
 
   validation {

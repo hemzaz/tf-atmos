@@ -209,6 +209,16 @@ SYNTH = [
     (r'^instance_name$',              'example'),
     (r'^(instance|primary_endpoint)_address$', 'example.abcdefghijkl.us-east-1.rds.amazonaws.com'),
     (r'^(password|auth_token)_secret_arn$', 'arn:aws:secretsmanager:us-east-1:123456789012:secret:example-secret-AbCdEf'),
+    # Output names read by stacks/catalog/templates/serverless-api.yaml: the
+    # cognito pool and its clients, the assets bucket's OAC origin name,
+    # apigateway's REST stage and real name, and lambda's invoke ARN.
+    (r'^user_pool_id$',               'us-east-1_EXAMPLE1'),
+    (r'^user_pool_arn$',              'arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_EXAMPLE1'),
+    (r'^client_ids$',                 'example0client0id0000000000'),
+    (r'^bucket_regional_domain_name$', 'example-bucket-123456789012.s3.us-east-1.amazonaws.com'),
+    (r'^rest_api_stage_arn$',         'arn:aws:apigateway:us-east-1::/restapis/a1b2c3d4e5/stages/example'),
+    (r'^api_name$',                   'example-api'),
+    (r'^function_invoke_arn$',        'arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:example-function/invocations'),
 ]
 
 # Only offered when the caller actually managed to generate one. An empty entry

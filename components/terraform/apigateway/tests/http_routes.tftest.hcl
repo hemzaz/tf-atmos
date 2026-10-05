@@ -196,6 +196,47 @@ run "aws_proxy_route_with_proxy_and_default_route_keys_gets_a_valid_statement_id
   }
 }
 
+# Two APIs routing one function on the same route_key must not write the same
+# statement_id into its policy: the API's name is part of the hash.
+run "http_route_statement_id_includes_the_api_name" {
+  command = plan
+
+  variables {
+    http_routes = {
+      "ANY /{proxy+}" = {
+        integration_type     = "AWS_PROXY"
+        integration_uri      = "arn:aws:lambda:us-east-1:123456789012:function:catchall"
+        lambda_function_name = "catchall"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_lambda_permission.http_route_invoke["ANY /{proxy+}"].statement_id == "AllowHttpRouteInvoke-${substr(sha1("test-microservices-api|ANY /{proxy+}"), 0, 16)}"
+    error_message = "statement_id hashes <Environment>-<api_name>|<route_key>."
+  }
+}
+
+run "http_route_statement_id_differs_for_another_api" {
+  command = plan
+
+  variables {
+    api_name = "other-api"
+    http_routes = {
+      "ANY /{proxy+}" = {
+        integration_type     = "AWS_PROXY"
+        integration_uri      = "arn:aws:lambda:us-east-1:123456789012:function:catchall"
+        lambda_function_name = "catchall"
+      }
+    }
+  }
+
+  assert {
+    condition     = aws_lambda_permission.http_route_invoke["ANY /{proxy+}"].statement_id != "AllowHttpRouteInvoke-${substr(sha1("test-microservices-api|ANY /{proxy+}"), 0, 16)}"
+    error_message = "Another API's statement_id for the same route_key differs."
+  }
+}
+
 run "tls_server_name_to_verify_wires_tls_config_onto_the_integration" {
   command = plan
 
