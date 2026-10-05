@@ -78,6 +78,11 @@
 #          # AWS Lambda Powertools for Python (v3, python3.13, arm64), e.g.
 #          # arn:aws:lambda:<region>:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:<version>
 #          powertools_layer_arn: arn:aws:lambda:<region>:017000801446:layer:<name>:<version>
+#          # Optional: Cognito email through this verified SES identity, whose
+#          # sending authorization policy allows cognito-idp.amazonaws.com (and
+#          # its sender address). Without it Cognito's own sender is used.
+#          ses_identity_arn: arn:aws:ses:<region>:<account>:identity/example.com
+#          ses_from_email_address: "App <no-reply@example.com>"
 #    A missing key fails every describe/plan of the stack with its name
 #    (gomplate `required`); `atmos validate stacks` does not render templates.
 #    settings.environment.account_id (set by every fnx stage _defaults)
@@ -146,6 +151,15 @@ components:
 
         # Self-signup on: the web and mobile apps register their own users.
         allow_admin_create_user_only: false
+
+        # Verification and invitation email. With settings.serverless_api.
+        # ses_identity_arn (REQUIREMENTS 4, optional) the pool sends through
+        # that SES identity (DEVELOPER); without it, through Cognito's own
+        # sender, capped at about 50 emails a day, which self-signup outgrows.
+        email_configuration:
+          email_sending_account: '{{ if index .settings.serverless_api "ses_identity_arn" }}DEVELOPER{{ else }}COGNITO_DEFAULT{{ end }}'
+          source_arn: '{{ index .settings.serverless_api "ses_identity_arn" | default "" }}'
+          from_email_address: '{{ index .settings.serverless_api "ses_from_email_address" | default "" }}'
 
         # User attributes. Attributes cannot be changed or removed once the
         # pool exists; new ones can be added.
