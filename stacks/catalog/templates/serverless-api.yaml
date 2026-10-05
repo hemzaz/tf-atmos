@@ -991,6 +991,23 @@ components:
             uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
             lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
 
+        # API Gateway's own errors (the authorizer's 401/403, a WAF or
+        # throttle reject, an integration timeout) carry the app origin's CORS
+        # headers, so the browser app can read the status (e.g. refresh an
+        # expired token on 401) instead of seeing an opaque CORS failure. One
+        # literal origin: echoing the request's Origin would admit any site.
+        gateway_responses:
+          DEFAULT_4XX:
+            response_parameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: >-
+                'https://{{ required "settings.serverless_api.app_domain_name is required" .settings.serverless_api.app_domain_name }}'
+              gatewayresponse.header.Access-Control-Allow-Headers: "'Authorization,Content-Type'"
+          DEFAULT_5XX:
+            response_parameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: >-
+                'https://{{ required "settings.serverless_api.app_domain_name is required" .settings.serverless_api.app_domain_name }}'
+              gatewayresponse.header.Access-Control-Allow-Headers: "'Authorization,Content-Type'"
+
         # Cognito authorizer: an access token carrying a scope the method
         # lists (authorization_scopes above), from any of the pool's clients.
         authorizer_type: "COGNITO_USER_POOLS"
