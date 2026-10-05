@@ -447,6 +447,48 @@ variable "api_integrations" {
   }
 }
 
+# aws_api_gateway_gateway_response's arguments, keyed by response_type (one
+# response per type per API). Cloud Posse's aws-api-gateway-rest-api takes an
+# OpenAPI body (x-amazon-apigateway-gateway-responses) instead.
+variable "gateway_responses" {
+  type = map(object({
+    status_code         = optional(string)
+    response_parameters = optional(map(string), {})
+    response_templates  = optional(map(string), {})
+  }))
+  description = "REST API gateway responses keyed by response_type (DEFAULT_4XX, DEFAULT_5XX, UNAUTHORIZED, ...): what API Gateway itself answers when it rejects a request before or instead of the integration (an authorizer 401/403, a WAF or throttle reject). response_parameters keys are gatewayresponse.header.<name>, values a quoted literal (\"'https://app.example.com'\") or a mapping expression; e.g. the CORS headers a browser needs to read the error. status_code null keeps the type's default"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition = alltrue([for k in keys(var.gateway_responses) : contains([
+      "DEFAULT_4XX", "DEFAULT_5XX", "ACCESS_DENIED", "API_CONFIGURATION_ERROR", "AUTHORIZER_FAILURE",
+      "AUTHORIZER_CONFIGURATION_ERROR", "BAD_REQUEST_PARAMETERS", "BAD_REQUEST_BODY", "EXPIRED_TOKEN",
+      "INTEGRATION_FAILURE", "INTEGRATION_TIMEOUT", "INVALID_API_KEY", "INVALID_SIGNATURE", "MISSING_AUTHENTICATION_TOKEN",
+      "QUOTA_EXCEEDED", "REQUEST_TOO_LARGE", "RESOURCE_NOT_FOUND", "THROTTLED", "UNAUTHORIZED",
+      "UNSUPPORTED_MEDIA_TYPE", "WAF_FILTERED",
+    ], k)])
+    error_message = "gateway_responses keys must be API Gateway response types (DEFAULT_4XX, DEFAULT_5XX, UNAUTHORIZED, ACCESS_DENIED, THROTTLED, WAF_FILTERED, ...)."
+  }
+
+  validation {
+    condition     = alltrue([for r in values(var.gateway_responses) : r.status_code == null || can(regex("^[1-5][0-9]{2}$", coalesce(r.status_code, "-")))])
+    error_message = "gateway_responses status_code must be a three-digit HTTP status code (e.g. \"401\") or null."
+  }
+
+  validation {
+    condition = alltrue(flatten([for r in values(var.gateway_responses) : [
+      for k in keys(r.response_parameters) : can(regex("^gatewayresponse\\.header\\.[A-Za-z0-9-]+$", k))
+    ]]))
+    error_message = "gateway_responses response_parameters keys must be gatewayresponse.header.<header name>."
+  }
+
+  validation {
+    condition     = length(var.gateway_responses) == 0 || var.api_type == "REST"
+    error_message = "gateway_responses apply to a REST API (api_type = \"REST\") only."
+  }
+}
+
 variable "http_routes" {
   type = map(object({
     integration_type          = string
