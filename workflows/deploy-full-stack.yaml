@@ -46,6 +46,15 @@
 # cloudfront instances (services) that use its arn; a REGIONAL one associates
 # with an alb (addons) or an apigateway stage (services), so it has its own
 # regional-waf layer after services.
+# eventbridge instances split by create_event_bus: a bus (reading only kms/main and
+# its dead-letter queue, storage) is in platform, before the rules (services) that
+# read its event_bus_name and target lambdas and queues. ses writes its DKIM and
+# verification records into the dns instances' zones, so it shares certificates
+# with acm. alb-controller-ingress-group (an Ingress for the controller eks-addons
+# installs, reading eks, acm and the VPC link's security group) is in addons, before
+# the apigateway routes (services) that read its listener. A Secrets Manager rotation
+# lambda (vars.rotation_secret_arn set) reads its rotation target (e.g. elasticache,
+# data), so it leaves compute for addons, after data.
 # Every layer except backend and regional-waf (no workload stack has a waf
 # instance yet; an empty layer plans "No components matched") has at least one
 # enabled instance in every workload stack (eks-backend-services/main, the last
@@ -210,11 +219,14 @@ workflows:
       - name: deploy-security-monitoring
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "security-monitoring"'
+      # The rotation split keys on rotation_secret_arn, a read of a secretsmanager
+      # instance, which relies on secrets (security) being applied before compute.
       - name: plan-compute
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm_compute
         type: confirm
         prompt: Apply the compute layer plan above?
@@ -226,11 +238,13 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: plan-platform
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
+          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"
+          or .metadata.component == "eventbridge" and .vars.create_event_bus == true'
       - name: confirm_platform
         type: confirm
         prompt: Apply the platform layer plan above?
@@ -241,7 +255,8 @@ workflows:
       - name: deploy-platform
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
+          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"
+          or .metadata.component == "eventbridge" and .vars.create_event_bus == true'
       - name: plan-data
         type: atmos
         command: >-
@@ -299,7 +314,7 @@ workflows:
       # ARNs, so it precedes them.
       - name: plan-certificates
         type: atmos
-        command: terraform plan --query '.metadata.component == "acm"'
+        command: terraform plan --query '.metadata.component == "acm" or .metadata.component == "ses"'
       - name: confirm_certificates
         type: confirm
         prompt: Apply the certificates layer plan above? (The stack's domain must already be delegated, or ACM validation times out.)
@@ -309,12 +324,15 @@ workflows:
         command: test "{{ .steps.confirm_certificates.value }}" = "true" || { echo "Deployment cancelled before the certificates layer."; exit 1; }
       - name: deploy-certificates
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "acm"'
+        command: terraform deploy --from-plan --query '.metadata.component == "acm" or .metadata.component == "ses"'
       # eks-addons reads the dns instances' zone_ids (external-dns and
       # cert-manager are scoped to those zones), so it follows dns.
       - name: plan-addons
         type: atmos
-        command: terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
+        command: >-
+          terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"
+          or .metadata.component == "alb-controller-ingress-group"
+          or .metadata.component == "lambda" and .vars.rotation_secret_arn != null'
       - name: confirm_addons
         type: confirm
         prompt: Apply the addons layer plan above?
@@ -324,12 +342,15 @@ workflows:
         command: test "{{ .steps.confirm_addons.value }}" = "true" || { echo "Deployment cancelled before the addons layer."; exit 1; }
       - name: deploy-addons
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
+        command: >-
+          terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"
+          or .metadata.component == "alb-controller-ingress-group"
+          or .metadata.component == "lambda" and .vars.rotation_secret_arn != null'
       - name: plan-services
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
-          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge" and .vars.create_event_bus != true'
       - name: confirm_services
         type: confirm
         prompt: Apply the services layer plan above?
@@ -342,7 +363,7 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
           or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
-          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge" and .vars.create_event_bus != true'
       - name: plan-regional-waf
         type: atmos
         command: terraform plan --query '.metadata.component == "waf" and .vars.scope == "REGIONAL"'
@@ -562,7 +583,8 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
       - name: confirm
         type: confirm
         prompt: Deploy the compute layer?
@@ -574,7 +596,8 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "eks" or .metadata.component == "ecs" or .metadata.component == "batch"
-          or .metadata.component == "lambda" or .metadata.component == "glue" or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+          or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null) or .metadata.component == "glue"
+          or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
 
   deploy-platform:
     description: "Deploy the platform layer: External Secrets, Step Functions state machines and Athena (after compute, whose Batch, Lambda and Glue state they read)"
@@ -584,7 +607,8 @@ workflows:
       - name: plan
         type: atmos
         command: >-
-          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
+          terraform plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"
+          or .metadata.component == "eventbridge" and .vars.create_event_bus == true'
       - name: confirm
         type: confirm
         prompt: Deploy the platform layer?
@@ -595,7 +619,8 @@ workflows:
       - name: deploy
         type: atmos
         command: >-
-          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"'
+          terraform deploy --from-plan --query '.metadata.component == "external-secrets" or .metadata.component == "athena" or .metadata.component == "stepfunctions"
+          or .metadata.component == "eventbridge" and .vars.create_event_bus == true'
 
   deploy-data:
     description: "Deploy the data layer: databases, caches, backups and Firehose delivery streams"
@@ -665,7 +690,7 @@ workflows:
       - *refuse-fixtures
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "acm"'
+        command: terraform plan --query '.metadata.component == "acm" or .metadata.component == "ses"'
       - name: confirm
         type: confirm
         prompt: Deploy the certificates layer?
@@ -675,7 +700,7 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "acm"'
+        command: terraform deploy --from-plan --query '.metadata.component == "acm" or .metadata.component == "ses"'
 
   deploy-addons:
     description: "Deploy the addons layer: EKS add-ons (after the dns layer, whose zones they read) and ALBs (after the certificates layer)"
@@ -684,7 +709,10 @@ workflows:
       - *refuse-fixtures
       - name: plan
         type: atmos
-        command: terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
+        command: >-
+          terraform plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"
+          or .metadata.component == "alb-controller-ingress-group"
+          or .metadata.component == "lambda" and .vars.rotation_secret_arn != null'
       - name: confirm
         type: confirm
         prompt: Deploy the addons layer?
@@ -694,7 +722,10 @@ workflows:
         command: test "{{ .steps.confirm.value }}" = "true" || { echo "Deployment cancelled."; exit 1; }
       - name: deploy
         type: atmos
-        command: terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"'
+        command: >-
+          terraform deploy --from-plan --query '.metadata.component == "eks-addons" or .metadata.component == "alb"
+          or .metadata.component == "alb-controller-ingress-group"
+          or .metadata.component == "lambda" and .vars.rotation_secret_arn != null'
 
   deploy-services:
     description: "Deploy the services layer: API Gateway, backend services, CloudFront distributions, ECS services and EventBridge rules"
@@ -705,7 +736,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "apigateway" or .metadata.component == "eks-backend-services"
-          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "cloudfront" or .metadata.component == "ecs-service" or .metadata.component == "eventbridge" and .vars.create_event_bus != true'
       - name: confirm
         type: confirm
         prompt: Deploy the services layer?
@@ -718,7 +749,7 @@ workflows:
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "apigateway"
           or .metadata.component == "eks-backend-services" or .metadata.component == "cloudfront"
-          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge"'
+          or .metadata.component == "ecs-service" or .metadata.component == "eventbridge" and .vars.create_event_bus != true'
 
   deploy-regional-waf:
     description: "Deploy the regional-waf layer: REGIONAL web ACLs, after the ALBs (addons) and API Gateway stages (services) they associate with"

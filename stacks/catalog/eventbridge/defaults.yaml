@@ -6,6 +6,8 @@
 # model). Instances inherit this base and set `name` and
 # `cloudwatch_event_rule_pattern`; one instance per bus sets
 # `create_event_bus: true`, and rules on that bus read its `event_bus_name`.
+# deploy-full-stack deploys the bus instance (create_event_bus: true, the
+# literal, not a template) in its platform layer and the rules in services.
 
 components:
   terraform:

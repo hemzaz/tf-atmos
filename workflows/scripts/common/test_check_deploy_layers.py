@@ -190,6 +190,55 @@ class CheckDeployLayersTest(unittest.TestCase):
         )}
         self.assert_errors(stacks, workflow_files(*layers))
 
+    def test_same_type_split_by_a_bool_var(self):
+        # An eventbridge bus (create_event_bus: true) before the rules that read
+        # its name; a rule with no create_event_bus var is a rule.
+        layers = (
+            ("platform", ['.metadata.component == "eventbridge" and .vars.create_event_bus == true']),
+            ("services", ['.metadata.component == "eventbridge" and .vars.create_event_bus != true']),
+        )
+        stacks = {"s1": stack(
+            eventbridge__bus=instance("eventbridge", {"create_event_bus": True}),
+            eventbridge__rule=instance(
+                "eventbridge", {"event_bus_name": "!terraform.state eventbridge/bus .event_bus_name"},
+                [{"component": "eventbridge/bus"}],
+            ),
+        )}
+        self.assert_errors(stacks, workflow_files(*layers))
+        # Both in the rules' layer: the read is in the same phase.
+        flat = (("services", ["eventbridge"]),)
+        self.assert_errors(stacks, workflow_files(*flat), "reads eventbridge/bus, which is planned in the same phase")
+
+    def test_bool_literal_does_not_match_a_string_or_number(self):
+        query = check_deploy_layers.parse_query('.vars.flag == true')
+        self.assertTrue(check_deploy_layers.selects(query, "a", instance("x", {"flag": True})))
+        self.assertFalse(check_deploy_layers.selects(query, "a", instance("x", {"flag": "true"})))
+        self.assertFalse(check_deploy_layers.selects(query, "a", instance("x", {"flag": 1})))
+        self.assertFalse(check_deploy_layers.selects(query, "a", instance("x")))
+
+    def test_parenthesised_and_before_the_last_or(self):
+        # A rotation lambda (rotation_secret_arn set) is split from the others in
+        # a query whose last operand already holds a bare `and`.
+        query = check_deploy_layers.parse_query(
+            '.metadata.component == "eks" or (.metadata.component == "lambda" and .vars.rotation_secret_arn == null)'
+            ' or .metadata.component == "ec2" and .atmos_component != "ec2/bastion"'
+        )
+        self.assertIsNotNone(query)
+        instances = {
+            "lambda/plain": instance("lambda"),
+            "lambda/rotation": instance("lambda", {"rotation_secret_arn": "!terraform.state secrets .arn"}),
+            "ec2/bastion": instance("ec2"),
+            "ec2/app": instance("ec2"),
+            "eks/main": instance("eks"),
+        }
+        selected = sorted(n for n, i in instances.items() if check_deploy_layers.selects(query, n, i))
+        self.assertEqual(selected, ["ec2/app", "eks/main", "lambda/plain"])
+
+    def test_unbalanced_or_nested_parentheses_are_rejected(self):
+        self.assertIsNone(check_deploy_layers.parse_query('(.metadata.component == "a" or .metadata.component == "b"'))
+        self.assertIsNone(check_deploy_layers.parse_query('(.metadata.component == "a" or .metadata.component == "b")'))
+        self.assertIsNone(check_deploy_layers.parse_query('.metadata.component == "a")'))
+
     def test_waf_without_a_scope_var_is_in_no_scope_layer(self):
         layers = (("security", ['.metadata.component == "waf" and .vars.scope == "CLOUDFRONT"']),)
         stacks = {"s1": stack(waf__main=instance("waf"))}
