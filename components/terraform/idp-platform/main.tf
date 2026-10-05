@@ -9,7 +9,9 @@ locals {
   # S3 names are global, so the buckets start with the stack's full id,
   # tenant-environment-stage (Cloud Posse's null-label id order); var.environment
   # is the stage here. The stage alone repeats across tenants and regions.
-  storage_bucket_prefix = "${var.tags["Tenant"]}-${var.tags["Environment"]}-${var.environment}-idp"
+  # lookup: var.tags' validation already requires both keys; tflint evaluates
+  # this local with the empty default.
+  storage_bucket_prefix = "${lookup(var.tags, "Tenant", "")}-${lookup(var.tags, "Environment", "")}-${var.environment}-idp"
   storage_buckets       = toset(["artifacts", "backups", "logs", "techdocs", "uploads"])
 
   # ../rds forces TLS (rds.force_ssl = 1); verify-full also checks the server
