@@ -13,11 +13,9 @@ check-deploy-layers, plan-sweep, tflint (workflows/lint.yaml).
 ALL = frozenset({"*"})
 
 KNOWN_BROKEN_FIXTURES = {
-    # Clean on dependencies, outputs, vars and plan-sweep. No operator path to
-    # its private EKS endpoint (no bastion), deploy-full-stack has no layer for
-    # ses or alb-controller-ingress-group, and its eventbridge rules read their
-    # bus, which shares their (services) layer.
-    "fnx-fixtures-msplatform": frozenset({"check-cluster-api-ci", "check-deploy-layers"}),
+    # Clean on dependencies, outputs, vars, deploy layers and plan-sweep. No
+    # operator path to its private EKS endpoint (no bastion).
+    "fnx-fixtures-msplatform": frozenset({"check-cluster-api-ci"}),
 }
 
 

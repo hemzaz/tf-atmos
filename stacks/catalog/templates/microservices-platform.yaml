@@ -628,7 +628,9 @@ components:
     # =========================================================================
     # One bus, archived for replay, with one rule per instance; each rule logs
     # what it matches to its own CloudWatch log group (the Cloud Posse
-    # aws-eventbridge model).
+    # aws-eventbridge model). The bus instance (create_event_bus: true, with
+    # its catch-all audit rule) deploys in deploy-full-stack's platform layer,
+    # before the rule instances (services) that read its event_bus_name.
 
     microservices/eventbridge:
       metadata:
@@ -893,7 +895,10 @@ components:
         components:
           - component: kms/main
           - component: s3/lambda-artifacts
-          - component: microservices/ses
+          # Not microservices/ses: the function reads none of its state (its
+          # policy names the identity by ARN), and SES is only needed when it
+          # sends, so the identity deploys later (certificates layer, after the
+          # dns zone it writes its DKIM records into).
           - component: microservices/sqs/welcome-email-failures
 
     # Failed asynchronous invocations of the welcome-email function (its
@@ -1507,6 +1512,8 @@ components:
     # rotation_policy output) together with the redis secret's own read/write
     # grant (secretsmanager's secret_access_policy output, folded into
     # elasticache's rotation_policy above via additional_policy_json).
+    # It reads elasticache (data layer), so deploy-full-stack deploys it, like
+    # every lambda that sets rotation_secret_arn, in addons, after data.
     microservices/lambda/redis-auth-rotation:
       metadata:
         component: lambda
