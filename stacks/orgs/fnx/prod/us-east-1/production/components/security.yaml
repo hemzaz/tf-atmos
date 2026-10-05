@@ -102,7 +102,7 @@ components:
           - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
         # State access: sts:AssumeRole on the single state backend's PROD
         # access roles only (backend/main in the management account's
-        # fnx-core-root; objects "*/fnx-prod-*") - plan -> the prod read-only
+        # fnx-core-root; the prod stacks' objects) - plan -> the prod read-only
         # role, apply -> the prod read/write role. Named by the same convention
         # as this stack's own backend (stacks/orgs/fnx/_defaults.yaml), not
         # read from backend/main's state: CI roles never read fnx-core-root

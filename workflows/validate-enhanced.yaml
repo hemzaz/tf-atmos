@@ -29,8 +29,8 @@ workflows:
       #  - every deployable instance maps to a component directory that exists.
       #    `atmos validate stacks` and validate-all both pass when it does not,
       #    because neither maps instances back to directories.
-      # Plus check-state-keys.py: every s3-backend instance's state key stays in
-      # its stage's prefix, which the backend's stage-split roles rely on.
+      # Plus check-state-keys.py: every s3-backend instance's state key is
+      # matched by exactly its stage's backend access roles.
       - name: check-dependencies
         type: shell
         command: |

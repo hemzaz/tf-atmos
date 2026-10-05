@@ -15,12 +15,15 @@ caller is always trusted).
 
 ## Access roles
 
-- `read` / `write` (`fnx-terraform-backend-read-role` / `-role`): dev and staging objects
-  (`*/fnx-dev-*`, `*/fnx-staging-*`), trusted by those stages' CI plan / apply roles.
-- `prod_read` / `prod_write` (`fnx-terraform-backend-prod-read-role` / `-prod-role`): `*/fnx-prod-*`
-  only, trusted by prod's plan / apply role only.
-- `core_write` (`fnx-terraform-backend-core-role`): `*/fnx-core-*`, trusted by nobody but the
-  administrator who applies `backend/main`.
+Each stack's objects are an exact pattern pair, `*/<stack>/*` and `*/<stack>-*` (its derived
+instances), listed on its stage's roles in `stacks/catalog/backend/defaults.yaml`.
+
+- `read` / `write` (`fnx-terraform-backend-read-role` / `-role`): the dev and staging stacks'
+  objects, trusted by those stages' CI plan / apply roles.
+- `prod_read` / `prod_write` (`fnx-terraform-backend-prod-read-role` / `-prod-role`): the prod
+  stacks' objects only, trusted by prod's plan / apply role only.
+- `core_write` (`fnx-terraform-backend-core-role`): `fnx-core-root`'s objects, trusted by nobody but
+  the administrator who applies `backend/main`.
 
 `TFSTATE_ACCESS=read` selects the read role (run plans with `-lock=false`).
 
@@ -36,8 +39,10 @@ caller is always trusted).
   role sees key names of other stages, never contents.
 - A read-only plan cannot create a workspace: a CI plan of a never-applied instance fails at
   `workspace new` until its first deploy.
-- A new stage must get its `*/fnx-<stage>-*` pattern (or its own roles) before its first `init`.
-  `check-state-keys.py` fails any instance whose workspace would land under another stage's pattern.
+- A new stack must get its pattern pair on its stage's roles (a new stage, its own roles) before its
+  first `init`. `check-state-keys.py` evaluates the patterns against every state key and fails a
+  key no role matches, or one matched by another stage's role. The pairs don't depend on where the
+  stage sits in the stack name.
 - Every `allowed_principal_arns` entry must name the account its role lives in; the committed ARNs
   use placeholder account IDs (see [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#first-deploy-inputs)).
 - All three buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.

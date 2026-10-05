@@ -77,13 +77,13 @@ variables {
         "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-plan",
       ]
       write_enabled       = false
-      object_key_patterns = ["*/fnx-dev-*", "*/fnx-staging-*"]
+      object_key_patterns = ["*/fnx-dev-testenv-01/*", "*/fnx-dev-testenv-01-*", "*/fnx-staging-staging-01/*", "*/fnx-staging-staging-01-*"]
     }
     prod_read = {
       role_name              = "fnx-terraform-backend-prod-read-role"
       write_enabled          = false
       allowed_principal_arns = ["arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan"]
-      object_key_patterns    = ["*/fnx-prod-*"]
+      object_key_patterns    = ["*/fnx-prod-production/*", "*/fnx-prod-production-*"]
     }
     write = {
       role_name = "fnx-terraform-backend-role"
@@ -92,18 +92,18 @@ variables {
         "arn:aws:iam::333333333333:role/fnx-staging-staging-01-ci-apply",
       ]
       write_enabled       = true
-      object_key_patterns = ["*/fnx-dev-*", "*/fnx-staging-*"]
+      object_key_patterns = ["*/fnx-dev-testenv-01/*", "*/fnx-dev-testenv-01-*", "*/fnx-staging-staging-01/*", "*/fnx-staging-staging-01-*"]
     }
     prod_write = {
       role_name              = "fnx-terraform-backend-prod-role"
       write_enabled          = true
       allowed_principal_arns = ["arn:aws:iam::444444444444:role/fnx-prod-production-ci-apply"]
-      object_key_patterns    = ["*/fnx-prod-*"]
+      object_key_patterns    = ["*/fnx-prod-production/*", "*/fnx-prod-production-*"]
     }
     core_write = {
       role_name           = "fnx-terraform-backend-core-role"
       write_enabled       = true
-      object_key_patterns = ["*/fnx-core-*"]
+      object_key_patterns = ["*/fnx-core-root/*", "*/fnx-core-root-*"]
     }
   }
 }
@@ -497,6 +497,30 @@ run "core_role_reaches_only_core_objects" {
       ])
     ])
     error_message = "The core role must not touch workload state."
+  }
+}
+
+# Each stack's pair is exact: a stack whose name merely extends a listed one
+# (fnx-dev-testenv-010) is not that stack, so no role reaches it until its own
+# pair is added. The old "*/<tenant>-<stage>-*" patterns reached any such name.
+run "exact_pairs_do_not_reach_a_stack_extending_a_listed_name" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for pair in setproduct(keys(var.access_roles), [
+        "vpc/fnx-dev-testenv-010/terraform.tfstate",
+        "vpc/fnx-staging-staging-01x/terraform.tfstate.tflock",
+        "vpc/fnx-prod-productionx/terraform.tfstate",
+        "backend/fnx-core-rootx/terraform.tfstate",
+        ]) : !anytrue([
+        for statement in data.aws_iam_policy_document.access_role[pair[0]].statement : anytrue([
+          for arn in tolist(statement.resources) :
+          can(regex("^${replace(replace(arn, ".", "\\."), "*", ".*")}$", "arn:aws:s3:::fnx-terraform-state/${pair[1]}"))
+        ]) if contains(tolist(statement.actions), "s3:GetObject")
+      ])
+    ])
+    error_message = "No role may reach a stack that is not in its object_key_patterns."
   }
 }
 

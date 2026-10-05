@@ -90,7 +90,7 @@ components:
           - "arn:aws:iam::aws:policy/AdministratorAccess"
         # State access: sts:AssumeRole on the single state backend's NON-PROD
         # access roles only (backend/main in the management account's
-        # fnx-core-root; objects "*/fnx-dev-*", "*/fnx-staging-*") - plan ->
+        # fnx-core-root; the dev and staging stacks' objects) - plan ->
         # the read-only role, apply -> the read/write role. Named by the same
         # convention as this stack's own backend (stacks/orgs/fnx/_defaults.yaml),
         # not read from backend/main's state: CI roles never read fnx-core-root

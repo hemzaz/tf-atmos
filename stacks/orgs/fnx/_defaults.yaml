@@ -28,7 +28,7 @@ terraform:
   # instance gets its own state file.
   #
   # Access goes through one of the backend's access roles (Cloud Posse
-  # tfstate-backend access_roles), split by stage (state objects "*/<tenant>-<stage>-*"):
+  # tfstate-backend access_roles), split by stage (state objects "*/<stack>/*" and "*/<stack>-*"):
   #   <tenant>-terraform-backend-role            read/write, dev/staging objects; the dev/staging CI apply roles
   #   <tenant>-terraform-backend-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
   #   <tenant>-terraform-backend-prod-role       read/write, prod objects; prod's apply role only
