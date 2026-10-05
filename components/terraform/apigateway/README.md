@@ -31,6 +31,10 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
 - A `COGNITO_USER_POOLS` method without `authorization_scopes` accepts ID tokens only; with them
   it accepts access tokens carrying one of the scopes (a `client_credentials` client's token,
   `<resource server identifier>/<scope>`), and no longer ID tokens.
+- `gateway_responses` (REST only, validated), keyed by response type, set what API Gateway
+  answers itself: an authorizer's 401/403, a WAF or throttle reject. They carry no CORS headers
+  by default, so a browser cannot read the status; a SPA's API sets the CORS headers on
+  `DEFAULT_4XX`/`DEFAULT_5XX`. Only a new deployment serves a change (they are in its trigger).
 - `cors_configuration` and `http_routes` apply to HTTP APIs only; a REST API ignores them silently
   (staging and prod set CORS on REST instances, a known gap).
 - `api_name` output is null for an HTTP API.

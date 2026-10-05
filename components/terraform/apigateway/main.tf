@@ -140,7 +140,7 @@ resource "aws_api_gateway_deployment" "rest_deployment" {
   # Without a trigger the deployment is created once and never refreshed, so methods
   # added or changed later exist on the API but are never served on the stage.
   triggers = {
-    redeployment = sha1(jsonencode([var.api_resources, var.api_methods, var.api_integrations]))
+    redeployment = sha1(jsonencode([var.api_resources, var.api_methods, var.api_integrations, var.gateway_responses]))
   }
 
   lifecycle {
@@ -150,8 +150,22 @@ resource "aws_api_gateway_deployment" "rest_deployment" {
   # This ensures deployment happens after all the API resources are created
   depends_on = [
     aws_api_gateway_method.method,
-    aws_api_gateway_integration.integration
+    aws_api_gateway_integration.integration,
+    aws_api_gateway_gateway_response.this,
   ]
+}
+
+# Gateway responses: what API Gateway answers itself (an authorizer 401/403,
+# a WAF or throttle reject). Only a new deployment serves a change, so they are
+# in the deployment's trigger and depends_on above.
+resource "aws_api_gateway_gateway_response" "this" {
+  for_each = local.create_rest_api ? var.gateway_responses : {}
+
+  rest_api_id         = aws_api_gateway_rest_api.rest_api[0].id
+  response_type       = each.key
+  status_code         = each.value.status_code
+  response_parameters = length(each.value.response_parameters) > 0 ? each.value.response_parameters : null
+  response_templates  = length(each.value.response_templates) > 0 ? each.value.response_templates : null
 }
 
 # HTTP API
