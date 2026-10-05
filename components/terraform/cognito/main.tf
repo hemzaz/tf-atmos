@@ -63,6 +63,15 @@ resource "aws_cognito_user_pool" "this" {
     advanced_security_mode = var.advanced_security_mode
   }
 
+  # Cloud Posse aws-cognito's email_configuration. Always one block, as there:
+  # COGNITO_DEFAULT with no other key is the AWS default. "" means unset.
+  email_configuration {
+    email_sending_account  = var.email_configuration.email_sending_account
+    source_arn             = try(length(var.email_configuration.source_arn), 0) > 0 ? var.email_configuration.source_arn : null
+    from_email_address     = try(length(var.email_configuration.from_email_address), 0) > 0 ? var.email_configuration.from_email_address : null
+    reply_to_email_address = try(length(var.email_configuration.reply_to_email_address), 0) > 0 ? var.email_configuration.reply_to_email_address : null
+  }
+
   # Cloud Posse aws-cognito's string_schemas (its number_schemas and generic
   # schemas are not ported).
   dynamic "schema" {

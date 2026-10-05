@@ -293,3 +293,38 @@ variable "clients" {
     error_message = "Every <identifier>/<scope_name> in clients[*].allowed_oauth_scopes must be a scope declared in resource_servers."
   }
 }
+
+# Cloud Posse aws-cognito's email_configuration keys (reply_to_email_address,
+# source_arn, email_sending_account, from_email_address), as one typed object
+# instead of its map(any) plus one email_configuration_* variable per key.
+variable "email_configuration" {
+  type = object({
+    email_sending_account  = optional(string, "COGNITO_DEFAULT")
+    source_arn             = optional(string)
+    from_email_address     = optional(string)
+    reply_to_email_address = optional(string)
+  })
+  description = "How the pool sends email. COGNITO_DEFAULT (the default) uses Cognito's built-in sender, capped at about 50 messages a day per account; DEVELOPER sends through the verified Amazon SES identity source_arn, whose sending authorization policy must let cognito-idp.amazonaws.com send. from_email_address (DEVELOPER only) is the sender, e.g. \"App <no-reply@example.com>\". An empty string means unset, as Cloud Posse's \"\" defaults do (a stack template can then pass an optional setting through)"
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = contains(["COGNITO_DEFAULT", "DEVELOPER"], var.email_configuration.email_sending_account)
+    error_message = "email_configuration.email_sending_account must be COGNITO_DEFAULT or DEVELOPER."
+  }
+
+  validation {
+    condition     = var.email_configuration.email_sending_account != "DEVELOPER" || try(length(var.email_configuration.source_arn), 0) > 0
+    error_message = "email_configuration with email_sending_account DEVELOPER needs source_arn, the verified SES identity Cognito sends through."
+  }
+
+  validation {
+    condition     = try(length(var.email_configuration.source_arn), 0) == 0 || can(regex("^arn:aws[a-z-]*:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$", var.email_configuration.source_arn))
+    error_message = "email_configuration.source_arn must be an SES identity ARN (arn:aws:ses:<region>:<account>:identity/<email or domain>)."
+  }
+
+  validation {
+    condition     = try(length(var.email_configuration.from_email_address), 0) == 0 || var.email_configuration.email_sending_account == "DEVELOPER"
+    error_message = "email_configuration.from_email_address only applies with email_sending_account DEVELOPER."
+  }
+}
