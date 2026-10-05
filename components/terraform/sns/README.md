@@ -24,5 +24,9 @@ Modelled on Cloud Posse `aws-sns-topic` (input and output names, defaults) as pl
   not rescoped: set each `Resource` to the topic ARN. Unpinned `*` or `Service` principals are
   rejected.
 - `http` subscriptions are rejected (use `https`); `firehose` needs `subscription_role_arn`.
+- An `https` subscriber needs `acknowledge_https_forwarder = true`: its endpoint must answer SNS's
+  SubscriptionConfirmation (a Lambda function URL, API Gateway, AWS Chatbot), or the subscription
+  stays PendingConfirmation and delivers nothing. Known raw chat-webhook hosts (Slack, Office/Teams,
+  Discord) are rejected by name, best effort.
 - A subscriber's `dead_letter_queue_arn` takes an sqs instance's queue (Cloud Posse's built-in DLQ
   is not ported).

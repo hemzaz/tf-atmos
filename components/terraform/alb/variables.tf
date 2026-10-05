@@ -63,6 +63,19 @@ variable "internal" {
 # are prefix lists or security group ids only -- never a CIDR block.
 # ---------------------------------------------------------------------------
 
+variable "cloudfront_ingress_enabled" {
+  type        = bool
+  description = "Admit the CloudFront origin-facing managed prefix list on 443 (an ALB behind CloudFront, or a CloudFront VPC origin). Off for an ALB reached directly; it then needs another source: additional_ingress_prefix_list_ids, additional_ingress_security_group_ids or security_group_ids"
+  default     = true
+
+  validation {
+    condition = var.cloudfront_ingress_enabled || (
+      length(var.additional_ingress_prefix_list_ids) + length(var.additional_ingress_security_group_ids) + length(var.security_group_ids) > 0
+    )
+    error_message = "With cloudfront_ingress_enabled false the ALB admits nothing: set additional_ingress_prefix_list_ids, additional_ingress_security_group_ids or security_group_ids (a group carrying the ingress rules)."
+  }
+}
+
 variable "additional_ingress_prefix_list_ids" {
   type        = list(string)
   description = "Extra managed prefix list ids allowed to reach the HTTPS listener, alongside the CloudFront origin-facing prefix list this component always resolves. Quota note: a security group rule referencing a managed prefix list counts against the 'Rules per security group' quota as that list's max-entries weight, not as 1 -- the CloudFront origin-facing list alone is already ~55-60 of the default 60, so adding an entry here can require an AWS quota increase for that security group."
@@ -297,6 +310,47 @@ variable "access_logs_prefix" {
   validation {
     condition     = !strcontains(var.access_logs_prefix, "AWSLogs") && can(regex("^[A-Za-z0-9/_.-]*$", var.access_logs_prefix))
     error_message = "access_logs_prefix must not contain \"AWSLogs\" (AWS reserves that path segment for the delivered log objects and rejects a prefix containing it) and may only contain letters, digits, and /_.- ."
+  }
+}
+
+# Cloud Posse aws-alb's lifecycle inputs for the access-logs bucket
+# (cloudposse/terraform-aws-lb-s3-bucket).
+variable "lifecycle_rule_enabled" {
+  type        = bool
+  description = "Expire the access logs: expiration_days, noncurrent_version_expiration_days and abort_incomplete_multipart_upload_days"
+  default     = false
+}
+
+variable "expiration_days" {
+  type        = number
+  description = "Days after which access log objects expire (lifecycle_rule_enabled)"
+  default     = 90
+
+  validation {
+    condition     = var.expiration_days >= 1 && floor(var.expiration_days) == var.expiration_days
+    error_message = "expiration_days must be a whole number of days, at least 1."
+  }
+}
+
+variable "noncurrent_version_expiration_days" {
+  type        = number
+  description = "Days after which noncurrent versions of access log objects expire (lifecycle_rule_enabled; the bucket is versioned)"
+  default     = 90
+
+  validation {
+    condition     = var.noncurrent_version_expiration_days >= 1 && floor(var.noncurrent_version_expiration_days) == var.noncurrent_version_expiration_days
+    error_message = "noncurrent_version_expiration_days must be a whole number of days, at least 1."
+  }
+}
+
+variable "abort_incomplete_multipart_upload_days" {
+  type        = number
+  description = "Days after which incomplete multipart uploads are aborted (lifecycle_rule_enabled)"
+  default     = 5
+
+  validation {
+    condition     = var.abort_incomplete_multipart_upload_days >= 1 && floor(var.abort_incomplete_multipart_upload_days) == var.abort_incomplete_multipart_upload_days
+    error_message = "abort_incomplete_multipart_upload_days must be a whole number of days, at least 1."
   }
 }
 

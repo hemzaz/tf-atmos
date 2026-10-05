@@ -367,3 +367,66 @@ run "dns_alias_enabled_needs_a_zone" {
 
   expect_failures = [var.parent_zone_id]
 }
+
+run "cloudfront_ingress_can_be_turned_off_for_a_direct_alb" {
+  command = plan
+
+  variables {
+    cloudfront_ingress_enabled = false
+    security_group_ids         = ["sg-0123456789abcdef0"]
+  }
+
+  assert {
+    condition     = length(aws_vpc_security_group_ingress_rule.cloudfront) == 0 && length(data.aws_ec2_managed_prefix_list.cloudfront) == 0
+    error_message = "Without CloudFront ingress there is no prefix-list rule and no lookup."
+  }
+}
+
+run "cloudfront_ingress_off_with_no_other_source_is_rejected" {
+  command = plan
+
+  variables {
+    cloudfront_ingress_enabled = false
+  }
+
+  expect_failures = [var.cloudfront_ingress_enabled]
+}
+
+run "access_logs_do_not_expire_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_s3_bucket_lifecycle_configuration.access_logs) == 0
+    error_message = "lifecycle_rule_enabled defaults to false, as in Cloud Posse's aws-alb."
+  }
+}
+
+run "lifecycle_rule_expires_the_access_logs" {
+  command = plan
+
+  variables {
+    lifecycle_rule_enabled                 = true
+    expiration_days                        = 90
+    abort_incomplete_multipart_upload_days = 7
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_lifecycle_configuration.access_logs[0].rule[0].expiration[0].days == 90 &&
+      aws_s3_bucket_lifecycle_configuration.access_logs[0].rule[0].noncurrent_version_expiration[0].noncurrent_days == 90 &&
+      aws_s3_bucket_lifecycle_configuration.access_logs[0].rule[0].abort_incomplete_multipart_upload[0].days_after_initiation == 7
+    )
+    error_message = "The access logs expire after expiration_days, noncurrent versions after 90 days, incomplete uploads after the abort days."
+  }
+}
+
+run "expiration_days_must_be_positive" {
+  command = plan
+
+  variables {
+    lifecycle_rule_enabled = true
+    expiration_days        = 0
+  }
+
+  expect_failures = [var.expiration_days]
+}

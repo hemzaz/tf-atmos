@@ -7,7 +7,8 @@ Modelled on Cloud Posse `aws-alb`, written as plain resources.
 
 ## Wiring
 
-- Used only by the `web-application` template: `web-application/alb` (addons layer, `internal:
+- Used by the `idp-platform` template (`idp-platform/alb`, internet-facing, no CloudFront
+  ingress, logs expiring) and the `web-application` template: `web-application/alb` (addons layer, `internal:
   true`) reads the template's `vpc` (private subnets), `acm` certificate, the dns instance's zone (`parent_zone_id`
   for `origin.<app_domain>`) and the `securitygroups` instance's `alb` group
   (`security_group_ids`), which the application group admits.
@@ -19,7 +20,12 @@ Modelled on Cloud Posse `aws-alb`, written as plain resources.
 
 - The security group admits only the CloudFront origin-facing prefix list on 443 (plus
   `additional_ingress_*`); there is no CIDR ingress input. No port 80 listener: CloudFront
-  redirects at the edge.
+  redirects at the edge. `cloudfront_ingress_enabled: false` drops the prefix-list rule for an ALB
+  reached directly (the `idp-platform` template); it then needs another source, such as a
+  `securitygroup` group with CIDR ingress attached through `security_group_ids`.
+- `lifecycle_rule_enabled` (Cloud Posse's, off by default) expires the access logs after
+  `expiration_days` (90), their noncurrent versions after `noncurrent_version_expiration_days`
+  (90), and aborts incomplete uploads after `abort_incomplete_multipart_upload_days` (5).
 - `security_group_ids` attaches groups defined elsewhere (Cloud Posse's input) beside the
   component's own: a target admits the ALB by one of them, defined in an earlier layer, instead
   of by `.security_group_id`, which only exists after this component applies.
