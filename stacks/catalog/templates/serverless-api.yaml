@@ -3,17 +3,19 @@
 # SERVERLESS API STACK TEMPLATE
 # =============================================================================
 # Serverless REST API: API Gateway -> Lambda -> DynamoDB, with Cognito auth,
-# an SQS work queue, and a CloudFront-fronted S3 bucket for static assets and
-# browser uploads.
+# an SQS work queue, a CloudFront-fronted S3 bucket for static assets and a
+# private S3 bucket for browser uploads.
 #
 # Architecture:
-#   - API Gateway REST API (REGIONAL) at api.<app domain>: ANY / and
-#     ANY /{proxy+}, both AWS_PROXY to lambda-api-handler, behind a
-#     COGNITO_USER_POOLS authorizer that takes access tokens with the API's
-#     read or write scope. One usage plan; a REGIONAL WAF on the stage.
+#   - API Gateway REST API (REGIONAL) at api.<app domain>: on / and
+#     /{proxy+}, every method AWS_PROXY to lambda-api-handler. GET and HEAD
+#     take an access token with the API's read or write scope, POST, PUT,
+#     PATCH and DELETE one with the write scope (COGNITO_USER_POOLS
+#     authorizer); OPTIONS (the CORS preflight) is unauthenticated. One usage
+#     plan; a REGIONAL WAF on the stage.
 #   - Cognito user pool with a hosted UI prefix domain, a resource server
 #     (<tenant>-<environment>-api, scopes read and write) and three clients:
-#     web (public, code flow), mobile (confidential, code flow) and api
+#     web and mobile (public, code flow with PKCE) and api
 #     (confidential, client_credentials).
 #   - Lambdas: api-handler (the API), async-processor (the tasks queue).
 #     api-authorizer is a disabled custom (TOKEN) authorizer, kept for a
@@ -21,16 +23,18 @@
 #   - DynamoDB: main (single-table design, two GSIs) and sessions.
 #   - SQS: tasks and notifications, each with its own dead-letter queue.
 #   - S3 assets bucket, read by CloudFront at assets.<app domain> through
-#     origin access control; CloudFront standard logging (v2) to a log bucket.
+#     origin access control; a separate private uploads bucket (never a
+#     CloudFront origin); CloudFront standard logging (v2) to a log bucket.
 #   - CloudWatch dashboard and alarms (API, Lambdas, DynamoDB, DLQs).
 #
 # Request path: client -> api.<app domain> (WAF) -> stage -> Cognito
 # authorizer -> lambda-api-handler. Assets: viewer -> CloudFront
 # (assets.<app domain>) -> S3 (OAC). Uploads: the browser PUTs to a presigned
-# URL the API handler issues (the bucket's CORS admits the app origin).
+# URL the API handler issues for the uploads bucket (its CORS admits the app
+# origin).
 #
 # Encryption: the stack's customer managed key, kms/main, encrypts the tables,
-# the queues, both buckets, the Lambdas' environment and log groups, the API
+# the queues, the buckets, the Lambdas' environment and log groups, the API
 # access log group, the WAF log group and the monitoring alarm topic.
 #
 # Cost Estimates (Monthly):
@@ -88,7 +92,8 @@
 #    alarm_email_subscriptions.
 # 8. S3 access logging is off: the target must be a separate SSE-S3 bucket (S3
 #    cannot deliver access logs to an SSE-KMS bucket) and this template has
-#    none. Enable it per stack on serverless-api/s3/assets (vars.logging).
+#    none. Enable it per stack on serverless-api/s3/assets and s3/uploads
+#    (vars.logging).
 # =============================================================================
 
 import:
@@ -166,8 +171,8 @@ components:
         # domain for.
         domain_prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api"
 
-        # The API's OAuth scopes. serverless-api/apigateway accepts an access
-        # token carrying either.
+        # The API's OAuth scopes. serverless-api/apigateway's GET and HEAD
+        # accept an access token carrying either, the write verbs only write.
         resource_servers:
           - identifier: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api"
             name: "API Resource Server"
@@ -196,8 +201,10 @@ components:
             logout_urls:
               - 'https://{{ required "settings.serverless_api.app_domain_name is required" .settings.serverless_api.app_domain_name }}/logout'
 
+          # Native app: a public client (RFC 8252: an installed app cannot
+          # keep a secret), authorization code flow with PKCE, like web.
           mobile:
-            generate_secret: true
+            generate_secret: false
             allowed_oauth_flows:
               - "code"
             allowed_oauth_scopes:
@@ -341,15 +348,22 @@ components:
           Application: "serverless-api"
 
     # =========================================================================
-    # STATIC ASSETS AND CDN LOGS (S3, storage layer)
+    # STATIC ASSETS, UPLOADS AND CDN LOGS (S3, storage layer)
     # =========================================================================
     # Each bucket is <Environment>-<name>-<account id>, SSE-KMS on kms/main
     # with versioning (s3/defaults); the component blocks public access.
+    # <name> carries the tenant and stage: bucket names are global.
+    #
+    # Two buckets, not one with prefixes: origin access control grants
+    # CloudFront the whole origin bucket (allow_cloudfront_oac_read, as Cloud
+    # Posse's cloudfront-s3-cdn origin policy does), so user uploads in the
+    # served bucket would be public at assets.<app domain>, and any HTML or SVG
+    # among them would run on a sibling of the app's origin. CloudFront serves
+    # only s3/assets, which the release pipeline writes; s3/uploads is never
+    # an origin.
 
-    # Static assets and user uploads. CloudFront reads it through origin
-    # access control (allow_cloudfront_oac_read; kms/main allow_cloudfront,
-    # REQUIREMENTS 1); browsers upload to presigned URLs from the API, which
-    # needs the app origin in CORS.
+    # Static assets the release pipeline publishes. CloudFront reads it
+    # through origin access control (kms/main allow_cloudfront, REQUIREMENTS 1).
     serverless-api/s3/assets:
       metadata:
         component: s3
@@ -357,8 +371,28 @@ components:
         inherits:
           - s3/defaults
       vars:
-        name: "{{ .settings.context.stage }}-api-assets"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-assets"
         allow_cloudfront_oac_read: true
+        lifecycle_configuration_rules:
+          - id: "noncurrent-versions"
+            abort_incomplete_multipart_upload_days: 7
+            noncurrent_version_expiration:
+              noncurrent_days: 30
+        tags:
+          Layer: "storage"
+          Application: "serverless-api"
+
+    # User uploads: private, reached only through presigned URLs the API
+    # handler signs. Browsers PUT and GET those URLs from the app origin, so
+    # CORS admits it.
+    serverless-api/s3/uploads:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-uploads"
         cors_configuration:
           - allowed_headers:
               - "*"
@@ -406,12 +440,12 @@ components:
         inherits:
           - s3/defaults
       vars:
-        # <Environment>-<stage>-api-cdn-logs-<account id>. The s3 component takes
+        # <Environment>-<tenant>-<stage>-api-cdn-logs-<account id>. The s3 component takes
         # <Environment> from tags.Environment; the bucket policy below uses
         # settings.context.environment, which is the same value only because
         # stacks/orgs/fnx/_defaults.yaml sets tags.Environment from it. Change
         # both together (vars are not reliably resolved at template time).
-        name: "{{ .settings.context.stage }}-api-cdn-logs"
+        name: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-cdn-logs"
         lifecycle_configuration_rules:
           - id: "expire-logs"
             abort_incomplete_multipart_upload_days: 7
@@ -429,7 +463,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:PutObject",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs-{{ .settings.environment.account_id }}/*",
+                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-cdn-logs-{{ .settings.environment.account_id }}/*",
                   "Condition": {
                     "StringEquals": {
                       "s3:x-amz-acl": "bucket-owner-full-control",
@@ -443,7 +477,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:GetBucketAcl",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs-{{ .settings.environment.account_id }}",
+                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api-cdn-logs-{{ .settings.environment.account_id }}",
                   "Condition": {
                     "StringEquals": {"aws:SourceAccount": "{{ .settings.environment.account_id }}"},
                     "ArnLike": {"aws:SourceArn": "arn:aws:logs:us-east-1:{{ .settings.environment.account_id }}:delivery-source:*"}
@@ -495,7 +529,7 @@ components:
           SESSIONS_TABLE_NAME: !terraform.state serverless-api/dynamodb/sessions .table_name
           TASKS_QUEUE_URL: !terraform.state serverless-api/sqs/tasks .queue_url
           NOTIFICATIONS_QUEUE_URL: !terraform.state serverless-api/sqs/notifications .queue_url
-          ASSETS_BUCKET: !terraform.state serverless-api/s3/assets .bucket_id
+          UPLOADS_BUCKET: !terraform.state serverless-api/s3/uploads .bucket_id
           USER_POOL_ID: !terraform.state serverless-api/cognito .user_pool_id
           LOG_LEVEL: "INFO"
           POWERTOOLS_SERVICE_NAME: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-api"
@@ -514,7 +548,6 @@ components:
               - "dynamodb:UpdateItem"
               - "dynamodb:DeleteItem"
               - "dynamodb:Query"
-              - "dynamodb:Scan"
             resources:
               - !terraform.state serverless-api/dynamodb/main .table_arn
               - !terraform.state serverless-api/dynamodb/main '.table_arn + "/index/*"'
@@ -543,13 +576,13 @@ components:
                 variable: "kms:ViaService"
                 values:
                   - "sqs.{{ .vars.region }}.amazonaws.com"
-          # Presigned GET/PUT URLs for assets and uploads are signed with this
-          # role, so it needs the object access they grant.
-          - sid: Assets
+          # Presigned GET/PUT URLs for uploads are signed with this role, so it
+          # needs the object access they grant.
+          - sid: Uploads
             actions: ["s3:GetObject", "s3:PutObject"]
             resources:
-              - !terraform.state serverless-api/s3/assets '.bucket_arn + "/*"'
-          - sid: AssetsKMS
+              - !terraform.state serverless-api/s3/uploads '.bucket_arn + "/*"'
+          - sid: UploadsKMS
             actions: ["kms:Decrypt", "kms:GenerateDataKey"]
             resources:
               - !terraform.state kms/main .key_arn
@@ -584,7 +617,7 @@ components:
           - component: serverless-api/dynamodb/sessions
           - component: serverless-api/sqs/tasks
           - component: serverless-api/sqs/notifications
-          - component: serverless-api/s3/assets
+          - component: serverless-api/s3/uploads
 
     # A custom (TOKEN) authorizer, for a stack that wants one in place of the
     # Cognito authorizer. Disabled: serverless-api/apigateway uses Cognito.
@@ -688,6 +721,7 @@ components:
               - "dynamodb:Query"
             resources:
               - !terraform.state serverless-api/dynamodb/main .table_arn
+              - !terraform.state serverless-api/dynamodb/main '.table_arn + "/index/*"'
           - sid: TableKMS
             actions: ["kms:Decrypt", "kms:GenerateDataKey"]
             resources:
@@ -766,43 +800,178 @@ components:
           - "multipart/form-data"
         minimum_compression_size: 10240
 
-        # The whole API is one Lambda proxy: ANY on the root and on
-        # {proxy+}, which matches every deeper path. AWS_PROXY passes the
-        # request through and returns the function's response, CORS headers
-        # included (cors_configuration is HTTP-API-only).
+        # The whole API is one Lambda proxy on the root and on {proxy+}, which
+        # matches every deeper path. AWS_PROXY passes the request through and
+        # returns the function's response, CORS headers included
+        # (cors_configuration is HTTP-API-only). One method per verb, not ANY:
+        # an ANY behind the authorizer also covers OPTIONS, so a browser's
+        # preflight (which carries no Authorization header) would get a 401,
+        # and the scopes on one method are OR'd, so read and write could not
+        # differ. GET and HEAD take the read or write scope, the other verbs
+        # the write scope, and OPTIONS is unauthenticated.
         api_resources:
           - path_part: "{proxy+}"
         api_methods:
           - resource_path: "/"
-            http_method: "ANY"
+            http_method: "GET"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/"
+            http_method: "HEAD"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/"
+            http_method: "POST"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/"
+            http_method: "PUT"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/"
+            http_method: "PATCH"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/"
+            http_method: "DELETE"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/"
+            http_method: "OPTIONS"
+            authorization: "NONE"
+          - resource_path: "/{proxy+}"
+            http_method: "GET"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
               - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
               - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
           - resource_path: "/{proxy+}"
-            http_method: "ANY"
+            http_method: "HEAD"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
               - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
               - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/{proxy+}"
+            http_method: "POST"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/{proxy+}"
+            http_method: "PUT"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/{proxy+}"
+            http_method: "PATCH"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/{proxy+}"
+            http_method: "DELETE"
+            authorization: "COGNITO_USER_POOLS"
+            authorization_scopes:
+              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+          - resource_path: "/{proxy+}"
+            http_method: "OPTIONS"
+            authorization: "NONE"
         # This component grants API Gateway lambda:InvokeFunction for each
         # (lambda_function_name).
         api_integrations:
           - resource_path: "/"
-            http_method: "ANY"
+            http_method: "GET"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/"
+            http_method: "HEAD"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/"
+            http_method: "POST"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/"
+            http_method: "PUT"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/"
+            http_method: "PATCH"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/"
+            http_method: "DELETE"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/"
+            http_method: "OPTIONS"
             integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
             type: "AWS_PROXY"
             uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
             lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
           - resource_path: "/{proxy+}"
-            http_method: "ANY"
-            integration_http_method: "POST"
+            http_method: "GET"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/{proxy+}"
+            http_method: "HEAD"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/{proxy+}"
+            http_method: "POST"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/{proxy+}"
+            http_method: "PUT"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/{proxy+}"
+            http_method: "PATCH"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/{proxy+}"
+            http_method: "DELETE"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
+            type: "AWS_PROXY"
+            uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
+            lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
+          - resource_path: "/{proxy+}"
+            http_method: "OPTIONS"
+            integration_http_method: "POST"   # AWS_PROXY always POSTs to Lambda
             type: "AWS_PROXY"
             uri: !terraform.state serverless-api/lambda-api-handler .function_invoke_arn
             lambda_function_name: !terraform.state serverless-api/lambda-api-handler .function_name
 
-        # Cognito authorizer: an access token with the API's read or write
-        # scope (authorization_scopes above), from any of the pool's clients.
+        # Cognito authorizer: an access token carrying a scope the method
+        # lists (authorization_scopes above), from any of the pool's clients.
         authorizer_type: "COGNITO_USER_POOLS"
         authorizer_identity_source: "method.request.header.Authorization"
         cognito_user_pool_arns:
@@ -901,15 +1070,6 @@ components:
             limit: 2000
             aggregate_key_type: "IP"
             action: "block"
-
-        byte_match_statement_rules:
-          - name: "BlockBadUserAgents"
-            priority: 5
-            action: "block"
-            search_string: "curl/"
-            positional_constraint: "STARTS_WITH"
-            header_name: "user-agent"
-            text_transformation_type: "LOWERCASE"
 
         # Deep-merged onto waf/defaults' authorization + cookie redaction: an
         # X-Api-Key header (usage plan keys) is a credential too.
