@@ -562,10 +562,12 @@ variable "allow_http_egress" {
 
   # Keyed on the Stage tag (settings.context.stage): Environment is the
   # stack's environment, a region code under the Q4 names, not the tier.
+  # Without a Stage tag it falls back to Environment, so a missing Stage
+  # cannot lift the production guard.
   validation {
     condition = (
       !var.allow_http_egress ||
-      !contains(["prod", "production"], lower(lookup(var.tags, "Stage", "dev")))
+      !contains(["prod", "production"], lower(lookup(var.tags, "Stage", lookup(var.tags, "Environment", ""))))
     )
     error_message = "HTTP egress is not allowed in production environments. Use HTTPS (port 443) only."
   }

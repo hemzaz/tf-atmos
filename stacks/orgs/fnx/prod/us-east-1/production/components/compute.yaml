@@ -59,7 +59,7 @@ components:
             max_group_size: 12
             kubernetes_labels:
               role: worker
-              environment: production
+              environment: "{{ .settings.context.stage }}"
             capacity_type: "ON_DEMAND" # Stable capacity for production
             # gp3 and encrypted are the component defaults, so only the
             # size is stated.

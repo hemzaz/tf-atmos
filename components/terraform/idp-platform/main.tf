@@ -4,7 +4,10 @@
 locals {
   # Matches the "<Environment>-vpc" naming used by the vpc component
   name_prefix = var.environment
-  tags        = merge({ Environment = var.environment }, var.tags, var.resource_tags)
+  # var.environment is the stage here. var.tags' validation requires
+  # Environment, so its default is only for tflint, which evaluates ../eks's
+  # var.tags["Environment"] with var.tags' empty default.
+  tags = merge({ Environment = var.environment, Stage = var.environment }, var.tags, var.resource_tags)
 
   # S3 names are global, so the buckets start with the stack's full id,
   # tenant-environment-stage (Cloud Posse's null-label id order); var.environment

@@ -172,6 +172,21 @@ run "storage_buckets_use_the_full_id" {
   }
 }
 
+# var.environment is the stage: it defaults tags.Stage, which ../eks keys
+# deletion protection on (tags.Environment is the region code).
+run "stage_tag_defaults_to_the_environment_variable" {
+  command = plan
+
+  variables {
+    environment = "prod"
+  }
+
+  assert {
+    condition     = aws_s3_bucket.idp_storage["artifacts"].tags["Stage"] == "prod"
+    error_message = "tags.Stage must default to var.environment."
+  }
+}
+
 run "rejects_tags_without_environment" {
   command = plan
 
