@@ -1,25 +1,25 @@
 #!/bin/bash
 # GitHub Actions runner bootstrap (Amazon Linux 2023). Rendered by main.tf
 # (templatefile); a $${...} here is a shell expansion, a single-dollar one a
-# Terraform value. Ported from Cloud Posse aws-github-runners' user-data.sh and
-# create-latest-svc.sh: Docker for container jobs, a pinned and checksummed
-# runner release instead of "latest", and (ephemeral) one job per instance.
+# Terraform value. Ported from Cloud Posse aws-github-runners' user-data.sh,
+# with a pinned and checksummed runner release and a just-in-time runner
+# configuration instead of a registration token: the jit function writes this
+# instance's single-use configuration to SSM while the instance waits in its
+# launch lifecycle hook; the instance reads it, deletes it, runs one job and
+# leaves.
 set -euo pipefail
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
-
-${pre_install}
-
-dnf install -y docker git jq libicu
-systemctl enable --now docker
+# Until the instance knows who it is, a failure can only power it off
+# (instance_initiated_shutdown_behavior terminates it).
+trap 'shutdown -h now' EXIT
 
 imds() {
   local token
-  token=$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
-  curl -s -H "X-aws-ec2-metadata-token: $${token}" "http://169.254.169.254/latest/meta-data/$1"
+  token=$(curl -sfX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+  curl -sf -H "X-aws-ec2-metadata-token: $${token}" "http://169.254.169.254/latest/meta-data/$1"
 }
 INSTANCE_ID=$(imds instance-id)
 REGION=$(imds placement/region)
-INSTANCE_TYPE=$(imds instance-type)
 
 # Leave the Auto Scaling group and lower its desired capacity, so the group
 # does not replace this instance: work arrives by raising desired capacity.
@@ -27,6 +27,14 @@ terminate() {
   aws autoscaling terminate-instance-in-auto-scaling-group --region "$${REGION}" \
     --instance-id "$${INSTANCE_ID}" --should-decrement-desired-capacity || shutdown -h now
 }
+# Whatever happens from here on, failed bootstrap or finished job, the
+# instance leaves: an ephemeral runner never serves a second job.
+trap terminate EXIT
+
+${pre_install}
+
+dnf install -y docker git jq libicu
+systemctl enable --now docker
 
 # The runner and its jobs run as an unprivileged user; the docker group lets
 # container jobs (the atmos image) start.
@@ -43,22 +51,27 @@ tar xzf "$${TARBALL}"
 rm -f "$${TARBALL}"
 chown -R runner:runner "$${RUNNER_DIR}"
 
-RUNNER_TOKEN=$(aws ssm get-parameter --region "$${REGION}" --with-decryption \
-  --name "${token_parameter_name}" --query Parameter.Value --output text)
-
-sudo -u runner ./config.sh --unattended --disableupdate \
-  --url "https://github.com/${github_scope}" --token "$${RUNNER_TOKEN}" \
-  --name "$${INSTANCE_ID}" --labels "${labels},$${INSTANCE_TYPE}" \
-  %{ if runner_group != "" }--runnergroup "${runner_group}" %{ endif }%{ if ephemeral }--ephemeral%{ endif }
-unset RUNNER_TOKEN
-
 ${post_install}
 
-%{ if ephemeral ~}
-# One job, then leave. A runner that gets no job within the idle timeout
-# leaves too; GitHub removes its offline registration.
-sudo -u runner ./run.sh &
+# The jit function writes the configuration while the launch hook holds this
+# instance (it may still be on its way); read it once, then delete it.
+JIT_PARAMETER="${jit_parameter_prefix}/$${INSTANCE_ID}"
+for _ in $(seq 1 60); do
+  if JIT_CONFIG=$(aws ssm get-parameter --region "$${REGION}" --with-decryption \
+      --name "$${JIT_PARAMETER}" --query Parameter.Value --output text 2>/dev/null); then
+    break
+  fi
+  JIT_CONFIG=""
+  sleep 5
+done
+[ -n "$${JIT_CONFIG}" ] || { echo "No JIT configuration at $${JIT_PARAMETER}"; exit 1; }
+aws ssm delete-parameter --region "$${REGION}" --name "$${JIT_PARAMETER}"
+
+# One job, then leave (the EXIT trap). A runner that gets no job within the
+# idle timeout leaves too; the jit function removes its registration.
+sudo -u runner ./run.sh --jitconfig "$${JIT_CONFIG}" &
 RUNNER_PID=$!
+unset JIT_CONFIG
 (
   sleep ${idle_timeout_seconds}
   if ! ls "$${RUNNER_DIR}"/_diag/Worker_*.log >/dev/null 2>&1; then
@@ -67,8 +80,3 @@ RUNNER_PID=$!
   fi
 ) &
 wait "$${RUNNER_PID}" || true
-terminate
-%{ else ~}
-./svc.sh install runner
-./svc.sh start
-%{ endif ~}

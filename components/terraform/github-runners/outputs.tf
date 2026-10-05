@@ -24,6 +24,21 @@ output "launch_template_id" {
 }
 
 output "runner_labels" {
-  description = "Labels the runners register with (besides self-hosted, linux, x64 and the instance type)"
+  description = "Labels the runners register with (besides self-hosted, linux and x64)"
   value       = var.runner_labels
+}
+
+output "app_private_key_parameter_name" {
+  description = "SSM SecureString the owner writes the GitHub App private key to, with app_key_kms_key_alias"
+  value       = local.enabled ? local.app_key_parameter_name : null
+}
+
+output "app_key_kms_key_alias" {
+  description = "Alias of the key the App private key parameter must be encrypted with (only the jit function may decrypt it)"
+  value       = one(aws_kms_alias.app_key[*].name)
+}
+
+output "jit_function_name" {
+  description = "Name of the jit function (its log group shows each launch's JIT configuration and each cleanup)"
+  value       = one(aws_lambda_function.jit[*].function_name)
 }

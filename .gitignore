@@ -170,7 +170,7 @@ components/terraform/*/providers_override.tf.json
 components/terraform/*/*_lambda.zip
 components/terraform/cost-optimization/*.zip
 components/terraform/lambda/.archives/
-components/terraform/github-action-token-rotator/.archives/
+components/terraform/github-runners/.archives/
 
 # Additional logs and temporary files
 *.tmp

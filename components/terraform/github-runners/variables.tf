@@ -60,7 +60,7 @@ variable "subnet_ids" {
 
 variable "kms_key_arn" {
   type        = string
-  description = "Customer managed key that encrypts the runners' root volumes and the registration token parameter (the runners decrypt it through SSM only)"
+  description = "Customer managed key (kms/main) that encrypts the runners' root volumes, the JIT configuration parameters and the jit function's log group. The App's private key is on this component's own key instead"
 
   validation {
     condition     = can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.kms_key_arn))
@@ -81,7 +81,7 @@ variable "github_scope" {
 
 variable "runner_labels" {
   type        = list(string)
-  description = "Labels the runners register with besides self-hosted, linux and x64 (which GitHub adds) and the instance type. CI routes a stack's jobs by its full id, <tenant>-<environment>-<stage>"
+  description = "Labels the runners register with besides self-hosted, linux and x64 (which the jit function adds). CI routes a stack's jobs by its full id, <tenant>-<environment>-<stage>"
 
   validation {
     condition     = length(var.runner_labels) > 0 && alltrue([for l in var.runner_labels : can(regex("^[A-Za-z0-9._-]{1,100}$", l))])
@@ -89,15 +89,21 @@ variable "runner_labels" {
   }
 }
 
-variable "runner_group" {
-  type        = string
-  description = "Runner group of organization runners (Cloud Posse's runner_group); ignored for a repository scope, which has none"
-  default     = "Default"
+# Cloud Posse's runner_group names the group; the JIT API takes its ID.
+variable "runner_group_id" {
+  type        = number
+  description = "Runner group ID the JIT runners join. 1 is the Default group, the only one a repository has"
+  default     = 1
+
+  validation {
+    condition     = var.runner_group_id >= 1 && floor(var.runner_group_id) == var.runner_group_id
+    error_message = "runner_group_id must be a positive integer."
+  }
 }
 
 variable "runner_version" {
   type        = string
-  description = "GitHub Actions runner release (e.g. 2.329.0). Pinned, unlike Cloud Posse's install of the latest release; the runner does not update itself (--disableupdate), so bump it, with runner_sha256, before GitHub stops accepting the release"
+  description = "GitHub Actions runner release (e.g. 2.337.0). Pinned, unlike Cloud Posse's install of the latest release; bump it, with runner_sha256, before GitHub stops accepting the release"
 
   validation {
     condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+$", var.runner_version))
@@ -115,15 +121,9 @@ variable "runner_sha256" {
   }
 }
 
-variable "ephemeral" {
-  type        = bool
-  description = "Each instance takes one job, then leaves its Auto Scaling group (lowering desired capacity), so no job ever sees another's files. CI raises desired capacity to start runners. False keeps Cloud Posse's long-lived runner service"
-  default     = true
-}
-
 variable "idle_timeout_seconds" {
   type        = number
-  description = "An ephemeral runner that gets no job within this many seconds of boot terminates itself"
+  description = "A runner that gets no job within this many seconds of starting terminates itself"
   default     = 900
 
   validation {
@@ -132,13 +132,71 @@ variable "idle_timeout_seconds" {
   }
 }
 
-variable "registration_token_parameter_name" {
+# Not in Cloud Posse aws-github-runners, which reads a registration token (or
+# PAT) from ssm_path/ssm_path_key (see README): here the jit function
+# authenticates as a GitHub App and hands each instance a single-use JIT
+# runner configuration.
+variable "github_app_id" {
   type        = string
-  description = "SSM SecureString holding a current registration token (github-action-token-rotator's .token_parameter_name). Cloud Posse builds it from ssm_parameter_name_format, ssm_path and ssm_path_key"
+  description = "GitHub App ID (the App's settings page, \"App ID\"); not a secret"
 
   validation {
-    condition     = can(regex("^/[A-Za-z0-9_./-]+$", var.registration_token_parameter_name))
-    error_message = "registration_token_parameter_name must be an absolute SSM parameter path."
+    condition     = can(regex("^[0-9]+$", var.github_app_id))
+    error_message = "github_app_id must be the App's numeric ID."
+  }
+}
+
+variable "github_app_installation_id" {
+  type        = string
+  description = "GitHub App installation ID (the number at the end of the installation's settings URL); not a secret"
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_app_installation_id))
+    error_message = "github_app_installation_id must be the installation's numeric ID."
+  }
+}
+
+variable "github_app_private_key_parameter_name" {
+  type        = string
+  description = "SSM SecureString holding the App's private key (PEM, or base64 of the PEM), written by hand with this pool's app key (.app_key_kms_key_alias); null for /github/runners/<name>/app-private-key. Never in the state: only the jit function reads it"
+  default     = null
+
+  validation {
+    condition     = var.github_app_private_key_parameter_name == null || can(regex("^/[A-Za-z0-9_./-]+$", coalesce(var.github_app_private_key_parameter_name, "-")))
+    error_message = "github_app_private_key_parameter_name must be an absolute SSM parameter path."
+  }
+}
+
+variable "jit_parameter_prefix" {
+  type        = string
+  description = "SSM path under which the jit function writes each instance's JIT configuration (<prefix>/<instance id>)"
+  default     = "/github/runners/jit"
+
+  validation {
+    condition     = can(regex("^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", var.jit_parameter_prefix))
+    error_message = "jit_parameter_prefix must be an absolute SSM path without a trailing slash."
+  }
+}
+
+variable "lifecycle_heartbeat_timeout" {
+  type        = number
+  description = "Seconds the launch hook holds an instance for the jit function before abandoning (terminating) it"
+  default     = 300
+
+  validation {
+    condition     = var.lifecycle_heartbeat_timeout >= 30 && var.lifecycle_heartbeat_timeout <= 7200
+    error_message = "lifecycle_heartbeat_timeout must be between 30 and 7200."
+  }
+}
+
+variable "log_retention_days" {
+  type        = number
+  description = "Days the jit function's log group keeps its logs"
+  default     = 30
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "log_retention_days must be a CloudWatch Logs retention value (1, 3, 5, 7, 14, 30, 60, 90, ...)."
   }
 }
 
