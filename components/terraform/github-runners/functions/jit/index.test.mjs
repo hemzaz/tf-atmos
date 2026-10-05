@@ -70,7 +70,7 @@ const DETAIL = {
   LifecycleActionToken: "token-1",
 };
 
-function fakes({ jitStatus = 201, runners = [] } = {}) {
+function fakes({ jitStatus = 201, runners = [], terminateFails = false } = {}) {
   const calls = [];
   const reply = (status, body) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
   return {
@@ -87,7 +87,10 @@ function fakes({ jitStatus = 201, runners = [] } = {}) {
       getParameter: async (name) => { calls.push({ kind: "getParameter", name }); return pem; },
       putParameter: async (input) => { calls.push({ kind: "putParameter", input }); },
       deleteParameter: async (name) => { calls.push({ kind: "deleteParameter", name }); },
-      terminateInstance: async (instanceId) => { calls.push({ kind: "terminate", instanceId }); },
+      terminateInstance: async (instanceId) => {
+        calls.push({ kind: "terminate", instanceId });
+        if (terminateFails) throw new Error("ScalingActivityInProgress");
+      },
       completeLifecycle: async (detail, result) => { calls.push({ kind: "complete", result }); },
     },
   };
@@ -132,6 +135,14 @@ test("launch: a GitHub failure revokes the token, terminates the instance (lower
   assert.deepEqual(kinds.slice(-2), ["terminate", "complete"]);
   assert.equal(calls.at(-2).instanceId, "i-0123456789abcdef0");
   assert.equal(calls.at(-1).result, "ABANDON");
+});
+
+test("launch: if Auto Scaling refuses the terminate, the launch continues so the instance ends itself", async () => {
+  const { calls, deps } = fakes({ jitStatus: 403, terminateFails: true });
+  await assert.rejects(onLaunch(DETAIL, ENV, deps), /generate-jitconfig: 403/);
+  assert.deepEqual(summary(calls).slice(-2), ["terminate", "complete"]);
+  assert.equal(calls.at(-1).result, "CONTINUE");
+  assert.ok(!summary(calls).includes("putParameter"));
 });
 
 test("terminate: deletes the unread parameter and the instance's leftover runner only", async () => {
