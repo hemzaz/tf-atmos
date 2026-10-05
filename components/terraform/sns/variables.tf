@@ -78,6 +78,40 @@ variable "subscribers" {
     condition     = alltrue([for s in values(var.subscribers) : s.dead_letter_queue_arn == null || can(regex("^arn:aws[a-z-]*:sqs:[a-z0-9-]+:[0-9]{12}:.+$", s.dead_letter_queue_arn))])
     error_message = "dead_letter_queue_arn must be an SQS queue ARN."
   }
+
+  validation {
+    condition     = alltrue([for s in values(var.subscribers) : s.protocol != "https" || startswith(s.endpoint, "https://")])
+    error_message = "An https subscriber's endpoint must be an https:// URL."
+  }
+
+  # Ported from the idp-platform component's notification_endpoints. A raw chat
+  # webhook never answers SNS's SubscriptionConfirmation POST, so the
+  # subscription stays PendingConfirmation and delivers nothing, silently.
+  # Best effort: these hosts move (Office 365 connectors retired in May 2026;
+  # their logic.azure.com replacements are being relocated), so the list lags
+  # and fails open. acknowledge_https_forwarder is the real guard.
+  validation {
+    condition = alltrue([
+      for s in values(var.subscribers) : s.protocol != "https" || (
+        !can(regex("^https://hooks\\.slack\\.com/", s.endpoint)) &&
+        !can(regex("\\.webhook\\.office\\.com/", s.endpoint)) &&
+        !can(regex("\\.logic\\.azure\\.com[:/]", s.endpoint)) &&
+        !can(regex("^https://(canary\\.)?discord(app)?\\.com/api/webhooks/", s.endpoint))
+      )
+    ])
+    error_message = "An https subscriber is a raw chat webhook URL, not a forwarder. It never answers SNS's SubscriptionConfirmation POST, so the subscription would stay PendingConfirmation and deliver nothing, silently. Point it at something that confirms the subscription and reshapes the payload: a Lambda function URL, an API Gateway, or AWS Chatbot."
+  }
+
+  validation {
+    condition     = alltrue([for s in values(var.subscribers) : s.protocol != "https"]) || var.acknowledge_https_forwarder
+    error_message = "Set acknowledge_https_forwarder = true to confirm that every https subscriber answers SNS's SubscriptionConfirmation POST. A chat webhook URL there leaves the subscription stuck in PendingConfirmation: it delivers nothing and never errors, so the failure surfaces only when a message does not arrive."
+  }
+}
+
+variable "acknowledge_https_forwarder" {
+  type        = bool
+  description = "Assert that every https subscriber is an endpoint that confirms its SNS subscription (a Lambda function URL, API Gateway, AWS Chatbot, a service's SNS endpoint), not a raw chat webhook. Required for any https subscriber, because no hostname check can prove it"
+  default     = false
 }
 
 variable "allowed_aws_services_for_sns_published" {

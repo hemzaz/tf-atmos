@@ -37,3 +37,17 @@ components:
           - "10.40.102.0/24"
           - "10.40.103.0/24"
         vpc_flow_logs_enabled: false
+
+    # The template's REQUIREMENTS 4: the alerts topic's subscribers.
+    # Placeholders, so the sweep plans both subscription paths.
+    idp-platform/sns/alerts:
+      vars:
+        acknowledge_https_forwarder: true
+        subscribers:
+          oncall:
+            protocol: email
+            endpoint: oncall@example.com
+          chat:
+            protocol: https
+            endpoint: https://fixtures.lambda-url.us-east-1.on.aws/
+            raw_message_delivery: true

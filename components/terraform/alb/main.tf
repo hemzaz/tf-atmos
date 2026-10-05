@@ -6,8 +6,9 @@
 #
 #   1. The ALB owns its own security group instead of taking caller-supplied
 #      ones, and that security group admits only the CloudFront origin-facing
-#      managed prefix list on 443 (plus any additional prefix lists or
-#      security groups the caller names -- never a CIDR block).
+#      managed prefix list on 443 (cloudfront_ingress_enabled, on by default;
+#      off for an ALB that is not behind CloudFront), plus any additional
+#      prefix lists or security groups the caller names -- never a CIDR block.
 #   2. There is no port 80 listener. CloudFront does the http -> https
 #      redirect at the edge.
 
@@ -17,6 +18,8 @@ locals {
   name = "${var.tags["Environment"]}-${var.name}"
 
   access_logs_enabled = local.enabled && var.access_logs_enabled
+
+  cloudfront_ingress_enabled = local.enabled && var.cloudfront_ingress_enabled
 }
 
 data "aws_partition" "current" {}
@@ -26,7 +29,7 @@ data "aws_partition" "current" {}
 # ---------------------------------------------------------------------------
 
 data "aws_ec2_managed_prefix_list" "cloudfront" {
-  count = local.enabled ? 1 : 0
+  count = local.cloudfront_ingress_enabled ? 1 : 0
   name  = "com.amazonaws.global.cloudfront.origin-facing"
 }
 
@@ -35,7 +38,8 @@ resource "aws_security_group" "this" {
   count = local.enabled ? 1 : 0
 
   name_prefix = "${local.name}-"
-  description = "ALB ${local.name}: HTTPS from the CloudFront origin-facing prefix list only"
+  # Unchanged text with CloudFront ingress on: a new description replaces the group.
+  description = var.cloudfront_ingress_enabled ? "ALB ${local.name}: HTTPS from the CloudFront origin-facing prefix list only" : "ALB ${local.name}: HTTPS from the named prefix lists and security groups only"
   vpc_id      = var.vpc_id
 
   tags = { Name = local.name }
@@ -46,7 +50,7 @@ resource "aws_security_group" "this" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "cloudfront" {
-  count = local.enabled ? 1 : 0
+  count = local.cloudfront_ingress_enabled ? 1 : 0
 
   security_group_id = aws_security_group.this[0].id
   description       = "HTTPS from the CloudFront origin-facing managed prefix list"
@@ -54,6 +58,25 @@ resource "aws_vpc_security_group_ingress_rule" "cloudfront" {
   to_port           = 443
   ip_protocol       = "tcp"
   prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront[0].id
+}
+
+# Route 53 health checkers, from their AWS-managed prefix list (weight 25
+# against the security-group rule quota): an internet-facing ALB watched by a
+# Route 53 HTTPS health check that its other rules would not admit.
+data "aws_ec2_managed_prefix_list" "route53_health_checks" {
+  count = local.enabled && var.route53_health_check_ingress_enabled ? 1 : 0
+  name  = "com.amazonaws.${var.region}.route53-healthchecks"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "route53_health_checks" {
+  count = local.enabled && var.route53_health_check_ingress_enabled ? 1 : 0
+
+  security_group_id = aws_security_group.this[0].id
+  description       = "HTTPS from the Route 53 health checkers' managed prefix list"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.route53_health_checks[0].id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "additional_prefix_lists" {
@@ -78,7 +101,7 @@ resource "aws_vpc_security_group_ingress_rule" "additional_security_groups" {
   referenced_security_group_id = each.value
 }
 
-#trivy:ignore:AVD-AWS-0104 Egress is unrestricted by policy (owner decision): the CloudFront-prefix-list-only ingress rules above cover inbound traffic; egress may be open.
+#trivy:ignore:AVD-AWS-0104 Egress is unrestricted by policy (owner decision): the prefix-list and security-group ingress rules above cover inbound traffic; egress may be open.
 resource "aws_vpc_security_group_egress_rule" "all" {
   count = local.enabled ? 1 : 0
 
@@ -117,7 +140,7 @@ resource "aws_s3_bucket" "access_logs" {
   #checkov:skip=CKV_AWS_21:aws_s3_bucket_versioning.access_logs covers this bucket via count
   #checkov:skip=CKV_AWS_145:ALB access log delivery only supports SSE-S3, not SSE-KMS
   #checkov:skip=CKV_AWS_18:This bucket IS the access-log destination; access logs of a log bucket are out of scope
-  #checkov:skip=CKV2_AWS_61:A short-lived lifecycle rule is unnecessary for access logs sized for this repo's stacks
+  #checkov:skip=CKV2_AWS_61:aws_s3_bucket_lifecycle_configuration.access_logs covers this bucket via count when lifecycle_rule_enabled is set
   #checkov:skip=CKV2_AWS_62:Event notifications are out of scope for this component
   #checkov:skip=CKV_AWS_144:Access-log bucket; cross-region replication is out of scope for this component (mirrors s3/main.tf and cloudtrail/main.tf)
   count = local.access_logs_enabled ? 1 : 0
@@ -169,6 +192,34 @@ resource "aws_s3_bucket_versioning" "access_logs" {
 
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+# Cloud Posse lb-s3-bucket's lifecycle: expire the logs (and their
+# noncurrent versions) after expiration_days / noncurrent_version_expiration_days,
+# and abort incomplete multipart uploads. Off by default, as upstream.
+resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
+  count = local.access_logs_enabled && var.lifecycle_rule_enabled ? 1 : 0
+
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  rule {
+    id     = "expire-access-logs"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = var.expiration_days
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.noncurrent_version_expiration_days
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = var.abort_incomplete_multipart_upload_days
+    }
   }
 }
 
@@ -232,7 +283,7 @@ resource "aws_s3_bucket_policy" "access_logs" {
 # Load balancer, default target group and HTTPS listener.
 # ---------------------------------------------------------------------------
 
-#trivy:ignore:AVD-AWS-0053 Internet-facing by design (owner decision): the security group above admits only the CloudFront origin-facing prefix list on 443, never 0.0.0.0/0.
+#trivy:ignore:AVD-AWS-0053 Internet-facing by design (owner decision): the security groups admit 443 only from the CloudFront origin-facing prefix list and the named prefix lists and security groups, never 0.0.0.0/0.
 resource "aws_lb" "this" {
   #checkov:skip=CKV_AWS_150:deletion_protection is an input; stacks that want it set var.deletion_protection = true
   #checkov:skip=CKV2_AWS_28:False positive; the waf component associates a REGIONAL web ACL with this ALB's alb_arn output (see stacks/catalog/templates/web-application.yaml web-application/waf) -- checkov's graph does not follow that cross-component association

@@ -112,6 +112,7 @@ run "subscriptions_with_a_dead_letter_queue" {
         endpoint = "https://events.example.com/sns"
       }
     }
+    acknowledge_https_forwarder = true
   }
 
   assert {
@@ -546,4 +547,88 @@ run "rejects_deduplication_on_a_standard_topic" {
   }
 
   expect_failures = [var.content_based_deduplication]
+}
+
+run "https_subscriber_needs_the_forwarder_acknowledgement" {
+  command = plan
+
+  variables {
+    subscribers = {
+      oncall = {
+        protocol = "https"
+        endpoint = "https://events.example.com/sns"
+      }
+    }
+  }
+
+  expect_failures = [var.subscribers]
+}
+
+run "raw_slack_webhook_is_rejected_even_when_acknowledged" {
+  command = plan
+
+  variables {
+    subscribers = {
+      slack = {
+        protocol = "https"
+        endpoint = "https://hooks.slack.com/services/T000/B000/XXXX"
+      }
+    }
+    acknowledge_https_forwarder = true
+  }
+
+  expect_failures = [var.subscribers]
+}
+
+run "raw_teams_and_discord_webhooks_are_rejected" {
+  command = plan
+
+  variables {
+    subscribers = {
+      teams = {
+        protocol = "https"
+        endpoint = "https://prod-00.westus.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke"
+      }
+      discord = {
+        protocol = "https"
+        endpoint = "https://discord.com/api/webhooks/123/abc"
+      }
+    }
+    acknowledge_https_forwarder = true
+  }
+
+  expect_failures = [var.subscribers]
+}
+
+run "acknowledged_forwarder_is_accepted" {
+  command = plan
+
+  variables {
+    subscribers = {
+      slack = {
+        protocol             = "https"
+        endpoint             = "https://abcdef.lambda-url.us-east-1.on.aws/"
+        raw_message_delivery = true
+      }
+    }
+    acknowledge_https_forwarder = true
+  }
+
+  assert {
+    condition     = aws_sns_topic_subscription.this["slack"].raw_message_delivery
+    error_message = "An acknowledged forwarder gets its subscription."
+  }
+}
+
+run "email_subscribers_need_no_acknowledgement" {
+  command = plan
+
+  variables {
+    subscribers = {
+      oncall = {
+        protocol = "email"
+        endpoint = "oncall@example.com"
+      }
+    }
+  }
 }

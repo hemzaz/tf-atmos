@@ -26,9 +26,11 @@
 #     jaeger., validated in that zone
 #   - securitygroups: alb_clients, HTTPS from the networks allowed to reach
 #     the platform (private ranges by default), attached to the ALB
-#   - alb: internet-facing in the public subnets, HTTPS only, access logs in
-#     its own SSE-S3 bucket under alb-access-logs/, alias records for the
-#     domain and its four hosts
+#   - alb: internet-facing in the public subnets, HTTPS only, reached from the
+#     allowed networks and the Route 53 health checkers only (no CloudFront
+#     ingress), access logs in its own
+#     SSE-S3 bucket under alb-access-logs/ (expiring after 90 days), alias
+#     records for the domain and its four hosts
 #   - sns/alerts and monitoring: the health check's alarm, notifying the
 #     alerts topic (email and HTTPS-forwarder subscribers)
 #   - secrets: the platform's JWT signing secret (64 characters, generated)
@@ -76,7 +78,9 @@
 #    subscribers: email addresses, and Slack/Teams through an HTTPS forwarder
 #    that answers SNS's SubscriptionConfirmation (a Lambda function URL, API
 #    Gateway, AWS Chatbot), never a raw chat webhook, with
-#    raw_message_delivery: true.
+#    raw_message_delivery: true, and acknowledge_https_forwarder: true (the sns
+#    component rejects known raw webhook hosts and requires that assertion for
+#    any https subscriber).
 # 5. A prod stack applies the ENVIRONMENT-SPECIFIC OVERRIDES at the end
 #    (rds environment: prod and its validations, deletion protection, backup
 #    and snapshot retention).
@@ -103,7 +107,8 @@ components:
     # STORAGE (storage layer)
     # =========================================================================
     # Four of the component's five buckets. Its fifth, logs, held only the ALB
-    # access logs: the alb component keeps those in its own SSE-S3 bucket.
+    # access logs: the alb component keeps those in its own SSE-S3 bucket,
+    # expiring them as the logs bucket did (idp-platform/alb).
     # techdocs is private (the component made it public): Backstage publishes
     # and reads TechDocs with its own IAM role, so nothing needs anonymous
     # read.
@@ -193,10 +198,11 @@ components:
     # =========================================================================
     # NETWORK ACCESS (connectivity layer)
     # =========================================================================
-    # The alb component's own group admits only the CloudFront origin-facing
-    # prefix list (never a CIDR, an owner decision for that component); this
-    # group, attached to the ALB as well, admits the networks that reach the
-    # platform directly, as the component's allowed_cidr_blocks did.
+    # The alb component's own group never takes a CIDR (an owner decision for
+    # that component), and this ALB is not behind CloudFront
+    # (cloudfront_ingress_enabled: false); this group, attached to the ALB,
+    # admits the networks that reach the platform directly, as the component's
+    # allowed_cidr_blocks did.
     idp-platform/securitygroups:
       metadata:
         component: securitygroup
@@ -467,10 +473,13 @@ components:
           - component: idp-platform/dns
 
     # <Environment>-idp, internet-facing in vpc/main's public subnets; HTTPS
-    # only (the component has no port 80 listener). Its access logs go to the
-    # component's own SSE-S3 bucket, under alb-access-logs/ as before. The
-    # alias records make the domain and its hosts resolve to it, which the
-    # health check needs (the idp-platform component created none).
+    # only (the component has no port 80 listener), from the alb_clients
+    # networks only: no CloudFront origin-facing prefix list. Its access logs
+    # go to the component's own SSE-S3 bucket, under alb-access-logs/ as
+    # before, and expire as the logs bucket's did: 90 days, incomplete
+    # uploads after 7. The alias records make the domain and its hosts
+    # resolve to it, which the health check needs (the idp-platform component
+    # created none).
     idp-platform/alb:
       metadata:
         component: alb
@@ -483,11 +492,18 @@ components:
         vpc_id: !terraform.state vpc/main .vpc_id
         subnets: !terraform.state vpc/main .public_subnet_ids
         certificate_arn: !terraform.state idp-platform/acm .certificate_arns.idp
+        cloudfront_ingress_enabled: false
+        # The health check (idp-platform/dns) probes from Route 53's public
+        # ranges, which alb_clients does not admit.
+        route53_health_check_ingress_enabled: true
         security_group_ids:
           - !terraform.state idp-platform/securitygroups .security_group_ids.alb_clients
         # Non-prod; prod: ENVIRONMENT-SPECIFIC OVERRIDES.
         deletion_protection: false
         access_logs_prefix: "alb-access-logs"
+        lifecycle_rule_enabled: true
+        expiration_days: 90
+        abort_incomplete_multipart_upload_days: 7
         dns_alias_enabled: true
         parent_zone_id: !terraform.state idp-platform/dns .zone_ids.main
         dns_aliases:
