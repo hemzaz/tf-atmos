@@ -48,3 +48,6 @@ state or outputs.
   turn off `store_auth_token_in_secrets_manager` and leave `auth_token_version` alone: the
   Lambda's first rotation SETs its own token, and a bump would ROTATE a Terraform one back in.
 - `rotation_policy` is a ready-made IAM policy for such a Lambda's `custom_policy`.
+- `log_delivery_configuration` (slow-log, engine-log) differs from Cloud Posse's: each entry names
+  only its log type and format, and the component creates the log group
+  (`/aws/elasticache/<Environment>-<cluster_id>/<log_type>`), always encrypted with `log_kms_key_id`.

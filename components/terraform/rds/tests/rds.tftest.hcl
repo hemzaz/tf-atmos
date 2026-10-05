@@ -532,3 +532,38 @@ run "monitoring_trust_names_only_the_primary_without_a_replica" {
     error_message = "Without a read replica the enhanced-monitoring trust names only the primary."
   }
 }
+
+run "prod_accepts_graviton_and_intel_production_classes" {
+  command = plan
+
+  variables {
+    environment         = "prod"
+    multi_az            = true
+    deletion_protection = true
+    instance_class      = "db.r6g.large"
+  }
+}
+
+run "prod_accepts_t4g_medium" {
+  command = plan
+
+  variables {
+    environment         = "prod"
+    multi_az            = true
+    deletion_protection = true
+    instance_class      = "db.t4g.medium"
+  }
+}
+
+run "prod_rejects_a_small_burstable_class" {
+  command = plan
+
+  variables {
+    environment         = "prod"
+    multi_az            = true
+    deletion_protection = true
+    instance_class      = "db.t3.micro"
+  }
+
+  expect_failures = [var.instance_class]
+}

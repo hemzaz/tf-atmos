@@ -27,7 +27,8 @@ Synthetics canary and X-Ray sampling rule, business-metric filters, and generic 
   an HTTP API publishes no `ApiName`, so use `metric_alarms` with `ApiId` instead.
 - The EKS node alarms read Container Insights metrics from `eks-addons`; set `eks_min_node_count`
   to the sum of the node groups' `min_group_size`.
-- Alarms notify only when `create_sns_topic = true` (default).
+- Alarms notify the own topic when `create_sns_topic = true` (default) and every topic in
+  `alarm_sns_topic_arns` (an `sns` instance, for subscribers the own email-only topic cannot take).
 - `lambda_error_alarms` keys are stable alarm ids; the watched function is each entry's
   `function_name` (validated as a name, not an ARN), never the key.
 - `create_dashboard` is a legacy alias of `create_infrastructure_dashboard`, still set by the stacks.

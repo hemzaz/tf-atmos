@@ -1,0 +1,575 @@
+---
+# =============================================================================
+# INTERNAL DEVELOPER PLATFORM (IDP) STACK TEMPLATE
+# =============================================================================
+# The infrastructure an internal developer platform (Backstage, its platform
+# API, Grafana/Prometheus/Jaeger) runs on, composed of the repo's components.
+# It replaces the unsupported components/terraform/idp-platform root module
+# (owner decision W3, 2026-10-02: "idp-platform -> template"), which nested
+# the eks, rds and acm root components as modules.
+#
+# Architecture (instances are idp-platform/<part>):
+#   - eks: one cluster, <Environment>-idp, private endpoint, all five control
+#     plane log types, two managed node groups: platform_services (on-demand,
+#     tainted platform-services=true:NoSchedule) and user_workloads (Spot)
+#   - rds: PostgreSQL for Backstage (database backstage, user idp_admin, the
+#     master password in the RDS-managed secret), admitting the cluster
+#   - elasticache: Redis 7.1 with failover, AUTH token (generated, in the
+#     redis-auth/<Environment>/idp-redis secret), slow log to a CloudWatch log
+#     group on kms/main, admitting the cluster
+#   - s3/{artifacts,backups,techdocs,uploads}: <tenant>-<environment>-<stage>-
+#     idp-<purpose> (the stack's full id: S3 names are global), SSE-KMS on
+#     kms/main; uploads takes browser uploads (CORS) from the platform's hosts
+#   - dns: the platform domain's public zone and an HTTPS Route 53 health
+#     check on /api/catalog/health
+#   - acm: one certificate, the domain plus api., grafana., prometheus. and
+#     jaeger., validated in that zone
+#   - securitygroups: alb_clients, HTTPS from the networks allowed to reach
+#     the platform (private ranges by default), attached to the ALB
+#   - alb: internet-facing in the public subnets, HTTPS only, access logs in
+#     its own SSE-S3 bucket under alb-access-logs/, alias records for the
+#     domain and its four hosts
+#   - sns/alerts and monitoring: the health check's alarm, notifying the
+#     alerts topic (email and HTTPS-forwarder subscribers)
+#   - secrets: the platform's JWT signing secret (64 characters, generated)
+#
+# Consumers (the platform's deploy, e.g. an eks-backend-services instance)
+# read the connection details from outputs instead of one composed secret:
+#   database:  idp-platform/rds .instance_endpoint, .instance_name and
+#              .password_secret_arn (connect with sslmode=verify-full against
+#              the RDS CA bundle: the rds component forces TLS)
+#   redis:     idp-platform/elasticache .primary_endpoint_address, .port and
+#              .auth_token_secret_arn (JSON key auth_token), rediss://
+#   jwt:       idp-platform/secrets .secret_arns.jwt_secret
+#   buckets:   idp-platform/s3/<purpose> .bucket_id
+#
+# Encryption: kms/main encrypts the EKS node volumes, the RDS storage,
+# Performance Insights and master user secret, the Redis cache, its AUTH
+# token secret and slow-log group, the buckets, the alerts topic and the JWT
+# secret. The ALB access-log bucket is SSE-S3 (ALB log delivery does not
+# support SSE-KMS).
+#
+# Usage:
+#   atmos terraform plan idp-platform/eks -s <tenant>-<stage>-<environment>
+#   atmos workflow deploy -f deploy-full-stack -s <tenant>-<stage>-<environment>
+#
+# =============================================================================
+# REQUIREMENTS FOR THE IMPORTING STACK
+# =============================================================================
+# 1. vpc/main (private and public subnets), kms/main and iam/ci instances, as
+#    every fnx org stack has (components/networking.yaml, security.yaml). The
+#    platform deploys into that VPC, as the idp-platform component did. kms/main
+#    keeps the grants catalog/kms/defaults turns on: allow_cloudwatch_logs (the
+#    Redis slow-log group) and allow_cloudwatch_alarms (the alerts topic).
+# 2. settings.idp_platform.domain_name: the platform's domain, a zone this
+#    template creates (idp-platform/dns) and the registrar or parent zone
+#    delegates to it (its name servers: idp-platform/dns .zone_name_servers).
+#    If a dns instance in the same stack holds the parent zone, it must
+#    delegate this one (check-domains.py).
+#      settings:
+#        idp_platform:
+#          domain_name: idp.example.com
+#    A missing key fails every describe/plan of the stack with its name.
+# 3. Route 53 publishes health-check metrics in us-east-1 only: the alarm
+#    (idp-platform/monitoring) works in a us-east-1 stack.
+# 4. Subscribers of the alerts topic, in idp-platform/sns/alerts's
+#    subscribers: email addresses, and Slack/Teams through an HTTPS forwarder
+#    that answers SNS's SubscriptionConfirmation (a Lambda function URL, API
+#    Gateway, AWS Chatbot), never a raw chat webhook, with
+#    raw_message_delivery: true.
+# 5. A prod stack applies the ENVIRONMENT-SPECIFIC OVERRIDES at the end
+#    (rds environment: prod and its validations, deletion protection, backup
+#    and snapshot retention).
+# 6. The networks allowed to reach the platform: idp-platform/securitygroups
+#    alb_clients's cidr_blocks (private ranges by default; a /0 is rejected).
+# =============================================================================
+
+import:
+  - catalog/_base/defaults
+  - catalog/eks/defaults
+  - catalog/rds/defaults
+  - catalog/elasticache/defaults
+  - catalog/s3/defaults
+  - catalog/sns/defaults
+  - catalog/acm/defaults
+  - catalog/alb/defaults
+  - catalog/monitoring/defaults
+  - catalog/secretsmanager/defaults
+  - catalog/network/defaults
+
+components:
+  terraform:
+    # =========================================================================
+    # STORAGE (storage layer)
+    # =========================================================================
+    # Four of the component's five buckets. Its fifth, logs, held only the ALB
+    # access logs: the alb component keeps those in its own SSE-S3 bucket.
+    # techdocs is private (the component made it public): Backstage publishes
+    # and reads TechDocs with its own IAM role, so nothing needs anonymous
+    # read.
+
+    idp-platform/s3/artifacts:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        name: idp-artifacts
+        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-artifacts'
+        tags:
+          Layer: "storage"
+          Platform: "idp"
+
+    idp-platform/s3/backups:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        name: idp-backups
+        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-backups'
+        tags:
+          Layer: "storage"
+          Platform: "idp"
+
+    idp-platform/s3/techdocs:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        name: idp-techdocs
+        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-techdocs'
+        tags:
+          Layer: "storage"
+          Platform: "idp"
+
+    # User content, uploaded from the browser on the platform's hosts. Not
+    # versioned, as in the component.
+    idp-platform/s3/uploads:
+      metadata:
+        component: s3
+        type: real
+        inherits:
+          - s3/defaults
+      vars:
+        name: idp-uploads
+        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-uploads'
+        versioning_enabled: false
+        cors_configuration:
+          - id: "platform-uploads"
+            allowed_headers: ["*"]
+            allowed_methods: ["GET", "HEAD", "PUT", "POST", "DELETE"]
+            allowed_origins:
+              - 'https://{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+              - 'https://api.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+            expose_headers: ["ETag"]
+            max_age_seconds: 3000
+        tags:
+          Layer: "storage"
+          Platform: "idp"
+
+    # The health alarm's topic, on kms/main (allow_cloudwatch_alarms). The
+    # importing stack lists the subscribers (requirement 4).
+    idp-platform/sns/alerts:
+      metadata:
+        component: sns
+        type: real
+        inherits:
+          - sns/defaults
+      vars:
+        # <Environment>-idp-alerts
+        name: idp-alerts
+        allowed_aws_services_for_sns_published:
+          - cloudwatch.amazonaws.com
+        subscribers: {}
+        tags:
+          Layer: "monitoring"
+          Platform: "idp"
+
+    # =========================================================================
+    # NETWORK ACCESS (connectivity layer)
+    # =========================================================================
+    # The alb component's own group admits only the CloudFront origin-facing
+    # prefix list (never a CIDR, an owner decision for that component); this
+    # group, attached to the ALB as well, admits the networks that reach the
+    # platform directly, as the component's allowed_cidr_blocks did.
+    idp-platform/securitygroups:
+      metadata:
+        component: securitygroup
+        type: real
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        security_groups:
+          alb_clients:
+            preserve_security_group_id: true
+            # The ALB's own group already allows all egress.
+            allow_all_egress: false
+            description: "HTTPS to the IDP platform ALB from the networks allowed to reach it"
+            ingress_rules:
+              - key: "https"
+                description: "HTTPS from the allowed networks"
+                from_port: 443
+                to_port: 443
+                protocol: "tcp"
+                cidr_blocks:
+                  - "10.0.0.0/8"
+                  - "172.16.0.0/12"
+                  - "192.168.0.0/16"
+        tags:
+          Layer: "security"
+          Platform: "idp"
+      dependencies:
+        components:
+          - component: vpc/main
+
+    # =========================================================================
+    # SECRETS (security layer)
+    # =========================================================================
+    # The JWT signing secret: 64 alphanumeric characters (the component's
+    # ephemeral.random_password.jwt_secret), generated write-only. Bump its
+    # secret_string_version to rotate. <stage>'s secret is
+    # idp-platform/<stage>/config/jwt-secret.
+    idp-platform/secrets:
+      metadata:
+        component: secretsmanager
+        type: real
+        inherits:
+          - secretsmanager/defaults
+      vars:
+        context_name: "idp-platform"
+        random_password_special: false
+        random_password_min_special: 0
+        secrets:
+          jwt_secret:
+            name: "jwt-secret"
+            description: "IDP platform JWT signing secret"
+            path: "config"
+            generate_random_password: true
+            password_length: 64
+        tags:
+          Layer: "security"
+          Platform: "idp"
+
+    # =========================================================================
+    # COMPUTE (compute layer)
+    # =========================================================================
+    # <Environment>-idp in vpc/main's private subnets (eks/defaults), private
+    # endpoint only. eks/defaults' dependencies are listed again: a list here
+    # replaces the inherited one (settings.list_merge_strategy: replace).
+    idp-platform/eks:
+      metadata:
+        component: eks
+        type: real
+        inherits:
+          - eks/defaults
+      vars:
+        name: idp
+        cluster_endpoint_private_access: true
+        cluster_endpoint_public_access: false
+        enabled_cluster_log_types:
+          - api
+          - audit
+          - authenticator
+          - controllerManager
+          - scheduler
+        node_groups:
+          platform_services:
+            instance_types: ["m5.xlarge", "m5a.xlarge"]
+            capacity_type: "ON_DEMAND"
+            min_group_size: 3
+            max_group_size: 10
+            desired_group_size: 3
+            kubernetes_labels:
+              workload-type: "platform-services"
+            kubernetes_taints:
+              - key: "platform-services"
+                value: "true"
+                effect: "NO_SCHEDULE"
+          user_workloads:
+            instance_types: ["m5.large", "m5a.large", "c5.large"]
+            capacity_type: "SPOT"
+            min_group_size: 2
+            max_group_size: 20
+            desired_group_size: 5
+            kubernetes_labels:
+              workload-type: "user-workloads"
+            kubernetes_taints: []
+        tags:
+          Layer: "compute"
+          Platform: "idp"
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+          - component: iam/ci
+
+    # =========================================================================
+    # DATA (data layer)
+    # =========================================================================
+
+    # <Environment>-idp-db. Its parameter group forces TLS (rds.force_ssl).
+    idp-platform/rds:
+      metadata:
+        component: rds
+        type: real
+        inherits:
+          - rds/defaults
+      vars:
+        identifier: "idp-db"
+        engine: "postgres"
+        engine_version: "15"
+        instance_class: "db.r6g.large"
+        allocated_storage: 100
+        max_allocated_storage: 1000
+        storage_type: "gp3"
+        kms_key_id: !terraform.state kms/main .key_arn
+        master_user_secret_kms_key_id: !terraform.state kms/main .key_arn
+
+        db_name: "backstage"
+        username: "idp_admin"
+        port: 5432
+
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_groups: !terraform.state idp-platform/eks '.eks_cluster_managed_security_group_id | [.]'
+        publicly_accessible: false
+
+        # Non-prod values; prod: ENVIRONMENT-SPECIFIC OVERRIDES.
+        multi_az: false
+        backup_retention_period: 7
+        deletion_protection: false
+        prevent_destroy: false
+        skip_final_snapshot: true
+
+        # RDS wants the maintenance window >= 30 minutes clear of the backup
+        # window.
+        backup_window: "03:00-04:00"
+        maintenance_window: "sun:04:30-sun:05:30"
+
+        performance_insights_enabled: true
+        performance_insights_retention_period: 7
+        performance_insights_kms_key_id: !terraform.state kms/main .key_arn
+        monitoring_interval: 60
+
+        tags:
+          Layer: "database"
+          Platform: "idp"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: vpc/main
+          - component: idp-platform/eks
+
+    # <Environment>-idp-redis: one primary and a replica, failover and
+    # Multi-AZ on. The redis7 family with no parameters uses the engine's
+    # default parameter group, as the component's empty group did.
+    idp-platform/elasticache:
+      metadata:
+        component: elasticache
+        type: real
+        inherits:
+          - elasticache/defaults
+      vars:
+        cluster_id: "idp-redis"
+        engine_version: "7.1"
+        node_type: "cache.r7g.large"
+        num_cache_nodes: 2
+        automatic_failover_enabled: true
+        multi_az_enabled: true
+        family: "redis7"
+        port: 6379
+
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        allowed_security_group_ids: !terraform.state idp-platform/eks '.eks_cluster_managed_security_group_id | [.]'
+
+        kms_key_id: !terraform.state kms/main .key_arn
+        auth_token_secret_kms_key_id: !terraform.state kms/main .key_arn
+
+        log_delivery_configuration:
+          - log_type: "slow-log"
+            log_format: "text"
+        log_kms_key_id: !terraform.state kms/main .key_arn
+        log_retention_in_days: 30
+
+        # Non-prod retention; prod: ENVIRONMENT-SPECIFIC OVERRIDES.
+        snapshot_retention_limit: 3
+        snapshot_window: "03:00-05:00"
+        maintenance_window: "sun:05:00-sun:07:00"
+
+        tags:
+          Layer: "caching"
+          Platform: "idp"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: vpc/main
+          - component: idp-platform/eks
+
+    # =========================================================================
+    # DNS, CERTIFICATE AND LOAD BALANCER (dns, certificates, addons layers)
+    # =========================================================================
+
+    # The platform domain's public zone (requirement 2) and its health check,
+    # as the component's aws_route53_zone.main and aws_route53_health_check.
+    idp-platform/dns:
+      metadata:
+        component: dns
+        type: real
+        inherits:
+          - dns
+      vars:
+        root_domain: '{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+        zones:
+          main:
+            name: '{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+            comment: "IDP platform"
+        health_checks:
+          platform:
+            name: "idp-platform"
+            fqdn: '{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+            port: 443
+            type: "HTTPS"
+            resource_path: "/api/catalog/health"
+            request_interval: 30
+            failure_threshold: 3
+            measure_latency: false
+        tags:
+          Layer: "dns"
+          Platform: "idp"
+
+    idp-platform/acm:
+      metadata:
+        component: acm
+        type: real
+        inherits:
+          - acm/defaults
+      vars:
+        dns_domains:
+          idp:
+            domain_name: '{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+            subject_alternative_names:
+              - 'api.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+              - 'grafana.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+              - 'prometheus.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+              - 'jaeger.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+            validation_method: "DNS"
+        zone_id: !terraform.state idp-platform/dns .zone_ids.main
+        tags:
+          Layer: "security"
+          Platform: "idp"
+      dependencies:
+        components:
+          - component: idp-platform/dns
+
+    # <Environment>-idp, internet-facing in vpc/main's public subnets; HTTPS
+    # only (the component has no port 80 listener). Its access logs go to the
+    # component's own SSE-S3 bucket, under alb-access-logs/ as before. The
+    # alias records make the domain and its hosts resolve to it, which the
+    # health check needs (the idp-platform component created none).
+    idp-platform/alb:
+      metadata:
+        component: alb
+        type: real
+        inherits:
+          - alb/defaults
+      vars:
+        name: "idp"
+        internal: false
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnets: !terraform.state vpc/main .public_subnet_ids
+        certificate_arn: !terraform.state idp-platform/acm .certificate_arns.idp
+        security_group_ids:
+          - !terraform.state idp-platform/securitygroups .security_group_ids.alb_clients
+        # Non-prod; prod: ENVIRONMENT-SPECIFIC OVERRIDES.
+        deletion_protection: false
+        access_logs_prefix: "alb-access-logs"
+        dns_alias_enabled: true
+        parent_zone_id: !terraform.state idp-platform/dns .zone_ids.main
+        dns_aliases:
+          - '{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+          - 'api.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+          - 'grafana.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+          - 'prometheus.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+          - 'jaeger.{{ required "settings.idp_platform.domain_name is required" .settings.idp_platform.domain_name }}'
+        tags:
+          Layer: "load-balancer"
+          Platform: "idp"
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: idp-platform/acm
+          - component: idp-platform/securitygroups
+          - component: idp-platform/dns
+
+    # =========================================================================
+    # MONITORING (monitoring layer)
+    # =========================================================================
+    # The health check's alarm (Route 53 metrics: us-east-1 only, requirement
+    # 3), notifying idp-platform/sns/alerts instead of the component's own
+    # email-only topic, plus the certificate's expiry alarm.
+    idp-platform/monitoring:
+      metadata:
+        component: monitoring
+        type: real
+        inherits:
+          - monitoring/defaults
+      vars:
+        # <Environment>-idp-<suffix>
+        name: idp
+        create_sns_topic: false
+        create_dashboard: false
+        alarm_sns_topic_arns:
+          - !terraform.state idp-platform/sns/alerts .sns_topic_arn
+        kms_key_id: !terraform.state kms/main .key_arn
+        vpc_id: !terraform.state vpc/main .vpc_id
+        certificate_arns: !terraform.state idp-platform/acm .certificate_arns // {} | [.[]]
+        certificate_names: !terraform.state idp-platform/acm .certificate_domains // {} | keys
+        certificate_domains: !terraform.state idp-platform/acm .certificate_domains // {} | [.[]]
+        metric_alarms:
+          platform-health:
+            namespace: "AWS/Route53"
+            metric_name: "HealthCheckStatus"
+            dimensions:
+              HealthCheckId: !terraform.state idp-platform/dns .health_check_ids.platform
+            comparison_operator: "LessThanThreshold"
+            threshold: 1
+            evaluation_periods: 2
+            period: 60
+            statistic: "Minimum"
+            description: "The IDP platform's health check (/api/catalog/health) is failing"
+        tags:
+          Layer: "monitoring"
+          Platform: "idp"
+      dependencies:
+        components:
+          - component: vpc/main
+          - component: kms/main
+          - component: idp-platform/sns/alerts
+          - component: idp-platform/dns
+          - component: idp-platform/acm
+
+# =============================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# =============================================================================
+# A prod stack sets, in its own components:
+#   idp-platform/rds:
+#     vars:
+#       environment: prod             # the rds production validations
+#       multi_az: true
+#       backup_retention_period: 30
+#       deletion_protection: true
+#       prevent_destroy: true
+#       skip_final_snapshot: false
+#   idp-platform/elasticache:
+#     vars:
+#       snapshot_retention_limit: 14
+#   idp-platform/alb:
+#     vars:
+#       deletion_protection: true
+# The EKS cluster's deletion protection follows tags.Stage (prod) by itself,
+# and the JWT secret's recovery window is secretsmanager/defaults' 30 days.

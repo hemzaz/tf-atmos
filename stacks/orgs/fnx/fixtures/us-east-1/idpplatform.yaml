@@ -1,0 +1,39 @@
+# fnx-fixtures-idpplatform: stacks/catalog/templates/idp-platform.yaml under CI's checks.
+# Never deployed (see ../_defaults.yaml).
+# Not "idp": tags.Environment comes from settings.context.environment, and the
+# eks component rejects a name (idp-platform/eks's "idp") that starts with it.
+import:
+  - orgs/fnx/fixtures/_defaults
+  - catalog/templates/idp-platform
+
+settings:
+  context:
+    environment: idpplatform
+  # The template's REQUIREMENTS 2. Placeholder.
+  idp_platform:
+    domain_name: idp.fixtures.example.com
+
+components:
+  terraform:
+    # The template's REQUIREMENTS 1: the stack's VPC, which the platform
+    # deploys into.
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "10.40.0.0/16"
+        availability_zone_ids:
+          - use1-az1
+          - use1-az2
+          - use1-az4
+        private_subnets:
+          - "10.40.1.0/24"
+          - "10.40.2.0/24"
+          - "10.40.3.0/24"
+        public_subnets:
+          - "10.40.101.0/24"
+          - "10.40.102.0/24"
+          - "10.40.103.0/24"
+        vpc_flow_logs_enabled: false

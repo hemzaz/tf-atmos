@@ -450,3 +450,60 @@ run "disabled_creates_nothing" {
     error_message = "enabled = false must create no cache, secret or secret version."
   }
 }
+
+run "no_log_delivery_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_cloudwatch_log_group.log_delivery) == 0 && length(aws_elasticache_replication_group.main[0].log_delivery_configuration) == 0
+    error_message = "Without log_delivery_configuration there is no log group and no delivery."
+  }
+}
+
+run "slow_log_goes_to_its_own_cmk_encrypted_log_group" {
+  command = plan
+
+  variables {
+    log_delivery_configuration = [{ log_type = "slow-log" }]
+    log_kms_key_id             = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+    log_retention_in_days      = 14
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_log_group.log_delivery["slow-log"].name == "/aws/elasticache/test-cache/slow-log" &&
+      aws_cloudwatch_log_group.log_delivery["slow-log"].kms_key_id == "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012" &&
+      aws_cloudwatch_log_group.log_delivery["slow-log"].retention_in_days == 14
+    )
+    error_message = "The slow log gets /aws/elasticache/<Environment>-<cluster_id>/slow-log, on log_kms_key_id."
+  }
+
+  assert {
+    condition = one([
+      for c in aws_elasticache_replication_group.main[0].log_delivery_configuration :
+      c if c.log_type == "slow-log" && c.destination_type == "cloudwatch-logs" && c.log_format == "text" && c.destination == "/aws/elasticache/test-cache/slow-log"
+    ]) != null
+    error_message = "The replication group delivers the slow log, as text, to that log group."
+  }
+}
+
+run "log_delivery_without_a_kms_key_is_rejected" {
+  command = plan
+
+  variables {
+    log_delivery_configuration = [{ log_type = "slow-log" }]
+  }
+
+  expect_failures = [var.log_delivery_configuration]
+}
+
+run "unknown_log_type_is_rejected" {
+  command = plan
+
+  variables {
+    log_delivery_configuration = [{ log_type = "audit-log" }]
+    log_kms_key_id             = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+  }
+
+  expect_failures = [var.log_delivery_configuration]
+}

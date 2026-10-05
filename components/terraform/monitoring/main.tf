@@ -47,7 +47,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   statistic           = "Average"
   threshold           = each.value.threshold
   alarm_description   = "High CPU utilization for ${each.key}"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = each.value.dimensions
 
@@ -66,7 +66,7 @@ resource "aws_cloudwatch_metric_alarm" "memory_high" {
   statistic           = "Average"
   threshold           = each.value.threshold
   alarm_description   = "High memory utilization for ${each.key}"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = each.value.dimensions
 
@@ -85,7 +85,7 @@ resource "aws_cloudwatch_metric_alarm" "db_connections_high" {
   statistic           = "Average"
   threshold           = each.value.threshold
   alarm_description   = "High database connections for ${each.key}"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     DBInstanceIdentifier = each.key
@@ -106,7 +106,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   statistic           = "Sum"
   threshold           = each.value.threshold
   alarm_description   = "Error count for Lambda function ${each.value.function_name}"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     FunctionName = each.value.function_name
@@ -142,7 +142,7 @@ resource "aws_cloudwatch_metric_alarm" "log_errors" {
   statistic           = "Sum"
   threshold           = each.value.threshold
   alarm_description   = "Error logs detected for ${each.key}"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   tags = { Name = "${local.name_prefix}-${each.key}-log-errors" }
 }
@@ -155,6 +155,10 @@ locals {
   # distinct values ("main"/"data") on its two instances of this component so
   # their AWS resources never collide.
   name_prefix = "${var.tags["Environment"]}-${var.name}"
+
+  # Every alarm notifies this component's own topic (create_sns_topic) and the
+  # topics in alarm_sns_topic_arns: Cloud Posse's alarm_actions.
+  alarm_actions = concat(var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : [], var.alarm_sns_topic_arns)
 
   # Process certificate ARNs for dashboard
   certificate_arns         = var.certificate_arns
@@ -340,8 +344,8 @@ resource "aws_cloudwatch_metric_alarm" "certificate_expiry" {
   statistic           = "Minimum"
   threshold           = var.certificate_expiry_threshold
   alarm_description   = "Certificate ${each.key} is approaching expiry"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
-  ok_actions          = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
 
   dimensions = {
     CertificateArn = each.value.arn
@@ -382,7 +386,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_latency" {
   statistic           = "Average"
   threshold           = var.api_gateway_latency_threshold
   alarm_description   = "API Gateway ${each.value} latency is too high"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     ApiName = var.api_gateway_name
@@ -402,7 +406,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_error_rate" {
   statistic           = "Sum"
   threshold           = var.api_gateway_error_threshold
   alarm_description   = "API Gateway ${each.value} error rate is too high"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     ApiName = var.api_gateway_name
@@ -441,7 +445,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_cpu_utilization" {
   statistic           = "Average"
   threshold           = var.eks_pod_cpu_threshold
   alarm_description   = "EKS pods have high CPU utilization"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     ClusterName = var.eks_cluster_name
@@ -461,7 +465,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_pod_memory_utilization" {
   statistic           = "Average"
   threshold           = var.eks_pod_memory_threshold
   alarm_description   = "EKS pods have high memory utilization"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     ClusterName = var.eks_cluster_name
@@ -488,7 +492,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_response_time" {
   statistic           = "Average"
   threshold           = var.alb_response_time_threshold
   alarm_description   = "ALB ${each.value} response time is too high"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     LoadBalancer = each.value
@@ -507,7 +511,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
   statistic           = "Average"
   threshold           = var.alb_unhealthy_hosts_threshold
   alarm_description   = "ALB ${each.value} has unhealthy hosts"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     LoadBalancer = each.value
@@ -527,7 +531,7 @@ resource "aws_cloudwatch_metric_alarm" "elasticache_cpu" {
   statistic           = "Average"
   threshold           = var.elasticache_cpu_threshold
   alarm_description   = "ElastiCache cluster ${each.value} CPU utilization is high"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     CacheClusterId = each.value
@@ -546,7 +550,7 @@ resource "aws_cloudwatch_metric_alarm" "elasticache_memory" {
   statistic           = "Average"
   threshold           = var.elasticache_memory_threshold
   alarm_description   = "ElastiCache cluster ${each.value} free memory is low"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     CacheClusterId = each.value
@@ -657,5 +661,5 @@ resource "aws_cloudwatch_metric_alarm" "business_metrics" {
   statistic           = each.value.statistic
   threshold           = each.value.threshold
   alarm_description   = "Business metric ${each.key}: ${each.value.description}"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 }
