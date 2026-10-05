@@ -196,6 +196,19 @@ resource "aws_elasticache_replication_group" "main" {
   auto_minor_version_upgrade = var.auto_minor_version_upgrade
   apply_immediately          = var.apply_immediately
 
+  # Cloud Posse aws-elasticache-redis's log_delivery_configuration, into log
+  # groups this component owns (aws_cloudwatch_log_group.log_delivery).
+  dynamic "log_delivery_configuration" {
+    for_each = aws_cloudwatch_log_group.log_delivery
+
+    content {
+      destination      = log_delivery_configuration.value.name
+      destination_type = "cloudwatch-logs"
+      log_format       = local.log_delivery[log_delivery_configuration.key].log_format
+      log_type         = log_delivery_configuration.key
+    }
+  }
+
   tags = { Name = local.name }
 
   lifecycle {
@@ -206,6 +219,27 @@ resource "aws_elasticache_replication_group" "main" {
       error_message = "The generated AUTH token breaks ElastiCache's rules (16-128 characters, punctuation only from !&#$^<>-); check local.auth_token_generator."
     }
   }
+}
+
+# Log delivery (slow-log, engine-log). Cloud Posse's aws-elasticache-redis
+# takes log_delivery_configuration entries naming an existing destination;
+# deviation: here each entry names only the log type and format, and this
+# component creates its CloudWatch log group, encrypted with log_kms_key_id
+# (the key policy must allow logs.<region>.amazonaws.com: kms
+# allow_cloudwatch_logs), so the destination cannot be left unencrypted.
+locals {
+  log_delivery = { for entry in var.log_delivery_configuration : entry.log_type => entry }
+}
+
+resource "aws_cloudwatch_log_group" "log_delivery" {
+  #checkov:skip=CKV_AWS_338:Retention is an input (log_retention_in_days) and a per-stack cost decision, as on the repo's other log groups
+  for_each = local.enabled ? local.log_delivery : {}
+
+  name              = "/aws/elasticache/${local.name}/${each.key}"
+  retention_in_days = var.log_retention_in_days
+  kms_key_id        = var.log_kms_key_id
+
+  tags = { Name = "${local.name}-${each.key}" }
 }
 
 # AUTH token. As in Cloud Posse's aws-elasticache-redis component, the token

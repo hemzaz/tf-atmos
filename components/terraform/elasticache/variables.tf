@@ -190,6 +190,56 @@ variable "store_auth_token_in_secrets_manager" {
   default     = true
 }
 
+variable "log_delivery_configuration" {
+  type = list(object({
+    log_type   = string
+    log_format = optional(string, "text")
+  }))
+  description = "Logs the cache delivers to CloudWatch Logs, one entry per log_type (slow-log, engine-log). Each gets a log group, /aws/elasticache/<Environment>-<cluster_id>/<log_type>, encrypted with log_kms_key_id. Cloud Posse aws-elasticache-redis's input, minus the destination this component creates"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([
+      for entry in var.log_delivery_configuration :
+      contains(["slow-log", "engine-log"], entry.log_type) && contains(["text", "json"], entry.log_format)
+    ])
+    error_message = "log_delivery_configuration entries need log_type slow-log or engine-log and log_format text or json."
+  }
+
+  validation {
+    condition     = length(distinct([for entry in var.log_delivery_configuration : entry.log_type])) == length(var.log_delivery_configuration)
+    error_message = "log_delivery_configuration may list each log_type once."
+  }
+
+  validation {
+    condition     = length(var.log_delivery_configuration) == 0 || var.log_kms_key_id != null
+    error_message = "log_delivery_configuration needs log_kms_key_id: the log groups are always encrypted with a customer managed key."
+  }
+}
+
+variable "log_retention_in_days" {
+  type        = number
+  description = "Retention of the log_delivery_configuration log groups, in days"
+  default     = 30
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_in_days)
+    error_message = "log_retention_in_days must be a CloudWatch Logs retention period."
+  }
+}
+
+variable "log_kms_key_id" {
+  type        = string
+  description = "Customer managed KMS key ARN encrypting the log_delivery_configuration log groups (kms/main's key_arn; its policy must allow logs.<region>.amazonaws.com)"
+  default     = null
+
+  validation {
+    condition     = var.log_kms_key_id == null || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.log_kms_key_id))
+    error_message = "log_kms_key_id must be a valid KMS key ARN."
+  }
+}
+
 variable "kms_key_id" {
   type        = string
   description = "Customer-managed KMS key ARN for at-rest encryption; AWS-owned key when null"

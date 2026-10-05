@@ -13,7 +13,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
   statistic           = "Average"
   threshold           = var.rds_storage_threshold # bytes (20% of allocated storage)
   alarm_description   = "RDS instance ${each.value} has low free storage space"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
   treat_missing_data  = "notBreaching"
 
   dimensions = {
@@ -34,7 +34,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
   statistic           = "Average"
   threshold           = var.rds_cpu_threshold
   alarm_description   = "RDS instance ${each.value} has high CPU utilization"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     DBInstanceIdentifier = each.value
@@ -54,7 +54,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   statistic           = "Sum"
   threshold           = "0"
   alarm_description   = "Lambda function ${each.value} is being throttled"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     FunctionName = each.value
@@ -74,7 +74,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_duration" {
   statistic           = "Average"
   threshold           = var.lambda_duration_threshold # milliseconds
   alarm_description   = "Lambda function ${each.value} has high execution duration"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     FunctionName = each.value
@@ -94,7 +94,7 @@ resource "aws_cloudwatch_metric_alarm" "ec2_status_check" {
   statistic           = "Maximum"
   threshold           = "0"
   alarm_description   = "EC2 instance ${each.value} status check failed"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     InstanceId = each.value
@@ -122,7 +122,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_node_not_ready" {
   statistic           = "Maximum"
   threshold           = "0"
   alarm_description   = "EKS cluster ${var.eks_cluster_name} has nodes in NotReady state"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
   treat_missing_data  = "notBreaching"
 
   dimensions = {
@@ -147,7 +147,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_node_count_low" {
   statistic           = "Average"
   threshold           = var.eks_min_node_count
   alarm_description   = "EKS cluster ${var.eks_cluster_name} has fewer than ${var.eks_min_node_count} nodes (below its configured minimum capacity)"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
   treat_missing_data  = "notBreaching"
 
   dimensions = {
@@ -168,7 +168,7 @@ resource "aws_cloudwatch_metric_alarm" "api_gateway_4xx_errors" {
   statistic           = "Sum"
   threshold           = var.api_gateway_4xx_threshold
   alarm_description   = "API Gateway ${each.value} has high 4XX error rate"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     ApiName = var.api_gateway_name
@@ -189,7 +189,7 @@ resource "aws_cloudwatch_metric_alarm" "nat_gateway_packets_drop" {
   statistic           = "Sum"
   threshold           = var.nat_gateway_drop_threshold
   alarm_description   = "NAT Gateway ${each.value} is dropping packets"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     NatGatewayId = each.value
@@ -209,7 +209,7 @@ resource "aws_cloudwatch_metric_alarm" "flow_logs_delivery_failure" {
   statistic           = "Sum"
   threshold           = "5"
   alarm_description   = "VPC Flow Logs delivery failures detected"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
   treat_missing_data  = "notBreaching"
 }
 
@@ -224,7 +224,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_target_response_time_p99" {
   evaluation_periods  = "3"
   threshold           = var.alb_p99_response_time_threshold
   alarm_description   = "ALB ${each.value} P99 response time is too high"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   metric_query {
     id          = "m1"
@@ -255,7 +255,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_cpu" {
   statistic           = "Average"
   threshold           = var.ecs_cpu_threshold
   alarm_description   = "ECS service ${each.key} has high CPU utilization"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     ClusterName = each.value.cluster_name
@@ -276,7 +276,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_service_memory" {
   statistic           = "Average"
   threshold           = var.ecs_memory_threshold
   alarm_description   = "ECS service ${each.key} has high memory utilization"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     ClusterName = each.value.cluster_name
@@ -297,7 +297,7 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttled_requests" {
   statistic           = "Sum"
   threshold           = var.dynamodb_throttle_threshold
   alarm_description   = "DynamoDB table ${each.value} has throttled requests"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     TableName = each.value
@@ -317,7 +317,7 @@ resource "aws_cloudwatch_metric_alarm" "sqs_message_age" {
   statistic           = "Maximum"
   threshold           = var.sqs_message_age_threshold # seconds
   alarm_description   = "SQS queue ${each.value} has old messages"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
 
   dimensions = {
     QueueName = each.value
@@ -333,7 +333,7 @@ resource "aws_cloudwatch_metric_alarm" "anomaly_detection" {
   evaluation_periods  = "2"
   threshold_metric_id = "e1"
   alarm_description   = "Anomaly detected in metric ${each.value}"
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
   treat_missing_data  = "notBreaching"
 
   metric_query {

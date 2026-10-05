@@ -19,8 +19,8 @@ resource "aws_cloudwatch_metric_alarm" "metric" {
   statistic           = each.value.statistic
   extended_statistic  = each.value.extended_statistic
   treat_missing_data  = each.value.treat_missing_data
-  alarm_actions       = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
-  ok_actions          = var.create_sns_topic ? [aws_sns_topic.alarms[0].arn] : []
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
 
   tags = { Name = "${local.name_prefix}-${each.key}" }
 }

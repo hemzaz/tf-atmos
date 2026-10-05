@@ -102,9 +102,11 @@ variable "instance_class" {
   validation {
     condition = (
       var.environment != "prod" ||
-      can(regex("^db\\.(t3\\.(medium|large|xlarge|2xlarge)|r5\\.|r6\\.|m5\\.|m6\\.)", var.instance_class))
+      # Generation 5 and later r/m classes with any suffix (r6g, r6i, m7g, ...):
+      # "r6\\." alone rejected the Graviton classes.
+      can(regex("^db\\.(t[34]g?\\.(medium|large|xlarge|2xlarge)|[rm][5-8][a-z]*\\.)", var.instance_class))
     )
-    error_message = "Production environment requires at least db.t3.medium or production-grade instance classes (r5, r6, m5, m6)."
+    error_message = "Production environment requires at least db.t3.medium / db.t4g.medium or a production-grade r/m class of generation 5 or later (r5, r6g, r6i, m6g, r7g, ...)."
   }
 }
 

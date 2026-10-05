@@ -181,6 +181,18 @@ variable "create_sns_topic" {
   default     = true
 }
 
+variable "alarm_sns_topic_arns" {
+  type        = list(string)
+  description = "SNS topics every alarm also notifies (alarm and OK actions), alongside this component's own topic when create_sns_topic is true: for subscribers the own topic cannot take (https forwarders), from an sns instance. The topic's policy must let cloudwatch.amazonaws.com publish, and its key must allow CloudWatch alarms (kms allow_cloudwatch_alarms)"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for arn in var.alarm_sns_topic_arns : can(regex("^arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+(\\.fifo)?$", arn))])
+    error_message = "alarm_sns_topic_arns entries must be SNS topic ARNs."
+  }
+}
+
 variable "alarm_email_subscriptions" {
   type        = list(string)
   description = "List of email addresses to notify for alarms"

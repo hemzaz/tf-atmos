@@ -286,3 +286,76 @@ run "rejects_a_metric_dashboard_key_reserved_by_a_built_in_dashboard" {
 
   expect_failures = [var.metric_dashboards]
 }
+
+run "alarms_also_notify_the_external_topics" {
+  # The own topic's ARN is unknown at plan, so it is overridden.
+  command = plan
+
+  override_resource {
+    target          = aws_sns_topic.alarms
+    override_during = plan
+    values = {
+      arn = "arn:aws:sns:us-east-1:123456789012:test-monitoring-alarms"
+    }
+  }
+
+  variables {
+    alarm_sns_topic_arns = ["arn:aws:sns:us-east-1:123456789012:test-idp-alerts"]
+    metric_alarms = {
+      health = {
+        namespace           = "AWS/Route53"
+        metric_name         = "HealthCheckStatus"
+        dimensions          = { HealthCheckId = "abcdef01-2345-6789-abcd-ef0123456789" }
+        comparison_operator = "LessThanThreshold"
+        threshold           = 1
+        period              = 60
+        statistic           = "Minimum"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.metric["health"].alarm_actions) == 2 &&
+      contains(aws_cloudwatch_metric_alarm.metric["health"].alarm_actions, "arn:aws:sns:us-east-1:123456789012:test-idp-alerts") &&
+      contains(aws_cloudwatch_metric_alarm.metric["health"].ok_actions, "arn:aws:sns:us-east-1:123456789012:test-idp-alerts")
+    )
+    error_message = "Alarms notify the own topic and every alarm_sns_topic_arns topic."
+  }
+}
+
+run "only_the_external_topic_without_an_own_topic" {
+  command = plan
+
+  variables {
+    create_sns_topic     = false
+    alarm_sns_topic_arns = ["arn:aws:sns:us-east-1:123456789012:test-idp-alerts"]
+    metric_alarms = {
+      health = {
+        namespace           = "AWS/Route53"
+        metric_name         = "HealthCheckStatus"
+        comparison_operator = "LessThanThreshold"
+        threshold           = 1
+        statistic           = "Minimum"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.metric["health"].alarm_actions) == 1 &&
+      contains(aws_cloudwatch_metric_alarm.metric["health"].alarm_actions, "arn:aws:sns:us-east-1:123456789012:test-idp-alerts")
+    )
+    error_message = "With create_sns_topic false, alarms notify only alarm_sns_topic_arns."
+  }
+}
+
+run "alarm_sns_topic_arns_rejects_a_non_topic" {
+  command = plan
+
+  variables {
+    alarm_sns_topic_arns = ["arn:aws:sqs:us-east-1:123456789012:queue"]
+  }
+
+  expect_failures = [var.alarm_sns_topic_arns]
+}
