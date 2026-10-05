@@ -2,8 +2,48 @@
 # Never deployed (see ../_defaults.yaml).
 import:
   - orgs/fnx/fixtures/_defaults
+  - catalog/network/defaults
+  - catalog/apigateway-account/defaults
   - catalog/templates/serverless-api
 
 settings:
   context:
     environment: serverless
+  # The template's REQUIREMENTS 4. Placeholders.
+  serverless_api:
+    app_domain_name: fixtures.example.com
+    dns_component: network/main
+    dns_zone_key: main
+    api_handler_version: "1.0.0"
+    async_processor_version: "1.0.0"
+    powertools_layer_arn: arn:aws:lambda:us-east-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:1
+
+components:
+  terraform:
+    # The template's REQUIREMENTS 1: CloudFront reads the SSE-KMS assets
+    # through OAC and delivers its logs into the SSE-KMS log bucket.
+    kms/main:
+      vars:
+        allow_cloudfront: true
+        allow_log_delivery_s3: true
+
+    # The template's REQUIREMENTS 2: the account's API Gateway CloudWatch role.
+    apigateway-account/main:
+      metadata:
+        component: apigateway-account
+        inherits:
+          - apigateway-account/defaults
+
+    # The template's REQUIREMENTS 5: the dns instance holding app_domain_name's
+    # public zone.
+    network/main:
+      metadata:
+        component: dns
+        inherits:
+          - dns
+      vars:
+        root_domain: fixtures.example.com
+        zones:
+          main:
+            name: fixtures.example.com
+            comment: Template fixture zone
