@@ -157,10 +157,11 @@ workflows:
             exit 1
           fi
           echo "tflint: all component directories clean"
-      # The state backend's roles are split by stage with S3 key patterns
-      # "*/<tenant>-<stage>-*" (stacks/catalog/backend/defaults.yaml); this
-      # fails any s3-backend instance whose state key would leave its stage's
-      # prefix. Also run by validate-all (validate-enhanced.yaml).
+      # The state backend's roles are split by stage with S3 key patterns, a
+      # "*/<stack>/*" and "*/<stack>-*" pair per stack
+      # (stacks/catalog/backend/defaults.yaml); this evaluates them against
+      # every s3-backend state key and fails one not matched by exactly its
+      # stage's roles. Also run by validate-all (validate-enhanced.yaml).
       - name: check-state-keys
         type: shell
         command: |

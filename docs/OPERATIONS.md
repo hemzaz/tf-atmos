@@ -87,8 +87,11 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 - Trust is by role ARN, listed in `access_roles` in `root.yaml`. Add a new stack's
   `<tenant>-<account>-<environment>-ci-plan`/`-apply` roles there, and any operator role that
   runs Terraform against a stage.
-- `check-state-keys.py` (in `lint` and `validate-all`) keeps every state key inside its stage's
-  prefix, which the role patterns rely on, and every backend region equal to `backend/main`'s.
+- Each stack's state is an exact pattern pair on its stage's roles, `*/<stack>/*` and
+  `*/<stack>-*` (`stacks/catalog/backend/defaults.yaml`): add a new stack's pair before its first
+  `init`. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against
+  every state key, requiring exactly its stage's roles to match it, and every backend region
+  equal to `backend/main`'s.
   `s3:ListBucket` is bucket-wide, so every role sees key names across stages, never contents.
 - The CI apply role (`iam/ci`, `AdministratorAccess`) trusts only the default-branch subject
   (`repo:<org>/<repo>:ref:refs/heads/<default branch>`). `terraform-cd.yml` uses no GitHub

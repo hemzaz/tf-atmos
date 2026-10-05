@@ -20,7 +20,7 @@
  * awsutils' eks_role_arn, which drops the path). A root-user caller is never
  * added. An entry with no allowed_principal_arns (upstream's default) is
  * therefore trusted by the caller alone: that is the core_write role, the
- * only one that can write the backend's own (fnx-core-*) state.
+ * only one that can write the backend's own (fnx-core-root) state.
  *
  * KMS: the state key's policy delegates to IAM (account root only), so the
  * roles' own policies grant key use. Read: Decrypt. Write: also Encrypt and
