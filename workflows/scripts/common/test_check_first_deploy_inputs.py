@@ -88,7 +88,7 @@ class PlaceholderTest(unittest.TestCase):
     def test_placeholder_account_inside_an_arn(self):
         stacks = clean()
         stacks["fnx-core-root"] = stack("core", None, backend_main={"component": "backend", "access_roles": {
-            "read": {"allowed_principal_arns": ["arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-plan"]}}})
+            "read": {"allowed_principal_arns": ["arn:aws:iam::123456789012:role/fnx-testenv-01-dev-ci-plan"]}}})
         self.assert_one(stacks, "fnx-core-root", "access_roles.read.allowed_principal_arns[0]", "Account IDs")
 
     def test_a_longer_number_is_not_a_placeholder(self):
@@ -109,7 +109,7 @@ class PlaceholderTest(unittest.TestCase):
             # after a hex-ish "-xxxx-" segment (review-301's misses)
             "backups-2026-123456789012", "fnx-feed-123456789012", "logs-cafe-123456789012",
             # ARN, JSON, S3 log prefix, role name, bare
-            "arn:aws:iam::123456789012:role/fnx-dev-testenv-01-ci-plan",
+            "arn:aws:iam::123456789012:role/fnx-testenv-01-dev-ci-plan",
             '{"Principal": {"AWS": "123456789012"}}',
             "AWSLogs/123456789012/",
             "fnx-dev-123456789012-ci",

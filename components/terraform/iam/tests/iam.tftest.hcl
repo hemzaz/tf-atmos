@@ -438,14 +438,14 @@ run "lambda_uploader_trusts_only_the_pinned_app_branch" {
     github_oidc_enabled                  = true
     github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix                  = "fnx-dev-testenv-01-ci"
+    ci_role_name_prefix                  = "fnx-testenv-01-dev-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
     lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
     tags                                 = { Environment = "testenv-01" }
   }
 
   assert {
-    condition     = aws_iam_role.lambda_uploader[0].name == "fnx-dev-testenv-01-ci-lambda-uploader"
+    condition     = aws_iam_role.lambda_uploader[0].name == "fnx-testenv-01-dev-ci-lambda-uploader"
     error_message = "The uploader role is <ci_role_name_prefix>-lambda-uploader."
   }
 

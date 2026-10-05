@@ -85,8 +85,9 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `root.yaml`. Add a new stack's
-  `<tenant>-<account>-<environment>-ci-plan`/`-apply` roles there, and any operator role that
-  runs Terraform against a stage.
+  `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles there (iam/ci's `ci_role_name_prefix`),
+  and any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
+  and `validate-all`) fails a CI role its stage's read or write role does not trust.
 - Each stack's state is an exact pattern pair on its stage's roles, `*/<stack>/*` and
   `*/<stack>-*` (`stacks/catalog/backend/defaults.yaml`): add a new stack's pair before its first
   `init`. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against
