@@ -180,7 +180,8 @@ fi
 # =================================================================
 echo -e "\n${WHITE}5. Backup Storage${NC}"
 
-BACKUP_BUCKET="${TENANT}-${ACCOUNT}-${ENVIRONMENT}-backups"
+# S3 names are global: built from the stack's full id, tenant-environment-stage.
+BACKUP_BUCKET="${TENANT}-${ENVIRONMENT}-${STAGE}-backups"
 echo -n "   Backup bucket exists: "
 if aws s3api head-bucket --bucket "$BACKUP_BUCKET" 2>/dev/null; then
   log_success "Yes"

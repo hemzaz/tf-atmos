@@ -29,7 +29,7 @@ components:
         log_retention_days: 30
 
         # Stage configurations
-        stage_name: "{{ .settings.context.environment }}"
+        stage_name: "{{ .settings.context.stage }}"
 
         # API Keys and Usage Plans
         create_api_key: false
@@ -87,7 +87,7 @@ components:
         log_retention_days: 30
 
         # Stage configurations
-        stage_name: "{{ .settings.context.environment }}"
+        stage_name: "{{ .settings.context.stage }}"
         auto_deploy: true
 
         # Monitoring
@@ -110,7 +110,7 @@ components:
         zone_id: null # required: Route53 hosted zone ID
 
         # Stage mapping
-        stage_name: "{{ .settings.context.environment }}"
+        stage_name: "{{ .settings.context.stage }}"
         base_path: null
 
         # Logging (minimal for domain component)

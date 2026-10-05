@@ -85,7 +85,7 @@ components:
         tracing_mode: "Active"
         log_retention_days: "{{ .settings.environment.log_retention_days }}"
         environment_variables:
-          STAGE: "{{ .settings.context.environment }}"
+          STAGE: "{{ .settings.context.stage }}"
           # dynamodb names its tables <Environment>-<name> (settings.context.environment
           # alone); this must match dynamodb/users and dynamodb/orders below.
           USERS_TABLE: "{{ .settings.context.environment }}-users"

@@ -570,7 +570,7 @@ components:
         log_retention_days: 30
         kms_key_id: !terraform.state kms/main .key_arn
 
-        stage_name: "{{ .settings.context.environment }}"
+        stage_name: "{{ .settings.context.stage }}"
         auto_deploy: true
 
         # Stage-wide throttling
@@ -1637,7 +1637,7 @@ components:
     # testenv-01 and testenv-02, both stage: dev) would both resolve to the
     # same full_path -- a name collision Secrets Manager would reject at
     # apply. This instance overrides it to the stack's full, unique
-    # environment name instead, matching apigateway's stage_name above.
+    # environment name instead.
     #
     # Side effect: the component's prod recovery-window guard
     # (components/terraform/secretsmanager/main.tf) compares var.environment

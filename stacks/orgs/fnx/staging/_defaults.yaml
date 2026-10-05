@@ -13,7 +13,6 @@ import:
 vars:
   # Account identification
   tags:
-    Stage: staging
     CostCenter: "staging-infra"
 settings:
   environment:

@@ -27,7 +27,6 @@ vars:
     Team: "Platform"
     CostCenter: "Production"
     Project: "Infrastructure"
-    Environment: "production"
     ManagedBy: "Terraform"
     Tenant: "fnx"
     Application: "Production"
