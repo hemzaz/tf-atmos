@@ -239,6 +239,13 @@ template port PR removes its entry, which makes the fixture strict. plan-sweep s
 entry is `ALL` with one `SKIP` line, even when you name it on the command line (check-dependencies
 still reports it); to sweep it, narrow the entry to the checks that still fail.
 
+Templates ship non-prod values for their databases and caches and leave the prod ones to the
+importing stack (each template's ENVIRONMENT-SPECIFIC OVERRIDES). `check-prod-protection.py` (in
+`lint` and `validate-all`) fails a stage `prod` rds instance that is not `environment: prod`,
+Multi-AZ, deletion-protected (`deletion_protection`, `prevent_destroy`), without a final snapshot
+or with under 7 days of backups, and a prod elasticache instance without failover across AZs (at
+least 2 nodes) or with under 7 days of snapshots. Unset values count as the component's defaults.
+
 ## Lambda packages
 
 Function code lives in an application repo, not here (the Cloud Posse aws-lambda model). The

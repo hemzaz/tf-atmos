@@ -49,6 +49,8 @@ workflows:
           python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < "$stacks_json"
           # Every iam/ci plan/apply role is trusted by its stage's backend roles.
           python3 workflows/scripts/common/check-ci-state-roles.py < "$stacks_json"
+          # Every prod rds/elasticache instance keeps its data-loss protections.
+          python3 workflows/scripts/common/check-prod-protection.py components/terraform < "$stacks_json"
       # deploy-full-stack, deploy-application (deploy-app) and bootstrap (full)
       # plan a whole phase before applying it: every deployable instance must be
       # in exactly one deploy-full-stack layer, and an instance must be planned
