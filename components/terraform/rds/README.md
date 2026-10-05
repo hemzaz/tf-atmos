@@ -13,8 +13,7 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
 - Used by: `eks-backend-services` (`.password_secret_arn`, `.instance_endpoint`, `.instance_name`),
   `dns` (`network/main`'s `db.internal` CNAME from `.instance_address`), `monitoring`
   (`.instance_identifier`).
-- `idp-platform` calls this component as a module (`source = "../rds"`); mirror variable changes
-  there.
+- The `idp-platform` template's `idp-platform/rds` instance.
 
 ## Notes
 
@@ -34,7 +33,7 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
 - With TLS required, clients must connect with TLS; to verify the server
   (`sslmode=verify-full`), an app needs the RDS CA bundle
   (`https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem`) in its image.
-  `eks-backend-services` and `idp-platform` build their DSNs that way (`database_ca_bundle_path`).
+  `eks-backend-services` builds its DSNs that way (`database_ca_bundle_path`).
 - The read replica uses the primary's security group, parameter group, deletion protection,
   Performance Insights key and enhanced monitoring.
 - The final snapshot is `final_snapshot_identifier`, else `<Environment>-<identifier>-final-snapshot`:
