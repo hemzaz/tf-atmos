@@ -554,7 +554,9 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   # Lambda's statement_id must match ^[a-zA-Z0-9_-]+$, and a resource_path
   # like "/{proxy+}" carries "{", "}" and "+": a short sha1 of the key, as in
   # aws_lambda_permission.http_route_invoke, keeps every key valid and distinct.
-  statement_id  = "AllowInvokeFrom-${substr(sha1(each.key), 0, 16)}"
+  # The API's name is hashed in too: two APIs granting the same function the
+  # same method and path would otherwise write the same statement_id.
+  statement_id  = "AllowInvokeFrom-${substr(sha1("${local.name_prefix}|${each.key}"), 0, 16)}"
   action        = "lambda:InvokeFunction"
   function_name = each.value.lambda_function_name
   principal     = "apigateway.amazonaws.com"
