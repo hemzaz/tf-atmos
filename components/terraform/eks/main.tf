@@ -184,7 +184,9 @@ resource "aws_eks_cluster" "default" {
   # prevent_destroy only accepts literals, so production protection uses EKS deletion protection instead.
   # Keyed on the Stage tag (settings.context.stage), not Environment, which
   # is the stack's environment and becomes a region code (ue1) under Q4.
-  deletion_protection = var.enable_cluster_protection && contains(["prod", "production"], lower(lookup(var.tags, "Stage", "")))
+  # Without a Stage tag it falls back to Environment, so a missing Stage
+  # cannot turn production protection off.
+  deletion_protection = var.enable_cluster_protection && contains(["prod", "production"], lower(lookup(var.tags, "Stage", lookup(var.tags, "Environment", ""))))
 
   lifecycle {
     # As in cloudposse/terraform-aws-eks-cluster: bootstrap_cluster_creator_admin_permissions

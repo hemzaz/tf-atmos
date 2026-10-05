@@ -461,3 +461,28 @@ run "allows_http_egress_outside_prod_stage" {
     }
   }
 }
+
+# Without a Stage tag the guard falls back to Environment: it fails closed.
+run "rejects_http_egress_without_stage_in_production_environment" {
+  command = plan
+
+  variables {
+    allow_http_egress = true
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  expect_failures = [var.allow_http_egress]
+}
+
+run "allows_http_egress_without_stage_outside_production" {
+  command = plan
+
+  variables {
+    allow_http_egress = true
+    tags = {
+      Environment = "staging-01"
+    }
+  }
+}

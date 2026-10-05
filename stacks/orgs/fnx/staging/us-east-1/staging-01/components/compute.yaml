@@ -55,7 +55,7 @@ components:
             max_group_size: 6
             kubernetes_labels:
               role: worker
-              environment: staging
+              environment: "{{ .settings.context.stage }}"
             tags:
               NodeGroup: workers
           monitoring:

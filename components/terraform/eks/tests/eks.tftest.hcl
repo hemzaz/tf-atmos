@@ -216,6 +216,59 @@ run "dev_and_staging_names" {
   }
 }
 
+# The Q4 names: Environment is the region code, Stage the tier.
+run "region_code_environment_with_prod_stage_is_protected" {
+  command = plan
+
+  variables {
+    tags = {
+      Environment = "ue1"
+      Stage       = "prod"
+    }
+  }
+
+  assert {
+    condition     = aws_eks_cluster.default[0].name == "ue1-main"
+    error_message = "The cluster must be named <Environment>-<name>."
+  }
+
+  assert {
+    condition     = aws_eks_cluster.default[0].deletion_protection == true
+    error_message = "A prod-stage cluster must have deletion protection whatever the Environment."
+  }
+}
+
+# Without a Stage tag the check falls back to Environment: it fails closed.
+run "missing_stage_falls_back_to_the_environment" {
+  command = plan
+
+  variables {
+    tags = {
+      Environment = "production"
+    }
+  }
+
+  assert {
+    condition     = aws_eks_cluster.default[0].deletion_protection == true
+    error_message = "A missing Stage tag must not turn production deletion protection off."
+  }
+}
+
+run "missing_stage_outside_production_is_unprotected" {
+  command = plan
+
+  variables {
+    tags = {
+      Environment = "staging-01"
+    }
+  }
+
+  assert {
+    condition     = aws_eks_cluster.default[0].deletion_protection == false
+    error_message = "Only prod clusters get deletion protection."
+  }
+}
+
 run "name_repeating_the_environment_is_rejected" {
   command = plan
 

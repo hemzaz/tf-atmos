@@ -99,9 +99,12 @@ backend's trust: see [State backend](./docs/OPERATIONS.md#state-backend).
 - Tags (`Tenant`, `Account`, `Environment`, `Stage`, `ManagedBy`) come from
   `stacks/orgs/fnx/_defaults.yaml`, built from `settings.context`, and are applied once through
   `default_tags` in each `provider.tf`, not per resource.
-- Globally unique names (S3 buckets, Cognito domains) start with the full id
-  `<tenant>-<environment>-<stage>`; a value that means the tier (API Gateway `stage_name`,
-  `ENVIRONMENT` variables) reads `settings.context.stage`, never `environment`.
+- Names that are global without an account id (S3 buckets without an account suffix, Cognito
+  domains) start with the full id `<tenant>-<environment>-<stage>`. Account-suffixed names
+  (`<Environment>-<name>-<account_id>`: the `s3` default, VPC flow logs, CloudTrail, AWS Config,
+  ALB logs) are unique per account and region, because each stage has its own account (the
+  Cloud Posse model). A value that means the tier (API Gateway `stage_name`, `ENVIRONMENT`
+  variables, Kubernetes `environment` labels) reads `settings.context.stage`, never `environment`.
 - `settings.list_merge_strategy: replace`: a list in a more specific file replaces the inherited one.
 - Each component has `variables.tf` (with validation blocks), `outputs.tf` (`sensitive = true`
   where needed), `versions.tf` (`>= 1.16.0, < 2.0.0`), `provider.tf` and a `README.md` covering
