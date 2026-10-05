@@ -1,0 +1,31 @@
+---
+##################################################
+# Catalog Configuration for the GitHub Actions runner token rotator
+##################################################
+# A scheduled function that keeps a fresh runner registration token in SSM for
+# github-runners (the Cloud Posse aws-github-action-token-rotator model). One
+# instance per account and region that runs github-runners, deployed before
+# them. It authenticates as a GitHub App: the owner's one-time setup (the App,
+# its installation, and its private key in SSM, never in the repository) is in
+# components/terraform/github-action-token-rotator/README.md. Instances set
+# github_app_id and github_app_installation_id (not secrets).
+
+components:
+  terraform:
+    github-action-token-rotator/defaults:
+      metadata:
+        component: github-action-token-rotator
+        type: abstract
+      dependencies:
+        components:
+          - component: kms/main
+      vars:
+        enabled: true
+        github_org_name: hemzaz
+        github_repository_name: tf-atmos
+        parameter_store_private_key_path: /github/runners/app-private-key
+        parameter_store_token_path: /github/runners/registration-token
+        kms_key_arn: !terraform.state kms/main .key_arn
+        schedule_expression: rate(30 minutes)
+        tags:
+          Component: "GitHubActionTokenRotator"
