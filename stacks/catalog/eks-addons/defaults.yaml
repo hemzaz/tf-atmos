@@ -12,13 +12,18 @@ components:
           namespace: "k8s"
       # Talks to the EKS API (kubernetes/helm providers), which is private
       # (cluster_endpoint_public_access: false), so GitHub-hosted runners
-      # cannot reach it: CI plans, CD deploys and drift detection skip every
-      # instance, and an operator applies it from inside the VPC
+      # cannot reach it. runner: in-vpc puts its CI jobs on the stack's
+      # self-hosted runners in the VPC (github-runners; the label is the
+      # stack's full id unless settings.github.runner_label says otherwise),
+      # which every eks instance it depends on must admit. Until CI routes
+      # in-vpc jobs, actions_enabled: false keeps CI plans, CD deploys and
+      # drift detection off it, and an operator applies it from inside the VPC
       # (docs/OPERATIONS.md, "In-cluster components").
       # workflows/scripts/common/check-cluster-api-ci.py enforces this.
       settings:
         github:
           actions_enabled: false
+          runner: in-vpc
       # Only variables the component declares. The add-on switches
       # (enable_aws_load_balancer_controller, enable_cluster_autoscaler,
       # enable_metrics_server, enable_external_dns, enable_cert_manager) and

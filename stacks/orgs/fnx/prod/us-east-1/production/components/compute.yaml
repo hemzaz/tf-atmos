@@ -9,6 +9,7 @@
 import:
   - orgs/fnx/prod/us-east-1/production/components/globals
   - catalog/eks/defaults
+  - catalog/github-runners/defaults
   - catalog/ec2/defaults
   - catalog/external-secrets/defaults
   - catalog/eks-addons/defaults
@@ -33,6 +34,8 @@ components:
         # the bastion's own security group, whose SSM port-forward carries it.
         allowed_security_group_ids:
           - !terraform.state ec2/bastion .security_group_id
+          # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
+          - !terraform.state github-runners/main .security_group_id
         tags:
           Cluster: production-main
           Purpose: "application-workloads"
@@ -107,6 +110,7 @@ components:
           - component: kms/main
           - component: iam/ci
           - component: ec2/bastion
+          - component: github-runners/main
 
     # ==========================================================================
     # EKS Cluster - Data Processing Workloads (Production HA)
@@ -126,6 +130,8 @@ components:
         # rule names the bastion rather than vpc/main's whole CIDR.
         allowed_security_group_ids:
           - !terraform.state ec2/bastion .security_group_id
+          # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
+          - !terraform.state github-runners/main .security_group_id
         tags:
           Cluster: production-data
           Purpose: "data-processing"
@@ -174,6 +180,7 @@ components:
           - component: kms/main
           - component: iam/ci
           - component: ec2/bastion
+          - component: github-runners/main
           - component: network/vpc-peering
 
     # ==========================================================================
@@ -390,3 +397,29 @@ components:
           - component: external-secrets/main
           - component: rds/main
           - component: elasticache/main
+
+
+    # Self-hosted GitHub Actions runners in vpc/main, labelled with this
+    # stack's full id, each registered just in time with the owner's GitHub App
+    # (settings.github_app; docs/OPERATIONS.md, "First-deploy inputs", GitHub
+    # App): CI runs the in-cluster instances (settings.github.runner: in-vpc)
+    # on them. eks/main admits them directly, eks/data across
+    # network/vpc-peering (a security group reference works on a same-account,
+    # same-region peering), as for the bastion.
+    github-runners/main:
+      metadata:
+        component: github-runners
+        inherits:
+          - github-runners/defaults
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # Alarms to the stack's monitoring/main topic, <Environment>-main-alarms,
+        # named rather than read: monitoring deploys in the last layer, this
+        # pool in connectivity (kms/main lets CloudWatch alarms publish to it).
+        alarm_sns_topic_arns:
+          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-main-alarms"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: vpc/main

@@ -93,6 +93,11 @@
 #    only to verified addresses, 200 a day). Request production access (SES
 #    console, or `aws sesv2 put-account-details`) before the welcome email
 #    can reach real users. Terraform cannot do this.
+# 6. settings.github_app (every fnx stack inherits it from
+#    stacks/orgs/fnx/_defaults.yaml): microservices/github-runners registers
+#    its runners with that GitHub App. Its private key goes in this pool's own
+#    parameter, /github/runners/microservices-runners/app-private-key, besides
+#    the stack's own pool's (components/terraform/github-runners/README.md).
 # =============================================================================
 
 import:
@@ -108,6 +113,7 @@ import:
   - catalog/sqs/defaults
   - catalog/ses/defaults
   - catalog/secretsmanager/defaults
+  - catalog/github-runners/defaults
   # s3/lambda-artifacts, the stack's lambda package bucket (an fnx org stack
   # imports the same file in components/services.yaml).
   - catalog/s3/lambda-artifacts
@@ -196,6 +202,41 @@ components:
           - component: kms/main
 
     # =========================================================================
+    # CI RUNNERS (self-hosted, in this VPC)
+    # =========================================================================
+    # The private microservices/eks API is reachable only from inside this
+    # VPC: CI runs the in-cluster instances (eks-addons, alb-ingress-group;
+    # settings.github.runner: in-vpc) on these ephemeral runners, which the
+    # cluster admits. Labelled <full id>-microservices so those jobs never land
+    # on the importing stack's own pool (github-runners/main, in vpc/main);
+    # the in-cluster instances below ask for that label (runner_label).
+
+    microservices/github-runners:
+      metadata:
+        component: github-runners
+        type: real
+        inherits:
+          - github-runners/defaults
+      vars:
+        # <Environment>-microservices-runners, beside the stack's own pool.
+        name: microservices-runners
+        vpc_id: !terraform.state microservices/vpc .vpc_id
+        subnet_ids: !terraform.state microservices/vpc .private_subnet_ids
+        # Alarms to microservices/monitoring's topic, <Environment>-monitoring-alarms,
+        # named rather than read: monitoring deploys in the last layer.
+        alarm_sns_topic_arns:
+          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-monitoring-alarms"
+        runner_labels:
+          - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-microservices"
+        tags:
+          Layer: "ci"
+          Platform: "microservices"
+      dependencies:
+        components:
+          - component: kms/main
+          - component: microservices/vpc
+
+    # =========================================================================
     # EKS CLUSTER
     # =========================================================================
 
@@ -225,6 +266,9 @@ components:
         # public_access_cidrs; 0.0.0.0/0 is rejected.
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: false
+        # The in-VPC CI runners (above) reach the private endpoint on 443.
+        allowed_security_group_ids:
+          - !terraform.state microservices/github-runners .security_group_id
 
         # Cluster logging
         enabled_cluster_log_types:
@@ -318,6 +362,7 @@ components:
           # eks/defaults gives the CI roles EKS access entries; every fnx org
           # stack has an iam/ci instance (components/security.yaml).
           - component: iam/ci
+          - component: microservices/github-runners
 
     # =========================================================================
     # EKS ADDONS (Kubernetes-level)
@@ -340,6 +385,10 @@ components:
         type: real
         inherits:
           - eks-addons
+      # CI runs it on microservices/github-runners, in this cluster's VPC.
+      settings:
+        github:
+          runner_label: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-microservices"
       vars:
         cluster_name: !terraform.state microservices/eks .eks_cluster_id
         host: !terraform.state microservices/eks .eks_cluster_endpoint
@@ -433,6 +482,10 @@ components:
         type: real
         inherits:
           - alb-controller-ingress-group/defaults
+      # CI runs it on microservices/github-runners, in this cluster's VPC.
+      settings:
+        github:
+          runner_label: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-microservices"
       vars:
         cluster_name: !terraform.state microservices/eks .eks_cluster_id
         host: !terraform.state microservices/eks .eks_cluster_endpoint

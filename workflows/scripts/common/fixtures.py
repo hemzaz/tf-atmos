@@ -12,11 +12,8 @@ check-deploy-layers, plan-sweep, tflint (workflows/lint.yaml).
 """
 ALL = frozenset({"*"})
 
-KNOWN_BROKEN_FIXTURES = {
-    # Clean on dependencies, outputs, vars, deploy layers and plan-sweep. No
-    # operator path to its private EKS endpoint (no bastion).
-    "fnx-fixtures-msplatform": frozenset({"check-cluster-api-ci"}),
-}
+# Empty: every template fixture passes every check.
+KNOWN_BROKEN_FIXTURES: dict = {}
 
 
 def known_broken(stack: str, check: str) -> bool:

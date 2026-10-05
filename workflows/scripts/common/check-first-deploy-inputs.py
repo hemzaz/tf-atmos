@@ -15,12 +15,15 @@ Errors (fatal unless --warn):
     *.test, *.invalid) in a domain or an alert address
   - an enabled eks instance with no map_additional_iam_roles (EKS admin role)
   - a prod-stage rds instance with no sns_topic_arn
+  - a github-runners instance whose GitHub App ID or installation ID is the
+    placeholder 0
   - a workload account equal to the management account
   - two stages sharing an account (one account per stage)
 The last two skip placeholder IDs, which are already an error.
 Notices (printed, never fatal): the rows a file cannot settle (Cognito
 feature plan, cross-account caller role existence, Lambda packages, GitHub
-protection, deploy tags).
+protection, deploy tags, the GitHub App's private key and outside-collaborator
+approval).
 
 Only deployable stacks are checked: every stage but EXEMPT_STAGES. --stacks
 limits the placeholder checks to some of them (the bootstrap workflow passes
@@ -142,6 +145,11 @@ def stack_findings(name: str, config: dict) -> list:
         if component == "rds" and env.get("_stage") == "prod" and not variables.get("sns_topic_arn"):
             add(Finding("error", name, f"{instance_name} vars.sns_topic_arn",
                         "unset: its CloudWatch alarms have no action", "Prod RDS alarm target"))
+        if component == "github-runners":
+            for key in ("github_app_id", "github_app_installation_id"):
+                if str(variables.get(key, "0")) == "0":
+                    add(Finding("error", name, f"{instance_name} vars.{key}",
+                                "placeholder 0: the owner's GitHub App is not set up", "GitHub App"))
         if component == "cognito" and variables.get("user_pool_tier") == "PLUS":
             add(Finding("notice", name, f"{instance_name} vars.user_pool_tier",
                         "PLUS is billed from the first monthly active user; confirm it is intended",
@@ -193,6 +201,9 @@ def notices() -> list:
                 "GitHub"),
         Finding("notice", "repository", "", "after each stack's first deploy, push its deployed/<stack> tag",
                 "Deploy tags"),
+        Finding("notice", "repository", "", "the GitHub App's private key in each account's SSM, and "
+                "\"Require approval for all outside collaborators\" on (self-hosted runners, public repository)",
+                "GitHub App"),
     ]
 
 

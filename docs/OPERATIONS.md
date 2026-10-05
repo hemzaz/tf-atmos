@@ -19,6 +19,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 | Prod RDS alarm target | `sns_topic_arn` on prod's `rds/main`: unset, so its CloudWatch alarms have no action |
 | Lambda packages | the application repo that builds them, as `lambda_uploader_trusted_github_repos` on each stack's `iam/ci` (`components/security.yaml`), then a first upload per function: see [Lambda packages](#lambda-packages). Until then every `lambda/*` instance is `metadata.enabled: false` |
 | GitHub | default-branch protection, applied: PR required, linear history, no force-push, required check `CI gate` (the `terraform-ci.yml` job that reports on every PR and fails if any CI job failed). No tag ruleset guards `refs/tags/deployed/**`: on a personal repo GitHub Actions cannot be a ruleset bypass actor, and a ruleset without that bypass blocks `terraform-cd.yml`'s own tag moves. Add it once the repo moves to an organization |
+| GitHub App | the self-hosted CI runners' just-in-time registration: a GitHub App installed on this repository (Administration read/write); its IDs in `settings.github_app` (`app_id`, `installation_id`; `0` until set) in `stacks/orgs/fnx/_defaults.yaml`; and, after each runner pool's first apply, its private key in that account's SSM at the pool's `.app_private_key_parameter_name`, encrypted with the pool's own key (`.app_key_kms_key_alias`): see `components/terraform/github-runners/README.md`. The repository is public: turn on Settings → Actions → General → "Require approval for all outside collaborators" |
 | Deploy tags | one `deployed/<stack>` tag per stack: `git tag deployed/<stack> <sha> && git push origin deployed/<stack>` |
 | EKS cluster admins | `map_additional_iam_roles` in each stack's `components/globals.yaml`: see [In-cluster components](#in-cluster-components). While empty, nobody can apply the in-cluster components |
 
@@ -42,11 +43,12 @@ the following, naming the stack, the key and the row above:
 - an `example.com`/`.test` domain or alert address;
 - an empty EKS admin role list;
 - an unset prod RDS alarm target;
+- a placeholder (`0`) GitHub App ID or installation ID;
 - a workload account equal to the management account;
 - two stages sharing one account.
 
 It prints the rows no file can settle (Cognito plan, the operator role's existence, Lambda
-packages, GitHub, deploy tags) as notices. The `local` and `fixtures` stacks are exempt.
+packages, GitHub, deploy tags, the GitHub App's key and outside-collaborator approval) as notices. The `local` and `fixtures` stacks are exempt.
 `bootstrap.yaml` runs it fatally for the stack being deployed (`backend-cold-start`,
 `backend-only`, `full`) before any AWS call. `atmos workflow lint` runs it with `--warn`: it
 never fails, and prints the counts per row plus the first 10 findings (`--warn --all` prints
@@ -154,10 +156,10 @@ atmos workflow deploy -f deploy-template -s <stack>          # a stack template 
 ```
 
 Template readiness follows `KNOWN_BROKEN_FIXTURES` in `workflows/scripts/common/fixtures.py`
-(see [Template fixtures](#template-fixtures)): `batch-processing`, `data-pipeline`,
-`idp-platform`, `serverless-api` and `web-application` pass every check; `microservices-platform`
-still fails `check-cluster-api-ci`. The `idp-platform` template replaces the unsupported
-`components/terraform/idp-platform` component, which no stack deploys.
+(see [Template fixtures](#template-fixtures)): every template (`batch-processing`, `data-pipeline`,
+`idp-platform`, `microservices-platform`, `serverless-api`, `web-application`) passes every check.
+The `idp-platform` template replaces the unsupported `components/terraform/idp-platform`
+component, which no stack deploys.
 
 ## In-cluster components
 

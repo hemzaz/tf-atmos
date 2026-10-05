@@ -62,7 +62,7 @@ class CleanTest(unittest.TestCase):
 
     def test_repository_notices_are_always_printed(self):
         rows = {f.row for f in preflight.check(clean()) if f.level == "notice"}
-        self.assertEqual(rows, {"Lambda packages", "GitHub", "Deploy tags"})
+        self.assertEqual(rows, {"Lambda packages", "GitHub", "Deploy tags", "GitHub App"})
 
 
 class PlaceholderTest(unittest.TestCase):
@@ -168,6 +168,18 @@ class PlaceholderTest(unittest.TestCase):
         stacks = clean()
         stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", eks_main={
             "component": "eks", "map_additional_iam_roles": [{"rolearn": "arn:aws:iam::222222222222:role/admin"}]})
+        self.assertEqual(errors(stacks), [])
+
+    def test_placeholder_github_app(self):
+        stacks = clean()
+        stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", rotator_main={
+            "component": "github-runners", "github_app_id": "0", "github_app_installation_id": "7654321"})
+        self.assert_one(stacks, "fnx-dev-testenv-01", "vars.github_app_id", "GitHub App")
+
+    def test_github_app_set_passes(self):
+        stacks = clean()
+        stacks["fnx-dev-testenv-01"] = stack("dev", "222222222222", rotator_main={
+            "component": "github-runners", "github_app_id": "123456", "github_app_installation_id": "7654321"})
         self.assertEqual(errors(stacks), [])
 
     def test_prod_rds_without_alarm_target(self):
@@ -285,7 +297,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(out.count("\nWARN ") + out.startswith("WARN "), preflight.WARN_LIMIT)
         self.assertNotIn("NOTICE repository", out)
-        self.assertIn("... 5 more WARN and 3 NOTICE line(s) not shown; see them all with --warn --all", out)
+        self.assertIn("... 5 more WARN and 4 NOTICE line(s) not shown; see them all with --warn --all", out)
         self.assertIn(f"By row: Alert recipients {preflight.WARN_LIMIT + 5}", out)
 
     def test_warn_all_and_fatal_mode_show_everything(self):
@@ -293,7 +305,7 @@ class MainTest(unittest.TestCase):
             with self.subTest(argv=argv):
                 _, out, _ = self.run_main(self.many_placeholder_stacks(), *argv)
                 self.assertEqual(out.count(f"{label} fnx-dev-testenv-01"), preflight.WARN_LIMIT + 5)
-                self.assertEqual(out.count("NOTICE repository"), 3)
+                self.assertEqual(out.count("NOTICE repository"), 4)
                 self.assertNotIn("not shown", out)
 
     def test_clean_passes(self):

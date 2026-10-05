@@ -70,6 +70,12 @@ terraform:
       allowed_account_ids:
         - "{{ .settings.environment.account_id }}"
 settings:
+  # The GitHub App that registers the self-hosted CI runners (github-runners'
+  # jit function): its ID and installation ID, not secrets. 0 until the owner
+  # creates it (docs/OPERATIONS.md#first-deploy-inputs, GitHub App).
+  github_app:
+    app_id: "0"
+    installation_id: "0"
   # ONE account map: the only place account IDs are written. Shaped like the
   # outputs of Cloud Posse's account-map component (full_account_map: account
   # name -> id, plus the names of the root and identity accounts), so the

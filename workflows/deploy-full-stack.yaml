@@ -36,6 +36,7 @@
 # whose lambda instances read s3/lambda-artifacts .bucket_id; sqs and sns share it
 # (they read only kms/main; an s3 instance notifying a queue names it rather than
 # reading its state); so do kinesis and dynamodb, which also read only kms/main.
+# github-runners (reading the vpc and kms/main) is in connectivity, before the eks instances (compute) that admit its security group.
 # glue (compute) reads the buckets; athena (platform) reads glue, and firehose
 # (data) reads glue, kinesis and the buckets. stepfunctions (platform) follows
 # compute, whose batch, lambda and glue state its definitions read (an athena
@@ -169,7 +170,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "securitygroup" or .metadata.component == "network"
-          or .atmos_component == "ec2/bastion"'
+          or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
       - name: confirm_connectivity
         type: confirm
         prompt: Apply the connectivity layer plan above?
@@ -181,7 +182,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "securitygroup"
-          or .metadata.component == "network" or .atmos_component == "ec2/bastion"'
+          or .metadata.component == "network" or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
       - name: plan-security
         type: atmos
         command: >-
@@ -511,7 +512,7 @@ workflows:
         type: atmos
         command: >-
           terraform plan --query '.metadata.component == "securitygroup" or .metadata.component == "network"
-          or .atmos_component == "ec2/bastion"'
+          or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
       - name: confirm
         type: confirm
         prompt: Deploy the connectivity layer?
@@ -523,7 +524,7 @@ workflows:
         type: atmos
         command: >-
           terraform deploy --from-plan --query '.metadata.component == "securitygroup"
-          or .metadata.component == "network" or .atmos_component == "ec2/bastion"'
+          or .metadata.component == "network" or .atmos_component == "ec2/bastion" or .metadata.component == "github-runners"'
 
   deploy-security:
     description: "Deploy the security layer: secrets, GuardDuty, Security Hub, Inspector, CloudTrail, AWS Config, Cognito and the API Gateway account settings"
