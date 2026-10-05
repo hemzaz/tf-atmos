@@ -27,7 +27,8 @@
 #   - securitygroups: alb_clients, HTTPS from the networks allowed to reach
 #     the platform (private ranges by default), attached to the ALB
 #   - alb: internet-facing in the public subnets, HTTPS only, reached from the
-#     allowed networks only (no CloudFront ingress), access logs in its own
+#     allowed networks and the Route 53 health checkers only (no CloudFront
+#     ingress), access logs in its own
 #     SSE-S3 bucket under alb-access-logs/ (expiring after 90 days), alias
 #     records for the domain and its four hosts
 #   - sns/alerts and monitoring: the health check's alarm, notifying the
@@ -492,6 +493,9 @@ components:
         subnets: !terraform.state vpc/main .public_subnet_ids
         certificate_arn: !terraform.state idp-platform/acm .certificate_arns.idp
         cloudfront_ingress_enabled: false
+        # The health check (idp-platform/dns) probes from Route 53's public
+        # ranges, which alb_clients does not admit.
+        route53_health_check_ingress_enabled: true
         security_group_ids:
           - !terraform.state idp-platform/securitygroups .security_group_ids.alb_clients
         # Non-prod; prod: ENVIRONMENT-SPECIFIC OVERRIDES.

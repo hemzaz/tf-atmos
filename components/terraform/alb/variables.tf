@@ -76,6 +76,12 @@ variable "cloudfront_ingress_enabled" {
   }
 }
 
+variable "route53_health_check_ingress_enabled" {
+  type        = bool
+  description = "Admit the Route 53 health checkers on 443, from the AWS-managed prefix list com.amazonaws.<region>.route53-healthchecks (weight 25 against the security-group rule quota): for a Route 53 HTTPS health check on a name aliased to this ALB"
+  default     = false
+}
+
 variable "additional_ingress_prefix_list_ids" {
   type        = list(string)
   description = "Extra managed prefix list ids allowed to reach the HTTPS listener, alongside the CloudFront origin-facing prefix list this component always resolves. Quota note: a security group rule referencing a managed prefix list counts against the 'Rules per security group' quota as that list's max-entries weight, not as 1 -- the CloudFront origin-facing list alone is already ~55-60 of the default 60, so adding an entry here can require an AWS quota increase for that security group."

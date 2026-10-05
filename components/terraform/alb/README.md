@@ -23,6 +23,10 @@ Modelled on Cloud Posse `aws-alb`, written as plain resources.
   redirects at the edge. `cloudfront_ingress_enabled: false` drops the prefix-list rule for an ALB
   reached directly (the `idp-platform` template); it then needs another source, such as a
   `securitygroup` group with CIDR ingress attached through `security_group_ids`.
+- `route53_health_check_ingress_enabled` admits the Route 53 health checkers on 443 from their
+  AWS-managed prefix list (`com.amazonaws.<region>.route53-healthchecks`, weight 25), for a Route 53
+  health check on an alias of this ALB. With CloudFront ingress on as well, the two lists weigh about
+  80 against the default 60 rules per group: raise that quota first.
 - `lifecycle_rule_enabled` (Cloud Posse's, off by default) expires the access logs after
   `expiration_days` (90), their noncurrent versions after `noncurrent_version_expiration_days`
   (90), and aborts incomplete uploads after `abort_incomplete_multipart_upload_days` (5).

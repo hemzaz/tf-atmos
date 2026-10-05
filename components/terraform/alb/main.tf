@@ -60,6 +60,25 @@ resource "aws_vpc_security_group_ingress_rule" "cloudfront" {
   prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront[0].id
 }
 
+# Route 53 health checkers, from their AWS-managed prefix list (weight 25
+# against the security-group rule quota): an internet-facing ALB watched by a
+# Route 53 HTTPS health check that its other rules would not admit.
+data "aws_ec2_managed_prefix_list" "route53_health_checks" {
+  count = local.enabled && var.route53_health_check_ingress_enabled ? 1 : 0
+  name  = "com.amazonaws.${var.region}.route53-healthchecks"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "route53_health_checks" {
+  count = local.enabled && var.route53_health_check_ingress_enabled ? 1 : 0
+
+  security_group_id = aws_security_group.this[0].id
+  description       = "HTTPS from the Route 53 health checkers' managed prefix list"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.route53_health_checks[0].id
+}
+
 resource "aws_vpc_security_group_ingress_rule" "additional_prefix_lists" {
   for_each = local.enabled ? toset(var.additional_ingress_prefix_list_ids) : toset([])
 

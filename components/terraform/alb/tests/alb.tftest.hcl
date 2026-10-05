@@ -430,3 +430,37 @@ run "expiration_days_must_be_positive" {
 
   expect_failures = [var.expiration_days]
 }
+
+run "route53_health_checkers_are_not_admitted_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_vpc_security_group_ingress_rule.route53_health_checks) == 0 && length(data.aws_ec2_managed_prefix_list.route53_health_checks) == 0
+    error_message = "route53_health_check_ingress_enabled defaults to false."
+  }
+}
+
+run "route53_health_checkers_are_admitted_on_443_from_their_prefix_list" {
+  command = plan
+
+  variables {
+    route53_health_check_ingress_enabled = true
+  }
+
+  override_data {
+    target = data.aws_ec2_managed_prefix_list.route53_health_checks[0]
+    values = {
+      id = "pl-0r53healthchecks"
+    }
+  }
+
+  assert {
+    condition = (
+      aws_vpc_security_group_ingress_rule.route53_health_checks[0].prefix_list_id == "pl-0r53healthchecks" &&
+      aws_vpc_security_group_ingress_rule.route53_health_checks[0].from_port == 443 &&
+      aws_vpc_security_group_ingress_rule.route53_health_checks[0].to_port == 443 &&
+      aws_vpc_security_group_ingress_rule.route53_health_checks[0].cidr_ipv4 == null
+    )
+    error_message = "The Route 53 health checkers' managed prefix list is admitted on 443, never as a CIDR."
+  }
+}

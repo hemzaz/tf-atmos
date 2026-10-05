@@ -567,3 +567,38 @@ run "prod_rejects_a_small_burstable_class" {
 
   expect_failures = [var.instance_class]
 }
+
+run "prod_accepts_r6i" {
+  command = plan
+
+  variables {
+    environment         = "prod"
+    multi_az            = true
+    deletion_protection = true
+    instance_class      = "db.r6i.xlarge"
+  }
+}
+
+run "prod_accepts_m7g" {
+  command = plan
+
+  variables {
+    environment         = "prod"
+    multi_az            = true
+    deletion_protection = true
+    instance_class      = "db.m7g.large"
+  }
+}
+
+run "prod_rejects_t4g_small" {
+  command = plan
+
+  variables {
+    environment         = "prod"
+    multi_az            = true
+    deletion_protection = true
+    instance_class      = "db.t4g.small"
+  }
+
+  expect_failures = [var.instance_class]
+}
