@@ -219,6 +219,8 @@ workflows:
       - name: deploy-security-monitoring
         type: atmos
         command: terraform deploy --from-plan --query '.metadata.component == "security-monitoring"'
+      # The rotation split keys on rotation_secret_arn, a read of a secretsmanager
+      # instance, which relies on secrets (security) being applied before compute.
       - name: plan-compute
         type: atmos
         command: >-
