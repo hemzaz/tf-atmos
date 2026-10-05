@@ -238,7 +238,10 @@ components:
     # been dropped or converted rather than silently ignored. `bucket_name`
     # is kept explicit on all three: the trigger queue's policy (below),
     # the s3-trigger EventBridge pattern and the job-definition/schedule
-    # input/output paths all reference these names literally. `logging` is
+    # input/output paths all reference these names literally. They start
+    # with the stack's full id, tenant-environment-stage (Cloud Posse's
+    # null-label id order): S3 bucket names are global, and environment alone
+    # repeats across stages once it is a region code. `logging` is
     # left unset (disabled, the s3 component's default) rather than pointed
     # at a `{{ .vars.log_bucket_name }}` placeholder: atmos.yaml sets no
     # `missingkey` option, so an unset template key renders as the literal
@@ -262,7 +265,7 @@ components:
         # name is required even though bucket_name overrides the name it would
         # otherwise generate.
         name: "batch-input"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input"
 
         lifecycle_configuration_rules:
           - id: "expire-processed"
@@ -320,7 +323,7 @@ components:
           - s3/defaults
       vars:
         name: "batch-output"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output"
 
         lifecycle_configuration_rules:
           - id: "transition-ia"
@@ -358,7 +361,7 @@ components:
           - s3/defaults
       vars:
         name: "batch-scripts"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-scripts"
+        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-scripts"
 
         # No lifecycle rules - keep scripts indefinitely.
 
@@ -447,7 +450,7 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
+                      - "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input"
         tags:
           Layer: "messaging"
           Platform: "batch-processing"
@@ -656,7 +659,7 @@ components:
             memory: 2048
             log_stream_prefix: data-processor
             environment:
-              ENVIRONMENT: "{{ .settings.context.environment }}"
+              ENVIRONMENT: "{{ .settings.context.stage }}"
               INPUT_BUCKET: !terraform.state batch-processing/s3-input .bucket_name
               OUTPUT_BUCKET: !terraform.state batch-processing/s3-output .bucket_name
               AWS_REGION: "{{ .vars.region }}"
@@ -667,19 +670,19 @@ components:
             job_role_policy_json: &batch_job_data_policy >-
               {"Version": "2012-10-17", "Statement": [
               {"Sid": "ListBuckets", "Effect": "Allow", "Action": "s3:ListBucket",
-              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input",
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output"]},
+              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input",
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output"]},
               {"Sid": "ReadObjects", "Effect": "Allow", "Action": "s3:GetObject",
-              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input/*",
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/*"]},
+              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input/*",
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/*"]},
               {"Sid": "WriteOutput", "Effect": "Allow", "Action": "s3:PutObject",
-              "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/*"},
+              "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/*"},
               {"Sid": "BucketKeyThroughS3", "Effect": "Allow", "Action": ["kms:Decrypt", "kms:GenerateDataKey*"],
               "Resource": "arn:aws:kms:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:key/*",
               "Condition": {"StringEquals": {"kms:ViaService": "s3.{{ .vars.region }}.amazonaws.com"},
               "StringLike": {"kms:EncryptionContext:aws:s3:arn": [
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input*",
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output*"]}}}]}
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input*",
+              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output*"]}}}]}
             retry_strategy:
               attempts: 3
               # Retry a lost host; exit when the application itself failed
@@ -709,7 +712,7 @@ components:
               - "--date"
               - "Ref::processing_date"
             environment:
-              ENVIRONMENT: "{{ .settings.context.environment }}"
+              ENVIRONMENT: "{{ .settings.context.stage }}"
             job_role_policy_json: *batch_job_data_policy
             retry_strategy:
               attempts: 2
@@ -1090,7 +1093,7 @@ components:
               input_paths:
                 id: "$.id"
                 time: "$.time"
-              input_template: '{"job_id": "<id>", "input_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input/incoming/", "output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/processed/", "final_output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-output/final/", "processing_date": "<time>"}'
+              input_template: '{"job_id": "<id>", "input_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input/incoming/", "output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/processed/", "final_output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/final/", "processing_date": "<time>"}'
             dead_letter_config:
               arn: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_arn
             retry_policy:
@@ -1161,7 +1164,7 @@ components:
           detail:
             bucket:
               name:
-                - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-batch-input"
+                - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input"
             object:
               key:
                 - prefix: "incoming/"
@@ -1260,7 +1263,7 @@ components:
         kms_key_id: !terraform.state kms/main .key_arn
 
         environment_variables:
-          ENVIRONMENT: "{{ .settings.context.environment }}"
+          ENVIRONMENT: "{{ .settings.context.stage }}"
           HIGH_PRIORITY_QUEUE: "{{ .settings.context.environment }}-batch-high_priority"
           DEFAULT_QUEUE: "{{ .settings.context.environment }}-batch-default"
           LOW_PRIORITY_QUEUE: "{{ .settings.context.environment }}-batch-low_priority"

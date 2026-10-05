@@ -11,6 +11,7 @@ vars:
     Tenant: "{{ .settings.context.tenant }}"
     Account: "{{ .settings.environment.account }}"
     Environment: "{{ .settings.context.environment }}"
+    Stage: "{{ .settings.context.stage }}"
     ManagedBy: "Terraform"
 
 terraform:

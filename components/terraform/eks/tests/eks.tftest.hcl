@@ -67,6 +67,7 @@ variables {
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {
     Environment = "production"
+    Stage       = "prod"
     Tenant      = "fnx"
   }
   node_groups = {
@@ -195,6 +196,7 @@ run "dev_and_staging_names" {
   variables {
     tags = {
       Environment = "staging-01"
+      Stage       = "staging"
     }
   }
 

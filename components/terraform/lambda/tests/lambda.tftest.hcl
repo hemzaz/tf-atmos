@@ -433,3 +433,31 @@ run "description_over_256_characters_is_rejected" {
 
   expect_failures = [var.description]
 }
+
+# HTTP egress is refused for the prod tier, read from the Stage tag (not
+# Environment, which becomes a region code under the Q4 names).
+run "rejects_http_egress_in_prod_stage" {
+  command = plan
+
+  variables {
+    allow_http_egress = true
+    tags = {
+      Environment = "ue1"
+      Stage       = "prod"
+    }
+  }
+
+  expect_failures = [var.allow_http_egress]
+}
+
+run "allows_http_egress_outside_prod_stage" {
+  command = plan
+
+  variables {
+    allow_http_egress = true
+    tags = {
+      Environment = "production"
+      Stage       = "dev"
+    }
+  }
+}

@@ -26,7 +26,6 @@ vars:
     Team: "Platform"
     CostCenter: "Staging"
     Project: "Infrastructure"
-    Environment: "staging-01"
     ManagedBy: "Terraform"
     Tenant: "fnx"
     Application: "Staging"

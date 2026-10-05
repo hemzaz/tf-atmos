@@ -392,7 +392,7 @@ components:
         # kms/main key through SQS.
         environment_variables:
           LOG_LEVEL: "INFO"
-          ENVIRONMENT: "production"
+          ENVIRONMENT: "{{ .settings.context.stage }}"
           QUEUE_URL: !terraform.state sqs/data-transform .queue_url
         custom_policy: !terraform.state sqs/data-transform '.producer_policy | tojson'
         # The built-in egress reaches S3 only, and vpc/services has no SQS

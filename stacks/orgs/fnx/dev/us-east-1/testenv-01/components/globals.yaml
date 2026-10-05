@@ -24,7 +24,6 @@ vars:
     Team: "DevOps"
     CostCenter: "IT"
     Project: "Infrastructure"
-    Environment: "testenv-01"
     ManagedBy: "Terraform"
     Tenant: "fnx"
     Application: "Testing"

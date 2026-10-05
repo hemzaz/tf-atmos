@@ -457,7 +457,7 @@ components:
         kms_key_id: !terraform.state kms/main .key_arn
 
         environment_variables:
-          ENVIRONMENT: "{{ .settings.context.environment }}"
+          ENVIRONMENT: "{{ .settings.context.stage }}"
           OUTPUT_STREAM: !terraform.state data-pipeline/kinesis-enriched .stream_name
           ENRICHMENT_TABLE: !terraform.state data-pipeline/dynamodb-lookup .table_name
           LOG_LEVEL: "INFO"
@@ -568,7 +568,7 @@ components:
         kms_key_id: !terraform.state kms/main .key_arn
 
         environment_variables:
-          ENVIRONMENT: "{{ .settings.context.environment }}"
+          ENVIRONMENT: "{{ .settings.context.stage }}"
           SCHEMA_REGISTRY_URL: '{{ required "settings.data_pipeline.schema_registry_url is required" .settings.data_pipeline.schema_registry_url }}'
           VALID_RECORDS_STREAM: !terraform.state data-pipeline/kinesis-validated .stream_name
           INVALID_RECORDS_BUCKET: !terraform.state data-pipeline/s3-raw .bucket_name

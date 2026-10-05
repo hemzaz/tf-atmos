@@ -508,7 +508,7 @@ components:
             port_mappings:
               - container_port: 8080
             environment:
-              ENVIRONMENT: "{{ .settings.context.environment }}"
+              ENVIRONMENT: "{{ .settings.context.stage }}"
               DATABASE_HOST: !terraform.state web-application/rds .instance_address
               DATABASE_PORT: "5432"
               DATABASE_NAME: !terraform.state web-application/rds .instance_name

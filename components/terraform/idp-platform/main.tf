@@ -6,7 +6,13 @@ locals {
   name_prefix = var.environment
   tags        = merge({ Environment = var.environment }, var.tags, var.resource_tags)
 
-  storage_buckets = toset(["artifacts", "backups", "logs", "techdocs", "uploads"])
+  # S3 names are global, so the buckets start with the stack's full id,
+  # tenant-environment-stage (Cloud Posse's null-label id order); var.environment
+  # is the stage here. The stage alone repeats across tenants and regions.
+  # lookup: var.tags' validation already requires both keys; tflint evaluates
+  # this local with the empty default.
+  storage_bucket_prefix = "${lookup(var.tags, "Tenant", "")}-${lookup(var.tags, "Environment", "")}-${var.environment}-idp"
+  storage_buckets       = toset(["artifacts", "backups", "logs", "techdocs", "uploads"])
 
   # ../rds forces TLS (rds.force_ssl = 1); verify-full also checks the server
   # certificate against the RDS CA bundle the app images ship.
@@ -271,7 +277,7 @@ resource "aws_s3_bucket" "idp_storage" {
   #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications from these buckets
   for_each = local.storage_buckets
 
-  bucket = "${local.name_prefix}-idp-${each.key}"
+  bucket = "${local.storage_bucket_prefix}-${each.key}"
 
   tags = merge(local.tags, {
     Component = "storage"

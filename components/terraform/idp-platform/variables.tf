@@ -22,8 +22,18 @@ variable "environment" {
 
 variable "tags" {
   type        = map(string)
-  description = "Common tags applied to all resources via the provider default_tags"
+  description = "Common tags applied to all resources via the provider default_tags. Tenant and Environment (the stack's settings.context) also name the S3 buckets: <Tenant>-<Environment>-<environment>-idp-<purpose>"
   default     = {}
+
+  # "artifacts" is the longest bucket purpose (local.storage_buckets).
+  validation {
+    condition = (
+      can(regex("^[a-z0-9][a-z0-9-]*$", var.tags["Tenant"])) &&
+      can(regex("^[a-z0-9][a-z0-9-]*$", var.tags["Environment"])) &&
+      try(length("${var.tags["Tenant"]}-${var.tags["Environment"]}-${var.environment}-idp-artifacts") <= 63, false)
+    )
+    error_message = "tags.Tenant and tags.Environment must be set, lowercase letters, digits and hyphens, and short enough that <Tenant>-<Environment>-<environment>-idp-<purpose> stays within S3's 63 characters."
+  }
 }
 
 variable "acknowledge_unsupported" {

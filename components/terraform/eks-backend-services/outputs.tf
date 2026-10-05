@@ -137,13 +137,13 @@ output "resource_quotas" {
 output "scaling_recommendations" {
   description = "Scaling recommendations based on environment"
   value = {
-    environment = var.tags["Environment"]
+    environment = var.environment
     recommendations = {
       for service_name, config in local.backend_services : service_name => {
         current_min_replicas     = config.replicas_min
         current_max_replicas     = config.replicas_max
-        recommended_min_replicas = var.tags["Environment"] == "prod" ? max(2, config.replicas_min) : 1
-        recommended_max_replicas = var.tags["Environment"] == "prod" ? config.replicas_max * 2 : config.replicas_max
+        recommended_min_replicas = var.environment == "prod" ? max(2, config.replicas_min) : 1
+        recommended_max_replicas = var.environment == "prod" ? config.replicas_max * 2 : config.replicas_max
         cpu_request              = config.cpu_request
         memory_request           = config.mem_request
         cpu_limit                = config.cpu_limit

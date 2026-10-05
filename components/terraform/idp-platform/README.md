@@ -30,3 +30,7 @@ pattern; the shared logic has to move to `components/terraform/_library` before 
   group, so the key policy must allow `logs.<region>.amazonaws.com` (kms `allow_cloudwatch_logs`).
 - `environment` accepts only `dev`, `staging` or `prod`, and `domain_name` allows exactly one dot
   (`example.com`, not `idp.example.com`).
+- `environment` is the stage. S3 names are global, so the buckets are
+  `<tags.Tenant>-<tags.Environment>-<environment>-idp-<purpose>` (the stack's full id) and
+  `tags.Tenant`/`tags.Environment` are required; the other `<environment>-idp-*` names are
+  per account and region.
