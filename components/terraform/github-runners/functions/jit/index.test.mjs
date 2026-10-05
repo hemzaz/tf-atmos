@@ -87,6 +87,7 @@ function fakes({ jitStatus = 201, runners = [] } = {}) {
       getParameter: async (name) => { calls.push({ kind: "getParameter", name }); return pem; },
       putParameter: async (input) => { calls.push({ kind: "putParameter", input }); },
       deleteParameter: async (name) => { calls.push({ kind: "deleteParameter", name }); },
+      terminateInstance: async (instanceId) => { calls.push({ kind: "terminate", instanceId }); },
       completeLifecycle: async (detail, result) => { calls.push({ kind: "complete", result }); },
     },
   };
@@ -115,18 +116,21 @@ test("launch: scoped token, JIT config for the instance, tagged parameter, token
     Name: "/github/runners/jit/i-0123456789abcdef0",
     Value: "ENCODED",
     Type: "SecureString",
+    Tier: "Intelligent-Tiering",
     KeyId: ENV.JIT_KMS_KEY_ID,
     Tags: [{ Key: "RunnerInstanceArn", Value: "arn:aws:ec2:us-east-1:123456789012:instance/i-0123456789abcdef0" }],
   });
   assert.equal(calls[5].result, "CONTINUE");
 });
 
-test("launch: a GitHub failure still revokes the token and abandons the launch", async () => {
+test("launch: a GitHub failure revokes the token, terminates the instance (lowering capacity), then abandons", async () => {
   const { calls, deps } = fakes({ jitStatus: 403 });
   await assert.rejects(onLaunch(DETAIL, ENV, deps), /generate-jitconfig: 403/);
   const kinds = summary(calls);
   assert.ok(kinds.includes("DELETE /installation/token"));
   assert.ok(!kinds.includes("putParameter"));
+  assert.deepEqual(kinds.slice(-2), ["terminate", "complete"]);
+  assert.equal(calls.at(-2).instanceId, "i-0123456789abcdef0");
   assert.equal(calls.at(-1).result, "ABANDON");
 });
 

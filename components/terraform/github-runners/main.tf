@@ -65,7 +65,7 @@ locals {
         Effect    = "Allow"
         Principal = { AWS = local.account_root }
         Action = [
-          "kms:Create*", "kms:Describe*", "kms:Enable*", "kms:List*", "kms:Put*", "kms:Update*",
+          "kms:CreateAlias", "kms:Describe*", "kms:Enable*", "kms:List*", "kms:Put*", "kms:Update*",
           "kms:Revoke*", "kms:Disable*", "kms:Get*", "kms:Delete*", "kms:TagResource", "kms:UntagResource",
           "kms:ScheduleKeyDeletion", "kms:CancelKeyDeletion", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncryptTo",
         ]
@@ -102,7 +102,13 @@ locals {
         Resource  = var.kms_key_arn
         Condition = { StringEquals = local.ssm_via }
       },
-      { Sid = "ReleaseLaunches", Effect = "Allow", Action = "autoscaling:CompleteLifecycleAction", Resource = local.asg_arn_pattern },
+      # Release a launch, or end a failed one lowering desired capacity.
+      {
+        Sid      = "ReleaseOrEndLaunches"
+        Effect   = "Allow"
+        Action   = ["autoscaling:CompleteLifecycleAction", "autoscaling:TerminateInstanceInAutoScalingGroup"]
+        Resource = local.asg_arn_pattern
+      },
       {
         Sid      = "Logs"
         Effect   = "Allow"
@@ -147,6 +153,7 @@ locals {
       # A runner removes itself from its own group after its job. IAM has no
       # key for the instance an Auto Scaling call targets, so this is scoped
       # to the group: a job could end a sibling runner in the same pool.
+      # TODO(owner): accept or reject that in-pool denial of service (#303).
       { Sid = "LeaveOwnGroup", Effect = "Allow", Action = "autoscaling:TerminateInstanceInAutoScalingGroup", Resource = local.asg_arn_pattern },
       # Session Manager (debugging a runner without SSH) without
       # AmazonSSMManagedInstanceCore, which also grants ssm:GetParameter* on *.
@@ -293,6 +300,34 @@ resource "aws_lambda_function" "jit" {
   }
 
   depends_on = [aws_cloudwatch_log_group.jit, aws_iam_role_policy.jit]
+}
+
+# EventBridge invokes asynchronously; a retry would mint a second JIT
+# configuration for an instance the first attempt already ended.
+resource "aws_lambda_function_event_invoke_config" "jit" {
+  count = local.enabled ? 1 : 0
+
+  function_name          = aws_lambda_function.jit[0].function_name
+  maximum_retry_attempts = 0
+}
+
+# A failed launch (the instance is ended, desired capacity lowered) or cleanup.
+resource "aws_cloudwatch_metric_alarm" "jit_errors" {
+  count = local.enabled ? 1 : 0
+
+  alarm_name          = "${local.name}-jit-errors"
+  alarm_description   = "The ${local.name} jit function failed: a runner launch was ended (see its log group)"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  dimensions          = { FunctionName = aws_lambda_function.jit[0].function_name }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_sns_topic_arns
+  ok_actions          = var.alarm_sns_topic_arns
 }
 
 resource "aws_cloudwatch_event_rule" "lifecycle" {

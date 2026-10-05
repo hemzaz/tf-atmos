@@ -189,6 +189,18 @@ variable "lifecycle_heartbeat_timeout" {
   }
 }
 
+variable "alarm_sns_topic_arns" {
+  type        = list(string)
+  description = "SNS topics the jit function's error alarm notifies (e.g. a monitoring instance's .sns_topic_arn); empty for an alarm without actions"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for a in var.alarm_sns_topic_arns : can(regex("^arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+$", a))])
+    error_message = "alarm_sns_topic_arns must be SNS topic ARNs."
+  }
+}
+
 variable "log_retention_days" {
   type        = number
   description = "Days the jit function's log group keeps its logs"

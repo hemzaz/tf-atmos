@@ -11,7 +11,8 @@
 // delete only that parameter), and lets the launch continue. A JIT
 // configuration registers one ephemeral runner once: a copy taken after the
 // runner started is useless, and no reusable registration credential exists
-// anywhere. Any failure abandons the launch, so the instance is terminated.
+// anywhere. Any failure terminates the instance, lowering desired capacity, so
+// a lasting failure cannot loop launches.
 //
 // Terminate ("EC2 Instance Terminate Successful"): delete the instance's JIT
 // parameter, if it never read it, and its runner registration, if GitHub still
@@ -112,12 +113,20 @@ export async function onLaunch(detail, env, deps) {
       Name: jitParameterName(env.JIT_PARAMETER_PREFIX, instanceId),
       Value: jit.encoded_jit_config,
       Type: "SecureString",
+      // An encoded JIT configuration is about 4.3-4.6 KB, over Standard's 4 KB:
+      // Intelligent-Tiering stores it as Advanced only when it must.
+      Tier: "Intelligent-Tiering",
       KeyId: env.JIT_KMS_KEY_ID,
       Tags: [{ Key: "RunnerInstanceArn", Value: `arn:${env.PARTITION}:ec2:${env.AWS_REGION}:${env.ACCOUNT_ID}:instance/${instanceId}` }],
     });
     await deps.completeLifecycle(detail, "CONTINUE");
     console.log(`JIT runner ${jit.runner.id} configured for ${instanceId}`);
   } catch (error) {
+    // Terminate with a lower desired capacity first: an abandoned launch alone
+    // is replaced by the group, and a lasting failure (a revoked App, a
+    // missing key) would loop launches. The lifecycle action then has nothing
+    // left to hold; completing it is best effort.
+    await deps.terminateInstance(instanceId).catch((e) => console.error(`terminate ${instanceId}: ${e.message}`));
     await deps.completeLifecycle(detail, "ABANDON").catch(() => {});
     throw error;
   }
@@ -139,7 +148,7 @@ export async function onTerminate(detail, env, deps) {
 
 async function awsDeps() {
   const { SSMClient, GetParameterCommand, PutParameterCommand, DeleteParameterCommand } = await import("@aws-sdk/client-ssm");
-  const { AutoScalingClient, CompleteLifecycleActionCommand } = await import("@aws-sdk/client-auto-scaling");
+  const { AutoScalingClient, CompleteLifecycleActionCommand, TerminateInstanceInAutoScalingGroupCommand } = await import("@aws-sdk/client-auto-scaling");
   const ssm = new SSMClient({});
   const autoscaling = new AutoScalingClient({});
   return {
@@ -151,6 +160,8 @@ async function awsDeps() {
       ssm.send(new DeleteParameterCommand({ Name: name })).catch((error) => {
         if (error.name !== "ParameterNotFound") throw error;
       }),
+    terminateInstance: (instanceId) =>
+      autoscaling.send(new TerminateInstanceInAutoScalingGroupCommand({ InstanceId: instanceId, ShouldDecrementDesiredCapacity: true })),
     completeLifecycle: (detail, result) =>
       autoscaling.send(new CompleteLifecycleActionCommand({
         AutoScalingGroupName: detail.AutoScalingGroupName,

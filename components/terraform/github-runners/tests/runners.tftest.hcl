@@ -97,6 +97,36 @@ run "jit_function_carries_no_secret" {
   }
 }
 
+run "jit_failures_alarm_and_are_not_retried" {
+  command = plan
+
+  variables {
+    alarm_sns_topic_arns = ["arn:aws:sns:us-east-1:123456789012:alerts"]
+  }
+
+  assert {
+    condition     = aws_lambda_function_event_invoke_config.jit[0].maximum_retry_attempts == 0
+    error_message = "A retry would mint a second JIT configuration."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.jit_errors[0].metric_name == "Errors"
+      && aws_cloudwatch_metric_alarm.jit_errors[0].threshold == 0
+      && toset(aws_cloudwatch_metric_alarm.jit_errors[0].alarm_actions) == toset(["arn:aws:sns:us-east-1:123456789012:alerts"])
+    )
+    error_message = "Any jit error alarms to alarm_sns_topic_arns."
+  }
+
+  assert {
+    condition = anytrue([
+      for s in local.jit_policy.Statement :
+      contains(flatten([s.Action]), "autoscaling:TerminateInstanceInAutoScalingGroup") && s.Resource == "arn:aws:autoscaling:us-east-1:123456789012:autoScalingGroup:*:autoScalingGroupName/test-github-runners"
+    ])
+    error_message = "The jit function may end a failed launch in its own group only."
+  }
+}
+
 run "app_key_is_decrypted_by_the_jit_function_only" {
   command = plan
 
@@ -106,6 +136,13 @@ run "app_key_is_decrypted_by_the_jit_function_only" {
       !contains(flatten([s.Action]), "kms:Decrypt") || s.Principal.AWS == "arn:aws:iam::123456789012:role/test-github-runners-jit"
     ])
     error_message = "Only the jit function's role may kms:Decrypt with the App key's key; the account root may administer and encrypt."
+  }
+
+  assert {
+    condition = !anytrue([
+      for s in local.app_key_policy.Statement : anytrue([for a in flatten([s.Action]) : contains(["kms:Create*", "kms:CreateGrant", "kms:*"], a)])
+    ])
+    error_message = "The key policy grants no kms:CreateGrant (no kms:Create* or kms:* either)."
   }
 
   assert {

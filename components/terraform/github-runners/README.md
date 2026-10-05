@@ -67,8 +67,9 @@ is useless, and no reusable registration credential exists anywhere.
 
 - **The App key's own KMS key.** Its key policy lets the account administer it and encrypt with
   it, but only the `jit` function's role may decrypt, and only for that parameter through SSM.
-  There is no IAM delegation for Decrypt, so no other role can read the key, whatever its IAM
-  policy says.
+  There is no IAM delegation for Decrypt, so no other role can read the key unless it holds
+  `kms:PutKeyPolicy` or `kms:CreateGrant` on that key (the account keeps PutKeyPolicy, so the key
+  stays recoverable; it gets no CreateGrant).
 - **The instance role reaches nothing of value.**
   - It may read and delete only its own JIT parameter (`aws:ResourceTag/RunnerInstanceArn` against
     `ec2:SourceInstanceARN`). An explicit deny covers every other parameter.
@@ -79,9 +80,17 @@ is useless, and no reusable registration credential exists anywhere.
     instance.
   - IAM has no key for the instance an Auto Scaling call targets, so "leave the group" is scoped
     to the group: a job could end a sibling runner of the same pool, and nothing else.
+    TODO(owner): that in-pool denial of service is not accepted yet (tracked in #303).
 - **The docker group is root-equivalent.** Jobs run as the unprivileged `runner` user, which is in
   the `docker` group so container jobs (the atmos image) start. That is acceptable only because
   the instance runs a single job and its role reaches nothing of value.
+- **The JIT configuration is in `run.sh`'s argv**, visible to the job. It is single-use, so a
+  copy is worthless once the runner has started.
+- **Failures.** A failed launch terminates the instance with a lower desired capacity (no
+  launch loop) and fails the function, which `<name>-jit-errors` alarms on
+  (`alarm_sns_topic_arns`). EventBridge's invoke is not retried (`maximum_retry_attempts` 0): a
+  retry would mint a second configuration. A runner whose bootstrap fails before it knows its
+  instance id can only power off, which the group replaces.
 - **A pinned runner release.** `runner_version` with `runner_sha256` (the release notes'
   linux-x64 SHA) replaces Cloud Posse's latest release. Bump both before GitHub stops accepting
   the release.
