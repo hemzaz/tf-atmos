@@ -102,6 +102,8 @@ SYNTH = [
     # The backend's access role outputs (no stack reads them today: iam/ci
     # names the roles by convention; kept for any cross-stack consumer).
     (r'^backend(_prod|_core)?(_read)?_role_arn$','arn:aws:iam::123456789012:role/example-terraform-backend-role'),
+    # iam/ci's CI roles, read by eks/defaults' access_entries (principal_arn).
+    (r'^ci_(plan|apply)_role_arn$',   'arn:aws:iam::123456789012:role/example-ci-role'),
     (r'route_table_ids$',             ['rtb-0123456789abcdef0']),
     # apigateway's api_integrations[] carries the Lambda wiring. Without these
     # two the whole integration object was dropped, which tripped the
