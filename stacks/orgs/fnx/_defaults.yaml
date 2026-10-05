@@ -22,7 +22,7 @@ terraform:
 
   # ONE state backend for every stack: the bucket and access roles created by
   # the `backend` component's single instance, backend/main in the management
-  # account's stack fnx-core-root (stacks/orgs/fnx/core/us-east-1/root.yaml).
+  # account's stack fnx-core-root (stacks/orgs/fnx/core/us-east-1.yaml).
   # Native S3 locking replaces DynamoDB. Atmos derives `workspace_key_prefix`
   # from the component name and the workspace from the stack name, so every
   # instance gets its own state file.

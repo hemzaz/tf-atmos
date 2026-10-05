@@ -1,12 +1,14 @@
 ---
-# Global component configurations for testenv-01 environment
-# This file is imported by the main stack file and provides environment-wide settings
+# =============================================================================
+# Global Component Configurations for Staging-01 Environment
+# =============================================================================
+# This file defines environment-wide settings that apply to all components
+# =============================================================================
 
 import:
-  # Import hierarchy - no .yaml extensions
-  - orgs/fnx/dev/us-east-1/_defaults
+  - orgs/fnx/staging/us-east-1/_defaults
 
-  # Import catalog defaults for all components used in this environment
+  # Import catalog defaults for all components
   - catalog/vpc/defaults
   - catalog/network/defaults
   - catalog/secretsmanager/defaults
@@ -21,13 +23,14 @@ import:
 vars:
   # Core environment identifiers
   tags:
-    Team: "DevOps"
-    CostCenter: "IT"
+    Team: "Platform"
+    CostCenter: "Staging"
     Project: "Infrastructure"
     ManagedBy: "Terraform"
     Tenant: "fnx"
-    Application: "Testing"
+    Application: "Staging"
     Provisioner: "Atmos"
+    DataClassification: "internal"
 
 # Environment metadata (not passed to Terraform). Moved here from a stack-wide
 # `metadata:` block, which Atmos no longer allows; component templates read it
@@ -38,14 +41,17 @@ settings:
     # apigateway custom domain derives from it; the Route 53 zone ids come from
     # the dns instances' zone_ids output, never from settings. example.com is a
     # placeholder base until the owner sets the real domain.
-    domain_name: "dev.fnx.example.com"
-    stage: "dev"
+    domain_name: "staging.fnx.example.com"
+    stage: "staging"
+
+  # Monitoring contacts
     monitoring:
-      critical_alerts: ["ops@example.com"]
+      critical_alerts: ["staging-alerts@example.com"]
       warning_alerts: ["team@example.com"]
       # cost-optimization/main's monthly AWS Budget (numeric string - see
       # components/terraform/cost-optimization/variables.tf).
-      budget_monthly_limit: "500"
+      budget_monthly_limit: "2000"
+
     eks_kubernetes_version: "1.36"
     eks_public_access: false
     rds_engine: "postgres"
@@ -61,11 +67,9 @@ settings:
       platform_api: "ghcr.io/fnx-platform/platform-api:1.4.2"
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
-    enable_vpc_flow_logs: false
-
-  # Environment tagging strategy
+    enable_vpc_flow_logs: true
   context:
-    environment: testenv-01
+    environment: staging-01
 
 components:
   terraform:
@@ -77,7 +81,7 @@ components:
     # (docs/OPERATIONS.md, "In-cluster components"), so
     # each rolearn must also be in backend/main's
     # access_roles.write allowed_principal_arns
-    # (stacks/orgs/fnx/core/us-east-1/root.yaml). check-cluster-api-ci.py fails
+    # (stacks/orgs/fnx/core/us-east-1.yaml). check-cluster-api-ci.py fails
     # a role listed here but not there, and warns while this list is empty.
     # The full role ARN WITH its path, e.g. IAM Identity Center's:
     #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>"

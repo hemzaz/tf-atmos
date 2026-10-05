@@ -34,10 +34,10 @@ domain files (`globals`, `networking`, `security`, `compute`, `services`).
 
 | Stack | Manifest (`stacks/orgs/fnx/...`) | Purpose |
 |-------|----------------------------------|---------|
-| `fnx-dev-testenv-01` | `dev/us-east-1/testenv-01.yaml` | dev |
-| `fnx-staging-staging-01` | `staging/us-east-1/staging-01.yaml` | staging |
-| `fnx-prod-production` | `prod/us-east-1/production.yaml` | production |
-| `fnx-core-root` | `core/us-east-1/root.yaml` | management account: the state backend (`backend/main`); not run by CI |
+| `fnx-dev-testenv-01` | `dev/us-east-1.yaml` | dev |
+| `fnx-staging-staging-01` | `staging/us-east-1.yaml` | staging |
+| `fnx-prod-production` | `prod/us-east-1.yaml` | production |
+| `fnx-core-root` | `core/us-east-1.yaml` | management account: the state backend (`backend/main`); not run by CI |
 | `fnx-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
 | `fnx-local-localemu` | `local/us-east-1/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
 | `fnx-fixtures-<name>` | `fixtures/us-east-1/<name>.yaml` | one per `stacks/catalog/templates/` file, checked by CI, never deployed ([details](./docs/OPERATIONS.md#template-fixtures)) |

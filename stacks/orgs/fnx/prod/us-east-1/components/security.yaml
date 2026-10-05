@@ -1,6 +1,13 @@
 ---
+# =============================================================================
+# Security Component Configurations for Production Environment
+# =============================================================================
+# PRODUCTION SECURITY - Maximum protection for business-critical data
+# IAM with least privilege, KMS encryption, secrets rotation enabled
+# =============================================================================
+
 import:
-  - orgs/fnx/dev/us-east-1/testenv-01/components/globals
+  - orgs/fnx/prod/us-east-1/components/globals
   - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/secretsmanager/defaults
@@ -16,24 +23,32 @@ import:
 
 components:
   terraform:
-    # IAM role instances
-    iam/dev:
+    # ==========================================================================
+    # IAM Roles - Production with Strict Permissions
+    # ==========================================================================
+    iam/main:
       metadata:
         component: iam
         inherits:
           - iam
       vars:
-        # Role and policy names
-        cross_account_role_name: "testenv-01-dev-fnx-CrossAccountRole"
-        policy_name: "testenv-01-dev-fnx-CrossAccountPolicy"
+
+        # Cross-account access configuration
+        cross_account_role_name: "production-prod-fnx-CrossAccountRole"
+        policy_name: "production-prod-fnx-CrossAccountPolicy"
         trusted_account_ids:
           - "{{ .settings.environment.management_account_id }}"
+
+        # MFA required for production access (trust condition)
+        require_mfa: true
+
         # kms/main's allow_autoscaling_ebs grant (catalog/kms/defaults.yaml)
         # names the Auto Scaling service-linked role directly as a
         # key-policy principal; this is the one iam instance per account
         # that provisions it.
         enable_autoscaling_service_linked_role: true
 
+        # MFA required for production access
       dependencies:
         components:
           - component: backend/main
@@ -77,28 +92,39 @@ components:
           - "hemzaz/tf-atmos:master"
         ci_apply_policy_arns:
           - "arn:aws:iam::aws:policy/AdministratorAccess"
-        # State access: sts:AssumeRole on the single state backend's NON-PROD
+        # Owner decision D3: production is planned from master only. The plan
+        # role trusts the default-branch subject (drift detection, the
+        # terraform-ci.yml plan on push to master) and NOT pull_request, so
+        # PR-controlled code can never assume it. terraform-ci.yml drops this
+        # stack from PR/merge-queue plans (settings.github.pull_request_plans_enabled
+        # in stacks/orgs/fnx/prod/_defaults.yaml).
+        ci_plan_role_subjects:
+          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
+        # State access: sts:AssumeRole on the single state backend's PROD
         # access roles only (backend/main in the management account's
-        # fnx-core-root; the dev and staging stacks' objects) - plan ->
-        # the read-only role, apply -> the read/write role. Named by the same
-        # convention as this stack's own backend (stacks/orgs/fnx/_defaults.yaml),
-        # not read from backend/main's state: CI roles never read fnx-core-root
+        # fnx-core-root; the prod stacks' objects) - plan -> the prod read-only
+        # role, apply -> the prod read/write role. Named by the same convention
+        # as this stack's own backend (stacks/orgs/fnx/_defaults.yaml), not
+        # read from backend/main's state: CI roles never read fnx-core-root
         # state (core_write, the only role that can, trusts the administrator
         # alone). The backend/main dependency below orders the deploys.
         ci_backend_read_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
-        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-role"
         # kms/main's key: eks/main's cluster_encryption_config_kms_key_id
         # (compute.yaml) points every EKS cluster this apply role deploys at
         # this key, and AWS requires the calling principal -- not the
         # cluster's own service role -- to hold kms:DescribeKey/CreateGrant/
-        # Encrypt on it. Scoped by alias, not !terraform.state kms/main
-        # .key_arn: iam/ci plans and applies in the deploy-full-stack "iam"
-        # layer, BEFORE the "kms" layer (workflows/deploy-full-stack.yaml), so
-        # the key's ARN does not exist yet on a first deploy. Must match
+        # Encrypt on it (see kms/main's comment below). Scoped by alias, not
+        # !terraform.state kms/main .key_arn: iam/ci plans and applies in the
+        # deploy-full-stack "iam" layer, BEFORE the "kms" layer
+        # (workflows/deploy-full-stack.yaml), so the key's ARN does not exist
+        # yet on a first deploy, and reading it here would make iam/ci depend
+        # on kms/main while kms/main already depends on iam/main below (a
+        # layer-order cycle check-deploy-layers.py rejects). Must match
         # kms/main's alias_name below, prefixed with "alias/".
         ci_apply_kms_key_aliases:
-          - alias/testenv-01-main
+          - alias/production-main
         # Lambda package uploader (<prefix>-lambda-uploader, the iam
         # component's lambda-uploader.tf): the application repo's CI uploads
         # each function's zip to this stage's s3/lambda-artifacts bucket with
@@ -107,32 +133,61 @@ components:
         # alias is kms/main's, the bucket's key; check-lambda-packages.py
         # keeps it and the bucket name in step with the storage instances.
         lambda_uploader_trusted_github_repos: []
-        lambda_uploader_kms_key_alias: alias/testenv-01-main
+        lambda_uploader_kms_key_alias: alias/production-main
       dependencies:
         components:
           - component: backend/main
             stack: fnx-core-root
-
-    # ==========================================================================
-    # KMS - customer-managed key for Secrets Manager and other encrypted services
-    # ==========================================================================
     kms/main:
       metadata:
         component: kms
         inherits:
           - kms/defaults
       vars:
-        description: Dev main encryption key (Secrets Manager, EBS, RDS)
-        alias_name: testenv-01-main  # without the alias/ prefix
-        deletion_window_in_days: 7   # non-prod: shorter window, faster teardown
+        description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
+        alias_name: production-main  # without the alias/ prefix
+        deletion_window_in_days: 30  # prod keeps the full window
+        # No named key_administrators/key_users: KMS validates every principal
+        # named in a key policy at CreateKey/PutKeyPolicy time, and this repo's
+        # IaC creates neither a "role/Admin" nor a "production-eks-node-role" /
+        # "production-ci-role" (iam/ci IS enabled here -- see above -- but its
+        # real role names are "{ci_role_name_prefix}-plan"/"-apply", never
+        # "production-ci-role"); naming any of them would fail the first real
+        # apply with MalformedPolicyDocumentException. kms/defaults's
+        # enable_default_policy (root-account delegation, the Cloud Posse
+        # aws-kms default) is what makes the key usable by whichever IAM
+        # principal applies this stack, same as dev and staging.
+        #
+        # Real consumers get least-privilege key use through their OWN IAM
+        # policy scoped to this key, never through key_users:
+        #   - EKS node groups' EBS volumes: already covered by
+        #     allow_autoscaling_ebs (kms/defaults) naming the Auto Scaling
+        #     service-linked role directly -- AWS's documented pattern, see
+        #     ../kms/README.md. No node-role grant needed; EBS encryption at
+        #     launch is performed by the ASG service, not the node's own role.
+        #   - EKS cluster secrets encryption (compute.yaml's
+        #     cluster_encryption_config_kms_key_id): the principal that calls
+        #     eks:CreateCluster/UpdateClusterConfig needs kms:DescribeKey,
+        #     kms:CreateGrant and kms:Encrypt on this key (AWS's
+        #     "Encrypting Kubernetes secrets" doc); iam/ci's ci_apply role is
+        #     that principal in this repo's CI-driven deploys, granted above
+        #     via ci_apply_kms_key_aliases (scoped by alias, not this key's
+        #     ARN, since iam/ci plans and applies in the layer before this
+        #     kms/main instance -- see the comment above) -- the Cloud Posse
+        #     pattern of root-account delegation plus a consumer's own scoped
+        #     IAM policy (cloudposse/terraform-aws-kms-key's default key
+        #     policy).
       dependencies:
         components:
           # allow_autoscaling_ebs (kms/defaults) names the Auto Scaling
-          # service-linked role directly as a principal; iam/dev provisions
+          # service-linked role directly as a principal; iam/main provisions
           # it (enable_autoscaling_service_linked_role) so KMS does not
           # reject the key policy.
-          - component: iam/dev
+          - component: iam/main
 
+    # ==========================================================================
+    # ACM Certificates - Production
+    # ==========================================================================
     acm/main:
       metadata:
         component: acm
@@ -147,6 +202,7 @@ components:
             domain_name: "*.{{ .settings.environment.domain_name }}"
             subject_alternative_names:
               - "{{ .settings.environment.domain_name }}"
+              - "*.api.{{ .settings.environment.domain_name }}"
             validation_method: "DNS"
             wait_for_validation: true
       dependencies:
@@ -165,32 +221,49 @@ components:
         dns_domains:
           services_wildcard:
             domain_name: "*.services.{{ .settings.environment.domain_name }}"
+            subject_alternative_names:
+              - "api.services.{{ .settings.environment.domain_name }}"
+            # No data.services SAN: *.services covers it, and its validation
+            # record would sit in the services zone while the name belongs to
+            # network/services' own data zone.
             validation_method: "DNS"
             wait_for_validation: true
       dependencies:
         components:
           - component: network/services
 
-    # Secrets Manager instances
+    # ==========================================================================
+    # Secrets Manager - Production with Rotation
+    # ==========================================================================
     secretsmanager/app:
       metadata:
         component: secretsmanager
         inherits:
           - secretsmanager/defaults
       vars:
+        # No rotation Lambdas are deployed: rotation settings were removed.
+        # The RDS master password is rotated by RDS itself.
         secrets:
           app_credentials:
             name: "credentials"
-            description: "Application credentials"
-            path: "app"
+            description: "Production application credentials"
+            path: "production/app"
             generate_random_password: true
-          app_keys:
+            password_length: 48
+          api_keys:
             name: "api-keys"
-            description: "API integration keys"
-            path: "app/api"
+            description: "Production API integration keys"
+            path: "production/app/api"
             generate_random_password: true
-
-        context_name: "app"
+            password_length: 64
+          database_credentials:
+            name: "db-credentials"
+            description: "Production database credentials"
+            path: "production/app/database"
+            generate_random_password: true
+            password_length: 32
+        context_name: "production/app"
+        default_recovery_window_in_days: 30
     secretsmanager/infra:
       metadata:
         component: secretsmanager
@@ -198,24 +271,21 @@ components:
           - secretsmanager/infra-defaults
       vars:
         secrets:
-          istio_certificates:
-            name: "istio-certificates"
-            description: "TLS certificates for Istio Gateway"
-            path: "certificates"
-            # The value comes from the ephemeral secret_data variable (below),
-            # written write-only: never in plan or state.
-            static_value: true
-        context_name: "infra"
-      # secret_data is ephemeral, so it travels in TF_VAR_secret_data, not
-      # vars: Terraform needs an ephemeral value set at plan again when the
-      # saved plan is applied, and `deploy --from-plan` applies the planfile
-      # without the varfile. Atmos exports `env` to every terraform command.
-      # This value is only a reference to an SSM path. A real secret goes here
-      # per instance, e.g. `TF_VAR_secret_data: !env FNX_DEV_INFRA_SECRET_DATA`,
-      # never as a global TF_VAR_secret_data (see the component README).
-      env:
-        TF_VAR_secret_data: >-
-          {"istio_certificates": "{\"tls.crt_ssm_parameter\": \"/fnx/certificates/example.com-wildcard/cert\", \"reference_only\": \"true\"}"}
+          tls_certificates:
+            name: "tls-certificates"
+            description: "Production TLS certificates"
+            path: "production/certificates"
+          ssh_keys:
+            name: "ssh-keys"
+            description: "Production SSH keys"
+            path: "production/ssh"
+          service_accounts:
+            name: "service-accounts"
+            description: "Production service account credentials"
+            path: "production/service-accounts"
+
+        context_name: "production/infra"
+        default_recovery_window_in_days: 30
 
     # ==========================================================================
     # CloudTrail - the account's multi-region trail (S3 + CloudWatch Logs,
@@ -238,25 +308,39 @@ components:
           - awsconfig/defaults
 
     # ==========================================================================
-    # GuardDuty - owns the detector (security-monitoring only consumes it).
-    # Catalog defaults: S3 protection on; EKS audit logs and EBS malware
-    # scanning stay off in non-prod to avoid per-event/per-GB charges.
+    # GuardDuty - owns the detector (security-monitoring only consumes it)
     # ==========================================================================
     guardduty/main:
       metadata:
         component: guardduty
         inherits:
           - guardduty/defaults
+      vars:
+        # Prod turns on the protection plans the catalog leaves opt-in.
+        enable_kubernetes_protection: true
+        enable_malware_protection: true
+
+        # Auto-archive low severity findings
+        auto_archive_filter:
+          - severity: 1
+            criteria:
+              type:
+                - "Recon:EC2/Portscan"
 
     # ==========================================================================
-    # Security Hub - owns the hub (security-monitoring only consumes it).
-    # Default standards (AWS FSBP + CIS 1.2.0) only; no PCI DSS in non-prod.
+    # Security Hub - owns the hub (security-monitoring only consumes it)
     # ==========================================================================
     securityhub/main:
       metadata:
         component: securityhub
         inherits:
           - securityhub/defaults
+      vars:
+        # AWS auto-subscribes AWS-FSBP and CIS under enable_default_standards
+        # (catalog default). Listing them here as well collides at apply, so
+        # `standards` carries only what AWS does not enable for us.
+        standards:
+          - "pci-dss/v/3.2.1"
 
     # ==========================================================================
     # Amazon Inspector - owns the enabler (security-monitoring only routes its
@@ -292,8 +376,10 @@ components:
     # ==========================================================================
     # AWS Backup - vault, plans and tag-based selection for rds/main,
     # rds/data (Backup=true in their own services.yaml vars.tags) and any
-    # EC2/EBS resource tagged the same way. Short retention, no vault lock or
-    # cross-region replication in dev.
+    # EC2/EBS resource tagged the same way. Retention matches the account's
+    # pci-sox-gdpr compliance tag (globals.yaml): 7-year monthly retention for
+    # SOX. Vault lock and cross-region replication stay off until an owner
+    # explicitly configures a replica region/key.
     # ==========================================================================
     backup/main:
       metadata:
@@ -301,8 +387,15 @@ components:
         inherits:
           - backup/defaults
       vars:
-        daily_retention_days: 7
-        weekly_retention_days: 14
-        monthly_retention_days: 30
+        daily_retention_days: 35
+        weekly_retention_days: 90
+        monthly_retention_days: 2555 # 7 years, SOX
+        # Only prod re-enables cold storage: 2555 days of retention easily
+        # clears AWS Backup's delete_after >= cold_storage_after + 90
+        # requirement. backup/defaults sets this to null so dev's and
+        # staging's shorter monthly retention (30/90 days) don't inherit a
+        # cold-storage floor they can't satisfy (round-5 review HIGH fix).
+        monthly_cold_storage_days: 90
         notification_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"

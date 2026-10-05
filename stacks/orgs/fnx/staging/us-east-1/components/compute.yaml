@@ -6,7 +6,7 @@
 # =============================================================================
 
 import:
-  - orgs/fnx/staging/us-east-1/staging-01/components/globals
+  - orgs/fnx/staging/us-east-1/components/globals
   - catalog/eks/defaults
   - catalog/github-runners/defaults
   - catalog/ec2/defaults

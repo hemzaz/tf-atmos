@@ -4,7 +4,7 @@
 # =============================================================================
 # The management account holds shared, organization-wide infrastructure that
 # no single workload stage owns. Today that is only the Terraform state
-# backend (stacks/orgs/fnx/core/us-east-1/root.yaml).
+# backend (stacks/orgs/fnx/core/us-east-1.yaml).
 #
 # Naming follows Cloud Posse's reference architecture, where the management
 # account is the "root" account of the "core" tenant (core-gbl-root). This

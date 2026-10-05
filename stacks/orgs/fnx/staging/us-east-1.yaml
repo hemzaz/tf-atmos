@@ -1,9 +1,8 @@
 ---
 # =============================================================================
-# Production Stack Configuration
+# Staging-01 Stack Configuration
 # =============================================================================
-# Production environment with full high availability, security, and compliance
-# ALL CHANGES REQUIRE CHANGE MANAGEMENT APPROVAL
+# Production-like staging environment for final validation before production
 # =============================================================================
 
 import:
@@ -14,14 +13,14 @@ import:
   - mixins/region/us-east-1
 
   # Import stage defaults (org defaults, tenant and stage mixins)
-  - orgs/fnx/prod/_defaults
+  - orgs/fnx/staging/_defaults
 
   # Import component-specific configurations
-  - orgs/fnx/prod/us-east-1/production/components/globals
-  - orgs/fnx/prod/us-east-1/production/components/networking
-  - orgs/fnx/prod/us-east-1/production/components/security
-  - orgs/fnx/prod/us-east-1/production/components/compute
-  - orgs/fnx/prod/us-east-1/production/components/services
+  - orgs/fnx/staging/us-east-1/components/globals
+  - orgs/fnx/staging/us-east-1/components/networking
+  - orgs/fnx/staging/us-east-1/components/security
+  - orgs/fnx/staging/us-east-1/components/compute
+  - orgs/fnx/staging/us-east-1/components/services
 
 vars:
   # Core variables for stack naming
@@ -29,8 +28,8 @@ vars:
 
 settings:
   environment:
-    account: prod
+    account: staging
   context:
     tenant: fnx
-    environment: production
-    stage: prod
+    environment: staging-01
+    stage: staging

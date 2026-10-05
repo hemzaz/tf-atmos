@@ -141,7 +141,7 @@ zone, so its domain must resolve, or validation times out after 45 minutes. Prod
 `fnx.example.com` is delegated at the registrar to prod's `zone_name_servers.main`
 (`atmos terraform output network/main -s fnx-prod-production`). Dev's and staging's parent is
 that Terraform-managed zone: add an NS record for `dev.`/`staging.fnx.example.com` to prod's
-`network/main` `records` (`stacks/orgs/fnx/prod/us-east-1/production/components/networking.yaml`)
+`network/main` `records` (`stacks/orgs/fnx/prod/us-east-1/components/networking.yaml`)
 with the child stack's `zone_name_servers.main`, and deploy prod's `network/main`.
 `services.<d>` delegation is wired by the stacks themselves.
 
@@ -178,7 +178,7 @@ gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master)
    `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
    which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
    `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
-   `stacks/orgs/fnx/core/us-east-1/root.yaml`, so it can write the stack's state. Apply `backend/main`
+   `stacks/orgs/fnx/core/us-east-1.yaml`, so it can write the stack's state. Apply `backend/main`
    (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
    backend and warns while a stack has none.
 2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then

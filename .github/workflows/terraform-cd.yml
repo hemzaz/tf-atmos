@@ -28,7 +28,7 @@
 #     stage's read/write state role (dev/staging: fnx-terraform-backend-role,
 #     prod: fnx-terraform-backend-prod-role), each trusted only by that stage's
 #     CI apply roles (stacks/orgs/fnx/_defaults.yaml,
-#     stacks/orgs/fnx/core/us-east-1/root.yaml).
+#     stacks/orgs/fnx/core/us-east-1.yaml).
 #   - Missing, needs an organization-owned repo: a tag ruleset allowing only
 #     GitHub Actions to create/update/delete refs/tags/deployed/**. On a
 #     personal repo Actions cannot be a bypass actor, and without the bypass
