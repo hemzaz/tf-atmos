@@ -40,7 +40,7 @@ print_usage() {
     echo -e "${WHITE}Examples:${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh stack fnx-ue1-dev${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh component vpc/main${NC}"
-    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack testenv-02 fnx dev  # <label> [tenant] [stage] [environment] [region]${NC}"
+    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack perf fnx dev us-east-1  # <lane name, or - for none> [tenant] [stage] [region]${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh resource aws_s3_bucket${NC}"
 }
 
@@ -121,18 +121,19 @@ EOF
 }
 
 generate_stack_template() {
-    local stack_label="$1"
+    local name="$1"
     local tenant="${2:-fnx}"
     local stage="${3:-dev}"
-    local environment="${4:-$stack_label}"
-    local region="${5:-us-east-1}"
+    local region="${4:-us-east-1}"
+    [[ "$name" == "-" ]] && name=""
 
     # Stack scaffolding lives in one place: new-environment.sh emits the current
-    # layout (stacks/orgs/<tenant>/<stage>/<region>/<environment>.yaml, naming
-    # context in settings.context). Backend bootstrap and init are left to the user.
-    echo -e "${CYAN}🏗️  Generating stack ${tenant}-${stage}-${environment} via new-environment.sh${NC}"
+    # layout (stacks/orgs/<tenant>/<stage>/<region>.yaml, or <region>/<name>.yaml
+    # for a lane; naming context in settings.context). Backend bootstrap and init
+    # are left to the user.
+    echo -e "${CYAN}🏗️  Generating stack $("$(dirname "${BASH_SOURCE[0]}")/stack-name.sh" stack "$tenant" "$region" "$stage" ${name:+"$name"}) via new-environment.sh${NC}"
     "$(dirname "${BASH_SOURCE[0]}")/new-environment.sh" \
-        --tenant "$tenant" --stage "$stage" --environment "$environment" --region "$region" \
+        --tenant "$tenant" --stage "$stage" ${name:+--name "$name"} --region "$region" \
         --skip-backend --no-workspace
 }
 
@@ -535,8 +536,8 @@ list_templates() {
     echo ""
 
     echo -e "${WHITE}Quick Examples:${NC}"
-    echo -e "  ${GREEN}# Create production environment${NC}"
-    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack prod-02 fnx prod prod-02${NC}"
+    echo -e "  ${GREEN}# Create the prod stack in us-east-2 (fnx-ue2-prod)${NC}"
+    echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack - fnx prod us-east-2${NC}"
     echo -e ""
     echo -e "  ${GREEN}# Generate web service component${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh template component api-gateway${NC}"
@@ -575,7 +576,7 @@ main() {
             fi
             case "$2" in
                 "stack")
-                    generate_stack_template "$3" "${4:-}" "${5:-}" "${6:-}" "${7:-}"
+                    generate_stack_template "$3" "${4:-}" "${5:-}" "${6:-}"
                     ;;
                 "component")
                     generate_component_template "$3"

@@ -5,8 +5,8 @@
 # One-command deployment for complete infrastructure environment
 #
 # Usage:
-#   ./scripts/quickstart.sh --tenant fnx --stage dev --environment testenv-01
-#   ./scripts/quickstart.sh --tenant fnx --stage prod --environment production --region us-east-1
+#   ./scripts/quickstart.sh --tenant fnx --stage dev
+#   ./scripts/quickstart.sh --tenant fnx --stage prod --region us-east-1
 #   ./scripts/quickstart.sh --help
 #
 # This script will:
@@ -24,6 +24,8 @@ SCRIPT_VERSION="1.0.0"
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=stack-name.sh
+source "$SCRIPT_DIR/stack-name.sh"
 
 # Default values
 DEFAULT_REGION="us-east-1"
@@ -85,17 +87,18 @@ EOF
 print_usage() {
     cat << EOF
 ${WHITE}Usage:${NC}
-    $SCRIPT_NAME --tenant <name> --stage <name> --environment <name> [OPTIONS]
+    $SCRIPT_NAME --tenant <name> --stage <name> [OPTIONS]
 
 ${WHITE}Required Parameters:${NC}
     --tenant, -t        Tenant name (e.g., 'fnx')
     --stage, -s         Stage (e.g., 'dev', 'staging', 'prod'); --account/-a is an alias
-    --environment, -e   Environment name (e.g., 'testenv-01', 'production')
 
-    The Atmos stack is <tenant>-<stage>-<environment> (e.g. fnx-ue1-dev).
+    The Atmos stack is <tenant>-<region code>-<stage>[-<name>] (e.g. fnx-ue1-dev):
+    the region code comes from --region (us-east-1 -> ue1, scripts/stack-name.sh).
 
 ${WHITE}Optional Parameters:${NC}
     --region, -r        AWS region (default: ${DEFAULT_REGION})
+    --name, -n          Lane name for a second stack in the same stage and region (fnx-ue1-dev-<name>)
     --profile, -p       AWS CLI profile to use
     --skip-backend      Skip backend creation (use existing)
     --skip-validation   Skip pre-deployment validation
@@ -107,16 +110,16 @@ ${WHITE}Optional Parameters:${NC}
 
 ${WHITE}Examples:${NC}
     # Deploy development environment
-    $SCRIPT_NAME --tenant fnx --stage dev --environment testenv-01
+    $SCRIPT_NAME --tenant fnx --stage dev
 
     # Deploy production environment with specific profile
-    $SCRIPT_NAME --tenant fnx --stage prod --environment production --profile prod-admin
+    $SCRIPT_NAME --tenant fnx --stage prod --profile prod-admin
 
     # Plan only (no changes)
-    $SCRIPT_NAME --tenant fnx --stage dev --environment testenv-01 --plan-only
+    $SCRIPT_NAME --tenant fnx --stage dev --plan-only
 
     # Dry run to see what would happen
-    $SCRIPT_NAME --tenant fnx --stage dev --environment testenv-01 --dry-run
+    $SCRIPT_NAME --tenant fnx --stage dev --dry-run
 
 ${WHITE}Environment Variables:${NC}
     AWS_ACCOUNT_ID              Override AWS account ID
@@ -132,7 +135,7 @@ EOF
 parse_args() {
     TENANT=""
     STAGE=""
-    ENVIRONMENT=""
+    NAME=""
     REGION="${AWS_REGION:-$DEFAULT_REGION}"
     AWS_PROFILE_ARG=""
     SKIP_BACKEND=false
@@ -152,8 +155,8 @@ parse_args() {
                 STAGE="$2"
                 shift 2
                 ;;
-            --environment|-e)
-                ENVIRONMENT="$2"
+            --name|-n)
+                NAME="$2"
                 shift 2
                 ;;
             --region|-r)
@@ -213,7 +216,6 @@ parse_args() {
     local missing_params=()
     [[ -z "$TENANT" ]] && missing_params+=("--tenant")
     [[ -z "$STAGE" ]] && missing_params+=("--stage")
-    [[ -z "$ENVIRONMENT" ]] && missing_params+=("--environment")
 
     if [[ ${#missing_params[@]} -gt 0 ]]; then
         log_error "Missing required parameters: ${missing_params[*]}"
@@ -222,8 +224,10 @@ parse_args() {
         exit 1
     fi
 
-    # Construct stack name (atmos.yaml name_template)
-    STACK_NAME="${TENANT}-${STAGE}-${ENVIRONMENT}"
+    # Construct stack name (atmos.yaml name_template); ENVIRONMENT is the
+    # region code, also the resources' Environment tag
+    ENVIRONMENT="$(region_code "$REGION")" || exit 1
+    STACK_NAME="$(stack_name "$TENANT" "$REGION" "$STAGE" "$NAME")"
 }
 
 # Check if command exists
@@ -445,7 +449,7 @@ create_stack_from_template() {
     "$SCRIPT_DIR/new-environment.sh" \
         --tenant "$TENANT" \
         --stage "$STAGE" \
-        --environment "$ENVIRONMENT" \
+        ${NAME:+--name "$NAME"} \
         --region "$REGION" \
         --skip-backend \
         --no-workspace
@@ -590,7 +594,7 @@ run_health_checks() {
     # Check VPC
     echo -n "VPC status... "
     local vpc_count
-    vpc_count=$(aws ec2 describe-vpcs --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" --query 'Vpcs | length(@)' --output text 2>/dev/null || echo "0")
+    vpc_count=$(aws ec2 describe-vpcs --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" "Name=tag:Stage,Values=$STAGE" --query 'Vpcs | length(@)' --output text 2>/dev/null || echo "0")
     if [[ "$vpc_count" -gt 0 ]]; then
         echo -e "${GREEN}OK${NC} ($vpc_count VPC(s) found)"
     else
@@ -600,7 +604,7 @@ run_health_checks() {
     # Check subnets
     echo -n "Subnets status... "
     local subnet_count
-    subnet_count=$(aws ec2 describe-subnets --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" --query 'Subnets | length(@)' --output text 2>/dev/null || echo "0")
+    subnet_count=$(aws ec2 describe-subnets --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" "Name=tag:Stage,Values=$STAGE" --query 'Subnets | length(@)' --output text 2>/dev/null || echo "0")
     if [[ "$subnet_count" -gt 0 ]]; then
         echo -e "${GREEN}OK${NC} ($subnet_count subnet(s) found)"
     else
@@ -610,7 +614,7 @@ run_health_checks() {
     # Check security groups
     echo -n "Security groups status... "
     local sg_count
-    sg_count=$(aws ec2 describe-security-groups --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" --query 'SecurityGroups | length(@)' --output text 2>/dev/null || echo "0")
+    sg_count=$(aws ec2 describe-security-groups --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" "Name=tag:Stage,Values=$STAGE" --query 'SecurityGroups | length(@)' --output text 2>/dev/null || echo "0")
     if [[ "$sg_count" -gt 0 ]]; then
         echo -e "${GREEN}OK${NC} ($sg_count security group(s) found)"
     else
@@ -620,7 +624,7 @@ run_health_checks() {
     # Check EC2 instances
     echo -n "EC2 instances status... "
     local ec2_count
-    ec2_count=$(aws ec2 describe-instances --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" "Name=instance-state-name,Values=running" --query 'Reservations[*].Instances | length(@)' --output text 2>/dev/null || echo "0")
+    ec2_count=$(aws ec2 describe-instances --filters "Name=tag:Tenant,Values=$TENANT" "Name=tag:Environment,Values=$ENVIRONMENT" "Name=tag:Stage,Values=$STAGE" "Name=instance-state-name,Values=running" --query 'Reservations[*].Instances | length(@)' --output text 2>/dev/null || echo "0")
     if [[ "$ec2_count" -gt 0 ]]; then
         echo -e "${GREEN}OK${NC} ($ec2_count running instance(s))"
     else
@@ -649,7 +653,7 @@ print_summary() {
     echo "  Name:        $STACK_NAME"
     echo "  Tenant:      $TENANT"
     echo "  Stage:       $STAGE"
-    echo "  Environment: $ENVIRONMENT"
+    echo "  Environment: $ENVIRONMENT (region code)"
     echo "  Region:      $REGION"
     echo "  AWS Account: ${AWS_ACCOUNT_ID}"
     echo

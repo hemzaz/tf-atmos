@@ -3,11 +3,15 @@
 # new-environment.sh - Environment Bootstrap Script
 #
 # Creates a new Atmos stack in the repository layout:
-#   stacks/orgs/<tenant>/<stage>/<region>/<environment>.yaml
-#   stacks/orgs/<tenant>/<stage>/<region>/<environment>/components/*.yaml
+#   stacks/orgs/<tenant>/<stage>/<region>.yaml
+#   stacks/orgs/<tenant>/<stage>/<region>/components/*.yaml
+# or, for a lane (--name), stacks/orgs/<tenant>/<stage>/<region>/<name>.yaml and
+# stacks/orgs/<tenant>/<stage>/<region>/<name>/components/*.yaml.
 #
-# The stack name follows atmos.yaml `name_template`: <tenant>-<stage>-<environment>.
-# Naming context is written to settings.context (tenant/stage/environment) and
+# The stack name follows atmos.yaml `name_template`:
+# <tenant>-<environment>-<stage>[-<name>], environment being the region's Cloud
+# Posse code (ue1), set by the region mixin (scripts/stack-name.sh). The stack
+# writes settings.context tenant/stage (and name for a lane) and
 # settings.environment.account; vars only carry `region`. The S3 backend
 # (native lockfile locking) is inherited from stacks/orgs/<tenant>/_defaults.yaml.
 #
@@ -16,9 +20,9 @@
 #   ./scripts/new-environment.sh --interactive
 #
 # Examples:
-#   ./scripts/new-environment.sh --tenant fnx --stage dev --environment testenv-02 --region us-east-1
+#   ./scripts/new-environment.sh --tenant fnx --stage dev --region us-west-2
 #   ./scripts/new-environment.sh --interactive
-#   ./scripts/new-environment.sh --tenant fnx --stage prod --environment prod-02 --region us-east-1 --template microservices-platform
+#   ./scripts/new-environment.sh --tenant fnx --stage dev --name perf --region us-east-1 --template microservices-platform
 #
 
 set -euo pipefail
@@ -29,6 +33,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=stack-name.sh
+source "${SCRIPT_DIR}/stack-name.sh"
 
 BOLD="\033[1m"
 RED="\033[31m"
@@ -42,7 +48,7 @@ RESET="\033[0m"
 TENANT=""
 STAGE=""
 ACCOUNT=""
-ENVIRONMENT=""
+NAME=""
 REGION=""
 VPC_CIDR=""
 TEMPLATE="minimal-stack"
@@ -97,19 +103,21 @@ log_step() {
     echo -e "\n${BOLD}${CYAN}==> $*${RESET}"
 }
 
-# Derived names/paths; valid once inputs are set
-stack_name() { echo "${TENANT}-${STAGE}-${ENVIRONMENT}"; }
+# Derived names/paths; valid once inputs are set. A lane (NAME) lives under its
+# region directory, next to the stage's own <region>/components.
+this_stack() { stack_name "$TENANT" "$REGION" "$STAGE" "$NAME"; }
 region_dir() { echo "${REPO_ROOT}/stacks/orgs/${TENANT}/${STAGE}/${REGION}"; }
-stack_file() { echo "$(region_dir)/${ENVIRONMENT}.yaml"; }
-components_dir() { echo "$(region_dir)/${ENVIRONMENT}/components"; }
-import_prefix() { echo "orgs/${TENANT}/${STAGE}/${REGION}/${ENVIRONMENT}/components"; }
+stack_file() { if [[ -n "$NAME" ]]; then echo "$(region_dir)/${NAME}.yaml"; else echo "$(region_dir).yaml"; fi; }
+components_dir() { echo "$(region_dir)${NAME:+/$NAME}/components"; }
+import_prefix() { echo "orgs/${TENANT}/${STAGE}/${REGION}${NAME:+/$NAME}/components"; }
 
 show_help() {
     cat << EOF
 ${BOLD}new-environment.sh - Environment Bootstrap Script${RESET}
 
-Creates a new Atmos stack (<tenant>-<stage>-<environment>) with its stack
-manifest and component files, then optionally bootstraps the state backend.
+Creates a new Atmos stack (<tenant>-<region code>-<stage>[-<name>], e.g.
+fnx-uw2-dev) with its stack manifest and component files, then verifies the
+shared state backend.
 
 ${BOLD}USAGE:${RESET}
     $0 [options]
@@ -118,10 +126,11 @@ ${BOLD}USAGE:${RESET}
 ${BOLD}REQUIRED OPTIONS:${RESET}
     --tenant <name>           Tenant/organization name (e.g., fnx)
     --stage <name>            Stage (e.g., dev, staging, prod)
-    --environment <name>      Environment name (e.g., testenv-01, prod-01)
-    --region <region>         AWS region (e.g., us-east-1)
+    --region <region>         AWS region (e.g., us-east-1); the stack name carries its code (ue1)
 
 ${BOLD}OPTIONAL:${RESET}
+    --name <name>             Lane name, for a second stack in the same stage and region
+                              (settings.context.name, e.g. perf -> fnx-ue1-dev-perf)
     --account <name>          Account name for settings.environment.account (default: stage)
     --vpc-cidr <cidr>         VPC CIDR block (default: auto-assigned based on env type)
     --template <name>         Stack template to use (default: minimal-stack)
@@ -145,24 +154,23 @@ ${BOLD}EXAMPLES:${RESET}
     # Create development environment interactively
     $0 --interactive
 
-    # Create development environment
-    $0 --tenant fnx --stage dev --environment testenv-02 --region us-east-1
+    # Create the dev stack in us-west-2 (fnx-uw2-dev)
+    $0 --tenant fnx --stage dev --region us-west-2
 
-    # Create production environment with a template
-    $0 --tenant fnx --stage prod --environment prod-02 \\
-       --region us-east-1 --template microservices-platform --env-type production
+    # Create a dev lane with a template (fnx-ue1-dev-perf)
+    $0 --tenant fnx --stage dev --name perf \\
+       --region us-east-1 --template microservices-platform
 
     # Dry run to see what would be created
-    $0 --tenant fnx --stage staging --environment staging-02 \\
-       --region us-east-1 --dry-run
+    $0 --tenant fnx --stage staging --region us-east-2 --dry-run
 
 ${BOLD}FILES CREATED:${RESET}
-    stacks/orgs/<tenant>/<stage>/<region>/<environment>.yaml
-    stacks/orgs/<tenant>/<stage>/<region>/<environment>/components/
+    stacks/orgs/<tenant>/<stage>/<region>.yaml               (lane: <region>/<name>.yaml)
+    stacks/orgs/<tenant>/<stage>/<region>/components/         (lane: <region>/<name>/components/)
     +-- globals.yaml        # Catalog imports, tags, environment settings
     +-- networking.yaml     # vpc/main
     +-- security.yaml       # security components (no state backend: it is shared)
-    stacks/orgs/<tenant>/<stage>/_defaults.yaml, mixins/{tenant,stage}/  (only if missing)
+    stacks/orgs/<tenant>/<stage>/_defaults.yaml, mixins/{tenant,stage,region}/  (only if missing)
 
 ${BOLD}NOTES:${RESET}
     - stacks/orgs/<tenant>/_defaults.yaml (backend, toolchain) must already exist
@@ -234,13 +242,7 @@ run_interactive() {
     STAGE=$(prompt_selection "Select stage:" "${stage_options[@]}")
     ACCOUNT=$(prompt_value "Account (settings.environment.account)" "${ACCOUNT:-$STAGE}")
 
-    local default_env=""
-    case "$STAGE" in
-        dev) default_env="testenv-02" ;;
-        staging) default_env="staging-02" ;;
-        prod) default_env="prod-02" ;;
-    esac
-    ENVIRONMENT=$(prompt_value "Environment name" "$default_env")
+    NAME=$(prompt_value "Lane name (empty for the stage's own stack)" "$NAME")
 
     local region_options=("us-east-1" "us-east-2" "us-west-2")
     REGION=$(prompt_selection "Select AWS region:" "${region_options[@]}")
@@ -254,7 +256,7 @@ run_interactive() {
 
     echo ""
     echo -e "${BOLD}Configuration Summary:${RESET}"
-    echo "  Stack:       ${TENANT}-${STAGE}-${ENVIRONMENT}"
+    echo "  Stack:       $(this_stack)"
     echo "  Account:     $ACCOUNT"
     echo "  Region:      $REGION"
     echo "  Env Type:    $ENV_TYPE"
@@ -296,13 +298,17 @@ validate_inputs() {
     validate_name "Tenant name" "$TENANT" || errors=$((errors + 1))
     validate_name "Stage" "$STAGE" || errors=$((errors + 1))
     validate_name "Account" "$ACCOUNT" || errors=$((errors + 1))
-    validate_name "Environment name" "$ENVIRONMENT" || errors=$((errors + 1))
+    if [[ -n "$NAME" ]]; then
+        validate_name "Lane name" "$NAME" || errors=$((errors + 1))
+    fi
 
     if [[ -z "$REGION" ]]; then
         log_error "Region is required"
         errors=$((errors + 1))
     elif [[ ! "$REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]$ ]]; then
         log_error "Invalid AWS region: $REGION"
+        errors=$((errors + 1))
+    elif ! region_code "$REGION" >/dev/null; then
         errors=$((errors + 1))
     fi
 
@@ -344,7 +350,7 @@ validate_inputs() {
 check_existing_environment() {
     local file dir
     file="$(stack_file)"
-    dir="$(region_dir)/${ENVIRONMENT}"
+    dir="$(components_dir)"
 
     if [[ -e "$file" || -d "$dir" ]]; then
         if [[ "$FORCE" == "true" ]]; then
@@ -386,6 +392,7 @@ generate_shared_files() {
 
     local tenant_mixin="${REPO_ROOT}/stacks/mixins/tenant/${TENANT}.yaml"
     local stage_mixin="${REPO_ROOT}/stacks/mixins/stage/${STAGE}.yaml"
+    local region_mixin="${REPO_ROOT}/stacks/mixins/region/${REGION}.yaml"
     local stage_defaults="${REPO_ROOT}/stacks/orgs/${TENANT}/${STAGE}/_defaults.yaml"
     local org_defaults="${REPO_ROOT}/stacks/orgs/${TENANT}/_defaults.yaml"
 
@@ -419,6 +426,24 @@ settings:
 EOF
     fi
 
+    if [[ -f "$region_mixin" ]]; then
+        log_info "Region mixin already exists: mixins/region/${REGION}"
+    else
+        write_file "$region_mixin" << EOF
+---
+# ${REGION}. settings.context.environment is the region's Cloud Posse code: the
+# stack name's middle part and tags.Environment.
+import:
+  - catalog/vpc/defaults
+
+vars:
+  region: ${REGION}
+settings:
+  context:
+    environment: $(region_code "$REGION")
+EOF
+    fi
+
     if [[ -f "$stage_defaults" ]]; then
         log_info "Stage defaults already exist: orgs/${TENANT}/${STAGE}/_defaults"
     else
@@ -441,17 +466,14 @@ EOF
 generate_stack_file() {
     log_step "Generating Stack Manifest"
 
-    local region_mixin_import=""
-    if [[ -f "${REPO_ROOT}/stacks/mixins/region/${REGION}.yaml" ]]; then
-        region_mixin_import="  - mixins/region/${REGION}"
-    else
-        region_mixin_import="  # (no stacks/mixins/region/${REGION}.yaml)"
-    fi
+    local name_context=""
+    [[ -n "$NAME" ]] && name_context="
+    name: ${NAME}"
 
     write_file "$(stack_file)" << EOF
 ---
 # =============================================================================
-# Stack: $(stack_name)
+# Stack: $(this_stack)
 # =============================================================================
 # Template: ${TEMPLATE}
 # Environment Type: ${ENV_TYPE}
@@ -461,8 +483,9 @@ generate_stack_file() {
 import:
   - catalog/_base/defaults
 
-  # Region mixin (the tenant and stage mixins come with the stage defaults)
-${region_mixin_import}
+  # Region mixin: region and settings.context.environment (the tenant and
+  # stage mixins come with the stage defaults)
+  - mixins/region/${REGION}
 
   # Stage defaults: org defaults (backend, toolchain, account map), tenant and stage mixins, account
   - orgs/${TENANT}/${STAGE}/_defaults
@@ -480,8 +503,7 @@ settings:
     account: ${ACCOUNT}
   context:
     tenant: ${TENANT}
-    stage: ${STAGE}
-    environment: ${ENVIRONMENT}
+    stage: ${STAGE}${name_context}
 EOF
 }
 
@@ -517,7 +539,7 @@ generate_component_files() {
 
     write_file "$(components_dir)/globals.yaml" << EOF
 ---
-# Environment-wide settings for $(stack_name)
+# Environment-wide settings for $(this_stack)
 
 import:
   - catalog/vpc/defaults
@@ -535,7 +557,7 @@ EOF
 
     write_file "$(components_dir)/networking.yaml" << EOF
 ---
-# Networking for $(stack_name)
+# Networking for $(this_stack)
 
 import:
   - $(import_prefix)/globals
@@ -555,13 +577,13 @@ EOF
 
     write_file "$(components_dir)/security.yaml" << EOF
 ---
-# Security components for $(stack_name).
+# Security components for $(this_stack).
 # No state backend here: every stack uses the single backend (backend/main in
 # fnx-ue1-core). Give this stack CI roles (iam/ci, see the existing stacks'
 # security.yaml) and add their ARNs to that instance's access_roles entries for
 # this stack's stage (read/write for dev and staging, prod_read/prod_write for prod),
-# with this stack's object_key_patterns pair "*/$(stack_name)/*" and
-# "*/$(stack_name)-*" (stacks/orgs/fnx/core/us-east-1.yaml).
+# with this stack's object_key_patterns pair "*/$(this_stack)/*" and
+# "*/$(this_stack)-*" (stacks/orgs/fnx/core/us-east-1.yaml).
 
 import:
   - $(import_prefix)/globals
@@ -576,10 +598,10 @@ validate_generated_stack() {
 
     log_step "Validating Generated Stack"
 
-    if atmos --chdir "$REPO_ROOT" describe stacks -s "$(stack_name)" --process-functions=false >/dev/null; then
-        log_success "Stack resolves: $(stack_name)"
+    if atmos --chdir "$REPO_ROOT" describe stacks -s "$(this_stack)" --process-functions=false >/dev/null; then
+        log_success "Stack resolves: $(this_stack)"
     else
-        log_error "atmos could not resolve stack $(stack_name); review the generated files"
+        log_error "atmos could not resolve stack $(this_stack); review the generated files"
         return 1
     fi
 }
@@ -612,15 +634,15 @@ initialize_workspace() {
     log_step "Initializing Terraform Workspace"
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        log_info "[DRY-RUN] Would run: atmos terraform init vpc/main -s $(stack_name)"
+        log_info "[DRY-RUN] Would run: atmos terraform init vpc/main -s $(this_stack)"
         return 0
     fi
 
-    if atmos --chdir "$REPO_ROOT" terraform init vpc/main -s "$(stack_name)"; then
-        log_success "Terraform initialized for stack: $(stack_name)"
+    if atmos --chdir "$REPO_ROOT" terraform init vpc/main -s "$(this_stack)"; then
+        log_success "Terraform initialized for stack: $(this_stack)"
     else
         log_warning "Could not initialize Terraform automatically"
-        log_info "Run manually: atmos terraform init vpc/main -s $(stack_name)"
+        log_info "Run manually: atmos terraform init vpc/main -s $(this_stack)"
     fi
 }
 
@@ -633,7 +655,7 @@ show_summary() {
 
     echo ""
     echo -e "${BOLD}Stack Details:${RESET}"
-    echo "  Stack Name:     $(stack_name)"
+    echo "  Stack Name:     $(this_stack)"
     echo "  Manifest:       $(stack_file)"
     echo "  Template:       $TEMPLATE"
     echo "  Environment:    $ENV_TYPE"
@@ -644,17 +666,17 @@ show_summary() {
     echo -e "${BOLD}Next Steps:${RESET}"
     echo ""
     echo -e "  1. Review and customize the configuration:"
-    echo -e "     ${CYAN}atmos describe stacks -s $(stack_name)${RESET}"
+    echo -e "     ${CYAN}atmos describe stacks -s $(this_stack)${RESET}"
     echo ""
     echo -e "  2. Validate the stack:"
-    echo -e "     ${CYAN}atmos workflow validate -f validate -s $(stack_name)${RESET}"
+    echo -e "     ${CYAN}atmos workflow validate -f validate -s $(this_stack)${RESET}"
     echo ""
     echo -e "  3. Plan the deployment:"
-    echo -e "     ${CYAN}atmos workflow plan -f plan-environment -s $(stack_name)${RESET}"
+    echo -e "     ${CYAN}atmos workflow plan -f plan-environment -s $(this_stack)${RESET}"
     echo ""
     echo -e "  4. Deploy the environment:"
-    echo -e "     ${CYAN}atmos workflow full -f bootstrap -s $(stack_name)${RESET}"
-    echo -e "     ${CYAN}atmos workflow deploy -f deploy-full-stack -s $(stack_name)${RESET}"
+    echo -e "     ${CYAN}atmos workflow full -f bootstrap -s $(this_stack)${RESET}"
+    echo -e "     ${CYAN}atmos workflow deploy -f deploy-full-stack -s $(this_stack)${RESET}"
     echo ""
 
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -682,8 +704,8 @@ parse_args() {
                 ACCOUNT="$2"
                 shift 2
                 ;;
-            --environment)
-                ENVIRONMENT="$2"
+            --name)
+                NAME="$2"
                 shift 2
                 ;;
             --region)
@@ -749,7 +771,7 @@ main() {
     echo ""
 
     # Run interactive mode if requested or if required args missing
-    if [[ "$INTERACTIVE" == "true" ]] || [[ -z "$TENANT" && -z "$STAGE" && -z "$ACCOUNT" && -z "$ENVIRONMENT" && -z "$REGION" ]]; then
+    if [[ "$INTERACTIVE" == "true" ]] || [[ -z "$TENANT" && -z "$STAGE" && -z "$ACCOUNT" && -z "$REGION" ]]; then
         run_interactive
     fi
 

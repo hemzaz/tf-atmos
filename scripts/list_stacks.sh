@@ -2,9 +2,10 @@
 # List all Atmos stacks with their naming context.
 #
 # Stack names come from atmos.yaml `name_template`
-# ({tenant}-{stage}-{environment}, e.g. fnx-ue1-dev), so they can be
+# ({tenant}-{environment}-{stage}[-{name}], e.g. fnx-ue1-dev), so they can be
 # passed straight to `atmos ... -s <stack>`. The naming context is read from
-# settings.context / settings.environment, the region from vars.region.
+# settings.context / settings.environment, the region from vars.region and the
+# manifest from atmos_stack_file.
 #
 # Usage: ./scripts/list_stacks.sh [--plain]
 #   --plain   print only the stack names, one per line (for scripting)
@@ -36,7 +37,7 @@ fi
 echo -e "${CYAN}Atmos Stack Listing${NC}"
 echo -e "${BLUE}🔍 Discovering available stacks...${NC}"
 
-# One row per stack: stack, tenant, stage, environment, account, region.
+# One row per stack: stack, tenant, stage, environment, name, account, region, manifest.
 # Context is taken from the first non-abstract Terraform component of the stack.
 STACK_ROWS=$(atmos describe stacks --process-functions=false --format json | jq -r '
   to_entries[]
@@ -47,8 +48,10 @@ STACK_ROWS=$(atmos describe stacks --process-functions=false --format json | jq 
      ($c.settings.context.tenant // "-"),
      ($c.settings.context.stage // "-"),
      ($c.settings.context.environment // "-"),
+     ($c.settings.context.name // "-"),
      ($c.settings.environment.account // "-"),
-     ($c.vars.region // "-")]
+     ($c.vars.region // "-"),
+     ($c.atmos_stack_file // "-")]
   | @tsv')
 
 if [ -z "$STACK_ROWS" ]; then
@@ -59,10 +62,10 @@ fi
 echo -e "${GREEN}✅ Found $(echo "$STACK_ROWS" | wc -l | tr -d ' ') stack(s)${NC}"
 echo
 
-while IFS=$'\t' read -r stack tenant stage environment account region; do
+while IFS=$'\t' read -r stack tenant stage environment name account region manifest; do
     echo -e "  ${GREEN}•${NC} ${WHITE}$stack${NC}"
-    echo -e "    ${BLUE}Tenant:${NC} $tenant  ${BLUE}Stage:${NC} $stage  ${BLUE}Environment:${NC} $environment  ${BLUE}Account:${NC} $account  ${BLUE}Region:${NC} $region"
-    echo -e "    ${YELLOW}Manifest:${NC} stacks/orgs/$tenant/$stage/$region/$environment.yaml"
+    echo -e "    ${BLUE}Tenant:${NC} $tenant  ${BLUE}Environment:${NC} $environment  ${BLUE}Stage:${NC} $stage  ${BLUE}Name:${NC} $name  ${BLUE}Account:${NC} $account  ${BLUE}Region:${NC} $region"
+    echo -e "    ${YELLOW}Manifest:${NC} stacks/$manifest.yaml"
 done <<< "$STACK_ROWS"
 echo
 
