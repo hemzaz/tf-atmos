@@ -12,16 +12,17 @@
 # =============================================================================
 
 # Default values - can be overridden via environment or command line.
-# Stack names follow atmos.yaml name_template: <tenant>-<environment>-<stage>,
-# environment being the region code (fnx-ue1-dev, fnx-ue1-staging, fnx-ue1-prod).
-# ACCOUNT is accepted as an alias for STAGE.
+# Stack names follow atmos.yaml name_template: <tenant>-<environment>-<stage>[-<name>],
+# environment being REGION's code (fnx-ue1-dev, fnx-ue1-staging, fnx-ue1-prod) and
+# NAME an optional lane. ACCOUNT is accepted as an alias for STAGE.
 TENANT ?= fnx
 STAGE ?= $(or $(ACCOUNT),dev)
-ENVIRONMENT ?= ue1
 REGION ?= us-east-1
+NAME ?=
 
 # Derived values (STACK can also be passed directly: make plan STACK=fnx-ue1-prod)
-STACK ?= $(TENANT)-$(ENVIRONMENT)-$(STAGE)
+ENVIRONMENT ?= $(shell ./scripts/stack-name.sh region-code $(REGION))
+STACK ?= $(TENANT)-$(ENVIRONMENT)-$(STAGE)$(if $(NAME),-$(NAME))
 
 # Colors for pretty output
 RED := \033[0;31m
@@ -363,7 +364,7 @@ install-toolchain: ## Install the Terraform toolchain Atmos uses (version pinned
 onboard: ## Quick environment onboarding with defaults (scaffold stack + bootstrap backend)
 	@echo "$(BLUE)Onboarding environment $(STACK)...$(NC)"
 	@echo "Using default VPC CIDR: 10.0.0.0/16"
-	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) --environment $(ENVIRONMENT) --region $(REGION) --vpc-cidr 10.0.0.0/16 --no-workspace
+	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) $(if $(NAME),--name $(NAME)) --region $(REGION) --vpc-cidr 10.0.0.0/16 --no-workspace
 
 onboard-custom: ## Custom environment onboarding (usage: make onboard-custom VPC_CIDR=10.1.0.0/16)
 	@if [ -z "$(VPC_CIDR)" ]; then \
@@ -372,7 +373,7 @@ onboard-custom: ## Custom environment onboarding (usage: make onboard-custom VPC
 		exit 1; \
 	fi
 	@echo "$(BLUE)Onboarding environment $(STACK) with VPC CIDR $(VPC_CIDR)...$(NC)"
-	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) --environment $(ENVIRONMENT) --region $(REGION) --vpc-cidr $(VPC_CIDR) --no-workspace
+	@./scripts/new-environment.sh --tenant $(TENANT) --stage $(STAGE) $(if $(NAME),--name $(NAME)) --region $(REGION) --vpc-cidr $(VPC_CIDR) --no-workspace
 
 list-stacks: ## List all available stacks
 	@echo "$(WHITE)Available Stacks:$(NC)"

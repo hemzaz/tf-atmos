@@ -36,7 +36,7 @@ variables {
   subnet_ids = ["subnet-0a1b2c3d"]
   subnet     = "subnet-4e5f6a7b"
   tags = {
-    Environment = "testenv-01"
+    Environment = "ue1"
   }
   instance_type = "t3.small"
   ssh_key_pair  = "bastion-ssh-key"
@@ -46,12 +46,12 @@ run "names_follow_the_prefix" {
   command = apply
 
   assert {
-    condition     = output.name == "testenv-01-bastion" && aws_instance.default[0].tags["Name"] == "testenv-01-bastion"
+    condition     = output.name == "ue1-bastion" && aws_instance.default[0].tags["Name"] == "ue1-bastion"
     error_message = "The instance must be named <Environment>-<name>."
   }
 
   assert {
-    condition     = aws_security_group.default[0].name == "testenv-01-bastion-sg" && aws_iam_role.default[0].name == "testenv-01-bastion-role" && aws_iam_instance_profile.default[0].name == "testenv-01-bastion-profile"
+    condition     = aws_security_group.default[0].name == "ue1-bastion-sg" && aws_iam_role.default[0].name == "ue1-bastion-role" && aws_iam_instance_profile.default[0].name == "ue1-bastion-profile"
     error_message = "Security group, role and profile names must be <Environment>-<name>-{sg,role,profile}."
   }
 
@@ -118,7 +118,7 @@ run "from_template_does_not_duplicate_the_instance" {
   }
 
   assert {
-    condition     = aws_launch_template.default[0].iam_instance_profile[0].name == "testenv-01-bastion-profile"
+    condition     = aws_launch_template.default[0].iam_instance_profile[0].name == "ue1-bastion-profile"
     error_message = "An instance launched from the template must get the instance profile."
   }
 
@@ -168,17 +168,17 @@ run "generated_keys_are_per_instance" {
   }
 
   assert {
-    condition     = aws_key_pair.generated[0].key_name == "testenv-01-app-server-ec2-ssh-key"
+    condition     = aws_key_pair.generated[0].key_name == "ue1-app-server-ec2-ssh-key"
     error_message = "A generated key pair is named after its instance."
   }
 
   assert {
-    condition     = aws_secretsmanager_secret.ssh_key[0].name == "ssh-key/testenv-01/app-server"
+    condition     = aws_secretsmanager_secret.ssh_key[0].name == "ssh-key/ue1/app-server"
     error_message = "A generated key's secret is named after its instance."
   }
 
   assert {
-    condition     = output.ssh_key_pair == "testenv-01-app-server-ec2-ssh-key"
+    condition     = output.ssh_key_pair == "ue1-app-server-ec2-ssh-key"
     error_message = "ssh_key_pair must be the generated key."
   }
 }
@@ -200,7 +200,7 @@ run "bastion_generates_its_own_key" {
   }
 
   assert {
-    condition     = aws_key_pair.generated[0].key_name == "testenv-01-bastion-ec2-ssh-key" && aws_secretsmanager_secret.ssh_key[0].name == "ssh-key/testenv-01/bastion"
+    condition     = aws_key_pair.generated[0].key_name == "ue1-bastion-ec2-ssh-key" && aws_secretsmanager_secret.ssh_key[0].name == "ssh-key/ue1/bastion"
     error_message = "The bastion's key and secret are named after it."
   }
 
@@ -211,7 +211,7 @@ run "bastion_generates_its_own_key" {
 
   # app-server reads this as its ssh_key_pair.
   assert {
-    condition     = output.ssh_key_pair == "testenv-01-bastion-ec2-ssh-key" && aws_instance.default[0].key_name == output.ssh_key_pair
+    condition     = output.ssh_key_pair == "ue1-bastion-ec2-ssh-key" && aws_instance.default[0].key_name == output.ssh_key_pair
     error_message = "ssh_key_pair must be the generated key the instance launched with."
   }
 
@@ -316,7 +316,7 @@ run "empty_key_name_with_generation_generates" {
   }
 
   assert {
-    condition     = aws_instance.default[0].key_name == "testenv-01-bastion-ec2-ssh-key"
+    condition     = aws_instance.default[0].key_name == "ue1-bastion-ec2-ssh-key"
     error_message = "ssh_key_pair = \"\" with create_ssh_keys must generate a key."
   }
 }

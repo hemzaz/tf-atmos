@@ -36,7 +36,7 @@ variable "name" {
 
 # The lifecycle tier this component's per-stage schedule map keys off, set
 # from settings.context.stage (dev/staging/prod) - NOT tags.Environment, which
-# is the real per-stack environment name (e.g. testenv-01). Validated to
+# is the region code (e.g. ue1). Validated to
 # exactly the map's keys, so lookup() with a default fallback is unnecessary:
 # an unrecognized value fails plan instead of silently running dev settings.
 variable "environment" {

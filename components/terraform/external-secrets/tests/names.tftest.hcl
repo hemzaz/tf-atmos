@@ -77,14 +77,14 @@ run "dev_and_staging_roles" {
   command = plan
 
   variables {
-    cluster_name = "staging-01-data"
+    cluster_name = "ue1-data"
     tags = {
-      Environment = "staging-01"
+      Environment = "ue1"
     }
   }
 
   assert {
-    condition     = aws_iam_role.external_secrets["aws-secretsmanager"].name == "staging-01-data-external-secrets-role"
+    condition     = aws_iam_role.external_secrets["aws-secretsmanager"].name == "ue1-data-external-secrets-role"
     error_message = "The role must be <cluster>-external-secrets-role."
   }
 }
@@ -95,12 +95,12 @@ run "cluster_name_without_the_environment_gets_it_once" {
   variables {
     cluster_name = "main"
     tags = {
-      Environment = "testenv-01"
+      Environment = "ue1"
     }
   }
 
   assert {
-    condition     = aws_iam_role.external_secrets["aws-secretsmanager"].name == "testenv-01-main-external-secrets-role"
+    condition     = aws_iam_role.external_secrets["aws-secretsmanager"].name == "ue1-main-external-secrets-role"
     error_message = "A bare cluster name is prefixed with the Environment."
   }
 }

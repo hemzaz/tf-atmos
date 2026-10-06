@@ -250,7 +250,7 @@ locals {
 
   # Only the fields security/cost still consume from templatefile(). environment
   # (var.environment, the lifecycle tier - dev/staging/prod) is deliberately
-  # not var.tags["Environment"] (the stack instance name, e.g. testenv-01):
+  # not var.tags["Environment"] (the region code, e.g. ue1):
   # cost-dashboard.json.tpl's only use of it is a Logs Insights SOURCE path
   # (/aws/lambda/${environment}), a distinct, functional value, not a
   # cosmetic title - unlike the infrastructure/performance/application

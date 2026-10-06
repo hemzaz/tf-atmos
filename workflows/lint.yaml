@@ -71,6 +71,15 @@ workflows:
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_hcl_unary_newline.py
               python3 scripts/check-hcl-unary-newline.py components/terraform
+          # Stack names and paths from before the region-code rename
+          # (<tenant>-<stage>-<instance>, <stage>/<region>/<instance>.yaml) point at stacks
+          # that no longer exist.
+          - name: old-stack-names
+            type: shell
+            command: |
+              set -eu
+              python3 -m unittest workflows/scripts/common/test_check_old_stack_names.py
+              python3 scripts/check-old-stack-names.py
       # No-op when the plugins are already installed (CI runs tflint-init first,
       # with a token for GitHub rate limits, so this step needs no network).
       - name: tflint-plugins

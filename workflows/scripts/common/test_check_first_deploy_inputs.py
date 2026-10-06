@@ -112,7 +112,7 @@ class PlaceholderTest(unittest.TestCase):
             "arn:aws:iam::123456789012:role/fnx-ue1-dev-ci-plan",
             '{"Principal": {"AWS": "123456789012"}}',
             "AWSLogs/123456789012/",
-            "fnx-dev-123456789012-ci",
+            "fnx-ue1-dev-123456789012-ci",
             "123456789012", "000000000000",
         )
         non_matches = (
@@ -128,7 +128,7 @@ class PlaceholderTest(unittest.TestCase):
                 self.assertFalse(preflight.ACCOUNT_RE.search(value))
 
     def test_placeholder_in_a_name_still_matches(self):
-        for value in ("fnx-dev-lambda-artifacts-123456789012", "my-data-123456789012", "000000000000"):  # pragma: allowlist secret (placeholder IDs)
+        for value in ("fnx-ue1-dev-lambda-artifacts-123456789012", "my-data-123456789012", "000000000000"):  # pragma: allowlist secret (placeholder IDs)
             with self.subTest(value=value):
                 stacks = clean()
                 stacks["fnx-ue1-dev"] = stack("dev", "222222222222", vpc_main={"bucket": value})

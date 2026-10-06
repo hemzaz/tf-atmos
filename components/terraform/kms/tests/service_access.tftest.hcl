@@ -24,7 +24,7 @@ override_data {
 
 variables {
   region      = "us-east-1"
-  name_prefix = "fnx-dev-test"
+  name_prefix = "fnx-ue1-dev-test"
   tags = {
     Environment = "test"
   }
