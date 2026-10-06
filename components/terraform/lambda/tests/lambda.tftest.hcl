@@ -32,6 +32,7 @@ variables {
   s3_key        = "welcome-email/1.0.0.zip"
   tags = {
     Environment = "test"
+    Stage       = "dev"
     ManagedBy   = "Terraform"
   }
 }
@@ -462,27 +463,16 @@ run "allows_http_egress_outside_prod_stage" {
   }
 }
 
-# Without a Stage tag the guard falls back to Environment: it fails closed.
-run "rejects_http_egress_without_stage_in_production_environment" {
+# Environment is the region code, so a missing Stage must fail the plan:
+# otherwise it would lift the production guard.
+run "rejects_tags_without_stage" {
   command = plan
 
   variables {
-    allow_http_egress = true
     tags = {
-      Environment = "production"
+      Environment = "ue1"
     }
   }
 
-  expect_failures = [var.allow_http_egress]
-}
-
-run "allows_http_egress_without_stage_outside_production" {
-  command = plan
-
-  variables {
-    allow_http_egress = true
-    tags = {
-      Environment = "staging-01"
-    }
-  }
+  expect_failures = [var.tags]
 }

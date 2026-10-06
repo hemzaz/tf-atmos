@@ -30,8 +30,8 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   input needs `| tojson` (`'.producer_policy | tojson'`); otherwise Atmos decodes it into an object.
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - Each stack's state is an exact `object_key_patterns` pair on its stage's backend roles
-  (`stacks/catalog/backend/defaults.yaml`): a new stack needs its pair (`check-state-keys.py`).
-- Stage `fixtures` (`fnx-fixtures-<name>`) puts each catalog template under the checks and is
+  (`stacks/orgs/fnx/core/us-east-1.yaml`): a new stack needs its pair (`check-state-keys.py`).
+- Stage `fixtures` (`fnx-ue1-fixtures-<name>`) puts each catalog template under the checks and is
   never deployed; `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) relaxes a
   template until its port PR removes the entry.
 - 43 of the 48 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,

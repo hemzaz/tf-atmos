@@ -4,7 +4,7 @@
 Reads `atmos describe stacks --process-functions=false --format json` on stdin.
 The state backend's access roles are split by stage within one bucket with S3
 object-key patterns, an exact pair per stack, "*/<stack>/*" and "*/<stack>-*"
-(stacks/catalog/backend/defaults.yaml). A state key is
+(stacks/orgs/fnx/core/us-east-1.yaml). A state key is
 "<workspace_key_prefix>/<workspace>/<backend.key>" (+ ".tflock"). This evaluates
 the deployed backend component's access_roles patterns against every key, with
 IAM's resource-ARN wildcards ("*" any run of characters, "/" included; "?" any
@@ -26,7 +26,7 @@ never deployed and have no access role. Layout checks stay for every instance:
   - backend.key is exactly "terraform.tfstate" (every instance uses it).
 
 Every s3 backend also points at the one bucket's region: backend.region must equal the
-region of the stack that deploys the "backend" component (backend/main, fnx-core-root),
+region of the stack that deploys the "backend" component (backend/main, fnx-ue1-core),
 not the stack's own, or init of a DR/EU stack fails against a region with no bucket.
 Exits 1 on any violation.
 """

@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# Staging-01 Stack Configuration
+# fnx-ue1-staging: the staging account's us-east-1 stack
 # =============================================================================
 # Production-like staging environment for final validation before production
 # =============================================================================
@@ -16,11 +16,11 @@ import:
   - orgs/fnx/staging/_defaults
 
   # Import component-specific configurations
-  - orgs/fnx/staging/us-east-1/staging-01/components/globals
-  - orgs/fnx/staging/us-east-1/staging-01/components/networking
-  - orgs/fnx/staging/us-east-1/staging-01/components/security
-  - orgs/fnx/staging/us-east-1/staging-01/components/compute
-  - orgs/fnx/staging/us-east-1/staging-01/components/services
+  - orgs/fnx/staging/us-east-1/components/globals
+  - orgs/fnx/staging/us-east-1/components/networking
+  - orgs/fnx/staging/us-east-1/components/security
+  - orgs/fnx/staging/us-east-1/components/compute
+  - orgs/fnx/staging/us-east-1/components/services
 
 vars:
   # Core variables for stack naming
@@ -31,5 +31,4 @@ settings:
     account: staging
   context:
     tenant: fnx
-    environment: staging-01
     stage: staging

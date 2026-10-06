@@ -9,7 +9,7 @@ state or outputs.
 
 ## Wiring
 
-- Instance: `elasticache/main` in `fnx-prod-production` only. Reads `vpc/main .vpc_id` /
+- Instance: `elasticache/main` in `fnx-ue1-prod` only. Reads `vpc/main .vpc_id` /
   `.private_subnet_ids` and `kms/main .key_arn`, admits `eks/main
   .eks_cluster_managed_security_group_id`.
 - Used by: `eks-backend-services` (`.auth_token_secret_arn`, `.primary_endpoint_address`, `.port`),

@@ -14,7 +14,7 @@ components:
           category: "security"
       vars:
         # The lifecycle tier the component validates (dev/staging/prod).
-        # context.environment is the instance name (`testenv-01`) and fails it.
+        # context.environment is the region code (`ue1`) and fails it.
         environment: "{{ .settings.context.stage }}"
         account_id: "{{ .settings.environment.account_id }}"
         # Principals allowed to assume the cross-account role
@@ -33,8 +33,8 @@ components:
         # trusted_principal_org_id when trusting another account.
         # TODO(placeholder): replace with the real AWS Organizations ID.
         trusted_principal_org_id: "o-xxxxxxxxxx"
-        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-CrossAccountRole"
-        policy_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-CrossAccountPolicy"
+        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-CrossAccountRole"
+        policy_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-CrossAccountPolicy"
 
         tags:
           Component: "IAM"
@@ -43,4 +43,4 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-core-root
+            stack: fnx-ue1-core

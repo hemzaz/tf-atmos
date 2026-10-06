@@ -48,7 +48,7 @@ esac
 COMPONENTS=(cloudtrail/main awsconfig/main guardduty/main securityhub/main)
 
 echo "Configuration:"
-echo "  Stack: ${TENANT}-${ACCOUNT}-${ENVIRONMENT}"
+echo "  Stack: ${STACK}"
 echo "  Region: $REGION"
 echo "  Auto-Approve: $AUTO_APPROVE"
 echo "  Phase: $HARDEN_PHASE"

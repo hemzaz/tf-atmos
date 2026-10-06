@@ -17,7 +17,7 @@ ci_apply_role_arn = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci_apply_role_arn)
 
 
-def ci(account="123456789012", prefix="fnx-production-prod-ci", **overrides):
+def ci(account="123456789012", prefix="fnx-ue1-prod-ci", **overrides):
     variables = {"github_oidc_enabled": True, "ci_apply_role_enabled": True, "ci_role_name_prefix": prefix}
     variables.update(overrides)
     return {"settings": {"environment": {"account_id": account}}, "vars": variables}
@@ -25,10 +25,10 @@ def ci(account="123456789012", prefix="fnx-production-prod-ci", **overrides):
 
 class ApplyRoleArnTest(unittest.TestCase):
     def test_arn_is_the_iam_ci_apply_role(self):
-        # The name the backend's prod_write role trusts (stacks/orgs/fnx/core/us-east-1/root.yaml)
+        # The name the backend's prod_write role trusts (stacks/orgs/fnx/core/us-east-1.yaml)
         self.assertEqual(
             ci_apply_role_arn.role_arn(ci()),
-            "arn:aws:iam::123456789012:role/fnx-production-prod-ci-apply",
+            "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply",
         )
         self.assertEqual(ci_apply_role_arn.role_arn(ci(), "apply"), ci_apply_role_arn.role_arn(ci()))
 
@@ -48,14 +48,14 @@ class PlanRoleArnTest(unittest.TestCase):
     def test_arn_is_the_stack_accounts_plan_role(self):
         # Each stack's own account and prefix: staging no longer plans with dev's role.
         self.assertEqual(
-            ci_apply_role_arn.role_arn(ci(account="210987654321", prefix="fnx-staging-01-staging-ci"), "plan"),
-            "arn:aws:iam::210987654321:role/fnx-staging-01-staging-ci-plan",
+            ci_apply_role_arn.role_arn(ci(account="210987654321", prefix="fnx-ue1-staging-ci"), "plan"),
+            "arn:aws:iam::210987654321:role/fnx-ue1-staging-ci-plan",
         )
 
     def test_plan_role_does_not_need_the_apply_role(self):
         self.assertEqual(
             ci_apply_role_arn.role_arn(ci(ci_apply_role_enabled=False), "plan"),
-            "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan",
+            "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan",
         )
 
     def test_disabled_oidc_fails(self):
@@ -74,7 +74,7 @@ class PlanRoleArnTest(unittest.TestCase):
 class MainTest(unittest.TestCase):
     def run_main(self, check_output, *argv):
         out = io.StringIO()
-        with mock.patch.dict(os.environ, {"STACK": "fnx-core-root"}, clear=False), \
+        with mock.patch.dict(os.environ, {"STACK": "fnx-ue1-core"}, clear=False), \
                 mock.patch.object(sys, "argv", ["ci-apply-role-arn.py", *argv]), \
                 mock.patch.object(ci_apply_role_arn.subprocess, "check_output", check_output), \
                 contextlib.redirect_stdout(out):
@@ -89,12 +89,12 @@ class MainTest(unittest.TestCase):
             with self.subTest(argv=argv):
                 rc, out = self.run_main(describe_fails, *argv)
                 self.assertEqual(rc, 1)
-                self.assertEqual(out, "::error::fnx-core-root: no iam/ci instance (atmos describe failed)\n")
+                self.assertEqual(out, "::error::fnx-ue1-core: no iam/ci instance (atmos describe failed)\n")
 
     def test_resolved_role_is_printed(self):
         rc, out = self.run_main(lambda cmd: json.dumps(ci(ci_apply_role_enabled=False)), "--kind", "plan")
         self.assertEqual(rc, 0)
-        self.assertEqual(out, "fnx-core-root: arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan\n")
+        self.assertEqual(out, "fnx-ue1-core: arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan\n")
 
 
 if __name__ == "__main__":

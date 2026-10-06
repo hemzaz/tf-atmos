@@ -1,6 +1,6 @@
 ---
 import:
-  - orgs/fnx/dev/us-east-1/testenv-01/components/globals
+  - orgs/fnx/dev/us-east-1/components/globals
   - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/secretsmanager/defaults
@@ -24,8 +24,6 @@ components:
           - iam
       vars:
         # Role and policy names
-        cross_account_role_name: "testenv-01-dev-fnx-CrossAccountRole"
-        policy_name: "testenv-01-dev-fnx-CrossAccountPolicy"
         trusted_account_ids:
           - "{{ .settings.environment.management_account_id }}"
         # kms/main's allow_autoscaling_ebs grant (catalog/kms/defaults.yaml)
@@ -37,7 +35,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-core-root
+            stack: fnx-ue1-core
     # GitHub Actions OIDC roles. CI plans, drift and DR checks for this stack
     # assume its plan role, and CD its apply role, each derived from this
     # instance (workflows/scripts/common/ci-apply-role-arn.py). Every AWS job
@@ -79,10 +77,10 @@ components:
           - "arn:aws:iam::aws:policy/AdministratorAccess"
         # State access: sts:AssumeRole on the single state backend's NON-PROD
         # access roles only (backend/main in the management account's
-        # fnx-core-root; the dev and staging stacks' objects) - plan ->
+        # fnx-ue1-core; the dev and staging stacks' objects) - plan ->
         # the read-only role, apply -> the read/write role. Named by the same
         # convention as this stack's own backend (stacks/orgs/fnx/_defaults.yaml),
-        # not read from backend/main's state: CI roles never read fnx-core-root
+        # not read from backend/main's state: CI roles never read fnx-ue1-core
         # state (core_write, the only role that can, trusts the administrator
         # alone). The backend/main dependency below orders the deploys.
         ci_backend_read_role_arns:
@@ -98,7 +96,7 @@ components:
         # the key's ARN does not exist yet on a first deploy. Must match
         # kms/main's alias_name below, prefixed with "alias/".
         ci_apply_kms_key_aliases:
-          - alias/testenv-01-main
+          - "alias/{{ .settings.context.environment }}-main"
         # Lambda package uploader (<prefix>-lambda-uploader, the iam
         # component's lambda-uploader.tf): the application repo's CI uploads
         # each function's zip to this stage's s3/lambda-artifacts bucket with
@@ -107,11 +105,11 @@ components:
         # alias is kms/main's, the bucket's key; check-lambda-packages.py
         # keeps it and the bucket name in step with the storage instances.
         lambda_uploader_trusted_github_repos: []
-        lambda_uploader_kms_key_alias: alias/testenv-01-main
+        lambda_uploader_kms_key_alias: "alias/{{ .settings.context.environment }}-main"
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-core-root
+            stack: fnx-ue1-core
 
     # ==========================================================================
     # KMS - customer-managed key for Secrets Manager and other encrypted services
@@ -123,7 +121,7 @@ components:
           - kms/defaults
       vars:
         description: Dev main encryption key (Secrets Manager, EBS, RDS)
-        alias_name: testenv-01-main  # without the alias/ prefix
+        alias_name: "{{ .settings.context.environment }}-main"  # without the alias/ prefix
         deletion_window_in_days: 7   # non-prod: shorter window, faster teardown
       dependencies:
         components:

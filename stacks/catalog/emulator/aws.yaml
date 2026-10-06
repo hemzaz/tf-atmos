@@ -1,9 +1,9 @@
 ---
 # yaml-language-server: $schema=https://atmos.tools/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json
 #
-# Local AWS sandbox (Floci), used by the fnx-local-sandbox stack only.
+# Local AWS sandbox (Floci), used by the fnx-ue1-local-sandbox stack only.
 #
-# `atmos emulator up aws -s fnx-local-sandbox` starts or reuses the container;
+# `atmos emulator up aws -s fnx-ue1-local-sandbox` starts or reuses the container;
 # the `local-aws` identity in atmos.yaml resolves this instance and the
 # provider-config contributor wires Terraform to it. There is no providers.tf
 # and no endpoint configuration to maintain.

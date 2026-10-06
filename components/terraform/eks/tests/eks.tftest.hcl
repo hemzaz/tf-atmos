@@ -238,35 +238,31 @@ run "region_code_environment_with_prod_stage_is_protected" {
   }
 }
 
-# Without a Stage tag the check falls back to Environment: it fails closed.
-run "missing_stage_falls_back_to_the_environment" {
+# Environment is the region code, so a missing Stage must fail the plan:
+# otherwise it would turn production deletion protection off.
+run "missing_stage_is_rejected" {
   command = plan
 
   variables {
     tags = {
-      Environment = "production"
+      Environment = "ue1"
     }
   }
 
-  assert {
-    condition     = aws_eks_cluster.default[0].deletion_protection == true
-    error_message = "A missing Stage tag must not turn production deletion protection off."
-  }
+  expect_failures = [var.tags]
 }
 
-run "missing_stage_outside_production_is_unprotected" {
+run "empty_stage_is_rejected" {
   command = plan
 
   variables {
     tags = {
-      Environment = "staging-01"
+      Environment = "ue1"
+      Stage       = " "
     }
   }
 
-  assert {
-    condition     = aws_eks_cluster.default[0].deletion_protection == false
-    error_message = "Only prod clusters get deletion protection."
-  }
+  expect_failures = [var.tags]
 }
 
 run "name_repeating_the_environment_is_rejected" {

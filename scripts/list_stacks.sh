@@ -2,7 +2,7 @@
 # List all Atmos stacks with their naming context.
 #
 # Stack names come from atmos.yaml `name_template`
-# ({tenant}-{stage}-{environment}, e.g. fnx-dev-testenv-01), so they can be
+# ({tenant}-{stage}-{environment}, e.g. fnx-ue1-dev), so they can be
 # passed straight to `atmos ... -s <stack>`. The naming context is read from
 # settings.context / settings.environment, the region from vars.region.
 #

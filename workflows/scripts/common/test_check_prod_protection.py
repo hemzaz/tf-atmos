@@ -23,7 +23,7 @@ def instance(component, stage="prod", **variables):
 
 
 def stacks(**instances):
-    return {"fnx-prod-production": {"components": {"terraform": instances}}}
+    return {"fnx-ue1-prod": {"components": {"terraform": instances}}}
 
 
 def errors(described):

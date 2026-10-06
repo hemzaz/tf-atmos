@@ -1,13 +1,13 @@
 ---
-# Local sandbox stack — fnx-local-sandbox
+# Local sandbox stack — fnx-ue1-local-sandbox
 #
 # Runs real terraform apply/destroy against the Floci AWS emulator, with no AWS
 # account and no credentials. This is how a component is proven to actually
 # provision, rather than merely validate.
 #
-#   atmos emulator up aws -s fnx-local-sandbox
-#   atmos terraform apply vpc/main -s fnx-local-sandbox
-#   atmos emulator down aws -s fnx-local-sandbox
+#   atmos emulator up aws -s fnx-ue1-local-sandbox
+#   atmos terraform apply vpc/main -s fnx-ue1-local-sandbox
+#   atmos emulator down aws -s fnx-ue1-local-sandbox
 #
 # Deliberately standalone: it does not import the dev/staging/prod component
 # files, so nothing here can affect a real environment, and a change to a real
@@ -72,7 +72,7 @@ settings:
     enable_vpc_flow_logs: false
   context:
     tenant: fnx
-    environment: sandbox
+    name: sandbox
     stage: local
 
 components:

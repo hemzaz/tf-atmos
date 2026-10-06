@@ -78,8 +78,8 @@ components:
         # requires length > 0), so it names this account, which grants nothing
         # while create_cross_account_role stays false.
         environment: "{{ .settings.context.stage }}"
-        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-unused"
-        policy_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-unused"
+        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-unused"
+        policy_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-unused"
         trusted_account_ids:
           - "{{ .settings.environment.account_id }}"
 
@@ -120,7 +120,7 @@ components:
         # ci_apply_role_trusted_github_repos: ["<org>/<repo>:master"]
 
         # State access through the single backend's stage-split access roles
-        # (backend/main in the management account's fnx-core-root), named by
+        # (backend/main in the management account's fnx-ue1-core), named by
         # the stack backend's convention (stacks/orgs/fnx/_defaults.yaml): the
         # plan role may assume the non-prod read-only role, the apply role the
         # non-prod read/write role. Add this hub's <prefix>-plan /
@@ -134,4 +134,4 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-core-root
+            stack: fnx-ue1-core

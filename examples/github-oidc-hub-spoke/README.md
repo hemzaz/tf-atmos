@@ -9,7 +9,7 @@ Templates, with usage in their header comments: `stacks/catalog/iam/oidc-hub.yam
 `stacks/catalog/iam/oidc-spoke.yaml`. Both are abstract: a stack must `import` the file **and**
 list it in the instance's `metadata.inherits`.
 
-1. Add the hub's plan/apply role ARNs to `access_roles` in `stacks/orgs/fnx/core/us-east-1/root.yaml`
+1. Add the hub's plan/apply role ARNs to `access_roles` in `stacks/orgs/fnx/core/us-east-1.yaml`
    (`read`/`write`, or `prod_read`/`prod_write` for prod) and deploy the backend.
 2. Hub stack: `iam/oidc-hub` with `github_oidc_repository: "<org>/<repo>"` and
    `ci_apply_role_trusted_github_repos: ["<org>/<repo>:master"]`. Apply it.

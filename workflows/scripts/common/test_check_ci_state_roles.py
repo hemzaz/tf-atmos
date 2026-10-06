@@ -10,7 +10,7 @@ check_ci_state_roles = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_ci_state_roles)
 
 ACCOUNTS = {"dev": "222222222222", "staging": "333333333333", "prod": "444444444444"}
-PREFIXES = {"dev": "fnx-testenv-01-dev-ci", "staging": "fnx-staging-01-staging-ci", "prod": "fnx-production-prod-ci"}
+PREFIXES = {"dev": "fnx-ue1-dev-ci", "staging": "fnx-ue1-staging-ci", "prod": "fnx-ue1-prod-ci"}
 
 
 def arn(stage, kind):
@@ -52,7 +52,7 @@ def ci(stage, prefix=None, apply=True, oidc=True, assumes=None, **metadata):
 
 
 def stacks(roles=None, **cis):
-    result = {"fnx-core-root": {"components": {"terraform": {
+    result = {"fnx-ue1-core": {"components": {"terraform": {
         "backend/main": {"component": "backend", "vars": {"access_roles": roles or access_roles()}},
     }}}}
     for stack, instance in cis.items():
@@ -61,8 +61,8 @@ def stacks(roles=None, **cis):
 
 
 def today(**overrides):
-    cis = {"fnx-dev-testenv-01": ci("dev"), "fnx-staging-staging-01": ci("staging"),
-           "fnx-prod-production": ci("prod")}
+    cis = {"fnx-ue1-dev": ci("dev"), "fnx-ue1-staging": ci("staging"),
+           "fnx-ue1-prod": ci("prod")}
     cis.update(overrides)
     return cis
 
@@ -83,13 +83,13 @@ class CheckCiStateRolesTest(unittest.TestCase):
         self.assert_errors(stacks(**today()))
 
     def test_renamed_prefix_fails(self):
-        # The old <tenant>-<account>-<environment>-ci name no longer matches the trusted ARNs,
+        # A prefix rendered from the old names no longer matches the trusted ARNs,
         # and the trusted ARNs no longer match a CI role (both directions fail)
         self.assert_errors(
-            stacks(**today(**{"fnx-prod-production": ci("prod", prefix="fnx-prod-production-ci")})),
-            "fnx-prod-production: iam/ci plan role arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan "
+            stacks(**today(**{"fnx-ue1-prod": ci("prod", prefix="fnx-production-prod-ci")})),
+            "fnx-ue1-prod: iam/ci plan role arn:aws:iam::444444444444:role/fnx-production-prod-ci-plan "
             "is not in backend access_roles.prod_read",
-            "apply role arn:aws:iam::444444444444:role/fnx-prod-production-ci-apply is not in backend "
+            "apply role arn:aws:iam::444444444444:role/fnx-production-prod-ci-apply is not in backend "
             "access_roles.prod_write",
             f"backend access_roles.prod_read trusts {arn('prod', 'plan')}",
             f"backend access_roles.prod_write trusts {arn('prod', 'apply')}",
@@ -137,18 +137,18 @@ class CheckCiStateRolesTest(unittest.TestCase):
 
     def test_backend_assuming_another_stages_role_fails(self):
         self.assert_errors(
-            stacks(**today(**{"fnx-prod-production": ci("prod", assumes="write")})),
+            stacks(**today(**{"fnx-ue1-prod": ci("prod", assumes="write")})),
             "backend assumes access_roles.write (backend.assume_role.role_arn), not one of stage 'prod'",
         )
 
     def test_read_access_assumes_the_read_role(self):
         # TFSTATE_ACCESS=read renders the read roles: still the stage's own
-        self.assert_errors(stacks(**today(**{"fnx-prod-production": ci("prod", assumes="prod_read")})))
+        self.assert_errors(stacks(**today(**{"fnx-ue1-prod": ci("prod", assumes="prod_read")})))
 
     def test_plan_role_in_the_write_role_only_fails(self):
         roles = access_roles(read=[arn("dev", "plan")], write=[arn("dev", "apply"), arn("staging", "apply"),
                                                                arn("staging", "plan")])
-        self.assert_errors(stacks(roles=roles, **today()), "fnx-staging-staging-01: iam/ci plan role",
+        self.assert_errors(stacks(roles=roles, **today()), "fnx-ue1-staging: iam/ci plan role",
                            f"backend access_roles.write trusts {arn('staging', 'plan')}, which is no apply role")
 
     def test_prod_role_in_the_non_prod_role_fails(self):
@@ -158,21 +158,21 @@ class CheckCiStateRolesTest(unittest.TestCase):
 
     def test_no_apply_role_needs_only_the_plan_role(self):
         roles = access_roles(prod_write=[])
-        self.assert_errors(stacks(roles=roles, **today(**{"fnx-prod-production": ci("prod", apply=False)})))
+        self.assert_errors(stacks(roles=roles, **today(**{"fnx-ue1-prod": ci("prod", apply=False)})))
 
     def test_oidc_disabled_disabled_and_fixtures_are_skipped(self):
         self.assert_errors(stacks(**today(
             **{"fnx-x": ci("dev", prefix="other", oidc=False), "fnx-y": ci("dev", prefix="other", enabled=False),
-               "fnx-fixtures-webapp": ci("fixtures", prefix="fnx-webapp-fixtures-ci")},
+               "fnx-ue1-fixtures-webapp": ci("fixtures", prefix="fnx-webapp-fixtures-ci")},
         )))
 
     def test_missing_backend_fails(self):
         described = stacks(**today())
-        del described["fnx-core-root"]
+        del described["fnx-ue1-core"]
         self.assert_errors(described, "expected exactly one deployable 'backend' instance, found 0")
 
     def test_unresolvable_arn_fails(self):
-        self.assert_has(stacks(**today(**{"fnx-prod-production": ci("prod", prefix="bad name", apply=False)})),
+        self.assert_has(stacks(**today(**{"fnx-ue1-prod": ci("prod", prefix="bad name", apply=False)})),
                         "plan role: resolved an invalid role ARN")
 
 

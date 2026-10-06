@@ -16,7 +16,7 @@ workflows:
           every stack is destroyed first.
       - name: stack
         type: input
-        prompt: Stack whose backend to destroy (the only one is fnx-core-root)
+        prompt: Stack whose backend to destroy (the only one is fnx-ue1-core)
       - name: preview
         type: atmos
         command: terraform destroy backend/main -s {{ .steps.stack.value }} --dry-run

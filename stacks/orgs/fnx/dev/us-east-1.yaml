@@ -1,6 +1,5 @@
 ---
-# TestEnv-01 Stack Configuration
-# This is the canonical stack definition for the testenv-01 environment
+# fnx-ue1-dev: the dev account's us-east-1 stack
 
 import:
   # Import base configuration first
@@ -14,11 +13,11 @@ import:
 
   # Import component-specific configurations
   # NOTE: Import paths should NOT include .yaml extension
-  - orgs/fnx/dev/us-east-1/testenv-01/components/globals
-  - orgs/fnx/dev/us-east-1/testenv-01/components/networking
-  - orgs/fnx/dev/us-east-1/testenv-01/components/security
-  - orgs/fnx/dev/us-east-1/testenv-01/components/compute
-  - orgs/fnx/dev/us-east-1/testenv-01/components/services
+  - orgs/fnx/dev/us-east-1/components/globals
+  - orgs/fnx/dev/us-east-1/components/networking
+  - orgs/fnx/dev/us-east-1/components/security
+  - orgs/fnx/dev/us-east-1/components/compute
+  - orgs/fnx/dev/us-east-1/components/services
 
 vars:
   # Core variables for stack naming
@@ -28,5 +27,4 @@ settings:
     account: dev
   context:
     tenant: fnx
-    environment: testenv-01
     stage: dev

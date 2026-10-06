@@ -15,7 +15,7 @@ VARIABLES_TF = _HERE.parents[3] / "components" / "terraform" / "secretsmanager" 
 
 def stacks_with(secrets, component="secretsmanager", **metadata):
     return {
-        "fnx-prod-production": {
+        "fnx-ue1-prod": {
             "components": {
                 "terraform": {
                     "secretsmanager/app": {"component": component, "metadata": metadata, "vars": {"secrets": secrets}}

@@ -2,13 +2,13 @@
 # Resolve stack context for workflow scripts from Atmos instead of ad-hoc
 # tenant/account/environment parameters.
 #
-# Requires: STACK (e.g. fnx-prod-production). Exports TENANT, ACCOUNT, STAGE,
+# Requires: STACK (e.g. fnx-ue1-prod). Exports TENANT, ACCOUNT, STAGE,
 # ENVIRONMENT, REGION and STATE_BUCKET as resolved by `atmos describe component`
 # (naming context lives in settings.context / settings.environment, not vars).
 # jq -e makes a missing path fail the script instead of yielding "null".
 set -euo pipefail
 
-: "${STACK:?STACK is required (e.g. STACK=fnx-prod-production)}"
+: "${STACK:?STACK is required (e.g. STACK=fnx-ue1-prod)}"
 
 _ctx="$(atmos describe component "${CONTEXT_COMPONENT:-vpc/main}" -s "${STACK}" \
   --process-functions=false --provenance=false --format json)"

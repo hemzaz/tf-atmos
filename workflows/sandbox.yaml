@@ -17,7 +17,7 @@
 # Components not listed here cannot be exercised against Floci; the gaps are
 # documented in stacks/orgs/fnx/local/us-east-1/sandbox.yaml. rds is the notable
 # one - CreateDBSubnetGroup is unimplemented - so it is exercised against
-# LocalEmu instead, in the fnx-local-localemu lane, via `atmos workflow localemu
+# LocalEmu instead, in the fnx-ue1-local-localemu lane, via `atmos workflow localemu
 # -f localemu` (workflows/localemu.yaml) and .github/workflows/emulator.yml in CI.
 #
 # Worth the reminder: adding lambda here immediately found that every lambda
@@ -30,14 +30,14 @@ workflows:
     steps:
       - type: shell
         name: up
-        command: atmos emulator up aws -s fnx-local-sandbox
+        command: atmos emulator up aws -s fnx-ue1-local-sandbox
 
   sandbox-down:
     description: Stop and remove the local AWS emulator
     steps:
       - type: shell
         name: down
-        command: atmos emulator down aws -s fnx-local-sandbox
+        command: atmos emulator down aws -s fnx-ue1-local-sandbox
 
   sandbox:
     description: Apply every sandbox component against the emulator, then destroy it
@@ -51,24 +51,24 @@ workflows:
 
       - type: shell
         name: up
-        command: atmos emulator up aws -s fnx-local-sandbox
+        command: atmos emulator up aws -s fnx-ue1-local-sandbox
 
       # Applied in dependency order: kms and vpc first, then what reads them.
       - type: shell
         name: apply-kms
-        command: atmos terraform apply kms/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply kms/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: apply-vpc
-        command: atmos terraform apply vpc/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply vpc/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: apply-dns
-        command: atmos terraform apply network/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply network/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: apply-secretsmanager
-        command: atmos terraform apply secretsmanager/app -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply secretsmanager/app -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: apply-ecs
-        command: atmos terraform apply ecs/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply ecs/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
 
       # lambda needs a deployment package to EXIST before apply: the provider
       # rejects a function with none, which is how every real instance in this
@@ -86,41 +86,41 @@ workflows:
           echo "built $dir/lambda.zip"
       - type: shell
         name: apply-lambda
-        command: atmos terraform apply lambda/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply lambda/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: apply-cognito
-        command: atmos terraform apply cognito/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply cognito/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: apply-securitygroup
-        command: atmos terraform apply securitygroup/app -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform apply securitygroup/app -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
 
       # Destroy proves teardown works, and leaves the emulator clean for the
       # next run. Reverse order.
       - type: shell
         name: destroy-securitygroup
-        command: atmos terraform destroy securitygroup/app -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy securitygroup/app -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-cognito
-        command: atmos terraform destroy cognito/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy cognito/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-lambda
-        command: atmos terraform destroy lambda/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy lambda/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-ecs
-        command: atmos terraform destroy ecs/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy ecs/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-secretsmanager
-        command: atmos terraform destroy secretsmanager/app -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy secretsmanager/app -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-dns
-        command: atmos terraform destroy network/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy network/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-vpc
-        command: atmos terraform destroy vpc/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy vpc/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
       - type: shell
         name: destroy-kms
-        command: atmos terraform destroy kms/main -s fnx-local-sandbox --identity local-aws -auto-approve
+        command: atmos terraform destroy kms/main -s fnx-ue1-local-sandbox --identity local-aws -auto-approve
 
       - type: shell
         name: down
-        command: atmos emulator down aws -s fnx-local-sandbox
+        command: atmos emulator down aws -s fnx-ue1-local-sandbox

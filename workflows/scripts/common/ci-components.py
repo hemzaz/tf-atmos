@@ -9,7 +9,7 @@ stack-wide `deploy --affected` / `plan -s <stack>`, because:
     runner cannot reach it; docs/OPERATIONS.md, "In-cluster components"), and
     Atmos 1.229 rejects --query together with --affected;
   - a stack-wide bulk run builds the dependency graph from the filtered set
-    alone and fails on any dependency outside it (iam/ci -> fnx-core-root's
+    alone and fails on any dependency outside it (iam/ci -> fnx-ue1-core's
     backend/main).
 Order: a topological sort of the stack's deployable instances over their
 same-stack dependencies.components (the list check-dependencies.py enforces

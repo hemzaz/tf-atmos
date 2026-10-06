@@ -31,6 +31,6 @@ settings:
   # opt a component IN with `actions_enabled: true`; here a missing value
   # means enabled (so the three real stacks need no change) and only the
   # local stacks opt OUT with `actions_enabled: false`. Data-driven (survives
-  # a stack rename) rather than a `fnx-local-` name-prefix check.
+  # a stack rename) rather than a `fnx-ue1-local-` name-prefix check.
   github:
     actions_enabled: false

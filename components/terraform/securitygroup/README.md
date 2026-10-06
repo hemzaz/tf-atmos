@@ -9,7 +9,7 @@ creates no monitoring: security group change alerting is account-level and lives
 
 ## Wiring
 
-- Instance: `securitygroup/app` in `fnx-local-sandbox` only; reads `vpc/main .vpc_id`.
+- Instance: `securitygroup/app` in `fnx-ue1-local-sandbox` only; reads `vpc/main .vpc_id`.
 - The `web-application`, `batch-processing` and `microservices-platform` catalog templates and the
   `templates/stacks/{minimal,full,microservices}-stack.yaml` stack templates configure it;
   consumers (ALB, ECS, RDS, ElastiCache, Batch) read `.security_group_ids.<key>`.

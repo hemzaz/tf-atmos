@@ -44,12 +44,12 @@ output "backend_prod_role_name" {
 }
 
 output "backend_core_role_arn" {
-  description = "ARN of the fnx-core-root state role (access_roles key \"core_write\"): what fnx-core-root's backend assumes; trusted only by the administrator who applies backend/main"
+  description = "ARN of the fnx-ue1-core state role (access_roles key \"core_write\"): what fnx-ue1-core's backend assumes; trusted only by the administrator who applies backend/main"
   value       = try(aws_iam_role.access["core_write"].arn, null)
 }
 
 output "backend_core_role_name" {
-  description = "Name of the fnx-core-root state role (access_roles key \"core_write\")"
+  description = "Name of the fnx-ue1-core state role (access_roles key \"core_write\")"
   value       = try(aws_iam_role.access["core_write"].name, null)
 }
 

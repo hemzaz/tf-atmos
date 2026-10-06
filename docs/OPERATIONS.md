@@ -10,7 +10,7 @@ The stacks hold placeholders. Replace them before any apply against a real accou
 
 | Input | Where |
 |-------|-------|
-| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`. Each stage's `settings.environment.account_id`, `management_account_id`, the backend `access_roles` ARNs in `fnx-core-root` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. `scripts/new-environment.sh` adds a new account here (`AWS_ACCOUNT_ID`). The emulator and fixture stacks keep the emulator's `000000000000` |
+| Account IDs | `settings.account_map.full_account_map` in `stacks/orgs/fnx/_defaults.yaml`, the only place: `root` (management), `dev`, `staging`, `prod`. Each stage's `settings.environment.account_id`, `management_account_id`, the backend `access_roles` ARNs in `fnx-ue1-core` and every provider's `allowed_account_ids` are read from it, so that guard fails every real plan and apply until the map holds the real IDs. `scripts/new-environment.sh` adds a new account here (`AWS_ACCOUNT_ID`). The emulator and fixture stacks keep the emulator's `000000000000` |
 | AWS Organization ID | `trusted_principal_org_id` in `stacks/catalog/iam/defaults.yaml` |
 | Cross-account role callers | `trusted_principal_arns` in `stacks/catalog/iam/defaults.yaml`: the management-account role ARNs (path included) allowed to assume each workload account's `-CrossAccountRole`. The placeholder `<tenant>-cross-account-operator` matches nobody until it exists |
 | Cognito feature plan | `user_pool_tier: PLUS` with `advanced_security_mode: ENFORCED` in `stacks/catalog/cognito/defaults.yaml`: PLUS is billed from the first monthly active user. `OFF` + `ESSENTIALS` per instance is the cheaper choice |
@@ -60,7 +60,7 @@ account IDs and the accounts layer is deployed and verified first
 ## State backend
 
 One bucket, `fnx-terraform-state`, in the management account, with native S3 lockfiles
-(`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-core-root`, and every stack's
+(`use_lockfile: true`, no DynamoDB). It is `backend/main` in `fnx-ue1-core`, and every stack's
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
 with management-account administrator credentials. The bucket lives in one region,
 `settings.tfstate.region` (`us-east-1`), and every stack's backend uses it whatever the stack's own
@@ -83,7 +83,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 | `fnx-terraform-backend-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
 | `fnx-terraform-backend-prod-read-role` (`prod_read`) | read, prod state | prod's CI plan role |
 | `fnx-terraform-backend-prod-role` (`prod_write`) | read/write, prod state | prod's CI apply role |
-| `fnx-terraform-backend-core-role` (`core_write`) | read/write, `fnx-core-root` state | none |
+| `fnx-terraform-backend-core-role` (`core_write`) | read/write, `fnx-ue1-core` state | none |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
 - Trust is by role ARN, listed in `access_roles` in `root.yaml`. Add a new stack's
@@ -91,7 +91,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
   and any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
   and `validate-all`) fails a CI role its stage's read or write role does not trust.
 - Each stack's state is an exact pattern pair on its stage's roles, `*/<stack>/*` and
-  `*/<stack>-*` (`stacks/catalog/backend/defaults.yaml`): add a new stack's pair before its first
+  `*/<stack>-*` (`stacks/orgs/fnx/core/us-east-1.yaml`): add a new stack's pair before its first
   `init`. `check-state-keys.py` (in `lint` and `validate-all`) evaluates those patterns against
   every state key, requiring exactly its stage's roles to match it, and every backend region
   equal to `backend/main`'s.
@@ -139,9 +139,9 @@ and that every enabled instance is in exactly one layer.
 **Before `certificates`: delegate the stack's domain.** ACM validates in `network/main`'s `main`
 zone, so its domain must resolve, or validation times out after 45 minutes. Prod's
 `fnx.example.com` is delegated at the registrar to prod's `zone_name_servers.main`
-(`atmos terraform output network/main -s fnx-prod-production`). Dev's and staging's parent is
+(`atmos terraform output network/main -s fnx-ue1-prod`). Dev's and staging's parent is
 that Terraform-managed zone: add an NS record for `dev.`/`staging.fnx.example.com` to prod's
-`network/main` `records` (`stacks/orgs/fnx/prod/us-east-1/production/components/networking.yaml`)
+`network/main` `records` (`stacks/orgs/fnx/prod/us-east-1/components/networking.yaml`)
 with the child stack's `zone_name_servers.main`, and deploy prod's `network/main`.
 `services.<d>` delegation is wired by the stacks themselves.
 
@@ -178,7 +178,7 @@ gets no implicit admin, and the CI apply role trusts only GitHub OIDC on master)
    `map_additional_iam_roles` (`groups: ["system:masters"]`) in the stack's `components/globals.yaml`,
    which gives every `eks` instance an `AmazonEKSClusterAdminPolicy` access entry; and
    `backend/main`'s `access_roles.write` (dev/staging) or `.prod_write` (prod) in
-   `stacks/orgs/fnx/core/us-east-1/root.yaml`, so it can write the stack's state. Apply `backend/main`
+   `stacks/orgs/fnx/core/us-east-1.yaml`, so it can write the stack's state. Apply `backend/main`
    (administrator) and let CD apply `eks/*`. `check-cluster-api-ci.py` fails a role missing from the
    backend and warns while a stack has none.
 2. On the laptop, with that role's credentials (`aws sso login --profile <profile>`, then
@@ -230,7 +230,7 @@ same PR.
 
 ### Template fixtures
 
-Each `stacks/catalog/templates/<t>.yaml` has a never-deployed stack `fnx-fixtures-<name>`
+Each `stacks/catalog/templates/<t>.yaml` has a never-deployed stack `fnx-ue1-fixtures-<name>`
 (`stacks/orgs/fnx/fixtures/us-east-1/<name>.yaml`; short names, since templates put the environment
 into length-limited AWS names), so lint, validate-all and plan-sweep check templates no real stack
 imports. A fixture listed in `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) has

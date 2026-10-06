@@ -37,7 +37,7 @@ variables {
   subnet_ids                 = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
   kms_key_arn                = "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
   github_scope               = "hemzaz/tf-atmos"
-  runner_labels              = ["fnx-testenv-01-dev"]
+  runner_labels              = ["fnx-ue1-dev"]
   runner_version             = "2.337.0"
   runner_sha256              = "0000000000000000000000000000000000000000000000000000000000000000"
   github_app_id              = "123456"
@@ -91,7 +91,7 @@ run "jit_function_carries_no_secret" {
       aws_lambda_function.jit[0].runtime == "nodejs22.x"
       && aws_lambda_function.jit[0].environment[0].variables["APP_KEY_PARAMETER"] == "/github/runners/github-runners/app-private-key"
       && aws_lambda_function.jit[0].environment[0].variables["GITHUB_SCOPE"] == "hemzaz/tf-atmos"
-      && aws_lambda_function.jit[0].environment[0].variables["RUNNER_LABELS"] == "[\"fnx-testenv-01-dev\"]"
+      && aws_lambda_function.jit[0].environment[0].variables["RUNNER_LABELS"] == "[\"fnx-ue1-dev\"]"
     )
     error_message = "The function gets the key's parameter name, the scope and the labels, never the key."
   }

@@ -345,11 +345,18 @@ variable "alias_function_version" {
 
 variable "tags" {
   type        = map(string)
-  description = "Tags to apply to resources; must include Environment (used in resource names)"
+  description = "Tags to apply to resources; must include Environment (used in resource names) and Stage (the production guards)"
 
   validation {
     condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
     error_message = "tags must include a non-empty Environment value."
+  }
+
+  # The tier, from settings.context.stage. Required: Environment is the region
+  # code (ue1), so nothing else says whether this is production.
+  validation {
+    condition     = trimspace(lookup(var.tags, "Stage", "")) != ""
+    error_message = "tags must include a non-empty Stage value (settings.context.stage)."
   }
 }
 
@@ -560,14 +567,13 @@ variable "allow_http_egress" {
   description = "Allow HTTP (port 80) egress for package downloads. Not recommended for production."
   default     = false
 
-  # Keyed on the Stage tag (settings.context.stage): Environment is the
-  # stack's environment, a region code under the Q4 names, not the tier.
-  # Without a Stage tag it falls back to Environment, so a missing Stage
-  # cannot lift the production guard.
+  # Keyed on the Stage tag (settings.context.stage): Environment is the region
+  # code (ue1), not the tier. var.tags' validation requires a non-empty Stage,
+  # so a missing Stage fails the plan instead of lifting the production guard.
   validation {
     condition = (
       !var.allow_http_egress ||
-      !contains(["prod", "production"], lower(lookup(var.tags, "Stage", lookup(var.tags, "Environment", ""))))
+      !contains(["prod", "production"], lower(lookup(var.tags, "Stage", "")))
     )
     error_message = "HTTP egress is not allowed in production environments. Use HTTPS (port 443) only."
   }

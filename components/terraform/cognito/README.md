@@ -8,7 +8,7 @@ its `schemas`/`number_schemas` are not ported).
 
 ## Wiring
 
-- Instance: `cognito/main` in the three AWS stacks and `fnx-local-sandbox` (applied for real by
+- Instance: `cognito/main` in the three AWS stacks and `fnx-ue1-local-sandbox` (applied for real by
   `atmos workflow sandbox`). Dev disables deletion protection; prod sets `mfa_configuration: ON`
   and 30-minute access tokens.
 - Used by: `apigateway/main` and `apigateway/data` (`.user_pool_arn`).

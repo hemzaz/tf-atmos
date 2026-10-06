@@ -4,13 +4,13 @@
 # =============================================================================
 # The management account holds shared, organization-wide infrastructure that
 # no single workload stage owns. Today that is only the Terraform state
-# backend (stacks/orgs/fnx/core/us-east-1/root.yaml).
+# backend (stacks/orgs/fnx/core/us-east-1.yaml).
 #
 # Naming follows Cloud Posse's reference architecture, where the management
 # account is the "root" account of the "core" tenant (core-gbl-root). This
-# repository's stack name template is tenant-stage-environment and its tenant
+# repository's stack name template is tenant-environment-stage and its tenant
 # is fixed to fnx (the bucket and role names derive from it), so here "core"
-# is the stage and "root" the environment: fnx-core-root.
+# is the stage and the region code the environment: fnx-ue1-core.
 # =============================================================================
 
 import:

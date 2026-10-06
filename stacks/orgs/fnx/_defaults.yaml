@@ -22,7 +22,7 @@ terraform:
 
   # ONE state backend for every stack: the bucket and access roles created by
   # the `backend` component's single instance, backend/main in the management
-  # account's stack fnx-core-root (stacks/orgs/fnx/core/us-east-1/root.yaml).
+  # account's stack fnx-ue1-core (stacks/orgs/fnx/core/us-east-1.yaml).
   # Native S3 locking replaces DynamoDB. Atmos derives `workspace_key_prefix`
   # from the component name and the workspace from the stack name, so every
   # instance gets its own state file.
@@ -33,7 +33,7 @@ terraform:
   #   <tenant>-terraform-backend-read-role       read-only, dev/staging objects; the dev/staging CI plan roles
   #   <tenant>-terraform-backend-prod-role       read/write, prod objects; prod's apply role only
   #   <tenant>-terraform-backend-prod-read-role  read-only, prod objects; prod's plan role only
-  #   <tenant>-terraform-backend-core-role       read/write, fnx-core-root objects; the administrator
+  #   <tenant>-terraform-backend-core-role       read/write, fnx-ue1-core objects; the administrator
   #                                              who applies backend/main only (read or write)
   # The role is per stack, not per job, so a job picks it with an environment
   # variable: TFSTATE_ACCESS=read selects the stage's read-only role, anything
@@ -81,7 +81,7 @@ settings:
   # name -> id, plus the names of the root and identity accounts), so the
   # tf-atmos org layer (turnkey Wave E) can replace it with that component's
   # output without touching any reader. Keys are the account names: `root` is
-  # the management account (stack fnx-core-root); the workload accounts are
+  # the management account (stack fnx-ue1-core); the workload accounts are
   # each stage's settings.environment.account. Wave E adds Cloud Posse's other
   # core accounts (audit, security, network, identity, artifacts); until then
   # the identity account is root. Placeholder IDs: see
@@ -89,7 +89,7 @@ settings:
   #
   # Readers: settings.environment.management_account_id (below) and each
   # stage's settings.environment.account_id (stacks/orgs/fnx/<stage>/_defaults.yaml),
-  # plus the CI role ARNs in fnx-core-root's backend access_roles. Those
+  # plus the CI role ARNs in fnx-ue1-core's backend access_roles. Those
   # settings are templates read by other templates, which is why atmos.yaml
   # renders templates in two evaluations.
   account_map:
@@ -100,7 +100,7 @@ settings:
       prod: "123456789012"
     root_account_account_name: root
     identity_account_account_name: root
-  # The ONE region of the state bucket (backend/main, fnx-core-root). Every stack's backend
+  # The ONE region of the state bucket (backend/main, fnx-ue1-core). Every stack's backend
   # reads it, not the stack's own region: a DR or EU stack still keeps its state here.
   # check-state-keys.py fails a stack whose backend region differs from backend/main's.
   tfstate:

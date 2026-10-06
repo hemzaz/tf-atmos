@@ -33,10 +33,15 @@ stacks:
   excluded_paths:
     - "**/_defaults.yaml"
     - "**/components/**"
-  # e.g. fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production
-  name_template: "{{ .settings.context.tenant }}-{{ .settings.context.stage }}-{{ .settings.context.environment }}"
+  # Cloud Posse's null-label id order, {tenant}-{environment}-{stage}, where
+  # environment is the region code (mixins/region/*) and stage the account
+  # tier: fnx-ue1-dev, fnx-ue1-staging, fnx-ue1-prod. A lane in a stage
+  # (the fixtures, the local emulator stacks) adds settings.context.name:
+  # fnx-ue1-fixtures-webapp. hasKey, not `with`: Atmos renders with
+  # missingkey=error.
+  name_template: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}{{ if hasKey .settings.context "name" }}-{{ .settings.context.name }}{{ end }}'
 
-# Local AWS sandbox (Floci). Binds ONLY the fnx-local-sandbox stack, via that
+# Local AWS sandbox (Floci). Binds ONLY the fnx-ue1-local-sandbox stack, via that
 # stack's `aws` emulator component — deliberately not `default: true`, so no
 # real environment can ever be silently redirected at the emulator once real
 # credentials exist. See stacks/catalog/emulator/aws.yaml.
@@ -44,7 +49,7 @@ auth:
   identities:
     local-aws:
       kind: aws/emulator
-      emulator: fnx-local-sandbox/aws
+      emulator: fnx-ue1-local-sandbox/aws
 
     # Second local lane, pointed at LocalEmu (localemu.cloud) instead of Floci.
     # Atmos has no localemu driver, so this is deliberately NOT an

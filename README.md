@@ -28,19 +28,22 @@ templates/, examples/    copy-in component template, stack/config samples, the O
 
 ## Stacks
 
-Names come from `name_template` in `atmos.yaml`: `<tenant>-<stage>-<environment>`. Only files
-under `stacks/orgs/` are stack manifests; each real stack imports its `<env>/components/`
-domain files (`globals`, `networking`, `security`, `compute`, `services`).
+Names come from `name_template` in `atmos.yaml`: `<tenant>-<environment>-<stage>[-<name>]`, Cloud
+Posse's null-label id order. `environment` is the region code (`ue1`, set by
+`stacks/mixins/region/*`), `stage` the account tier, and the optional `settings.context.name` a lane
+within a stage (fixtures, emulator lanes). Only files under `stacks/orgs/` are stack manifests;
+each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/components/` domain files
+(`globals`, `networking`, `security`, `compute`, `services`).
 
 | Stack | Manifest (`stacks/orgs/fnx/...`) | Purpose |
 |-------|----------------------------------|---------|
-| `fnx-dev-testenv-01` | `dev/us-east-1/testenv-01.yaml` | dev |
-| `fnx-staging-staging-01` | `staging/us-east-1/staging-01.yaml` | staging |
-| `fnx-prod-production` | `prod/us-east-1/production.yaml` | production |
-| `fnx-core-root` | `core/us-east-1/root.yaml` | management account: the state backend (`backend/main`); not run by CI |
-| `fnx-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
-| `fnx-local-localemu` | `local/us-east-1/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
-| `fnx-fixtures-<name>` | `fixtures/us-east-1/<name>.yaml` | one per `stacks/catalog/templates/` file, checked by CI, never deployed ([details](./docs/OPERATIONS.md#template-fixtures)) |
+| `fnx-ue1-dev` | `dev/us-east-1.yaml` | dev |
+| `fnx-ue1-staging` | `staging/us-east-1.yaml` | staging |
+| `fnx-ue1-prod` | `prod/us-east-1.yaml` | production |
+| `fnx-ue1-core` | `core/us-east-1.yaml` | management account: the state backend (`backend/main`); not run by CI |
+| `fnx-ue1-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
+| `fnx-ue1-local-localemu` | `local/us-east-1/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
+| `fnx-ue1-fixtures-<name>` | `fixtures/us-east-1/<name>.yaml` | one per `stacks/catalog/templates/` file, checked by CI, never deployed ([details](./docs/OPERATIONS.md#template-fixtures)) |
 
 An instance name need not match its module: `metadata.component` decides. `network/main` and
 `network/services` are `dns` instances; `network/vpc-peering` is the `network` module.
@@ -58,17 +61,17 @@ An instance name need not match its module: `metadata.component` decides. `netwo
 
 ```bash
 atmos list stacks                                   # also: list components, list workflows
-atmos describe component vpc/main -s fnx-dev-testenv-01 --process-functions=false
+atmos describe component vpc/main -s fnx-ue1-dev --process-functions=false
 atmos validate stacks                               # offline
 atmos workflow tflint-init -f lint                  # once
 atmos workflow lint -f lint                         # fmt, yamllint, state-key check, TFLint
 atmos workflow security-scan -f lint                # Trivy + Checkov gate (any HIGH/CRITICAL not suppressed inline)
 atmos workflow validate-all -f validate-enhanced    # schema, stacks, dependency/layer/domain checks, fmt, terraform validate
-bash scripts/plan-sweep.sh fnx-dev-testenv-01       # plan with resolved variables, no AWS account needed
+bash scripts/plan-sweep.sh fnx-ue1-dev              # plan with resolved variables, no AWS account needed
 atmos workflow providers-lock -f providers          # after a required_providers change: rewrite the committed locks
 atmos workflow sandbox -f sandbox                   # apply against Floci, then destroy (Docker only)
 atmos workflow localemu -f localemu                 # the same against LocalEmu (Python 3.13)
-atmos terraform plan vpc/main -s fnx-dev-testenv-01 # needs AWS credentials
+atmos terraform plan vpc/main -s fnx-ue1-dev # needs AWS credentials
 ```
 
 `terraform validate` never evaluates `variable` validation blocks; plan-sweep and the emulator

@@ -223,7 +223,7 @@ components:
         inherits:
           - rds/prod
       vars:
-        identifier: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-db"
+        identifier: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-db"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         family: "{{ .settings.environment.rds_family }}"

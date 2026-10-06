@@ -92,7 +92,7 @@ ${WHITE}Required Parameters:${NC}
     --stage, -s         Stage (e.g., 'dev', 'staging', 'prod'); --account/-a is an alias
     --environment, -e   Environment name (e.g., 'testenv-01', 'production')
 
-    The Atmos stack is <tenant>-<stage>-<environment> (e.g. fnx-dev-testenv-01).
+    The Atmos stack is <tenant>-<stage>-<environment> (e.g. fnx-ue1-dev).
 
 ${WHITE}Optional Parameters:${NC}
     --region, -r        AWS region (default: ${DEFAULT_REGION})
@@ -463,7 +463,7 @@ setup_backend() {
     cd "$PROJECT_ROOT"
 
     # One S3 state bucket (native lockfile locking, no DynamoDB) for every stack,
-    # managed by backend/main in fnx-core-root; created once, never per stack.
+    # managed by backend/main in fnx-ue1-core; created once, never per stack.
     # The workflow asks for confirmation and refuses to run when the bucket
     # already exists (use `atmos workflow backend-only -f bootstrap` then).
     if [[ "$DRY_RUN" == "true" ]]; then

@@ -445,8 +445,8 @@ alias a-plan='atmos workflow plan -f plan-environment -s'
 alias a-apply='atmos workflow apply -f apply-environment -s'
 
 # Stack management (adjust for your environment)
-alias stack-dev='atmos list components -s fnx-dev-testenv-01'
-alias stack-staging='atmos list components -s fnx-staging-staging-01'
+alias stack-dev='atmos list components -s fnx-ue1-dev'
+alias stack-staging='atmos list components -s fnx-ue1-staging'
 
 echo "🌍 Infrastructure development aliases loaded!"
 echo "💡 Try: validate, plan, apply, a-stacks, stack-dev"
@@ -589,8 +589,8 @@ make onboard                 # Quick environment onboarding
 \`\`\`bash
 atmos --help                                   # Show all commands
 atmos list workflows                           # Available workflows
-atmos list components -s fnx-dev-testenv-01    # Components in a stack
-atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
+atmos list components -s fnx-ue1-dev    # Components in a stack
+atmos workflow plan -f plan-environment -s fnx-ue1-dev
 \`\`\`
 
 ## 🔧 Development Workflow
@@ -618,7 +618,7 @@ atmos workflow plan -f plan-environment -s fnx-dev-testenv-01
 ## 🚀 Next Steps
 
 1. Explore available stacks: \`make list-stacks\`
-2. Check a specific environment: \`make status STACK=fnx-dev-testenv-01\`
+2. Check a specific environment: \`make status STACK=fnx-ue1-dev\`
 3. Try a safe plan operation: \`make plan\`
 4. Review the documentation in \`docs/\`
 

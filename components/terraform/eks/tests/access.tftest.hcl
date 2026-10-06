@@ -84,6 +84,7 @@ variables {
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {
     Environment = "production"
+    Stage       = "prod"
   }
   node_groups = {
     workers = {
@@ -252,17 +253,17 @@ run "list_entries_for_ci_roles" {
 
   variables {
     access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan" },
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-apply" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply" },
     ]
     access_policy_associations = [
       {
-        principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan"
+        principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan"
         policy_arn    = "AmazonEKSViewPolicy"
         access_scope  = { type = "cluster" }
       },
       {
-        principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-apply"
+        principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply"
         policy_arn    = "AmazonEKSClusterAdminPolicy"
         access_scope  = { type = "cluster" }
       },
@@ -298,12 +299,12 @@ run "null_principal_is_skipped" {
 
   variables {
     access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
       { principal_arn = null },
     ]
     access_policy_associations = [
       {
-        principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan"
+        principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan"
         policy_arn    = "View"
       },
       {
@@ -387,10 +388,10 @@ run "admin_roles_get_cluster_admin_with_the_sso_path_kept" {
       }
     }
     access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-testenv-01-dev-ci-apply" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-dev-ci-apply" },
     ]
     access_policy_associations = [{
-      principal_arn = "arn:aws:iam::123456789012:role/fnx-testenv-01-dev-ci-apply"
+      principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-dev-ci-apply"
       policy_arn    = "AmazonEKSClusterAdminPolicy"
     }]
   }
@@ -701,13 +702,13 @@ run "principal_in_map_and_list_is_rejected" {
 
   variables {
     access_entry_map = {
-      "arn:aws:iam::123456789012:role/fnx-production-prod-ci-apply" = {
+      "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply" = {
         access_policy_associations = { ClusterAdmin = {} }
       }
     }
     access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan" },
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-apply" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply" },
     ]
   }
 
@@ -735,8 +736,8 @@ run "principal_twice_in_list_is_rejected" {
 
   variables {
     access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan" },
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
     ]
   }
 
@@ -749,15 +750,15 @@ run "association_without_access_entry_is_rejected" {
 
   variables {
     access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
     ]
     access_policy_associations = [
       {
-        principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan"
+        principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan"
         policy_arn    = "View"
       },
       {
-        principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-apply"
+        principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply"
         policy_arn    = "ClusterAdmin"
       },
     ]
@@ -848,10 +849,10 @@ run "disabled_creates_no_access_or_addon" {
   variables {
     enabled = false
     access_entries = [
-      { principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan" },
+      { principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan" },
     ]
     access_policy_associations = [{
-      principal_arn = "arn:aws:iam::123456789012:role/fnx-production-prod-ci-plan"
+      principal_arn = "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan"
       policy_arn    = "View"
     }]
   }

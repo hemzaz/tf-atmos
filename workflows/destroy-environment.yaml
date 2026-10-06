@@ -9,7 +9,7 @@ workflows:
     steps:
       - name: stack
         type: input
-        prompt: Stack to destroy (e.g. fnx-dev-testenv-01)
+        prompt: Stack to destroy (e.g. fnx-ue1-dev)
       # Template fixture stacks (stage "fixtures") are never deployed.
       - name: stages
         type: atmos

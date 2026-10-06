@@ -268,7 +268,7 @@ run "no_ci_apply_kms_policy_without_the_key_aliases" {
 }
 
 # State access: the CI roles reach the single state backend (backend/main in
-# fnx-core-root) only through its stage-split access roles -- prod's plan role
+# fnx-ue1-core) only through its stage-split access roles -- prod's plan role
 # may assume only the prod READ-only role, prod's apply role only the prod
 # WRITE role -- and hold no S3/KMS grant on the state bucket themselves (so no
 # lock-object writes from plans either). The values are prod's security.yaml.
@@ -351,7 +351,7 @@ run "ci_apply_role_rejects_environment_subject" {
   command = plan
 
   variables {
-    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:environment:fnx-prod-production"]
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:environment:fnx-ue1-prod"]
   }
 
   expect_failures = [var.ci_apply_role_trusted_github_repos]
@@ -438,14 +438,14 @@ run "lambda_uploader_trusts_only_the_pinned_app_branch" {
     github_oidc_enabled                  = true
     github_oidc_repository               = "hemzaz/tf-atmos"
     github_oidc_provider_arn             = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-    ci_role_name_prefix                  = "fnx-testenv-01-dev-ci"
+    ci_role_name_prefix                  = "fnx-ue1-dev-ci"
     lambda_uploader_trusted_github_repos = ["hemzaz/data-app:main"]
     lambda_uploader_kms_key_alias        = "alias/testenv-01-main"
     tags                                 = { Environment = "testenv-01" }
   }
 
   assert {
-    condition     = aws_iam_role.lambda_uploader[0].name == "fnx-testenv-01-dev-ci-lambda-uploader"
+    condition     = aws_iam_role.lambda_uploader[0].name == "fnx-ue1-dev-ci-lambda-uploader"
     error_message = "The uploader role is <ci_role_name_prefix>-lambda-uploader."
   }
 

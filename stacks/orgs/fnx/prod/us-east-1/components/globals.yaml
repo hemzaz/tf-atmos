@@ -7,7 +7,6 @@
 # =============================================================================
 
 import:
-  - orgs/fnx/prod/us-east-1/_defaults
 
   # Import catalog defaults for all components
   - catalog/vpc/defaults
@@ -77,8 +76,6 @@ settings:
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     enable_vpc_flow_logs: true
-  context:
-    environment: production
 
 components:
   terraform:
@@ -90,7 +87,7 @@ components:
     # (docs/OPERATIONS.md, "In-cluster components"), so
     # each rolearn must also be in backend/main's
     # access_roles.prod_write allowed_principal_arns
-    # (stacks/orgs/fnx/core/us-east-1/root.yaml). check-cluster-api-ci.py fails
+    # (stacks/orgs/fnx/core/us-east-1.yaml). check-cluster-api-ci.py fails
     # a role listed here but not there, and warns while this list is empty.
     # The full role ARN WITH its path, e.g. IAM Identity Center's:
     #   - rolearn: "arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<sso-region>/AWSReservedSSO_AdministratorAccess_<hash>"

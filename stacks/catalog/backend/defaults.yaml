@@ -1,7 +1,7 @@
 ---
 # The Terraform state backend (bucket, KMS key, access roles). Deployed ONCE,
-# as backend/main in the management account's stack fnx-core-root
-# (stacks/orgs/fnx/core/us-east-1/root.yaml); workload stacks never create one.
+# as backend/main in the management account's stack fnx-ue1-core
+# (stacks/orgs/fnx/core/us-east-1.yaml); workload stacks never create one.
 components:
   terraform:
     backend:
@@ -14,20 +14,25 @@ components:
         bucket_name: "{{ .settings.context.tenant }}-terraform-state"
         # Cloud Posse tfstate-backend access_roles. The role names are what
         # stacks/orgs/fnx/_defaults.yaml assumes (terraform.backend.s3.assume_role);
-        # the allowed principals are set on the instance.
+        # the allowed principals and the state each role reaches
+        # (object_key_patterns) are set on the instance, next to each other
+        # (stacks/orgs/fnx/core/us-east-1.yaml).
         #
         # Reads AND writes are split by stage within the one bucket. State keys
         # are "<workspace_key_prefix>/<workspace>/terraform.tfstate" (+ ".tflock"):
         # Atmos sets workspace_key_prefix to the component (iam, eks, ...) and
         # the workspace to the stack name, with "-<instance>" appended for a
-        # derived instance (e.g. fnx-prod-production-iam-ci). Each stack gets
+        # derived instance (e.g. fnx-ue1-prod-iam-ci). Each stack gets
         # an exact pair, "*/<stack>/*" (its own workspace) and "*/<stack>-*"
         # (its derived instances), on its stage's roles only. The pair does not
         # depend on where the stage sits in the stack name, so it holds under
         # any name_template. S3's "*" also spans "/". check-state-keys.py
         # (validate-all, lint) evaluates these patterns against every state
         # key and fails a key that no role, or another stage's role, matches:
-        # a new stack needs its pair here before its first init.
+        # a new stack needs its pair on the instance before its first init.
+        # object_key_patterns is [] here, not the component's ["*"] default:
+        # a role the instance forgets fails the plan (the variable requires a
+        # non-empty list) instead of reaching every stack's state.
         #
         #   stage        read (TFSTATE_ACCESS=read)  write (TFSTATE_ACCESS unset)
         #   dev/staging  read                        write
@@ -37,31 +42,23 @@ components:
           read:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-read-role"
             write_enabled: false
-            object_key_patterns: &non_prod_state
-              - "*/fnx-dev-testenv-01/*"
-              - "*/fnx-dev-testenv-01-*"
-              - "*/fnx-staging-staging-01/*"
-              - "*/fnx-staging-staging-01-*"
+            object_key_patterns: []
           prod_read:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
             write_enabled: false
-            object_key_patterns: &prod_state
-              - "*/fnx-prod-production/*"
-              - "*/fnx-prod-production-*"
+            object_key_patterns: []
           write:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-role"
             write_enabled: true
-            object_key_patterns: *non_prod_state
+            object_key_patterns: []
           prod_write:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-prod-role"
             write_enabled: true
-            object_key_patterns: *prod_state
-          # The backend's own state (fnx-core-root). No allowed_principal_arns:
+            object_key_patterns: []
+          # The backend's own state (fnx-ue1-core). No allowed_principal_arns:
           # only the administrator applying backend/main (the caller, always
           # trusted) may assume it; no CI role can read or write core state.
           core_write:
             role_name: "{{ .settings.context.tenant }}-terraform-backend-core-role"
             write_enabled: true
-            object_key_patterns:
-              - "*/fnx-core-root/*"
-              - "*/fnx-core-root-*"
+            object_key_patterns: []

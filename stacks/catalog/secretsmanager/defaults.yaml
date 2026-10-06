@@ -19,14 +19,10 @@ components:
         components:
           - component: kms/main
       vars:
-        # The default is the lifecycle tier (dev/staging/prod), used for
-        # tier-scoped secret naming. An instance may override this to
-        # context.environment (the stack's instance name, e.g. `testenv-01`)
-        # for per-stack uniqueness when two stacks share an account and stage
-        # -- see microservices/secrets in microservices-platform.yaml. Either
-        # value passes the component's own validation
-        # (components/terraform/secretsmanager/variables.tf), which only
-        # requires lowercase letters, numbers and hyphens.
+        # The lifecycle tier (dev/staging/prod), used for tier-scoped secret
+        # naming and the component's prod recovery-window guard. Stacks sharing
+        # an account and stage differ by region, and secrets are regional, so
+        # the names stay unique per stack.
         environment: "{{ .settings.context.stage }}"
         enabled: true
         context_name: "common"

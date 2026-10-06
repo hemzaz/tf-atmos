@@ -1,4 +1,4 @@
-# fnx-fixtures-batch: stacks/catalog/templates/batch-processing.yaml under CI's checks.
+# fnx-ue1-fixtures-batch: stacks/catalog/templates/batch-processing.yaml under CI's checks.
 # Never deployed (see ../_defaults.yaml).
 import:
   - orgs/fnx/fixtures/_defaults
@@ -6,7 +6,7 @@ import:
 
 settings:
   context:
-    environment: batch
+    name: batch
   # The template's REQUIREMENTS 3. Placeholders.
   batch_processing:
     data_processor_image: 000000000000.dkr.ecr.us-east-1.amazonaws.com/processor:1.0

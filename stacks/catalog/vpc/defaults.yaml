@@ -45,7 +45,7 @@ components:
         vpc_flow_logs_enabled: true
         # flow_logs_kms_key_arn is NOT set here: this abstract component is
         # inherited by every vpc/main and vpc/services instance, including
-        # the LocalEmu lane (fnx-local-localemu), which has no kms/main
+        # the LocalEmu lane (fnx-ue1-local-localemu), which has no kms/main
         # instance at all. Atmos resolves deferred `!terraform.state`
         # functions inherited from an abstract component even when an
         # instance overrides the resulting var with a literal, so a

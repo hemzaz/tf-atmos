@@ -124,7 +124,7 @@ components:
         inherits:
           - apigateway_http
       vars:
-        api_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-api"
+        api_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api"
         description: "Serverless API for {{ .settings.context.environment }}"
         jwt_issuer: "{{ .settings.environment.jwt_issuer }}"
         jwt_audience:
@@ -383,7 +383,7 @@ components:
         lambda_duration_monitoring: true
         lambda_duration_threshold: 10000
         lambda_throttle_monitoring: true
-        api_gateway_name: "{{ .settings.context.tenant }}-{{ .settings.environment.account }}-{{ .settings.context.environment }}-api"
+        api_gateway_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api"
         api_gateway_latency_threshold: 2000
         enable_dynamodb_monitoring: true
         # Matches dynamodb/users and dynamodb/orders above (<Environment>-<name>).

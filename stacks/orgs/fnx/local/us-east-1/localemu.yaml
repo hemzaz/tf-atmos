@@ -1,5 +1,5 @@
 ---
-# LocalEmu lane — fnx-local-localemu
+# LocalEmu lane — fnx-ue1-local-localemu
 #
 # A second local lane, alongside the Floci sandbox (sandbox.yaml). It exists
 # for the components Floci cannot execute AT ALL, so that they are proven
@@ -50,7 +50,7 @@
 # fidelity, not a component defect. The `localemu` workflow
 # (workflows/localemu.yaml, run in CI by .github/workflows/emulator.yml) works
 # around it with a clear-lane-state step that removes this lane's
-# fnx-local-localemu-* workspace state before every apply, so a fresh cycle is
+# fnx-ue1-local-localemu-* workspace state before every apply, so a fresh cycle is
 # what actually runs even when the same LocalEmu process is reused; a manual
 # run without that workflow still needs a freshly started LocalEmu or the
 # state cleared by hand.
@@ -74,7 +74,7 @@
 #
 #   export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test \
 #          AWS_ENDPOINT_URL=http://localhost:4566
-#   atmos terraform apply <c> -s fnx-local-localemu --identity local-emu
+#   atmos terraform apply <c> -s fnx-ue1-local-localemu --identity local-emu
 #
 # Never `--identity local-aws`: that is the Floci lane.
 #
@@ -103,7 +103,7 @@ settings:
     enable_vpc_flow_logs: false
   context:
     tenant: fnx
-    environment: localemu
+    name: localemu
     stage: local
 
 components:
