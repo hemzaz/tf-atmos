@@ -1691,21 +1691,10 @@ components:
     # bump secret_string_version on redis or jwt_signing: rotate them with
     # `aws secretsmanager rotate-secret`.
     #
-    # secretsmanager/defaults sets var.environment from
-    # settings.context.stage (dev/staging/prod), which two stacks sharing an
-    # AWS account but differing only in settings.context.environment (e.g.
-    # testenv-01 and testenv-02, both stage: dev) would both resolve to the
-    # same full_path -- a name collision Secrets Manager would reject at
-    # apply. This instance overrides it to the stack's full, unique
-    # environment name instead.
-    #
-    # Side effect: the component's prod recovery-window guard
-    # (components/terraform/secretsmanager/main.tf) compares var.environment
-    # against "prod"/"production" literally, so it now keys on this
-    # environment name rather than the stage. It matches today because the
-    # prod stack's environment happens to be "production"; every secret below
-    # sets recovery_window_in_days >= 7 regardless, so there is no current
-    # impact, but a differently-named prod stack would skip the guard.
+    # var.environment is the stage (secretsmanager/defaults): stacks sharing an
+    # account and stage differ by region, and secrets are regional, so the
+    # full_path stays unique and the component's prod recovery-window guard
+    # keys on the stage.
 
     microservices/secrets:
       metadata:
@@ -1715,7 +1704,6 @@ components:
           - secretsmanager/defaults
       vars:
         context_name: "microservices"
-        environment: "{{ .settings.context.environment }}"
         secrets:
           # Database credentials
           database:
