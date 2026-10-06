@@ -2,11 +2,13 @@
 # Minimal Stack Template
 # Basic infrastructure: one VPC and tiered security groups.
 #
-# Usage: copy into an account/region directory as a top-level stack and set
-# settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
-#   cp templates/stacks/minimal-stack.yaml stacks/orgs/fnx/dev/us-east-1/minimal-01.yaml
+# Usage: copy in as a lane beside a stage's own stack (settings.context.name;
+# the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
+# lane (settings.prefix, <region code>-<name>), so it deploys in the same
+# account and region:
+#   cp templates/stacks/minimal-stack.yaml stacks/orgs/fnx/dev/us-east-1/minimal.yaml
 #   atmos validate stacks
-#   atmos terraform plan vpc/main -s fnx-dev-minimal-01
+#   atmos terraform plan vpc/main -s fnx-ue1-dev-minimal
 # To target another account or region, change the `orgs/fnx/<stage>/_defaults`
 # (org and account defaults) and `mixins/region/<region>` imports.
 
@@ -25,7 +27,7 @@ vars:
 
 settings:
   context:
-    environment: minimal-01
+    name: minimal
   environment:
     description: "Minimal environment (VPC and security groups)"
     vpc_cidr: "10.10.0.0/16"

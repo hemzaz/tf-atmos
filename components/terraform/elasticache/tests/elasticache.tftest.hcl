@@ -507,3 +507,30 @@ run "unknown_log_type_is_rejected" {
 
   expect_failures = [var.log_delivery_configuration]
 }
+
+# A lane's Environment (<region code>-<name>) lengthens the replication group
+# ID; a long one fails at plan, not at apply.
+run "replication_group_id_over_40_characters_is_rejected" {
+  command = plan
+
+  variables {
+    cluster_id = "microservices-cache-xxxxxx"
+    tags       = { Environment = "ue1-xxxxxxxxxx", Tenant = "fnx", ManagedBy = "Terraform" }
+  }
+
+  expect_failures = [var.cluster_id]
+}
+
+run "replication_group_id_of_40_characters_passes" {
+  command = plan
+
+  variables {
+    cluster_id = "microservices-cache-xxxxxx"
+    tags       = { Environment = "ue1-xxxxxxxxx", Tenant = "fnx", ManagedBy = "Terraform" }
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].replication_group_id == "ue1-xxxxxxxxx-microservices-cache-xxxxxx"
+    error_message = "The replication group ID is <Environment>-<cluster_id>."
+  }
+}

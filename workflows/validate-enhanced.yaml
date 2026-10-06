@@ -40,6 +40,8 @@ workflows:
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-dependencies.py components/terraform < "$stacks_json"
           python3 workflows/scripts/common/check-state-keys.py < "$stacks_json"
+          # A lane shares no resource name with its stage stack or another lane.
+          python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
           # Every dns record, acm domain/SAN and apigateway custom domain sits
           # inside the zone it is written to (zone_id followed to its dns zone).
           python3 workflows/scripts/common/check-domains.py < "$stacks_json"

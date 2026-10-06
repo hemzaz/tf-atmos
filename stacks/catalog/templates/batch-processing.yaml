@@ -299,7 +299,7 @@ components:
           enabled: true
           eventbridge: true
           queue_list:
-            - queue_arn: 'arn:aws:sqs:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:{{ .settings.context.environment }}-batch-trigger'
+            - queue_arn: 'arn:aws:sqs:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:{{ .settings.prefix }}-batch-trigger'
               events:
                 - "s3:ObjectCreated:*"
               filter_prefix: "incoming/"
@@ -491,7 +491,7 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-batch-status"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-batch-status"
         tags:
           Layer: "messaging"
           Platform: "batch-processing"
@@ -522,10 +522,10 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-daily-batch"
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-hourly-batch"
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-s3-trigger"
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-batch-status"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-daily-batch"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-hourly-batch"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-s3-trigger"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-batch-status"
         tags:
           Layer: "messaging"
           Platform: "batch-processing"
@@ -1215,7 +1215,7 @@ components:
             # The event carries the queue's ARN, not its name; the queues are
             # batch-processing/batch's "<Environment>-batch-<key>".
             jobQueue:
-              - wildcard: "arn:aws:batch:{{ .vars.region }}:*:job-queue/{{ .settings.context.environment }}-batch-*"
+              - wildcard: "arn:aws:batch:{{ .vars.region }}:*:job-queue/{{ .settings.prefix }}-batch-*"
         targets:
           notification-queue:
             arn: !terraform.state batch-processing/sqs/notifications .queue_arn
@@ -1264,10 +1264,10 @@ components:
 
         environment_variables:
           ENVIRONMENT: "{{ .settings.context.stage }}"
-          HIGH_PRIORITY_QUEUE: "{{ .settings.context.environment }}-batch-high_priority"
-          DEFAULT_QUEUE: "{{ .settings.context.environment }}-batch-default"
-          LOW_PRIORITY_QUEUE: "{{ .settings.context.environment }}-batch-low_priority"
-          JOB_DEFINITION: "{{ .settings.context.environment }}-batch-data_processor"
+          HIGH_PRIORITY_QUEUE: "{{ .settings.prefix }}-batch-high_priority"
+          DEFAULT_QUEUE: "{{ .settings.prefix }}-batch-default"
+          LOW_PRIORITY_QUEUE: "{{ .settings.prefix }}-batch-low_priority"
+          JOB_DEFINITION: "{{ .settings.prefix }}-batch-data_processor"
 
         # The queues' visibility timeout (43200 s) is well over 6x this
         # function's timeout plus the batching window. The component grants
@@ -1291,10 +1291,10 @@ components:
           {"Version": "2012-10-17", "Statement": [
           {"Sid": "SubmitJobs", "Effect": "Allow", "Action": "batch:SubmitJob",
           "Resource": [
-          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-high_priority",
-          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-default",
-          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.context.environment }}-batch-low_priority",
-          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-definition/{{ .settings.context.environment }}-batch-data_processor:*"]},
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.prefix }}-batch-high_priority",
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.prefix }}-batch-default",
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-queue/{{ .settings.prefix }}-batch-low_priority",
+          "arn:aws:batch:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:job-definition/{{ .settings.prefix }}-batch-data_processor:*"]},
           {"Sid": "DescribeJobs", "Effect": "Allow", "Action": "batch:DescribeJobs", "Resource": "*"}]}
 
         tags:

@@ -66,10 +66,10 @@ components:
         # the component drops nulls. To exclude another role, add its ARN here
         # (or replace the list in a stack: list_merge_strategy is replace).
         security_group_change_excluded_role_arns:
-          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-main-cluster-role"
-          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-main-aws-load-balancer-controller-role"
-          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-data-cluster-role"
-          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.context.environment }}-data-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-data-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-data-aws-load-balancer-controller-role"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
           - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
           - !terraform.state iam/ci .ci_apply_role_arn

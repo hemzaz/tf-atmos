@@ -602,3 +602,31 @@ run "prod_rejects_t4g_small" {
 
   expect_failures = [var.instance_class]
 }
+
+# A lane's Environment (<region code>-<name>) lengthens every name; a long one
+# fails at plan, not at apply.
+run "name_base_over_47_characters_is_rejected" {
+  command = plan
+
+  variables {
+    identifier = "orders-database-primary"
+    tags       = { Environment = "ue1-xxxxxxxxxxxxxxxxxxxx", Tenant = "fnx", ManagedBy = "Terraform" }
+  }
+
+  expect_failures = [var.identifier]
+}
+
+run "name_base_of_47_characters_passes" {
+  command = plan
+
+  variables {
+    identifier          = "orders-database-primary"
+    create_read_replica = true
+    tags                = { Environment = "ue1-xxxxxxxxxxxxxxxxxxx", Tenant = "fnx", ManagedBy = "Terraform" }
+  }
+
+  assert {
+    condition     = aws_db_instance.read_replica[0].identifier == "ue1-xxxxxxxxxxxxxxxxxxx-orders-database-primary-read-replica" && aws_iam_role.monitoring[0].name == "ue1-xxxxxxxxxxxxxxxxxxx-orders-database-primary-monitoring-role"
+    error_message = "The replica and monitoring role names are <Environment>-<identifier>-<suffix>."
+  }
+}

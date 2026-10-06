@@ -28,6 +28,9 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   (`check-deploy-layers.py`).
 - A `!terraform.state`/`!terraform.output` read of a JSON-string output (e.g. a `*_policy`) into a `type = string`
   input needs `| tojson` (`'.producer_policy | tojson'`); otherwise Atmos decodes it into an object.
+- A stack template that repeats a component's `<Environment>-<x>` name writes `{{ .settings.prefix }}-<x>`
+  (the region code, plus `-<name>` on a lane), never `settings.context.environment`; the full id is
+  `{{ .atmos_stack }}`. `check-lane-names.py` fails a lane that shares a name with its stage stack.
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - Each stack's state is an exact `object_key_patterns` pair on its stage's backend roles
   (`stacks/orgs/fnx/core/us-east-1.yaml`): a new stack needs its pair (`check-state-keys.py`).

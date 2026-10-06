@@ -174,10 +174,10 @@ components:
         # microservices/eks below sets name: microservices.
         public_subnets_additional_tags:
           "kubernetes.io/role/elb": "1"
-          "kubernetes.io/cluster/{{ .settings.context.environment }}-microservices": "shared"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-microservices": "shared"
         private_subnets_additional_tags:
           "kubernetes.io/role/internal-elb": "1"
-          "kubernetes.io/cluster/{{ .settings.context.environment }}-microservices": "shared"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-microservices": "shared"
 
         # redis-auth-rotation (below) is VPC-attached and calls the Secrets
         # Manager and ElastiCache control-plane APIs. Without these, both
@@ -225,7 +225,7 @@ components:
         # Alarms to microservices/monitoring's topic, <Environment>-monitoring-alarms,
         # named rather than read: monitoring deploys in the last layer.
         alarm_sns_topic_arns:
-          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-monitoring-alarms"
+          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-monitoring-alarms"
         runner_labels:
           - "{{ .atmos_stack }}-microservices"
         tags:
@@ -397,7 +397,7 @@ components:
         oidc_provider_url: !terraform.state microservices/eks .eks_cluster_identity_oidc_issuer
 
         clusters:
-          "{{ .settings.context.environment }}-microservices":
+          "{{ .settings.prefix }}-microservices":
             cluster_name: !terraform.state microservices/eks .eks_cluster_id
             kubernetes_host: !terraform.state microservices/eks .eks_cluster_endpoint
             cluster_ca_certificate: !terraform.state microservices/eks .eks_cluster_certificate_authority_data
@@ -836,7 +836,7 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-order-created"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-microservices/{{ .settings.prefix }}-order-created"
         tags:
           Layer: "messaging"
           Platform: "microservices"
@@ -864,7 +864,7 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-user-registered"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-microservices/{{ .settings.prefix }}-user-registered"
         tags:
           Layer: "messaging"
           Platform: "microservices"
@@ -895,9 +895,9 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:events:{{ .vars.region }}:*:event-bus/{{ .settings.context.environment }}-microservices"
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-order-created"
-                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.context.environment }}-microservices/{{ .settings.context.environment }}-user-registered"
+                      - "arn:aws:events:{{ .vars.region }}:*:event-bus/{{ .settings.prefix }}-microservices"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-microservices/{{ .settings.prefix }}-order-created"
+                      - "arn:aws:events:{{ .vars.region }}:*:rule/{{ .settings.prefix }}-microservices/{{ .settings.prefix }}-user-registered"
         tags:
           Layer: "messaging"
           Platform: "microservices"

@@ -10,7 +10,7 @@ vars:
   tags:
     Tenant: "{{ .settings.context.tenant }}"
     Account: "{{ .settings.environment.account }}"
-    Environment: "{{ .settings.context.environment }}"
+    Environment: "{{ .settings.prefix }}"
     Stage: "{{ .settings.context.stage }}"
     ManagedBy: "Terraform"
 
@@ -70,6 +70,14 @@ terraform:
       allowed_account_ids:
         - "{{ .settings.environment.account_id }}"
 settings:
+  # The environment-derived name prefix (tags.Environment, which components
+  # start their names with): the region code, plus -<name> on a lane
+  # (settings.context.name), so a lane deploys beside its stage stack in one
+  # account and region (ue1, ue1-serverless; Cloud Posse null-label order).
+  # Reference it as {{ .settings.prefix }}: the second template evaluation
+  # (atmos.yaml) renders it. Backticks, not quotes: the expression is pasted
+  # into double-quoted YAML by the first evaluation.
+  prefix: '{{ .settings.context.environment }}{{ if hasKey .settings.context `name` }}-{{ .settings.context.name }}{{ end }}'
   # The GitHub App that registers the self-hosted CI runners (github-runners'
   # jit function): its ID and installation ID, not secrets. 0 until the owner
   # creates it (docs/OPERATIONS.md#first-deploy-inputs, GitHub App).

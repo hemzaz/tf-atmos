@@ -31,6 +31,13 @@ variable "cluster_id" {
     condition     = can(regex("^[a-z][a-z0-9-]{0,28}[a-z0-9]$", var.cluster_id))
     error_message = "cluster_id must be 2-30 lowercase alphanumeric characters or hyphens, starting with a letter and not ending in a hyphen."
   }
+
+  # The replication group ID is <Environment>-<cluster_id> (main.tf), and a
+  # lane's Environment is <region code>-<name>: fail at plan, not at apply.
+  validation {
+    condition     = length("${lookup(var.tags, "Environment", "")}-${var.cluster_id}") <= 40
+    error_message = "The replication group ID <Environment>-<cluster_id> must be 40 characters or fewer: shorten cluster_id or the lane name."
+  }
 }
 
 variable "vpc_id" {

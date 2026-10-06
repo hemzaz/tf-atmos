@@ -87,7 +87,6 @@ class MainTest(unittest.TestCase):
             "scripts/check-old-stack-names.py": "fnx-dev-testenv-01",
             "c/.terraform.lock.hcl": "fnx-dev-testenv-01",
             "img.png": "fnx-dev-testenv-01",
-            "templates/stacks/minimal-stack.yaml": "fnx-dev-minimal-01",
         })
         self.assertEqual(code, 0)
 

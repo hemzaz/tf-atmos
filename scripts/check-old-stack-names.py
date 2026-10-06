@@ -9,9 +9,8 @@ fnx-prod-production, fnx-fixtures-batch) and lived in
 <stage>/<region>/<instance>.yaml. An old name left in a script, workflow, test or
 doc points at a stack that no longer exists, so this fails on any of them.
 
-This file and its test quote the old names and are skipped, as are the
-templates/stacks samples (see SKIP_PATHS); any other line that must quote one
-carries the marker "old-stack-names: allow".
+This file and its test quote the old names and are skipped; any other line
+that must quote one carries the marker "old-stack-names: allow".
 
 Usage: check-old-stack-names.py [PATH...]   (default: the repository root)
 Exit 0 when clean, 1 on a hit. Pure stdlib (runs in the CI image).
@@ -27,10 +26,6 @@ SKIP_DIRS = {".git", ".terraform", ".worktrees", "node_modules", "__pycache__", 
 # Binary or generated files that never hold a stack name.
 SKIP_SUFFIXES = {".png", ".jpg", ".gif", ".ico", ".zip", ".gz", ".pyc", ".lock.hcl"}
 SKIP_FILES = {"check-old-stack-names.py", "test_check_old_stack_names.py"}
-# The copy-in stack samples are rewritten as lanes (settings.context.name) together
-# with the lane prefix on environment-derived names; until then they keep their
-# old instance names.
-SKIP_PATHS = ("templates/stacks/",)
 
 OLD_NAMES = (
     # The stage second: fnx-dev-testenv-01, fnx-prod-production, fnx-core-root,
@@ -69,10 +64,8 @@ def files(paths):
         for root, dirs, names in os.walk(path):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
             for name in sorted(names):
-                file = pathlib.Path(root) / name
-                if (name not in SKIP_FILES and not any(name.endswith(s) for s in SKIP_SUFFIXES)
-                        and not any(p in file.as_posix() for p in SKIP_PATHS)):
-                    yield file
+                if name not in SKIP_FILES and not any(name.endswith(s) for s in SKIP_SUFFIXES):
+                    yield pathlib.Path(root) / name
 
 
 def main(argv):

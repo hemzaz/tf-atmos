@@ -1,7 +1,8 @@
 ---
 # us-east-1. settings.context.environment is the region's Cloud Posse code
-# (ue1): the stack name's middle part ({tenant}-{environment}-{stage}) and
-# tags.Environment, which components prefix their names with.
+# (ue1): the stack name's middle part ({tenant}-{environment}-{stage}) and the
+# start of settings.prefix (tags.Environment, which components prefix their
+# names with; a lane appends -<name>).
 import:
   # Every stack in this region has the vpc catalog's abstract defaults
   - catalog/vpc/defaults

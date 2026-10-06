@@ -15,7 +15,7 @@ components:
       metadata: { component: web-service }
       vars:
         tenant: "{{ .settings.context.tenant }}"
-        environment: "{{ .settings.context.environment }}"
+        environment: "{{ .settings.prefix }}"
         service_name: api
         container_image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/api@sha256:<digest>
         vpc_id: !terraform.state vpc/main .vpc_id

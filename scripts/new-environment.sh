@@ -432,7 +432,7 @@ EOF
         write_file "$region_mixin" << EOF
 ---
 # ${REGION}. settings.context.environment is the region's Cloud Posse code: the
-# stack name's middle part and tags.Environment.
+# stack name's middle part and the start of settings.prefix (tags.Environment).
 import:
   - catalog/vpc/defaults
 

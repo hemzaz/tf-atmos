@@ -16,7 +16,8 @@ _ctx="$(atmos describe component "${CONTEXT_COMPONENT:-vpc/main}" -s "${STACK}" 
 TENANT="$(jq -er '.settings.context.tenant' <<<"${_ctx}")"
 ACCOUNT="$(jq -er '.settings.environment.account' <<<"${_ctx}")"
 STAGE="$(jq -er '.settings.context.stage' <<<"${_ctx}")"
-ENVIRONMENT="$(jq -er '.settings.context.environment' <<<"${_ctx}")"
+# The Environment tag (settings.prefix): the region code, plus -<name> on a lane.
+ENVIRONMENT="$(jq -er '.vars.tags.Environment' <<<"${_ctx}")"
 REGION="$(jq -er '.vars.region' <<<"${_ctx}")"
 STATE_BUCKET="$(jq -er '.backend.bucket' <<<"${_ctx}")"
 export TENANT ACCOUNT STAGE ENVIRONMENT REGION STATE_BUCKET

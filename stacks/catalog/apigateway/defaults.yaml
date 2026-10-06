@@ -7,8 +7,8 @@ components:
         type: abstract
       vars:
         enabled: true
-        api_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-rest-api"
-        description: "REST API Gateway for {{ .settings.context.environment }} environment"
+        api_name: "{{ .settings.context.tenant }}-{{ .settings.prefix }}-rest-api"
+        description: "REST API Gateway for {{ .settings.prefix }} environment"
         api_type: "REST"
         endpoint_type: ["REGIONAL"]
 
@@ -55,8 +55,8 @@ components:
         type: abstract
       vars:
         enabled: true
-        api_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-http-api"
-        description: "HTTP API Gateway for {{ .settings.context.environment }} environment"
+        api_name: "{{ .settings.context.tenant }}-{{ .settings.prefix }}-http-api"
+        description: "HTTP API Gateway for {{ .settings.prefix }} environment"
         api_type: "HTTP"
 
         # HTTP API specific configurations
@@ -103,7 +103,7 @@ components:
         type: abstract
       vars:
         enabled: true
-        api_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-domain"
+        api_name: "{{ .settings.context.tenant }}-{{ .settings.prefix }}-domain"
         api_type: "REST"
         domain_name: null # required: e.g. api.<environment>.<root domain>
         certificate_arn: null # required: ACM certificate ARN

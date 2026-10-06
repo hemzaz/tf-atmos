@@ -37,7 +37,7 @@ components:
           # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
           - !terraform.state github-runners/main .security_group_id
         tags:
-          Cluster: "{{ .settings.context.environment }}-main"
+          Cluster: "{{ .settings.prefix }}-main"
           Purpose: "application-workloads"
           CriticalityLevel: "high"
           SLA: "99.9"
@@ -133,7 +133,7 @@ components:
           # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
           - !terraform.state github-runners/main .security_group_id
         tags:
-          Cluster: "{{ .settings.context.environment }}-data"
+          Cluster: "{{ .settings.prefix }}-data"
           Purpose: "data-processing"
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true
@@ -418,7 +418,7 @@ components:
         # named rather than read: monitoring deploys in the last layer, this
         # pool in connectivity (kms/main lets CloudWatch alarms publish to it).
         alarm_sns_topic_arns:
-          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-main-alarms"
+          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
       dependencies:
         components:
           - component: kms/main
