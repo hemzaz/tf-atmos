@@ -245,22 +245,22 @@ components:
           app_credentials:
             name: "credentials"
             description: "Production application credentials"
-            path: "production/app"
+            path: "app"
             generate_random_password: true
             password_length: 48
           api_keys:
             name: "api-keys"
             description: "Production API integration keys"
-            path: "production/app/api"
+            path: "app/api"
             generate_random_password: true
             password_length: 64
           database_credentials:
             name: "db-credentials"
             description: "Production database credentials"
-            path: "production/app/database"
+            path: "app/database"
             generate_random_password: true
             password_length: 32
-        context_name: "production/app"
+        context_name: "app"
         default_recovery_window_in_days: 30
     secretsmanager/infra:
       metadata:
@@ -272,17 +272,17 @@ components:
           tls_certificates:
             name: "tls-certificates"
             description: "Production TLS certificates"
-            path: "production/certificates"
+            path: "certificates"
           ssh_keys:
             name: "ssh-keys"
             description: "Production SSH keys"
-            path: "production/ssh"
+            path: "ssh"
           service_accounts:
             name: "service-accounts"
             description: "Production service account credentials"
-            path: "production/service-accounts"
+            path: "service-accounts"
 
-        context_name: "production/infra"
+        context_name: "infra"
         default_recovery_window_in_days: 30
 
     # ==========================================================================

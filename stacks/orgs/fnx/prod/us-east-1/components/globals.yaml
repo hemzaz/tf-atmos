@@ -46,7 +46,6 @@ settings:
     # the dns instances' zone_ids output, never from settings. example.com is a
     # placeholder base until the owner sets the real domain.
     domain_name: "fnx.example.com"
-    stage: "production"
 
   # Monitoring contacts - 24/7 coverage
     monitoring:

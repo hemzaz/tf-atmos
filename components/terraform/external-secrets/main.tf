@@ -32,11 +32,9 @@ locals {
 
   # Per store: "<prefix>/*" plus "<context>/<prefix>/*" for every
   # var.secret_path_context_prefixes entry. secretsmanager's full_path nests
-  # context_name/environment/path/name (e.g.
-  # "production/app/prod/production/app/credentials"), so a "*/<prefix>/*"
-  # wildcard would also match an unrelated secret containing "/<prefix>/"
-  # further down; the stack's own context (settings.environment.stage, set in
-  # the catalog) keeps the nested match scoped. RDS generates "rds!db-<id>"
+  # context_name/environment/path/name (e.g. "app/prod/credentials"); a
+  # "*/<prefix>/*" wildcard would also match an unrelated secret containing
+  # "/<prefix>/" further down, so a nested context_name is listed explicitly. RDS generates "rds!db-<id>"
   # only once the instance exists, so rds_managed_secret_access grants that
   # fixed naming convention directly ("!" is not a valid prefix entry).
   store_secret_arns = {

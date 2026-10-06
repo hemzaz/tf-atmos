@@ -195,22 +195,22 @@ components:
           app_credentials:
             name: "credentials"
             description: "Application credentials for staging"
-            path: "staging/app"
+            path: "app"
             generate_random_password: true
             password_length: 32
           api_keys:
             name: "api-keys"
             description: "API integration keys for staging"
-            path: "staging/app/api"
+            path: "app/api"
             generate_random_password: true
           database_credentials:
             name: "db-credentials"
             description: "Database connection credentials"
-            path: "staging/app/database"
+            path: "app/database"
             generate_random_password: true
             password_length: 24
 
-        context_name: "staging/app"
+        context_name: "app"
         default_recovery_window_in_days: 7
     secretsmanager/infra:
       metadata:
@@ -222,12 +222,12 @@ components:
           tls_certificates:
             name: "tls-certificates"
             description: "TLS certificates for services"
-            path: "staging/certificates"
+            path: "certificates"
           ssh_keys:
             name: "ssh-keys"
             description: "SSH keys for infrastructure access"
-            path: "staging/ssh"
-        context_name: "staging/infra"
+            path: "ssh"
+        context_name: "infra"
         default_recovery_window_in_days: 7
 
     # ==========================================================================

@@ -195,7 +195,7 @@ components:
       metadata:
         component: ecs
       vars:
-        cluster_name: "staging-main-apps"
+        cluster_name: "{{ .settings.context.stage }}-main-apps"
         fargate_only: true
         enable_container_insights: true
       dependencies:
@@ -213,7 +213,7 @@ components:
         # and every environment == "prod" gate in the component silently
         # passes.
         environment: "{{ .settings.context.stage }}"
-        identifier: "staging-main-db"
+        identifier: "{{ .settings.context.stage }}-main-db"
         db_name: "stagingapp"
         # Selected into backup/main's daily/weekly/monthly plans by tag
         # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
@@ -250,7 +250,7 @@ components:
         # and every environment == "prod" gate in the component silently
         # passes.
         environment: "{{ .settings.context.stage }}"
-        identifier: "staging-data-db"
+        identifier: "{{ .settings.context.stage }}-data-db"
         db_name: "stagingdata"
         # Selected into backup/main's daily/weekly/monthly plans by tag
         # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
@@ -287,7 +287,7 @@ components:
       settings:
         package_version: "unreleased"
       vars:
-        function_name: "staging-data-processor"
+        function_name: "{{ .settings.context.stage }}-data-processor"
         handler: "main.handler"
         runtime: "python3.13"
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
@@ -325,7 +325,7 @@ components:
       settings:
         package_version: "unreleased"
       vars:
-        function_name: "staging-data-transformer"
+        function_name: "{{ .settings.context.stage }}-data-transformer"
         handler: "transform.handler"
         runtime: "python3.13"
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id

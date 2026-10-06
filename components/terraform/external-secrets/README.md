@@ -26,7 +26,7 @@ IRSA role. Cloud Posse's `eks/external-secrets-operator` uses the same two-relea
   gets no AWS credentials, and a namespaced store cannot reference the stores' service accounts.
 - Each role reads Secrets Manager only, on its own prefixes: `secret_path_prefixes` (plus
   `rds!db-*` with `rds_managed_secret_access`) or `certificate_secret_path_prefixes`, each also
-  under `<stage>/` via `secret_path_context_prefixes`. The two lists may not overlap. `kms:Decrypt`
+  under a nested `context_name` via `secret_path_context_prefixes` (none here). The two lists may not overlap. `kms:Decrypt`
   is on `kms_key_arn` through Secrets Manager only. There is no SSM access and no `ListSecrets`, so
   `dataFrom.find` does not work.
 - Deliberate deviation from Cloud Posse, which puts the IRSA role on the operator's service

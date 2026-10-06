@@ -97,7 +97,7 @@ components:
         # Domain Configuration
         domain_name: "api.{{ .settings.environment.domain_name }}"
         certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
-        api_name: "production-main-api"
+        api_name: "{{ .settings.context.stage }}-main-api"
         zone_id: !terraform.state network/main .zone_ids.main
 
         throttling_burst_limit: 5000
@@ -210,7 +210,7 @@ components:
     # ==========================================================================
     # Infrastructure - Main Application Stack (Production HA)
     # ==========================================================================
-        api_name: "production-data-api"
+        api_name: "{{ .settings.context.stage }}-data-api"
         zone_id: !terraform.state network/services .zone_ids.data
         tracing_enabled: true
       dependencies:
@@ -229,7 +229,7 @@ components:
       metadata:
         component: ecs
       vars:
-        cluster_name: "production-main-apps"
+        cluster_name: "{{ .settings.context.stage }}-main-apps"
         fargate_only: true
         enable_container_insights: true
       dependencies:
@@ -249,7 +249,7 @@ components:
         # and every environment == "prod" gate in the component silently
         # passes.
         environment: "{{ .settings.context.stage }}"
-        identifier: "production-main-db"
+        identifier: "{{ .settings.context.stage }}-main-db"
         db_name: "productionapp"
         # Selected into backup/main's daily/weekly/monthly plans by tag
         # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
@@ -303,7 +303,7 @@ components:
         inherits:
           - elasticache/prod
       vars:
-        cluster_id: "production-cache"
+        cluster_id: "{{ .settings.context.stage }}-cache"
         engine_version: "7.0"
         node_type: "cache.r5.large"
         num_cache_nodes: 3
@@ -338,7 +338,7 @@ components:
         # and every environment == "prod" gate in the component silently
         # passes.
         environment: "{{ .settings.context.stage }}"
-        identifier: "production-data-db"
+        identifier: "{{ .settings.context.stage }}-data-db"
         db_name: "productiondata"
         # Selected into backup/main's daily/weekly/monthly plans by tag
         # (enable_rds_backup, catalog/backup/defaults.yaml), not by reading
@@ -379,7 +379,7 @@ components:
       settings:
         package_version: "unreleased"
       vars:
-        function_name: "production-data-processor"
+        function_name: "{{ .settings.context.stage }}-data-processor"
         handler: "main.handler"
         runtime: "python3.13"
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
@@ -420,7 +420,7 @@ components:
       settings:
         package_version: "unreleased"
       vars:
-        function_name: "production-data-transformer"
+        function_name: "{{ .settings.context.stage }}-data-transformer"
         handler: "transform.handler"
         runtime: "python3.13"
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
@@ -483,7 +483,7 @@ components:
       settings:
         package_version: "unreleased"
       vars:
-        function_name: "production-report-generator"
+        function_name: "{{ .settings.context.stage }}-report-generator"
         handler: "reports.handler"
         runtime: "python3.13"
         s3_bucket: !terraform.state s3/lambda-artifacts .bucket_id
