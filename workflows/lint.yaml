@@ -180,6 +180,18 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-state-keys.py < "$stacks_json"
+      # Stacks of one tenant, region and stage (a stage stack and its lanes,
+      # settings.context.name) share one account and region: none may reuse
+      # another's tags.Environment, built names or secret names.
+      - name: check-lane-names
+        type: shell
+        command: |
+          set -eu
+          python3 -m unittest workflows/scripts/common/test_check_lane_names.py
+          stacks_json="$(mktemp)"
+          trap 'rm -f "$stacks_json"' EXIT
+          atmos describe stacks --process-functions=false --format json > "$stacks_json"
+          python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
       # iam/ci's lambda uploader role names its stage's s3/lambda-artifacts
       # bucket and kms/main alias instead of reading their state (it applies
       # first); this fails when either stops matching, and when an enabled

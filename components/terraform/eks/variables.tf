@@ -22,7 +22,7 @@ variable "enabled" {
 
 # Cloud Posse: context `name`. Every resource is named
 # "<tags.Environment>-<name>" (the repo's name_prefix convention), so `name`
-# must not repeat the Environment: prod sets `main`, not `production-main`.
+# must not repeat the Environment: prod sets `main`, not `ue1-main`.
 variable "name" {
   type        = string
   description = "Cluster name without the Environment prefix. The cluster is named <tags.Environment>-<name>."

@@ -3,21 +3,22 @@
 # Event-driven serverless application: Lambda functions behind an HTTP API
 # Gateway, with DynamoDB, EventBridge, Step Functions, SNS and SQS.
 #
-# Usage: copy into an account/region directory as a top-level stack and set
-# settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
-#   cp templates/stacks/serverless-stack.yaml stacks/orgs/fnx/dev/us-east-1/serverless-01.yaml
+# Usage: copy in as a lane beside a stage's own stack (settings.context.name;
+# the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
+# lane (settings.prefix, <region code>-<name>), so it deploys in the same
+# account and region:
+#   cp templates/stacks/serverless-stack.yaml stacks/orgs/fnx/dev/us-east-1/serverless.yaml
 #   atmos validate stacks
-#   atmos workflow plan -f plan-environment -s fnx-dev-serverless-01
+#   atmos workflow plan -f plan-environment -s fnx-ue1-dev-serverless
 # To target another account or region, change the `orgs/fnx/<stage>/_defaults`
 # (org and account defaults) and `mixins/region/<region>` imports.
 #
 # dynamodb, eventbridge, stepfunctions, sns and sqs all have root modules now
 # (one table/rule/machine/topic/queue per instance, the Cloud Posse model for
 # each), so every component below is enabled.
-# Resource names follow <tenant>-<account>-<environment>-<name> for the
-# older, full-name components (apigateway, lambda) and <Environment>-<name>
-# (settings.context.environment alone) for the newer short-name ones
-# (dynamodb, sns, sqs, eventbridge, stepfunctions).
+# Resource names follow the full id (the stack name) for the older, full-name
+# components (apigateway, lambda) and <Environment>-<name> (settings.prefix)
+# for the newer short-name ones (dynamodb, sns, sqs, eventbridge, stepfunctions).
 
 import:
   - orgs/fnx/dev/_defaults
@@ -42,7 +43,7 @@ vars:
 
 settings:
   context:
-    environment: serverless-01
+    name: serverless
   environment:
     description: "Serverless platform (Lambda, API Gateway, DynamoDB)"
     lambda_runtime: "python3.13"
@@ -57,16 +58,16 @@ components:
     # sqs, eventbridge, stepfunctions) and their log groups. This is a
     # top-level stack of its own (not nested under an existing environment's
     # components/), so unlike a component that only inherits catalog/kms/defaults,
-    # it needs its own concrete kms/main instance, as every full environment
-    # stack in this repo (testenv-01, staging-01, production) does.
+    # it needs its own concrete kms/main instance, as every stage stack in this
+    # repo (fnx-ue1-dev, fnx-ue1-staging, fnx-ue1-prod) does.
     kms/main:
       metadata:
         component: kms
         inherits:
           - kms/defaults
       vars:
-        description: "{{ .settings.context.environment }} serverless components key (DynamoDB, SNS, SQS, EventBridge, Step Functions)"
-        alias_name: "{{ .settings.context.environment }}-main" # without the alias/ prefix
+        description: "{{ .settings.prefix }} serverless components key (DynamoDB, SNS, SQS, EventBridge, Step Functions)"
+        alias_name: "{{ .settings.prefix }}-main" # without the alias/ prefix
         deletion_window_in_days: 7
 
     # Shared Lambda settings; each function below inherits them
@@ -86,10 +87,10 @@ components:
         log_retention_days: "{{ .settings.environment.log_retention_days }}"
         environment_variables:
           STAGE: "{{ .settings.context.stage }}"
-          # dynamodb names its tables <Environment>-<name> (settings.context.environment
-          # alone); this must match dynamodb/users and dynamodb/orders below.
-          USERS_TABLE: "{{ .settings.context.environment }}-users"
-          ORDERS_TABLE: "{{ .settings.context.environment }}-orders"
+          # dynamodb names its tables <Environment>-<name> (settings.prefix);
+          # this must match dynamodb/users and dynamodb/orders below.
+          USERS_TABLE: "{{ .settings.prefix }}-users"
+          ORDERS_TABLE: "{{ .settings.prefix }}-orders"
         # Read/write access to the application tables
         custom_policy: |
           {
@@ -105,10 +106,10 @@ components:
                   "dynamodb:Query"
                 ],
                 "Resource": [
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-users",
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-users/index/*",
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-orders",
-                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.context.environment }}-orders/index/*"
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.prefix }}-users",
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.prefix }}-users/index/*",
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.prefix }}-orders",
+                  "arn:aws:dynamodb:{{ .vars.region }}:{{ .settings.environment.account_id }}:table/{{ .settings.prefix }}-orders/index/*"
                 ]
               }
             ]
@@ -124,8 +125,8 @@ components:
         inherits:
           - apigateway_http
       vars:
-        api_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api"
-        description: "Serverless API for {{ .settings.context.environment }}"
+        api_name: "{{ .atmos_stack }}-api"
+        description: "Serverless API for {{ .settings.prefix }}"
         jwt_issuer: "{{ .settings.environment.jwt_issuer }}"
         jwt_audience:
           - "example-app-client-id" # Cognito app client ID
@@ -263,7 +264,7 @@ components:
                     values:
                       # Tightened to this account (orgs/fnx/<stage>/_defaults'
                       # settings.environment.account_id) rather than wildcarding it.
-                      - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/{{ .settings.context.environment }}-order-created"
+                      - "arn:aws:events:{{ .vars.region }}:{{ .settings.environment.account_id }}:rule/{{ .settings.prefix }}-order-created"
 
     # Event bus and routing rules (eventbridge is one rule per instance: the
     # Cloud Posse aws-eventbridge model). Both rules sit on the default bus
@@ -377,19 +378,19 @@ components:
       vars:
         create_dashboard: true
         lambda_functions:
-          - "{{ .settings.context.environment }}-users-api"
-          - "{{ .settings.context.environment }}-order-processor"
-          - "{{ .settings.context.environment }}-daily-reports"
+          - "{{ .settings.prefix }}-users-api"
+          - "{{ .settings.prefix }}-order-processor"
+          - "{{ .settings.prefix }}-daily-reports"
         lambda_duration_monitoring: true
         lambda_duration_threshold: 10000
         lambda_throttle_monitoring: true
-        api_gateway_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api"
+        api_gateway_name: "{{ .atmos_stack }}-api"
         api_gateway_latency_threshold: 2000
         enable_dynamodb_monitoring: true
         # Matches dynamodb/users and dynamodb/orders above (<Environment>-<name>).
         dynamodb_tables:
-          - "{{ .settings.context.environment }}-users"
-          - "{{ .settings.context.environment }}-orders"
+          - "{{ .settings.prefix }}-users"
+          - "{{ .settings.prefix }}-orders"
         alarm_email_subscriptions:
           - "{{ .settings.environment.ops_email }}"
       dependencies:

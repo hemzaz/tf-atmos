@@ -297,7 +297,7 @@ components:
         component: $component_name
       vars:
         tenant: "{{ .settings.context.tenant }}"
-        environment: "{{ .settings.context.environment }}"
+        environment: "{{ .settings.prefix }}"
         enabled: true
         name: "my-${component_name}"
 \`\`\`

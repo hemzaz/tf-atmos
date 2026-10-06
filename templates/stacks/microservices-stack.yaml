@@ -4,11 +4,13 @@
 # compute-optimized node groups, service mesh add-ons, an HTTP API Gateway
 # with JWT auth, and monitoring.
 #
-# Usage: copy into an account/region directory as a top-level stack and set
-# settings.context.environment (the stack name is <tenant>-<stage>-<environment>):
-#   cp templates/stacks/microservices-stack.yaml stacks/orgs/fnx/dev/us-east-1/micro-01.yaml
+# Usage: copy in as a lane beside a stage's own stack (settings.context.name;
+# the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
+# lane (settings.prefix, <region code>-<name>), so it deploys in the same
+# account and region:
+#   cp templates/stacks/microservices-stack.yaml stacks/orgs/fnx/dev/us-east-1/micro.yaml
 #   atmos validate stacks
-#   atmos workflow plan -f plan-environment -s fnx-dev-micro-01
+#   atmos workflow plan -f plan-environment -s fnx-ue1-dev-micro
 # To target another account or region, change the `orgs/fnx/<stage>/_defaults`
 # (org and account defaults) and `mixins/region/<region>` imports.
 
@@ -31,7 +33,7 @@ vars:
 
 settings:
   context:
-    environment: micro-01
+    name: micro
   environment:
     description: "Microservices platform (EKS, service mesh, API Gateway)"
     vpc_cidr: "10.40.0.0/16"
@@ -168,8 +170,8 @@ components:
         inherits:
           - apigateway_http
       vars:
-        api_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api"
-        description: "Microservices API for {{ .settings.context.environment }}"
+        api_name: "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api"
+        description: "Microservices API for {{ .settings.prefix }}"
         jwt_issuer: "{{ .settings.environment.jwt_issuer }}"
         jwt_audience:
           - "example-app-client-id" # Cognito app client ID
@@ -192,7 +194,7 @@ components:
         eks_cluster_name: !terraform.state eks/main .eks_cluster_id
         eks_pod_cpu_threshold: 80
         eks_pod_memory_threshold: 85
-        api_gateway_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api"
+        api_gateway_name: "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api"
         api_gateway_latency_threshold: 1000
         alarm_email_subscriptions:
           - "{{ .settings.environment.ops_email }}"

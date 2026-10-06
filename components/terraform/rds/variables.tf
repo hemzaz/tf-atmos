@@ -44,6 +44,15 @@ variable "allowed_security_groups" {
 variable "identifier" {
   type        = string
   description = "Identifier for the RDS instance"
+
+  # Every name here is <Environment>-<identifier>-<suffix> (main.tf,
+  # secrets-rotation.tf); the longest 64-character-limited one, the EventBridge
+  # rule <...>-rotation-success, leaves the base 47. A lane's Environment is <region code>-<name>: fail at
+  # plan, not at apply.
+  validation {
+    condition     = length("${lookup(var.tags, "Environment", "")}-${var.identifier}") <= 47
+    error_message = "<Environment>-<identifier> must be 47 characters or fewer (its longest derived name, the EventBridge rule <...>-rotation-success, allows 64): shorten identifier or the lane name."
+  }
 }
 
 variable "engine" {

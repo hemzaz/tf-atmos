@@ -31,7 +31,9 @@ templates/, examples/    copy-in component template, stack/config samples, the O
 Names come from `name_template` in `atmos.yaml`: `<tenant>-<environment>-<stage>[-<name>]`, Cloud
 Posse's null-label id order. `environment` is the region code (`ue1`, set by
 `stacks/mixins/region/*`), `stage` the account tier, and the optional `settings.context.name` a lane
-within a stage (fixtures, emulator lanes). Only files under `stacks/orgs/` are stack manifests;
+within a stage (fixtures, emulator lanes, the `templates/stacks` samples). A lane deploys beside its
+stage stack in the same account and region: its names carry the lane (below), and
+`check-lane-names.py` (lint) fails two stacks of one tenant, region and stage that share a name. Only files under `stacks/orgs/` are stack manifests;
 each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/components/` domain files
 (`globals`, `networking`, `security`, `compute`, `services`).
 
@@ -101,7 +103,9 @@ backend's trust: see [State backend](./docs/OPERATIONS.md#state-backend).
   boolean variables start with `is_`, `has_` or `enable_`.
 - Tags (`Tenant`, `Account`, `Environment`, `Stage`, `ManagedBy`) come from
   `stacks/orgs/fnx/_defaults.yaml`, built from `settings.context`, and are applied once through
-  `default_tags` in each `provider.tf`, not per resource.
+  `default_tags` in each `provider.tf`, not per resource. `Environment` is `settings.prefix`: the
+  region code, plus `-<name>` on a lane (`ue1`, `ue1-serverless`). Components start their names with
+  it, and a stack template that repeats such a name writes `{{ .settings.prefix }}-<x>`.
 - Names that are global without an account id (S3 buckets without an account suffix, Cognito
   domains) start with the full id, the stack name `<tenant>-<environment>-<stage>[-<name>]`
   (`{{ .atmos_stack }}` in a template), so a lane gets its own. Account-suffixed names

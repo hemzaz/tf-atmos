@@ -71,7 +71,7 @@ components:
           - kms/defaults
       vars:
         description: Template fixture key
-        alias_name: '{{ .settings.context.environment }}-main'
+        alias_name: '{{ .settings.prefix }}-main'
         deletion_window_in_days: 7
       dependencies:
         components:

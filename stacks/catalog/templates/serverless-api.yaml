@@ -188,7 +188,7 @@ components:
         # The API's OAuth scopes. serverless-api/apigateway's GET and HEAD
         # accept an access token carrying either, the write verbs only write.
         resource_servers:
-          - identifier: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api"
+          - identifier: "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api"
             name: "API Resource Server"
             scope:
               - scope_name: "read"
@@ -208,8 +208,8 @@ components:
               - "email"
               - "openid"
               - "profile"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
             callback_urls:
               - 'https://{{ required "settings.serverless_api.app_domain_name is required" .settings.serverless_api.app_domain_name }}/callback'
             logout_urls:
@@ -225,8 +225,8 @@ components:
               - "email"
               - "openid"
               - "profile"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
             callback_urls:
               - "myapp://callback"
             logout_urls:
@@ -241,8 +241,8 @@ components:
             allowed_oauth_flows:
               - "client_credentials"
             allowed_oauth_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
 
         tags:
           Layer: "authentication"
@@ -837,34 +837,34 @@ components:
             http_method: "GET"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/"
             http_method: "HEAD"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/"
             http_method: "POST"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/"
             http_method: "PUT"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/"
             http_method: "PATCH"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/"
             http_method: "DELETE"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/"
             http_method: "OPTIONS"
             authorization: "NONE"
@@ -872,34 +872,34 @@ components:
             http_method: "GET"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/{proxy+}"
             http_method: "HEAD"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/read"
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/read"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/{proxy+}"
             http_method: "POST"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/{proxy+}"
             http_method: "PUT"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/{proxy+}"
             http_method: "PATCH"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/{proxy+}"
             http_method: "DELETE"
             authorization: "COGNITO_USER_POOLS"
             authorization_scopes:
-              - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-api/write"
+              - "{{ .settings.context.tenant }}-{{ .settings.prefix }}-api/write"
           - resource_path: "/{proxy+}"
             http_method: "OPTIONS"
             authorization: "NONE"

@@ -58,10 +58,10 @@ components:
         # tag on both. The eks component names the cluster "<Environment>-<name>".
         public_subnets_additional_tags:
           "kubernetes.io/role/elb": "1"
-          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
         private_subnets_additional_tags:
           "kubernetes.io/role/internal-elb": "1"
-          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-main": "shared"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
       dependencies:
         components:
           - component: kms/main
@@ -100,10 +100,10 @@ components:
         # tag on both. The eks component names the cluster "<Environment>-<name>".
         public_subnets_additional_tags:
           "kubernetes.io/role/elb": "1"
-          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-data": "shared"
         private_subnets_additional_tags:
           "kubernetes.io/role/internal-elb": "1"
-          "kubernetes.io/cluster/{{ .vars.tags.Environment }}-data": "shared"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-data": "shared"
       dependencies:
         components:
           - component: kms/main

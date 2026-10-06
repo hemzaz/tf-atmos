@@ -22,6 +22,9 @@ NAME ?=
 
 # Derived values (STACK can also be passed directly: make plan STACK=fnx-ue1-prod)
 ENVIRONMENT ?= $(shell ./scripts/stack-name.sh region-code $(REGION))
+ifeq ($(origin STACK)$(strip $(ENVIRONMENT)),undefined)
+$(error No region code for REGION=$(REGION): add stacks/mixins/region/$(REGION).yaml, or pass STACK=<stack>)
+endif
 STACK ?= $(TENANT)-$(ENVIRONMENT)-$(STAGE)$(if $(NAME),-$(NAME))
 
 # Colors for pretty output

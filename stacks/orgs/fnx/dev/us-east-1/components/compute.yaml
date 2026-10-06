@@ -334,7 +334,7 @@ components:
         # named rather than read: monitoring deploys in the last layer, this
         # pool in connectivity (kms/main lets CloudWatch alarms publish to it).
         alarm_sns_topic_arns:
-          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-main-alarms"
+          - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
       dependencies:
         components:
           - component: kms/main

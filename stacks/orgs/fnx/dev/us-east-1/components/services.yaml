@@ -32,7 +32,7 @@ components:
       metadata:
         component: apigateway
       vars:
-        description: "Main API Gateway for {{ .settings.context.tenant }}-{{ .settings.context.environment }}"
+        description: "Main API Gateway for {{ .settings.context.tenant }}-{{ .settings.prefix }}"
         stage_name: "v1"
 
         # API resources
@@ -101,7 +101,7 @@ components:
         component: apigateway
         enabled: false
       vars:
-        description: "Data API Gateway for {{ .settings.context.tenant }}-{{ .settings.context.environment }}"
+        description: "Data API Gateway for {{ .settings.context.tenant }}-{{ .settings.prefix }}"
         stage_name: "v1"
 
         # API resources

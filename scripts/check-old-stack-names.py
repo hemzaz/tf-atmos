@@ -9,9 +9,12 @@ fnx-prod-production, fnx-fixtures-batch) and lived in
 <stage>/<region>/<instance>.yaml. An old name left in a script, workflow, test or
 doc points at a stack that no longer exists, so this fails on any of them.
 
-This file and its test quote the old names and are skipped, as are the
-templates/stacks samples (see SKIP_PATHS); any other line that must quote one
-carries the marker "old-stack-names: allow".
+This file and its test quote the old names and are skipped; any other line
+that must quote one carries the marker "old-stack-names: allow".
+
+Files are those git tracks or would track (git ls-files: ignored files such as
+.terraform/ are left out); outside a usable git work tree the directories are
+walked instead, skipping SKIP_DIRS.
 
 Usage: check-old-stack-names.py [PATH...]   (default: the repository root)
 Exit 0 when clean, 1 on a hit. Pure stdlib (runs in the CI image).
@@ -20,6 +23,7 @@ Exit 0 when clean, 1 on a hit. Pure stdlib (runs in the CI image).
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 ALLOW = "old-stack-names: allow"
@@ -27,10 +31,6 @@ SKIP_DIRS = {".git", ".terraform", ".worktrees", "node_modules", "__pycache__", 
 # Binary or generated files that never hold a stack name.
 SKIP_SUFFIXES = {".png", ".jpg", ".gif", ".ico", ".zip", ".gz", ".pyc", ".lock.hcl"}
 SKIP_FILES = {"check-old-stack-names.py", "test_check_old_stack_names.py"}
-# The copy-in stack samples are rewritten as lanes (settings.context.name) together
-# with the lane prefix on environment-derived names; until then they keep their
-# old instance names.
-SKIP_PATHS = ("templates/stacks/",)
 
 OLD_NAMES = (
     # The stage second: fnx-dev-testenv-01, fnx-prod-production, fnx-core-root,
@@ -59,6 +59,26 @@ def hits(text):
                 break
 
 
+def git_files(path):
+    """The files git tracks or would track under path (ignored ones left out), or None outside a
+    usable work tree (no git, not a repository, or an unsafe owner as in the CI container)."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(path), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True, check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return sorted(path / name for name in out.decode().split("\0") if name)
+
+
+def walked_files(path):
+    for root, dirs, names in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        for name in sorted(names):
+            yield pathlib.Path(root) / name
+
+
 def files(paths):
     for path in paths:
         path = pathlib.Path(path)
@@ -66,13 +86,11 @@ def files(paths):
             if path.name not in SKIP_FILES:
                 yield path
             continue
-        for root, dirs, names in os.walk(path):
-            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
-            for name in sorted(names):
-                file = pathlib.Path(root) / name
-                if (name not in SKIP_FILES and not any(name.endswith(s) for s in SKIP_SUFFIXES)
-                        and not any(p in file.as_posix() for p in SKIP_PATHS)):
-                    yield file
+        listed = git_files(path)
+        for file in walked_files(path) if listed is None else listed:
+            if (file.name not in SKIP_FILES and not any(file.name.endswith(s) for s in SKIP_SUFFIXES)
+                    and not SKIP_DIRS.intersection(file.parts) and file.is_file()):
+                yield file
 
 
 def main(argv):

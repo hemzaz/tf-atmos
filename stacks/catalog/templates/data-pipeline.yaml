@@ -1342,7 +1342,7 @@ components:
               Resource: "arn:aws:states:::athena:startQueryExecution.sync"
               Parameters:
                 QueryString: !terraform.state data-pipeline/glue-database .database_name | "SELECT COUNT(*) FROM " + . + ".processed_events WHERE year = CAST(YEAR(CURRENT_DATE) AS VARCHAR)"
-                WorkGroup: "{{ .settings.context.environment }}-data-pipeline"
+                WorkGroup: "{{ .settings.prefix }}-data-pipeline"
               ResultPath: "$.data_quality"
               Next: "CreateCuratedDataset"
               Catch:
@@ -1411,7 +1411,7 @@ components:
               - "athena:StopQueryExecution"
               - "athena:GetWorkGroup"
             resources:
-              - 'arn:aws:athena:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:workgroup/{{ .settings.context.environment }}-data-pipeline'
+              - 'arn:aws:athena:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:workgroup/{{ .settings.prefix }}-data-pipeline'
           - sid: ReadCatalog
             actions: ["glue:GetDatabase", "glue:GetTable", "glue:GetPartition", "glue:GetPartitions", "glue:BatchGetPartition"]
             resources:

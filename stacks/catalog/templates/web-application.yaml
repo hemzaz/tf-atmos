@@ -232,7 +232,7 @@ components:
       vars:
         # <Environment>-cdn-logs-<account id>. The s3 component takes
         # <Environment> from tags.Environment; the bucket policy below uses
-        # settings.context.environment, which is the same value only because
+        # settings.prefix, which is the same value only because
         # stacks/orgs/fnx/_defaults.yaml sets tags.Environment from it. Change
         # both together (vars are not reliably resolved at template time).
         name: cdn-logs
@@ -253,7 +253,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:PutObject",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-cdn-logs-{{ .settings.environment.account_id }}/*",
+                  "Resource": "arn:aws:s3:::{{ .settings.prefix }}-cdn-logs-{{ .settings.environment.account_id }}/*",
                   "Condition": {
                     "StringEquals": {
                       "s3:x-amz-acl": "bucket-owner-full-control",
@@ -267,7 +267,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:GetBucketAcl",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.environment }}-cdn-logs-{{ .settings.environment.account_id }}",
+                  "Resource": "arn:aws:s3:::{{ .settings.prefix }}-cdn-logs-{{ .settings.environment.account_id }}",
                   "Condition": {
                     "StringEquals": {"aws:SourceAccount": "{{ .settings.environment.account_id }}"},
                     "ArnLike": {"aws:SourceArn": "arn:aws:logs:us-east-1:{{ .settings.environment.account_id }}:delivery-source:*"}
@@ -476,7 +476,7 @@ components:
         component: ecs
         type: real
       vars:
-        cluster_name: "{{ .settings.context.environment }}-webapp"
+        cluster_name: "{{ .settings.prefix }}-webapp"
         fargate_only: true
         enable_container_insights: true
 

@@ -225,8 +225,9 @@ parse_args() {
     fi
 
     # Construct stack name (atmos.yaml name_template); ENVIRONMENT is the
-    # region code, also the resources' Environment tag
-    ENVIRONMENT="$(region_code "$REGION")" || exit 1
+    # resources' Environment tag (settings.prefix): the region code, plus
+    # -<name> on a lane
+    ENVIRONMENT="$(region_code "$REGION")${NAME:+-$NAME}" || exit 1
     STACK_NAME="$(stack_name "$TENANT" "$REGION" "$STAGE" "$NAME")"
 }
 
@@ -653,7 +654,7 @@ print_summary() {
     echo "  Name:        $STACK_NAME"
     echo "  Tenant:      $TENANT"
     echo "  Stage:       $STAGE"
-    echo "  Environment: $ENVIRONMENT (region code)"
+    echo "  Environment: $ENVIRONMENT (Environment tag)"
     echo "  Region:      $REGION"
     echo "  AWS Account: ${AWS_ACCOUNT_ID}"
     echo
