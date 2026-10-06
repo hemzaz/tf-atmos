@@ -65,7 +65,7 @@ mock_provider "random" {}
 override_resource {
   target = aws_iam_role.vpc_cni
   values = {
-    arn = "arn:aws:iam::123456789012:role/production-main-vpc-cni-role"
+    arn = "arn:aws:iam::123456789012:role/ue1-main-vpc-cni-role"
   }
 }
 
@@ -74,7 +74,7 @@ override_resource {
 override_resource {
   target = aws_iam_role.node
   values = {
-    arn = "arn:aws:iam::123456789012:role/production-main-node-role"
+    arn = "arn:aws:iam::123456789012:role/ue1-main-node-role"
   }
 }
 
@@ -83,7 +83,7 @@ variables {
   name       = "main"
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {
-    Environment = "production"
+    Environment = "ue1"
     Stage       = "prod"
   }
   node_groups = {
@@ -194,7 +194,7 @@ run "cni_policy_is_on_the_vpc_cni_irsa_role_not_the_node_role" {
   }
 
   assert {
-    condition     = aws_iam_role.vpc_cni[0].name == "production-main-vpc-cni-role"
+    condition     = aws_iam_role.vpc_cni[0].name == "ue1-main-vpc-cni-role"
     error_message = "The vpc-cni role must be <cluster>-vpc-cni-role."
   }
 
@@ -210,8 +210,8 @@ run "cni_policy_is_on_the_vpc_cni_irsa_role_not_the_node_role" {
   assert {
     condition = (
       aws_eks_addon.vpc_cni[0].addon_name == "vpc-cni" &&
-      aws_eks_addon.vpc_cni[0].service_account_role_arn == "arn:aws:iam::123456789012:role/production-main-vpc-cni-role" &&
-      output.vpc_cni_service_account_role_arn == "arn:aws:iam::123456789012:role/production-main-vpc-cni-role"
+      aws_eks_addon.vpc_cni[0].service_account_role_arn == "arn:aws:iam::123456789012:role/ue1-main-vpc-cni-role" &&
+      output.vpc_cni_service_account_role_arn == "arn:aws:iam::123456789012:role/ue1-main-vpc-cni-role"
     )
     error_message = "The vpc-cni addon must get the IRSA role as service_account_role_arn."
   }
@@ -273,7 +273,7 @@ run "list_entries_for_ci_roles" {
   assert {
     condition = (
       length(aws_eks_access_entry.standard) == 2 &&
-      alltrue([for e in aws_eks_access_entry.standard : e.type == "STANDARD" && e.cluster_name == "production-main"])
+      alltrue([for e in aws_eks_access_entry.standard : e.type == "STANDARD" && e.cluster_name == "ue1-main"])
     )
     error_message = "Each listed principal must get a STANDARD access entry on the cluster."
   }

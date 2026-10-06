@@ -12,7 +12,7 @@ locals {
 
   # Every name is "<Environment>-<name>", the repo's name_prefix convention.
   # var.name must not repeat the Environment (see its validation), so the
-  # prod cluster is "production-main", not "production-production-main".
+  # prod cluster is "ue1-main", not "ue1-ue1-main".
   name_prefix            = "${local.environment}-${var.name}"
   cluster_name           = local.name_prefix
   cluster_log_group_name = "/aws/eks/${local.cluster_name}/cluster"

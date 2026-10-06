@@ -44,7 +44,8 @@ region_code() {
     local region="$1" mixin code
     mixin="${STACK_NAME_REPO_ROOT}/stacks/mixins/region/${region}.yaml"
     if [[ -f "$mixin" ]]; then
-        code="$(awk '/^settings:/{s=1;next} s&&/^  context:/{c=1;next} c&&/^    environment:/{print $2; exit} /^[^ #]/{s=0;c=0}' "$mixin")"
+        # The value may be quoted in YAML (environment: "ue1"): drop the quotes.
+        code="$(awk '/^settings:/{s=1;next} s&&/^  context:/{c=1;next} c&&/^    environment:/{print $2; exit} /^[^ #]/{s=0;c=0}' "$mixin" | tr -d "\"'")"
         if [[ -n "$code" ]]; then
             echo "$code"
             return 0

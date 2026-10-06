@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -89,6 +90,29 @@ class MainTest(unittest.TestCase):
             "img.png": "fnx-dev-testenv-01",
         })
         self.assertEqual(code, 0)
+
+    def test_git_work_tree_skips_ignored_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q", root], check=True)
+            for name, text in {
+                ".gitignore": "build/\n",
+                "build/out.txt": "fnx-dev-testenv-01",  # ignored: not reported
+                "untracked.md": "fnx-prod-production",  # untracked, not ignored: reported
+                "docs/a.md": "fnx-ue1-dev",
+            }.items():
+                path = pathlib.Path(root, name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = check.main([root])
+        self.assertEqual(code, 1)
+        self.assertIn("untracked.md:1:", out.getvalue())
+        self.assertNotIn("out.txt", out.getvalue())
+
+    def test_outside_git_the_tree_is_walked(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.assertIsNone(check.git_files(pathlib.Path(root)))
 
 
 if __name__ == "__main__":

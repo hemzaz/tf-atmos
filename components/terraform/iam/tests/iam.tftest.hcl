@@ -210,7 +210,7 @@ run "ci_apply_kms_policy_scoped_to_the_key_aliases" {
     ci_apply_role_enabled              = true
     ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
     ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
-    ci_apply_kms_key_aliases           = ["alias/production-main"]
+    ci_apply_kms_key_aliases           = ["alias/ue1-main"]
   }
 
   assert {
@@ -233,7 +233,7 @@ run "ci_apply_kms_policy_scoped_to_the_key_aliases" {
   assert {
     condition = (
       toset(jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[0].Action) == toset(["kms:DescribeKey", "kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*"])
-      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[0].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/production-main"
+      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[0].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/ue1-main"
     )
     error_message = "The key-use statement must grant DescribeKey (required by eks:CreateCluster/UpdateClusterConfig on the calling principal) plus Encrypt/Decrypt/GenerateDataKey* for the other kms/main consumers this role deploys, scoped to exactly the configured alias(es) via kms:ResourceAliases."
   }
@@ -241,7 +241,7 @@ run "ci_apply_kms_policy_scoped_to_the_key_aliases" {
   assert {
     condition = (
       toset(jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Action) == toset(["kms:CreateGrant", "kms:ListGrants", "kms:RevokeGrant"])
-      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/production-main"
+      && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Condition["ForAnyValue:StringEquals"]["kms:ResourceAliases"] == "alias/ue1-main"
       && jsondecode(aws_iam_role_policy.ci_apply_kms[0].policy).Statement[1].Condition["Bool"]["kms:GrantIsForAWSResource"] == "true"
     )
     error_message = "CreateGrant/ListGrants/RevokeGrant must be split into their own statement, scoped to the configured alias(es) AND kms:GrantIsForAWSResource = true (AWS's documented pattern for AWS-service-managed grants, e.g. the EKS cluster secrets grant this role deploys)."

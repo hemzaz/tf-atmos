@@ -66,7 +66,7 @@ variables {
   name       = "main"
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {
-    Environment = "production"
+    Environment = "ue1"
     Stage       = "prod"
     Tenant      = "fnx"
   }
@@ -84,22 +84,22 @@ run "prod_names_do_not_repeat_the_environment" {
   command = apply
 
   assert {
-    condition     = aws_eks_cluster.default[0].name == "production-main"
-    error_message = "The prod cluster must be named production-main."
+    condition     = aws_eks_cluster.default[0].name == "ue1-main"
+    error_message = "The prod cluster must be named ue1-main."
   }
 
   assert {
-    condition     = aws_iam_role.default[0].name == "production-main-cluster-role" && aws_iam_role.node[0].name == "production-main-node-role"
+    condition     = aws_iam_role.default[0].name == "ue1-main-cluster-role" && aws_iam_role.node[0].name == "ue1-main-node-role"
     error_message = "IAM role names must be <Environment>-<name>-{cluster,node}-role."
   }
 
   assert {
-    condition     = aws_cloudwatch_log_group.default[0].name == "/aws/eks/production-main/cluster"
+    condition     = aws_cloudwatch_log_group.default[0].name == "/aws/eks/ue1-main/cluster"
     error_message = "The log group must be /aws/eks/<cluster>/cluster, as EKS writes it."
   }
 
   assert {
-    condition     = aws_launch_template.default["workers"].name_prefix == "production-main-workers-"
+    condition     = aws_launch_template.default["workers"].name_prefix == "ue1-main-workers-"
     error_message = "The node group name base must be <cluster>-<node group>."
   }
 
@@ -109,7 +109,7 @@ run "prod_names_do_not_repeat_the_environment" {
         [aws_eks_cluster.default[0].name, aws_iam_role.default[0].name, aws_iam_role.node[0].name],
         [for lt in aws_launch_template.default : lt.name_prefix],
         [for ng in aws_eks_node_group.default : ng.node_group_name],
-      ) : length(regexall("production-production", n)) == 0
+      ) : length(regexall("ue1-ue1", n)) == 0
     ])
     error_message = "No name may contain the Environment twice."
   }
@@ -161,7 +161,7 @@ run "scalar_outputs_have_the_consumer_formats" {
 
   # external-secrets and the kubernetes providers want the name, not the ARN.
   assert {
-    condition     = output.eks_cluster_id == "production-main" && !startswith(output.eks_cluster_id, "arn:")
+    condition     = output.eks_cluster_id == "ue1-main" && !startswith(output.eks_cluster_id, "arn:")
     error_message = "eks_cluster_id must be the cluster name."
   }
 
@@ -180,7 +180,7 @@ run "scalar_outputs_have_the_consumer_formats" {
   }
 
   assert {
-    condition     = output.cloudwatch_log_group_name == "/aws/eks/production-main/cluster"
+    condition     = output.cloudwatch_log_group_name == "/aws/eks/ue1-main/cluster"
     error_message = "cloudwatch_log_group_name must be the control-plane log group."
   }
 
@@ -269,7 +269,7 @@ run "name_repeating_the_environment_is_rejected" {
   command = plan
 
   variables {
-    name = "production-main"
+    name = "ue1-main"
   }
 
   expect_failures = [var.name]
@@ -279,7 +279,7 @@ run "name_too_long_for_iam_is_rejected" {
   command = plan
 
   variables {
-    name        = "a-very-long-cluster-name-that-overflows-iam"
+    name        = "a-very-long-cluster-name-that-overflows-iam-roles"
     node_groups = {}
   }
 
@@ -540,12 +540,12 @@ run "names_that_merely_resemble_the_environment_are_accepted" {
   command = plan
 
   variables {
-    name = "production2"
+    name = "ue12"
   }
 
   assert {
-    condition     = aws_eks_cluster.default[0].name == "production-production2"
-    error_message = "production2 does not start with \"production-\" and must be accepted."
+    condition     = aws_eks_cluster.default[0].name == "ue1-ue12"
+    error_message = "ue12 does not start with \"ue1-\" and must be accepted."
   }
 }
 
@@ -557,7 +557,7 @@ run "prod_prefix_is_not_the_environment" {
   }
 
   assert {
-    condition     = aws_eks_cluster.default[0].name == "production-prod-main"
+    condition     = aws_eks_cluster.default[0].name == "ue1-prod-main"
     error_message = "prod-main is not the Environment and must be accepted."
   }
 }
@@ -566,18 +566,18 @@ run "environment_in_another_case_is_rejected" {
   command = plan
 
   variables {
-    name = "Production-main"
+    name = "UE1-main"
   }
 
   expect_failures = [var.name]
 }
 
-# "production-" (11) + 40 + "-cluster-role" (13) = 64, IAM's limit exactly.
+# "ue1-" (4) + 47 + "-cluster-role" (13) = 64, IAM's limit exactly.
 run "longest_name_is_accepted" {
   command = plan
 
   variables {
-    name        = "abcdefghij-abcdefghij-abcdefghij-abcdefg"
+    name        = "abcdefghij-abcdefghij-abcdefghij-abcdefghij-abc"
     node_groups = {}
   }
 
@@ -587,18 +587,18 @@ run "longest_name_is_accepted" {
   }
 }
 
-# "production-main-" (16) + 38 = 54, the node group budget at random_pet_length 1.
+# "ue1-main-" (9) + 45 = 54, the node group budget at random_pet_length 1.
 run "longest_node_group_key_is_accepted" {
   command = plan
 
   variables {
     node_groups = {
-      abcdefghij-abcdefghij-abcdefghij-abcde = {}
+      abcdefghij-abcdefghij-abcdefghij-abcdefghij-a = {}
     }
   }
 
   assert {
-    condition     = length(aws_launch_template.default["abcdefghij-abcdefghij-abcdefghij-abcde"].name_prefix) == 55
+    condition     = length(aws_launch_template.default["abcdefghij-abcdefghij-abcdefghij-abcdefghij-a"].name_prefix) == 55
     error_message = "A 54-character name base (plus \"-\") is within the node group budget."
   }
 }

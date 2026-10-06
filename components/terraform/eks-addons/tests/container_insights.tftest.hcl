@@ -51,13 +51,13 @@ mock_provider "time" {}
 
 variables {
   region                 = "us-east-1"
-  cluster_name           = "production-main"
+  cluster_name           = "ue1-main"
   host                   = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
   oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
   oidc_provider_url      = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
   tags = {
-    Environment = "production"
+    Environment = "ue1"
   }
 }
 
@@ -75,7 +75,7 @@ run "switch_installs_the_addon_role_and_encrypted_log_groups" {
   }
 
   assert {
-    condition     = aws_eks_addon.container_insights["main"].addon_name == "amazon-cloudwatch-observability" && aws_eks_addon.container_insights["main"].cluster_name == "production-main"
+    condition     = aws_eks_addon.container_insights["main"].addon_name == "amazon-cloudwatch-observability" && aws_eks_addon.container_insights["main"].cluster_name == "ue1-main"
     error_message = "The switch must install the amazon-cloudwatch-observability add-on on this cluster."
   }
 
@@ -104,10 +104,10 @@ run "switch_installs_the_addon_role_and_encrypted_log_groups" {
 
   assert {
     condition = toset([for g in aws_cloudwatch_log_group.container_insights : g.name]) == toset([
-      "/aws/containerinsights/production-main/application",
-      "/aws/containerinsights/production-main/dataplane",
-      "/aws/containerinsights/production-main/host",
-      "/aws/containerinsights/production-main/performance",
+      "/aws/containerinsights/ue1-main/application",
+      "/aws/containerinsights/ue1-main/dataplane",
+      "/aws/containerinsights/ue1-main/host",
+      "/aws/containerinsights/ue1-main/performance",
     ])
     error_message = "The four Container Insights log groups of this cluster must be created."
   }
@@ -137,7 +137,7 @@ run "switch_installs_the_addon_role_and_encrypted_log_groups" {
   }
 
   assert {
-    condition     = aws_iam_role.container_insights["main"].name == "production-main-container-insights-role"
+    condition     = aws_iam_role.container_insights["main"].name == "ue1-main-container-insights-role"
     error_message = "The role name carries the Environment once."
   }
 }

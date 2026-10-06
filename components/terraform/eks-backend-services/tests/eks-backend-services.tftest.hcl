@@ -95,8 +95,8 @@ run "redis_enabled_creates_its_own_external_secret_and_env_var" {
 
   variables {
     redis_enabled    = true
-    redis_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:redis-auth/production/production-cache-AbCdEf"
-    redis_host       = "production-cache.abcdefg.use1.cache.amazonaws.com"
+    redis_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:redis-auth/ue1/ue1-prod-cache-AbCdEf"
+    redis_host       = "ue1-prod-cache.abcdefg.use1.cache.amazonaws.com"
   }
 
   assert {

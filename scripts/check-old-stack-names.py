@@ -12,6 +12,10 @@ doc points at a stack that no longer exists, so this fails on any of them.
 This file and its test quote the old names and are skipped; any other line
 that must quote one carries the marker "old-stack-names: allow".
 
+Files are those git tracks or would track (git ls-files: ignored files such as
+.terraform/ are left out); outside a usable git work tree the directories are
+walked instead, skipping SKIP_DIRS.
+
 Usage: check-old-stack-names.py [PATH...]   (default: the repository root)
 Exit 0 when clean, 1 on a hit. Pure stdlib (runs in the CI image).
 """
@@ -19,6 +23,7 @@ Exit 0 when clean, 1 on a hit. Pure stdlib (runs in the CI image).
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 ALLOW = "old-stack-names: allow"
@@ -54,6 +59,26 @@ def hits(text):
                 break
 
 
+def git_files(path):
+    """The files git tracks or would track under path (ignored ones left out), or None outside a
+    usable work tree (no git, not a repository, or an unsafe owner as in the CI container)."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(path), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True, check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return sorted(path / name for name in out.decode().split("\0") if name)
+
+
+def walked_files(path):
+    for root, dirs, names in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        for name in sorted(names):
+            yield pathlib.Path(root) / name
+
+
 def files(paths):
     for path in paths:
         path = pathlib.Path(path)
@@ -61,11 +86,11 @@ def files(paths):
             if path.name not in SKIP_FILES:
                 yield path
             continue
-        for root, dirs, names in os.walk(path):
-            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
-            for name in sorted(names):
-                if name not in SKIP_FILES and not any(name.endswith(s) for s in SKIP_SUFFIXES):
-                    yield pathlib.Path(root) / name
+        listed = git_files(path)
+        for file in walked_files(path) if listed is None else listed:
+            if (file.name not in SKIP_FILES and not any(file.name.endswith(s) for s in SKIP_SUFFIXES)
+                    and not SKIP_DIRS.intersection(file.parts) and file.is_file()):
+                yield file
 
 
 def main(argv):
