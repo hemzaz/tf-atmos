@@ -34,10 +34,8 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
 - Stage `fixtures` (`fnx-fixtures-<name>`) puts each catalog template under the checks and is
   never deployed; `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) relaxes a
   template until its port PR removes the entry.
-- 43 of the 49 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,
-  `iam`, `idp-platform`, `kms`, `secretsmanager`); many use it in resource names.
-- `idp-platform` calls `../eks`, `../rds`, `../acm` as modules: grep for `source = "../<component>"`
-  before changing their variables.
+- 43 of the 48 root modules validate a non-empty `tags.Environment` (all but `backend`, `dns`,
+  `iam`, `kms`, `secretsmanager`); many use it in resource names.
 - checkov's HCL parser rejects a unary `!x`/`-x` that ends a line before a line starting with a binary
   operator (`&&`, `||`, ...) and skips the file: write `x == false` or `(!x)`. The lint step
   `hcl-unary-newline` (`scripts/check-hcl-unary-newline.py`) catches it.

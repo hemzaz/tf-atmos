@@ -14,7 +14,7 @@ names follow Cloud Posse's; node-group fields follow `terraform-aws-eks-node-gro
 - Used by: `eks-addons`, `external-secrets`, `eks-backend-services` (cluster ID, endpoint, base64 CA,
   OIDC issuer with `https://` and its provider ARN), `rds/main` and `elasticache/main`
   (`.eks_cluster_managed_security_group_id`), `monitoring` (`.eks_cluster_id`).
-- `idp-platform` calls this component as a module (`source = "../eks"`).
+- The `idp-platform` template's `idp-platform/eks` instance.
 
 ## Access model
 

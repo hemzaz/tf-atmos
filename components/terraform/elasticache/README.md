@@ -42,7 +42,7 @@ state or outputs.
   Rotating the secret alone desyncs the two.
 - A secret version replaced alone or deleted out of band, or an apply that fails between the secret
   and the cache, leaves them disagreeing: bump `auth_token_version` and apply again.
-- The token is not read back from Secrets Manager (idp-platform's pattern): the CI plan role has no
+- The token is not read back from Secrets Manager: the CI plan role has no
   `secretsmanager:GetSecretValue`, and `mock_provider` tests reject any aws ephemeral resource.
 - With a rotation Lambda managing the token out of band (the `microservices-platform` template),
   turn off `store_auth_token_in_secrets_manager` and leave `auth_token_version` alone: the

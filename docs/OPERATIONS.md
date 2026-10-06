@@ -158,8 +158,6 @@ atmos workflow deploy -f deploy-template -s <stack>          # a stack template 
 Template readiness follows `KNOWN_BROKEN_FIXTURES` in `workflows/scripts/common/fixtures.py`
 (see [Template fixtures](#template-fixtures)): every template (`batch-processing`, `data-pipeline`,
 `idp-platform`, `microservices-platform`, `serverless-api`, `web-application`) passes every check.
-The `idp-platform` template replaces the unsupported `components/terraform/idp-platform`
-component, which no stack deploys.
 
 ## In-cluster components
 

@@ -641,8 +641,8 @@ def ref_shape(e, ctx):
     m = re.match(r'^module\.(' + IDENT + r')\.(' + IDENT + r')$', e)
     if m:
         # A module with a LOCAL source is just another directory in this
-        # repository -- kms wraps _library/security/kms-multi-region, and
-        # idp-platform calls ../eks and ../rds -- so read its outputs too. A
+        # repository -- kms wraps _library/security/kms-multi-region -- so
+        # read its outputs too. A
         # registry or git module stays UNKNOWN: its source is not here.
         src = comp.modules.get(m.group(1), '').strip().strip('"')
         if not src.startswith(('./', '../')):

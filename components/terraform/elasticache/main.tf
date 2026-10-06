@@ -147,7 +147,7 @@ resource "aws_vpc_security_group_egress_rule" "replication" {
 }
 
 resource "aws_elasticache_replication_group" "main" {
-  #checkov:skip=CKV_AWS_31:False positive, the check reads only auth_token; transit encryption is forced on and the token is set write-only through auth_token_wo (idp-platform's replication group carries the same skip)
+  #checkov:skip=CKV_AWS_31:False positive, the check reads only auth_token; transit encryption is forced on and the token is set write-only through auth_token_wo
   count = local.enabled ? 1 : 0
 
   replication_group_id = local.name
@@ -259,7 +259,7 @@ resource "aws_cloudwatch_log_group" "log_delivery" {
 # deleted out of band, or an apply that fails between the two, needs an
 # auth_token_version bump: both are then re-sent.
 #
-# No ephemeral read back from Secrets Manager (idp-platform's old pattern): the
+# No ephemeral read back from Secrets Manager: the
 # CI plan role (ReadOnlyAccess) has no secretsmanager:GetSecretValue, and
 # mock_provider tests cannot run a module with any aws ephemeral resource.
 ephemeral "random_password" "auth_token" {
