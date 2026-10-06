@@ -115,7 +115,7 @@ components:
       metadata:
         component: network
       vars:
-        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        name_prefix: '{{ .atmos_stack }}'
         create_vpc_peering: true
         requester_vpc_id: !terraform.state vpc/main .vpc_id
         accepter_vpc_id: !terraform.state vpc/services .vpc_id

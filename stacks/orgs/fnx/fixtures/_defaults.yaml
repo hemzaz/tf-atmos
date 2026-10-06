@@ -49,7 +49,7 @@ components:
         github_oidc_repository: "hemzaz/tf-atmos"
         github_oidc_default_branch: "master"
         github_oidc_create_provider: true
-        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-ci"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
 

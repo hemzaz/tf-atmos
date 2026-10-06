@@ -26,7 +26,7 @@ components:
         inherits:
           - cognito/defaults
       vars:
-        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        name_prefix: '{{ .atmos_stack }}'
         clients:
           api:
             generate_secret: true

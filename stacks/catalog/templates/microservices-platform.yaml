@@ -227,7 +227,7 @@ components:
         alarm_sns_topic_arns:
           - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.context.environment }}-monitoring-alarms"
         runner_labels:
-          - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-microservices"
+          - "{{ .atmos_stack }}-microservices"
         tags:
           Layer: "ci"
           Platform: "microservices"
@@ -388,7 +388,7 @@ components:
       # CI runs it on microservices/github-runners, in this cluster's VPC.
       settings:
         github:
-          runner_label: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-microservices"
+          runner_label: "{{ .atmos_stack }}-microservices"
       vars:
         cluster_name: !terraform.state microservices/eks .eks_cluster_id
         host: !terraform.state microservices/eks .eks_cluster_endpoint
@@ -485,7 +485,7 @@ components:
       # CI runs it on microservices/github-runners, in this cluster's VPC.
       settings:
         github:
-          runner_label: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-microservices"
+          runner_label: "{{ .atmos_stack }}-microservices"
       vars:
         cluster_name: !terraform.state microservices/eks .eks_cluster_id
         host: !terraform.state microservices/eks .eks_cluster_endpoint

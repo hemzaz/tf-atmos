@@ -253,8 +253,6 @@ class CheckClusterApiCiTest(unittest.TestCase):
             self.assertEqual(check_cluster_api_ci.check_network_paths(stacks, CLUSTER), [])
 
     # In-vpc runners: the CI path into a private cluster.
-    CONTEXT = {"tenant": "fnx", "environment": "ue1", "stage": "dev"}
-
     def runner_stack(self, admitted=True, labels=("fnx-ue1-dev",), runner_label=None):
         pool = instance("github-runners")
         pool["vars"].update(vpc_id="!terraform.state vpc/main .vpc_id", runner_labels=list(labels))
@@ -268,7 +266,7 @@ class CheckClusterApiCiTest(unittest.TestCase):
         github = {"runner": "in-vpc"}
         if runner_label:
             github["runner_label"] = runner_label
-        addon_["settings"] = {"github": github, "context": self.CONTEXT}
+        addon_["settings"] = {"github": github}
         return stacks_with(**{
             "vpc/main": instance("vpc"),
             "github-runners/main": pool,
@@ -293,6 +291,15 @@ class CheckClusterApiCiTest(unittest.TestCase):
         errors = check_cluster_api_ci.check_runner_paths(self.runner_stack(labels=("other",)), CLUSTER)
         self.assertEqual(len(errors), 1, errors)
         self.assertIn("labelled 'fnx-ue1-dev', but no deployable github-runners instance", errors[0])
+
+    def test_lane_label_is_the_stack_name(self):
+        # A lane's full id carries its name: fnx-ue1-dev-perf, not fnx-ue1-dev.
+        lane = {"fnx-ue1-dev-perf": self.runner_stack(labels=("fnx-ue1-dev-perf",))["fnx-ue1-dev"]}
+        self.assertEqual(check_cluster_api_ci.check_runner_paths(lane, CLUSTER), [])
+        lane = {"fnx-ue1-dev-perf": self.runner_stack()["fnx-ue1-dev"]}
+        errors = check_cluster_api_ci.check_runner_paths(lane, CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("labelled 'fnx-ue1-dev-perf'", errors[0])
 
     def test_runner_label_setting_picks_another_pool(self):
         stacks = self.runner_stack(labels=("fnx-ue1-dev-microservices",), runner_label="fnx-ue1-dev-microservices")

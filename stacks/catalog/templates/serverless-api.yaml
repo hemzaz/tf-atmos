@@ -139,7 +139,7 @@ components:
         inherits:
           - cognito/defaults
       vars:
-        name_prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}"
+        name_prefix: "{{ .atmos_stack }}"
 
         # Threat protection in audit mode (a Plus-plan feature; the component
         # validates the pair). catalog/cognito/defaults sets ENFORCED.
@@ -183,7 +183,7 @@ components:
         # the code flow's authorize endpoint, and the api client's
         # client_credentials token endpoint, which the component requires a
         # domain for.
-        domain_prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api"
+        domain_prefix: "{{ .atmos_stack }}-api"
 
         # The API's OAuth scopes. serverless-api/apigateway's GET and HEAD
         # accept an access token carrying either, the write verbs only write.
@@ -388,7 +388,7 @@ components:
           - s3/defaults
       vars:
         name: "api-assets"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-assets"
+        bucket_name: "{{ .atmos_stack }}-api-assets"
         allow_cloudfront_oac_read: true
         lifecycle_configuration_rules:
           - id: "noncurrent-versions"
@@ -410,7 +410,7 @@ components:
           - s3/defaults
       vars:
         name: "api-uploads"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-uploads"
+        bucket_name: "{{ .atmos_stack }}-api-uploads"
         cors_configuration:
           - allowed_headers:
               - "*"
@@ -466,7 +466,7 @@ components:
         # change both together (vars are not reliably resolved at template
         # time).
         name: "api-cdn-logs"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs"
+        bucket_name: "{{ .atmos_stack }}-api-cdn-logs"
         lifecycle_configuration_rules:
           - id: "expire-logs"
             abort_incomplete_multipart_upload_days: 7
@@ -484,7 +484,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:PutObject",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs/*",
+                  "Resource": "arn:aws:s3:::{{ .atmos_stack }}-api-cdn-logs/*",
                   "Condition": {
                     "StringEquals": {
                       "s3:x-amz-acl": "bucket-owner-full-control",
@@ -498,7 +498,7 @@ components:
                   "Effect": "Allow",
                   "Principal": {"Service": "delivery.logs.amazonaws.com"},
                   "Action": "s3:GetBucketAcl",
-                  "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-api-cdn-logs",
+                  "Resource": "arn:aws:s3:::{{ .atmos_stack }}-api-cdn-logs",
                   "Condition": {
                     "StringEquals": {"aws:SourceAccount": "{{ .settings.environment.account_id }}"},
                     "ArnLike": {"aws:SourceArn": "arn:aws:logs:us-east-1:{{ .settings.environment.account_id }}:delivery-source:*"}

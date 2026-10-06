@@ -123,6 +123,19 @@ class CheckStateKeysTest(unittest.TestCase):
             "iam/ci": instance("fnx-ue1-prod-iam-ci", key_prefix="iam"),
         }))
 
+    def test_lane_named_like_an_instance_suffix_fails(self):
+        # Lane fnx-ue1-prod-main's vpc has workspace fnx-ue1-prod-main, which is
+        # also fnx-ue1-prod's vpc/main workspace.
+        stacks = stacks_with(**{"vpc/main": prod(), "vpc/x": instance("fnx-ue1-prod-main")})
+        stacks["fnx-ue1-prod-main"] = {"components": {"terraform": {"vpc": instance("fnx-ue1-prod-main")}}}
+        self.assert_has(stacks, "fnx-ue1-prod-main: vpc and fnx-ue1-prod: vpc/x share the state key "
+                                "'vpc/fnx-ue1-prod-main/terraform.tfstate'")
+
+    def test_lane_with_its_own_keys_passes(self):
+        stacks = stacks_with(**{"vpc/main": prod()})
+        stacks["fnx-ue1-prod-perf"] = {"components": {"terraform": {"vpc/main": instance("fnx-ue1-prod-perf")}}}
+        self.assert_errors(stacks)
+
     def test_isolation_does_not_depend_on_where_the_stage_sits_in_the_name(self):
         # The Q4 names put the region code before the stage: the pairs still split them.
         roles = access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging"), prod=("fnx-ue1-prod", "fnx-ue2-prod"),

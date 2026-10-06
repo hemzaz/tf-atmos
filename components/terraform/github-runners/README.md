@@ -38,7 +38,8 @@ is useless, and no reusable registration credential exists anywhere.
 - Catalog: `github-runners/defaults`, with one instance per workload-account VPC.
   - `vpc_id` and `subnet_ids` come from the vpc instance's private subnets, which need a NAT path
     to GitHub. They replace Cloud Posse's remote-state read.
-  - `runner_labels` is the stack's full id `<tenant>-<environment>-<stage>`, built from context.
+  - `runner_labels` is the stack's full id, its name `<tenant>-<environment>-<stage>[-<name>]`
+    (`{{ .atmos_stack }}`).
 - Used by:
   - an eks instance admits `.security_group_id` in `allowed_security_group_ids`;
   - CI raises `.autoscaling_group_name`'s desired capacity for `runs-on: [self-hosted, <full id>]`

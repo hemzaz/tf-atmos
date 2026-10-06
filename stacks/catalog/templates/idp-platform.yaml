@@ -121,7 +121,7 @@ components:
           - s3/defaults
       vars:
         name: idp-artifacts
-        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-artifacts'
+        bucket_name: '{{ .atmos_stack }}-idp-artifacts'
         tags:
           Layer: "storage"
           Platform: "idp"
@@ -134,7 +134,7 @@ components:
           - s3/defaults
       vars:
         name: idp-backups
-        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-backups'
+        bucket_name: '{{ .atmos_stack }}-idp-backups'
         tags:
           Layer: "storage"
           Platform: "idp"
@@ -147,7 +147,7 @@ components:
           - s3/defaults
       vars:
         name: idp-techdocs
-        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-techdocs'
+        bucket_name: '{{ .atmos_stack }}-idp-techdocs'
         tags:
           Layer: "storage"
           Platform: "idp"
@@ -162,7 +162,7 @@ components:
           - s3/defaults
       vars:
         name: idp-uploads
-        bucket_name: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-idp-uploads'
+        bucket_name: '{{ .atmos_stack }}-idp-uploads'
         versioning_enabled: false
         cors_configuration:
           - id: "platform-uploads"

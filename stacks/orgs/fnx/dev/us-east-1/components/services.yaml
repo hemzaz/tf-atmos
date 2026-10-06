@@ -17,7 +17,7 @@ components:
         inherits:
           - cognito/defaults
       vars:
-        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        name_prefix: '{{ .atmos_stack }}'
         # Dev only: a deletable pool, so tearing the environment down does not
         # leave one behind. Staging and prod keep deletion protection on.
         deletion_protection: false

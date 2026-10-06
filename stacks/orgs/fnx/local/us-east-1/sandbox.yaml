@@ -202,7 +202,7 @@ components:
       metadata:
         component: cognito
       vars:
-        name_prefix: "fnx-sandbox-local"
+        name_prefix: "{{ .atmos_stack }}"
         deletion_protection: false
         # Two Floci limits shape this instance, neither a component defect:
         #   - SetUserPoolMfaConfig is unimplemented, and the provider calls it

@@ -9,8 +9,8 @@
 # subnet_ids (the vpc instance's .vpc_id / .private_subnet_ids) and the owner's
 # GitHub App IDs, and declare that vpc instance in dependencies.components.
 #
-# runner_labels is the stack's full id, from context (never a literal stack
-# name), which CI's self-hosted jobs ask for: runs-on: [self-hosted, <full id>].
+# runner_labels is the stack's full id, its name (.atmos_stack, never a literal
+# stack name), which CI's self-hosted jobs ask for: runs-on: [self-hosted, <full id>].
 # github_scope is this repository: repository runners, since its owner is a
 # user account, which has no organization runners.
 
@@ -27,7 +27,7 @@ components:
         enabled: true
         github_scope: hemzaz/tf-atmos
         runner_labels:
-          - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}"
+          - "{{ .atmos_stack }}"
         # Bump both together, from the release notes' linux-x64 SHA.
         runner_version: "2.337.0"
         runner_sha256: "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"

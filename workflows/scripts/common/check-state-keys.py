@@ -23,7 +23,10 @@ This holds whatever the stack names look like, so it does not depend on where
 the stage sits in name_template. Stage fixtures is skipped: its stacks are
 never deployed and have no access role. Layout checks stay for every instance:
   - the workspace and backend.workspace_key_prefix contain no "/";
-  - backend.key is exactly "terraform.tfstate" (every instance uses it).
+  - backend.key is exactly "terraform.tfstate" (every instance uses it);
+  - no two stacks share a state key. Atmos names an instance's workspace
+    <stack>-<instance suffix> (fnx-ue1-dev-main for vpc/main), so a lane named
+    like a suffix (fnx-ue1-dev-main's vpc) would read and write its parent's state.
 
 Every s3 backend also points at the one bucket's region: backend.region must equal the
 region of the stack that deploys the "backend" component (backend/main, fnx-ue1-core),
@@ -193,6 +196,7 @@ def check(stacks: dict) -> list[str]:
         if not roles:
             errors.append(f"the deployed '{BACKEND_COMPONENT}' instance has no access_roles")
     objects = []
+    owners = {}
     for stack_name, stack in sorted(stacks.items()):
         instances = (stack.get("components") or {}).get("terraform") or {}
         for name, instance in sorted(instances.items()):
@@ -200,14 +204,20 @@ def check(stacks: dict) -> list[str]:
                 continue
             where = f"{stack_name}: {name}"
             errors += check_layout(where, instance, bucket_region)
+            backend = instance.get("backend") or {}
+            state = f"{backend.get('workspace_key_prefix')}/{instance.get('workspace')}/{backend.get('key')}"
+            owner = owners.setdefault(state, (stack_name, where))
+            if owner[0] != stack_name:
+                errors.append(
+                    f"{where} and {owner[1]} share the state key {state!r}: rename the lane "
+                    "(settings.context.name) so it is no instance's workspace suffix"
+                )
             stage = stage_of(instance)
             if stage is None:
                 errors.append(f"{where} has no settings.context stage to split its state by")
                 continue
             if stage == fixtures.FIXTURE_STAGE:
                 continue
-            backend = instance.get("backend") or {}
-            state = f"{backend.get('workspace_key_prefix')}/{instance.get('workspace')}/{backend.get('key')}"
             for obj in (state, state + LOCK_SUFFIX):
                 objects.append((stage, where, obj, assumed_role_name(instance)))
     if roles:
@@ -224,8 +234,8 @@ def main() -> int:
         return 1
     print(
         "every s3-backend state object is matched by exactly its stage's access roles, including "
-        "the role it assumes; its workspace_key_prefix has no '/', its backend.key is terraform.tfstate "
-        "and its backend.region is the state bucket's"
+        "the role it assumes; its workspace_key_prefix has no '/', its backend.key is terraform.tfstate, "
+        "its backend.region is the state bucket's and no other instance shares its key"
     )
     return 0
 
