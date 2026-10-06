@@ -192,6 +192,12 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-lane-names.py < "$stacks_json"
+      # The templates/stacks samples, copied in as the lanes their headers name,
+      # resolve and pass the stack checks beside the real stacks (plan-sweep
+      # covers them in validate-enhanced's plan-sweep workflow).
+      - name: stack-samples
+        type: shell
+        command: bash scripts/check-stack-samples.sh
       # iam/ci's lambda uploader role names its stage's s3/lambda-artifacts
       # bucket and kms/main alias instead of reading their state (it applies
       # first); this fails when either stops matching, and when an enabled

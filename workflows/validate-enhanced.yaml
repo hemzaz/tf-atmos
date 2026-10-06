@@ -130,6 +130,11 @@ workflows:
         # per pair.
         type: shell
         command: bash scripts/plan-sweep.sh
+      # The templates/stacks samples, copied in as the lanes their headers
+      # name (scripts/check-stack-samples.sh), through the same sweep.
+      - name: plan-sweep-samples
+        type: shell
+        command: bash scripts/check-stack-samples.sh --sweep
 
   # Runs `terraform test` (tests/*.tftest.hcl) for every component that has a
   # tests/ directory. The CI job (.github/workflows/terraform-ci.yml,

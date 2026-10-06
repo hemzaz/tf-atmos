@@ -59,8 +59,14 @@ components:
         nat_gateway_enabled: true
         nat_gateway_strategy: "single"
 
-    # Web tier: public HTTP(S) into the load balancers
-    securitygroup/web:
+    # The three tiers, one securitygroup instance: each group admits the one
+    # above it by key (source_security_group_id), so no tier reads another's
+    # state before it exists (deploy-full-stack plans a layer before applying
+    # it). Web is the group the load balancers carry. It has no ingress here:
+    # public traffic arrives only through CloudFront, and the alb component
+    # (catalog/alb/defaults) admits nothing but CloudFront's origin-facing
+    # managed prefix list on 443 itself.
+    securitygroup/tiers:
       metadata:
         component: securitygroup
         inherits:
@@ -68,59 +74,25 @@ components:
       vars:
         security_groups:
           web:
-            description: "Web tier security group"
-            ingress_rules:
-              - description: "HTTP from anywhere"
-                from_port: 80
-                to_port: 80
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-              - description: "HTTPS from anywhere"
-                from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-
-    # Application tier: only reachable from the web tier
-    securitygroup/app:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
+            description: "Web tier: attached to the load balancers; the app tier admits it"
           app:
-            description: "Application tier security group"
+            description: "Application tier: only reachable from the web tier"
             ingress_rules:
-              - description: "App port from web tier"
+              - key: "app-from-web"
+                description: "App port from web tier"
                 from_port: 8080
                 to_port: 8080
                 protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/web .security_group_ids.web
-      dependencies:
-        components:
-          - component: vpc/main
-          - component: securitygroup/web
-
-    # Database tier: only reachable from the application tier
-    securitygroup/db:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
+                source_security_group_id: "web"
           db:
-            description: "Database tier security group"
+            description: "Database tier: only reachable from the application tier"
             ingress_rules:
-              - description: "PostgreSQL from app tier"
+              - key: "postgres-from-app"
+                description: "PostgreSQL from app tier"
                 from_port: 5432
                 to_port: 5432
                 protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/app .security_group_ids.app
+                source_security_group_id: "app"
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/app

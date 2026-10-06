@@ -139,6 +139,18 @@ components:
           expose_headers: []
           max_age: 86400
           allow_credentials: false
+        # The API reads its handler, not the reverse: lambda (compute layer)
+        # deploys before apigateway (services), and this component grants the
+        # invoke permission itself (aws_lambda_permission.http_route_invoke).
+        http_routes:
+          "ANY /users/{proxy+}":
+            integration_type: "AWS_PROXY"
+            integration_uri: !terraform.state lambda/users-api .function_invoke_arn
+            lambda_function_name: !terraform.state lambda/users-api .function_name
+            authorization_type: "JWT"
+      dependencies:
+        components:
+          - component: lambda/users-api
 
     # API handler, invoked by the HTTP API
     lambda/users-api:
@@ -150,12 +162,6 @@ components:
         function_name: "users-api" # deployed as <environment>-users-api
         handler: "handlers.users.handler"
         s3_key: "users-api.zip"
-        api_gateway_source_arn: !terraform.state 'apigateway/main .http_api_execution_arn + "/*/*"'
-      dependencies:
-        components:
-          # Replaces lambda/defaults' list (list_merge_strategy: replace).
-          - component: s3/lambda-artifacts
-          - component: apigateway/main
 
     # Background processor, triggered by EventBridge "Order Created" events
     lambda/order-processor:

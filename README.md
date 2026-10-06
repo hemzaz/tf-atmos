@@ -33,7 +33,9 @@ Posse's null-label id order. `environment` is the region code (`ue1`, set by
 `stacks/mixins/region/*`), `stage` the account tier, and the optional `settings.context.name` a lane
 within a stage (fixtures, emulator lanes, the `templates/stacks` samples). A lane deploys beside its
 stage stack in the same account and region: its names carry the lane (below), and
-`check-lane-names.py` (lint) fails two stacks of one tenant, region and stage that share a name. Only files under `stacks/orgs/` are stack manifests;
+`check-lane-names.py` (lint) fails two stacks of one tenant, region and stage that share a name. The
+`templates/stacks` samples are such lanes: `scripts/check-stack-samples.sh` copies them in and runs
+the stack checks (lint) and plan-sweep (validate-enhanced) over them. Only files under `stacks/orgs/` are stack manifests;
 each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/components/` domain files
 (`globals`, `networking`, `security`, `compute`, `services`).
 

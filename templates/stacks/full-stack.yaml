@@ -20,9 +20,11 @@ import:
   - orgs/fnx/prod/_defaults
   - mixins/region/us-east-1
   - catalog/_base/defaults
+  - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/vpc/defaults
   - catalog/securitygroup/defaults
+  - catalog/github-runners/defaults
   - catalog/eks/defaults
   - catalog/eks-addons/defaults
   - catalog/secretsmanager/defaults
@@ -83,8 +85,15 @@ components:
         vpc_flow_logs_enabled: true
         flow_logs_retention_days: 90
 
-    # Application Load Balancer tier
-    securitygroup/alb:
+    # The platform's tiers, one securitygroup instance: each group admits the
+    # one above it by key (source_security_group_id), so no tier reads
+    # another's state before it exists (deploy-full-stack plans a layer before
+    # applying it). The alb group has no ingress here: public traffic reaches
+    # the platform only through CloudFront, and the ALB (the alb component,
+    # catalog/alb/defaults) admits nothing but CloudFront's origin-facing
+    # managed prefix list on 443 itself; this group, attached to it, is what
+    # the nodes admit (as web-application's `alb` group).
+    securitygroup/platform:
       metadata:
         component: securitygroup
         inherits:
@@ -92,68 +101,92 @@ components:
       vars:
         security_groups:
           alb:
-            description: "Application Load Balancer"
-            ingress_rules:
-              - description: "HTTP from internet (redirected to HTTPS)"
-                from_port: 80
-                to_port: 80
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-              - description: "HTTPS from internet"
-                from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-
-    # Additional security group for EKS worker nodes (the cluster security
-    # group itself is created by EKS)
-    securitygroup/eks-nodes:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
+            description: "Attached to the platform ALB; the EKS nodes admit it"
+          # Additional group for the EKS worker nodes (EKS creates the cluster
+          # security group itself)
           eks-nodes:
             description: "EKS node group security group"
             ingress_rules:
-              - description: "Node to node communication"
+              - key: "node-to-node"
+                description: "Node to node communication"
                 from_port: 0
                 to_port: 65535
                 protocol: "tcp"
                 self: true
-              - description: "Traffic from the load balancers"
+              - key: "from-alb"
+                description: "Traffic from the load balancers"
                 from_port: 1025
                 to_port: 65535
                 protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/alb .security_group_ids.alb
-      dependencies:
-        components:
-          - component: vpc/main
-          - component: securitygroup/alb
-
-    # Database tier: PostgreSQL only from the EKS nodes
-    securitygroup/rds:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
+                source_security_group_id: "alb"
+          # Database tier: PostgreSQL only from the EKS nodes
           rds:
             description: "RDS security group"
             ingress_rules:
-              - description: "PostgreSQL from EKS nodes"
+              - key: "postgres-from-nodes"
+                description: "PostgreSQL from EKS nodes"
                 from_port: 5432
                 to_port: 5432
                 protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+                source_security_group_id: "eks-nodes"
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/eks-nodes
+
+    # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
+    # entries read them, and CI deploys this lane with them. The GitHub OIDC
+    # provider is an account singleton that fnx-ue1-prod's iam/ci creates,
+    # so this instance trusts it by ARN instead of creating a second one. A
+    # deployed lane also needs its state pattern pair and these role ARNs on
+    # backend/main's access roles for its stage (stacks/orgs/fnx/core/us-east-1.yaml).
+    iam/ci:
+      metadata:
+        component: iam
+        inherits:
+          - iam
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-role"
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+        lambda_uploader_trusted_github_repos: []
+        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: fnx-ue1-core
+          - component: iam/ci
+            stack: fnx-ue1-prod
+
+    # The lane's own in-VPC CI runners (catalog/github-runners/defaults:
+    # labelled with the full id, which eks-addons/main's CI jobs ask for):
+    # the private cluster API is reachable only from inside this VPC, and
+    # eks/main admits them on 443.
+    github-runners/main:
+      metadata:
+        component: github-runners
+        inherits:
+          - github-runners/defaults
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+      dependencies:
+        components:
+          - component: kms/main
+          - component: vpc/main
 
     # EKS cluster (private endpoint; subnet_ids come from eks/defaults)
     eks/main:
@@ -166,8 +199,11 @@ components:
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
+        # The in-VPC CI runners (above) reach the private endpoint on 443.
+        allowed_security_group_ids:
+          - !terraform.state github-runners/main .security_group_id
         associated_security_group_ids:
-          - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+          - !terraform.state securitygroup/platform .security_group_ids.eks-nodes
         node_groups:
           general:
             instance_types: ["m6i.large", "m6i.xlarge"]
@@ -178,7 +214,10 @@ components:
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/eks-nodes
+          - component: securitygroup/platform
+          - component: kms/main
+          - component: iam/ci
+          - component: github-runners/main
 
     # EKS add-ons, wired to the cluster outputs
     eks-addons/main:
@@ -225,7 +264,10 @@ components:
         inherits:
           - rds/prod
       vars:
-        identifier: "{{ .atmos_stack }}-db"
+        # The tier the component's prod guards compare to; the name is
+        # <Environment>-<identifier> (ue1-platform-main-db).
+        environment: "{{ .settings.context.stage }}"
+        identifier: "main-db"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         family: "{{ .settings.environment.rds_family }}"
@@ -234,10 +276,12 @@ components:
         port: 5432
         db_name: "app"
         vpc_id: !terraform.state vpc/main .vpc_id
-        vpc_cidr: !terraform.state vpc/main .vpc_cidr
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
         allowed_security_groups:
-          - !terraform.state securitygroup/rds .security_group_ids.rds
+          - !terraform.state securitygroup/platform .security_group_ids.rds
+        kms_key_id: !terraform.state kms/main .key_arn
+        performance_insights_kms_key_id: !terraform.state kms/main .key_arn
+        master_user_secret_kms_key_id: !terraform.state kms/main .key_arn
         allocated_storage: 100
         max_allocated_storage: 1000
         skip_final_snapshot: false
@@ -247,17 +291,26 @@ components:
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/rds
+          - component: kms/main
+          - component: securitygroup/platform
 
-    # The stack's customer-managed key (Container Insights log groups)
+    # The lane's own customer-managed key (EKS secrets, node EBS volumes,
+    # Container Insights log groups). Its key policy names the Auto Scaling
+    # service-linked role, an account singleton that fnx-ue1-prod's iam/main
+    # provisions.
     kms/main:
       metadata:
         component: kms
         inherits:
           - kms/defaults
       vars:
-        description: Platform main encryption key (CloudWatch Logs)
+        description: Platform lane encryption key (EKS secrets, EBS, CloudWatch Logs)
         alias_name: "{{ .settings.prefix }}-main"
+        deletion_window_in_days: 30  # prod keeps the full window
+      dependencies:
+        components:
+          - component: iam/main
+            stack: fnx-ue1-prod
 
     # Application secrets (random values generated by Terraform)
     secretsmanager/app:
