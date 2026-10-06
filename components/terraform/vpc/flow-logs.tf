@@ -6,6 +6,17 @@ locals {
   # already grants every log group in this account and region), otherwise
   # this component's own key.
   flow_logs_kms_key_arn = var.flow_logs_kms_key_arn != "" ? var.flow_logs_kms_key_arn : one(aws_kms_key.flow_logs[*].arn)
+
+  # Account- or region-unique names (the KMS alias, IAM role and policy,
+  # CloudWatch alarms, the archive bucket) carry the instance's name, as a
+  # Cloud Posse context name does, so two vpc instances of one stack (vpc/main,
+  # vpc/services) do not create the same ones. Names scoped to this VPC or its
+  # log group (security groups, metric filters) keep the Environment alone.
+  flow_logs_name_prefix = "${var.tags["Environment"]}-${var.name}"
+  # The metric filters publish without dimensions, so each instance gets its
+  # own namespace: a shared one would sum every VPC's traffic in the account
+  # into one metric, and each instance's alarms would fire on the others'.
+  flow_logs_metric_namespace = "VPC/FlowLogs/${local.flow_logs_name_prefix}"
 }
 
 # KMS key for CloudWatch Logs encryption, created only when the caller
@@ -70,7 +81,7 @@ resource "aws_kms_key" "flow_logs" {
   tags = merge(
     var.tags,
     {
-      Name    = "${var.tags["Environment"]}-vpc-flow-logs-kms"
+      Name    = "${local.flow_logs_name_prefix}-flow-logs-kms"
       Purpose = "vpc-flow-logs-encryption"
     }
   )
@@ -79,7 +90,7 @@ resource "aws_kms_key" "flow_logs" {
 resource "aws_kms_alias" "flow_logs" {
   count = var.vpc_flow_logs_enabled && var.flow_logs_kms_key_arn == "" ? 1 : 0
 
-  name          = "alias/${var.tags["Environment"]}-vpc-flow-logs"
+  name          = "alias/${local.flow_logs_name_prefix}-flow-logs"
   target_key_id = aws_kms_key.flow_logs[0].key_id
 }
 
@@ -106,7 +117,7 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 resource "aws_iam_role" "flow_logs" {
   count = var.vpc_flow_logs_enabled ? 1 : 0
 
-  name = "${var.tags["Environment"]}-vpc-flow-logs-role"
+  name = "${local.flow_logs_name_prefix}-flow-logs-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -137,7 +148,7 @@ resource "aws_iam_role" "flow_logs" {
   tags = merge(
     var.tags,
     {
-      Name    = "${var.tags["Environment"]}-vpc-flow-logs-role"
+      Name    = "${local.flow_logs_name_prefix}-flow-logs-role"
       Purpose = "vpc-flow-logs-service-role"
     }
   )
@@ -147,7 +158,7 @@ resource "aws_iam_role" "flow_logs" {
 resource "aws_iam_role_policy" "flow_logs" {
   count = var.vpc_flow_logs_enabled ? 1 : 0
 
-  name = "${var.tags["Environment"]}-vpc-flow-logs-policy"
+  name = "${local.flow_logs_name_prefix}-flow-logs-policy"
   role = aws_iam_role.flow_logs[0].id
 
   policy = jsonencode({
@@ -204,7 +215,7 @@ resource "aws_cloudwatch_log_metric_filter" "ssh_access" {
 
   metric_transformation {
     name          = "SSHAccessAttempts"
-    namespace     = "VPC/FlowLogs"
+    namespace     = local.flow_logs_metric_namespace
     value         = "1"
     default_value = "0"
     unit          = "Count"
@@ -214,11 +225,11 @@ resource "aws_cloudwatch_log_metric_filter" "ssh_access" {
 resource "aws_cloudwatch_metric_alarm" "ssh_access" {
   count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
-  alarm_name          = "${var.tags["Environment"]}-high-ssh-access-attempts"
+  alarm_name          = "${local.flow_logs_name_prefix}-high-ssh-access-attempts"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
   metric_name         = "SSHAccessAttempts"
-  namespace           = "VPC/FlowLogs"
+  namespace           = local.flow_logs_metric_namespace
   period              = "300"
   statistic           = "Sum"
   threshold           = var.ssh_access_alarm_threshold
@@ -237,7 +248,7 @@ resource "aws_cloudwatch_log_metric_filter" "rdp_access" {
 
   metric_transformation {
     name          = "RDPAccessAttempts"
-    namespace     = "VPC/FlowLogs"
+    namespace     = local.flow_logs_metric_namespace
     value         = "1"
     default_value = "0"
     unit          = "Count"
@@ -247,11 +258,11 @@ resource "aws_cloudwatch_log_metric_filter" "rdp_access" {
 resource "aws_cloudwatch_metric_alarm" "rdp_access" {
   count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
-  alarm_name          = "${var.tags["Environment"]}-high-rdp-access-attempts"
+  alarm_name          = "${local.flow_logs_name_prefix}-high-rdp-access-attempts"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
   metric_name         = "RDPAccessAttempts"
-  namespace           = "VPC/FlowLogs"
+  namespace           = local.flow_logs_metric_namespace
   period              = "300"
   statistic           = "Sum"
   threshold           = var.rdp_access_alarm_threshold
@@ -270,7 +281,7 @@ resource "aws_cloudwatch_log_metric_filter" "rejected_connections" {
 
   metric_transformation {
     name          = "RejectedConnections"
-    namespace     = "VPC/FlowLogs"
+    namespace     = local.flow_logs_metric_namespace
     value         = "1"
     default_value = "0"
     unit          = "Count"
@@ -280,11 +291,11 @@ resource "aws_cloudwatch_log_metric_filter" "rejected_connections" {
 resource "aws_cloudwatch_metric_alarm" "rejected_connections" {
   count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
-  alarm_name          = "${var.tags["Environment"]}-high-rejected-connections"
+  alarm_name          = "${local.flow_logs_name_prefix}-high-rejected-connections"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "2"
   metric_name         = "RejectedConnections"
-  namespace           = "VPC/FlowLogs"
+  namespace           = local.flow_logs_metric_namespace
   period              = "300"
   statistic           = "Sum"
   threshold           = var.rejected_connections_alarm_threshold
@@ -303,7 +314,7 @@ resource "aws_cloudwatch_log_metric_filter" "large_data_transfer" {
 
   metric_transformation {
     name          = "LargeDataTransfers"
-    namespace     = "VPC/FlowLogs"
+    namespace     = local.flow_logs_metric_namespace
     value         = "$bytes"
     default_value = "0"
     unit          = "Bytes"
@@ -313,11 +324,11 @@ resource "aws_cloudwatch_log_metric_filter" "large_data_transfer" {
 resource "aws_cloudwatch_metric_alarm" "large_data_transfer" {
   count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
-  alarm_name          = "${var.tags["Environment"]}-large-data-transfers"
+  alarm_name          = "${local.flow_logs_name_prefix}-large-data-transfers"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
   metric_name         = "LargeDataTransfers"
-  namespace           = "VPC/FlowLogs"
+  namespace           = local.flow_logs_metric_namespace
   period              = "900"
   statistic           = "Sum"
   threshold           = var.large_data_transfer_alarm_threshold
@@ -337,7 +348,7 @@ resource "aws_cloudwatch_log_metric_filter" "port_scan" {
 
   metric_transformation {
     name          = "PortScanActivity"
-    namespace     = "VPC/FlowLogs"
+    namespace     = local.flow_logs_metric_namespace
     value         = "1"
     default_value = "0"
     unit          = "Count"
@@ -347,11 +358,11 @@ resource "aws_cloudwatch_log_metric_filter" "port_scan" {
 resource "aws_cloudwatch_metric_alarm" "port_scan" {
   count = var.vpc_flow_logs_enabled && var.enable_flow_logs_alarms ? 1 : 0
 
-  alarm_name          = "${var.tags["Environment"]}-port-scan-detected"
+  alarm_name          = "${local.flow_logs_name_prefix}-port-scan-detected"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "1"
   metric_name         = "PortScanActivity"
-  namespace           = "VPC/FlowLogs"
+  namespace           = local.flow_logs_metric_namespace
   period              = "300"
   statistic           = "Sum"
   threshold           = var.port_scan_alarm_threshold
@@ -371,12 +382,12 @@ resource "aws_s3_bucket" "flow_logs" {
   #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications on a log archive
   count = var.vpc_flow_logs_enabled && var.flow_logs_s3_backup ? 1 : 0
 
-  bucket = "${var.tags["Environment"]}-vpc-flow-logs-${data.aws_caller_identity.current.account_id}"
+  bucket = "${local.flow_logs_name_prefix}-flow-logs-${data.aws_caller_identity.current.account_id}"
 
   tags = merge(
     var.tags,
     {
-      Name    = "${var.tags["Environment"]}-vpc-flow-logs-archive"
+      Name    = "${local.flow_logs_name_prefix}-flow-logs-archive"
       Purpose = "flow-logs-long-term-storage"
     }
   )

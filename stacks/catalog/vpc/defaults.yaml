@@ -14,6 +14,10 @@ components:
           description: "Manages VPC with subnets, NAT gateways, and routing"
           category: "networking"
       vars:
+        # The instance's name in its account-unique names (flow logs role,
+        # policy, KMS alias, alarms, bucket): vpc/main -> main, so vpc/main and
+        # vpc/services in one stack do not collide.
+        name: '{{ last (splitList "/" .atmos_component) }}'
         ipv4_primary_cidr_block: "10.0.0.0/16"
 
         # No AZ default: each instance sets availability_zone_ids (region- and

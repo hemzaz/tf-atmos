@@ -11,9 +11,9 @@ check_lane_names = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_lane_names)
 
 
-def instance(tag, name=None, component="kms", stage="dev", **variables):
-    """An instance whose tags.Environment is tag, in fnx-ue1-<stage>[-<name>]."""
-    ctx = {"tenant": "fnx", "environment": "ue1", "stage": stage, **({"name": name} if name else {})}
+def instance(tag, lane=None, component="kms", stage="dev", **variables):
+    """An instance whose tags.Environment is tag, in fnx-ue1-<stage>[-<lane>]."""
+    ctx = {"tenant": "fnx", "environment": "ue1", "stage": stage, **({"name": lane} if lane else {})}
     return {"component": component, "settings": {"context": ctx}, "vars": {"tags": {"Environment": tag}, **variables}}
 
 
@@ -107,6 +107,30 @@ class CheckLaneNamesTest(unittest.TestCase):
             "fnx-ue1-dev-perf": stack(**{"s3/assets": instance("ue1-perf", "perf", component="s3",
                                                                bucket_name="fnx-ue1-dev-perf-assets")}),
         }), [])
+
+    def test_instances_with_the_same_name_inputs_fail(self):
+        # vpc/main and vpc/services both naming their flow-logs role
+        # <Environment>-vpc-flow-logs-role.
+        errors = self.errors({"fnx-ue1-prod": stack(**{
+            "vpc/main": instance("ue1", component="vpc", stage="prod", region="us-east-1"),
+            "vpc/services": instance("ue1", component="vpc", stage="prod", region="us-east-1"),
+        })})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("fnx-ue1-prod: vpc/main, vpc/services (vpc) set the same name inputs (none)", errors[0])
+
+    def test_instances_with_their_own_names_pass(self):
+        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
+            "vpc/main": instance("ue1", component="vpc", stage="prod", name="main"),
+            "vpc/services": instance("ue1", component="vpc", stage="prod", name="services"),
+            "acm/main": instance("ue1", component="acm", stage="prod", dns_domains=["a.example.com"]),
+            "acm/services": instance("ue1", component="acm", stage="prod", dns_domains=["b.example.com"]),
+        })}), [])
+
+    def test_disabled_instance_does_not_collide(self):
+        off = instance("ue1", component="vpc", stage="prod", enabled=False)
+        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
+            "vpc/main": instance("ue1", component="vpc", stage="prod"), "vpc/old": off,
+        })}), [])
 
     def test_abstract_and_disabled_instances_are_skipped(self):
         abstract = instance("ue1")

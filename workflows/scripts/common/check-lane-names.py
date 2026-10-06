@@ -18,6 +18,11 @@ stage, this fails:
     form of every name the stacks build themselves;
   - a secretsmanager secret name (context_name/environment/path/name) that two
     stacks both create.
+Within one stack, two deployable instances of one component that set the
+same name inputs (every vars key that names something, NAME_INPUT: name,
+identifier, *_name, *_prefix, domains, zones, ...) build the same names: a
+component names its resources from tags.Environment and those inputs, so they
+must differ in at least one (vpc/main and vpc/services differ in name).
 And, across every stack (any account or region), names that are global in AWS:
   - an S3 bucket_name or a Cognito domain_prefix (vars keys GLOBAL_KEYS, at any
     depth) that two stacks both set.
@@ -25,9 +30,14 @@ Exits 1 on any collision.
 """
 import collections
 import json
+import re
 import sys
 
 SKIP_VARS = {"tags", "description"}
+# vars keys that name an instance's resources (with tags.Environment).
+NAME_INPUT = re.compile(
+    r"(^|_)(name|names|identifier|prefix|cluster_id|alias|bucket|domain|domains|zones|function_name|queue_name|topic_name)(_|$)"
+)
 # vars keys whose values are names global across accounts and regions.
 GLOBAL_KEYS = {"bucket_name", "domain_prefix"}
 
@@ -104,6 +114,30 @@ def global_names(stack: dict) -> dict:
     return names
 
 
+def check_instances(stacks: dict) -> list[str]:
+    """Instances of one component in one stack with the same name inputs."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        by_inputs = collections.defaultdict(list)
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            if not is_deployable(instance) or (instance.get("vars") or {}).get("enabled") is False:
+                continue
+            variables = instance.get("vars") or {}
+            inputs = json.dumps(
+                {k: v for k, v in variables.items() if NAME_INPUT.search(k) and k not in SKIP_VARS},
+                sort_keys=True,
+            )
+            by_inputs[(instance.get("component"), inputs)].append(name)
+        for (component, inputs), names in sorted(by_inputs.items(), key=lambda item: (str(item[0][0]), item[0][1])):
+            if len(names) > 1:
+                errors.append(
+                    f"{stack_name}: {', '.join(names)} ({component}) set the same name inputs "
+                    f"{inputs if inputs != '{}' else '(none)'}, so they build the same resource names: "
+                    "give each its own name"
+                )
+    return errors
+
+
 def check_global(stacks: dict) -> list[str]:
     errors, owners = [], {}
     for stack_name in sorted(stacks):
@@ -136,7 +170,7 @@ def check(stacks: dict) -> list[str]:
                             f"{stack_name}: {where} and {first[0]}: {first[1]} both use {kind} {value!r} "
                             f"in {'-'.join(map(str, group))}: a lane's names must carry its name (settings.prefix)"
                         )
-    return errors + check_global(stacks)
+    return errors + check_instances(stacks) + check_global(stacks)
 
 
 def main() -> int:
@@ -144,9 +178,9 @@ def main() -> int:
     for error in errors:
         print(f"ERROR {error}")
     if errors:
-        print(f"{len(errors)} name collision(s) between stacks of one account and region")
+        print(f"{len(errors)} name collision(s) between stacks or instances that share an account and region")
         return 1
-    print("no two stacks of one tenant, region and stage share a tags.Environment, a name they build or a secret name, and no two stacks share an S3 bucket or Cognito domain name")
+    print("no two stacks of one tenant, region and stage share a tags.Environment, a name they build or a secret name, no two instances of a component in one stack set the same name inputs, and no two stacks share an S3 bucket or Cognito domain name")
     return 0
 
 
