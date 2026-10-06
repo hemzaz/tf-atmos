@@ -561,7 +561,7 @@ run "lambda_error_alarm_watches_function_name" {
     name = "data"
     lambda_error_alarms = {
       data-processor = {
-        function_name      = "fnx-prod-data-processor"
+        function_name      = "fnx-ue1-prod-data-processor"
         evaluation_periods = 2
         period             = 300
         threshold          = 5
@@ -570,7 +570,7 @@ run "lambda_error_alarm_watches_function_name" {
   }
 
   assert {
-    condition     = aws_cloudwatch_metric_alarm.lambda_errors["data-processor"].dimensions["FunctionName"] == "fnx-prod-data-processor"
+    condition     = aws_cloudwatch_metric_alarm.lambda_errors["data-processor"].dimensions["FunctionName"] == "fnx-ue1-prod-data-processor"
     error_message = "The Lambda error alarm's FunctionName dimension must be the entry's function_name, not the map key."
   }
 
@@ -587,7 +587,7 @@ run "lambda_error_alarm_rejects_arn" {
     name = "data"
     lambda_error_alarms = {
       data-processor = {
-        function_name      = "arn:aws:lambda:us-east-1:123456789012:function:fnx-prod-data-processor"
+        function_name      = "arn:aws:lambda:us-east-1:123456789012:function:fnx-ue1-prod-data-processor"
         evaluation_periods = 2
         period             = 300
         threshold          = 5

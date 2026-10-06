@@ -43,14 +43,14 @@ mock_provider "time" {}
 
 variables {
   region                 = "us-east-1"
-  cluster_name           = "testenv-01-main"
+  cluster_name           = "ue1-main"
   host                   = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
   oidc_provider_arn      = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
   oidc_provider_url      = "https://oidc.eks.us-east-1.amazonaws.com/id/ABCDEF"
   istio_enabled          = false
   tags = {
-    Environment = "testenv-01"
+    Environment = "ue1"
   }
 }
 
@@ -134,7 +134,7 @@ run "each_switch_installs_its_release_and_role" {
 
   # Names carry the Environment once (the cluster name already has it).
   assert {
-    condition     = aws_iam_role.addon["main.external-dns"].name == "testenv-01-main-external-dns-role"
+    condition     = aws_iam_role.addon["main.external-dns"].name == "ue1-main-external-dns-role"
     error_message = "The role must be <cluster>-<add-on>-role, with the Environment once."
   }
 
@@ -165,7 +165,7 @@ run "each_switch_installs_its_release_and_role" {
   }
 
   assert {
-    condition     = yamldecode(helm_release.addon["main.external-dns"].values[1]).txtPrefix == "testenv-01-main-" && yamldecode(helm_release.addon["main.external-dns"].values[1]).policy == "sync"
+    condition     = yamldecode(helm_release.addon["main.external-dns"].values[1]).txtPrefix == "ue1-main-" && yamldecode(helm_release.addon["main.external-dns"].values[1]).policy == "sync"
     error_message = "external-dns must prefix its TXT ownership records with the cluster name and set policy (required from chart 1.22)."
   }
 
@@ -175,7 +175,7 @@ run "each_switch_installs_its_release_and_role" {
   }
 
   assert {
-    condition     = yamldecode(helm_release.addon["main.cluster-autoscaler"].values[1]).autoDiscovery.clusterName == "testenv-01-main"
+    condition     = yamldecode(helm_release.addon["main.cluster-autoscaler"].values[1]).autoDiscovery.clusterName == "ue1-main"
     error_message = "cluster-autoscaler must auto-discover this cluster's groups."
   }
 }
@@ -275,14 +275,14 @@ run "policies_are_scoped" {
   assert {
     condition = [
       for s in jsondecode(aws_iam_policy.addon["main.cluster-autoscaler"].policy).Statement : s.Condition.StringEquals if s.Sid == "ScaleThisClustersGroups"
-    ][0] == { "aws:ResourceTag/k8s.io/cluster-autoscaler/testenv-01-main" = "owned" }
+    ][0] == { "aws:ResourceTag/k8s.io/cluster-autoscaler/ue1-main" = "owned" }
     error_message = "Scaling must be conditioned on the k8s.io/cluster-autoscaler/<cluster> tag."
   }
 
   assert {
     condition = [
       for s in jsondecode(aws_iam_policy.addon["main.cluster-autoscaler"].policy).Statement : s.Resource if s.Sid == "DescribeThisClustersNodegroups"
-    ][0] == "arn:aws:eks:us-east-1:123456789012:nodegroup/testenv-01-main/*/*"
+    ][0] == "arn:aws:eks:us-east-1:123456789012:nodegroup/ue1-main/*/*"
     error_message = "eks:DescribeNodegroup must be limited to this cluster's node groups."
   }
 
@@ -344,7 +344,7 @@ run "addons_only_install_into_the_provider_cluster" {
   variables {
     clusters = {
       other = {
-        cluster_name          = "testenv-01-data"
+        cluster_name          = "ue1-data"
         enable_metrics_server = true
       }
     }
@@ -441,12 +441,12 @@ run "eks_addon_role_is_attached" {
   }
 
   assert {
-    condition     = aws_eks_addon.core["main.ebs"].cluster_name == "testenv-01-main"
+    condition     = aws_eks_addon.core["main.ebs"].cluster_name == "ue1-main"
     error_message = "The addon must target the real cluster name, not the clusters key."
   }
 
   assert {
-    condition     = aws_iam_role.service_account["main.ebs"].name == "testenv-01-main-aws-ebs-csi-driver-sa-role"
+    condition     = aws_iam_role.service_account["main.ebs"].name == "ue1-main-aws-ebs-csi-driver-sa-role"
     error_message = "The addon role name carries the Environment once."
   }
 }

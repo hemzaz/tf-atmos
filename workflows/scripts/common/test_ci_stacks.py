@@ -84,7 +84,7 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(ci_stacks.check(TODAY, "fnx-ue1-staging"), "")
 
     def test_unknown_stack_fails(self):
-        self.assertIn("Unknown stack", ci_stacks.check(TODAY, "fnx-dev-typo"))
+        self.assertIn("Unknown stack", ci_stacks.check(TODAY, "fnx-ue1-typo"))
         self.assertIn("Unknown stack", ci_stacks.check(TODAY, "fnx-ue1-dev\nfnx-ue1-prod"))
 
     def test_ci_disabled_stacks_fail(self):

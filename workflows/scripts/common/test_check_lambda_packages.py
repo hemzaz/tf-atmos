@@ -15,8 +15,8 @@ IAM = {
     "vars": {
         "github_oidc_enabled": True,
         "lambda_uploader_trusted_github_repos": [],
-        "lambda_uploader_kms_key_alias": "alias/testenv-01-main",
-        "tags": {"Environment": "testenv-01"},
+        "lambda_uploader_kms_key_alias": "alias/ue1-main",
+        "tags": {"Environment": "ue1"},
     },
 }
 BUCKET = {
@@ -24,10 +24,10 @@ BUCKET = {
     "vars": {
         "name": "lambda-artifacts",
         "kms_key_arn": "!terraform.state kms/main .key_arn",
-        "tags": {"Environment": "testenv-01"},
+        "tags": {"Environment": "ue1"},
     },
 }
-KMS = {"metadata": {"component": "kms"}, "vars": {"alias_name": "testenv-01-main"}}
+KMS = {"metadata": {"component": "kms"}, "vars": {"alias_name": "ue1-main"}}
 LAMBDA = {
     "metadata": {"component": "lambda"},
     "vars": {
@@ -96,7 +96,7 @@ class CheckLambdaPackagesTest(unittest.TestCase):
     def test_alias_mismatch_fails(self):
         self.assert_errors(
             stack(iam__ci=set_var("lambda_uploader_kms_key_alias", "alias/other")),
-            "is not kms/main's 'alias/testenv-01-main'",
+            "is not kms/main's 'alias/ue1-main'",
         )
 
     def test_bucket_with_another_key_fails(self):

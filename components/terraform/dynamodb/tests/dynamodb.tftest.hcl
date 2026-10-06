@@ -53,7 +53,7 @@ run "range_key_indexes_and_ttl" {
   command = plan
 
   variables {
-    table_name = "fnx-dev-saga-state"
+    table_name = "fnx-ue1-dev-saga-state"
     range_key  = "sk"
     dynamodb_attributes = [
       { name = "status", type = "S" },
@@ -70,7 +70,7 @@ run "range_key_indexes_and_ttl" {
   }
 
   assert {
-    condition     = aws_dynamodb_table.this[0].name == "fnx-dev-saga-state"
+    condition     = aws_dynamodb_table.this[0].name == "fnx-ue1-dev-saga-state"
     error_message = "table_name overrides the generated name."
   }
 

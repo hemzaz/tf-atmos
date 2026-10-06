@@ -139,8 +139,8 @@ class CheckStateKeysTest(unittest.TestCase):
     def test_stage_prefix_patterns_miss_the_q4_names(self):
         # "*/<tenant>-<stage>-*" only isolated while the stage followed the tenant.
         roles = access_roles(
-            read=["*/fnx-dev-*"], write=["*/fnx-dev-*"], prod_read=["*/fnx-prod-*"], prod_write=["*/fnx-prod-*"],
-            core_write=["*/fnx-core-*"],
+            read=["*/fnx-ue1-dev-*"], write=["*/fnx-ue1-dev-*"], prod_read=["*/fnx-ue1-prod-*"], prod_write=["*/fnx-ue1-prod-*"],
+            core_write=["*/fnx-ue1-core-*"],
         )
         stacks = {
             "fnx-ue1-root": core_stack(roles=roles, stack="fnx-ue1-root"),
@@ -182,20 +182,20 @@ class CheckStateKeysTest(unittest.TestCase):
         )
 
     def test_role_reaching_no_state_fails(self):
-        roles = access_roles(prod_read=["*/fnx-prod-prod/*"])
+        roles = access_roles(prod_read=["*/fnx-ue1-prod-prod/*"])
         self.assert_errors(stacks_with(roles=roles, **{"vpc/main": prod()}),
                            "access role 'prod_read' matches no state object",
-                           "access role 'prod_read' pattern '*/fnx-prod-prod/*' matches no state object")
+                           "access role 'prod_read' pattern '*/fnx-ue1-prod-prod/*' matches no state object")
 
     def test_dead_pair_of_a_renamed_stack_fails(self):
         # The old name's pair left beside the new one after a rename
-        roles = access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging", "fnx-dev-old"))
+        roles = access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-old"))
         self.assert_errors(
             stacks_with(roles=roles, **{"vpc/main": prod()}),
-            "access role 'read' pattern '*/fnx-dev-old/*' matches no state object",
-            "access role 'read' pattern '*/fnx-dev-old-*' matches no state object",
-            "access role 'write' pattern '*/fnx-dev-old/*' matches no state object",
-            "access role 'write' pattern '*/fnx-dev-old-*' matches no state object",
+            "access role 'read' pattern '*/fnx-ue1-old/*' matches no state object",
+            "access role 'read' pattern '*/fnx-ue1-old-*' matches no state object",
+            "access role 'write' pattern '*/fnx-ue1-old/*' matches no state object",
+            "access role 'write' pattern '*/fnx-ue1-old-*' matches no state object",
         )
 
     def test_derived_pattern_of_a_live_stack_may_match_nothing(self):
@@ -203,10 +203,10 @@ class CheckStateKeysTest(unittest.TestCase):
         self.assert_errors(stacks_with(**{"vpc/main": prod()}))
 
     def test_lone_derived_pattern_matching_nothing_fails(self):
-        roles = access_roles(prod_read=pair("fnx-ue1-prod") + ["*/fnx-prod-other-*"],
-                             prod_write=pair("fnx-ue1-prod") + ["*/fnx-prod-other-*"])
+        roles = access_roles(prod_read=pair("fnx-ue1-prod") + ["*/fnx-ue1-prod-other-*"],
+                             prod_write=pair("fnx-ue1-prod") + ["*/fnx-ue1-prod-other-*"])
         self.assert_has(stacks_with(roles=roles, **{"vpc/main": prod()}),
-                        "access role 'prod_read' pattern '*/fnx-prod-other-*' matches no state object")
+                        "access role 'prod_read' pattern '*/fnx-ue1-prod-other-*' matches no state object")
 
     def test_own_role_outside_its_patterns_fails(self):
         # The non-prod write role lost staging: staging's apply could not write its own state
@@ -240,13 +240,13 @@ class CheckStateKeysTest(unittest.TestCase):
     # Layout
 
     def test_workspace_with_slash_fails(self):
-        self.assert_has(stacks_with(**{"vpc/main": prod(), "vpc/x": instance("fnx-prod-x/fnx-dev-y")}),
+        self.assert_has(stacks_with(**{"vpc/main": prod(), "vpc/x": instance("fnx-ue1-prod-x/fnx-ue1-dev-y")}),
                         "contains '/'")
 
     def test_key_prefix_with_slash_fails(self):
         self.assert_errors(
-            stacks_with(**{"vpc/main": prod(key_prefix="a/fnx-dev-x")}),
-            "workspace_key_prefix 'a/fnx-dev-x' contains '/'",
+            stacks_with(**{"vpc/main": prod(key_prefix="a/vpc")}),
+            "workspace_key_prefix 'a/vpc' contains '/'",
         )
 
     def test_missing_key_prefix_fails(self):
@@ -305,14 +305,14 @@ class CheckStateKeysTest(unittest.TestCase):
 
     def test_two_backend_regions_fail(self):
         stacks = stacks_with(**{"vpc/main": prod()})
-        other = instance("fnx-core-eu", key_prefix="backend", stage="core", region="eu-west-1", component="backend")
-        stacks["fnx-core-eu"] = {"components": {"terraform": {"backend/main": other}}}
+        other = instance("fnx-ew1-core", key_prefix="backend", stage="core", region="eu-west-1", component="backend")
+        stacks["fnx-ew1-core"] = {"components": {"terraform": {"backend/main": other}}}
         self.assert_errors(stacks, "expected exactly one deployed 'backend' region")
 
     def test_abstract_and_disabled_backend_do_not_count(self):
         stacks = stacks_with(**{"vpc/main": prod()})
         for name, flag in (("abstract", {"type": "abstract"}), ("off", {"enabled": False})):
-            other = instance("fnx-core-x", key_prefix="backend", stage="core", region="eu-west-1",
+            other = instance("fnx-ue1-core-x", key_prefix="backend", stage="core", region="eu-west-1",
                              component="backend", **flag)
             stacks["fnx-ue1-core"]["components"]["terraform"][name] = other
         self.assert_errors(stacks)

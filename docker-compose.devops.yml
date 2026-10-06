@@ -45,7 +45,7 @@ services:
       # Development
       - TENANT=${TENANT:-fnx}
       - ACCOUNT=${ACCOUNT:-dev}
-      - ENVIRONMENT=${ENVIRONMENT:-testenv-01}
+      - ENVIRONMENT=${ENVIRONMENT:-ue1}
 
     networks:
       - devops-network

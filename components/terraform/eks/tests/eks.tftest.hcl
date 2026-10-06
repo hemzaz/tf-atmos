@@ -195,18 +195,18 @@ run "dev_and_staging_names" {
 
   variables {
     tags = {
-      Environment = "staging-01"
+      Environment = "ue1"
       Stage       = "staging"
     }
   }
 
   assert {
-    condition     = aws_eks_cluster.default[0].name == "staging-01-main"
-    error_message = "The staging cluster must be named staging-01-main."
+    condition     = aws_eks_cluster.default[0].name == "ue1-main"
+    error_message = "The staging cluster must be named ue1-main."
   }
 
   assert {
-    condition     = aws_iam_role.default[0].name == "staging-01-main-cluster-role"
+    condition     = aws_iam_role.default[0].name == "ue1-main-cluster-role"
     error_message = "IAM role names must be <Environment>-<name>-cluster-role."
   }
 

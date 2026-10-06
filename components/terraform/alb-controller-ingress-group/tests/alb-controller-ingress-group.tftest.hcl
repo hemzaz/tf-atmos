@@ -43,7 +43,7 @@ mock_provider "kubernetes" {}
 
 variables {
   region                   = "us-east-1"
-  cluster_name             = "testenv-01-microservices"
+  cluster_name             = "ue1-microservices"
   host                     = "https://ABCDEF0123456789.gr7.us-east-1.eks.amazonaws.com"
   cluster_ca_certificate   = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg=="
   vpc_id                   = "vpc-0123456789abcdef0"

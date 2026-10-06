@@ -617,10 +617,10 @@ resource "aws_iam_role_policy_attachment" "synthetics_execution" {
 resource "aws_xray_sampling_rule" "backend_services" {
   count = var.enable_tracing ? 1 : 0
 
-  # X-Ray caps rule names at 32 characters, so this is always truncated. It is
-  # built from local.name_prefix (Environment-name), not Environment alone,
-  # so main and data still get distinct rule names post-truncation for every
-  # real stack's short environment names (testenv-01, staging, production).
+  # X-Ray caps rule names at 32 characters, so this is truncated. It is built
+  # from local.name_prefix (Environment-name), not Environment alone, so main
+  # and data keep distinct rule names (ue1-main-backend-services) after the
+  # cut.
   rule_name      = substr("${local.name_prefix}-backend-services", 0, 32)
   priority       = 9000
   version        = 1

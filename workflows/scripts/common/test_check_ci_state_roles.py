@@ -105,7 +105,7 @@ class CheckCiStateRolesTest(unittest.TestCase):
 
     def test_stale_ci_role_arn_fails(self):
         # The old <tenant>-<stage>-<environment>-ci name left behind after a rename
-        stale = "arn:aws:iam::444444444444:role/fnx-prod-production-ci-plan"
+        stale = "arn:aws:iam::444444444444:role/fnx-ue2-prod-ci-plan"
         roles = access_roles(prod_read=[arn("prod", "plan"), stale])
         self.assert_errors(stacks(roles=roles, **today()), f"backend access_roles.prod_read trusts {stale}")
 
