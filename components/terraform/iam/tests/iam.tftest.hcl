@@ -619,3 +619,49 @@ run "lambda_uploader_requires_github_oidc" {
 
   expect_failures = [var.lambda_uploader_trusted_github_repos]
 }
+
+# Both CI roles may start in-VPC runners: SetDesiredCapacity on groups tagged
+# as runner pools only.
+run "ci_roles_may_resize_only_runner_pools" {
+  command = plan
+
+  variables {
+    github_oidc_enabled                = true
+    github_oidc_repository             = "hemzaz/tf-atmos"
+    github_oidc_provider_arn           = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix                = "test-ci"
+    ci_apply_role_enabled              = true
+    ci_apply_role_trusted_github_repos = ["hemzaz/tf-atmos:master"]
+    ci_apply_policy_arns               = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
+  }
+
+  assert {
+    condition     = toset(keys(aws_iam_role_policy.ci_runner_pools)) == toset(["plan", "apply"])
+    error_message = "Both the plan and the apply role get the runner-pool policy."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.ci_runner_pools["plan"].policy).Statement :
+      s.Action != "autoscaling:SetDesiredCapacity" || s.Condition.StringEquals["autoscaling:ResourceTag/Component"] == "GitHubRunners"
+    ])
+    error_message = "SetDesiredCapacity only on groups tagged Component=GitHubRunners."
+  }
+}
+
+run "no_runner_pool_policy_when_the_tag_is_null" {
+  command = plan
+
+  variables {
+    github_oidc_enabled      = true
+    github_oidc_repository   = "hemzaz/tf-atmos"
+    github_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    ci_role_name_prefix      = "test-ci"
+    ci_runner_pool_tag       = null
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.ci_runner_pools) == 0
+    error_message = "ci_runner_pool_tag = null grants nothing."
+  }
+}
