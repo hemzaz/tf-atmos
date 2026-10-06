@@ -4,9 +4,9 @@
 # =============================================================================
 # The infrastructure an internal developer platform (Backstage, its platform
 # API, Grafana/Prometheus/Jaeger) runs on, composed of the repo's components.
-# It replaces the unsupported components/terraform/idp-platform root module
-# (owner decision W3, 2026-10-02: "idp-platform -> template"), which nested
-# the eks, rds and acm root components as modules.
+# It replaced the former components/terraform/idp-platform root module, which
+# nested the eks, rds and acm root components as modules and was deleted in
+# B4-b (owner decision W3, 2026-10-02: "idp-platform -> template").
 #
 # Architecture (instances are idp-platform/<part>):
 #   - eks: one cluster, <Environment>-idp, private endpoint, all five control

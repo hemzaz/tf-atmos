@@ -414,6 +414,7 @@ resource "aws_db_instance" "read_replica" {
 }
 
 resource "aws_db_instance" "main" {
+  #checkov:skip=CKV_AWS_157:multi_az is a per-stage input (false by default, as in Cloud Posse's terraform-aws-rds); the multi_az validation and check-prod-protection require it in prod
   #checkov:skip=CKV_AWS_129:Log exports are an input (enabled_cloudwatch_logs_exports, [] by default as in Cloud Posse's terraform-aws-rds); prod and the web-application template set them
   identifier            = "${var.tags["Environment"]}-${var.identifier}"
   engine                = var.engine
