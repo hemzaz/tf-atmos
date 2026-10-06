@@ -1,4 +1,4 @@
-# fnx-fixtures-msplatform: stacks/catalog/templates/
+# fnx-ue1-fixtures-msplatform: stacks/catalog/templates/
 # microservices-platform.yaml under CI's checks. Never deployed (see
 # ../_defaults.yaml).
 import:
@@ -8,7 +8,7 @@ import:
 
 settings:
   context:
-    environment: msplatform
+    name: msplatform
   # The template's REQUIREMENTS 2. Placeholders.
   microservices:
     app_domain_name: fixtures.example.com

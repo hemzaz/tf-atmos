@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# Staging-01 Stack Configuration
+# fnx-ue1-staging: the staging account's us-east-1 stack
 # =============================================================================
 # Production-like staging environment for final validation before production
 # =============================================================================
@@ -31,5 +31,4 @@ settings:
     account: staging
   context:
     tenant: fnx
-    environment: staging-01
     stage: staging

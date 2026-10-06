@@ -25,14 +25,14 @@ def stack(stage, *actions_enabled):
 
 # The shape of today's stacks (atmos describe stacks --sections settings).
 TODAY = {
-    "fnx-core-root": stack("core", False, False),
-    "fnx-dev-testenv-01": stack("dev", None, False),
-    "fnx-fixtures-batch": stack("fixtures", False),
-    "fnx-fixtures-webapp": stack("fixtures", False),
-    "fnx-local-localemu": stack("local", False),
-    "fnx-local-sandbox": stack("local", False),
-    "fnx-prod-production": stack("prod", None, True, False),
-    "fnx-staging-staging-01": stack("staging", None, False),
+    "fnx-ue1-core": stack("core", False, False),
+    "fnx-ue1-dev": stack("dev", None, False),
+    "fnx-ue1-fixtures-batch": stack("fixtures", False),
+    "fnx-ue1-fixtures-webapp": stack("fixtures", False),
+    "fnx-ue1-local-localemu": stack("local", False),
+    "fnx-ue1-local-sandbox": stack("local", False),
+    "fnx-ue1-prod": stack("prod", None, True, False),
+    "fnx-ue1-staging": stack("staging", None, False),
 }
 
 
@@ -40,55 +40,55 @@ class TodayTest(unittest.TestCase):
     def test_ci_stacks_equal_the_former_hard_coded_list(self):
         # terraform-cd.yml ORDER / choice options, disaster-recovery.yml options
         self.assertEqual(
-            ci_stacks.ci_stacks(TODAY), ["fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-prod-production"]
+            ci_stacks.ci_stacks(TODAY), ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod"]
         )
 
     def test_plan_sweep_equals_the_former_default(self):
-        # scripts/plan-sweep.sh: the three real stacks, then every fnx-fixtures-* stack
+        # scripts/plan-sweep.sh: the three real stacks, then every fnx-ue1-fixtures-* stack
         self.assertEqual(
             ci_stacks.plan_sweep_stacks(TODAY),
-            ["fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-prod-production",
-             "fnx-fixtures-batch", "fnx-fixtures-webapp"],
+            ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod",
+             "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp"],
         )
 
 
 class NewStackTest(unittest.TestCase):
     def test_a_new_stack_flows_in_without_edits(self):
-        stacks = dict(TODAY, **{"fnx-prod-production-eu": stack("prod"), "fnx-dev-testenv-02": stack("dev")})
+        stacks = dict(TODAY, **{"fnx-ew1-prod": stack("prod"), "fnx-ue2-dev": stack("dev")})
         self.assertEqual(
             ci_stacks.ci_stacks(stacks),
-            ["fnx-dev-testenv-01", "fnx-dev-testenv-02", "fnx-staging-staging-01", "fnx-prod-production",
-             "fnx-prod-production-eu"],
+            ["fnx-ue1-dev", "fnx-ue2-dev", "fnx-ue1-staging", "fnx-ew1-prod",
+             "fnx-ue1-prod"],
         )
-        self.assertEqual(ci_stacks.check(stacks, "fnx-prod-production-eu"), "")
-        self.assertIn("fnx-prod-production-eu", ci_stacks.plan_sweep_stacks(stacks))
+        self.assertEqual(ci_stacks.check(stacks, "fnx-ew1-prod"), "")
+        self.assertIn("fnx-ew1-prod", ci_stacks.plan_sweep_stacks(stacks))
 
     def test_a_ci_stack_in_an_unordered_stage_fails(self):
         # CD would otherwise deploy a new qa stage after production.
-        stacks = dict(TODAY, **{"fnx-qa-qa-01": stack("qa")})
-        with self.assertRaisesRegex(ValueError, r"'fnx-qa-qa-01' has stage 'qa'.*add it to STAGE_ORDER"):
+        stacks = dict(TODAY, **{"fnx-ue1-qa": stack("qa")})
+        with self.assertRaisesRegex(ValueError, r"'fnx-ue1-qa' has stage 'qa'.*add it to STAGE_ORDER"):
             ci_stacks.ci_stacks(stacks)
         # plan-sweep only orders its run, so a new stage is swept (after prod, with the fixtures).
         self.assertEqual(
             ci_stacks.plan_sweep_stacks(stacks),
-            ["fnx-dev-testenv-01", "fnx-staging-staging-01", "fnx-prod-production",
-             "fnx-fixtures-batch", "fnx-fixtures-webapp", "fnx-qa-qa-01"],
+            ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod",
+             "fnx-ue1-fixtures-batch", "fnx-ue1-fixtures-webapp", "fnx-ue1-qa"],
         )
 
     def test_a_ci_disabled_stack_in_an_unordered_stage_is_fine(self):
-        self.assertNotIn("fnx-fixtures-batch", ci_stacks.ci_stacks(TODAY))
+        self.assertNotIn("fnx-ue1-fixtures-batch", ci_stacks.ci_stacks(TODAY))
 
 
 class CheckTest(unittest.TestCase):
     def test_ci_stack_passes(self):
-        self.assertEqual(ci_stacks.check(TODAY, "fnx-staging-staging-01"), "")
+        self.assertEqual(ci_stacks.check(TODAY, "fnx-ue1-staging"), "")
 
     def test_unknown_stack_fails(self):
         self.assertIn("Unknown stack", ci_stacks.check(TODAY, "fnx-dev-typo"))
-        self.assertIn("Unknown stack", ci_stacks.check(TODAY, "fnx-dev-testenv-01\nfnx-prod-production"))
+        self.assertIn("Unknown stack", ci_stacks.check(TODAY, "fnx-ue1-dev\nfnx-ue1-prod"))
 
     def test_ci_disabled_stacks_fail(self):
-        for name in ("fnx-core-root", "fnx-local-sandbox", "fnx-fixtures-batch"):
+        for name in ("fnx-ue1-core", "fnx-ue1-local-sandbox", "fnx-ue1-fixtures-batch"):
             with self.subTest(name=name):
                 self.assertIn("actions_enabled: false", ci_stacks.check(TODAY, name))
 
@@ -130,16 +130,16 @@ class MainStreamsTest(unittest.TestCase):
 
     def test_list_goes_to_stdout(self):
         self.assertEqual(
-            self.run_main(TODAY), (0, "fnx-dev-testenv-01\nfnx-staging-staging-01\nfnx-prod-production\n", "")
+            self.run_main(TODAY), (0, "fnx-ue1-dev\nfnx-ue1-staging\nfnx-ue1-prod\n", "")
         )
 
     def test_refusals_go_to_stderr_only(self):
         cases = (
-            (dict(TODAY, **{"fnx-qa-qa-01": stack("qa")}), (), "has stage 'qa'"),
+            (dict(TODAY, **{"fnx-ue1-qa": stack("qa")}), (), "has stage 'qa'"),
             (dict(TODAY, **{"fnx-odd-odd-01": {"components": {"terraform": {}}}}), ("--plan-sweep",),
              "no single settings.context.stage"),
             (TODAY, ("--check", "fnx-typo"), "Unknown stack 'fnx-typo'"),
-            (TODAY, ("--check", "fnx-local-sandbox"), "actions_enabled: false"),
+            (TODAY, ("--check", "fnx-ue1-local-sandbox"), "actions_enabled: false"),
         )
         for stacks, argv, fragment in cases:
             with self.subTest(argv=argv, fragment=fragment):
@@ -149,7 +149,7 @@ class MainStreamsTest(unittest.TestCase):
                 self.assertIn(fragment, err)
 
     def test_check_echoes_an_accepted_stack_on_stdout(self):
-        self.assertEqual(self.run_main(TODAY, "--check", "fnx-prod-production"), (0, "fnx-prod-production\n", ""))
+        self.assertEqual(self.run_main(TODAY, "--check", "fnx-ue1-prod"), (0, "fnx-ue1-prod\n", ""))
 
 
 if __name__ == "__main__":

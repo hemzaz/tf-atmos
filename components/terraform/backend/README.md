@@ -8,7 +8,7 @@ caller is always trusted).
 
 ## Wiring
 
-- One instance, `backend/main` in `fnx-core-root` (management account). CI never plans or applies
+- One instance, `backend/main` in `fnx-ue1-core` (management account). CI never plans or applies
   it (`settings.github.actions_enabled: false`); a management-account administrator does.
 - Every stack's backend (`stacks/orgs/fnx/_defaults.yaml`) assumes a role by naming convention;
   `iam/ci` names the same roles. Nothing reads this instance's state.
@@ -16,13 +16,13 @@ caller is always trusted).
 ## Access roles
 
 Each stack's objects are an exact pattern pair, `*/<stack>/*` and `*/<stack>-*` (its derived
-instances), listed on its stage's roles in `stacks/catalog/backend/defaults.yaml`.
+instances), listed on its stage's roles in `stacks/orgs/fnx/core/us-east-1.yaml`.
 
 - `read` / `write` (`fnx-terraform-backend-read-role` / `-role`): the dev and staging stacks'
   objects, trusted by those stages' CI plan / apply roles.
 - `prod_read` / `prod_write` (`fnx-terraform-backend-prod-read-role` / `-prod-role`): the prod
   stacks' objects only, trusted by prod's plan / apply role only.
-- `core_write` (`fnx-terraform-backend-core-role`): `fnx-core-root`'s objects, trusted by nobody but
+- `core_write` (`fnx-terraform-backend-core-role`): `fnx-ue1-core`'s objects, trusted by nobody but
   the administrator who applies `backend/main`.
 
 `TFSTATE_ACCESS=read` selects the read role (run plans with `-lock=false`).
@@ -67,7 +67,7 @@ If the bucket already exists (created by `atmos terraform backend create` or by 
 cold-start workflow refuses to run. Import the bucket, then run the workflow's two steps by hand:
 
 ```bash
-atmos terraform import backend/main aws_s3_bucket.terraform_state fnx-terraform-state -s fnx-core-root --auto-generate-backend-file=false
-atmos terraform deploy backend/main -s fnx-core-root --auto-generate-backend-file=false
-atmos terraform init backend/main -s fnx-core-root --init-reconfigure=never -- -migrate-state -force-copy
+atmos terraform import backend/main aws_s3_bucket.terraform_state fnx-terraform-state -s fnx-ue1-core --auto-generate-backend-file=false
+atmos terraform deploy backend/main -s fnx-ue1-core --auto-generate-backend-file=false
+atmos terraform init backend/main -s fnx-ue1-core --init-reconfigure=never -- -migrate-state -force-copy
 ```

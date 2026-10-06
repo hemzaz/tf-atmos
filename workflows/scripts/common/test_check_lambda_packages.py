@@ -51,7 +51,7 @@ def stack(**overrides):
             del components[name]
         else:
             change(components[name])
-    return {"fnx-dev-testenv-01": {"components": {"terraform": components}}}
+    return {"fnx-ue1-dev": {"components": {"terraform": components}}}
 
 
 def set_var(key, value):

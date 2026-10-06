@@ -1,5 +1,5 @@
 ---
-# Networking component configurations for testenv-01 environment
+# Networking component configurations for fnx-ue1-dev
 # Defines VPC and network resources
 
 import:

@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# fnx-core-root - the management account's stack
+# fnx-ue1-core - the management account's stack
 # =============================================================================
 # Owns the ONE Terraform state backend every stack uses: bucket
 # fnx-terraform-state, its KMS key, and the stage-split read-only / read-write
@@ -15,6 +15,8 @@
 
 import:
   - catalog/_base/defaults
+  # The region code (ue1) of the state bucket's region, settings.tfstate.region
+  - mixins/region/us-east-1
   - orgs/fnx/core/_defaults
   - catalog/backend/defaults
 
@@ -24,7 +26,6 @@ vars:
 settings:
   context:
     tenant: fnx
-    environment: root
     stage: core
 
 components:
@@ -58,26 +59,45 @@ components:
         # prod - with the same full ARN, path included (aws:PrincipalArn
         # carries the role's path). check-cluster-api-ci.py fails a stack
         # whose admin role is missing here. None yet: the owner supplies them.
+        #
+        # State: each stack's exact pattern pair, "*/<stack>/*" and "*/<stack>-*"
+        # (stacks/catalog/backend/defaults.yaml explains the key layout), on its
+        # stage's read and write roles. Adding a stack = its pair and its CI
+        # roles here (check-state-keys.py, check-ci-state-roles.py).
         access_roles:
           read:
             # Dev/staging state: their CI plan roles (PR plans, drift).
+            object_key_patterns: &non_prod_state
+              - "*/fnx-ue1-dev/*"
+              - "*/fnx-ue1-dev-*"
+              - "*/fnx-ue1-staging/*"
+              - "*/fnx-ue1-staging-*"
             allowed_principal_arns:
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-testenv-01-dev-ci-plan"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-staging-01-staging-ci-plan"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-ue1-dev-ci-plan"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-ue1-staging-ci-plan"
           prod_read:
             # Prod state: ONLY prod's plan role, which trusts the master
             # branch subject alone (owner decision D3) - never PR code.
+            object_key_patterns: &prod_state
+              - "*/fnx-ue1-prod/*"
+              - "*/fnx-ue1-prod-*"
             allowed_principal_arns:
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-production-prod-ci-plan"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue1-prod-ci-plan"
           write:
             # Dev/staging state: their CI apply roles (master branch subject
             # only, see iam/ci ci_apply_role_trusted_repos).
+            object_key_patterns: *non_prod_state
             allowed_principal_arns:
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-testenv-01-dev-ci-apply"
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-staging-01-staging-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.dev }}:role/fnx-ue1-dev-ci-apply"
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.staging }}:role/fnx-ue1-staging-ci-apply"
           prod_write:
             # Prod state: ONLY prod's apply role.
+            object_key_patterns: *prod_state
             allowed_principal_arns:
-              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-production-prod-ci-apply"
-          # core_write: no principals listed - the applying administrator only
-          # (stacks/catalog/backend/defaults.yaml).
+              - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue1-prod-ci-apply"
+          # This stack's own state (backend/main). No principals listed: the
+          # applying administrator only (stacks/catalog/backend/defaults.yaml).
+          core_write:
+            object_key_patterns:
+              - "*/fnx-ue1-core/*"
+              - "*/fnx-ue1-core-*"

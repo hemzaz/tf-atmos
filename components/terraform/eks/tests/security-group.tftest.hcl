@@ -67,6 +67,7 @@ variables {
   subnet_ids = ["subnet-0a1b2c3d", "subnet-4e5f6a7b"]
   tags = {
     Environment = "dev"
+    Stage       = "dev"
   }
   node_groups = {
     workers = {

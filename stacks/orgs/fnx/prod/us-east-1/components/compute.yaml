@@ -26,7 +26,7 @@ components:
         inherits:
           - eks/defaults
       vars:
-        # The cluster is "<Environment>-<name>": production-main.
+        # The cluster is "<Environment>-<name>": ue1-main.
         name: main
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
         # The operator's path to the private endpoint (docs/OPERATIONS.md,
@@ -37,7 +37,7 @@ components:
           # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
           - !terraform.state github-runners/main .security_group_id
         tags:
-          Cluster: production-main
+          Cluster: "{{ .settings.context.environment }}-main"
           Purpose: "application-workloads"
           CriticalityLevel: "high"
           SLA: "99.9"
@@ -133,7 +133,7 @@ components:
           # The stack's in-VPC CI runners (github-runners/main), for the in-cluster instances.
           - !terraform.state github-runners/main .security_group_id
         tags:
-          Cluster: production-data
+          Cluster: "{{ .settings.context.environment }}-data"
           Purpose: "data-processing"
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true

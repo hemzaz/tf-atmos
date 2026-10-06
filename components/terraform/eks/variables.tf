@@ -672,10 +672,17 @@ variable "vpc_cni_addon" {
 
 variable "tags" {
   type        = map(string)
-  description = "Common tags to apply to all resources. Environment is required: it prefixes every name."
+  description = "Common tags to apply to all resources. Environment is required: it prefixes every name. Stage is required: prod gets deletion protection."
 
   validation {
     condition     = trimspace(lookup(var.tags, "Environment", "")) != ""
     error_message = "tags must include a non-empty Environment value."
+  }
+
+  # The tier, from settings.context.stage. Required: Environment is the region
+  # code (ue1), so nothing else says whether this is production.
+  validation {
+    condition     = trimspace(lookup(var.tags, "Stage", "")) != ""
+    error_message = "tags must include a non-empty Stage value (settings.context.stage)."
   }
 }

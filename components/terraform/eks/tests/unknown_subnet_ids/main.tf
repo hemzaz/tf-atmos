@@ -24,7 +24,7 @@ module "eks" {
   region     = "us-east-1"
   name       = "main"
   subnet_ids = aws_subnet.this[*].id
-  tags       = { Environment = "production", Tenant = "fnx" }
+  tags       = { Environment = "production", Stage = "prod", Tenant = "fnx" }
   node_groups = {
     workers = { instance_types = ["m5.xlarge"] }
   }

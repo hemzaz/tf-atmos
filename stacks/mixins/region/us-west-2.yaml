@@ -8,4 +8,4 @@ vars:
   region: us-west-2
 settings:
   context:
-    environment: us-west-2
+    environment: uw2

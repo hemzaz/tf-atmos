@@ -87,8 +87,8 @@ workflows:
         command: |
           set -eu
           broken=$(python3 -B -c 'import sys; sys.path.insert(0, "workflows/scripts/common"); import fixtures; print(" ".join(fixtures.stacks("tflint")))')
-          stacks=$(atmos list stacks | grep '^fnx-fixtures-' || true)
-          [ -n "$stacks" ] || { echo "no fnx-fixtures-* stacks listed; refusing to skip them"; exit 1; }
+          stacks=$(atmos list stacks | grep '^fnx-ue1-fixtures-' || true)
+          [ -n "$stacks" ] || { echo "no fnx-ue1-fixtures-* stacks listed; refusing to skip them"; exit 1; }
           ATMOS_STACKS_EXCLUDED_PATHS='**/_defaults.yaml,**/components/**,orgs/fnx/fixtures/**' atmos terraform lint
           failed=""
           for stack in $stacks; do
@@ -159,7 +159,7 @@ workflows:
           echo "tflint: all component directories clean"
       # The state backend's roles are split by stage with S3 key patterns, a
       # "*/<stack>/*" and "*/<stack>-*" pair per stack
-      # (stacks/catalog/backend/defaults.yaml); this evaluates them against
+      # (stacks/orgs/fnx/core/us-east-1.yaml); this evaluates them against
       # every s3-backend state key and fails one not matched by exactly its
       # stage's roles. Also run by validate-all (validate-enhanced.yaml).
       - name: check-state-keys

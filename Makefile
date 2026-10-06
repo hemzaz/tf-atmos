@@ -12,16 +12,16 @@
 # =============================================================================
 
 # Default values - can be overridden via environment or command line.
-# Stack names follow atmos.yaml name_template: <tenant>-<stage>-<environment>
-# (fnx-dev-testenv-01, fnx-staging-staging-01, fnx-prod-production).
+# Stack names follow atmos.yaml name_template: <tenant>-<environment>-<stage>,
+# environment being the region code (fnx-ue1-dev, fnx-ue1-staging, fnx-ue1-prod).
 # ACCOUNT is accepted as an alias for STAGE.
 TENANT ?= fnx
 STAGE ?= $(or $(ACCOUNT),dev)
-ENVIRONMENT ?= testenv-01
+ENVIRONMENT ?= ue1
 REGION ?= us-east-1
 
-# Derived values (STACK can also be passed directly: make plan STACK=fnx-prod-production)
-STACK ?= $(TENANT)-$(STAGE)-$(ENVIRONMENT)
+# Derived values (STACK can also be passed directly: make plan STACK=fnx-ue1-prod)
+STACK ?= $(TENANT)-$(ENVIRONMENT)-$(STAGE)
 
 # Colors for pretty output
 RED := \033[0;31m
@@ -57,9 +57,9 @@ help: ## Show this help message
 	@echo "  $(YELLOW)Batch Ops:$(NC)      make validate-all  $(GREEN)# Validate all stacks$(NC)"
 	@echo
 	@echo "$(WHITE)Quick Examples:$(NC)"
-	@echo "  $(GREEN)make validate STAGE=prod ENVIRONMENT=production$(NC)"
+	@echo "  $(GREEN)make validate STAGE=prod$(NC)"
 	@echo "  $(GREEN)make plan-component COMPONENT=vpc/main$(NC)"
-	@echo "  $(GREEN)make api-validate-stack STACK=fnx-dev-testenv-01$(NC)"
+	@echo "  $(GREEN)make api-validate-stack STACK=fnx-ue1-dev$(NC)"
 
 # =============================================================================
 # API-Style Shortcuts (atmos wrappers)
@@ -77,7 +77,7 @@ api-status: ## Show components of the current stack
 api-list-stacks: ## List all stacks
 	@atmos list stacks
 
-api-validate-stack: ## Validate a specific stack (usage: make api-validate-stack STACK=fnx-dev-testenv-01)
+api-validate-stack: ## Validate a specific stack (usage: make api-validate-stack STACK=fnx-ue1-dev)
 	@echo "$(CYAN)✅ Validating stack: $(STACK)$(NC)"
 	@atmos workflow validate-stack -f validate-enhanced -s "$(STACK)"
 
@@ -195,13 +195,13 @@ safety-check: ## Comprehensive safety checks before any apply operation
 
 # Printed by `make shell-functions`; kept in a variable because a recipe cannot hold a heredoc
 define SHELL_FUNCTIONS
-# Atmos Infrastructure Functions (stacks: <tenant>-<stage>-<environment>)
+# Atmos Infrastructure Functions (stacks: <tenant>-<environment>-<stage>)
 infra-stacks() {
   atmos list stacks
 }
 
 infra-validate-stack() {
-  local stack=$${1:-fnx-dev-testenv-01}
+  local stack=$${1:-fnx-ue1-dev}
   atmos workflow validate-stack -f validate-enhanced -s $$stack
 }
 
@@ -212,13 +212,13 @@ infra-lint() {
 # Terraform shortcuts
 tf-plan() {
   local component=$${1:?Component required, e.g. vpc/main}
-  local stack=$${2:-fnx-dev-testenv-01}
+  local stack=$${2:-fnx-ue1-dev}
   atmos terraform plan $$component -s $$stack
 }
 
 tf-validate() {
   local component=$${1:?Component required, e.g. vpc/main}
-  local stack=$${2:-fnx-dev-testenv-01}
+  local stack=$${2:-fnx-ue1-dev}
   atmos terraform validate $$component -s $$stack
 }
 
@@ -239,8 +239,8 @@ shell-functions: ## Generate shell functions for .bashrc/.zshrc
 	@echo "$(WHITE)Examples:$(NC)"
 	@echo "  make status                           # Show current stack status"
 	@echo "  make validate                        # Validate all configurations"
-	@echo "  make plan STAGE=prod ENVIRONMENT=production  # Plan another stack"
-	@echo "  make apply STACK=fnx-staging-staging-01      # Apply to staging"
+	@echo "  make plan STAGE=prod  # Plan another stack"
+	@echo "  make apply STACK=fnx-ue1-staging      # Apply to staging"
 	@echo
 	@echo "$(WHITE)Development:$(NC)"
 	@echo "  make onboard                         # Quick environment onboarding"
@@ -480,28 +480,28 @@ h: help ## Alias for help
 # =============================================================================
 
 dev: ## Switch to development environment
-	@$(MAKE) STACK=fnx-dev-testenv-01 status
+	@$(MAKE) STACK=fnx-ue1-dev status
 
 staging: ## Switch to staging environment
-	@$(MAKE) STACK=fnx-staging-staging-01 status
+	@$(MAKE) STACK=fnx-ue1-staging status
 
 prod: ## Switch to production environment
-	@$(MAKE) STACK=fnx-prod-production status
+	@$(MAKE) STACK=fnx-ue1-prod status
 
 # =============================================================================
 # AWS Backend Setup and Management
 # =============================================================================
 # State lives in ONE S3 bucket, <tenant>-terraform-state (native lockfile
 # locking, no DynamoDB), created and managed by backend/main in the management
-# account's stack fnx-core-root. First creation: make setup-aws-backend-cold-start.
+# account's stack fnx-ue1-core. First creation: make setup-aws-backend-cold-start.
 
-BACKEND_STACK := fnx-core-root
+BACKEND_STACK := fnx-ue1-core
 
 setup-aws-backend-cold-start: ## Create the single state backend (once, management-account admin credentials)
 	@echo "$(BLUE)Creating the state backend in $(BACKEND_STACK)...$(NC)"
 	@atmos workflow backend-cold-start -f bootstrap
 
-setup-aws-backend: ## Plan and apply the single state backend (backend/main in fnx-core-root)
+setup-aws-backend: ## Plan and apply the single state backend (backend/main in fnx-ue1-core)
 	@echo "$(BLUE)Updating the state backend in $(BACKEND_STACK)...$(NC)"
 	@atmos workflow backend-only -f bootstrap
 
@@ -534,15 +534,15 @@ cleanup-aws-backend: ## Destroy the backend/main component (DANGEROUS; the workf
 	@atmos workflow destroy -f destroy-backend
 
 # Quick bootstrap per environment. There is no per-environment backend: all
-# stacks share the one in fnx-core-root (make setup-aws-backend-cold-start).
+# stacks share the one in fnx-ue1-core (make setup-aws-backend-cold-start).
 setup-aws-dev: ## Quick bootstrap (IAM + VPCs) for development
-	@$(MAKE) bootstrap-environment STACK=fnx-dev-testenv-01
+	@$(MAKE) bootstrap-environment STACK=fnx-ue1-dev
 
 setup-aws-staging: ## Quick bootstrap (IAM + VPCs) for staging
-	@$(MAKE) bootstrap-environment STACK=fnx-staging-staging-01
+	@$(MAKE) bootstrap-environment STACK=fnx-ue1-staging
 
 setup-aws-prod: ## Quick bootstrap (IAM + VPCs) for production
-	@$(MAKE) bootstrap-environment STACK=fnx-prod-production
+	@$(MAKE) bootstrap-environment STACK=fnx-ue1-prod
 
 # =============================================================================
 # Advanced Operations

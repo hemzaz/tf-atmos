@@ -6,7 +6,7 @@
 # for terminal-first workflows
 #
 # Usage:
-#   ./scripts/manifest-generator.sh stack fnx-dev-testenv-01      # Generate stack manifest
+#   ./scripts/manifest-generator.sh stack fnx-ue1-dev      # Generate stack manifest
 #   ./scripts/manifest-generator.sh component vpc/main               # Generate component manifest
 #   ./scripts/manifest-generator.sh template new-stack           # Generate new stack template
 #   ./scripts/manifest-generator.sh resource s3-bucket          # Generate resource template
@@ -38,7 +38,7 @@ print_usage() {
     echo -e "  ${GREEN}list${NC}                      List available templates"
     echo ""
     echo -e "${WHITE}Examples:${NC}"
-    echo -e "  ${GREEN}./scripts/manifest-generator.sh stack fnx-dev-testenv-01${NC}"
+    echo -e "  ${GREEN}./scripts/manifest-generator.sh stack fnx-ue1-dev${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh component vpc/main${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh template stack testenv-02 fnx dev  # <label> [tenant] [stage] [environment] [region]${NC}"
     echo -e "  ${GREEN}./scripts/manifest-generator.sh resource aws_s3_bucket${NC}"
@@ -81,7 +81,7 @@ EOF
 
 generate_component_manifest() {
     local component="$1"
-    local stack="${2:-fnx-dev-testenv-01}"
+    local stack="${2:-fnx-ue1-dev}"
     local output_file="${3:-manifests/components/${component}-manifest.yaml}"
 
     echo -e "${CYAN}📦 Generating manifest for component: ${component}${NC}"
@@ -324,10 +324,10 @@ components:
 
 \`\`\`bash
 # Validate the component
-atmos terraform validate $component_name -s fnx-dev-testenv-01
+atmos terraform validate $component_name -s fnx-ue1-dev
 
 # Plan the component
-atmos terraform plan $component_name -s fnx-dev-testenv-01
+atmos terraform plan $component_name -s fnx-ue1-dev
 
 # Get component info
 make component-info COMPONENT=$component_name

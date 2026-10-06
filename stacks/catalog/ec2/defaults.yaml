@@ -11,7 +11,7 @@ components:
           category: "compute"
       vars:
         # The lifecycle tier the component validates (dev/staging/prod).
-        # context.environment is the instance name (`testenv-01`) and fails it.
+        # context.environment is the region code (`ue1`) and fails it.
         environment: "{{ .settings.context.stage }}"
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids

@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# Production Stack Configuration
+# fnx-ue1-prod: the prod account's us-east-1 stack
 # =============================================================================
 # Production environment with full high availability, security, and compliance
 # ALL CHANGES REQUIRE CHANGE MANAGEMENT APPROVAL
@@ -32,5 +32,4 @@ settings:
     account: prod
   context:
     tenant: fnx
-    environment: production
     stage: prod

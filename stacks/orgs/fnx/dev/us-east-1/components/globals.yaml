@@ -1,10 +1,9 @@
 ---
-# Global component configurations for testenv-01 environment
+# Global component configurations for fnx-ue1-dev
 # This file is imported by the main stack file and provides environment-wide settings
 
 import:
   # Import hierarchy - no .yaml extensions
-  - orgs/fnx/dev/us-east-1/_defaults
 
   # Import catalog defaults for all components used in this environment
   - catalog/vpc/defaults
@@ -63,9 +62,6 @@ settings:
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     enable_vpc_flow_logs: false
 
-  # Environment tagging strategy
-  context:
-    environment: testenv-01
 
 components:
   terraform:

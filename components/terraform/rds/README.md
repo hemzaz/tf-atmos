@@ -6,7 +6,7 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
 
 ## Wiring
 
-- Instances: `rds/main` in the three AWS stacks and `fnx-local-localemu` (reads `vpc/main`
+- Instances: `rds/main` in the three AWS stacks and `fnx-ue1-local-localemu` (reads `vpc/main`
   subnets; in the AWS stacks it also admits `eks/main .eks_cluster_managed_security_group_id`);
   `rds/data` in the three AWS stacks (reads `vpc/services`). Only prod's instances read `kms/main .key_arn`;
   dev and staging use AWS-managed keys.

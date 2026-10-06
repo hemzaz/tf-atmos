@@ -170,7 +170,7 @@ ${BOLD}NOTES:${RESET}
       (stacks/orgs/<tenant>/_defaults.yaml). A new account needs \$AWS_ACCOUNT_ID
       (12 digits): the script adds it there, and fails without it
     - VPC CIDR is auto-assigned if not specified based on environment type
-    - All stacks share one state backend (backend/main in fnx-core-root), created once with:
+    - All stacks share one state backend (backend/main in fnx-ue1-core), created once with:
       atmos workflow backend-cold-start -f bootstrap
 
 EOF
@@ -557,11 +557,11 @@ EOF
 ---
 # Security components for $(stack_name).
 # No state backend here: every stack uses the single backend (backend/main in
-# fnx-core-root). Give this stack CI roles (iam/ci, see the existing stacks'
+# fnx-ue1-core). Give this stack CI roles (iam/ci, see the existing stacks'
 # security.yaml) and add their ARNs to that instance's access_roles entries for
 # this stack's stage (read/write for dev and staging, prod_read/prod_write for prod),
 # with this stack's object_key_patterns pair "*/$(stack_name)/*" and
-# "*/$(stack_name)-*" (stacks/catalog/backend/defaults.yaml).
+# "*/$(stack_name)-*" (stacks/orgs/fnx/core/us-east-1.yaml).
 
 import:
   - $(import_prefix)/globals
@@ -592,7 +592,7 @@ initialize_backend() {
 
     log_step "Checking the Shared State Backend"
 
-    # Every stack uses the single backend (backend/main in fnx-core-root); a new
+    # Every stack uses the single backend (backend/main in fnx-ue1-core); a new
     # stack creates none. Create it once with `atmos workflow backend-cold-start
     # -f bootstrap`; here it is only verified.
     if [[ "$DRY_RUN" == "true" ]]; then

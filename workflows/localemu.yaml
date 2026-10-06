@@ -118,7 +118,7 @@ workflows:
         command: |
           set -eu
           find components/terraform -maxdepth 3 -type d \
-            -name 'fnx-local-localemu-*' -exec rm -rf {} + 2>/dev/null || true
+            -name 'fnx-ue1-local-localemu-*' -exec rm -rf {} + 2>/dev/null || true
           echo "cleared LocalEmu workspace state"
 
       - type: shell
@@ -142,27 +142,27 @@ workflows:
         name: apply-vpc
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform apply vpc/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform apply vpc/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: apply-lambda
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform apply lambda/api -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform apply lambda/api -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: apply-rds
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform apply rds/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform apply rds/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: apply-monitoring
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform apply monitoring/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform apply monitoring/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: apply-iam
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform apply iam/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform apply iam/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
 
       # Destroy proves teardown works and is where rds's deletion_protection
       # footgun would surface. Reverse order.
@@ -170,27 +170,27 @@ workflows:
         name: destroy-iam
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform destroy iam/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform destroy iam/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: destroy-monitoring
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform destroy monitoring/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform destroy monitoring/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: destroy-rds
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform destroy rds/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform destroy rds/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: destroy-lambda
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform destroy lambda/api -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform destroy lambda/api -s fnx-ue1-local-localemu --identity local-emu -auto-approve
       - type: shell
         name: destroy-vpc
         command: |
           export LOCALEMU_ACCESS_KEY_ID=test LOCALEMU_SECRET_ACCESS_KEY=test AWS_ENDPOINT_URL=http://localhost:4566
-          atmos terraform destroy vpc/main -s fnx-local-localemu --identity local-emu -auto-approve
+          atmos terraform destroy vpc/main -s fnx-ue1-local-localemu --identity local-emu -auto-approve
 
       - type: shell
         name: down

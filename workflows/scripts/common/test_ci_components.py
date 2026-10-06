@@ -8,7 +8,7 @@ _spec = importlib.util.spec_from_file_location("ci_components", pathlib.Path(__f
 ci_components = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci_components)
 
-STACK = "fnx-dev-testenv-01"
+STACK = "fnx-ue1-dev"
 
 
 def instance(*deps, actions_enabled=None, **metadata):
@@ -34,7 +34,7 @@ class DependencyOrderTest(unittest.TestCase):
 
     def test_cross_stack_missing_and_non_deployable_edges_are_ignored(self):
         instances = {
-            "iam/ci": instance({"component": "backend/main", "stack": "fnx-core-root"}, "gone/main", "base"),
+            "iam/ci": instance({"component": "backend/main", "stack": "fnx-ue1-core"}, "gone/main", "base"),
             "base": instance(type="abstract"),
             "off": instance(enabled=False),
         }
@@ -114,7 +114,7 @@ class StackInstancesTest(unittest.TestCase):
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(ci_components.main(), 1)
         self.assertEqual(out.getvalue(), "")
-        self.assertIn("::error::fnx-dev-testenv-01: dependency cycle", err.getvalue())
+        self.assertIn("::error::fnx-ue1-dev: dependency cycle", err.getvalue())
 
 
 if __name__ == "__main__":

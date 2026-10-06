@@ -79,8 +79,8 @@ components:
 
         # Lifecycle tier, not the environment instance name: the component
         # validates dev/development/staging/stage/prod/production.
-        # context.stage carries the tier; context.environment is the instance
-        # ("testenv-01") and fails that validation.
+        # context.stage carries the tier; context.environment is the region
+        # code ("ue1") and fails that validation.
         environment: "{{ .settings.context.stage }}"
 
         # The four below have NO safe default, so they are left unset here on

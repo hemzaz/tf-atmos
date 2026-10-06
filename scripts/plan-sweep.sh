@@ -45,7 +45,7 @@
 #
 # Usage:
 #   bash scripts/plan-sweep.sh                       # every real stack and template fixture (ci-stacks.py --plan-sweep)
-#   bash scripts/plan-sweep.sh fnx-prod-production   # only these stacks
+#   bash scripts/plan-sweep.sh fnx-ue1-prod   # only these stacks
 #
 # A template fixture listed for plan-sweep in KNOWN_BROKEN_FIXTURES
 # (workflows/scripts/common/fixtures.py) is swept and reported, but its
@@ -138,9 +138,9 @@ if [ -z "$STACKS" ]; then
   STACKS=$(python3 -B workflows/scripts/common/ci-stacks.py --plan-sweep) || exit 2
   STACKS=$(printf '%s\n' "$STACKS" | tr '\n' ' ')
   case " $STACKS" in
-    *" fnx-fixtures-"*) ;;
+    *" fnx-ue1-fixtures-"*) ;;
     *)
-      printf '%s\n' "error: no fnx-fixtures-* stacks listed; refusing to sweep without them." >&2
+      printf '%s\n' "error: no fnx-ue1-fixtures-* stacks listed; refusing to sweep without them." >&2
       exit 2
       ;;
   esac

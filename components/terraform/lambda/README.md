@@ -15,8 +15,8 @@ rotation configuration.
   (Cloud Posse's aws-lambda takes its bucket from an s3-bucket component the same way), `s3_key`
   `<function_name>/<settings.package_version>.zip`. All are `metadata.enabled: false` until their
   first package is uploaded (`docs/OPERATIONS.md`, "Lambda packages"). `lambda/main` in
-  `fnx-local-sandbox` (applied for real by the sandbox workflow)
-  and `lambda/api` in `fnx-local-localemu` use `filename`.
+  `fnx-ue1-local-sandbox` (applied for real by the sandbox workflow)
+  and `lambda/api` in `fnx-ue1-local-localemu` use `filename`.
 - Triggers: `lambda/data-transformer` polls `sqs/data-transform` (an event source mapping, with
   `kms/main` in `event_source_kms_key_arns`), which `lambda/data-processor` sends to (`QUEUE_URL`,
   `custom_policy` from the queue's `.producer_policy`); `lambda/report-generator` runs daily at

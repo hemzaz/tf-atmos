@@ -1,12 +1,13 @@
 ---
+# us-east-1. settings.context.environment is the region's Cloud Posse code
+# (ue1): the stack name's middle part ({tenant}-{environment}-{stage}) and
+# tags.Environment, which components prefix their names with.
 import:
-  # Import the catalog with vpc configuration for us-east-1 region
+  # Every stack in this region has the vpc catalog's abstract defaults
   - catalog/vpc/defaults
-  # All accounts (stages) in this region will have vpc components
 
 vars:
   region: us-east-1
-# Other defaults for the us-east-1 region
 settings:
   context:
-    environment: us-east-1
+    environment: ue1

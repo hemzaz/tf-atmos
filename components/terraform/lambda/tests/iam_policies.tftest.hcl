@@ -20,6 +20,7 @@ variables {
   s3_key        = "orders/1.0.0.zip"
   tags = {
     Environment = "test"
+    Stage       = "dev"
     ManagedBy   = "Terraform"
   }
 }

@@ -9,7 +9,7 @@ provider.
 ## Wiring
 
 Instances are named `network/main` and `network/services` (`metadata.component: dns`) in the
-three AWS stacks; `network/main` also in `fnx-local-sandbox`. `network/vpc-peering` is a
+three AWS stacks; `network/main` also in `fnx-ue1-local-sandbox`. `network/vpc-peering` is a
 different component (`network`).
 
 - In the AWS stacks, `network/main` reads `vpc/main .vpc_id` (private `internal` zone) and

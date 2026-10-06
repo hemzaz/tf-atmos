@@ -7,7 +7,6 @@
 # =============================================================================
 
 import:
-  - orgs/fnx/prod/us-east-1/_defaults
 
   # Import catalog defaults for all components
   - catalog/vpc/defaults
@@ -77,8 +76,6 @@ settings:
       auth_service: "ghcr.io/fnx-platform/auth-service:1.4.2"
       job_processor: "ghcr.io/fnx-platform/job-processor:1.4.2"
     enable_vpc_flow_logs: true
-  context:
-    environment: production
 
 components:
   terraform:

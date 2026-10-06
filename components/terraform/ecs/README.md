@@ -6,7 +6,7 @@ An ECS cluster with optional Container Insights and its capacity providers: `FAR
 
 ## Wiring
 
-- Instance: `ecs/main` in the three AWS stacks and `fnx-local-sandbox`, Fargate only. It lists
+- Instance: `ecs/main` in the three AWS stacks and `fnx-ue1-local-sandbox`, Fargate only. It lists
   `vpc/main` as a dependency but reads nothing: a cluster has no VPC or subnets (services do).
 - Used by: `monitoring/main` (`.cluster_name`). The `web-application` template also configures it.
 

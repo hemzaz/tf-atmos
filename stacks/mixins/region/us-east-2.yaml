@@ -8,4 +8,4 @@ vars:
   region: us-east-2
 settings:
   context:
-    environment: us-east-2
+    environment: ue2

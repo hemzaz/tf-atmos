@@ -521,12 +521,12 @@ jobs:
                   for stack, config in stacks.items()
               }
 
-          # fnx-local-* target the Floci/LocalEmu emulators (account_id
+          # fnx-ue1-local-* target the Floci/LocalEmu emulators (account_id
           # 000000000000, see stacks/orgs/fnx/local/_defaults.yaml) and have no
           # AWS_PLAN_ROLE_ARN trust; emulator.yml covers them instead. Read the
           # exclusion from settings.github.actions_enabled (the same key Cloud
           # Posse's own atmos-terraform-plan/-apply actions read; data-driven
-          # and survives a stack rename, unlike matching the `fnx-local-` name
+          # and survives a stack rename, unlike matching the `fnx-ue1-local-` name
           # prefix). Filtered per (stack, component) pair — not per whole
           # stack — so a future per-component opt-out on a real stack only
           # drops that one instance from the matrix, not the entire stack.

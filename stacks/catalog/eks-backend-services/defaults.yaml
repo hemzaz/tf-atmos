@@ -15,7 +15,7 @@ components:
           actions_enabled: false
           runner: in-vpc
       vars:
-        # Only fnx-prod-production runs an elasticache/main instance today
+        # Only fnx-ue1-prod runs an elasticache/main instance today
         # (stacks/catalog/elasticache/defaults.yaml); every stack starts with
         # redis off and prod's instance turns it on explicitly.
         redis_enabled: false

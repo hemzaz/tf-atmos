@@ -20,7 +20,7 @@ def instance(component, actions_enabled=None, public=None, **metadata):
 
 
 def stacks_with(**components):
-    return {"fnx-dev-testenv-01": {"components": {"terraform": components}}}
+    return {"fnx-ue1-dev": {"components": {"terraform": components}}}
 
 
 # The sso.amazonaws.com/<region>/ path segment is the IAM Identity Center home
@@ -45,7 +45,7 @@ def addon(component, cluster):
 def with_backend(stacks, **allowed):
     backend = instance("backend")
     backend["vars"]["access_roles"] = {key: {"allowed_principal_arns": arns} for key, arns in allowed.items()}
-    return {**stacks, "fnx-core-root": {"components": {"terraform": {"backend/main": backend}}}}
+    return {**stacks, "fnx-ue1-core": {"components": {"terraform": {"backend/main": backend}}}}
 
 
 class CheckClusterApiCiTest(unittest.TestCase):
@@ -128,7 +128,7 @@ class CheckClusterApiCiTest(unittest.TestCase):
 
     def test_prod_admin_role_needs_prod_write(self):
         stacks = with_backend(
-            {"fnx-prod-production": {"components": {"terraform": {
+            {"fnx-ue1-prod": {"components": {"terraform": {
                 "eks/main": admin_eks(ADMIN, stage="prod"),
                 "eks-addons/main": addon("eks-addons", "eks/main"),
             }}}},
@@ -145,7 +145,7 @@ class CheckClusterApiCiTest(unittest.TestCase):
         self.assertIn("no deployable backend/main", errors[0])
         # A disabled backend/main counts as missing.
         off = with_backend(stacks, write=[ADMIN])
-        off["fnx-core-root"]["components"]["terraform"]["backend/main"]["metadata"] = {"enabled": False}
+        off["fnx-ue1-core"]["components"]["terraform"]["backend/main"]["metadata"] = {"enabled": False}
         errors, _ = check_cluster_api_ci.check_operators(off, CLUSTER)
         self.assertEqual(len(errors), 1, errors)
 
@@ -221,7 +221,7 @@ class CheckClusterApiCiTest(unittest.TestCase):
         })
 
     def terraform(self, stacks):
-        return stacks["fnx-dev-testenv-01"]["components"]["terraform"]
+        return stacks["fnx-ue1-dev"]["components"]["terraform"]
 
     def test_bastion_in_a_peered_vpc_with_open_nacls_passes(self):
         self.assertEqual(check_cluster_api_ci.check_network_paths(self.peered_stack(), CLUSTER), [])
@@ -253,9 +253,9 @@ class CheckClusterApiCiTest(unittest.TestCase):
             self.assertEqual(check_cluster_api_ci.check_network_paths(stacks, CLUSTER), [])
 
     # In-vpc runners: the CI path into a private cluster.
-    CONTEXT = {"tenant": "fnx", "environment": "testenv-01", "stage": "dev"}
+    CONTEXT = {"tenant": "fnx", "environment": "ue1", "stage": "dev"}
 
-    def runner_stack(self, admitted=True, labels=("fnx-testenv-01-dev",), runner_label=None):
+    def runner_stack(self, admitted=True, labels=("fnx-ue1-dev",), runner_label=None):
         pool = instance("github-runners")
         pool["vars"].update(vpc_id="!terraform.state vpc/main .vpc_id", runner_labels=list(labels))
         eks = instance("eks")
@@ -292,10 +292,10 @@ class CheckClusterApiCiTest(unittest.TestCase):
     def test_label_with_no_pool_fails(self):
         errors = check_cluster_api_ci.check_runner_paths(self.runner_stack(labels=("other",)), CLUSTER)
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("labelled 'fnx-testenv-01-dev', but no deployable github-runners instance", errors[0])
+        self.assertIn("labelled 'fnx-ue1-dev', but no deployable github-runners instance", errors[0])
 
     def test_runner_label_setting_picks_another_pool(self):
-        stacks = self.runner_stack(labels=("fnx-testenv-01-dev-microservices",), runner_label="fnx-testenv-01-dev-microservices")
+        stacks = self.runner_stack(labels=("fnx-ue1-dev-microservices",), runner_label="fnx-ue1-dev-microservices")
         self.assertEqual(check_cluster_api_ci.check_runner_paths(stacks, CLUSTER), [])
 
     def test_unknown_runner_mode_fails(self):

@@ -1,7 +1,7 @@
 """Template fixtures (stacks/orgs/fnx/fixtures) whose failures are known and not yet fatal.
 
 Each catalog template (stacks/catalog/templates/*.yaml) has a fixture stack,
-fnx-fixtures-<short name>, so CI resolves and checks a template no real stack
+fnx-ue1-fixtures-<short name>, so CI resolves and checks a template no real stack
 imports. A template not yet ported to the current component interfaces fails
 those checks; listing its fixture here, with the checks it fails (ALL for every
 one), reports those failures as KNOWN-BROKEN without failing the run. A port PR
