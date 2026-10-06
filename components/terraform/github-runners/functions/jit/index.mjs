@@ -122,12 +122,18 @@ export async function onLaunch(detail, env, deps) {
     await deps.completeLifecycle(detail, "CONTINUE");
     console.log(`JIT runner ${jit.runner.id} configured for ${instanceId}`);
   } catch (error) {
-    // Terminate with a lower desired capacity first: an abandoned launch alone
-    // is replaced by the group, and a lasting failure (a revoked App, a
-    // missing key) would loop launches. The lifecycle action then has nothing
-    // left to hold; completing it is best effort.
-    await deps.terminateInstance(instanceId).catch((e) => console.error(`terminate ${instanceId}: ${e.message}`));
-    await deps.completeLifecycle(detail, "ABANDON").catch(() => {});
+    // End the instance with a lower desired capacity: an abandoned launch
+    // alone is replaced by the group, and a lasting failure (a revoked App, a
+    // missing key) would loop launches. If Auto Scaling refuses to terminate an
+    // instance still in Pending:Wait (e.g. ScalingActivityInProgress), let the
+    // launch CONTINUE instead: the instance finds no JIT configuration and its
+    // own EXIT trap terminates it, decrementing, from InService.
+    let terminated = true;
+    await deps.terminateInstance(instanceId).catch((e) => {
+      terminated = false;
+      console.error(`terminate ${instanceId}: ${e.message}; continuing the launch so the instance ends itself`);
+    });
+    await deps.completeLifecycle(detail, terminated ? "ABANDON" : "CONTINUE").catch(() => {});
     throw error;
   }
 }

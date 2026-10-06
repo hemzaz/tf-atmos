@@ -7,10 +7,19 @@ Usage: check-cluster-api-ci.py <components/terraform dir> < describe-stacks.json
 A component whose Terraform configures a kubernetes, helm or kubectl provider
 talks to the EKS API server. In a stack whose eks instances all keep
 cluster_endpoint_public_access off (its default), a GitHub-hosted runner cannot
-reach that server, so every deployable instance of such a component must set
-settings.github.actions_enabled: false: terraform-ci.yml, terraform-cd.yml and
-drift-detection.yml then skip it and an operator applies it from inside the VPC
-(docs/OPERATIONS.md, "In-cluster components").
+reach that server, so every deployable instance of such a component must
+either set settings.github.actions_enabled: false (CI skips it and an operator
+applies it from inside the VPC; docs/OPERATIONS.md, "In-cluster components")
+or settings.github.runner: in-vpc (CI runs it on the self-hosted runners in the
+VPC). settings.github.runner, when set, is hosted or in-vpc.
+
+An in-vpc instance runs on the runners labelled settings.github.runner_label,
+by default the stack's full id <tenant>-<environment>-<stage>. The stack must
+have a deployable github-runners instance whose runner_labels hold that label,
+and every eks instance the in-cluster instance depends on must admit that
+runner pool (`!terraform.state <pool> .security_group_id` in its
+allowed_security_group_ids): an ERROR otherwise. A pool in another vpc is
+checked for peering and NACLs like a bastion (below).
 
 That operator is an eks map_additional_iam_roles role with system:masters (a
 cluster-scoped AmazonEKSClusterAdminPolicy access entry, set in each stack's
@@ -27,8 +36,8 @@ so such an eks instance (private endpoint, in-cluster instances depending on
 it) must admit it on TCP 443: an empty allowed_security_group_ids and
 allowed_cidr_blocks leaves no network path, an ERROR. A non-empty
 allowed_cidr_blocks is a smoke check only: nothing checks that its CIDRs hold
-the bastion. For each allowed_security_group_ids entry read from an ec2
-instance (`!terraform.state ec2/<name> .security_group_id`) whose vpc is not
+the bastion. For each allowed_security_group_ids entry read from an ec2 or
+github-runners instance (`!terraform.state <instance> .security_group_id`) whose vpc is not
 the cluster's (the vpc its subnet_ids are read from), the stack must also have
 a deployable network instance peering the two vpcs, and each vpc's
 private_network_acl_peer_cidr_blocks must hold the other's
@@ -46,6 +55,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import fixtures  # noqa: E402
 
 CLUSTER_PROVIDER = re.compile(r'^\s*provider\s+"(kubernetes|helm|kubectl)"', re.MULTILINE)
+RUNNER_COMPONENT = "github-runners"
+RUNNER_MODES = ("hosted", "in-vpc")
+# Instances whose security group may be an operator or CI path into a cluster.
+ADMITTED_SOURCE_COMPONENTS = ("ec2", RUNNER_COMPONENT)
 
 
 def cluster_components(components_dir: pathlib.Path) -> set[str]:
@@ -94,11 +107,60 @@ def check(stacks: dict, cluster: set[str]) -> list[str]:
             if instance.get("component") not in cluster:
                 continue
             github = (instance.get("settings") or {}).get("github") or {}
-            if github.get("actions_enabled") is not False:
+            runner = github.get("runner")
+            if runner is not None and runner not in RUNNER_MODES:
+                errors.append(f"{stack_name}: {name} settings.github.runner is {runner!r}, not one of {', '.join(RUNNER_MODES)}")
+            elif github.get("actions_enabled") is not False and runner != "in-vpc":
                 errors.append(
                     f"{stack_name}: {name} ({instance.get('component')}) needs the private EKS API "
-                    "but does not set settings.github.actions_enabled: false"
+                    "but sets neither settings.github.actions_enabled: false nor settings.github.runner: in-vpc"
                 )
+    return errors
+
+
+def runner_label(instance: dict) -> str:
+    """The label an in-vpc instance's CI jobs ask for: settings.github.runner_label, else the full id."""
+    settings = instance.get("settings") or {}
+    label = (settings.get("github") or {}).get("runner_label")
+    if label:
+        return label
+    context = settings.get("context") or {}
+    return "-".join(str(context.get(key)) for key in ("tenant", "environment", "stage"))
+
+
+def check_runner_paths(stacks: dict, cluster: set[str]) -> list[str]:
+    """In-vpc in-cluster instances whose label has no runner pool, or whose clusters do not admit it."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        instances = deployable_instances(stack)
+        if not is_private(instances):
+            continue
+        for name, instance in sorted(instances.items()):
+            github = (instance.get("settings") or {}).get("github") or {}
+            if instance.get("component") not in cluster or github.get("runner") != "in-vpc":
+                continue
+            label = runner_label(instance)
+            pools = sorted(
+                pool for pool, i in instances.items()
+                if i.get("component") == RUNNER_COMPONENT and label in ((i.get("vars") or {}).get("runner_labels") or [])
+            )
+            if not pools:
+                errors.append(
+                    f"{stack_name}: {name} runs on in-vpc runners labelled {label!r}, but no deployable "
+                    f"{RUNNER_COMPONENT} instance registers that label"
+                )
+                continue
+            for dep in (instance.get("dependencies") or {}).get("components") or []:
+                eks = instances.get(dep.get("component")) if not dep.get("stack") else None
+                if not eks or eks.get("component") != "eks":
+                    continue
+                admitted = {state_source(sg) for sg in (eks.get("vars") or {}).get("allowed_security_group_ids") or []}
+                if not admitted.intersection(pools):
+                    errors.append(
+                        f"{stack_name}: {name} runs on the {label!r} runners ({', '.join(pools)}), but "
+                        f"{dep['component']} does not admit them (add `!terraform.state {pools[0]} "
+                        ".security_group_id` to its allowed_security_group_ids)"
+                    )
     return errors
 
 
@@ -211,13 +273,13 @@ def nacl_gaps(instances: dict, vpc_a: str, vpc_b: str) -> list[str]:
 
 
 def cross_vpc_errors(stack_name: str, instances: dict, name: str, eks_vars: dict) -> list[str]:
-    """A bastion in another vpc needs a peering and both vpcs' NACLs to admit each other."""
+    """A bastion or runner pool in another vpc needs a peering and both vpcs' NACLs to admit each other."""
     errors = []
     cluster_vpc = state_source(eks_vars.get("subnet_ids"))
     for sg in eks_vars.get("allowed_security_group_ids") or []:
         source = state_source(sg)
         source_vars = (instances.get(source) or {}).get("vars") or {}
-        if cluster_vpc is None or (instances.get(source) or {}).get("component") != "ec2":
+        if cluster_vpc is None or (instances.get(source) or {}).get("component") not in ADMITTED_SOURCE_COMPONENTS:
             continue
         source_vpc = state_source(source_vars.get("vpc_id")) or state_source(source_vars.get("subnet"))
         if source_vpc is None or source_vpc == cluster_vpc:
@@ -262,7 +324,9 @@ def main() -> int:
     errors = fixtures.fatal(check(stacks, cluster), "check-cluster-api-ci")
     operator_errors, warnings = check_operators(stacks, cluster)
     operator_errors = fixtures.fatal(operator_errors, "check-cluster-api-ci")
-    network_errors = fixtures.fatal(check_network_paths(stacks, cluster), "check-cluster-api-ci")
+    network_errors = fixtures.fatal(
+        check_network_paths(stacks, cluster) + check_runner_paths(stacks, cluster), "check-cluster-api-ci"
+    )
     for warning in warnings:
         print(f"WARN {warning}")
     for error in errors + operator_errors + network_errors:
@@ -272,13 +336,14 @@ def main() -> int:
     if operator_errors:
         print(f"{len(operator_errors)} cluster admin role(s) cannot write their stack's state")
     if network_errors:
-        print(f"{len(network_errors)} private cluster(s) have no operator network path")
+        print(f"{len(network_errors)} private cluster path(s) missing: an operator's or the in-vpc runners'")
     if errors or operator_errors or network_errors:
         return 1
     print(
         f"every instance of {', '.join(sorted(cluster))} in a stack with a private EKS endpoint "
-        "has settings.github.actions_enabled: false, every cluster admin role there can "
-        "write its stack's state, and every private cluster they use admits an operator path"
+        "runs on in-vpc runners or sets settings.github.actions_enabled: false, every cluster admin "
+        "role there can write its stack's state, and every private cluster they use admits an "
+        "operator path and the in-vpc runners its instances run on"
     )
     return 0
 

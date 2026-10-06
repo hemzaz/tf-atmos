@@ -252,6 +252,65 @@ class CheckClusterApiCiTest(unittest.TestCase):
             self.terraform(stacks)[vpc]["vars"]["manage_network_acls"] = False
             self.assertEqual(check_cluster_api_ci.check_network_paths(stacks, CLUSTER), [])
 
+    # In-vpc runners: the CI path into a private cluster.
+    CONTEXT = {"tenant": "fnx", "environment": "testenv-01", "stage": "dev"}
+
+    def runner_stack(self, admitted=True, labels=("fnx-testenv-01-dev",), runner_label=None):
+        pool = instance("github-runners")
+        pool["vars"].update(vpc_id="!terraform.state vpc/main .vpc_id", runner_labels=list(labels))
+        eks = instance("eks")
+        eks["vars"].update(
+            subnet_ids="!terraform.state vpc/main .private_subnet_ids",
+            allowed_security_group_ids=["!terraform.state github-runners/main .security_group_id"] if admitted else
+            ["!terraform.state ec2/bastion .security_group_id"],
+        )
+        addon_ = addon("eks-addons", "eks/main")
+        github = {"runner": "in-vpc"}
+        if runner_label:
+            github["runner_label"] = runner_label
+        addon_["settings"] = {"github": github, "context": self.CONTEXT}
+        return stacks_with(**{
+            "vpc/main": instance("vpc"),
+            "github-runners/main": pool,
+            "eks/main": eks,
+            "eks-addons/main": addon_,
+        })
+
+    def test_in_vpc_instance_needs_no_opt_out(self):
+        self.assert_errors(self.runner_stack())
+
+    def test_in_vpc_runners_admitted_by_the_cluster_pass(self):
+        self.assertEqual(check_cluster_api_ci.check_runner_paths(self.runner_stack(), CLUSTER), [])
+        self.assertEqual(check_cluster_api_ci.check_network_paths(self.runner_stack(), CLUSTER), [])
+
+    def test_cluster_must_admit_the_runner_pool(self):
+        errors = check_cluster_api_ci.check_runner_paths(self.runner_stack(admitted=False), CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("eks/main does not admit them", errors[0])
+        self.assertIn("!terraform.state github-runners/main .security_group_id", errors[0])
+
+    def test_label_with_no_pool_fails(self):
+        errors = check_cluster_api_ci.check_runner_paths(self.runner_stack(labels=("other",)), CLUSTER)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("labelled 'fnx-testenv-01-dev', but no deployable github-runners instance", errors[0])
+
+    def test_runner_label_setting_picks_another_pool(self):
+        stacks = self.runner_stack(labels=("fnx-testenv-01-dev-microservices",), runner_label="fnx-testenv-01-dev-microservices")
+        self.assertEqual(check_cluster_api_ci.check_runner_paths(stacks, CLUSTER), [])
+
+    def test_unknown_runner_mode_fails(self):
+        stacks = self.runner_stack()
+        self.terraform(stacks)["eks-addons/main"]["settings"]["github"]["runner"] = "self-hosted"
+        self.assert_errors(stacks, "settings.github.runner is 'self-hosted'")
+
+    def test_runner_pool_in_another_vpc_needs_a_peering(self):
+        stacks = self.runner_stack()
+        self.terraform(stacks)["github-runners/main"]["vars"]["vpc_id"] = "!terraform.state vpc/services .vpc_id"
+        errors = check_cluster_api_ci.check_network_paths(stacks, CLUSTER)
+        # No peering, and neither vpc's NACLs admit the other (vpc/services is not even declared).
+        self.assertEqual(len(errors), 3, errors)
+        self.assertIn("admits github-runners/main (in vpc/services), but no network instance peers", errors[0])
+
     def test_cluster_components_reads_provider_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

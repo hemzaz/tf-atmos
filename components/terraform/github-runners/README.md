@@ -87,7 +87,10 @@ is useless, and no reusable registration credential exists anywhere.
 - **The JIT configuration is in `run.sh`'s argv**, visible to the job. It is single-use, so a
   copy is worthless once the runner has started.
 - **Failures.** A failed launch terminates the instance with a lower desired capacity (no
-  launch loop) and fails the function, which `<name>-jit-errors` alarms on
+  launch loop) and abandons the lifecycle action. If Auto Scaling refuses to terminate an
+  instance still in Pending:Wait, the function lets the launch continue instead: the instance
+  finds no JIT configuration and its EXIT trap terminates it, decrementing, from InService.
+  Either way the function fails, which `<name>-jit-errors` alarms on
   (`alarm_sns_topic_arns`). EventBridge's invoke is not retried (`maximum_retry_attempts` 0): a
   retry would mint a second configuration. A runner whose bootstrap fails before it knows its
   instance id can only power off, which the group replaces.

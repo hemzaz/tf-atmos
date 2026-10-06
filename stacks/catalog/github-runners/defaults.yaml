@@ -32,6 +32,9 @@ components:
         runner_version: "2.337.0"
         runner_sha256: "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613"
         kms_key_arn: !terraform.state kms/main .key_arn
+        # The owner's GitHub App (settings.github_app, stacks/orgs/fnx/_defaults.yaml).
+        github_app_id: "{{ .settings.github_app.app_id }}"
+        github_app_installation_id: "{{ .settings.github_app.installation_id }}"
         instance_type: t3.medium
         min_size: 0
         max_size: 4

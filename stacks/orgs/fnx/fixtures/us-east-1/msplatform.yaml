@@ -22,6 +22,7 @@ settings:
 
 components:
   terraform:
+
     # The template's REQUIREMENTS 4: the dns instance holding app_domain_name's
     # public zone.
     network/main:
