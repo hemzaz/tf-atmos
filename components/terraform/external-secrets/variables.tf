@@ -148,7 +148,7 @@ variable "kms_key_arn" {
 
 variable "secret_path_prefixes" {
   type        = list(string)
-  description = "Secrets Manager secret-name path prefixes the default ClusterSecretStore (\"aws-secretsmanager\") may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover the app/infra secretsmanager instances (context_name \"app\"/\"infra\", or \"<stage>/app\"/\"<stage>/infra\" in staging and prod), and elasticache's redis AUTH token secrets (\"redis-auth/<Environment>/<cluster_id>\"). Certificates belong to certificate_secret_path_prefixes."
+  description = "Secrets Manager secret-name path prefixes the default ClusterSecretStore (\"aws-secretsmanager\") may read, matched as a top-level prefix (\"<prefix>/*\"), plus \"<context>/<prefix>/*\" for every entry in var.secret_path_context_prefixes. Defaults cover the app/infra secretsmanager instances (context_name \"app\"/\"infra\"), and elasticache's redis AUTH token secrets (\"redis-auth/<Environment>/<cluster_id>\"). Certificates belong to certificate_secret_path_prefixes."
   default     = ["app", "infra", "redis-auth"]
 
   validation {
@@ -225,7 +225,7 @@ variable "certificate_allowed_namespaces" {
 
 variable "secret_path_context_prefixes" {
   type        = list(string)
-  description = "Explicit leading path segment(s) (this stack's context, e.g. its descriptive stage name) that may precede a secret_path_prefixes/certificate_secret_path_prefixes match one level down, in place of a depth-agnostic \"*/<prefix>/*\" wildcard (which would also match an unrelated secret merely containing \"/<prefix>/\" further down its name, e.g. \"x/y/app/z\"). secretsmanager's full_path nests context_name/environment/path/name (e.g. \"production/app/prod/production/app/credentials\" for context_name \"production/app\"), so the catalog sets this to settings.environment.stage (\"production\"), the descriptive stage name each stack's secretsmanager/app and secretsmanager/infra instances already hardcode as the leading segment of context_name. Empty by default: only the top-level \"<prefix>/*\" match applies unless a stack's catalog configures this."
+  description = "Explicit leading path segment(s) (this stack's context, e.g. its descriptive stage name) that may precede a secret_path_prefixes/certificate_secret_path_prefixes match one level down, in place of a depth-agnostic \"*/<prefix>/*\" wildcard (which would also match an unrelated secret merely containing \"/<prefix>/\" further down its name, e.g. \"x/y/app/z\"). For a secretsmanager instance whose context_name nests (\"<context>/app\"; full_path is context_name/environment/path/name). Empty by default, as in every stack here (context_name \"app\"/\"infra\"): only the top-level \"<prefix>/*\" match applies."
   default     = []
 
   validation {

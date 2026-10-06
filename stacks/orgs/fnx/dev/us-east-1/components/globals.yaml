@@ -38,7 +38,6 @@ settings:
     # the dns instances' zone_ids output, never from settings. example.com is a
     # placeholder base until the owner sets the real domain.
     domain_name: "dev.fnx.example.com"
-    stage: "dev"
     monitoring:
       critical_alerts: ["ops@example.com"]
       warning_alerts: ["team@example.com"]

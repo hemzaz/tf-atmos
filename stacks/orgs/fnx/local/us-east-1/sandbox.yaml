@@ -162,7 +162,7 @@ components:
         component: secretsmanager
       vars:
         environment: sandbox
-        context_name: "sandbox/app"
+        context_name: "app"
         tags:
           Environment: sandbox
           Tenant: fnx
