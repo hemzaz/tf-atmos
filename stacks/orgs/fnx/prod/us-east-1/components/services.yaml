@@ -28,7 +28,7 @@ components:
         inherits:
           - cognito/defaults
       vars:
-        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        name_prefix: '{{ .atmos_stack }}'
         # Production tightens both knobs over the inherited defaults: MFA is
         # mandatory rather than opt-in, and the pool cannot be deleted while it
         # holds real users.

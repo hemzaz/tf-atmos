@@ -78,8 +78,8 @@ components:
         # requires length > 0), so it names this account, which grants nothing
         # while create_cross_account_role stays false.
         environment: "{{ .settings.context.stage }}"
-        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-unused"
-        policy_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-unused"
+        cross_account_role_name: "{{ .atmos_stack }}-unused"
+        policy_name: "{{ .atmos_stack }}-unused"
         trusted_account_ids:
           - "{{ .settings.environment.account_id }}"
 
@@ -95,7 +95,7 @@ components:
         github_oidc_default_branch: "master"
 
         # Roles become <prefix>-plan and <prefix>-apply. Limit is 58 characters.
-        ci_role_name_prefix: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-ci"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
 
         # MUST be overridden for hub-and-spoke. The component default is
         # ReadOnlyAccess, which reads the HUB account -- useless for planning a

@@ -239,8 +239,8 @@ components:
     # is kept explicit on all three: the trigger queue's policy (below),
     # the s3-trigger EventBridge pattern and the job-definition/schedule
     # input/output paths all reference these names literally. They start
-    # with the stack's full id, tenant-environment-stage (Cloud Posse's
-    # null-label id order): S3 bucket names are global, and environment alone
+    # with the stack's full id, its name (tenant-environment-stage[-name],
+    # Cloud Posse's null-label id order): S3 bucket names are global, and environment alone
     # repeats across stages once it is a region code. `logging` is
     # left unset (disabled, the s3 component's default) rather than pointed
     # at a `{{ .vars.log_bucket_name }}` placeholder: atmos.yaml sets no
@@ -265,7 +265,7 @@ components:
         # name is required even though bucket_name overrides the name it would
         # otherwise generate.
         name: "batch-input"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input"
+        bucket_name: "{{ .atmos_stack }}-batch-input"
 
         lifecycle_configuration_rules:
           - id: "expire-processed"
@@ -323,7 +323,7 @@ components:
           - s3/defaults
       vars:
         name: "batch-output"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output"
+        bucket_name: "{{ .atmos_stack }}-batch-output"
 
         lifecycle_configuration_rules:
           - id: "transition-ia"
@@ -361,7 +361,7 @@ components:
           - s3/defaults
       vars:
         name: "batch-scripts"
-        bucket_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-scripts"
+        bucket_name: "{{ .atmos_stack }}-batch-scripts"
 
         # No lifecycle rules - keep scripts indefinitely.
 
@@ -450,7 +450,7 @@ components:
                   - test: ArnLike
                     variable: "aws:SourceArn"
                     values:
-                      - "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input"
+                      - "arn:aws:s3:::{{ .atmos_stack }}-batch-input"
         tags:
           Layer: "messaging"
           Platform: "batch-processing"
@@ -670,19 +670,19 @@ components:
             job_role_policy_json: &batch_job_data_policy >-
               {"Version": "2012-10-17", "Statement": [
               {"Sid": "ListBuckets", "Effect": "Allow", "Action": "s3:ListBucket",
-              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input",
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output"]},
+              "Resource": ["arn:aws:s3:::{{ .atmos_stack }}-batch-input",
+              "arn:aws:s3:::{{ .atmos_stack }}-batch-output"]},
               {"Sid": "ReadObjects", "Effect": "Allow", "Action": "s3:GetObject",
-              "Resource": ["arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input/*",
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/*"]},
+              "Resource": ["arn:aws:s3:::{{ .atmos_stack }}-batch-input/*",
+              "arn:aws:s3:::{{ .atmos_stack }}-batch-output/*"]},
               {"Sid": "WriteOutput", "Effect": "Allow", "Action": "s3:PutObject",
-              "Resource": "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/*"},
+              "Resource": "arn:aws:s3:::{{ .atmos_stack }}-batch-output/*"},
               {"Sid": "BucketKeyThroughS3", "Effect": "Allow", "Action": ["kms:Decrypt", "kms:GenerateDataKey*"],
               "Resource": "arn:aws:kms:{{ .vars.region }}:{{ required "settings.environment.account_id is required" .settings.environment.account_id }}:key/*",
               "Condition": {"StringEquals": {"kms:ViaService": "s3.{{ .vars.region }}.amazonaws.com"},
               "StringLike": {"kms:EncryptionContext:aws:s3:arn": [
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input*",
-              "arn:aws:s3:::{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output*"]}}}]}
+              "arn:aws:s3:::{{ .atmos_stack }}-batch-input*",
+              "arn:aws:s3:::{{ .atmos_stack }}-batch-output*"]}}}]}
             retry_strategy:
               attempts: 3
               # Retry a lost host; exit when the application itself failed
@@ -1093,7 +1093,7 @@ components:
               input_paths:
                 id: "$.id"
                 time: "$.time"
-              input_template: '{"job_id": "<id>", "input_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input/incoming/", "output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/processed/", "final_output_path": "s3://{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-output/final/", "processing_date": "<time>"}'
+              input_template: '{"job_id": "<id>", "input_path": "s3://{{ .atmos_stack }}-batch-input/incoming/", "output_path": "s3://{{ .atmos_stack }}-batch-output/processed/", "final_output_path": "s3://{{ .atmos_stack }}-batch-output/final/", "processing_date": "<time>"}'
             dead_letter_config:
               arn: !terraform.state batch-processing/sqs/eventbridge-dlq .queue_arn
             retry_policy:
@@ -1164,7 +1164,7 @@ components:
           detail:
             bucket:
               name:
-                - "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-batch-input"
+                - "{{ .atmos_stack }}-batch-input"
             object:
               key:
                 - prefix: "incoming/"

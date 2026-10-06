@@ -18,7 +18,7 @@ components:
         component: kms
         type: abstract
       vars:
-        name_prefix: '{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}'
+        name_prefix: '{{ .atmos_stack }}'
         key_spec: SYMMETRIC_DEFAULT
         key_usage: ENCRYPT_DECRYPT
         enable_key_rotation: true

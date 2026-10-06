@@ -14,7 +14,8 @@ or settings.github.runner: in-vpc (CI runs it on the self-hosted runners in the
 VPC). settings.github.runner, when set, is hosted or in-vpc.
 
 An in-vpc instance runs on the runners labelled settings.github.runner_label,
-by default the stack's full id <tenant>-<environment>-<stage>. The stack must
+by default the stack's full id, its name <tenant>-<environment>-<stage>[-<name>]
+(the github-runners catalog's runner_labels is {{ .atmos_stack }}). The stack must
 have a deployable github-runners instance whose runner_labels hold that label,
 and every eks instance the in-cluster instance depends on must admit that
 runner pool (`!terraform.state <pool> .security_group_id` in its
@@ -118,14 +119,10 @@ def check(stacks: dict, cluster: set[str]) -> list[str]:
     return errors
 
 
-def runner_label(instance: dict) -> str:
-    """The label an in-vpc instance's CI jobs ask for: settings.github.runner_label, else the full id."""
+def runner_label(stack_name: str, instance: dict) -> str:
+    """The label an in-vpc instance's CI jobs ask for: settings.github.runner_label, else the full id (the stack name)."""
     settings = instance.get("settings") or {}
-    label = (settings.get("github") or {}).get("runner_label")
-    if label:
-        return label
-    context = settings.get("context") or {}
-    return "-".join(str(context.get(key)) for key in ("tenant", "environment", "stage"))
+    return (settings.get("github") or {}).get("runner_label") or stack_name
 
 
 def check_runner_paths(stacks: dict, cluster: set[str]) -> list[str]:
@@ -139,7 +136,7 @@ def check_runner_paths(stacks: dict, cluster: set[str]) -> list[str]:
             github = (instance.get("settings") or {}).get("github") or {}
             if instance.get("component") not in cluster or github.get("runner") != "in-vpc":
                 continue
-            label = runner_label(instance)
+            label = runner_label(stack_name, instance)
             pools = sorted(
                 pool for pool, i in instances.items()
                 if i.get("component") == RUNNER_COMPONENT and label in ((i.get("vars") or {}).get("runner_labels") or [])

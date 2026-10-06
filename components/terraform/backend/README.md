@@ -45,6 +45,10 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/core/us-east-1.yaml`
   It also fails a pattern that matches no state key, such as a pair left behind by a renamed or
   removed stack; a `*/<stack>-*` pattern is exempt while its `*/<stack>/*` pattern matches. The
   pairs don't depend on where the stage sits in the stack name.
+- `*/<stack>-*` also matches a lane's objects (`fnx-ue1-dev-perf` is a sibling of `fnx-ue1-dev`), so
+  the parent's roles reach its lanes. That stays inside the stage, since a lane shares its parent's
+  stage. A lane still gets its own pair. A lane named like one of the parent's instance suffixes
+  (`main`) would share its state keys (`vpc/fnx-ue1-dev-main/...`), and `check-state-keys.py` fails that.
 - Every `allowed_principal_arns` entry must name the account its role lives in; the committed ARNs
   use placeholder account IDs (see [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#first-deploy-inputs)).
 - All three buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.

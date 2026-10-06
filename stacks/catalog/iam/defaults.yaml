@@ -33,8 +33,8 @@ components:
         # trusted_principal_org_id when trusting another account.
         # TODO(placeholder): replace with the real AWS Organizations ID.
         trusted_principal_org_id: "o-xxxxxxxxxx"
-        cross_account_role_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-CrossAccountRole"
-        policy_name: "{{ .settings.context.tenant }}-{{ .settings.context.environment }}-{{ .settings.context.stage }}-CrossAccountPolicy"
+        cross_account_role_name: "{{ .atmos_stack }}-CrossAccountRole"
+        policy_name: "{{ .atmos_stack }}-CrossAccountPolicy"
 
         tags:
           Component: "IAM"
