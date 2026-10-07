@@ -83,6 +83,30 @@ workflows:
               set -eu
               python3 -m unittest workflows/scripts/common/test_check_old_stack_names.py
               python3 scripts/check-old-stack-names.py
+          # atmos.yaml validates stacks against the pinned
+          # schemas/atmos/atmos-manifest.json, not a URL (cached in $TMPDIR and
+          # corrupted there by concurrent runs). The pin must be the embedded
+          # schema of the CI image's Atmos (.github/atmos-image/Dockerfile);
+          # another local Atmos skips the check and CI enforces it.
+          - name: manifest-schema
+            type: shell
+            command: |
+              set -eu
+              pin=schemas/atmos/atmos-manifest.json
+              want=$(sed -n 's|^FROM ghcr\.io/cloudposse/atmos:\([^@]*\)@.*|\1|p' .github/atmos-image/Dockerfile)
+              have=$(atmos version --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])')
+              if [ "$have" != "$want" ]; then
+                echo "manifest-schema: skipped, Atmos $have is not the CI image's $want"
+                exit 0
+              fi
+              fresh="$(mktemp)"
+              trap 'rm -f "$fresh"' EXIT
+              atmos stack schema "$fresh"
+              if ! cmp -s "$fresh" "$pin"; then
+                echo "::error title=Manifest schema pin is stale::$pin is not Atmos $want's schema. Run: atmos stack schema $pin"
+                exit 1
+              fi
+              echo "manifest-schema: $pin is Atmos $want's schema"
       # No-op when the plugins are already installed (CI runs tflint-init first,
       # with a token for GitHub rate limits, so this step needs no network).
       - name: tflint-plugins

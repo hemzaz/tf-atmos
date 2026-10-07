@@ -117,9 +117,15 @@ scaffold:
       source: "./scaffolds/catalog-entry"
       version: "1.0.0"
 
+# A repo file, relative to base_path, is read in place. A URL is fetched by
+# go-getter into $TMPDIR/atmos-manifest.json, which it never truncates: it keeps
+# a cache at least as long as the remote and range-appends to a shorter one, so
+# concurrent or mixed-version runs left valid JSON plus trailing bytes there and
+# every describe/validate failed (jsonschema: invalid json). The pin is
+# `atmos stack schema` of the CI image's Atmos; lint step manifest-schema checks it.
 schemas:
   atmos:
-    manifest: "https://atmos.tools/schemas/atmos/atmos-manifest/1.0/atmos-manifest.json"
+    manifest: "schemas/atmos/atmos-manifest.json"
 
 templates:
   settings:

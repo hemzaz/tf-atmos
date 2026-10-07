@@ -318,6 +318,9 @@ stacks' `security.yaml` (advisory until branch protection requires code-owner re
   (the actionlint job fails until you do). By hand: put the new tag and the digest of its manifest
   index (`docker buildx imagetools inspect ghcr.io/cloudposse/atmos:<tag>`, or the ghcr registry
   API) in that Dockerfile and run the script; it also sets `atmos-version` in `emulator.yml`.
+  Then, with that Atmos version installed, re-pin the stack manifest schema
+  (`atmos stack schema schemas/atmos/atmos-manifest.json`) and commit it; the lint step
+  `manifest-schema` fails in CI until the pin matches the image's Atmos.
   Raise `version.constraint` in `atmos.yaml` and `.atmos.env` when the new version is required.
 - **Actions.** `uses:` refs are commit SHAs with a version comment; Dependabot moves both.
 
