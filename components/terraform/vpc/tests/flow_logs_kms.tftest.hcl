@@ -122,3 +122,38 @@ run "flow_logs_role_trust_is_scoped_to_this_account" {
     error_message = "The flow-logs role must trust vpc-flow-logs.amazonaws.com only with aws:SourceAccount = this account and aws:SourceArn = a flow log in this account and region."
   }
 }
+
+# Two vpc instances of one stack (vpc/main, vpc/services) share an account:
+# every account- or region-unique flow-logs name carries the instance's name.
+run "account_unique_names_carry_the_instance_name" {
+  command = plan
+
+  variables {
+    name                  = "services"
+    vpc_flow_logs_enabled = true
+    flow_logs_s3_backup   = true
+  }
+
+  assert {
+    condition = (
+      aws_kms_alias.flow_logs[0].name == "alias/test-services-flow-logs" &&
+      aws_iam_role.flow_logs[0].name == "test-services-flow-logs-role" &&
+      aws_iam_role_policy.flow_logs[0].name == "test-services-flow-logs-policy" &&
+      aws_s3_bucket.flow_logs[0].bucket == "test-services-flow-logs-123456789012" &&
+      aws_cloudwatch_metric_alarm.ssh_access[0].alarm_name == "test-services-high-ssh-access-attempts" &&
+      aws_cloudwatch_metric_alarm.ssh_access[0].namespace == "VPC/FlowLogs/test-services" &&
+      aws_cloudwatch_log_metric_filter.ssh_access[0].metric_transformation[0].namespace == "VPC/FlowLogs/test-services"
+    )
+    error_message = "The KMS alias, IAM role and policy, archive bucket, alarms and metric namespace are <Environment>-<name>-..."
+  }
+}
+
+run "name_must_fit_a_bucket_name" {
+  command = plan
+
+  variables {
+    name = "Services_1"
+  }
+
+  expect_failures = [var.name]
+}

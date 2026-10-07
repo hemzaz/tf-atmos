@@ -130,12 +130,20 @@ class CiPlanTrustTest(unittest.TestCase):
         self.assertEqual(len(self.found(ci_plan_role_subjects=["repo:other/repo:ref:refs/heads/master"])), 1)
 
     def test_branch_default_is_resolved_from_variables_tf(self):
-        # github_oidc_default_branch's default is "main": master no longer matches.
+        # github_oidc_default_branch's default is "main", not master.
         found = check_prod_protection.check_ci_plan_trust(stacks(**{"iam/ci": instance(
             "iam", github_oidc_enabled=True, github_oidc_repository="hemzaz/tf-atmos",
             ci_plan_role_subjects=self.MASTER)}), COMPONENTS)
         self.assertEqual(len(found), 1, found)
-        self.assertIn("'repo:hemzaz/tf-atmos:ref:refs/heads/main'", found[0])
+        self.assertIn("github_oidc_default_branch is 'main'", found[0])
+
+    def test_coordinated_branch_and_subject_edit_fails(self):
+        # Moving both the default branch and the subject to feature-x still fails (D3).
+        found = self.found(github_oidc_default_branch="feature-x",
+                           ci_plan_role_subjects=["repo:hemzaz/tf-atmos:ref:refs/heads/feature-x"])
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("github_oidc_default_branch is 'feature-x'", found[0])
+        self.assertIn("trusts the master ref only", found[1])
 
     def test_non_prod_and_roleless_iam_are_skipped(self):
         dev = {"fnx-ue1-dev": {"components": {"terraform": {"iam/ci": instance(

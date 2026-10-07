@@ -21,9 +21,11 @@ the component's variables.tf) must be safe:
 
 And every deployable iam instance in a stack of stage prod that creates the
 GitHub OIDC CI roles (github_oidc_enabled) must set ci_plan_role_subjects
-explicitly, to exactly repo:<github_oidc_repository>:ref:refs/heads/<github_oidc_default_branch>
-(both resolved as the component does, var or default), nothing else: no
-pull_request, environment, other branch or wildcard subject. The plan role reads
+explicitly, to exactly repo:<github_oidc_repository>:ref:refs/heads/master
+(the repository resolved as the component does, var or default), and set
+github_oidc_default_branch to master: owner decision D3 pins prod plans to the
+master branch, so no pull_request, environment, other branch or wildcard
+subject, and no other default branch even with a matching subject. The plan role reads
 every prod state object through backend/main's prod_read role, and the
 component's default trusts repo:<repo>:pull_request, i.e. code from any PR.
 
@@ -36,6 +38,8 @@ import sys
 from typing import Any, Callable, Optional
 
 PROD_STAGE = "prod"
+# Owner decision D3: a prod plan role trusts the master branch's ref, nothing else.
+PROD_PLAN_BRANCH = "master"
 MIN_RETENTION_DAYS = 7
 
 # component -> [(variable, is_safe, what safe means)]
@@ -136,8 +140,15 @@ def check_ci_plan_trust(stacks: dict, components_dir: pathlib.Path) -> list[str]
                 return value if value is not None else variable_default(components_dir, "iam", var)
 
             repository, branch = effective("github_oidc_repository"), effective("github_oidc_default_branch")
-            allowed = f"repo:{repository}:ref:refs/heads/{branch}"
+            # Pinned, not the instance's own branch: setting github_oidc_default_branch
+            # and the subject to feature-x together must not pass.
+            allowed = f"repo:{repository}:ref:refs/heads/{PROD_PLAN_BRANCH}"
             subjects = variables.get("ci_plan_role_subjects")
+            if branch != PROD_PLAN_BRANCH:
+                errors.append(
+                    f"{stack_name}: {name} (iam) github_oidc_default_branch is {branch!r}: a prod plan role "
+                    f"trusts {PROD_PLAN_BRANCH!r} only (D3)"
+                )
             if not repository:
                 errors.append(f"{stack_name}: {name} (iam) sets no github_oidc_repository")
             elif not subjects:
@@ -150,7 +161,7 @@ def check_ci_plan_trust(stacks: dict, components_dir: pathlib.Path) -> list[str]
                     if subject != allowed:
                         errors.append(
                             f"{stack_name}: {name} (iam) ci_plan_role_subjects trusts {subject!r}: a prod plan "
-                            f"role trusts its default branch's ref only, {allowed!r}"
+                            f"role trusts the {PROD_PLAN_BRANCH} ref only, {allowed!r} (D3)"
                         )
     return errors
 
@@ -170,7 +181,7 @@ def main() -> int:
         "every prod rds instance is environment prod, Multi-AZ, deletion-protected, keeps a final "
         f"snapshot and {MIN_RETENTION_DAYS}+ days of backups; every prod elasticache instance fails over "
         f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots; every prod CI plan role trusts its "
-        "repository's default-branch ref only"
+        "repository's master ref only"
     )
     return 0
 

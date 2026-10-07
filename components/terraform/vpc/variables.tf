@@ -268,6 +268,22 @@ variable "default_security_group_egress_rules" {
   default     = []
 }
 
+# Cloud Posse: context `name`. The account- and region-unique names
+# (flow-logs.tf: KMS alias, IAM role and policy, alarms, metric namespace,
+# archive bucket) are <Environment>-<name>-..., so two instances of one stack
+# need different names (catalog/vpc/defaults sets it to the instance's last
+# path segment: vpc/main -> main).
+variable "name" {
+  type        = string
+  description = "Instance name in the account- and region-unique names: <tags.Environment>-<name>-flow-logs-..."
+  default     = "vpc"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.name))
+    error_message = "name must be lowercase letters, digits and hyphens, not starting or ending with a hyphen (it is part of an S3 bucket name)."
+  }
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to resources; must include Environment (used in resource names)"
