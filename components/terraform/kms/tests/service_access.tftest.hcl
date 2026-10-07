@@ -499,3 +499,46 @@ run "named_key_administrators_and_users_are_the_only_principals_granted" {
     error_message = "Named key_administrators/key_users must appear as the exact principal on their own statements, and only when explicitly set."
   }
 }
+
+# --- B1: a replica gets its own alias in its region (replica_alias_names) ---
+
+run "replica_alias_is_created_in_the_replica_region" {
+  command = plan
+
+  variables {
+    is_multi_region     = true
+    replica_regions     = ["us-east-2"]
+    replica_alias_names = { "us-east-2" = "ue2-main" }
+  }
+
+  assert {
+    condition     = output.replica_keys["us-east-2"].alias_name == "alias/ue2-main"
+    error_message = "replica_alias_names must create alias/<name> for the replica in its own region."
+  }
+}
+
+run "replica_without_an_alias_name_gets_none" {
+  command = plan
+
+  variables {
+    is_multi_region = true
+    replica_regions = ["us-east-2"]
+  }
+
+  assert {
+    condition     = output.replica_keys["us-east-2"].alias_name == ""
+    error_message = "A replica region left out of replica_alias_names must get no alias."
+  }
+}
+
+run "replica_alias_for_a_region_that_is_not_a_replica_is_rejected" {
+  command = plan
+
+  variables {
+    is_multi_region     = true
+    replica_regions     = ["us-east-2"]
+    replica_alias_names = { "us-west-2" = "uw2-main" }
+  }
+
+  expect_failures = [var.replica_alias_names]
+}

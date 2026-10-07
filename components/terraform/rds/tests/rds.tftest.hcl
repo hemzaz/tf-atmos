@@ -44,6 +44,25 @@ run "default_has_no_custom_ingress_rules" {
   }
 }
 
+# Prod's kms/main is multi-region (B1 DR): its key ids start with mrk-.
+run "multi_region_kms_key_is_accepted" {
+  command = plan
+
+  variables {
+    kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/mrk-0123456789abcdef0123456789abcdef"
+  }
+}
+
+run "kms_key_id_that_is_not_a_key_arn_is_rejected" {
+  command = plan
+
+  variables {
+    kms_key_id = "arn:aws:kms:us-east-1:123456789012:alias/ue1-main"
+  }
+
+  expect_failures = [var.kms_key_id]
+}
+
 run "retired_ca_cert_identifier_is_rejected" {
   command = plan
 

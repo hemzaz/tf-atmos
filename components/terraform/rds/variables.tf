@@ -167,7 +167,7 @@ variable "kms_key_id" {
   default     = null
 
   validation {
-    condition     = var.kms_key_id == null || var.kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.kms_key_id))
+    condition     = var.kms_key_id == null || var.kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[a-f0-9-]+$", var.kms_key_id))
     error_message = "KMS key ID must be a valid ARN format."
   }
 }

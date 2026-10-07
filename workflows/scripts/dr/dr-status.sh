@@ -31,7 +31,7 @@ echo "DR Region: $DR_REGION"
 echo
 
 DR_SCORE=0
-DR_MAX=75 # 25 points previously scored on the DynamoDB lock table (replaced by S3 lockfiles)
+DR_MAX=90 # 25 points previously scored on the DynamoDB lock table (replaced by S3 lockfiles); 15 on backup vaults
 
 # =================================================================
 # Check Terraform State Backend
@@ -176,25 +176,52 @@ else
 fi
 
 # =================================================================
-# Check S3 Backups
+# Check AWS Backup vaults
 # =================================================================
-echo -e "\n${WHITE}5. Backup Storage${NC}"
+echo -e "\n${WHITE}5. Backup Vaults (AWS Backup)${NC}"
 
-# S3 names are global: built from the stack's full id, its name
-# (tenant-environment-stage[-name]).
-BACKUP_BUCKET="${STACK}-backups"
-echo -n "   Backup bucket exists: "
-if aws s3api head-bucket --bucket "$BACKUP_BUCKET" 2>/dev/null; then
-  log_success "Yes"
+# backup/main's vault, <Environment>-<tags.Name or "backup">, and, when it
+# copies cross-region, the replica vault <that name>-replica in replica_region
+# (components/terraform/backup/main.tf). Names come from the stack's resolved
+# config: nothing in this repo creates an S3 "backups" bucket.
+vault_points() { # <vault> <region>: its recovery point count, empty when missing
+  aws backup describe-backup-vault --backup-vault-name "$1" --region "$2" \
+    --query 'NumberOfRecoveryPoints' --output text 2>/dev/null || true
+}
 
-  echo -n "   Lifecycle policy: "
-  if aws s3api get-bucket-lifecycle-configuration --bucket "$BACKUP_BUCKET" >/dev/null 2>&1; then
-    log_success "Configured"
+if BACKUP_CFG="$(atmos describe component backup/main -s "$STACK" \
+  --process-functions=false --provenance=false --format json 2>/dev/null)" &&
+  [[ "$(jq -r '.metadata.enabled // true' <<<"$BACKUP_CFG")" != "false" ]]; then
+  VAULT="${ENVIRONMENT}-$(jq -r '.vars.tags.Name // "backup"' <<<"$BACKUP_CFG")"
+  echo -n "   Vault $VAULT ($REGION): "
+  POINTS="$(vault_points "$VAULT" "$REGION")"
+  if [[ -n "$POINTS" ]]; then
+    log_success "$POINTS recovery point(s)"
+    ((DR_SCORE+=5))
   else
-    log_warning "Not configured"
+    log_error "Not found"
+  fi
+
+  echo -n "   Cross-region copy: "
+  if [[ "$(jq -r '.vars.enable_cross_region_backup // false' <<<"$BACKUP_CFG")" == "true" ]]; then
+    REPLICA_REGION="$(jq -r '.vars.replica_region' <<<"$BACKUP_CFG")"
+    log_success "to $REPLICA_REGION"
+    ((DR_SCORE+=5))
+    echo -n "   Vault ${VAULT}-replica ($REPLICA_REGION): "
+    POINTS="$(vault_points "${VAULT}-replica" "$REPLICA_REGION")"
+    if [[ -n "$POINTS" && "$POINTS" != "0" ]]; then
+      log_success "$POINTS recovery point(s)"
+      ((DR_SCORE+=5))
+    elif [[ "$POINTS" == "0" ]]; then
+      log_warning "Empty (no copy job has completed yet)"
+    else
+      log_error "Not found"
+    fi
+  else
+    log_warning "Not configured (backup/main enable_cross_region_backup)"
   fi
 else
-  log_warning "Not found ($BACKUP_BUCKET)"
+  log_warning "No backup/main instance in $STACK"
 fi
 
 # =================================================================
@@ -221,7 +248,7 @@ echo
 echo "Recommendations:"
 if [[ $DR_SCORE -lt 80 ]]; then
   echo "  - Enable S3 cross-region replication for state bucket"
-  echo "  - Configure DynamoDB global tables for state locks"
+  echo "  - Copy backups to the DR region (backup/main enable_cross_region_backup)"
   echo "  - Enable Multi-AZ for all RDS instances"
   echo "  - Deploy NAT Gateways in multiple AZs"
   echo "  - Create read replicas in DR region"

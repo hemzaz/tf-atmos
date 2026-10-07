@@ -84,8 +84,15 @@ variable "replica_region" {
 
 variable "replica_kms_key_arn" {
   type        = string
-  description = "KMS key ARN in replica region"
+  description = "KMS key ARN in replica region (required when enable_cross_region_backup is true): the replica vault's key, e.g. kms/main's multi-region replica there"
   default     = null
+
+  # A vault key must be in the vault's region; without one AWS Backup falls
+  # back to its AWS-managed key, which the stack's CMK posture does not allow.
+  validation {
+    condition     = !var.enable_cross_region_backup || (var.replica_kms_key_arn != null && can(regex("^arn:aws[a-z-]*:kms:${coalesce(var.replica_region, "-")}:[0-9]{12}:key/", coalesce(var.replica_kms_key_arn, "-"))))
+    error_message = "replica_kms_key_arn must be a KMS key ARN in replica_region when enable_cross_region_backup is true."
+  }
 }
 
 # Backup Schedule Variables

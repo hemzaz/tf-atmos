@@ -31,6 +31,7 @@ module "kms" {
   alias_name                      = var.alias_name
   create_alias                    = var.create_alias
   replica_regions                 = var.replica_regions
+  replica_alias_names             = var.replica_alias_names
   replica_deletion_window_in_days = var.replica_deletion_window_in_days
   grants                          = var.grants
   tags                            = var.tags

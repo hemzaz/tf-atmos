@@ -768,3 +768,48 @@ run "null_retention_falls_back_to_the_default" {
     error_message = "A null daily_retention_days should fall back to the 7-day default."
   }
 }
+
+# --- B1: cross-region copies (prod: us-east-2, kms/main's replica key) ---
+
+run "cross_region_copies_every_rule_to_the_replica_vault" {
+  command = plan
+
+  variables {
+    enable_cross_region_backup = true
+    replica_region             = "us-east-2"
+    replica_kms_key_arn        = "arn:aws:kms:us-east-2:123456789012:key/mrk-0123456789abcdef0123456789abcdef"
+  }
+
+  assert {
+    condition     = aws_backup_vault.cross_region[0].name == "test-backup-replica" && aws_backup_vault.cross_region[0].kms_key_arn == "arn:aws:kms:us-east-2:123456789012:key/mrk-0123456789abcdef0123456789abcdef"
+    error_message = "The replica vault must be <Environment>-backup-replica on the replica key (dr-status.sh checks that name)."
+  }
+
+  assert {
+    condition     = alltrue([for r in aws_backup_plan.main.rule : length(r.copy_action) == 1])
+    error_message = "Every rule (daily, weekly, monthly) must copy to the replica vault."
+  }
+}
+
+run "cross_region_without_a_replica_key_is_rejected" {
+  command = plan
+
+  variables {
+    enable_cross_region_backup = true
+    replica_region             = "us-east-2"
+  }
+
+  expect_failures = [var.replica_kms_key_arn]
+}
+
+run "cross_region_with_a_key_in_another_region_is_rejected" {
+  command = plan
+
+  variables {
+    enable_cross_region_backup = true
+    replica_region             = "us-east-2"
+    replica_kms_key_arn        = "arn:aws:kms:us-east-1:123456789012:key/mrk-0123456789abcdef0123456789abcdef"
+  }
+
+  expect_failures = [var.replica_kms_key_arn]
+}

@@ -35,8 +35,10 @@ output "replica_keys" {
   description = "Map of replica region to replica key details"
   value = {
     for region, key in aws_kms_replica_key.replicas : region => {
-      key_id  = key.id
-      key_arn = key.arn
+      key_id     = key.id
+      key_arn    = key.arn
+      alias_name = try(aws_kms_alias.replicas[region].name, "")
+      alias_arn  = try(aws_kms_alias.replicas[region].arn, "")
     }
   }
 }

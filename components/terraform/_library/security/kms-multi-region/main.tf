@@ -73,6 +73,18 @@ resource "aws_kms_replica_key" "replicas" {
   }
 }
 
+# An alias per replica region (replica_alias_names), in that region: aliases
+# are regional, so the primary's alias does not reach the replica, and a stack
+# in the replica region that names its key by alias (iam ci_apply_kms_key_aliases)
+# needs one there.
+resource "aws_kms_alias" "replicas" {
+  for_each = { for region, name in var.replica_alias_names : region => name if var.is_multi_region }
+
+  region        = each.key
+  name          = "alias/${each.value}"
+  target_key_id = aws_kms_replica_key.replicas[each.key].key_id
+}
+
 ##############################################
 # KMS Grants
 ##############################################

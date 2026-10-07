@@ -746,7 +746,7 @@ variable "event_source_kms_key_arns" {
   default     = []
 
   validation {
-    condition     = alltrue([for k in var.event_source_kms_key_arns : can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]+$", k))])
+    condition     = alltrue([for k in var.event_source_kms_key_arns : can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[0-9a-f-]+$", k))])
     error_message = "event_source_kms_key_arns must be KMS key ARNs (arn:aws:kms:<region>:<account>:key/<id>), not aliases or wildcards."
   }
 

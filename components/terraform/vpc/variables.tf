@@ -405,7 +405,7 @@ variable "flow_logs_kms_key_arn" {
   nullable    = false
 
   validation {
-    condition     = var.flow_logs_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.flow_logs_kms_key_arn))
+    condition     = var.flow_logs_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[a-f0-9-]+$", var.flow_logs_kms_key_arn))
     error_message = "flow_logs_kms_key_arn must be a valid KMS key ARN (e.g., arn:aws:kms:region:account-id:key/key-id)."
   }
 }

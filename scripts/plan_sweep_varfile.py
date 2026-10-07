@@ -613,6 +613,22 @@ def atmos_yq(expr, data):
 TOP_KEY = re.compile(r'''^("(?:[^"\\]|\\.)*"|'[^']*'|[^\s#'"-](?:[^:\n]|:(?=[^ \n]))*):(?: |$)''', re.M)
 
 
+# A map keyed by AWS region (kms's replica_keys) holds that region's ARNs:
+# backup's replica_kms_key_arn must be a key in replica_region (B1).
+REGION = re.compile(r'^[a-z]{2}(-gov)?-[a-z]+-[0-9]$')
+
+
+def in_region(value, region):
+    """value with the synthetic leaves' us-east-1 ARNs moved to region."""
+    if isinstance(value, dict):
+        return {k: in_region(v, region) for k, v in value.items()}
+    if isinstance(value, list):
+        return [in_region(v, region) for v in value]
+    if isinstance(value, str) and value.startswith('arn:'):
+        return value.replace(':us-east-1:', ':%s:' % region)
+    return value
+
+
 def synth_value(shape, names, keys=()):
     """A synthetic value of this shape, or None if any part of it is unknown.
 
@@ -652,7 +668,7 @@ def synth_value(shape, names, keys=()):
         for pad in ('synthetic_a', 'synthetic_b'):
             if len(ks) < 2:
                 ks.append(pad)
-        return {k: v for k in ks}
+        return {k: in_region(v, k) if REGION.match(k) else v for k in ks}
     if shape[0] == 'object':
         out = {}
         for attr, s in shape[1].items():
@@ -1250,6 +1266,11 @@ def self_test(components_dir, tmp):
           ('shaped', True))
     check('map key accessor', ref('.certificate_arns.main_wildcard', 'certificate_arn')[1],
           'arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012')
+    # B1: a map keyed by region holds that region's ARNs (backup's
+    # replica_kms_key_arn is validated to be in replica_region).
+    check('region-keyed map leaf is in its region',
+          synth_value(MAP(OBJ({'key_arn': SCALAR})), ['replica_keys'], ['us-east-2'])['us-east-2']['key_arn'],
+          'arn:aws:kms:us-east-2:123456789012:key/12345678-1234-1234-1234-123456789012')
     dns = res.component('dns')
     check('dns zone_ids shape', shape_of(dns.outputs.get('zone_ids', ''), Ctx(dns)), MAP(SCALAR))
     # acm's zone_id is validated ^Z[A-Z0-9]{1,32}$: the synthetic leaf must match.
