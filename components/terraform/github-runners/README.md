@@ -13,7 +13,9 @@ API takes.
 
 ## How a runner starts
 
-1. CI raises the group's desired capacity (`min_size` 0).
+1. CI executes the group's `<name>-start` policy, a +1 that Auto Scaling caps at `max_size`
+   (`min_size` 0). CI's roles can do nothing else to the group; scale-in never picks a runner
+   (`protect_from_scale_in`).
 2. The launch lifecycle hook holds the new instance (Pending:Wait).
 3. EventBridge invokes the `jit` function (`functions/jit`, Node.js 22, no dependencies). It:
    - reads the GitHub App private key from SSM;
@@ -43,7 +45,7 @@ is useless, and no reusable registration credential exists anywhere.
     (`{{ .atmos_stack }}`).
 - Used by:
   - an eks instance admits `.security_group_id` in `allowed_security_group_ids`;
-  - CI raises `.autoscaling_group_name`'s desired capacity for `runs-on: [self-hosted, <full id>]`
+  - CI executes `.start_policy_name` for `runs-on: [self-hosted, <full id>]`
     jobs.
 
 ## One-time GitHub App setup (owner)
@@ -104,14 +106,24 @@ is useless, and no reusable registration credential exists anywhere.
   `kms_key_arn` (`kms/main` grants the Auto Scaling service-linked role, `allow_autoscaling_ebs`).
 - **No `instance_refresh`.** It would end running jobs. `max_instance_lifetime` (one day) is the
   backstop.
-- **Public repository.** Self-hosted runners on a public repository must never run fork code.
-  - CI's self-hosted jobs run only on push to master, `workflow_dispatch`, `merge_group`,
-    schedule, and same-repository pull requests.
-  - `allowed_refs` (production: `[refs/heads/master]`) makes the runner fail any job of another
-    ref in its job-started hook, before the job's first step. The hook is set by the bootstrap
-    and `GITHUB_REF` by GitHub, so a pull request's workflow cannot get past it by asking for the
-    pool's label. Such a job still uses up the runner, so a same-repository pull request can
-    delay a master job (a denial of service, not access).
+- **Public repository: the fork guard is on the runner.** Self-hosted runners on a public
+  repository must never run fork code, and workflow files are pull-request controlled (a fork
+  can ask for `runs-on: [self-hosted, <label>]` and drop `container:`). So every runner's
+  job-started hook (`files/job-started.sh`, set by the bootstrap in the runner's `.env`) fails a
+  job before its first step unless:
+  - `GITHUB_REPOSITORY` is `github_scope` (or one of its repositories, for an organization);
+  - the event is `push`, `workflow_dispatch`, `schedule` or `merge_group`, or `pull_request`
+    whose head repository (`.pull_request.head.repo.full_name` in the event payload) is that
+    repository. `pull_request_target`, `workflow_run`, `issue_comment` and any other event are
+    refused;
+  - with `allowed_refs` (production: `[refs/heads/master]`), `GITHUB_REF` is one of them.
+
+  `GITHUB_*` and the payload come from GitHub; the hook and its policy are root-owned.
+  `test_runner_scripts.py` runs the hook for fork, `pull_request_target` and same-repository
+  events. The owner also keeps Settings → Actions → General → "Require approval for all outside
+  collaborators" on. A refused job still uses up the runner it landed on, so a same-repository
+  writer can delay a master job by queueing jobs for its label (a denial of service, not access;
+  re-run the master job).
   - The owner must also turn on Settings → Actions → General → "Require approval for all
     outside collaborators".
 - The `jit` function's flow is tested with `node --test functions/jit/`.

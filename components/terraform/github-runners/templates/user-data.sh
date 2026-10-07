@@ -53,24 +53,22 @@ chown -R runner:runner "$${RUNNER_DIR}"
 
 ${post_install}
 
-%{ if length(allowed_refs) > 0 ~}
-# This pool serves only jobs of the allowed refs: the runner's job-started
-# hook (named in .env, which the runner loads) fails any other job before its
-# first step. GITHUB_REF is set by GitHub; a workflow cannot override it.
+# The fork guard (files/job-started.sh): the runner's job-started hook, named
+# in .env (which the runner loads), fails a job before its first step unless
+# it comes from github_scope by push, dispatch, schedule or merge queue, or
+# from a same-repository pull request, and (allowed_refs) on an allowed ref.
+# Workflow files are pull-request controlled; this hook and its policy are not.
 install -d -m 0755 /opt/runner-hooks
 cat > /opt/runner-hooks/job-started.sh <<'HOOK'
-#!/bin/bash
-case "$${GITHUB_REF:-}" in
-%{ for ref in allowed_refs ~}
-  ${ref}) exit 0 ;;
-%{ endfor ~}
-esac
-echo "::error::This runner pool serves only ${join(", ", allowed_refs)}, not '$${GITHUB_REF:-}'"
-exit 1
+${job_started_hook}
 HOOK
+cat > /opt/runner-hooks/policy <<'POLICY'
+ALLOWED_SCOPE='${github_scope}'
+ALLOWED_REFS='${join(" ", allowed_refs)}'
+POLICY
 chmod 0755 /opt/runner-hooks/job-started.sh
+chmod 0644 /opt/runner-hooks/policy
 echo "ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/runner-hooks/job-started.sh" > "$${RUNNER_DIR}/.env"
-%{ endif ~}
 
 # The jit function writes the configuration while the launch hook holds this
 # instance (it may still be on its way); read it once, then delete it.

@@ -1,5 +1,5 @@
 output "autoscaling_group_name" {
-  description = "Name of the runners' Auto Scaling group; CI raises its desired capacity to start runners"
+  description = "Name of the runners' Auto Scaling group; CI starts runners by executing its <name>-start policy"
   value       = one(aws_autoscaling_group.runner[*].name)
 }
 
@@ -41,4 +41,9 @@ output "app_key_kms_key_alias" {
 output "jit_function_name" {
   description = "Name of the jit function (its log group shows each launch's JIT configuration and each cleanup)"
   value       = one(aws_lambda_function.jit[*].function_name)
+}
+
+output "start_policy_name" {
+  description = "The +1 scaling policy CI executes to start one runner (<autoscaling_group_name>-start)"
+  value       = one(aws_autoscaling_policy.start[*].name)
 }

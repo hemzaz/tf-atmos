@@ -12,7 +12,8 @@
 #     configuration is dead once its runner starts. Cloud Posse's component
 #     reads a registration token (and its token-rotator component keeps one
 #     in SSM); their philips-labs variant uses JIT the same way. CI raises
-#     desired capacity to start runners (min_size 0), so there are no CPU
+#     desired capacity by one (a +1 start policy, min_size 0) to start
+#     runners, so there are no CPU
 #     scaling policies, graceful scale-in hook or instance refresh.
 #   - The App's private key is on this component's own KMS key, whose policy
 #     lets only the jit function decrypt (no IAM delegation for Decrypt), so
@@ -47,6 +48,8 @@ locals {
     jit_parameter_prefix = local.jit_parameter_prefix
     idle_timeout_seconds = var.idle_timeout_seconds
     allowed_refs         = var.allowed_refs
+    github_scope         = var.github_scope
+    job_started_hook     = trimspace(file("${path.module}/files/job-started.sh"))
   })
 }
 
@@ -497,7 +500,12 @@ resource "aws_autoscaling_group" "runner" {
   health_check_type     = "EC2"
   max_instance_lifetime = var.max_instance_lifetime
 
-  # CI sets desired capacity; Terraform must not reset it on every apply.
+  # Scale-in never picks a runner (it may be mid-job): runners leave by
+  # TerminateInstanceInAutoScalingGroup, which protection does not block.
+  protect_from_scale_in = true
+
+  # CI raises desired capacity (the start policy below); Terraform must not
+  # reset it on every apply.
   # Capacity is never waited for: with min_size 0 there is nothing to wait for.
   wait_for_capacity_timeout = "0"
 
@@ -534,4 +542,18 @@ resource "aws_autoscaling_group" "runner" {
 
   # The jit function and its trigger exist before any instance launches.
   depends_on = [aws_cloudwatch_event_target.lifecycle, aws_lambda_permission.lifecycle]
+}
+
+# CI starts a runner by executing this policy (autoscaling:ExecutePolicy on
+# this group only, iam/ci ci_runner_pool_names): an atomic +1, which Auto
+# Scaling caps at max_size. CI cannot set any other capacity.
+resource "aws_autoscaling_policy" "start" {
+  count = local.enabled ? 1 : 0
+
+  name                   = "${local.name}-start"
+  autoscaling_group_name = aws_autoscaling_group.runner[0].name
+  policy_type            = "SimpleScaling"
+  adjustment_type        = "ChangeInCapacity"
+  scaling_adjustment     = 1
+  cooldown               = 0
 }

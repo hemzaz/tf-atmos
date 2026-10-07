@@ -220,7 +220,6 @@ run "user_data_runs_one_checksummed_jit_runner_and_always_leaves" {
       strcontains(local.user_data, "./run.sh --jitconfig"),
       strcontains(local.user_data, "--should-decrement-desired-capacity"),
       !strcontains(local.user_data, "config.sh"),
-      !strcontains(local.user_data, "ACTIONS_RUNNER_HOOK_JOB_STARTED"),
     ])
     error_message = "The bootstrap verifies the pinned runner, reads and deletes its JIT configuration, runs once, and leaves on any exit."
   }
@@ -290,6 +289,23 @@ run "rejects_a_non_numeric_app_id" {
   expect_failures = [var.github_app_id]
 }
 
+run "every_pool_installs_the_fork_guard_hook" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(local.user_data, "ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/runner-hooks/job-started.sh"),
+      strcontains(local.user_data, "ALLOWED_SCOPE='hemzaz/tf-atmos'"),
+      strcontains(local.user_data, "ALLOWED_REFS=''"),
+      # The hook's rules (files/job-started.sh), rendered verbatim.
+      strcontains(local.user_data, "push | workflow_dispatch | schedule | merge_group) ;;"),
+      strcontains(local.user_data, ".pull_request.head.repo.full_name // empty"),
+      strcontains(local.user_data, "*) refuse \"event '$event'\" ;;"),
+    ])
+    error_message = "Every pool's runners refuse fork pull requests and unlisted events in their job-started hook, whatever allowed_refs says."
+  }
+}
+
 run "allowed_refs_fail_other_jobs_before_their_first_step" {
   command = plan
 
@@ -300,11 +316,24 @@ run "allowed_refs_fail_other_jobs_before_their_first_step" {
 
   assert {
     condition = alltrue([
-      strcontains(local.user_data, "ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/runner-hooks/job-started.sh"),
-      strcontains(local.user_data, "  refs/heads/master) exit 0 ;;"),
+      strcontains(local.user_data, "ALLOWED_REFS='refs/heads/master'"),
       strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/prod-runners/jit/$${INSTANCE_ID}\""),
     ])
-    error_message = "A pool with allowed_refs fails every other ref's job in its job-started hook; its JIT path is per pool."
+    error_message = "A pool with allowed_refs hands them to its hook; its JIT path is per pool."
+  }
+}
+
+run "ci_starts_runners_with_a_plus_one_policy_and_scale_in_spares_them" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_autoscaling_group.runner[0].protect_from_scale_in
+      && aws_autoscaling_policy.start[0].name == "test-github-runners-start"
+      && aws_autoscaling_policy.start[0].adjustment_type == "ChangeInCapacity"
+      && aws_autoscaling_policy.start[0].scaling_adjustment == 1
+    )
+    error_message = "CI's only lever is a +1 SimpleScaling policy (capped at max_size); scale-in never ends a runner mid-job."
   }
 }
 

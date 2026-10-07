@@ -180,7 +180,7 @@ variable "jit_parameter_prefix" {
 
 variable "allowed_refs" {
   type        = list(string)
-  description = "When non-empty, a runner fails any job whose GITHUB_REF is not one of these refs before its first step (the runner's job-started hook, set by the bootstrap, which a workflow cannot change). A production pool sets [\"refs/heads/master\"]: its runners then serve master's push, dispatch and schedule runs only, whatever a pull request's workflow asks for. Empty: any job with the pool's labels"
+  description = "When non-empty, a runner also fails any job whose GITHUB_REF is not one of these refs before its first step (the runner's job-started hook, files/job-started.sh, which always enforces the fork guard and which a workflow cannot change). A production pool sets [\"refs/heads/master\"]: its runners then serve master's push, dispatch and schedule runs only, whatever a pull request's workflow asks for. Empty: any job with the pool's labels"
   default     = []
   nullable    = false
 
@@ -232,7 +232,7 @@ variable "instance_type" {
 
 variable "min_size" {
   type        = number
-  description = "Minimum runners. 0: CI starts them by raising desired capacity"
+  description = "Minimum runners. 0: CI starts them with the +1 start policy"
   default     = 0
 
   validation {
