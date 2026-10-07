@@ -135,6 +135,14 @@ components:
         # there), so it notifies fnx-ue1-prod monitoring/main's topic (ue1).
         health_check_alarm_actions:
           - "arn:aws:sns:us-east-1:{{ .settings.environment.account_id }}:ue1-main-alarms"
+        # The out-of-region signal: during a us-east-1 outage the alarms above
+        # and ue1-main-alarms are down with it. These watch this region's own
+        # API (5xx, latency) and notify monitoring/main's ue2 topic, by name
+        # (monitoring/main reads this component).
+        create_performance_alarms: true
+        alarm_5xx_threshold: 10
+        alarm_latency_threshold: 5000
+        sns_topic_arn: "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000
         enable_logging: true

@@ -16,7 +16,8 @@ the standards in `standards`, given as short `<name>/v/<version>` paths.
   filtered out of `standards` so the apply does not subscribe them twice.
 - CIS v1.2.0 uses the partition-wide `:::ruleset/` ARN; every other standard `:<region>::standards/`.
 - `disabled_security_controls` disables controls per subscribed standard
-  (`aws_securityhub_standards_control_association`). `fnx-ue2-prod` disables the IAM controls
-  there: AWS Config records global resources in us-east-1 only, and AWS's guidance is to disable
-  global-resource controls in every other region. An ID not in that standard fails at apply.
+  (`aws_securityhub_standards_control_association`). `fnx-ue2-prod` disables, per AWS's "Controls
+  that you might want to disable": the IAM controls and KMS.1/KMS.2 (global resources; AWS Config
+  records them in us-east-1 only) and CloudWatch.1-14 (metric filters on the trail's log group,
+  which is in us-east-1). An ID not in that standard fails at apply.
   Cloud Posse's `aws-security-hub` has no such input; this is an extension.

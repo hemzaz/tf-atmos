@@ -432,7 +432,11 @@ vaults and the state bucket's replication) and the same for `fnx-ue2-prod`. CD d
 `fnx-ue2-prod` right after `fnx-ue1-prod`, whose state it reads (`kms/main`, `rds/main`,
 `elasticache/main`, `network/main`, `iam/ci`): its `settings.dr.standby_of: fnx-ue1-prod` orders it
 (`ci-stacks.py`), not the stack names. Each region's `apigateway/main` health check has a
-`HealthCheckStatus` alarm in us-east-1 on `ue1-main-alarms`.
+`HealthCheckStatus` alarm in us-east-1 on `ue1-main-alarms`. Both alarms and that topic live in
+us-east-1 (Route 53 publishes health check metrics only there), so a us-east-1 outage silences
+them; the DNS failover itself does not depend on them. The signal outside us-east-1 is
+`fnx-ue2-prod`'s own API alarms (`apigateway/main` 5xx and latency, `create_performance_alarms`)
+on its `ue2-main-alarms` topic in us-east-2: they fire when the failed-over traffic errors.
 
 **Failover** (`STACK=fnx-ue1-prod atmos workflow dr-failover -f disaster-recovery` prints these
 steps; operator only, never from CI). It is CLI-first: a us-east-1 outage takes the state bucket
@@ -486,12 +490,27 @@ with it, so nothing here needs Terraform. Terraform catches up after recovery (b
    ```
 
 6. Deploy the in-cluster services, `eks-backend-services/main`, from inside the VPC
-   ([In-cluster components](#in-cluster-components)), from a branch that sets its
-   `metadata.enabled: true` (Atmos skips a disabled instance). It has never been applied in
-   `fnx-ue2-prod`, so it has no state: with the state bucket down it
-   may apply with local state and migrate it after recovery
-   ([State during a us-east-1 outage](#state-during-a-us-east-1-outage)). Its secrets come from
-   us-east-2: the RDS-managed secret step 3 created and the cache's `redis-auth/ue2/...` secret.
+   ([In-cluster components](#in-cluster-components)). It has never been applied in
+   `fnx-ue2-prod`, so it has no state of its own to fork: with the state bucket down it applies
+   with local state, migrated after recovery, while its `!terraform.state` inputs read the
+   bucket's us-east-2 replica
+   ([State during a us-east-1 outage](#state-during-a-us-east-1-outage)). The replica holds the
+   state from before the CLI steps, so on a branch (`stacks/orgs/fnx/prod/us-east-2/components/compute.yaml`):
+
+   | Input | From the replica | On the branch |
+   |-------|------------------|---------------|
+   | `metadata.enabled` | `false` | `true` (Atmos skips a disabled instance) |
+   | `database_secret_arn` (`rds/main .password_secret_arn`) | null: the replica had no secret, and the validation rejects null | the secret step 3 created: `aws rds describe-db-instances --db-instance-identifier ue2-prod-main-db --region us-east-2 --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text` |
+   | `database_name` (`rds/main .instance_name`) | a replica's `db_name`, possibly null | `productionapp`, the promoted instance's (`fnx-ue1-prod`'s) |
+   | `cluster_secret_store_name` (`external-secrets/main`) | its output, if it was applied while warm | `aws-secretsmanager` (its default store); if it was never applied, deploy it first the same way |
+   | `database_endpoint`, `cluster_name`, `host`, `cluster_ca_certificate` | unchanged by the failover | keep |
+   | `redis_host`, `redis_port`, `redis_secret_arn` (`elasticache/main`) | the secondary's own endpoint and AUTH secret (`redis-auth/ue2/...`), which promotion keeps | keep |
+
+   ```bash
+   export TFSTATE_SOURCE=replica          # !terraform.state reads go to the us-east-2 replica
+   rm -f components/terraform/eks-backend-services/backend.tf.json
+   atmos terraform deploy eks-backend-services/main -s fnx-ue2-prod --auto-generate-backend-file=false
+   ```
 7. Analytics, if needed: restore `rds/data` from `ue1-backup-replica` in us-east-2
    (`aws backup list-recovery-points-by-backup-vault --backup-vault-name ue1-backup-replica
    --region us-east-2`, then `aws backup start-restore-job`).
@@ -513,7 +532,8 @@ terraform-cd.yml`) or apply them from an operator machine:
    replacement in the plan means stop, not apply.
 2. `fnx-ue2-prod` `eks/main`: the node groups' `min_group_size`/`desired_group_size` to the sizes of
    step 5 (Terraform ignores `desired_size` drift, not `min_size`).
-3. `fnx-ue2-prod` `eks-backend-services/main`: `metadata.enabled: true`; migrate its local state
+3. `fnx-ue2-prod` `eks-backend-services/main`: `metadata.enabled: true`, its inputs back to the
+   `!terraform.state` reads (the step 6 literals now match `rds/main`'s reconciled outputs); migrate its local state
    into the bucket first if step 6 used one.
 4. Apply neither stack's `elasticache/main` while the cache primary is in us-east-2:
    `fnx-ue1-prod`'s plan would replace the Global Datastore (its primary moved). Failback restores

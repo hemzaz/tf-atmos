@@ -146,14 +146,14 @@ class GroupTest(unittest.TestCase):
     def test_dr_region_reusing_an_iam_name_fails(self):
         errors = self.errors({
             "fnx-ue1-prod": stack(**{"iam/ci": instance(
-                "ue1", component="iam", stage="prod", github_oidc_enabled=True, ci_role_name_prefix="fnx-prod-ci",
+                "ue1", component="iam", stage="prod", github_oidc_enabled=True, ci_role_name_prefix="shared-ci",
                 create_cross_account_role=False)}),
             "fnx-ue2-prod": stack(**{"iam/ci": instance(
                 "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_enabled=True,
-                ci_role_name_prefix="fnx-prod-ci", create_cross_account_role=False)}),
+                ci_role_name_prefix="shared-ci", create_cross_account_role=False)}),
         })
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("IAM CI role prefix 'fnx-prod-ci' in account prod", errors[0])
+        self.assertIn("IAM CI role prefix 'shared-ci' in account prod", errors[0])
 
     def test_regional_names_in_another_region_of_the_account_pass(self):
         # A KMS alias is regional: the same alias in us-east-2 is another alias.

@@ -130,19 +130,29 @@ components:
       vars:
         standards:
           - "pci-dss/v/3.2.1"
-        # AWS Config records global resources (IAM) in us-east-1 only
-        # (awsconfig/main above), so the controls that check them are
-        # disabled here, as AWS's Security Hub guidance says for every region
-        # but the recording one; fnx-ue1-prod evaluates them. Per standard, the
-        # IAM controls each one contains.
+        # Controls fnx-ue1-prod evaluates, disabled here per standard. AWS
+        # Security Hub User Guide, "Controls that you might want to disable"
+        # (https://docs.aws.amazon.com/securityhub/latest/userguide/controls-to-disable.html):
+        # - global resources: AWS Config records IAM in us-east-1 only
+        #   (awsconfig/main above), so the IAM controls and KMS.1/KMS.2 (they
+        #   check IAM policies, kms-controls.html) are disabled in every
+        #   other region;
+        # - CloudWatch.1-14 (CIS 1.2.0 section 3, PCI CW.1): log metric filters
+        #   on the trail's log group, which exists only in us-east-1 (the
+        #   multi-region trail, fnx-ue1-prod); in other regions they cannot
+        #   pass (cloudwatch-controls.html).
         disabled_security_controls:
           "aws-foundational-security-best-practices/v/1.0.0":
-            ["IAM.1", "IAM.2", "IAM.3", "IAM.4", "IAM.5", "IAM.6", "IAM.7", "IAM.8", "IAM.21"]
+            ["IAM.1", "IAM.2", "IAM.3", "IAM.4", "IAM.5", "IAM.6", "IAM.7", "IAM.8", "IAM.21",
+             "KMS.1", "KMS.2"]
           "cis-aws-foundations-benchmark/v/1.2.0":
             ["IAM.1", "IAM.2", "IAM.3", "IAM.4", "IAM.5", "IAM.6", "IAM.8", "IAM.9", "IAM.11", "IAM.12",
-             "IAM.13", "IAM.14", "IAM.15", "IAM.16", "IAM.17", "IAM.18", "IAM.20"]
+             "IAM.13", "IAM.14", "IAM.15", "IAM.16", "IAM.17", "IAM.18", "IAM.20",
+             "CloudWatch.1", "CloudWatch.2", "CloudWatch.3", "CloudWatch.4", "CloudWatch.5",
+             "CloudWatch.6", "CloudWatch.7", "CloudWatch.8", "CloudWatch.9", "CloudWatch.10",
+             "CloudWatch.11", "CloudWatch.12", "CloudWatch.13", "CloudWatch.14"]
           "pci-dss/v/3.2.1":
-            ["IAM.1", "IAM.2", "IAM.4", "IAM.6", "IAM.8", "IAM.9", "IAM.10", "IAM.19"]
+            ["IAM.1", "IAM.2", "IAM.4", "IAM.6", "IAM.8", "IAM.9", "IAM.10", "IAM.19", "CloudWatch.1"]
 
     inspector2/main:
       metadata:
