@@ -44,6 +44,15 @@ run "primary_creates_the_global_datastore" {
     global_replication_group_id_suffix = "prod-cache"
   }
 
+  # A random mock id can start with a digit, which the provider's replication
+  # group ID validation rejects in primary_replication_group_id.
+  override_resource {
+    target = aws_elasticache_replication_group.global_primary
+    values = {
+      id = "ue1-prod-cache"
+    }
+  }
+
   assert {
     condition     = length(aws_elasticache_global_replication_group.main) == 1 && aws_elasticache_global_replication_group.main[0].global_replication_group_id_suffix == "prod-cache"
     error_message = "global_replication_group_id_suffix must create the Global Datastore with this cache as its primary."

@@ -68,6 +68,10 @@ state or outputs.
     then set `engine_version`/`family` to match.
   - `auto_minor_version_upgrade` is always false on a member: AWS turns it off on association and
     it cannot be turned back on.
+  - The primary role is operated by CLI (`aws elasticache failover-global-replication-group`), not
+    by Terraform: the global group ignores `primary_replication_group_id`, which forces a
+    replacement and which the provider reads back from the current primary, so a plan after a
+    failover leaves the Global Datastore alone.
 - `rotation_policy` is a ready-made IAM policy for such a Lambda's `custom_policy`.
 - `log_delivery_configuration` (slow-log, engine-log) differs from Cloud Posse's: each entry names
   only its log type and format, and the component creates the log group

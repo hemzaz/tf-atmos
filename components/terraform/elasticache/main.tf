@@ -346,6 +346,14 @@ resource "aws_elasticache_global_replication_group" "main" {
 
   engine_version  = var.engine_version
   cache_node_type = var.node_type
+
+  lifecycle {
+    # The primary role is operated by CLI (failover-global-replication-group,
+    # docs/OPERATIONS.md). The provider reads this attribute back from the
+    # PRIMARY member, and it forces a new resource: after a failover every
+    # plan here would destroy and recreate the Global Datastore.
+    ignore_changes = [primary_replication_group_id]
+  }
 }
 
 locals {
