@@ -215,11 +215,12 @@ run "user_data_runs_one_checksummed_jit_runner_and_always_leaves" {
       strcontains(local.user_data, "trap 'shutdown -h now' EXIT"),
       strcontains(local.user_data, "actions-runner-linux-x64-2.337.0.tar.gz"),
       strcontains(local.user_data, "sha256sum -c"),
-      strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/jit/$${INSTANCE_ID}\""),
+      strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/github-runners/jit/$${INSTANCE_ID}\""),
       strcontains(local.user_data, "aws ssm delete-parameter"),
       strcontains(local.user_data, "./run.sh --jitconfig"),
       strcontains(local.user_data, "--should-decrement-desired-capacity"),
       !strcontains(local.user_data, "config.sh"),
+      !strcontains(local.user_data, "ACTIONS_RUNNER_HOOK_JOB_STARTED"),
     ])
     error_message = "The bootstrap verifies the pinned runner, reads and deletes its JIT configuration, runs once, and leaves on any exit."
   }
@@ -287,4 +288,32 @@ run "rejects_a_non_numeric_app_id" {
   }
 
   expect_failures = [var.github_app_id]
+}
+
+run "allowed_refs_fail_other_jobs_before_their_first_step" {
+  command = plan
+
+  variables {
+    name         = "prod-runners"
+    allowed_refs = ["refs/heads/master"]
+  }
+
+  assert {
+    condition = alltrue([
+      strcontains(local.user_data, "ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/runner-hooks/job-started.sh"),
+      strcontains(local.user_data, "  refs/heads/master) exit 0 ;;"),
+      strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/prod-runners/jit/$${INSTANCE_ID}\""),
+    ])
+    error_message = "A pool with allowed_refs fails every other ref's job in its job-started hook; its JIT path is per pool."
+  }
+}
+
+run "allowed_refs_rejects_a_pattern" {
+  command = plan
+
+  variables {
+    allowed_refs = ["refs/heads/*"]
+  }
+
+  expect_failures = [var.allowed_refs]
 }

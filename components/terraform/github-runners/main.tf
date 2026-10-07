@@ -34,7 +34,8 @@ locals {
 
   app_key_parameter_name = coalesce(var.github_app_private_key_parameter_name, "/github/runners/${var.name}/app-private-key")
   app_key_parameter_arn  = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${local.app_key_parameter_name}" : null
-  jit_parameter_arns     = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${var.jit_parameter_prefix}/*" : null
+  jit_parameter_prefix   = coalesce(var.jit_parameter_prefix, "/github/runners/${var.name}/jit")
+  jit_parameter_arns     = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${local.jit_parameter_prefix}/*" : null
   # The group's ARN carries a generated id; this matches it by name.
   asg_arn_pattern = local.enabled ? "arn:${local.partition}:autoscaling:${var.region}:${local.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.name}" : null
 
@@ -43,8 +44,9 @@ locals {
     post_install         = var.userdata_post_install
     runner_version       = var.runner_version
     runner_sha256        = var.runner_sha256
-    jit_parameter_prefix = var.jit_parameter_prefix
+    jit_parameter_prefix = local.jit_parameter_prefix
     idle_timeout_seconds = var.idle_timeout_seconds
+    allowed_refs         = var.allowed_refs
   })
 }
 
@@ -292,7 +294,7 @@ resource "aws_lambda_function" "jit" {
       APP_KEY_PARAMETER      = local.app_key_parameter_name
       RUNNER_LABELS          = jsonencode(var.runner_labels)
       RUNNER_GROUP_ID        = tostring(var.runner_group_id)
-      JIT_PARAMETER_PREFIX   = var.jit_parameter_prefix
+      JIT_PARAMETER_PREFIX   = local.jit_parameter_prefix
       JIT_KMS_KEY_ID         = var.kms_key_arn
       PARTITION              = local.partition
       ACCOUNT_ID             = local.account_id

@@ -253,9 +253,11 @@ workflows:
           python3 workflows/scripts/common/check-secret-attributes.py components/terraform < "$stacks_json"
       # A component that configures a kubernetes/helm/kubectl provider needs
       # the EKS API, which GitHub-hosted runners cannot reach where the
-      # endpoint is private: each such instance must set
-      # settings.github.actions_enabled: false (docs/OPERATIONS.md,
-      # "In-cluster components"), and each eks cluster admin role there
+      # endpoint is private: each such instance must run on the in-VPC
+      # runners (settings.github.runner: in-vpc, with a pool its clusters
+      # admit) or set settings.github.actions_enabled: false
+      # (docs/OPERATIONS.md, "In-cluster components"); a master-only stack's
+      # runner pool must set allowed_refs; and each eks cluster admin role there
       # (map_additional_iam_roles) must be trusted by its stage's state write
       # role; a cluster with none only warns. Also run by validate-all.
       - name: check-cluster-api-ci

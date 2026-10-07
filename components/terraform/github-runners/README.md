@@ -21,7 +21,8 @@ API takes.
    - calls `generate-jitconfig` for a runner named after the instance;
    - revokes the token;
    - writes the single-use configuration to `<jit_parameter_prefix>/<instance id>` (SecureString
-     on `kms_key_arn`, tagged with the instance's ARN);
+     on `kms_key_arn`, tagged with the instance's ARN). The prefix defaults to
+     `/github/runners/<name>/jit`, so two pools in one account never share a path or its grants;
    - completes the lifecycle action. On any failure it abandons the launch, so the instance is
      terminated.
 4. The instance reads its configuration, deletes it, and runs `run.sh --jitconfig` for one job.
@@ -106,6 +107,11 @@ is useless, and no reusable registration credential exists anywhere.
 - **Public repository.** Self-hosted runners on a public repository must never run fork code.
   - CI's self-hosted jobs run only on push to master, `workflow_dispatch`, `merge_group`,
     schedule, and same-repository pull requests.
+  - `allowed_refs` (production: `[refs/heads/master]`) makes the runner fail any job of another
+    ref in its job-started hook, before the job's first step. The hook is set by the bootstrap
+    and `GITHUB_REF` by GitHub, so a pull request's workflow cannot get past it by asking for the
+    pool's label. Such a job still uses up the runner, so a same-repository pull request can
+    delay a master job (a denial of service, not access).
   - The owner must also turn on Settings → Actions → General → "Require approval for all
     outside collaborators".
 - The `jit` function's flow is tested with `node --test functions/jit/`.

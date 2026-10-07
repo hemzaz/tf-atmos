@@ -20,7 +20,10 @@ have a deployable github-runners instance whose runner_labels hold that label,
 and every eks instance the in-cluster instance depends on must admit that
 runner pool (`!terraform.state <pool> .security_group_id` in its
 allowed_security_group_ids): an ERROR otherwise. A pool in another vpc is
-checked for peering and NACLs like a bastion (below).
+checked for peering and NACLs like a bastion (below). A pool in a stack that is
+planned from master only (settings.github.pull_request_plans_enabled: false,
+production) must set allowed_refs, so its runners refuse a pull request's job
+that asks for its label: an ERROR otherwise.
 
 That operator is an eks map_additional_iam_roles role with system:masters (a
 cluster-scoped AmazonEKSClusterAdminPolicy access entry, set in each stack's
@@ -159,6 +162,20 @@ def check_runner_paths(stacks: dict, cluster: set[str]) -> list[str]:
                         ".security_group_id` to its allowed_security_group_ids)"
                     )
     return errors
+
+
+def check_protected_pools(stacks: dict) -> list[str]:
+    """Runner pools of master-only stacks (pull_request_plans_enabled: false) without allowed_refs."""
+    return [
+        f"{stack_name}: {name} serves a stack planned from master only "
+        "(settings.github.pull_request_plans_enabled: false) but sets no allowed_refs: "
+        "a pull request's workflow could take its runners (set allowed_refs: [refs/heads/master])"
+        for stack_name, stack in sorted(stacks.items())
+        for name, instance in sorted(deployable_instances(stack).items())
+        if instance.get("component") == RUNNER_COMPONENT
+        and ((instance.get("settings") or {}).get("github") or {}).get("pull_request_plans_enabled") is False
+        and not (instance.get("vars") or {}).get("allowed_refs")
+    ]
 
 
 def admin_role_arns(eks_instance: dict) -> list[str]:
@@ -322,7 +339,8 @@ def main() -> int:
     operator_errors, warnings = check_operators(stacks, cluster)
     operator_errors = fixtures.fatal(operator_errors, "check-cluster-api-ci")
     network_errors = fixtures.fatal(
-        check_network_paths(stacks, cluster) + check_runner_paths(stacks, cluster), "check-cluster-api-ci"
+        check_network_paths(stacks, cluster) + check_runner_paths(stacks, cluster) + check_protected_pools(stacks),
+        "check-cluster-api-ci",
     )
     for warning in warnings:
         print(f"WARN {warning}")

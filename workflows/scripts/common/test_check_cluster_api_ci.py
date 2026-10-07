@@ -318,6 +318,23 @@ class CheckClusterApiCiTest(unittest.TestCase):
         self.assertEqual(len(errors), 3, errors)
         self.assertIn("admits github-runners/main (in vpc/services), but no network instance peers", errors[0])
 
+    def master_only_pool(self, allowed_refs=None):
+        pool = instance("github-runners")
+        pool["settings"] = {"github": {"pull_request_plans_enabled": False}}
+        if allowed_refs is not None:
+            pool["vars"]["allowed_refs"] = allowed_refs
+        return stacks_with(**{"github-runners/main": pool})
+
+    def test_master_only_pool_without_allowed_refs_fails(self):
+        for refs in (None, []):
+            errors = check_cluster_api_ci.check_protected_pools(self.master_only_pool(refs))
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIn("github-runners/main serves a stack planned from master only", errors[0])
+
+    def test_master_only_pool_with_allowed_refs_and_other_pools_pass(self):
+        self.assertEqual(check_cluster_api_ci.check_protected_pools(self.master_only_pool(["refs/heads/master"])), [])
+        self.assertEqual(check_cluster_api_ci.check_protected_pools(self.runner_stack()), [])
+
     def test_cluster_components_reads_provider_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

@@ -142,6 +142,11 @@ components:
       vars:
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        # A prod lane is deployed and planned from master only: its runners
+        # fail any other ref's job (check-cluster-api-ci.py requires this in a
+        # pull_request_plans_enabled: false stack).
+        allowed_refs:
+          - refs/heads/master
       dependencies:
         components:
           - component: kms/main
