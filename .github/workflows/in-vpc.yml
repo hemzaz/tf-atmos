@@ -28,6 +28,12 @@
 # refs/heads/master. The owner keeps "Require approval for all outside
 # collaborators" on (docs/OPERATIONS.md, First-deploy inputs).
 #
+# Pool demand is bounded: the callers hold one concurrency group per pool and
+# family (terraform-cd-main; in-vpc-plan-<stack>-<asg>; in-vpc-drift-<stack>-
+# <asg>), so at most IN_VPC_JOBS_PER_POOL (3, check-cluster-api-ci.py) jobs
+# want one pool at once, and the start job fails a full pool instead of
+# leaving the run job queued for a runner that never starts.
+#
 # A job the hook refuses does not cost a runner: the instance powers off
 # without lowering desired capacity and the pool replaces it for the next
 # queued job (github-runners README, "A refused job does not cost a runner").

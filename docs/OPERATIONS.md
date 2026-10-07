@@ -253,6 +253,11 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
   job-started hook fails any other ref's job before its first step, even one that asks for a
   pool's label while a master job started the runner. `check-cluster-api-ci.py` fails a pool
   without `allowed_refs`.
+- Demand per pool is bounded: CD (serialized by `terraform-cd-main`), one plan
+  (`in-vpc-plan-<stack>-<asg>`) and one drift check (`in-vpc-drift-<stack>-<asg>`) at most, and
+  every pool's `max_size` must be at least 3 (`check-cluster-api-ci.py`). A job that finds its
+  pool full fails ("runner pool ... is full") rather than queueing for a runner that never starts
+  (github-runners README, "Bounded demand").
 - A refused job does not cost a runner: the instance powers off without lowering desired
   capacity and the pool launches a replacement for the next queued job, so jobs queued for a
   label cannot starve the master job that started the runner. Runners have no Auto Scaling

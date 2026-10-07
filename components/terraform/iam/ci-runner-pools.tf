@@ -8,7 +8,9 @@
 # decision), so the plan role, which trusts pull requests, has no write here.
 # ExecutePolicy only, on this stack's own pools by name: CI cannot set a
 # capacity (no SetDesiredCapacity: not 0 mid-apply, not max), nor touch any
-# other group.
+# other group. DescribeAutoScalingGroups (read-only; no resource-level
+# permissions exist for it) lets start-runner.sh fail a full pool instead of
+# leaving a job queued for a runner that never starts.
 resource "aws_iam_role_policy" "ci_runner_pools" {
   count = local.create_ci_apply_role && length(var.ci_runner_pool_names) > 0 ? 1 : 0
 
@@ -17,6 +19,12 @@ resource "aws_iam_role_policy" "ci_runner_pools" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      {
+        Sid      = "SeeRunnerPools"
+        Effect   = "Allow"
+        Action   = "autoscaling:DescribeAutoScalingGroups"
+        Resource = "*"
+      },
       {
         Sid    = "StartRunners"
         Effect = "Allow"

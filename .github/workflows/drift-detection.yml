@@ -170,6 +170,11 @@ jobs:
     name: Drift in-VPC ${{ matrix.stack }} (${{ matrix.label }})
     needs: stacks
     if: needs.stacks.outputs.in_vpc != '' && fromJson(needs.stacks.outputs.in_vpc).include[0] != null
+    # One in-VPC drift check per pool at a time (in-vpc.yml,
+    # IN_VPC_JOBS_PER_POOL): bounds a pool's runner demand.
+    concurrency:
+      group: in-vpc-drift-${{ matrix.stack }}-${{ matrix.asg }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write

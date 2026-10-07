@@ -20,7 +20,11 @@ have a deployable github-runners instance whose runner_labels hold that label,
 and every eks instance the in-cluster instance depends on must admit that
 runner pool (`!terraform.state <pool> .security_group_id` in its
 allowed_security_group_ids): an ERROR otherwise. A pool in another vpc is
-checked for peering and NACLs like a bastion (below). Every runner pool must
+checked for peering and NACLs like a bastion (below). Every runner pool's
+max_size must be at least IN_VPC_JOBS_PER_POOL, the in-VPC jobs that can want
+a runner of one pool at once (per-pool concurrency on in-vpc.yml's callers;
+test_in_vpc_workflows.py ties the two), or a job waits for a runner that never
+starts: an ERROR otherwise. Every runner pool must
 set allowed_refs: every in-VPC job runs on the default branch (owner
 decision), so its runners refuse any other ref's job that asks for its
 label: an ERROR otherwise. Each deployable runner pool's
@@ -70,6 +74,12 @@ EXEC_COMMAND = re.compile(r'\bexec\s*=?\s*\{[^}]*?\bcommand\s*=\s*"([^"]+)"', re
 # The Atmos toolchain tool that provides each provider exec command.
 EXEC_TOOLS = {"aws": "aws/aws-cli"}
 RUNNER_POOL_DEFAULT_NAME = "github-runners"
+# In-VPC jobs that can want a runner of one pool at once: one per concurrency
+# family of in-vpc.yml's callers (terraform-cd.yml's workflow group, and the
+# in-vpc-plan-/in-vpc-drift- groups of terraform-ci.yml and
+# drift-detection.yml). test_in_vpc_workflows.py asserts the families match.
+IN_VPC_JOBS_PER_POOL = 3
+RUNNER_POOL_DEFAULT_MAX_SIZE = 4  # github-runners variables.tf max_size
 RUNNER_COMPONENT = "github-runners"
 RUNNER_MODES = ("hosted", "in-vpc")
 # Instances whose security group may be an operator or CI path into a cluster.
@@ -223,6 +233,27 @@ def check_pool_start_grants(stacks: dict) -> list[str]:
                 errors.append(
                     f"{stack_name}: {name} ({group}) is not in iam/ci ci_runner_pool_names, so CI cannot start "
                     "its runners"
+                )
+    return errors
+
+
+def check_pool_sizes(stacks: dict) -> list[str]:
+    """Runner pools too small for the in-VPC jobs that can want them at once."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(deployable_instances(stack).items()):
+            if instance.get("component") != RUNNER_COMPONENT:
+                continue
+            max_size = (instance.get("vars") or {}).get("max_size", RUNNER_POOL_DEFAULT_MAX_SIZE)
+            try:
+                size = int(max_size)
+            except (TypeError, ValueError):
+                errors.append(f"{stack_name}: {name} max_size {max_size!r} is not a number")
+                continue
+            if size < IN_VPC_JOBS_PER_POOL:
+                errors.append(
+                    f"{stack_name}: {name} max_size {size} is below {IN_VPC_JOBS_PER_POOL}, the in-VPC jobs that "
+                    "can want its runners at once (deploy, plan, drift): a job could wait for a runner that never starts"
                 )
     return errors
 
@@ -400,6 +431,7 @@ def main() -> int:
     operator_errors = fixtures.fatal(operator_errors, "check-cluster-api-ci")
     network_errors = fixtures.fatal(
         check_network_paths(stacks, cluster) + check_runner_paths(stacks, cluster) + check_protected_pools(stacks)
+        + check_pool_sizes(stacks)
         + check_pool_start_grants(stacks) + check_exec_tools(stacks, exec_commands(pathlib.Path(sys.argv[1]))),
         "check-cluster-api-ci",
     )

@@ -5,9 +5,15 @@ Owner decision (#343, C3): in-VPC jobs run on the default branch only (push,
 workflow_dispatch, schedule) with the stack's master-only apply role; a pull
 request gets a ::notice:: and the CI gate accepts the skipped plan-in-vpc.
 """
+import importlib.util
 import pathlib
 import re
 import unittest
+
+_spec = importlib.util.spec_from_file_location(
+    "check_cluster_api_ci", pathlib.Path(__file__).with_name("check-cluster-api-ci.py"))
+check_cluster_api_ci = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(check_cluster_api_ci)
 
 WORKFLOWS = pathlib.Path(__file__).resolve().parents[3] / ".github/workflows"
 MASTER_ONLY_IF = (
@@ -65,6 +71,40 @@ class InVpcWorkflowTest(unittest.TestCase):
         body = job(self.ci, "gate")
         self.assertIn("plan-in-vpc", re.search(r"needs: \[(.*)\]", body).group(1))
         self.assertIn('.value.result != "skipped"', body)
+
+
+class PoolDemandTest(unittest.TestCase):
+    """At most IN_VPC_JOBS_PER_POOL in-VPC jobs want one pool at once: one per concurrency family."""
+
+    def callers(self):
+        """(workflow text, caller job text) for every job that calls in-vpc.yml."""
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            text = path.read_text()
+            for match in re.finditer(r"^  ([A-Za-z0-9_-]+):\n", text, re.MULTILINE):
+                body = job(text, match.group(1))
+                if "uses: ./.github/workflows/in-vpc.yml" in body:
+                    yield path.name, text, match.group(1), body
+
+    def family(self, workflow, text, name, body):
+        """A caller's concurrency family: its job group without the ${{ }} parts, else its workflow's group."""
+        own = re.search(r"^    concurrency:\n      group: (.*)$", body, re.MULTILINE)
+        if own:
+            self.assertIn("${{ matrix.stack }}-${{ matrix.asg }}", own.group(1), f"{workflow} {name}: one group per pool")
+            return re.sub(r"\$\{\{[^}]*\}\}", "", own.group(1)).rstrip("-")
+        workflow_group = re.search(r"^concurrency:\n  group: (\S+)$", text, re.MULTILINE)
+        self.assertIsNotNone(workflow_group, f"{workflow} {name} has no concurrency group")
+        self.assertIn("max-parallel: 1", body, f"{workflow} {name}: one matrix entry at a time")
+        return workflow_group.group(1)
+
+    def test_the_concurrency_families_match_the_check_constant(self):
+        families = {self.family(*caller) for caller in self.callers()}
+        self.assertEqual(families, {"terraform-cd-main", "in-vpc-plan", "in-vpc-drift"})
+        self.assertEqual(len(families), check_cluster_api_ci.IN_VPC_JOBS_PER_POOL)
+
+    def test_plans_cancel_superseded_runs_and_drift_waits(self):
+        callers = {name: body for _, _, name, body in self.callers()}
+        self.assertIn("cancel-in-progress: true", callers["plan-in-vpc"])
+        self.assertIn("cancel-in-progress: false", callers["drift-in-vpc"])
 
 
 if __name__ == "__main__":

@@ -136,42 +136,46 @@ class StartRunnerTest(unittest.TestCase):
         sleeps = (bin_dir / "sleeps").read_text().split() if (bin_dir / "sleeps").exists() else []
         return result.returncode, result.stdout + result.stderr, calls, sleeps
 
+    DESCRIBE = ("autoscaling describe-auto-scaling-groups --auto-scaling-group-names ue1-github-runners "
+                "--query AutoScalingGroups[0].[DesiredCapacity,MaxSize] --output text")
     EXECUTE = ("autoscaling execute-policy --auto-scaling-group-name ue1-github-runners "
                "--policy-name ue1-github-runners-start --no-honor-cooldown")
+    BUSY = (254, "An error occurred (ScalingActivityInProgress) when calling the ExecutePolicy operation")
 
-    def test_executes_the_pool_start_policy_once(self):
-        code, _, calls, sleeps = self.run_start("ue1-github-runners")
-        self.assertEqual((code, calls, sleeps), (0, [self.EXECUTE], []))
+    def test_a_pool_with_room_executes_its_start_policy_once(self):
+        code, out, calls, sleeps = self.run_start("ue1-github-runners", (0, "1\t4"))
+        self.assertEqual((code, calls, sleeps), (0, [self.DESCRIBE, self.EXECUTE], []))
+        self.assertIn("desired 1 of 4", out)
 
-    def test_a_full_pool_is_not_a_failure(self):
-        code, out, calls, _ = self.run_start(
-            "ue1-github-runners",
-            (254, "An error occurred (ValidationError) when calling the ExecutePolicy operation: "
-                  "New SetDesiredCapacity value 5 is above max value 4 for the AutoScalingGroup."))
-        self.assertEqual((code, len(calls)), (0, 1))
-        self.assertIn("at max_size", out)
+    def test_a_full_pool_fails_without_executing_the_policy(self):
+        code, out, calls, _ = self.run_start("ue1-github-runners", (0, "4\t4"))
+        self.assertEqual((code, calls), (1, [self.DESCRIBE]))
+        self.assertIn("::error::runner pool ue1-github-runners is full (desired=max=4); this job would never get a runner", out)
 
-    def test_max_in_another_error_is_not_a_full_pool(self):
-        code, out, _, _ = self.run_start("ue1-github-runners", (255, "Max attempts exceeded"))
-        self.assertEqual(code, 1)
-        self.assertIn("could not start a runner", out)
+    def test_a_missing_pool_fails(self):
+        code, out, calls, _ = self.run_start("ue1-github-runners", (0, "None\tNone"))
+        self.assertEqual((code, calls), (1, [self.DESCRIBE]))
+        self.assertIn("not found", out)
 
     def test_transient_errors_are_retried_with_backoff(self):
         code, _, calls, sleeps = self.run_start(
             "ue1-github-runners",
-            (254, "An error occurred (ScalingActivityInProgress) when calling the ExecutePolicy operation"),
+            (254, "An error occurred (Throttling) when calling the DescribeAutoScalingGroups operation"),
+            (0, "0\t4"),
+            self.BUSY,
             (254, "An error occurred (ResourceContention) when calling the ExecutePolicy operation"))
-        self.assertEqual((code, calls, sleeps), (0, [self.EXECUTE] * 3, ["5", "10"]))
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [self.DESCRIBE, self.DESCRIBE, self.EXECUTE, self.EXECUTE, self.EXECUTE])
+        self.assertEqual(sleeps, ["5", "5", "10"])
 
     def test_a_lasting_transient_error_fails_after_three_retries(self):
-        busy = (254, "An error occurred (ScalingActivityInProgress) when calling the ExecutePolicy operation")
-        code, out, calls, sleeps = self.run_start("ue1-github-runners", busy, busy, busy, busy)
-        self.assertEqual((code, len(calls), sleeps), (1, 4, ["5", "10", "20"]))
-        self.assertIn("could not start a runner", out)
+        code, out, calls, sleeps = self.run_start("ue1-github-runners", (0, "0\t4"), *[self.BUSY] * 4)
+        self.assertEqual((code, len(calls), sleeps), (1, 5, ["5", "10", "20"]))
+        self.assertIn("::error::runner pool ue1-github-runners", out)
 
     def test_other_errors_fail_without_retry(self):
-        code, out, calls, sleeps = self.run_start("ue1-github-runners", (254, "AccessDenied"))
-        self.assertEqual((code, len(calls), sleeps), (1, 1, []))
+        code, _, calls, sleeps = self.run_start("ue1-github-runners", (0, "0\t4"), (254, "Max attempts exceeded"))
+        self.assertEqual((code, len(calls), sleeps), (1, 2, []))
 
     def test_a_bad_group_name_is_refused_before_any_call(self):
         code, _, calls, _ = self.run_start("ue1;rm -rf /")

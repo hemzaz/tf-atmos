@@ -643,12 +643,20 @@ run "apply_role_may_only_execute_its_runner_pools_policies" {
   }
 
   assert {
+    condition = (
+      [for s in jsondecode(aws_iam_role_policy.ci_runner_pools[0].policy).Statement : s.Action]
+      == ["autoscaling:DescribeAutoScalingGroups", "autoscaling:ExecutePolicy"]
+    )
+    error_message = "The apply role may describe the groups (read-only) and execute the pools' start policies, nothing else."
+  }
+
+  assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.ci_runner_pools[0].policy).Statement :
-      s.Action == "autoscaling:ExecutePolicy" && length(s.Resource) == 1
-      && endswith(s.Resource[0], ":autoScalingGroupName/ue1-github-runners")
+      s.Action != "autoscaling:ExecutePolicy" || (length(s.Resource) == 1
+      && endswith(s.Resource[0], ":autoScalingGroupName/ue1-github-runners"))
     ])
-    error_message = "Only autoscaling:ExecutePolicy, on the named runner pool only."
+    error_message = "ExecutePolicy on the named runner pool only."
   }
 }
 

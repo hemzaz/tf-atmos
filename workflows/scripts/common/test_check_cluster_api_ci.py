@@ -337,6 +337,23 @@ class CheckClusterApiCiTest(unittest.TestCase):
         self.assertEqual(check_cluster_api_ci.check_protected_pools(self.pool_with(["refs/heads/master"])), [])
         self.assertEqual(check_cluster_api_ci.check_protected_pools(stacks_with(**{"vpc/main": instance("vpc")})), [])
 
+    def sized_pool(self, **vars_):
+        pool = instance("github-runners")
+        pool["vars"].update(vars_)
+        return stacks_with(**{"github-runners/main": pool})
+
+    def test_pool_max_size_covers_the_in_vpc_jobs_per_pool(self):
+        self.assertEqual(check_cluster_api_ci.IN_VPC_JOBS_PER_POOL, 3)
+        for ok in ({"max_size": 3}, {"max_size": 4}, {"max_size": "5"}, {}):
+            self.assertEqual(check_cluster_api_ci.check_pool_sizes(self.sized_pool(**ok)), [], ok)
+
+    def test_pool_max_size_below_the_jobs_per_pool_fails(self):
+        errors = check_cluster_api_ci.check_pool_sizes(self.sized_pool(max_size=2))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("github-runners/main max_size 2 is below 3", errors[0])
+        errors = check_cluster_api_ci.check_pool_sizes(self.sized_pool(max_size="{{ .x }}"))
+        self.assertIn("is not a number", errors[0])
+
     def pool_stack(self, granted, name=None):
         pool = instance("github-runners")
         pool["vars"]["tags"] = {"Environment": "ue1"}

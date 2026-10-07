@@ -125,6 +125,21 @@ is useless, and no reusable registration credential exists anywhere.
 - **Instance hardening.** Amazon Linux 2023, IMDSv2 only with hop limit 1, no public IP, an
   egress-only security group (`name_prefix`, `create_before_destroy`), and a gp3 root volume on
   `kms_key_arn` (`kms/main` grants the Auto Scaling service-linked role, `allow_autoscaling_ebs`).
+- **Bounded demand; a full pool fails fast.** At `max_size` Auto Scaling silently caps the start
+  policy's +1, and a job queued for a runner that never starts waits up to GitHub's 24 h queue
+  limit (`timeout-minutes` only counts once a runner takes it), holding its workflow's
+  concurrency group: CD would halt. So:
+  - at most 3 in-VPC jobs want one pool at once: CD's (`terraform-cd-main`, one matrix entry at
+    a time), one plan (`in-vpc-plan-<stack>-<asg>`, a newer push cancels it) and one drift check
+    (`in-vpc-drift-<stack>-<asg>`); `check-cluster-api-ci.py` requires `max_size` >= 3
+    (`IN_VPC_JOBS_PER_POOL`, which `test_in_vpc_workflows.py` ties to those groups);
+  - `start-runner.sh` reads the group's desired capacity and `max_size` first and fails the job
+    ("runner pool ... is full") instead of queueing it, so a pool held full by runners that never
+    left (the sweep ends those) shows up as a red job, not a stalled CD.
+
+  The alternative, an "owed runner" ledger (record each start that got no runner and start it
+  when capacity frees), was left out: it adds state and a second scaler for a case the bound
+  rules out.
 - **No `instance_refresh`.** It would end running jobs. `max_instance_lifetime` (one day) is the
   backstop.
 - **Public repository: the fork guard is on the runner.** Self-hosted runners on a public
