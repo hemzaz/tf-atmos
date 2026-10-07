@@ -39,7 +39,7 @@ output "parameter_group_id" {
 }
 
 output "password_secret_arn" {
-  value       = one(aws_db_instance.main.master_user_secret[*].secret_arn)
+  value       = try(aws_db_instance.main.master_user_secret[0].secret_arn, null)
   description = "ARN of the RDS-managed Secrets Manager secret holding the master credentials (null on a replica until it is promoted)"
 }
 
