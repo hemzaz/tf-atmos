@@ -86,7 +86,7 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 | `fnx-terraform-backend-root-role` (`root_write`) | read/write, `fnx-ue1-root` state | none |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
-- Trust is by role ARN, listed in `access_roles` in `root.yaml`. Add a new stack's
+- Trust is by role ARN, listed in `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml`. Add a new stack's
   `<tenant>-<environment>-<stage>-ci-plan`/`-apply` roles there (iam/ci's `ci_role_name_prefix`),
   and any operator role that runs Terraform against a stage. `check-ci-state-roles.py` (in `lint`
   and `validate-all`) fails a CI role its stage's read or write role does not trust.
@@ -362,7 +362,7 @@ liveness endpoint by design.
 | Symptom | Fix |
 |---------|-----|
 | `This repository requires Atmos >= 1.229.0` | Upgrade Atmos |
-| `init` cannot assume `fnx-terraform-backend-*-role` | Run `backend-cold-start`, or add the caller's role ARN to that stage's `access_roles` in `root.yaml` |
+| `init` cannot assume `fnx-terraform-backend-*-role` | Run `backend-cold-start`, or add the caller's role ARN to that stage's `access_roles` in `stacks/orgs/fnx/root/us-east-1.yaml` |
 | CI plan: AccessDenied on `PutObject` at `workspace new` | Read roles cannot create a workspace; the instance's first deploy does |
 | `Error acquiring the state lock` | Another run holds it; `list-locks`, then `force-unlock` if abandoned |
 | `!terraform.state` returns nothing | The referenced instance is not deployed in that stack yet; deploy in layer order |

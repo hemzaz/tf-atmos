@@ -20,7 +20,7 @@ def pair(stack):
 
 
 def access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging"), prod=("fnx-ue1-prod",),
-                 core=("fnx-ue1-root",), **patterns):
+                 root=("fnx-ue1-root",), **patterns):
     """backend/main's access_roles as the catalog renders them; patterns overrides one role's list."""
     non_prod_keys = [p for stack in non_prod for p in pair(stack)]
     prod_keys = [p for stack in prod for p in pair(stack)]
@@ -29,7 +29,7 @@ def access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging"), prod=("fnx-ue1-pro
         "prod_read": ("fnx-terraform-backend-prod-read-role", prod_keys),
         "write": (NON_PROD_ROLE, non_prod_keys),
         "prod_write": (STAGE_ROLES["prod"], prod_keys),
-        "root_write": (STAGE_ROLES["root"], [p for stack in core for p in pair(stack)]),
+        "root_write": (STAGE_ROLES["root"], [p for stack in root for p in pair(stack)]),
     }
     return {
         name: {"role_name": role_name, "object_key_patterns": patterns.get(name, keys)}
@@ -53,7 +53,7 @@ def instance(workspace, key_prefix="vpc", stage="prod", backend_type="s3", key="
     }
 
 
-def core_stack(region="us-east-1", roles=None, stack="fnx-ue1-root"):
+def root_stack(region="us-east-1", roles=None, stack="fnx-ue1-root"):
     backend = instance(stack, key_prefix="backend", stage="root", region=region, component="backend",
                        roles=access_roles() if roles is None else roles)
     return {"components": {"terraform": {"backend/main": backend}}}
@@ -66,7 +66,7 @@ def one(name, stage, region="us-east-1"):
 def stacks_with(roles=None, **components):
     """The four stacks of today: root, dev and staging with one instance each, prod with components."""
     return {
-        "fnx-ue1-root": core_stack(roles=roles),
+        "fnx-ue1-root": root_stack(roles=roles),
         "fnx-ue1-dev": one("fnx-ue1-dev", "dev"),
         "fnx-ue1-staging": one("fnx-ue1-staging", "staging"),
         "fnx-ue1-prod": {"components": {"terraform": components}},
@@ -139,9 +139,9 @@ class CheckStateKeysTest(unittest.TestCase):
     def test_isolation_does_not_depend_on_where_the_stage_sits_in_the_name(self):
         # The Q4 names put the region code before the stage: the pairs still split them.
         roles = access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging"), prod=("fnx-ue1-prod", "fnx-ue2-prod"),
-                             core=("fnx-ue1-root",))
+                             root=("fnx-ue1-root",))
         stacks = {
-            "fnx-ue1-root": core_stack(roles=roles, stack="fnx-ue1-root"),
+            "fnx-ue1-root": root_stack(roles=roles, stack="fnx-ue1-root"),
             "fnx-ue1-dev": one("fnx-ue1-dev", "dev"),
             "fnx-ue1-staging": one("fnx-ue1-staging", "staging"),
             "fnx-ue1-prod": one("fnx-ue1-prod", "prod"),
@@ -156,7 +156,7 @@ class CheckStateKeysTest(unittest.TestCase):
             root_write=["*/fnx-ue1-root-*"],
         )
         stacks = {
-            "fnx-ue1-root": core_stack(roles=roles, stack="fnx-ue1-root"),
+            "fnx-ue1-root": root_stack(roles=roles, stack="fnx-ue1-root"),
             "fnx-ue1-dev": one("fnx-ue1-dev", "dev"),
             "fnx-ue1-prod": one("fnx-ue1-prod", "prod"),
         }
@@ -304,7 +304,7 @@ class CheckStateKeysTest(unittest.TestCase):
     def test_bucket_region_is_the_backend_stacks_own(self):
         # backend/main moved to another region: stacks still pointing at us-east-1 now fail
         stacks = stacks_with(**{"vpc/main": prod()})
-        stacks["fnx-ue1-root"] = core_stack(region="eu-west-1")
+        stacks["fnx-ue1-root"] = root_stack(region="eu-west-1")
         errors = check_state_keys.check(stacks)
         self.assertEqual(len(errors), 3, errors)
         self.assertTrue(all("backend.region 'us-east-1' is not the state bucket's region 'eu-west-1'" in e
@@ -333,7 +333,7 @@ class CheckStateKeysTest(unittest.TestCase):
     def test_unset_region_fails(self):
         # An unset settings.tfstate.region renders "<no value>" everywhere; equal strings must not pass
         stacks = {
-            "fnx-ue1-root": core_stack(region="<no value>"),
+            "fnx-ue1-root": root_stack(region="<no value>"),
             "fnx-ue1-dev": one("fnx-ue1-dev", "dev", region="<no value>"),
             "fnx-ue1-staging": one("fnx-ue1-staging", "staging", region="<no value>"),
             "fnx-ue1-prod": one("fnx-ue1-prod", "prod", region="<no value>"),
