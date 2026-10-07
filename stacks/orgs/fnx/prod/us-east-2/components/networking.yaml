@@ -1,0 +1,71 @@
+---
+# =============================================================================
+# Networking for fnx-ue2-prod (DR warm standby)
+# =============================================================================
+# Warm = full: vpc/main as in fnx-ue1-prod (three AZs, a NAT gateway per AZ,
+# flow logs), on its own CIDR so the two regions can be peered later without
+# renumbering. No vpc/services: the data tier it holds in us-east-1 (rds/data,
+# eks/data) is restored from backup copies, not run warm (docs/OPERATIONS.md,
+# "Disaster recovery"). No dns instance: the public zone is fnx-ue1-prod's
+# network/main, which this stack writes its failover record into.
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/us-east-2/components/globals
+  - catalog/vpc/defaults
+
+settings:
+  network:
+    vpc_cidrs:
+      main: "10.22.0.0/16"
+
+components:
+  terraform:
+    vpc/main:
+      metadata:
+        component: vpc
+        inherits:
+          - vpc/defaults
+      vars:
+        ipv4_primary_cidr_block: "{{ .settings.network.vpc_cidrs.main }}"
+        # AZ IDs, not names: see components/terraform/vpc/README.md.
+        availability_zone_ids:
+          - use2-az1
+          - use2-az2
+          - use2-az3
+        private_subnets:
+          - "10.22.1.0/24"
+          - "10.22.2.0/24"
+          - "10.22.3.0/24"
+        public_subnets:
+          - "10.22.101.0/24"
+          - "10.22.102.0/24"
+          - "10.22.103.0/24"
+        database_subnets:
+          - "10.22.201.0/24"
+          - "10.22.202.0/24"
+          - "10.22.203.0/24"
+        nat_gateway_enabled: true
+        nat_gateway_strategy: "one_per_az"
+        default_sg_ingress_self_only: true
+        default_sg_egress_self_only: false
+        default_sg_allow_all_outbound: true
+        # Load balancer subnet discovery for eks/main's AWS Load Balancer
+        # Controller, as in fnx-ue1-prod (cluster "<Environment>-main": ue2-main).
+        public_subnets_additional_tags:
+          "kubernetes.io/role/elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
+        private_subnets_additional_tags:
+          "kubernetes.io/role/internal-elb": "1"
+          "kubernetes.io/cluster/{{ .settings.prefix }}-main": "shared"
+        vpc_flow_logs_enabled: true
+        # This region's key: fnx-ue1-prod kms/main's multi-region replica.
+        flow_logs_kms_key_arn: !terraform.state kms/main fnx-ue1-prod '.replica_keys["us-east-2"].key_arn'
+        tags:
+          NetworkTier: "primary"
+          HighAvailability: "true"
+          CriticalityLevel: "high"
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ue1-prod

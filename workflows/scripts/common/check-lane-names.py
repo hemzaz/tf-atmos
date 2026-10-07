@@ -26,6 +26,10 @@ Stacks are grouped by account (settings.environment.account) and region
     fixtures, never deployed and each standalone, are exempt;
   - two secretsmanager instances creating the same secret name
     (context_name/environment/path/name).
+Account-wide names (IAM, the account singletons) are also compared between
+the regions of one account: fnx-ue1-prod and its DR stack fnx-ue2-prod share
+the prod account, so they cannot create the same IAM role or both the GitHub
+OIDC provider.
 Within one stack, two deployable instances of one component that set the same
 name inputs (NAME_INPUT: name, identifier, *_name, *_prefix, domains, zones,
 ...) build the same <Environment>-<input> names, so they must differ in one
@@ -69,6 +73,9 @@ SINGLETONS = {
     ("iam", "github_oidc_create_provider", False): "GitHub OIDC provider",
     ("iam", "enable_autoscaling_service_linked_role", False): "Auto Scaling service-linked role",
 }
+# Kinds from RAW_NAMES and SINGLETONS that are unique per account, not per
+# region (IAM is global within an account).
+ACCOUNT_WIDE = {"IAM role", "IAM policy", "IAM CI role prefix", *SINGLETONS.values()}
 # vars keys whose values are names global across accounts and regions.
 GLOBAL_KEYS = {"bucket_name", "assets_bucket_name", "domain_prefix"}
 
@@ -175,6 +182,31 @@ def check_groups(stacks: dict) -> list[str]:
     return errors
 
 
+def check_account(stacks: dict) -> list[str]:
+    """ACCOUNT_WIDE names created in two regions of one account (same-region pairs are
+    check_groups')."""
+    owners, errors = {}, []
+    for stack_name in sorted(stacks):
+        group = group_of(stacks[stack_name])
+        if not group:
+            continue
+        account, region = group
+        for name, instance in instances_of(stacks[stack_name]):
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            for kind, value, key in created(instance, stage):
+                if kind not in ACCOUNT_WIDE:
+                    continue
+                here = (f"{stack_name}: {name} {key}", region)
+                first = owners.setdefault((account, kind, value), here)
+                if first[1] != region:
+                    errors.append(
+                        f"{here[0]} ({region}) and {first[0]} ({first[1]}) both create the {kind} {value!r} "
+                        f"in account {account}: IAM names are account-wide, so another region's must carry "
+                        "its region code (settings.prefix), and a singleton belongs to one stack"
+                    )
+    return errors
+
+
 def check_instances(stacks: dict) -> list[str]:
     """Instances of one component in one stack with the same name inputs."""
     errors = []
@@ -214,7 +246,7 @@ def check_global(stacks: dict) -> list[str]:
 
 
 def check(stacks: dict) -> list[str]:
-    return check_groups(stacks) + check_instances(stacks) + check_global(stacks)
+    return check_groups(stacks) + check_account(stacks) + check_instances(stacks) + check_global(stacks)
 
 
 def main() -> int:

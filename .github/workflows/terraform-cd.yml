@@ -129,7 +129,8 @@ jobs:
           # settings.github.actions_enabled: false (fnx-ue1-root, the
           # emulator-only fnx-ue1-local-*, the fnx-ue1-fixtures-* templates), in
           # promotion order by settings.context.stage (dev, staging, prod,
-          # then any other stage): ci-stacks.py, derived from
+          # then any other stage), a DR standby (settings.dr.standby_of)
+          # right after its primary: ci-stacks.py, derived from
           # `atmos describe stacks`, so a new stack needs no edit here. A
           # stack with only some opted-out instances (the in-cluster
           # components) stays; the deploy job skips just those
