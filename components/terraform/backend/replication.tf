@@ -188,12 +188,52 @@ data "aws_iam_policy_document" "terraform_state_replica" {
   }
 }
 
+# Write protection beyond IAM: no principal but the replication role may put,
+# tag or delete objects in the replica, whatever its own policies grant (an
+# administrator included; lifting it is an explicit bucket-policy change).
+# Replication itself writes with s3:ReplicateObject, s3:ReplicateDelete and
+# s3:ReplicateTags on the destination, never s3:PutObject (AWS S3 User Guide,
+# "Setting up permissions for live replication",
+# https://docs.aws.amazon.com/AmazonS3/latest/userguide/setting-repl-config-perm-overview.html).
+data "aws_iam_policy_document" "terraform_state_replica_writes" {
+  count = local.replication_enabled ? 1 : 0
+
+  source_policy_documents = [data.aws_iam_policy_document.terraform_state_replica[0].json]
+
+  statement {
+    sid    = "DenyWritesButReplication"
+    effect = "Deny"
+    actions = [
+      "s3:PutObject",
+      "s3:PutObjectAcl",
+      "s3:PutObjectTagging",
+      "s3:PutObjectVersionTagging",
+      "s3:DeleteObject",
+      "s3:DeleteObjectVersion",
+      "s3:DeleteObjectTagging",
+      "s3:DeleteObjectVersionTagging",
+    ]
+    resources = ["${aws_s3_bucket.terraform_state_replica[0].arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = [aws_iam_role.replication[0].arn]
+    }
+  }
+}
+
 resource "aws_s3_bucket_policy" "terraform_state_replica" {
   count = local.replication_enabled ? 1 : 0
 
   region = var.replica_region
   bucket = aws_s3_bucket.terraform_state_replica[0].id
-  policy = data.aws_iam_policy_document.terraform_state_replica[0].json
+  policy = data.aws_iam_policy_document.terraform_state_replica_writes[0].json
 
   depends_on = [aws_s3_bucket_public_access_block.terraform_state_replica]
 }

@@ -61,7 +61,9 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
   one instance creates it through the provider's per-resource `region`, since a second instance
   would collide on the access roles' names. The replication role is least privilege (source
   versions read, replicas written, each key through S3 in its region). Every access role may read
-  the replica and none may write it, so a run against it (`TFSTATE_SOURCE=replica`,
+  the replica and none may write it; the replica's bucket policy also denies object writes, tags
+  and deletes to every principal but the replication role (replication writes with
+  `s3:Replicate*` only). A run against it (`TFSTATE_SOURCE=replica`,
   [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#state-during-a-us-east-1-outage)) can only
   plan with `-lock=false`. The replica has no server access logs (they need a target bucket in its
   region).

@@ -67,6 +67,14 @@ mock_provider "aws" {
   }
 
   override_data {
+    target          = data.aws_iam_policy_document.terraform_state_replica_writes
+    override_during = plan
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  override_data {
     target          = data.aws_iam_policy_document.replication
     override_during = plan
     values = {
@@ -746,4 +754,29 @@ run "replica_in_the_bucket_region_is_rejected" {
   }
 
   expect_failures = [var.replica_region]
+}
+
+run "replica_bucket_policy_denies_writes_to_all_but_replication" {
+  command = plan
+
+  variables {
+    s3_replication_enabled = true
+    replica_region         = "us-east-2"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.terraform_state_replica_writes[0].statement :
+      s.effect == "Deny"
+      && length(setintersection(toset(s.actions), toset(["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:PutObjectTagging"]))) == 4
+      && anytrue([for c in s.condition : c.test == "StringNotEquals" && c.variable == "aws:PrincipalArn"])
+      && anytrue([for p in s.principals : contains(tolist(p.identifiers), "*")])
+    ])
+    error_message = "The replica's bucket policy must deny object writes, tags and deletes to every principal but the replication role."
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.terraform_state_replica_writes[0].source_policy_documents) == 1
+    error_message = "The write deny is added to the TLS-only policy, not instead of it."
+  }
 }

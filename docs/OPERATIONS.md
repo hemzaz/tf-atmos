@@ -108,12 +108,15 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 ### State during a us-east-1 outage
 
 The replica is read-only for every access role, write roles included: they may list it and read
-their own stage's objects, never write, delete or lock. Point a run at it with
+their own stage's objects, never write, delete or lock. Its bucket policy also denies object
+writes and deletes to every principal but the replication role. Point a run at it with
 `TFSTATE_SOURCE=replica` (`stacks/orgs/fnx/_defaults.yaml` then renders bucket
-`fnx-terraform-state-replica`, region us-east-2):
+`fnx-terraform-state-replica`, region us-east-2). Leave `TFSTATE_ACCESS` unset: the stage's usual
+read/write role, the one operators and the CI apply roles assume, is read-only on the replica. The
+read roles trust only the CI plan roles.
 
 ```bash
-export TFSTATE_SOURCE=replica TFSTATE_ACCESS=read
+export TFSTATE_SOURCE=replica
 atmos terraform init vpc/main -s fnx-ue2-prod -- -reconfigure       # the replica's backend
 atmos terraform plan vpc/main -s fnx-ue2-prod -- -lock=false        # read-only: plan, output, show
 atmos terraform output rds/main -s fnx-ue1-prod
@@ -133,17 +136,24 @@ What is safe and what is not:
   Control): the replica may miss the last writes before the outage.
 - A component that has never been applied has no state to fork. One that must be applied during the
   outage (the DR stack's `eks-backend-services/main`) may apply with local state and be migrated
-  into the bucket when it returns, the way the backend's own cold start does (`bootstrap.yaml`):
+  into the bucket when it returns, the way the backend's own cold start does (`bootstrap.yaml`).
+  Keep `TFSTATE_SOURCE=replica` exported for that deploy: its `!terraform.state` inputs then read
+  the replica, while its own state stays local (no generated backend file):
 
   ```bash
-  unset TFSTATE_SOURCE TFSTATE_ACCESS
+  export TFSTATE_SOURCE=replica
   rm -f components/terraform/eks-backend-services/backend.tf.json   # no S3 backend: local state
   atmos terraform deploy eks-backend-services/main -s fnx-ue2-prod --auto-generate-backend-file=false
   # later, with the bucket back:
+  unset TFSTATE_SOURCE
   atmos terraform init eks-backend-services/main -s fnx-ue2-prod --init-reconfigure=never -- -migrate-state -force-copy
   ```
 
   Keep the local `terraform.tfstate.d/` until the migration has run.
+- The replica holds the state as of the outage. A component that the outage runbook changed by CLI
+  (a promoted database, a moved cache primary) still shows its pre-outage outputs there, so an
+  input read from it may be stale or null: set such an input literally, from the CLI's answer, on
+  the branch that deploys.
 
 - After the outage: unset `TFSTATE_SOURCE` and `init -reconfigure` again before any apply.
   Nothing is copied back: the primary bucket never stopped being the source of truth.
