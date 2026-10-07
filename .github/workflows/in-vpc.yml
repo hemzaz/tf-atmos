@@ -28,9 +28,9 @@
 # refs/heads/master. The owner keeps "Require approval for all outside
 # collaborators" on (docs/OPERATIONS.md, First-deploy inputs).
 #
-# A same-repository writer can still queue jobs for a label and take runners
-# that a master job started (the hook then fails those jobs): a delay, not
-# access; re-run the master job.
+# A job the hook refuses does not cost a runner: the instance powers off
+# without lowering desired capacity and the pool replaces it for the next
+# queued job (github-runners README, "A refused job does not cost a runner").
 name: In-VPC run
 
 on:

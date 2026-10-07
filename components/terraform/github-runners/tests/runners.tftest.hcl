@@ -175,6 +175,57 @@ run "instance_reads_only_its_own_parameter" {
     condition     = length(aws_iam_role_policy_attachment.additional) == 0
     error_message = "No managed policy is attached by default."
   }
+
+  assert {
+    condition = !anytrue([
+      for s in local.runner_policy.Statement :
+      anytrue([for a in flatten([s.Action]) : startswith(a, "autoscaling:")])
+    ])
+    error_message = "The runner role has no Auto Scaling action (it could end a sibling runner): runners leave through their lease."
+  }
+}
+
+run "a_deleted_lease_ends_its_runner" {
+  command = plan
+
+  assert {
+    condition = (
+      jsondecode(aws_cloudwatch_event_rule.lease[0].event_pattern) == {
+        source        = ["aws.ssm"]
+        "detail-type" = ["Parameter Store Change"]
+        detail = {
+          operation = ["Delete"]
+          name      = [{ prefix = "/github/runners/github-runners/jit/lease/" }]
+        }
+      }
+      && aws_cloudwatch_event_target.lease[0].rule == "test-github-runners-lease"
+      && aws_lambda_permission.lease[0].principal == "events.amazonaws.com"
+      && aws_lambda_permission.lease[0].statement_id == "AllowLeaseEvents"
+      && aws_lambda_function.jit[0].environment[0].variables["AUTOSCALING_GROUP_NAME"] == "test-github-runners"
+    )
+    error_message = "Deleting <prefix>/lease/<instance id> invokes the jit function, which ends that runner of this group."
+  }
+
+  assert {
+    condition = anytrue([
+      for s in local.jit_policy.Statement :
+      contains(flatten([s.Action]), "autoscaling:DescribeAutoScalingInstances")
+    ])
+    error_message = "The jit function checks that a lease's instance is an InService runner of this group."
+  }
+}
+
+run "a_refused_job_leaves_without_lowering_capacity" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(local.user_data, "install -d -m 0700 -o runner -g runner /var/lib/runner-state"),
+      strcontains(local.user_data, "REFUSED_MARKER='/var/lib/runner-state/refused'"),
+      strcontains(local.user_data, "if [ -e \"$${REFUSED_MARKER}\" ]; then"),
+    ])
+    error_message = "A runner whose job the fork guard refused powers off with its lease kept, so the group replaces it."
+  }
 }
 
 run "instances_are_hardened" {
@@ -218,7 +269,9 @@ run "user_data_runs_one_checksummed_jit_runner_and_always_leaves" {
       strcontains(local.user_data, "JIT_PARAMETER=\"/github/runners/github-runners/jit/$${INSTANCE_ID}\""),
       strcontains(local.user_data, "aws ssm delete-parameter"),
       strcontains(local.user_data, "./run.sh --jitconfig"),
-      strcontains(local.user_data, "--should-decrement-desired-capacity"),
+      strcontains(local.user_data, "aws ssm delete-parameter --region \"$${REGION}\" --name \"/github/runners/github-runners/jit/lease/$${INSTANCE_ID}\""),
+      strcontains(local.user_data, "sleep 600"),
+      !strcontains(local.user_data, "terminate-instance-in-auto-scaling-group"),
       !strcontains(local.user_data, "config.sh"),
     ])
     error_message = "The bootstrap verifies the pinned runner, reads and deletes its JIT configuration, runs once, and leaves on any exit."

@@ -14,9 +14,22 @@
 // anywhere. Any failure terminates the instance, lowering desired capacity, so
 // a lasting failure cannot loop launches.
 //
+// Launch also writes the instance's lease, <prefix>/lease/<instance id>
+// (tagged with its ARN, before the JIT configuration, so it exists whenever
+// the runner runs). A runner done with its job deletes its own lease (it may
+// delete only parameters tagged with its own ARN) and has no Auto Scaling
+// permission at all.
+//
+// Lease deleted ("Parameter Store Change", Delete, under <prefix>/lease/):
+// end that instance, lowering desired capacity. Only an InService instance of
+// this pool: one already leaving (or gone) is left alone, so this never
+// lowers capacity twice. This replaces Cloud Posse's and philips-labs' runner
+// self-termination (TerminateInstanceInAutoScalingGroup on the instance
+// role), which IAM cannot scope to the caller's own instance.
+//
 // Terminate ("EC2 Instance Terminate Successful"): delete the instance's JIT
-// parameter, if it never read it, and its runner registration, if GitHub still
-// has one (a runner that never took a job).
+// parameter, if it never read it, its lease, and its runner registration, if
+// GitHub still has one (a runner that never took a job).
 //
 // Node.js 22 runtime only: node:crypto for RS256, fetch, and the AWS SDK v3
 // the runtime ships. The AWS and HTTP calls come in as `deps`, so the flow is
@@ -73,6 +86,22 @@ export function jitParameterName(prefix, instanceId) {
   return `${prefix.replace(/\/+$/, "")}/${instanceId}`;
 }
 
+export function leaseParameterName(prefix, instanceId) {
+  return `${prefix.replace(/\/+$/, "")}/lease/${instanceId}`;
+}
+
+// The instance id a deleted lease names, or null for any other parameter.
+export function leaseInstanceId(prefix, parameterName) {
+  const leases = `${prefix.replace(/\/+$/, "")}/lease/`;
+  if (typeof parameterName !== "string" || !parameterName.startsWith(leases)) return null;
+  const instanceId = parameterName.slice(leases.length);
+  return /^i-[0-9a-f]+$/.test(instanceId) ? instanceId : null;
+}
+
+function instanceArn(env, instanceId) {
+  return `arn:${env.PARTITION}:ec2:${env.AWS_REGION}:${env.ACCOUNT_ID}:instance/${instanceId}`;
+}
+
 async function github(deps, method, path, token, body) {
   const response = await deps.fetch(`${API}${path}`, {
     method,
@@ -109,6 +138,14 @@ export async function onLaunch(detail, env, deps) {
     const jit = await withInstallationToken(deps, env, (token) =>
       github(deps, "POST", `${runnersPath(env.GITHUB_SCOPE)}/generate-jitconfig`, token,
         jitRequest(instanceId, JSON.parse(env.RUNNER_LABELS), Number(env.RUNNER_GROUP_ID))));
+    // The lease first: the runner deletes it when done, which ends it.
+    await deps.putParameter({
+      Name: leaseParameterName(env.JIT_PARAMETER_PREFIX, instanceId),
+      Value: instanceArn(env, instanceId),
+      Type: "String",
+      Tier: "Standard",
+      Tags: [{ Key: "RunnerInstanceArn", Value: instanceArn(env, instanceId) }],
+    });
     await deps.putParameter({
       Name: jitParameterName(env.JIT_PARAMETER_PREFIX, instanceId),
       Value: jit.encoded_jit_config,
@@ -117,7 +154,7 @@ export async function onLaunch(detail, env, deps) {
       // Intelligent-Tiering stores it as Advanced only when it must.
       Tier: "Intelligent-Tiering",
       KeyId: env.JIT_KMS_KEY_ID,
-      Tags: [{ Key: "RunnerInstanceArn", Value: `arn:${env.PARTITION}:ec2:${env.AWS_REGION}:${env.ACCOUNT_ID}:instance/${instanceId}` }],
+      Tags: [{ Key: "RunnerInstanceArn", Value: instanceArn(env, instanceId) }],
     });
     await deps.completeLifecycle(detail, "CONTINUE");
     console.log(`JIT runner ${jit.runner.id} configured for ${instanceId}`);
@@ -138,9 +175,27 @@ export async function onLaunch(detail, env, deps) {
   }
 }
 
+export async function onLeaseDeleted(detail, env, deps) {
+  const instanceId = leaseInstanceId(env.JIT_PARAMETER_PREFIX, detail.name);
+  if (instanceId === null) throw new Error(`not a runner lease: ${JSON.stringify(detail.name)}`);
+  const instance = await deps.describeInstance(instanceId);
+  if (instance?.group !== env.AUTOSCALING_GROUP_NAME || instance.state !== "InService") {
+    console.log(`${instanceId} is not an InService runner of ${env.AUTOSCALING_GROUP_NAME} (${JSON.stringify(instance)}): nothing to end`);
+    return;
+  }
+  try {
+    await deps.terminateInstance(instanceId);
+    console.log(`Ended ${instanceId} (its lease was deleted), lowering desired capacity`);
+  } catch (error) {
+    if (error.name === "ValidationError" && /not found/i.test(error.message)) return;
+    throw error;
+  }
+}
+
 export async function onTerminate(detail, env, deps) {
   const instanceId = detail.EC2InstanceId;
   await deps.deleteParameter(jitParameterName(env.JIT_PARAMETER_PREFIX, instanceId));
+  await deps.deleteParameter(leaseParameterName(env.JIT_PARAMETER_PREFIX, instanceId));
   await withInstallationToken(deps, env, async (token) => {
     const found = await github(deps, "GET", `${runnersPath(env.GITHUB_SCOPE)}?name=${encodeURIComponent(instanceId)}`, token);
     for (const runner of found.runners ?? []) {
@@ -154,7 +209,7 @@ export async function onTerminate(detail, env, deps) {
 
 async function awsDeps() {
   const { SSMClient, GetParameterCommand, PutParameterCommand, DeleteParameterCommand } = await import("@aws-sdk/client-ssm");
-  const { AutoScalingClient, CompleteLifecycleActionCommand, TerminateInstanceInAutoScalingGroupCommand } = await import("@aws-sdk/client-auto-scaling");
+  const { AutoScalingClient, CompleteLifecycleActionCommand, DescribeAutoScalingInstancesCommand, TerminateInstanceInAutoScalingGroupCommand } = await import("@aws-sdk/client-auto-scaling");
   const ssm = new SSMClient({});
   const autoscaling = new AutoScalingClient({});
   return {
@@ -166,6 +221,12 @@ async function awsDeps() {
       ssm.send(new DeleteParameterCommand({ Name: name })).catch((error) => {
         if (error.name !== "ParameterNotFound") throw error;
       }),
+    // The instance's group and lifecycle state, or null when it is in none.
+    describeInstance: async (instanceId) => {
+      const found = (await autoscaling.send(new DescribeAutoScalingInstancesCommand({ InstanceIds: [instanceId] })))
+        .AutoScalingInstances?.[0];
+      return found ? { group: found.AutoScalingGroupName, state: found.LifecycleState } : null;
+    },
     terminateInstance: (instanceId) =>
       autoscaling.send(new TerminateInstanceInAutoScalingGroupCommand({ InstanceId: instanceId, ShouldDecrementDesiredCapacity: true })),
     completeLifecycle: (detail, result) =>
@@ -183,5 +244,6 @@ export const handler = async (event) => {
   const deps = await awsDeps();
   if (event["detail-type"] === "EC2 Instance-launch Lifecycle Action") return onLaunch(event.detail, process.env, deps);
   if (event["detail-type"] === "EC2 Instance Terminate Successful") return onTerminate(event.detail, process.env, deps);
+  if (event["detail-type"] === "Parameter Store Change") return onLeaseDeleted(event.detail, process.env, deps);
   throw new Error(`unexpected event ${event["detail-type"]}`);
 };

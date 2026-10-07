@@ -7,7 +7,8 @@
 #     launch lifecycle hook holds each new instance while the jit function
 #     (functions/jit) authenticates as a GitHub App and writes the instance's
 #     single-use JIT configuration to SSM; the instance reads it, deletes it,
-#     runs one job and leaves its group, lowering desired capacity. No
+#     runs one job and leaves by deleting its lease, which makes the jit
+#     function end it, lowering desired capacity. No
 #     reusable registration credential exists on any host, and a copied
 #     configuration is dead once its runner starts. Cloud Posse's component
 #     reads a registration token (and its token-rotator component keeps one
@@ -107,13 +108,17 @@ locals {
         Resource  = var.kms_key_arn
         Condition = { StringEquals = local.ssm_via }
       },
-      # Release a launch, or end a failed one lowering desired capacity.
+      # Release a launch, end a failed one, or end a runner whose lease was
+      # deleted, lowering desired capacity: this group's instances only.
       {
-        Sid      = "ReleaseOrEndLaunches"
+        Sid      = "ReleaseOrEndRunners"
         Effect   = "Allow"
         Action   = ["autoscaling:CompleteLifecycleAction", "autoscaling:TerminateInstanceInAutoScalingGroup"]
         Resource = local.asg_arn_pattern
       },
+      # Whether a lease's instance is an InService runner of this group
+      # (no resource-level permissions).
+      { Sid = "DescribeRunners", Effect = "Allow", Action = "autoscaling:DescribeAutoScalingInstances", Resource = "*" },
       {
         Sid      = "Logs"
         Effect   = "Allow"
@@ -155,11 +160,11 @@ locals {
           StringLike   = { "kms:EncryptionContext:PARAMETER_ARN" = local.jit_parameter_arns }
         }
       },
-      # A runner removes itself from its own group after its job. IAM has no
-      # key for the instance an Auto Scaling call targets, so this is scoped
-      # to the group: a job could end a sibling runner in the same pool.
-      # TODO(owner): accept or reject that in-pool denial of service (#303).
-      { Sid = "LeaveOwnGroup", Effect = "Allow", Action = "autoscaling:TerminateInstanceInAutoScalingGroup", Resource = local.asg_arn_pattern },
+      # No Auto Scaling action: IAM cannot scope TerminateInstanceInAutoScalingGroup
+      # to the caller's own instance, so a job could end a sibling runner. A
+      # runner leaves by deleting its own lease (OwnJitConfiguration above:
+      # <prefix>/lease/<instance id>, tagged with its ARN); the jit function
+      # then ends it, lowering desired capacity.
       # Session Manager (debugging a runner without SSH) without
       # AmazonSSMManagedInstanceCore, which also grants ssm:GetParameter* on *.
       # The instance registers itself; the message channels take no
@@ -301,6 +306,7 @@ resource "aws_lambda_function" "jit" {
       JIT_KMS_KEY_ID         = var.kms_key_arn
       PARTITION              = local.partition
       ACCOUNT_ID             = local.account_id
+      AUTOSCALING_GROUP_NAME = local.name
     }
   }
 
@@ -345,6 +351,42 @@ resource "aws_cloudwatch_event_rule" "lifecycle" {
     detail-type = ["EC2 Instance-launch Lifecycle Action", "EC2 Instance Terminate Successful"]
     detail      = { AutoScalingGroupName = [local.name] }
   })
+}
+
+# A runner done with its job deletes its lease (<prefix>/lease/<instance id>);
+# the jit function ends that instance, lowering desired capacity. EventBridge
+# delivery is best effort: a runner whose lease event is lost powers itself
+# off after 600 s (user-data), and the group replaces it.
+resource "aws_cloudwatch_event_rule" "lease" {
+  count = local.enabled ? 1 : 0
+
+  name        = "${local.name}-lease"
+  description = "${local.name} runners leaving (their lease parameter deleted)"
+  event_pattern = jsonencode({
+    source      = ["aws.ssm"]
+    detail-type = ["Parameter Store Change"]
+    detail = {
+      operation = ["Delete"]
+      name      = [{ prefix = "${local.jit_parameter_prefix}/lease/" }]
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "lease" {
+  count = local.enabled ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.lease[0].name
+  arn  = aws_lambda_function.jit[0].arn
+}
+
+resource "aws_lambda_permission" "lease" {
+  count = local.enabled ? 1 : 0
+
+  statement_id  = "AllowLeaseEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.jit[0].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.lease[0].arn
 }
 
 resource "aws_cloudwatch_event_target" "lifecycle" {
@@ -541,7 +583,7 @@ resource "aws_autoscaling_group" "runner" {
   }
 
   # The jit function and its trigger exist before any instance launches.
-  depends_on = [aws_cloudwatch_event_target.lifecycle, aws_lambda_permission.lifecycle]
+  depends_on = [aws_cloudwatch_event_target.lifecycle, aws_lambda_permission.lifecycle, aws_cloudwatch_event_target.lease, aws_lambda_permission.lease]
 }
 
 # CI starts a runner by executing this policy (autoscaling:ExecutePolicy on

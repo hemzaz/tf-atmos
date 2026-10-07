@@ -22,16 +22,27 @@ API takes.
    - takes an installation token scoped to this repository and Administration write only;
    - calls `generate-jitconfig` for a runner named after the instance;
    - revokes the token;
+   - writes the instance's lease, `<jit_parameter_prefix>/lease/<instance id>` (String, tagged
+     with the instance's ARN);
    - writes the single-use configuration to `<jit_parameter_prefix>/<instance id>` (SecureString
      on `kms_key_arn`, tagged with the instance's ARN). The prefix defaults to
      `/github/runners/<name>/jit`, so two pools in one account never share a path or its grants;
    - completes the lifecycle action. On any failure it abandons the launch, so the instance is
      terminated.
 4. The instance reads its configuration, deletes it, and runs `run.sh --jitconfig` for one job.
-5. It leaves the group, lowering desired capacity. An EXIT trap does this after any bootstrap
-   failure, too. An instance that gets no job within `idle_timeout_seconds` leaves as well.
-6. On termination the function deletes an unread configuration and any runner registration left
-   behind.
+5. It leaves by deleting its own lease (an EXIT trap: after its job, after any bootstrap failure,
+   and when it gets no job within `idle_timeout_seconds`). The deletion's EventBridge event
+   ("Parameter Store Change", Delete) invokes the function, which ends that instance, lowering
+   desired capacity, if it is an InService runner of this group.
+6. On termination the function deletes an unread configuration, the lease and any runner
+   registration left behind.
+
+The instance role has no Auto Scaling action. Cloud Posse's `aws-github-runners` and
+philips-labs' runners let the instance end itself (`TerminateInstanceInAutoScalingGroup` on the
+instance role, or a scale-down Lambda); IAM cannot scope that call to the caller's own instance, so
+a job could end a sibling runner. Here the only thing a runner can do is delete its own lease
+(the parameter is tagged with its ARN; the role may delete only parameters tagged with
+`ec2:SourceInstanceARN`), and the function ends exactly that instance.
 
 A JIT configuration registers one ephemeral runner, once. A copy taken after its runner started
 is useless, and no reusable registration credential exists anywhere.
@@ -75,16 +86,14 @@ is useless, and no reusable registration credential exists anywhere.
   `kms:PutKeyPolicy` or `kms:CreateGrant` on that key (the account keeps PutKeyPolicy, so the key
   stays recoverable; it gets no CreateGrant).
 - **The instance role reaches nothing of value.**
-  - It may read and delete only its own JIT parameter (`aws:ResourceTag/RunnerInstanceArn` against
-    `ec2:SourceInstanceARN`). An explicit deny covers every other parameter.
-  - It may leave its own group.
+  - It may read and delete only its own JIT parameter and lease (`aws:ResourceTag/RunnerInstanceArn`
+    against `ec2:SourceInstanceARN`). An explicit deny covers reading any other parameter.
+  - It has no Auto Scaling action: it leaves through its lease, so a job cannot end another
+    runner of the pool.
   - It has minimal Session Manager actions instead of `AmazonSSMManagedInstanceCore` (which allows
     `ssm:GetParameter*` on `*`).
   - Terraform jobs get AWS access from GitHub OIDC (the stack's `iam/ci` roles), not from the
     instance.
-  - IAM has no key for the instance an Auto Scaling call targets, so "leave the group" is scoped
-    to the group: a job could end a sibling runner of the same pool, and nothing else.
-    TODO(owner): that in-pool denial of service is not accepted yet (tracked in #303).
 - **The docker group is root-equivalent.** Jobs run as the unprivileged `runner` user, which is in
   the `docker` group so container jobs (the atmos image) start. That is acceptable only because
   the instance runs a single job and its role reaches nothing of value.
@@ -98,6 +107,11 @@ is useless, and no reusable registration credential exists anywhere.
   (`alarm_sns_topic_arns`). EventBridge's invoke is not retried (`maximum_retry_attempts` 0): a
   retry would mint a second configuration. A runner whose bootstrap fails before it knows its
   instance id can only power off, which the group replaces.
+- **The lease event is best effort.** EventBridge may drop or delay the deletion's event, or the
+  delete itself may fail. The runner therefore powers off 600 s after deleting its lease
+  (`instance_initiated_shutdown_behavior` terminate): the group then replaces it with a runner
+  that, finding no job, idles out after `idle_timeout_seconds` and leaves through its lease. A lost
+  event costs one idle runner, never a launch loop.
 - **A pinned runner release.** `runner_version` with `runner_sha256` (the release notes'
   linux-x64 SHA) replaces Cloud Posse's latest release. Bump both before GitHub stops accepting
   the release.
@@ -121,9 +135,12 @@ is useless, and no reusable registration credential exists anywhere.
   `GITHUB_*` and the payload come from GitHub; the hook and its policy are root-owned.
   `test_runner_scripts.py` runs the hook for fork, `pull_request_target` and same-repository
   events. The owner also keeps Settings → Actions → General → "Require approval for all outside
-  collaborators" on. A refused job still uses up the runner it landed on, so a same-repository
-  writer can delay a master job by queueing jobs for its label (a denial of service, not access;
-  re-run the master job).
-  - The owner must also turn on Settings → Actions → General → "Require approval for all
-    outside collaborators".
+  collaborators" on.
+- **A refused job does not cost a runner.** The hook's refusal leaves a marker
+  (`/var/lib/runner-state/refused`, owned by the runner user). The EXIT trap then powers the
+  instance off with its lease kept, without lowering desired capacity, so the group launches a
+  replacement that takes the next queued job. Queueing jobs for a label (say production's) cannot
+  starve the master job the runner was started for. There is no loop: each replacement consumes
+  one refused job, and an idle replacement leaves through its lease, lowering capacity. A job the
+  hook admitted can write the marker too, which only buys one extra idle runner.
 - The `jit` function's flow is tested with `node --test functions/jit/`.

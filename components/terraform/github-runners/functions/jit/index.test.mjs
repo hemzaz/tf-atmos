@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, createVerify } from "node:crypto";
-import { appJwt, pemFrom, tokenScope, runnersPath, jitRequest, jitParameterName, onLaunch, onTerminate } from "./index.mjs";
+import { appJwt, pemFrom, tokenScope, runnersPath, jitRequest, jitParameterName, leaseParameterName, leaseInstanceId, onLaunch, onLeaseDeleted, onTerminate } from "./index.mjs";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const pem = privateKey.export({ type: "pkcs1", format: "pem" });
@@ -62,6 +62,7 @@ const ENV = {
   PARTITION: "aws",
   AWS_REGION: "us-east-1",
   ACCOUNT_ID: "123456789012",
+  AUTOSCALING_GROUP_NAME: "dev-github-runners",
 };
 const DETAIL = {
   EC2InstanceId: "i-0123456789abcdef0",
@@ -70,7 +71,7 @@ const DETAIL = {
   LifecycleActionToken: "token-1",
 };
 
-function fakes({ jitStatus = 201, runners = [], terminateFails = false } = {}) {
+function fakes({ jitStatus = 201, runners = [], terminateFails = false, instance = { group: "dev-github-runners", state: "InService" }, terminateError = null } = {}) {
   const calls = [];
   const reply = (status, body) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
   return {
@@ -90,7 +91,9 @@ function fakes({ jitStatus = 201, runners = [], terminateFails = false } = {}) {
       terminateInstance: async (instanceId) => {
         calls.push({ kind: "terminate", instanceId });
         if (terminateFails) throw new Error("ScalingActivityInProgress");
+        if (terminateError) throw terminateError;
       },
+      describeInstance: async (instanceId) => { calls.push({ kind: "describe", instanceId }); return instance; },
       completeLifecycle: async (detail, result) => { calls.push({ kind: "complete", result }); },
     },
   };
@@ -107,6 +110,7 @@ test("launch: scoped token, JIT config for the instance, tagged parameter, token
     "POST /repos/hemzaz/tf-atmos/actions/runners/generate-jitconfig",
     "DELETE /installation/token",
     "putParameter",
+    "putParameter",
     "complete",
   ]);
   assert.equal(calls[0].name, ENV.APP_KEY_PARAMETER);
@@ -115,7 +119,15 @@ test("launch: scoped token, JIT config for the instance, tagged parameter, token
   assert.deepEqual(calls[2].body, jitRequest("i-0123456789abcdef0", ["fnx-ue1-dev"], 1));
   assert.equal(calls[2].auth, "Bearer ghs_installation");
   assert.equal(calls[3].auth, "Bearer ghs_installation");
+  // The lease first, so it exists whenever the runner runs.
   assert.deepEqual(calls[4].input, {
+    Name: "/github/runners/jit/lease/i-0123456789abcdef0",
+    Value: "arn:aws:ec2:us-east-1:123456789012:instance/i-0123456789abcdef0",
+    Type: "String",
+    Tier: "Standard",
+    Tags: [{ Key: "RunnerInstanceArn", Value: "arn:aws:ec2:us-east-1:123456789012:instance/i-0123456789abcdef0" }],
+  });
+  assert.deepEqual(calls[5].input, {
     Name: "/github/runners/jit/i-0123456789abcdef0",
     Value: "ENCODED",
     Type: "SecureString",
@@ -123,7 +135,7 @@ test("launch: scoped token, JIT config for the instance, tagged parameter, token
     KeyId: ENV.JIT_KMS_KEY_ID,
     Tags: [{ Key: "RunnerInstanceArn", Value: "arn:aws:ec2:us-east-1:123456789012:instance/i-0123456789abcdef0" }],
   });
-  assert.equal(calls[5].result, "CONTINUE");
+  assert.equal(calls[6].result, "CONTINUE");
 });
 
 test("launch: a GitHub failure revokes the token, terminates the instance (lowering capacity), then abandons", async () => {
@@ -150,6 +162,7 @@ test("terminate: deletes the unread parameter and the instance's leftover runner
   await onTerminate(DETAIL, ENV, deps);
   assert.deepEqual(summary(calls), [
     "deleteParameter",
+    "deleteParameter",
     "getParameter",
     "POST /app/installations/7654321/access_tokens",
     "GET /repos/hemzaz/tf-atmos/actions/runners?name=i-0123456789abcdef0",
@@ -157,4 +170,51 @@ test("terminate: deletes the unread parameter and the instance's leftover runner
     "DELETE /installation/token",
   ]);
   assert.equal(calls[0].name, "/github/runners/jit/i-0123456789abcdef0");
+  assert.equal(calls[1].name, "/github/runners/jit/lease/i-0123456789abcdef0");
+});
+
+test("the lease is <prefix>/lease/<instance id>, and only such a name yields an instance id", () => {
+  assert.equal(leaseParameterName("/github/runners/x/jit/", "i-1"), "/github/runners/x/jit/lease/i-1");
+  assert.equal(leaseInstanceId("/github/runners/x/jit", "/github/runners/x/jit/lease/i-0123abcd"), "i-0123abcd");
+  for (const name of [
+    "/github/runners/x/jit/i-0123abcd",
+    "/github/runners/x/jit/lease/i-0123abcd/extra",
+    "/github/runners/x/jit/lease/i-XYZ",
+    "/github/runners/x/jit/lease/",
+    "/github/runners/other/jit/lease/i-0123abcd",
+    undefined,
+  ]) {
+    assert.equal(leaseInstanceId("/github/runners/x/jit", name), null, String(name));
+  }
+});
+
+const LEASE = { operation: "Delete", name: "/github/runners/jit/lease/i-0123456789abcdef0" };
+
+test("lease deleted: the InService runner of this group is ended, lowering capacity", async () => {
+  const { calls, deps } = fakes();
+  await onLeaseDeleted(LEASE, ENV, deps);
+  assert.deepEqual(summary(calls), ["describe", "terminate"]);
+  assert.equal(calls[1].instanceId, "i-0123456789abcdef0");
+});
+
+test("lease deleted: an invalid instance id is rejected before any call", async () => {
+  const { calls, deps } = fakes();
+  await assert.rejects(onLeaseDeleted({ operation: "Delete", name: "/github/runners/jit/lease/i-0;rm" }, ENV, deps), /not a runner lease/);
+  await assert.rejects(onLeaseDeleted({ operation: "Delete", name: "/github/runners/jit/i-0123456789abcdef0" }, ENV, deps), /not a runner lease/);
+  assert.deepEqual(calls, []);
+});
+
+test("lease deleted: an instance already leaving, gone, or in another group is left alone", async () => {
+  for (const instance of [null, { group: "dev-github-runners", state: "Terminating" }, { group: "other-pool", state: "InService" }]) {
+    const { calls, deps } = fakes({ instance });
+    await onLeaseDeleted(LEASE, ENV, deps);
+    assert.deepEqual(summary(calls), ["describe"], JSON.stringify(instance));
+  }
+});
+
+test("lease deleted: an instance Auto Scaling no longer finds is success; other errors fail", async () => {
+  const notFound = Object.assign(new Error("Instance Id not found - No managed instance found for instance ID i-0123456789abcdef0"), { name: "ValidationError" });
+  await onLeaseDeleted(LEASE, ENV, fakes({ terminateError: notFound }).deps);
+  const denied = Object.assign(new Error("not authorized"), { name: "AccessDenied" });
+  await assert.rejects(onLeaseDeleted(LEASE, ENV, fakes({ terminateError: denied }).deps), /not authorized/);
 });

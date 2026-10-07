@@ -4,7 +4,7 @@
 # +1 atomically, so concurrent jobs each get their own runner, and caps it at
 # max_size, so at max nothing starts and the job waits for a runner of the pool
 # to free up. The runner takes one queued job labelled for the pool and leaves
-# its group when done, lowering the capacity again.
+# when done (deleting its lease, github-runners), lowering the capacity again.
 #
 # Requires: ASG (the pool's group, ci-components.py --pools "asg"), AWS
 # credentials of a CI role (iam/ci ci-runner-pools.tf grants ExecutePolicy on

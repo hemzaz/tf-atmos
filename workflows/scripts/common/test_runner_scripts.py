@@ -28,7 +28,9 @@ class JobStartedHookTest(unittest.TestCase):
         shutil.copy(HOOK, self.dir / "job-started.sh")
 
     def run_hook(self, event, payload=None, scope=REPO, refs="", ref="refs/heads/master", repository=REPO):
-        (self.dir / "policy").write_text(f"ALLOWED_SCOPE='{scope}'\nALLOWED_REFS='{refs}'\n")
+        self.marker = self.dir / "refused"
+        (self.dir / "policy").write_text(
+            f"ALLOWED_SCOPE='{scope}'\nALLOWED_REFS='{refs}'\nREFUSED_MARKER='{self.marker}'\n")
         event_path = self.dir / "event.json"
         event_path.write_text(json.dumps(payload or {}))
         env = {
@@ -83,6 +85,20 @@ class JobStartedHookTest(unittest.TestCase):
         self.assertIn("serves only refs/heads/master", out)
         same_repo_pr = self.run_hook("pull_request", self.pull_request(REPO), refs="refs/heads/master", ref="refs/pull/7/merge")
         self.assertEqual(same_repo_pr[0], 1)
+
+    def test_a_refused_job_leaves_the_marker_an_allowed_one_does_not(self):
+        self.assertEqual(self.run_hook("pull_request", self.pull_request(REPO), ref="refs/pull/7/merge")[0], 0)
+        self.assertFalse(self.marker.exists(), "an allowed job leaves no marker")
+        for args in (
+            ("pull_request", self.pull_request("mallory/tf-atmos")),
+            ("pull_request_target", self.pull_request(REPO)),
+        ):
+            self.marker.unlink(missing_ok=True)
+            self.assertEqual(self.run_hook(*args)[0], 1)
+            self.assertTrue(self.marker.exists(), args[0])
+        self.marker.unlink()
+        self.assertEqual(self.run_hook("push", refs="refs/heads/master", ref="refs/heads/feature")[0], 1)
+        self.assertTrue(self.marker.exists(), "a refused ref leaves the marker too")
 
     def test_missing_policy_fails_closed(self):
         (self.dir / "event.json").write_text("{}")

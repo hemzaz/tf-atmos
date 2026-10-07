@@ -252,6 +252,11 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
   the runner's job-started hook fails any other ref's job before its first step, even one that
   asks for the prod label while a master job started the runner. `check-cluster-api-ci.py` fails
   a pool of a master-only stack (`pull_request_plans_enabled: false`) without `allowed_refs`.
+- A refused job does not cost a runner: the instance powers off without lowering desired
+  capacity and the pool launches a replacement for the next queued job, so jobs queued for a
+  label cannot starve the master job that started the runner. Runners have no Auto Scaling
+  permission: each leaves by deleting its own lease parameter, and the pool's `jit` function ends
+  it (github-runners README).
 - `check-cluster-api-ci.py` (lint, validate-all) fails an in-vpc instance whose label has no runner
   pool, or whose clusters do not admit the pool's security group; a pool missing from its
   stack's `iam/ci` `ci_runner_pool_names`; and an instance whose providers exec a command

@@ -3,7 +3,7 @@
 # CI starts an ephemeral in-VPC runner for each in-cluster job by executing
 # its pool's start policy (<group>-start, a SimpleScaling +1 that Auto Scaling
 # caps at max_size; workflows/scripts/common/start-runner.sh); the runner
-# leaves its group when done. Only the apply role starts runners: every
+# leaves when done. Only the apply role starts runners: every
 # in-VPC job (plan, drift, deploy) runs on the default branch with it (owner
 # decision), so the plan role, which trusts pull requests, has no write here.
 # ExecutePolicy only, on this stack's own pools by name: CI cannot set a
