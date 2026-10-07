@@ -70,6 +70,91 @@ class SelectTest(unittest.TestCase):
         self.assertEqual(ci_components.select(self.instances, STACK, {"eks-addons/main"}), ([], ["eks-addons/main"]))
 
 
+def in_vpc(*deps, label=None):
+    """An in-cluster instance routed to the in-VPC runners of its stack (or `label`)."""
+    i = instance(*deps)
+    i["settings"] = {
+        "github": {"runner": "in-vpc", **({"runner_label": label} if label else {})},
+    }
+    return i
+
+
+def pool(*labels, environment="ue1", var_name=None):
+    i = instance(component="github-runners")
+    i["vars"] = {"runner_labels": list(labels), "tags": {"Environment": environment}, **({"name": var_name} if var_name else {})}
+    return i
+
+
+class RunnerRoutingTest(unittest.TestCase):
+    instances = {
+        "vpc/main": instance(),
+        "github-runners/main": pool("fnx-ue1-dev"),
+        "github-runners/ms": pool("ms-label", var_name="microservices-runners"),
+        "eks/main": instance("vpc/main"),
+        "eks-addons/main": in_vpc("eks/main"),
+        "eks-addons/ms": in_vpc("eks/main", label="ms-label"),
+        "external-secrets/off": instance("eks/main", actions_enabled=False),
+    }
+
+    def test_hosted_runs_everything_but_in_vpc_and_opted_out(self):
+        run, skipped = ci_components.select(self.instances, STACK)
+        self.assertEqual(run, ["github-runners/main", "github-runners/ms", "vpc/main", "eks/main"])
+        self.assertEqual(skipped, ["external-secrets/off"])
+
+    def test_in_vpc_runs_only_its_label(self):
+        run, _ = ci_components.select(self.instances, STACK, runner="in-vpc", label="fnx-ue1-dev")
+        self.assertEqual(run, ["eks-addons/main"])
+        run, _ = ci_components.select(self.instances, STACK, runner="in-vpc", label="ms-label")
+        self.assertEqual(run, ["eks-addons/ms"])
+
+    def test_in_vpc_without_label_runs_every_in_vpc_instance(self):
+        run, _ = ci_components.select(self.instances, STACK, runner="in-vpc")
+        self.assertEqual(run, ["eks-addons/main", "eks-addons/ms"])
+
+    def test_pools_name_each_needed_label_its_pool_and_group(self):
+        run, _ = ci_components.select(self.instances, STACK, runner="in-vpc")
+        self.assertEqual(ci_components.pools(self.instances, STACK, run), [
+            {"label": "fnx-ue1-dev", "pool": "github-runners/main", "asg": "ue1-github-runners"},
+            {"label": "ms-label", "pool": "github-runners/ms", "asg": "ue1-microservices-runners"},
+        ])
+
+    def test_affected_in_vpc_subset_needs_only_its_pool(self):
+        run, _ = ci_components.select(self.instances, STACK, {"eks-addons/ms", "vpc/main"}, runner="in-vpc")
+        self.assertEqual([p["label"] for p in ci_components.pools(self.instances, STACK, run)], ["ms-label"])
+
+    def run_main(self, *argv):
+        import contextlib
+        import io
+        import sys
+        from unittest import mock
+
+        out, err = io.StringIO(), io.StringIO()
+        described = {STACK: {"components": {"terraform": self.instances}}}
+        with mock.patch.object(ci_components, "atmos_json", return_value=described), \
+                mock.patch.object(sys, "argv", ["ci-components.py", "--stack", STACK, *argv]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = ci_components.main()
+        return code, out.getvalue()
+
+    def test_main_pools_for_one_dispatched_component(self):
+        code, out = self.run_main("--pools", "--only", "eks-addons/ms")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines(), ['{"asg": "ue1-microservices-runners", "label": "ms-label", "pool": "github-runners/ms"}'])
+
+    def test_main_pools_for_a_hosted_component_is_empty(self):
+        self.assertEqual(self.run_main("--pools", "--only", "vpc/main"), (0, ""))
+
+    def test_main_lists_in_vpc_instances_of_a_label(self):
+        self.assertEqual(self.run_main("--runner", "in-vpc", "--label", "ms-label"), (0, "eks-addons/ms\n"))
+
+    def test_a_label_without_a_pool_fails(self):
+        instances = dict(self.instances)
+        del instances["github-runners/ms"]
+        run, _ = ci_components.select(instances, STACK, runner="in-vpc")
+        with self.assertRaisesRegex(LookupError, "registers the label 'ms-label'"):
+            ci_components.pools(instances, STACK, run)
+
+
 class StackInstancesTest(unittest.TestCase):
     def test_known_stack_returns_terraform_instances(self):
         described = {STACK: {"components": {"terraform": {"vpc/main": instance()}}}}

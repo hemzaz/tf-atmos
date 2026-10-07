@@ -1,0 +1,14 @@
+# Self-hosted CI runners (the github-runners component).
+#
+# Usage (CI; .github/workflows/in-vpc.yml):
+#   ASG=<pool group> atmos workflow start-runner -f ci-runners
+workflows:
+  start-runner:
+    description: Start one ephemeral in-VPC runner (raise the pool's desired capacity by one, up to max_size)
+    dependencies:
+      tools:
+        aws/aws-cli: "2.36.49"
+    steps:
+      - name: start
+        type: shell
+        command: ./workflows/scripts/common/start-runner.sh

@@ -1,0 +1,205 @@
+# In-VPC runs of the in-cluster components (settings.github.runner: in-vpc):
+# a reusable workflow that terraform-cd.yml, drift-detection.yml and
+# terraform-ci.yml call once per (stack, runner label).
+#
+#   start  (GitHub-hosted) raises the label's runner pool by one
+#          (atmos workflow start-runner -f ci-runners; the CI role may resize
+#          runner pools only, iam/ci ci-runner-pools.tf);
+#   run    (self-hosted, runs-on the label) the ephemeral runner that pool
+#          starts takes this job, assumes the stack's CI role through GitHub
+#          OIDC like the hosted jobs, and plans or deploys the stack's in-vpc
+#          instances for that label (ci-components.py --runner in-vpc
+#          --label), in dependency order.
+#
+# Public repository: self-hosted runners must never run fork code. Both jobs
+# run only for push, workflow_dispatch, merge_group, schedule and pull
+# requests from this repository (a fork's pull request is skipped); fork pull
+# requests get no OIDC token anyway. The owner keeps "Require approval for all
+# outside collaborators" on (docs/OPERATIONS.md, First-deploy inputs). The
+# workflow file itself is PR-controlled, so the hard limits are outside it:
+# production's CI roles trust master only (no prod runner starts for a pull
+# request), and its pool's allowed_refs make the runner itself fail any job
+# not on refs/heads/master (github-runners).
+name: In-VPC run
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: Atmos stack
+        required: true
+        type: string
+      label:
+        description: Runner label (the stack's full id, or settings.github.runner_label)
+        required: true
+        type: string
+      asg:
+        description: The label's runner pool Auto Scaling group (ci-components.py --pools)
+        required: true
+        type: string
+      mode:
+        description: "plan, deploy, or drift (plan with a detailed exit code that fails on changes)"
+        required: true
+        type: string
+      role:
+        description: CI role kind (plan or apply)
+        required: true
+        type: string
+      base:
+        description: Only the instances affected since this commit (terraform-cd.yml); deploy then also requires the stack's hosted deploy marker
+        required: false
+        type: string
+        default: ""
+      components:
+        description: Space-separated in-vpc instances of this label to run (default every one, or every affected one with base)
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+env:
+  TF_CLI_ARGS_init: -lockfile=readonly
+
+jobs:
+  start:
+    name: Start a runner (${{ inputs.label }})
+    if: >-
+      contains(fromJSON('["push", "workflow_dispatch", "merge_group", "schedule"]'), github.event_name) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      STACK: ${{ inputs.stack }}
+      ROLE_KIND: ${{ inputs.role }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: role
+        name: Resolve the stack's CI role
+        run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind "$ROLE_KIND"
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ steps.role.outputs.arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Raise the runner pool by one
+        env:
+          ASG: ${{ inputs.asg }}
+        run: atmos workflow start-runner -f ci-runners
+
+  run:
+    name: ${{ inputs.mode }} ${{ inputs.stack }} (${{ inputs.label }})
+    needs: start
+    if: >-
+      contains(fromJSON('["push", "workflow_dispatch", "merge_group", "schedule"]'), github.event_name) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, linux, x64, "${{ inputs.label }}"]
+    container:
+      image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
+    # No `environment:`: it would change the OIDC sub (see terraform-cd.yml).
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      STACK: ${{ inputs.stack }}
+      LABEL: ${{ inputs.label }}
+      MODE: ${{ inputs.mode }}
+      ROLE_KIND: ${{ inputs.role }}
+      BASE_SHA: ${{ inputs.base }}
+      COMPONENTS: ${{ inputs.components }}
+      TF_CLI_ARGS_apply: -lock-timeout=10m
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Allow git operations in the container's workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # deploy: only after this stack's GitHub-hosted instances deployed
+      # (terraform-cd.yml's deploy-affected uploads deployed-<stack> on success).
+      - name: Require this stack's hosted deploy
+        if: inputs.mode == 'deploy' && inputs.base != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: deployed-${{ inputs.stack }}
+          path: hosted-marker
+      - id: role
+        name: Resolve the stack's CI role
+        run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind "$ROLE_KIND"
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ steps.role.outputs.arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      # Inputs reach the script through env, never interpolated into it.
+      - name: Run
+        shell: bash
+        run: |
+          set -uo pipefail
+          args=(--stack "$STACK" --runner in-vpc --label "$LABEL")
+          [ -n "$BASE_SHA" ] && args+=(--base "$BASE_SHA")
+          listed="$(python3 workflows/scripts/common/ci-components.py "${args[@]}")" || exit 1
+          components="$listed"
+          if [ -n "$COMPONENTS" ]; then
+            # Only instances of this label: an exact line of the list each.
+            components=""
+            for component in $COMPONENTS; do
+              grep -qxF -- "$component" <<<"$listed" || { echo "::error::'$component' is not an in-vpc instance of $STACK on $LABEL"; exit 1; }
+              components+="$component"$'\n'
+            done
+          fi
+          case "$MODE" in
+            deploy)
+              while IFS= read -r component; do
+                [ -n "$component" ] || continue
+                echo "Deploying $component in $STACK"
+                atmos terraform deploy "$component" -s "$STACK" </dev/null || exit 1
+              done <<<"$components"
+              mkdir -p in-vpc-marker && echo "$GITHUB_SHA" > in-vpc-marker/sha
+              ;;
+            plan|drift)
+              # The plan role reads state through a READ-only state role, hence
+              # -lock=false (as the hosted plans); a dispatched plan uses the
+              # apply role and its write state role, and still takes no lock.
+              if [ "$ROLE_KIND" = plan ]; then export TFSTATE_ACCESS=read; fi
+              drifted=() failed=()
+              while IFS= read -r component; do
+                [ -n "$component" ] || continue
+                rc=0
+                atmos terraform plan "$component" -s "$STACK" --skip-planfile --hide no-changes \
+                  -- -detailed-exitcode -lock=false </dev/null || rc=$?
+                case "$rc" in
+                  0) ;;
+                  2) drifted+=("$component") ;;
+                  *) failed+=("$component"); echo "::error title=Plan failed::$STACK $component (exit $rc)" ;;
+                esac
+              done <<<"$components"
+              if [ "${#failed[@]}" -gt 0 ]; then
+                echo "::error::$STACK: plan failed for ${failed[*]}"
+                exit 1
+              fi
+              if [ "$MODE" = drift ] && [ "${#drifted[@]}" -gt 0 ]; then
+                for component in "${drifted[@]}"; do echo "::warning title=Drift::$STACK $component has drifted"; done
+                echo "::error::$STACK: drift in ${drifted[*]}"
+                exit 2
+              fi
+              [ "${#drifted[@]}" -eq 0 ] || echo "$STACK: changes planned for ${drifted[*]}"
+              ;;
+            *)
+              echo "::error::unknown mode '$MODE'"
+              exit 1
+              ;;
+          esac
+      - name: Upload the in-VPC deploy marker
+        if: inputs.mode == 'deploy' && inputs.base != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: in-vpc-${{ inputs.stack }}--${{ inputs.label }}
+          path: in-vpc-marker/
+          retention-days: 1

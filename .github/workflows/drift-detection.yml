@@ -1,8 +1,9 @@
 # Scheduled drift detection: a plan of every deployable component in every
-# stack, except instances with settings.github.actions_enabled: false (the
-# in-cluster components, which a hosted runner cannot reach; skipped with a
-# ::notice::, see docs/OPERATIONS.md). Stacks with drift fail the job and show
-# the changes in the job summary (Atmos Native CI).
+# stack, except instances with settings.github.actions_enabled: false (skipped
+# with a ::notice::). The in-cluster components (settings.github.runner:
+# in-vpc), which a hosted runner cannot reach, are planned on the stack's
+# self-hosted runners in the VPC (in-vpc.yml, docs/OPERATIONS.md). Stacks with
+# drift fail the job and show the changes in the job summary (Atmos Native CI).
 #
 # Upgrade path: Atmos Pro drift detection (settings.pro.drift_detection +
 # `atmos terraform plan <component> -s <stack> --upload-status`) adds drift
@@ -49,6 +50,7 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.stacks.outputs.matrix }}
+      in_vpc: ${{ steps.stacks.outputs.in_vpc }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -86,8 +88,19 @@ jobs:
 
           matrix = {"include": [{"stack": s} for s in selected]}
 
+          # The in-VPC part: one entry per (stack, runner pool) its in-cluster
+          # instances need (ci-components.py --pools).
+          in_vpc = []
+          for stack in selected:
+              pools = subprocess.check_output(
+                  ["python3", "workflows/scripts/common/ci-components.py", "--stack", stack, "--pools"], text=True)
+              for line in pools.splitlines():
+                  pool = json.loads(line)
+                  in_vpc.append({"stack": stack, "label": pool["label"], "asg": pool["asg"]})
+
           with open(out_file, "a") as out:
               out.write(f"matrix={json.dumps(matrix)}\n")
+              out.write(f"in_vpc={json.dumps({'include': in_vpc})}\n")
 
   detect-drift:
     name: Drift ${{ matrix.stack }}
@@ -152,3 +165,23 @@ jobs:
             exit 2
           fi
           echo "$STACK: no drift"
+
+  drift-in-vpc:
+    name: Drift in-VPC ${{ matrix.stack }} (${{ matrix.label }})
+    needs: stacks
+    if: needs.stacks.outputs.in_vpc != '' && fromJson(needs.stacks.outputs.in_vpc).include[0] != null
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.stacks.outputs.in_vpc) }}
+    uses: ./.github/workflows/in-vpc.yml
+    with:
+      stack: ${{ matrix.stack }}
+      label: ${{ matrix.label }}
+      asg: ${{ matrix.asg }}
+      mode: drift
+      role: plan
+    secrets: inherit

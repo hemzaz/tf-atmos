@@ -464,6 +464,7 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.affected.outputs.matrix }}
+      in_vpc: ${{ steps.affected.outputs.in_vpc }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -530,6 +531,35 @@ jobs:
           # prefix). Filtered per (stack, component) pair — not per whole
           # stack — so a future per-component opt-out on a real stack only
           # drops that one instance from the matrix, not the entire stack.
+          # The in-cluster components (settings.github.runner: in-vpc) are
+          # planned on their stack's self-hosted runners in the VPC
+          # (in-vpc.yml), grouped per (stack, runner label); the rest here.
+          def split_in_vpc(include):
+              hosted, groups = [], {}
+              in_vpc_pairs = {}
+              for item in include:
+                  stack = item.get("stack")
+                  if stack not in in_vpc_pairs:
+                      out = subprocess.check_output(
+                          ["python3", "workflows/scripts/common/ci-components.py", "--stack", stack, "--pools"], text=True)
+                      in_vpc_pairs[stack] = {}
+                      for line in out.splitlines():
+                          pool = json.loads(line)
+                          names = subprocess.check_output(
+                              ["python3", "workflows/scripts/common/ci-components.py", "--stack", stack,
+                               "--runner", "in-vpc", "--label", pool["label"]], text=True).split()
+                          for name in names:
+                              in_vpc_pairs[stack][name] = pool
+                  pool = in_vpc_pairs[stack].get(item.get("component"))
+                  if pool is None:
+                      hosted.append(item)
+                  else:
+                      key = (stack, pool["label"])
+                      groups.setdefault(key, {"stack": stack, "label": pool["label"], "asg": pool["asg"], "components": []})
+                      groups[key]["components"].append(item["component"])
+              in_vpc = [dict(g, components=" ".join(sorted(g["components"]))) for _, g in sorted(groups.items())]
+              return hosted, in_vpc
+
           def disabled_pairs(stack_components):
               disabled = set()
               for stack, components in stack_components.items():
@@ -563,8 +593,10 @@ jobs:
                   if (i.get("stack"), i.get("component")) not in excluded
                   and keep_for_event(settings, (i.get("stack"), i.get("component")))
               ]
+              matrix["include"], in_vpc = split_in_vpc(matrix["include"])
               with open(out_file, "a") as out:
                   out.write(f"matrix={json.dumps(matrix)}\n")
+                  out.write(f"in_vpc={json.dumps({'include': in_vpc})}\n")
               print(f"{len(matrix['include'])} instances (excluded pairs: {sorted(excluded)})")
               raise SystemExit(0)
 
@@ -586,8 +618,10 @@ jobs:
                   if pr_plans_enabled(spec) == on_push:
                       continue
                   include.append({"stack": stack, "component": component})
+          include, in_vpc = split_in_vpc(include)
           with open(out_file, "a") as out:
               out.write(f"matrix={json.dumps({'include': include})}\n")
+              out.write(f"in_vpc={json.dumps({'include': in_vpc})}\n")
           print(f"{len(include)} instances")
 
   plan:
@@ -678,6 +712,31 @@ jobs:
           else:
               call("POST", comments_url, {"body": body})
 
+  # The in-cluster components' plans, on their stack's self-hosted runners in
+  # the VPC: same events and role as `plan` (merge_group excluded, see there).
+  # in-vpc.yml skips a fork's pull request: self-hosted runners never run
+  # fork code. The plan output is in the job log and summary (no PR comment).
+  plan-in-vpc:
+    name: Plan in-VPC ${{ matrix.stack }} (${{ matrix.label }})
+    needs: affected
+    if: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.in_vpc != '' && fromJson(needs.affected.outputs.in_vpc).include[0] != null }}
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.affected.outputs.in_vpc) }}
+    uses: ./.github/workflows/in-vpc.yml
+    with:
+      stack: ${{ matrix.stack }}
+      label: ${{ matrix.label }}
+      asg: ${{ matrix.asg }}
+      mode: plan
+      role: plan
+      components: ${{ matrix.components }}
+    secrets: inherit
+
   # The LocalEmu lane (emulator.yml, a reusable workflow) runs from here rather
   # than on its own pull_request trigger so the gate below can `need` it: it is
   # the only CI job that provisions, so a red lane must block the merge too.
@@ -698,7 +757,7 @@ jobs:
   # that failed is in this list too. Add every new job to `needs`.
   gate:
     name: CI gate
-    needs: [changes, lint, actionlint, plan-sweep, security-scan, terraform-test, affected, plan, emulator]
+    needs: [changes, lint, actionlint, plan-sweep, security-scan, terraform-test, affected, plan, plan-in-vpc, emulator]
     if: always()
     runs-on: ubuntu-latest
     permissions: {}

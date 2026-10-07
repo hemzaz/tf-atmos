@@ -132,8 +132,9 @@ until the repository variable `AWS_PLAN_ROLE_ARN` is set.
 |----------|---------|--------------|
 | `terraform-ci.yml` | PR, merge queue, push to master | PR/merge queue: lint + validate-all, actionlint (when `.github/workflows/` changes), plan-sweep, Trivy/Checkov gate (any HIGH/CRITICAL not suppressed inline; no baselines); PR only: plan of affected non-prod instances, each with its stack's read-only `iam/ci` plan role (PR comment). `terraform test` for components with `tests/`: affected ones on PRs, all on merge queue and push. Push to master otherwise runs only the prod plan. A `changes` job skips the jobs whose paths did not change; `CI gate`, the check master's protection requires, runs on every PR and fails if any job, the emulator lane included, failed |
 | `emulator.yml` | called by `terraform-ci.yml`, manual | LocalEmu lane: applies and destroys real resources |
-| `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag; skips the [in-cluster components](./docs/OPERATIONS.md#in-cluster-components). No manual approval ([details](./docs/OPERATIONS.md#state-backend)) |
-| `drift-detection.yml` | hourly, manual | Read-only plan of every stack except the in-cluster components; drift fails the job |
+| `terraform-cd.yml` | push to master, manual | Per stack (dev, staging, prod): deploys what changed since its `deployed/<stack>` tag with that stack's `iam/ci` apply role, then moves the tag; the [in-cluster components](./docs/OPERATIONS.md#in-cluster-components) deploy on the stack's in-VPC runners (`in-vpc.yml`). No manual approval ([details](./docs/OPERATIONS.md#state-backend)) |
+| `drift-detection.yml` | hourly, manual | Read-only plan of every stack, the in-cluster components on the in-VPC runners; drift fails the job |
+| `in-vpc.yml` | called by the three above | Starts an ephemeral self-hosted runner in the stack's VPC and runs the in-cluster components there; never for a fork's pull request |
 | `security-scan.yml` | nightly, manual | Report-only Trivy + Checkov |
 | `disaster-recovery.yml` | manual | Read-only DR checks (`dr-status`, `recover-state`, `recover-database`) |
 

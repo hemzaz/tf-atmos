@@ -11,11 +11,10 @@ components:
       metadata:
         component: external-secrets
         type: abstract
-      # Talks to the private EKS API: on the in-VPC runners, off hosted-runner
-      # CI/CD/drift (see catalog/eks-addons/defaults.yaml).
+      # Talks to the private EKS API: CI/CD/drift run it on the in-VPC runners
+      # (see catalog/eks-addons/defaults.yaml).
       settings:
         github:
-          actions_enabled: false
           runner: in-vpc
       # kms_key_arn below reads kms/main, so the key must be applied first.
       # workflows/scripts/common/check-dependencies.py enforces that every
