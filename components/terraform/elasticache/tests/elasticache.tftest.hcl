@@ -24,6 +24,11 @@ run "default_is_one_primary_with_replicas" {
   }
 
   assert {
+    condition     = aws_elasticache_replication_group.main[0].auto_minor_version_upgrade == "true" && length(aws_elasticache_replication_group.global_primary) == 0
+    error_message = "Outside a Global Datastore, auto_minor_version_upgrade follows the input (default true)."
+  }
+
+  assert {
     condition     = length(aws_elasticache_parameter_group.main) == 0
     error_message = "No parameter group is created when there is nothing to put in it."
   }
@@ -32,7 +37,8 @@ run "default_is_one_primary_with_replicas" {
 # --- B1 DR: Global Datastore ---
 
 run "primary_creates_the_global_datastore" {
-  command = plan
+  # apply: the ids the wiring assertions compare are known only after it.
+  command = apply
 
   variables {
     global_replication_group_id_suffix = "prod-cache"
@@ -44,8 +50,35 @@ run "primary_creates_the_global_datastore" {
   }
 
   assert {
-    condition     = aws_elasticache_replication_group.main[0].transit_encryption_enabled == true && aws_elasticache_replication_group.main[0].engine == "redis"
-    error_message = "The primary keeps its own engine and encryption settings."
+    condition = (
+      length(aws_elasticache_replication_group.main) == 0
+      && aws_elasticache_replication_group.global_primary[0].transit_encryption_enabled == true
+      && aws_elasticache_replication_group.global_primary[0].engine == "redis"
+      && aws_elasticache_global_replication_group.main[0].primary_replication_group_id == aws_elasticache_replication_group.global_primary[0].id
+    )
+    error_message = "The primary is the global_primary variant (it ignores what the global group owns) and keeps its own engine and encryption settings."
+  }
+
+  # The global group owns the members' engine version and node type: a change
+  # to either input goes through it, not through the member.
+  assert {
+    condition = (
+      aws_elasticache_global_replication_group.main[0].engine_version == "7.0"
+      && aws_elasticache_global_replication_group.main[0].cache_node_type == "cache.t4g.micro"
+    )
+    error_message = "engine_version and node_type must be managed on the global replication group."
+  }
+
+  # AWS disables auto minor version upgrade on every member and it cannot be
+  # re-enabled; sending true would be a perpetual diff.
+  assert {
+    condition     = aws_elasticache_replication_group.global_primary[0].auto_minor_version_upgrade == "false"
+    error_message = "A Global Datastore primary must send auto_minor_version_upgrade false."
+  }
+
+  assert {
+    condition     = output.replication_group_id == aws_elasticache_replication_group.global_primary[0].id
+    error_message = "Outputs must read the global_primary variant when it is the cache."
   }
 }
 
@@ -70,6 +103,11 @@ run "secondary_joins_the_global_datastore_and_inherits_its_settings" {
   assert {
     condition     = output.global_replication_group_id == "ldgnf-prod-cache"
     error_message = "global_replication_group_id must report the group a secondary joined."
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].auto_minor_version_upgrade == "false" && length(aws_elasticache_replication_group.global_primary) == 0
+    error_message = "A Global Datastore secondary must send auto_minor_version_upgrade false, whatever the input says."
   }
 }
 

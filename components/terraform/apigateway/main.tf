@@ -92,6 +92,13 @@ resource "aws_api_gateway_rest_api" "rest_api" {
     types = var.endpoint_type
   }
 
+  # The route53_failover_type health check calls the execute-api endpoint
+  # (the custom domain's name is shared by both regions), so it stays on.
+  disable_execute_api_endpoint = false
+
+  # No resource policy is attached by this component: one added later must
+  # still allow the Route 53 health checkers (public AWS ranges) on GET /<stage>/.
+
   minimum_compression_size = var.minimum_compression_size
   api_key_source           = var.api_key_source
   binary_media_types       = var.binary_media_types
@@ -660,7 +667,40 @@ resource "aws_route53_health_check" "api" {
   failure_threshold = 3
   measure_latency   = true
 
+  # With a WAF geo rule, check only from the US checker regions, which the
+  # rule admits (allowed_countries must hold US, variables.tf).
+  regions = length(var.allowed_countries) > 0 ? ["us-east-1", "us-west-1", "us-west-2"] : null
+
   tags = merge(local.tags, { Name = "${local.name_prefix}-${lower(var.route53_failover_type)}" })
+}
+
+# Alarm on the failover health check: DNS moving to the other region is
+# otherwise silent. HealthCheckStatus is published in us-east-1 only.
+resource "aws_cloudwatch_metric_alarm" "health_check" {
+  count = length(aws_route53_health_check.api)
+
+  # The AWS provider's per-resource region (v6), as kms-multi-region's
+  # replicas: no second provider block.
+  region = "us-east-1"
+
+  alarm_name          = "${local.name_prefix}-${lower(var.route53_failover_type)}-health-check"
+  alarm_description   = "Route 53 failover health check of ${local.name_prefix} (${var.route53_failover_type}, ${var.region}) is unhealthy: ${var.domain_name} answers from the other region while it is"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HealthCheckStatus"
+  namespace           = "AWS/Route53"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 1
+  treat_missing_data  = "breaching"
+  alarm_actions       = var.health_check_alarm_actions
+  ok_actions          = var.health_check_alarm_actions
+
+  dimensions = {
+    HealthCheckId = aws_route53_health_check.api[0].id
+  }
+
+  tags = local.tags
 }
 
 # WAF for API Gateway protection

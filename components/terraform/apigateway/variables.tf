@@ -109,12 +109,47 @@ variable "route53_failover_type" {
     condition     = var.route53_failover_type == null || try(length(var.route53_set_identifier) > 0, false)
     error_message = "route53_failover_type needs route53_set_identifier, unique within the record's name (e.g. the region code)."
   }
+
+  # The health check GETs the stage root unauthenticated: a "/" GET (or ANY)
+  # method must exist, open to callers without a token or an API key, or the
+  # check sees 401/403 and fails the healthy region over.
+  validation {
+    condition = var.route53_failover_type == null || anytrue([
+      for m in var.api_methods :
+      m.resource_path == "/" && contains(["GET", "ANY"], m.http_method) && m.authorization == "NONE" && !m.api_key_required
+    ])
+    error_message = "route53_failover_type needs a GET (or ANY) method on \"/\" with authorization NONE and no API key: the Route 53 health check calls it unauthenticated (a MOCK liveness method answers 200)."
+  }
+
+  # Route 53's checkers call from AWS's public health-checker ranges. A WAF
+  # geo rule (allowed_countries) would block those outside the list; with geo
+  # blocking on, the check uses only its US checker regions, so US must be in it.
+  validation {
+    condition     = var.route53_failover_type == null || length(var.allowed_countries) == 0 || contains(var.allowed_countries, "US")
+    error_message = "route53_failover_type with allowed_countries needs \"US\" in the list: the health check then calls only from its US checker regions, which the WAF geo rule must not block."
+  }
 }
 
 variable "route53_set_identifier" {
   type        = string
   description = "The failover record's set_identifier, unique per record name (e.g. the stack's region code)"
   default     = null
+}
+
+# Route 53 publishes health check metrics in us-east-1 only, so the alarm on
+# the failover health check lives there and can notify only a
+# us-east-1 SNS topic. The apigateway alarms' sns_topic_arn is in this
+# component's own region, hence a separate input.
+variable "health_check_alarm_actions" {
+  type        = list(string)
+  description = "SNS topic ARNs (in us-east-1) notified when the route53_failover_type health check turns unhealthy, and again when it recovers. The alarm itself is created whenever the health check is, in us-east-1"
+  default     = []
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for a in var.health_check_alarm_actions : can(regex("^arn:aws[a-z-]*:sns:us-east-1:[0-9]{12}:[A-Za-z0-9_-]+$", a))])
+    error_message = "health_check_alarm_actions must be SNS topic ARNs in us-east-1, where Route 53 publishes HealthCheckStatus."
+  }
 }
 
 variable "enable_logging" {

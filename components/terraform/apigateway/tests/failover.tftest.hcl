@@ -81,6 +81,124 @@ run "secondary_record_with_its_own_health_check" {
   }
 }
 
+run "health_check_alarm_in_us_east_1_notifies_the_topic" {
+  command = plan
+
+  variables {
+    route53_failover_type      = "SECONDARY"
+    route53_set_identifier     = "ue2"
+    health_check_alarm_actions = ["arn:aws:sns:us-east-1:123456789012:ue1-main-alarms"]
+  }
+
+  assert {
+    condition = (
+      length(aws_cloudwatch_metric_alarm.health_check) == 1
+      && aws_cloudwatch_metric_alarm.health_check[0].region == "us-east-1"
+      && aws_cloudwatch_metric_alarm.health_check[0].namespace == "AWS/Route53"
+      && aws_cloudwatch_metric_alarm.health_check[0].metric_name == "HealthCheckStatus"
+      && aws_cloudwatch_metric_alarm.health_check[0].comparison_operator == "LessThanThreshold"
+      && aws_cloudwatch_metric_alarm.health_check[0].threshold == 1
+    )
+    error_message = "A failover health check needs an alarm on its HealthCheckStatus."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.health_check[0].alarm_actions == toset(["arn:aws:sns:us-east-1:123456789012:ue1-main-alarms"])
+      && aws_cloudwatch_metric_alarm.health_check[0].ok_actions == toset(["arn:aws:sns:us-east-1:123456789012:ue1-main-alarms"])
+    )
+    error_message = "The alarm must notify health_check_alarm_actions on failure and on recovery."
+  }
+}
+
+run "no_health_check_alarm_without_failover" {
+  command = plan
+
+  assert {
+    condition     = length(aws_cloudwatch_metric_alarm.health_check) == 0
+    error_message = "No health check, no alarm."
+  }
+}
+
+run "health_check_alarm_topic_outside_us_east_1_is_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type      = "SECONDARY"
+    route53_set_identifier     = "ue2"
+    health_check_alarm_actions = ["arn:aws:sns:us-east-2:123456789012:ue2-main-alarms"]
+  }
+
+  expect_failures = [var.health_check_alarm_actions]
+}
+
+run "geo_blocking_pins_the_us_checker_regions" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "PRIMARY"
+    route53_set_identifier = "ue1"
+    enable_waf             = true
+    allowed_countries      = ["US", "CA"]
+  }
+
+  assert {
+    condition     = aws_route53_health_check.api[0].regions == toset(["us-east-1", "us-west-1", "us-west-2"])
+    error_message = "With a WAF geo rule the health check must call only from US checker regions."
+  }
+}
+
+run "geo_blocking_without_us_is_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "PRIMARY"
+    route53_set_identifier = "ue1"
+    allowed_countries      = ["DE"]
+  }
+
+  expect_failures = [var.route53_failover_type]
+}
+
+run "liveness_method_needing_an_api_key_is_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "PRIMARY"
+    route53_set_identifier = "ue1"
+    api_methods = [{
+      resource_path    = "/"
+      http_method      = "GET"
+      authorization    = "NONE"
+      api_key_required = true
+    }]
+  }
+
+  expect_failures = [var.route53_failover_type]
+}
+
+run "failover_without_a_root_method_is_rejected" {
+  command = plan
+
+  variables {
+    route53_failover_type  = "PRIMARY"
+    route53_set_identifier = "ue1"
+    api_resources          = [{ path_part = "health" }]
+    api_methods = [{
+      resource_path = "/health"
+      http_method   = "GET"
+    }]
+    api_integrations = [{
+      resource_path           = "/health"
+      http_method             = "GET"
+      integration_http_method = "GET"
+      type                    = "MOCK"
+    }]
+  }
+
+  expect_failures = [var.route53_failover_type]
+}
+
 run "failover_without_a_set_identifier_is_rejected" {
   command = plan
 

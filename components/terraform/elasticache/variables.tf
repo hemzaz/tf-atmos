@@ -415,7 +415,7 @@ variable "maintenance_window" {
 
 variable "auto_minor_version_upgrade" {
   type        = bool
-  description = "Apply minor engine version upgrades automatically during the maintenance window"
+  description = "Apply minor engine version upgrades automatically during the maintenance window. Ignored (always false) on a Global Datastore member: AWS turns it off on association and it cannot be turned back on"
   default     = true
 }
 

@@ -29,6 +29,15 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   execute-api endpoint (`<api id>.execute-api.<region>.amazonaws.com/<stage>/`), so the name moves
   to the other region when this one's API Gateway stops answering. Cloud Posse's
   `aws-api-gateway-rest-api` has no failover; this follows AWS's regional-API failover pattern.
+  The checker calls unauthenticated, so validations require a `GET`/`ANY` method on `/` with
+  authorization `NONE` and no API key, and `US` in `allowed_countries` when the WAF geo rule is
+  on (the check then calls from the US checker regions only). The execute-api endpoint stays
+  enabled (`disable_execute_api_endpoint = false`). The component attaches no resource policy;
+  one added later must still admit the Route 53 health checkers.
+- The failover health check gets a `HealthCheckStatus` alarm, notifying `health_check_alarm_actions`
+  on failure and recovery. Route 53 publishes the metric in us-east-1 only, so the alarm lives
+  there (the resource's `region` argument) and its topics must be us-east-1 topics: both prod stacks
+  point it at `fnx-ue1-prod` `monitoring/main`'s topic, by name (that component reads this one).
 - A `MOCK` integration answers 200: without `request_templates` it gets one selecting
   `statusCode: 200`, plus a 200 method and integration response (API Gateway answers 500 without
   them). `/`, the liveness method the health check probes, is such a MOCK.
