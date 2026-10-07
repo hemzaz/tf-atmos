@@ -64,7 +64,10 @@ One bucket, `fnx-terraform-state`, in the management account, with native S3 loc
 backend (`stacks/orgs/fnx/_defaults.yaml`) assumes one of its access roles, so it is created first,
 with management-account administrator credentials. The bucket lives in one region,
 `settings.tfstate.region` (`us-east-1`), and every stack's backend uses it whatever the stack's own
-region is, so a DR or EU stack keeps its state here too:
+region is, so a DR or EU stack keeps its state here too. S3 replicates it to
+`fnx-terraform-state-replica` in `settings.tfstate.replica_region` (`us-east-2`), encrypted with
+the state key's multi-region replica (`backend/main`'s `s3_replication_enabled`; see
+[State during a us-east-1 outage](#state-during-a-us-east-1-outage)):
 
 ```bash
 atmos workflow backend-cold-start -f bootstrap   # once: apply with local state, then migrate it into the bucket
@@ -101,6 +104,51 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
   Environment: **every merge deploys, prod included, with no manual approval**. Default-branch
   protection is the gate. PR code gets only the dev/staging plan roles; prod is planned on push
   to master (`pull_request_plans_enabled: false` in `stacks/orgs/fnx/prod/_defaults.yaml`).
+
+### State during a us-east-1 outage
+
+The replica is read-only for every access role, write roles included: they may list it and read
+their own stage's objects, never write, delete or lock. Point a run at it with
+`TFSTATE_SOURCE=replica` (`stacks/orgs/fnx/_defaults.yaml` then renders bucket
+`fnx-terraform-state-replica`, region us-east-2):
+
+```bash
+export TFSTATE_SOURCE=replica TFSTATE_ACCESS=read
+atmos terraform init vpc/main -s fnx-ue2-prod -- -reconfigure       # the replica's backend
+atmos terraform plan vpc/main -s fnx-ue2-prod -- -lock=false        # read-only: plan, output, show
+atmos terraform output rds/main -s fnx-ue1-prod
+```
+
+What is safe and what is not:
+
+- Safe: `plan -lock=false`, `output`, `show`, `state list`/`state pull`, and `!terraform.state`
+  reads (`atmos describe component` with functions) for any stack.
+- Not possible, by design: `apply`, `import`, `state push`/`rm`/`mv`, or a plan that takes a lock.
+  The roles cannot write the replica, so the S3 backend fails on the `.tflock` it cannot create.
+  An apply against a copy while the primary may come back would fork the state: the two buckets
+  would disagree once us-east-1 returns, and replication would overwrite the replica's side.
+- Lock files replicate like state. A `.tflock` copied while a run held the lock in us-east-1 may
+  sit in the replica; `-lock=false` ignores it. Do not `force-unlock` against the replica.
+- Replication is asynchronous (typically seconds; S3 gives no bound without Replication Time
+  Control): the replica may miss the last writes before the outage.
+- A component that has never been applied has no state to fork. One that must be applied during the
+  outage (the DR stack's `eks-backend-services/main`) may apply with local state and be migrated
+  into the bucket when it returns, the way the backend's own cold start does (`bootstrap.yaml`):
+
+  ```bash
+  unset TFSTATE_SOURCE TFSTATE_ACCESS
+  rm -f components/terraform/eks-backend-services/backend.tf.json   # no S3 backend: local state
+  atmos terraform deploy eks-backend-services/main -s fnx-ue2-prod --auto-generate-backend-file=false
+  # later, with the bucket back:
+  atmos terraform init eks-backend-services/main -s fnx-ue2-prod --init-reconfigure=never -- -migrate-state -force-copy
+  ```
+
+  Keep the local `terraform.tfstate.d/` until the migration has run.
+
+- After the outage: unset `TFSTATE_SOURCE` and `init -reconfigure` again before any apply.
+  Nothing is copied back: the primary bucket never stopped being the source of truth.
+
+`dr-status` reports whether the bucket replicates and to where.
 
 ## Repository variables
 

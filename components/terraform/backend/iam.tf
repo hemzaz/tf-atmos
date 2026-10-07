@@ -25,6 +25,11 @@
  * KMS: the state key's policy delegates to IAM (account root only), so the
  * roles' own policies grant key use. Read: Decrypt. Write: also Encrypt and
  * GenerateDataKey, which S3 needs to write SSE-KMS objects.
+ *
+ * The state bucket's replica (replication.tf) is read-only for every role,
+ * write roles included: list, the same object patterns, Decrypt with the
+ * replica key. A run pointed at it (TFSTATE_SOURCE=replica) can plan with
+ * -lock=false and cannot lock, write or apply.
  */
 
 data "aws_caller_identity" "current" {}
@@ -133,6 +138,40 @@ data "aws_iam_policy_document" "access_role" {
     effect    = "Allow"
     actions   = concat(["kms:Decrypt", "kms:DescribeKey"], each.value.write_enabled ? ["kms:Encrypt", "kms:GenerateDataKey"] : [])
     resources = [aws_kms_key.terraform_state_key.arn]
+  }
+
+  # Read-only access to the replica, whatever write_enabled says.
+  dynamic "statement" {
+    for_each = local.replication_enabled ? [true] : []
+
+    content {
+      sid       = "ListStateReplica"
+      effect    = "Allow"
+      actions   = ["s3:ListBucket"]
+      resources = [aws_s3_bucket.terraform_state_replica[0].arn]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.replication_enabled ? [true] : []
+
+    content {
+      sid       = "ReadStateReplica"
+      effect    = "Allow"
+      actions   = ["s3:GetObject"]
+      resources = [for pattern in each.value.object_key_patterns : "${aws_s3_bucket.terraform_state_replica[0].arn}/${pattern}"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.replication_enabled ? [true] : []
+
+    content {
+      sid       = "UseStateReplicaKey"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt", "kms:DescribeKey"]
+      resources = [aws_kms_replica_key.terraform_state[0].arn]
+    }
   }
 }
 

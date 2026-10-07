@@ -38,6 +38,10 @@ components:
       vars:
         account_id: "{{ .settings.environment.management_account_id }}"
         enable_access_logging: true
+        # State replicated to <bucket>-replica in the DR region (owner
+        # decision, B1 DR), read-only for every access role.
+        s3_replication_enabled: true
+        replica_region: "{{ .settings.tfstate.replica_region }}"
         # Who may use the state. The CI roles are named from iam/ci's
         # ci_role_name_prefix ("<tenant>-<environment>-<stage>-ci", see each
         # workload stack's components/security.yaml) in that stack's

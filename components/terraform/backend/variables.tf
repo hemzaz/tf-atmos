@@ -99,6 +99,30 @@ variable "access_roles" {
   }
 }
 
+# Cross-region replication of the state bucket (Cloud Posse tfstate-backend's
+# s3_replication_enabled; replication.tf).
+variable "s3_replication_enabled" {
+  type        = bool
+  description = "Replicate the state bucket to <bucket_name>-replica in replica_region, created here with a replica of the state key, so state survives (read-only) an outage of the bucket's region"
+  default     = false
+}
+
+variable "replica_region" {
+  type        = string
+  description = "Region of the state bucket's replica (s3_replication_enabled); must differ from region"
+  default     = null
+
+  validation {
+    condition     = var.replica_region == null || can(regex("^[a-z]{2}(-[a-z]+)+-\\d+$", var.replica_region))
+    error_message = "replica_region must be an AWS region name (e.g. us-east-2)."
+  }
+
+  validation {
+    condition     = !var.s3_replication_enabled || (var.replica_region != null && var.replica_region != var.region)
+    error_message = "s3_replication_enabled needs replica_region, a region other than the bucket's own."
+  }
+}
+
 # Security and operational features
 
 variable "enable_access_logging" {

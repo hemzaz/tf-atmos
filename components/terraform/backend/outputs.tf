@@ -13,6 +13,26 @@ output "backend_kms_key_arn" {
   value       = aws_kms_key.terraform_state_key.arn
 }
 
+output "backend_replica_bucket" {
+  description = "The state bucket's cross-region replica (s3_replication_enabled), read-only for the access roles; null without replication"
+  value       = one(aws_s3_bucket.terraform_state_replica[*].id)
+}
+
+output "backend_replica_region" {
+  description = "Region of backend_replica_bucket; null without replication"
+  value       = local.replication_enabled ? var.replica_region : null
+}
+
+output "backend_replica_kms_key_arn" {
+  description = "ARN of the state key's replica that encrypts backend_replica_bucket; null without replication"
+  value       = one(aws_kms_replica_key.terraform_state[*].arn)
+}
+
+output "replication_role_arn" {
+  description = "ARN of the role S3 assumes to replicate the state bucket; null without replication"
+  value       = one(aws_iam_role.replication[*].arn)
+}
+
 output "access_role_arns" {
   description = "ARN of every state access role, by access_roles key"
   value       = { for key, role in aws_iam_role.access : key => role.arn }
