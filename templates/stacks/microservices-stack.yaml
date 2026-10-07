@@ -99,9 +99,11 @@ components:
     # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
     # entries read them, and CI deploys this lane with them. The GitHub OIDC
     # provider is an account singleton that fnx-ue1-dev's iam/ci creates,
-    # so this instance trusts it by ARN instead of creating a second one. A
-    # deployed lane also needs its state pattern pair and these role ARNs on
+    # so this instance trusts it by ARN instead of creating a second one.
+    # Deploying the lane needs one manual step: these roles' ARNs on
     # backend/main's access roles for its stage (stacks/orgs/fnx/core/us-east-1.yaml).
+    # A state pattern pair of its own is optional: the stage stack's
+    # "*/<stage stack>-*" pattern already covers the lane's state keys.
     iam/ci:
       metadata:
         component: iam

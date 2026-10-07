@@ -10,12 +10,17 @@
 # and runs:
 #   - atmos validate stacks, and every sample stack its header names (`-s <stack>`)
 #     must resolve;
+#   - ci-apply-role-arn.py --kind plan/apply for each sample stack, as
+#     terraform-ci.yml and terraform-cd.yml resolve its CI roles (a sample with
+#     no iam/ci fails here, as it would in CI);
+#   - the one manual step a deployed lane needs, done in the scratch copy:
+#     its plan/apply role ARNs added to backend/main's access roles for its
+#     stage (read/write; prod_read/prod_write for stage prod). No state pattern
+#     pair: the stage stack's "*/<stack>-*" pattern already covers a lane;
 #   - check-dependencies.py, check-deploy-layers.py, check-lane-names.py,
-#     check-prod-protection.py and check-cluster-api-ci.py over the result;
+#     check-prod-protection.py, check-cluster-api-ci.py, check-state-keys.py and
+#     check-ci-state-roles.py over the result;
 #   - with --sweep, scripts/plan-sweep.sh on the sample stacks.
-# The checks that need deploy-time inputs a copied-in lane must still add
-# (its state pattern pair and CI role ARNs on backend/main) are left out:
-# check-state-keys and check-ci-state-roles.
 #
 # Usage: scripts/check-stack-samples.sh [--sweep]
 # Exit 0 when every sample passes, 1 otherwise.
@@ -71,11 +76,49 @@ for stack in "${stacks[@]}"; do
 done
 [[ "$missing" -eq 0 ]]
 
+# The CI preflight: each sample stack's CI role ARNs, as CI resolves them.
+: > roles.tsv
+for stack in "${stacks[@]}"; do
+    for kind in plan apply; do
+        arn="$(STACK="$stack" python3 workflows/scripts/common/ci-apply-role-arn.py --kind "$kind")"
+        printf '%s\t%s\t%s\n' "$stack" "$kind" "${arn##*: }" >> roles.tsv
+    done
+done
+# The manual step: the roles on backend/main's access roles for each lane's stage.
+python3 - stacks.json roles.tsv <<'ROLES'
+import json, pathlib, sys
+
+stacks = json.load(open(sys.argv[1]))
+backend = next(
+    (i["atmos_stack_file"] for s in stacks.values()
+     for i in (s.get("components") or {}).get("terraform", {}).values()
+     if i.get("component") == "backend" and (i.get("metadata") or {}).get("type") != "abstract"),
+    None,
+)
+if backend is None:
+    sys.exit("ERROR no deployable backend instance to add the sample lanes' CI roles to")
+path = pathlib.Path("stacks") / f"{backend}.yaml"
+lines = path.read_text().splitlines()
+for row in open(sys.argv[2]):
+    stack, kind, arn = row.rstrip("\n").split("\t")
+    stage = next(i["settings"]["context"]["stage"] for i in stacks[stack]["components"]["terraform"].values()
+                 if ((i.get("settings") or {}).get("context") or {}).get("stage"))
+    role = ("prod_" if stage == "prod" else "") + ("read" if kind == "plan" else "write")
+    start = lines.index(f"          {role}:")
+    at = next(n for n in range(start, len(lines)) if lines[n].strip() == "allowed_principal_arns:")
+    lines.insert(at + 1, f'              - "{arn}"')
+    print(f"{stack}: {kind} role {arn} -> backend/main access_roles.{role}")
+path.write_text("\n".join(lines) + "\n")
+ROLES
+atmos describe stacks --process-functions=false --format json > stacks.json
+
 python3 workflows/scripts/common/check-dependencies.py components/terraform < stacks.json
 python3 workflows/scripts/common/check-deploy-layers.py stacks.json workflows.json
 python3 workflows/scripts/common/check-lane-names.py < stacks.json
 python3 workflows/scripts/common/check-prod-protection.py components/terraform < stacks.json
 python3 workflows/scripts/common/check-cluster-api-ci.py components/terraform < stacks.json
+python3 workflows/scripts/common/check-state-keys.py < stacks.json
+python3 workflows/scripts/common/check-ci-state-roles.py < stacks.json
 
 if [[ "$SWEEP" == "true" ]]; then
     # plan-sweep mirrors components/terraform with git ls-files.

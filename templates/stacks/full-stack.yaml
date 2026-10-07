@@ -88,11 +88,9 @@ components:
     # The platform's tiers, one securitygroup instance: each group admits the
     # one above it by key (source_security_group_id), so no tier reads
     # another's state before it exists (deploy-full-stack plans a layer before
-    # applying it). The alb group has no ingress here: public traffic reaches
-    # the platform only through CloudFront, and the ALB (the alb component,
-    # catalog/alb/defaults) admits nothing but CloudFront's origin-facing
-    # managed prefix list on 443 itself; this group, attached to it, is what
-    # the nodes admit (as web-application's `alb` group).
+    # applying it). No load-balancer group: nothing in this sample creates a
+    # load balancer (eks-addons' AWS Load Balancer Controller manages the
+    # groups of the ones Kubernetes asks for), and none admits 0.0.0.0/0.
     securitygroup/platform:
       metadata:
         component: securitygroup
@@ -100,8 +98,6 @@ components:
           - securitygroup
       vars:
         security_groups:
-          alb:
-            description: "Attached to the platform ALB; the EKS nodes admit it"
           # Additional group for the EKS worker nodes (EKS creates the cluster
           # security group itself)
           eks-nodes:
@@ -113,12 +109,6 @@ components:
                 to_port: 65535
                 protocol: "tcp"
                 self: true
-              - key: "from-alb"
-                description: "Traffic from the load balancers"
-                from_port: 1025
-                to_port: 65535
-                protocol: "tcp"
-                source_security_group_id: "alb"
           # Database tier: PostgreSQL only from the EKS nodes
           rds:
             description: "RDS security group"
@@ -136,9 +126,11 @@ components:
     # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
     # entries read them, and CI deploys this lane with them. The GitHub OIDC
     # provider is an account singleton that fnx-ue1-prod's iam/ci creates,
-    # so this instance trusts it by ARN instead of creating a second one. A
-    # deployed lane also needs its state pattern pair and these role ARNs on
+    # so this instance trusts it by ARN instead of creating a second one.
+    # Deploying the lane needs one manual step: these roles' ARNs on
     # backend/main's access roles for its stage (stacks/orgs/fnx/core/us-east-1.yaml).
+    # A state pattern pair of its own is optional: the stage stack's
+    # "*/<stage stack>-*" pattern already covers the lane's state keys.
     iam/ci:
       metadata:
         component: iam
@@ -157,6 +149,12 @@ components:
           - "hemzaz/tf-atmos:master"
         ci_apply_policy_arns:
           - "arn:aws:iam::aws:policy/AdministratorAccess"
+        # Prod plan role: the master ref only, never pull_request (owner
+        # decision D3, as fnx-ue1-prod's iam/ci): it reads every prod state
+        # object through backend/main's prod_read role, so PR code must never
+        # assume it. check-prod-protection.py fails a prod iam/ci without this.
+        ci_plan_role_subjects:
+          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
         ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-role"
@@ -276,7 +274,7 @@ components:
         port: 5432
         db_name: "app"
         vpc_id: !terraform.state vpc/main .vpc_id
-        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
         allowed_security_groups:
           - !terraform.state securitygroup/platform .security_group_ids.rds
         kms_key_id: !terraform.state kms/main .key_arn

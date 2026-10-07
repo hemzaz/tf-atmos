@@ -19,6 +19,12 @@ the component's variables.tf) must be safe:
                 2 nodes (num_cache_nodes) unless cluster_mode_enabled, and
                 snapshot_retention_limit >= 7
 
+And every deployable iam instance in a stack of stage prod that creates the
+GitHub OIDC CI roles (github_oidc_enabled) must set ci_plan_role_subjects
+explicitly, with no pull_request subject and no wildcard: the plan role reads
+every prod state object through backend/main's prod_read role, and the
+component's default trusts repo:<repo>:pull_request, i.e. code from any PR.
+
 Exits 1 on any unsafe value.
 """
 import json
@@ -112,11 +118,38 @@ def check(stacks: dict, components_dir: pathlib.Path) -> list[str]:
     return errors
 
 
+def check_ci_plan_trust(stacks: dict) -> list[str]:
+    """Prod CI plan roles trusting pull requests (or the component's PR-trusting default)."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            variables = instance.get("vars") or {}
+            if (instance.get("component") != "iam" or stage != PROD_STAGE or not is_deployable(instance)
+                    or normalize(variables.get("github_oidc_enabled")) is not True):
+                continue
+            subjects = variables.get("ci_plan_role_subjects")
+            if not subjects:
+                errors.append(
+                    f"{stack_name}: {name} (iam) leaves ci_plan_role_subjects unset, so its prod plan role "
+                    "trusts repo:<repo>:pull_request (the default): list the master ref only"
+                )
+                continue
+            for subject in subjects:
+                if ":pull_request" in str(subject) or "*" in str(subject):
+                    errors.append(
+                        f"{stack_name}: {name} (iam) ci_plan_role_subjects trusts {subject!r}: a prod plan "
+                        "role must trust the master ref only"
+                    )
+    return errors
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__.splitlines()[2], file=sys.stderr)
         return 2
-    errors = check(json.load(sys.stdin), pathlib.Path(sys.argv[1]))
+    described = json.load(sys.stdin)
+    errors = check(described, pathlib.Path(sys.argv[1])) + check_ci_plan_trust(described)
     for error in errors:
         print(f"ERROR {error}")
     if errors:
@@ -125,7 +158,8 @@ def main() -> int:
     print(
         "every prod rds instance is environment prod, Multi-AZ, deletion-protected, keeps a final "
         f"snapshot and {MIN_RETENTION_DAYS}+ days of backups; every prod elasticache instance fails over "
-        f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots"
+        f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots; every prod CI plan role trusts the "
+        "master ref only"
     )
     return 0
 

@@ -93,5 +93,36 @@ class CheckProdProtectionTest(unittest.TestCase):
             check_prod_protection.variable_default(COMPONENTS, "rds", "no_such_variable")
 
 
+
+class CiPlanTrustTest(unittest.TestCase):
+    MASTER = ["repo:hemzaz/tf-atmos:ref:refs/heads/master"]
+
+    def found(self, **variables):
+        return check_prod_protection.check_ci_plan_trust(stacks(**{"iam/ci": instance(
+            "iam", github_oidc_enabled=True, **variables)}))
+
+    def test_master_only_passes(self):
+        self.assertEqual(self.found(ci_plan_role_subjects=self.MASTER), [])
+
+    def test_default_trusting_pull_requests_fails(self):
+        found = self.found()
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("leaves ci_plan_role_subjects unset", found[0])
+
+    def test_pull_request_subject_fails(self):
+        found = self.found(ci_plan_role_subjects=self.MASTER + ["repo:hemzaz/tf-atmos:pull_request"])
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("trusts 'repo:hemzaz/tf-atmos:pull_request'", found[0])
+
+    def test_wildcard_subject_fails(self):
+        self.assertEqual(len(self.found(ci_plan_role_subjects=["repo:hemzaz/tf-atmos:*"])), 1)
+
+    def test_non_prod_and_roleless_iam_are_skipped(self):
+        dev = {"fnx-ue1-dev": {"components": {"terraform": {"iam/ci": instance(
+            "iam", stage="dev", github_oidc_enabled=True)}}}}
+        self.assertEqual(check_prod_protection.check_ci_plan_trust(dev), [])
+        self.assertEqual(check_prod_protection.check_ci_plan_trust(stacks(**{"iam/main": instance("iam")})), [])
+
+
 if __name__ == "__main__":
     unittest.main()
