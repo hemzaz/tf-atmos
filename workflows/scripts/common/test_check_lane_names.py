@@ -121,6 +121,47 @@ class GroupTest(unittest.TestCase):
             "fnx-ue2-dev": stack(**{"kms/main": instance("ue1", region="us-east-2", alias_name="ue1-main")}),
         }), [])
 
+    def test_dr_region_with_its_own_iam_names_passes(self):
+        # fnx-ue1-prod and its DR stack fnx-ue2-prod share the prod account.
+        self.assertEqual(self.errors({
+            "fnx-ue1-prod": stack(**{"iam/ci": instance(
+                "ue1", component="iam", stage="prod", ci_role_name_prefix="fnx-ue1-prod-ci",
+                github_oidc_enabled=True, github_oidc_create_provider=True, create_cross_account_role=False)}),
+            "fnx-ue2-prod": stack(**{"iam/ci": instance(
+                "ue2", component="iam", stage="prod", region="us-east-2", ci_role_name_prefix="fnx-ue2-prod-ci",
+                github_oidc_enabled=True, github_oidc_create_provider=False, create_cross_account_role=False)}),
+        }), [])
+
+    def test_dr_region_creating_the_account_singleton_again_fails(self):
+        errors = self.errors({
+            "fnx-ue1-prod": stack(**{"iam/ci": instance(
+                "ue1", component="iam", stage="prod", github_oidc_create_provider=True, create_cross_account_role=False)}),
+            "fnx-ue2-prod": stack(**{"iam/ci": instance(
+                "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_create_provider=True,
+                create_cross_account_role=False)}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both create the GitHub OIDC provider '(one per account)' in account prod", errors[0])
+
+    def test_dr_region_reusing_an_iam_name_fails(self):
+        errors = self.errors({
+            "fnx-ue1-prod": stack(**{"iam/ci": instance(
+                "ue1", component="iam", stage="prod", github_oidc_enabled=True, ci_role_name_prefix="fnx-prod-ci",
+                create_cross_account_role=False)}),
+            "fnx-ue2-prod": stack(**{"iam/ci": instance(
+                "ue2", component="iam", stage="prod", region="us-east-2", github_oidc_enabled=True,
+                ci_role_name_prefix="fnx-prod-ci", create_cross_account_role=False)}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("IAM CI role prefix 'fnx-prod-ci' in account prod", errors[0])
+
+    def test_regional_names_in_another_region_of_the_account_pass(self):
+        # A KMS alias is regional: the same alias in us-east-2 is another alias.
+        self.assertEqual(self.errors({
+            "fnx-ue1-prod": stack(**{"kms/main": instance("ue1", stage="prod", alias_name="main")}),
+            "fnx-ue2-prod": stack(**{"kms/main": instance("ue2", stage="prod", region="us-east-2", alias_name="main")}),
+        }), [])
+
     def test_stages_sharing_an_account_are_one_group(self):
         errors = self.errors({
             "fnx-ue1-dev": stack(**{"kms/main": instance("ue1", account="shared", alias_name="ue1-main")}),

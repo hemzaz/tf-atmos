@@ -1,0 +1,204 @@
+---
+# =============================================================================
+# Security for fnx-ue2-prod (DR warm standby)
+# =============================================================================
+# Regional services run here as in fnx-ue1-prod (GuardDuty, Security Hub, AWS
+# Config, Inspector, finding routing, backups); account-wide ones do not:
+#   - KMS: no kms/main here. This region's key is fnx-ue1-prod kms/main's
+#     multi-region replica (replica_keys["us-east-2"], alias ue2-main), read
+#     cross-stack wherever fnx-ue1-prod reads kms/main.
+#   - no iam/main: the account's cross-account role and the Auto Scaling
+#     service-linked role are fnx-ue1-prod's iam/main.
+#   - iam/ci trusts the account's GitHub OIDC provider, created by
+#     fnx-ue1-prod's iam/ci.
+#   - no cloudtrail/main: fnx-ue1-prod's trail is multi-region and records
+#     this region too; its CIS metric filters run there.
+#   - awsconfig/main records this region's resources only
+#     (include_global_resource_types: false, Cloud Posse's
+#     global_resource_collector_region is us-east-1).
+# =============================================================================
+
+import:
+  - orgs/fnx/prod/us-east-2/components/globals
+  - catalog/iam/defaults
+  - catalog/acm/defaults
+  - catalog/awsconfig/defaults
+  - catalog/guardduty/defaults
+  - catalog/securityhub/defaults
+  - catalog/inspector2/defaults
+  - catalog/apigateway-account/defaults
+  - catalog/security-monitoring/defaults
+  - catalog/backup/defaults
+
+components:
+  terraform:
+    # GitHub Actions OIDC roles of this stack: <full id>-ci-plan/-apply, as in
+    # fnx-ue1-prod (orgs/fnx/prod/us-east-1/components/security.yaml explains
+    # each input). Prod trust: master only, for both roles.
+    iam/ci:
+      metadata:
+        component: iam
+        inherits:
+          - iam
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        # The account's one provider, created by fnx-ue1-prod's iam/ci (IAM
+        # OIDC providers are per account; a second create fails).
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        ci_plan_role_subjects:
+          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
+        # Prod state access: the same prod read/write backend roles as
+        # fnx-ue1-prod (both prod stacks' state is under them).
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-role"
+        # eks/main's cluster encryption key, by alias (iam/ci applies before
+        # any key read): the replica's alias in this region.
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: fnx-ue1-root
+          # The OIDC provider this stack's roles trust.
+          - component: iam/ci
+            stack: fnx-ue1-prod
+
+    # api.<domain>'s certificate in this region (ACM certificates are
+    # regional), validated in fnx-ue1-prod's main zone. Only api.<domain>: a
+    # wildcard here would write the same validation record fnx-ue1-prod's
+    # acm/main owns, and two states would own one record.
+    acm/main:
+      metadata:
+        component: acm
+        inherits:
+          - acm/defaults
+      vars:
+        zone_id: !terraform.state network/main fnx-ue1-prod .zone_ids.main
+        dns_domains:
+          api:
+            domain_name: "api.{{ .settings.environment.domain_name }}"
+            validation_method: "DNS"
+            wait_for_validation: true
+      dependencies:
+        components:
+          - component: network/main
+            stack: fnx-ue1-prod
+
+    awsconfig/main:
+      metadata:
+        component: awsconfig
+        inherits:
+          - awsconfig/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main fnx-ue1-prod '.replica_keys["us-east-2"].key_arn'
+        include_global_resource_types: false
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ue1-prod
+
+    guardduty/main:
+      metadata:
+        component: guardduty
+        inherits:
+          - guardduty/defaults
+      vars:
+        enable_kubernetes_protection: true
+        enable_malware_protection: true
+        auto_archive_filter:
+          - severity: 1
+            criteria:
+              type:
+                - "Recon:EC2/Portscan"
+
+    securityhub/main:
+      metadata:
+        component: securityhub
+        inherits:
+          - securityhub/defaults
+      vars:
+        standards:
+          - "pci-dss/v/3.2.1"
+
+    inspector2/main:
+      metadata:
+        component: inspector2
+        inherits:
+          - inspector2/defaults
+
+    # The region's API Gateway CloudWatch Logs role setting (apigateway/main).
+    apigateway-account/main:
+      metadata:
+        component: apigateway-account
+        inherits:
+          - apigateway-account/defaults
+
+    # Finding routing for this region. No CIS metric filters here: the
+    # account's trail delivers to fnx-ue1-prod's log group, where they run. It
+    # does not inherit security-monitoring/defaults, whose
+    # cloudtrail_log_group_name reads a cloudtrail/main this stack does not
+    # have (a null cannot unset an inherited value); the rest mirrors it.
+    security-monitoring/main:
+      metadata:
+        component: security-monitoring
+      vars:
+        guardduty_detector_id: !terraform.state guardduty/main .detector_id
+        securityhub_account_arn: !terraform.state securityhub/main .account_arn
+        require_guardduty_route: true
+        require_securityhub_route: true
+        require_cloudtrail_route: false
+        enable_security_group_change_events: true
+        inspector2_account_id: !terraform.state inspector2/main .account_id
+        enable_alert_enrichment: false
+        security_email_subscriptions: []
+        tags:
+          Component: "SecurityMonitoring"
+        security_group_change_excluded_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-cluster-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/{{ .settings.prefix }}-main-aws-load-balancer-controller-role"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks.amazonaws.com/AWSServiceRoleForAmazonEKS"
+          - "arn:aws:iam::{{ .settings.environment.account_id }}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
+          - !terraform.state iam/ci .ci_apply_role_arn
+        kms_key_id: !terraform.state kms/main fnx-ue1-prod '.replica_keys["us-east-2"].key_arn'
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ue1-prod
+          - component: guardduty/main
+          - component: securityhub/main
+          - component: inspector2/main
+          - component: iam/ci
+
+    # This region's own vault and plans. While warm it selects nothing
+    # (rds/main is a replica, Role=read-replica); once promoted, rds/main is
+    # backed up here like fnx-ue1-prod's. Retention as in fnx-ue1-prod. No
+    # copies back to us-east-1 until a failback is planned (docs/OPERATIONS.md).
+    backup/main:
+      metadata:
+        component: backup
+        inherits:
+          - backup/defaults
+      vars:
+        kms_key_arn: !terraform.state kms/main fnx-ue1-prod '.replica_keys["us-east-2"].key_arn'
+        daily_retention_days: 35
+        weekly_retention_days: 90
+        monthly_retention_days: 2555 # 7 years, SOX
+        monthly_cold_storage_days: 90
+        notification_emails:
+          - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
+          - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"
+      dependencies:
+        components:
+          - component: kms/main
+            stack: fnx-ue1-prod

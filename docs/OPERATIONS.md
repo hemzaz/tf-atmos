@@ -84,8 +84,8 @@ role from the stack's stage and `TFSTATE_ACCESS`, whoever runs it.
 |---------------------------|--------|-----------------|
 | `fnx-terraform-backend-read-role` (`read`) | read, dev/staging state | dev/staging CI plan roles |
 | `fnx-terraform-backend-role` (`write`) | read/write, dev/staging state | dev/staging CI apply roles |
-| `fnx-terraform-backend-prod-read-role` (`prod_read`) | read, prod state | prod's CI plan role |
-| `fnx-terraform-backend-prod-role` (`prod_write`) | read/write, prod state | prod's CI apply role |
+| `fnx-terraform-backend-prod-read-role` (`prod_read`) | read, prod state (`fnx-ue1-prod`, DR `fnx-ue2-prod`) | the prod stacks' CI plan roles |
+| `fnx-terraform-backend-prod-role` (`prod_write`) | read/write, prod state | the prod stacks' CI apply roles |
 | `fnx-terraform-backend-root-role` (`root_write`) | read/write, `fnx-ue1-root` state | none |
 
 - CI plans set `TFSTATE_ACCESS=read` and plan with `-lock=false`; deploys leave it unset.
@@ -406,12 +406,92 @@ applying anything.
 ```bash
 STACK=<stack> atmos workflow dr-status -f disaster-recovery          # readiness report
 STACK=<stack> atmos workflow recover-database -f disaster-recovery   # RDS snapshots, PITR windows
-STACK=<stack> atmos workflow dr-failover -f disaster-recovery        # interactive, never from CI
-STACK=<stack> atmos workflow dr-failback -f disaster-recovery
 ```
 
-The stacks run in `us-east-1`; the DR region is `us-east-2` (`dr-failover`'s default target,
-`DR_REGION` in `dr-status`).
+### Disaster recovery
+
+Prod only (owner decision Q5): `fnx-ue1-prod` (us-east-1) fails over to `fnx-ue2-prod` (us-east-2),
+a warm standby in the same account. Dev and staging have no DR stack; they are rebuilt from Git.
+What runs in `fnx-ue2-prod` while `fnx-ue1-prod` serves:
+
+| Component | Warm state in `fnx-ue2-prod` | On failover |
+|-----------|------------------------------|-------------|
+| `vpc/main`, `iam/ci`, `acm/main`, GuardDuty, Security Hub, Config, `backup/main` | full | nothing |
+| KMS | `fnx-ue1-prod` `kms/main`'s multi-region replica, alias `ue2-main` (no `kms/main` here) | nothing |
+| `rds/main` | cross-region read replica of `fnx-ue1-prod`'s (`replicate_source_db`), `db.r5.large` | promote |
+| `elasticache/main` | Global Datastore secondary, 2 nodes | promote |
+| `eks/main` | `workers` at 2 nodes, `monitoring`/`memory-optimized` at 0 | scale up |
+| `eks-backend-services/main` | `metadata.enabled: false` | enable, apply |
+| `apigateway/main` | SECONDARY half of `api.<domain>`'s Route 53 failover pair | automatic |
+| `rds/data`, `vpc/services`, `eks/data` | not run | restore `rds/data` from backup copies |
+| Cognito | not replicated (AWS has no cross-region user pools) | see below |
+
+`backup/main` in `fnx-ue1-prod` copies every recovery point to `ue1-backup-replica` in us-east-2.
+Readiness: `STACK=fnx-ue1-prod atmos workflow dr-status -f disaster-recovery` (it reports both
+vaults) and the same for `fnx-ue2-prod`. CD deploys `fnx-ue1-prod` before `fnx-ue2-prod`, which
+reads it (`kms/main`, `rds/main`, `elasticache/main`, `network/main`, `iam/ci`).
+
+**Failover** (`STACK=fnx-ue1-prod atmos workflow dr-failover -f disaster-recovery` prints these
+steps; operator only, never from CI):
+
+1. Freeze other merges: CD applies every merge to master, and the steps below are merges.
+2. DNS fails over by itself: `api.<domain>` answers from us-east-2 once `fnx-ue1-prod`'s health
+   check on its stage root fails three times (90 s). Check it, and force it when us-east-1 answers
+   but is unusable:
+
+   ```bash
+   aws route53 list-health-checks --query 'HealthChecks[].[Id,HealthCheckConfig.FullyQualifiedDomainName]'
+   aws route53 get-health-check-status --health-check-id <ue1 id>
+   aws route53 update-health-check --health-check-id <ue1 id> --inverted   # force us-east-1 unhealthy
+   ```
+
+3. Promote the database: a PR setting `replicate_source_db: null` on `fnx-ue2-prod`'s `rds/main`
+   (`stacks/orgs/fnx/prod/us-east-2/components/services.yaml`). The apply promotes the replica,
+   and RDS then creates its managed master secret. Without CI:
+   `aws rds promote-read-replica --db-instance-identifier ue2-prod-main-db --region us-east-2`, then
+   the same PR to match.
+4. Promote the cache:
+
+   ```bash
+   atmos terraform output elasticache/main -s fnx-ue2-prod   # global_replication_group_id
+   aws elasticache failover-global-replication-group --region us-east-2 \
+     --global-replication-group-id <global_replication_group_id> \
+     --primary-region us-east-2 --primary-replication-group-id ue2-prod-cache
+   ```
+
+   Do not apply `fnx-ue1-prod`'s `elasticache/main` until failback: its plan reports the moved
+   primary as drift.
+5. In one PR on `fnx-ue2-prod`: `eks/main` node groups to `fnx-ue1-prod`'s sizes (`compute.yaml`),
+   and `metadata.enabled: true` on `eks-backend-services/main`. CD applies the node groups; the
+   in-cluster service runs on the stack's in-VPC runners, or from an operator
+   ([In-cluster components](#in-cluster-components)):
+   `atmos terraform deploy eks-backend-services/main -s fnx-ue2-prod`.
+6. Analytics, if needed: restore `rds/data` from `ue1-backup-replica` in us-east-2
+   (`aws backup list-recovery-points-by-backup-vault --backup-vault-name ue1-backup-replica
+   --region us-east-2`, then `aws backup start-restore-job`).
+7. Verify: `curl -sf https://api.<domain>/` and
+   `STACK=fnx-ue2-prod atmos workflow dr-status -f disaster-recovery`.
+
+Cognito: `/api` (the only authorized route) is disabled today, so nothing fails over. When it is
+enabled, `fnx-ue2-prod`'s `apigateway/main` needs an authorizer whose pool exists in us-east-2.
+
+**Failback** (`STACK=fnx-ue1-prod atmos workflow dr-failback -f disaster-recovery`), once
+us-east-1 is healthy:
+
+1. Re-seed us-east-1 from us-east-2: set `fnx-ue1-prod`'s `rds/main` `replicate_source_db` to
+   `fnx-ue2-prod`'s `rds/main` `instance_arn`. AWS cannot turn a standalone instance into a
+   replica, so this replaces the stale us-east-1 instance: lift its deletion protection first
+   (`aws rds modify-db-instance --db-instance-identifier ue1-prod-main-db --no-deletion-protection
+   --region us-east-1`). When the replica lag is zero, stop writes, promote it
+   (`replicate_source_db: null`) and set `fnx-ue2-prod`'s back to
+   `!terraform.state rds/main fnx-ue1-prod .instance_arn` (again a replacement, the same way).
+2. Move the cache primary back: `failover-global-replication-group --primary-region us-east-1
+   --primary-replication-group-id ue1-prod-cache`.
+3. Un-invert the health check if step 2 of the failover inverted it
+   (`aws route53 update-health-check --health-check-id <ue1 id> --no-inverted`): DNS returns to
+   us-east-1.
+4. Revert the step 5 PR: `fnx-ue2-prod` back to its warm sizes, `eks-backend-services/main`
+   disabled.
 
 ## Deploys green, does not serve
 

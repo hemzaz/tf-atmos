@@ -58,11 +58,18 @@ workflows:
         type: markdown
         content: |
           **Failover runbook ({{ .steps.stack.value }} -> {{ .steps.target_region.value }})**
-          1. Promote the RDS read replica in {{ .steps.target_region.value }}
-             (`aws rds promote-read-replica --db-instance-identifier <replica> --region {{ .steps.target_region.value }}`).
-          2. Switch Route53 failover records to the DR endpoints.
-          3. Verify application health in {{ .steps.target_region.value }}.
-          4. Record the incident and notify stakeholders.
+          Prod only: fnx-ue1-prod fails over to fnx-ue2-prod. Details and commands:
+          docs/OPERATIONS.md, "Disaster recovery".
+          1. Freeze other merges to master (CD applies every merge).
+          2. DNS: api.<domain> moves to {{ .steps.target_region.value }} when the primary's Route 53
+             health check fails; force it with
+             `aws route53 update-health-check --health-check-id <ue1 id> --inverted`.
+          3. Database: PR `replicate_source_db: null` on fnx-ue2-prod rds/main (promotes the replica).
+          4. Cache: `aws elasticache failover-global-replication-group --primary-region {{ .steps.target_region.value }}
+             --primary-replication-group-id ue2-prod-cache --global-replication-group-id <id>`.
+          5. PR on fnx-ue2-prod: eks/main node groups to fnx-ue1-prod's sizes,
+             eks-backend-services/main enabled; deploy it in-VPC.
+          6. Verify: `curl -sf https://api.<domain>/`, then dr-status for fnx-ue2-prod.
 
   dr-failback:
     description: Execute failback to the primary region (guided runbook)
@@ -85,10 +92,12 @@ workflows:
       - name: runbook
         type: markdown
         content: |
-          **Failback steps**
-          1. Resync data from DR to primary.
-          2. Shift DNS weights back to the primary region gradually.
-          3. Demote the DR database back to a read replica.
+          **Failback steps** (docs/OPERATIONS.md, "Disaster recovery")
+          1. Recreate fnx-ue1-prod rds/main as a replica of fnx-ue2-prod's (replicate_source_db),
+             promote it at zero lag, then make fnx-ue2-prod's a replica again.
+          2. Move the cache primary back: failover-global-replication-group --primary-region us-east-1.
+          3. Un-invert the primary's health check if it was forced; DNS returns to us-east-1.
+          4. Revert fnx-ue2-prod to its warm sizes, eks-backend-services/main disabled.
 
   recover-state:
     description: List Terraform state object versions available for recovery

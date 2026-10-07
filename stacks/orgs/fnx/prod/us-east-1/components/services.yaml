@@ -99,6 +99,11 @@ components:
         certificate_arn: !terraform.state acm/main .certificate_arns.main_wildcard
         api_name: "{{ .settings.context.stage }}-main-api"
         zone_id: !terraform.state network/main .zone_ids.main
+        # DR (owner decision Q5): the PRIMARY half of api.<domain>'s Route 53
+        # failover pair, health-checked on this region's stage root;
+        # fnx-ue2-prod's apigateway/main is the SECONDARY.
+        route53_failover_type: PRIMARY
+        route53_set_identifier: "{{ .settings.prefix }}"
 
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000
@@ -304,6 +309,10 @@ components:
           - elasticache/prod
       vars:
         cluster_id: "{{ .settings.context.stage }}-cache"
+        # DR (owner decision Q5): a Global Datastore with this cache as primary;
+        # fnx-ue2-prod's elasticache/main is its secondary. The suffix is
+        # global per account, so it carries the full id.
+        global_replication_group_id_suffix: "{{ .atmos_stack }}-cache"
         engine_version: "7.0"
         node_type: "cache.r5.large"
         num_cache_nodes: 3
