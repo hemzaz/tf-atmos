@@ -73,5 +73,9 @@ jobs:
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      # The atmos image has no aws CLI or jq: each DR workflow's
+      # dependencies.tools installs the pinned versions through the Atmos
+      # toolchain before its steps run, and dr-status.sh refuses to start
+      # without them.
       - name: Run DR workflow
         run: atmos workflow "$ACTION" -f disaster-recovery

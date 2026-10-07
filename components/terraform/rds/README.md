@@ -42,6 +42,11 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
   from the source, carries `Role=read-replica` (so `backup` skips it), and has no master user
   secret (`password_secret_arn` is null) and no rotation. Setting it back to `null` promotes the
   replica: RDS then creates the managed secret and rotation starts. A replica cannot use RDS Proxy.
+  Setting it on a standalone instance, or to another source, does not force a replacement in the
+  AWS provider, and AWS cannot turn an instance into a replica: the apply errors. Replace it
+  explicitly (`-replace=aws_db_instance.main`, deletion protection lifted first), as the DR
+  failback does (docs/OPERATIONS.md). A promotion's plan must update in place: `db_name` and
+  `username` force a replacement, so they must equal the source's.
   Deleting an unpromoted replica needs `skip_final_snapshot: true` (RDS takes no final snapshot of a
   replica); deletion protection blocks it either way.
 - The final snapshot is `final_snapshot_identifier`, else `<Environment>-<identifier>-final-snapshot`:

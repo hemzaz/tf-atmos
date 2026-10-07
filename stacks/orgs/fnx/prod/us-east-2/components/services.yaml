@@ -131,6 +131,10 @@ components:
         zone_id: !terraform.state network/main fnx-ue1-prod .zone_ids.main
         route53_failover_type: SECONDARY
         route53_set_identifier: "{{ .settings.prefix }}"
+        # The health check's alarm is in us-east-1 (Route 53's metrics are only
+        # there), so it notifies fnx-ue1-prod monitoring/main's topic (ue1).
+        health_check_alarm_actions:
+          - "arn:aws:sns:us-east-1:{{ .settings.environment.account_id }}:ue1-main-alarms"
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000
         enable_logging: true

@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Check disaster recovery readiness and status
 # Extracted from the inline `dr-status` workflow; run via `atmos workflow dr-status -f disaster-recovery`.
+#
+# The workflow's dependencies.tools installs the pinned aws CLI and jq through
+# the Atmos toolchain (also in CI's atmos container, which ships neither).
+for tool in aws jq; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "dr-status: '$tool' is not on PATH. Run it as 'atmos workflow dr-status -f disaster-recovery' (the workflow's toolchain installs the pinned aws CLI and jq), or install it." >&2
+    exit 127
+  fi
+done
+
 # shellcheck source=../common/stack-context.sh
 source "$(dirname "$0")/../common/stack-context.sh"
 # The state bucket is read through the stack's read-only backend role (state_aws).
@@ -20,6 +30,36 @@ log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $*"; }
 log_error() { echo -e "${RED}[FAIL]${NC} $*"; }
 log_warning() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+
+# aws_query <not-found regex> <command...>: runs the command, printing its
+# stdout. Returns 0 on success; 3 when it fails with an error matching the
+# regex (the resource is absent: a finding, not a failure); for any other
+# error (AccessDenied, throttling, a bad region) it prints the error and
+# returns 1, which the callers turn into an exit: a report built on swallowed
+# errors would score a broken check as a missing resource.
+aws_query() {
+  local not_found="$1" err rc=0
+  shift
+  err="$(mktemp)"
+  "$@" 2>"$err" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    if [[ -n "$not_found" ]] && grep -Eq "$not_found" "$err"; then
+      rm -f "$err"
+      return 3
+    fi
+    echo >&2
+    echo "dr-status: '$*' failed: $(cat "$err")" >&2
+    rm -f "$err"
+    return 1
+  fi
+  rm -f "$err"
+}
+
+# fail: the query errored (not a not-found): stop with that error.
+fail() {
+  echo "dr-status: stopping on the error above; fix access or retry." >&2
+  exit 1
+}
 
 echo -e "\n${WHITE}=== Disaster Recovery Status Check ===${NC}\n"
 
@@ -41,12 +81,14 @@ echo -e "${WHITE}1. Terraform State Backend${NC}"
 BUCKET_NAME="${STATE_BUCKET}"
 
 echo -n "   S3 bucket exists: "
-if state_aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+rc=0
+aws_query '\(404\)|Not Found|NoSuchBucket' state_aws s3api head-bucket --bucket "$BUCKET_NAME" >/dev/null || rc=$?
+if [[ $rc -eq 0 ]]; then
   log_success "Yes"
   ((DR_SCORE+=10))
 
   echo -n "   Versioning enabled: "
-  VERSIONING=$(state_aws s3api get-bucket-versioning --bucket "$BUCKET_NAME" --query 'Status' --output text 2>/dev/null || echo "None")
+  VERSIONING="$(aws_query '' state_aws s3api get-bucket-versioning --bucket "$BUCKET_NAME" --query 'Status' --output text)" || fail
   if [[ "$VERSIONING" == "Enabled" ]]; then
     log_success "Yes"
     ((DR_SCORE+=10))
@@ -55,14 +97,21 @@ if state_aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
   fi
 
   echo -n "   Cross-region replication: "
-  if state_aws s3api get-bucket-replication --bucket "$BUCKET_NAME" >/dev/null 2>&1; then
-    log_success "Configured"
+  rc=0
+  REPLICA="$(aws_query 'ReplicationConfigurationNotFoundError' state_aws s3api get-bucket-replication --bucket "$BUCKET_NAME" \
+    --query 'ReplicationConfiguration.Rules[0].Destination.Bucket' --output text)" || rc=$?
+  if [[ $rc -eq 0 ]]; then
+    log_success "Configured (to ${REPLICA##*:})"
     ((DR_SCORE+=15))
-  else
+  elif [[ $rc -eq 3 ]]; then
     log_warning "Not configured"
+  else
+    fail
   fi
-else
+elif [[ $rc -eq 3 ]]; then
   log_error "Not found"
+else
+  fail
 fi
 
 # State locking uses S3 native lockfiles (use_lockfile); no DynamoDB table to check.
@@ -73,8 +122,8 @@ fi
 echo -e "\n${WHITE}2. VPC and Networking${NC}"
 
 echo -n "   Primary VPC exists: "
-PRIMARY_VPC=$(aws ec2 describe-vpcs --filters "Name=tag:Tenant,Values=${TENANT}" "Name=tag:Environment,Values=${ENVIRONMENT}" \
-  --region "$REGION" --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
+PRIMARY_VPC="$(aws_query '' aws ec2 describe-vpcs --filters "Name=tag:Tenant,Values=${TENANT}" "Name=tag:Environment,Values=${ENVIRONMENT}" \
+  --region "$REGION" --query 'Vpcs[0].VpcId' --output text)" || fail
 if [[ "$PRIMARY_VPC" != "None" ]] && [[ -n "$PRIMARY_VPC" ]]; then
   log_success "$PRIMARY_VPC"
   ((DR_SCORE+=10))
@@ -83,8 +132,8 @@ else
 fi
 
 echo -n "   NAT Gateway redundancy: "
-NAT_COUNT=$(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$PRIMARY_VPC" "Name=state,Values=available" \
-  --region "$REGION" --query 'NatGateways | length(@)' --output text 2>/dev/null || echo "0")
+NAT_COUNT="$(aws_query '' aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$PRIMARY_VPC" "Name=state,Values=available" \
+  --region "$REGION" --query 'NatGateways | length(@)' --output text)" || fail
 if [[ "$NAT_COUNT" -gt 1 ]]; then
   log_success "$NAT_COUNT NAT Gateways (multi-AZ)"
   ((DR_SCORE+=5))
@@ -99,8 +148,8 @@ fi
 # =================================================================
 echo -e "\n${WHITE}3. Database (RDS)${NC}"
 
-RDS_INSTANCES=$(aws rds describe-db-instances --query "DBInstances[?contains(DBInstanceIdentifier, '${TENANT}') && contains(DBInstanceIdentifier, '${ENVIRONMENT}')]" \
-  --region "$REGION" 2>/dev/null)
+RDS_INSTANCES="$(aws_query '' aws rds describe-db-instances --query "DBInstances[?contains(DBInstanceIdentifier, '${TENANT}') && contains(DBInstanceIdentifier, '${ENVIRONMENT}')]" \
+  --region "$REGION")" || fail
 
 if [[ -n "$RDS_INSTANCES" ]] && [[ "$RDS_INSTANCES" != "[]" ]]; then
   echo -n "   RDS instances found: "
@@ -129,8 +178,8 @@ if [[ -n "$RDS_INSTANCES" ]] && [[ "$RDS_INSTANCES" != "[]" ]]; then
 
   # Check read replicas
   echo -n "   Read replicas: "
-  READ_REPLICA_COUNT=$(aws rds describe-db-instances --query "DBInstances[?ReadReplicaSourceDBInstanceIdentifier!=null] | length(@)" \
-    --region "$REGION" --output text 2>/dev/null || echo "0")
+  READ_REPLICA_COUNT="$(aws_query '' aws rds describe-db-instances --query "DBInstances[?ReadReplicaSourceDBInstanceIdentifier!=null] | length(@)" \
+    --region "$REGION" --output text)" || fail
   if [[ "$READ_REPLICA_COUNT" -gt 0 ]]; then
     log_success "$READ_REPLICA_COUNT replica(s)"
     ((DR_SCORE+=5))
@@ -146,13 +195,15 @@ fi
 # =================================================================
 echo -e "\n${WHITE}4. EKS Cluster${NC}"
 
-EKS_CLUSTERS=$(aws eks list-clusters --region "$REGION" --query 'clusters' --output text 2>/dev/null | tr '\t' '\n' | grep "$TENANT" || echo "")
+EKS_CLUSTERS="$(aws_query '' aws eks list-clusters --region "$REGION" --query 'clusters' --output text)" || fail
+# grep finding no cluster is not an error.
+EKS_CLUSTERS="$(tr '\t' '\n' <<<"$EKS_CLUSTERS" | grep "$TENANT" || true)"
 
 if [[ -n "$EKS_CLUSTERS" ]]; then
   for cluster in $EKS_CLUSTERS; do
     echo -n "   Cluster $cluster: "
 
-    CLUSTER_STATUS=$(aws eks describe-cluster --name "$cluster" --region "$REGION" --query 'cluster.status' --output text 2>/dev/null || echo "UNKNOWN")
+    CLUSTER_STATUS="$(aws_query '' aws eks describe-cluster --name "$cluster" --region "$REGION" --query 'cluster.status' --output text)" || fail
     if [[ "$CLUSTER_STATUS" == "ACTIVE" ]]; then
       log_success "Active"
       ((DR_SCORE+=5))
@@ -161,7 +212,7 @@ if [[ -n "$EKS_CLUSTERS" ]]; then
     fi
 
     echo -n "   Node group redundancy: "
-    NG_COUNT=$(aws eks list-nodegroups --cluster-name "$cluster" --region "$REGION" --query 'nodegroups | length(@)' --output text 2>/dev/null || echo "0")
+    NG_COUNT="$(aws_query '' aws eks list-nodegroups --cluster-name "$cluster" --region "$REGION" --query 'nodegroups | length(@)' --output text)" || fail
     if [[ "$NG_COUNT" -gt 1 ]]; then
       log_success "$NG_COUNT node groups"
       ((DR_SCORE+=5))
@@ -184,9 +235,11 @@ echo -e "\n${WHITE}5. Backup Vaults (AWS Backup)${NC}"
 # copies cross-region, the replica vault <that name>-replica in replica_region
 # (components/terraform/backup/main.tf). Names come from the stack's resolved
 # config: nothing in this repo creates an S3 "backups" bucket.
-vault_points() { # <vault> <region>: its recovery point count, empty when missing
-  aws backup describe-backup-vault --backup-vault-name "$1" --region "$2" \
-    --query 'NumberOfRecoveryPoints' --output text 2>/dev/null || true
+vault_points() { # <vault> <region>: its recovery point count, empty when missing; exits on any other error
+  local rc=0
+  aws_query 'ResourceNotFoundException' aws backup describe-backup-vault --backup-vault-name "$1" --region "$2" \
+    --query 'NumberOfRecoveryPoints' --output text || rc=$?
+  [[ $rc -eq 0 || $rc -eq 3 ]] || fail
 }
 
 if BACKUP_CFG="$(atmos describe component backup/main -s "$STACK" \

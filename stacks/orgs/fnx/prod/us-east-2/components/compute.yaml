@@ -3,11 +3,12 @@
 # Compute for fnx-ue2-prod (DR warm standby)
 # =============================================================================
 # Warm = the same cluster shape as fnx-ue1-prod's eks/main at its floor: the
-# workers node group runs at 2 nodes (one per AZ for two AZs), the monitoring
-# and memory-optimized groups at 0, each keeping fnx-ue1-prod's max_group_size.
-# Failover scales them (cluster-autoscaler from eks-addons/main, or
-# min_group_size/desired_group_size in a PR: docs/OPERATIONS.md, "Disaster
-# recovery"). Cloud Posse's eks/cluster node groups take the same
+# workers node group runs at 2 nodes, spread over vpc/main's three private
+# subnets (use2-az1..az3) like every group here, the monitoring and
+# memory-optimized groups at 0, each keeping fnx-ue1-prod's max_group_size.
+# Failover scales them with aws eks update-nodegroup-config, and a PR setting
+# min_group_size/desired_group_size reconciles Terraform afterwards
+# (docs/OPERATIONS.md, "Disaster recovery"). Cloud Posse's eks/cluster node groups take the same
 # min/desired/max inputs. The operator path (bastion) and the in-VPC CI
 # runners are as in fnx-ue1-prod, so the in-cluster components can be applied
 # here on failover.

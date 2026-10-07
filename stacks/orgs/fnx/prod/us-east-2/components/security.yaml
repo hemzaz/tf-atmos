@@ -130,6 +130,19 @@ components:
       vars:
         standards:
           - "pci-dss/v/3.2.1"
+        # AWS Config records global resources (IAM) in us-east-1 only
+        # (awsconfig/main above), so the controls that check them are
+        # disabled here, as AWS's Security Hub guidance says for every region
+        # but the recording one; fnx-ue1-prod evaluates them. Per standard, the
+        # IAM controls each one contains.
+        disabled_security_controls:
+          "aws-foundational-security-best-practices/v/1.0.0":
+            ["IAM.1", "IAM.2", "IAM.3", "IAM.4", "IAM.5", "IAM.6", "IAM.7", "IAM.8", "IAM.21"]
+          "cis-aws-foundations-benchmark/v/1.2.0":
+            ["IAM.1", "IAM.2", "IAM.3", "IAM.4", "IAM.5", "IAM.6", "IAM.8", "IAM.9", "IAM.11", "IAM.12",
+             "IAM.13", "IAM.14", "IAM.15", "IAM.16", "IAM.17", "IAM.18", "IAM.20"]
+          "pci-dss/v/3.2.1":
+            ["IAM.1", "IAM.2", "IAM.4", "IAM.6", "IAM.8", "IAM.9", "IAM.10", "IAM.19"]
 
     inspector2/main:
       metadata:

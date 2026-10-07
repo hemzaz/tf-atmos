@@ -22,8 +22,11 @@ stdout carries only stack names; every ::error:: goes to stderr, so a caller
 that captures stdout (subprocess.check_output) still shows the reason.
 
 Order: settings.context.stage by STAGE_ORDER (dev, staging, prod), other
-stages (plan-sweep's fixtures) after them, ties by stack name. A selected stack
-without exactly one stage is an error in both list modes.
+stages (plan-sweep's fixtures) after them; within a stage, a DR standby
+(settings.dr.standby_of: <primary stack>, fnx-ue2-prod) right after the stack
+it stands by for, which it reads through !terraform.state; other ties by stack
+name. A selected stack without exactly one stage, or a standby whose primary is
+not a selected stack of the same stage, is an error in both list modes.
 """
 import argparse
 import json
@@ -54,6 +57,15 @@ def stage(config: dict):
     return stages.pop() if len(stages) == 1 else None
 
 
+def standby_of(config: dict):
+    """The stack's settings.dr.standby_of (its DR primary), or None."""
+    primaries = {
+        (((spec or {}).get("settings") or {}).get("dr") or {}).get("standby_of")
+        for spec in instances(config).values()
+    } - {None}
+    return primaries.pop() if len(primaries) == 1 else None
+
+
 def ci_disabled(config: dict) -> bool:
     """True when EVERY terraform instance opts out of hosted CI."""
     specs = instances(config).values()
@@ -72,9 +84,25 @@ def ordered(stacks: dict, names) -> list:
                 f"{name!r} has no single settings.context.stage (no terraform instances, or mixed stages)"
             )
 
+    selected = set(names)
+    for name in names:
+        primary = standby_of(stacks[name])
+        if primary is None:
+            continue
+        if primary not in selected or stage(stacks[primary]) != stage(stacks[name]):
+            raise ValueError(
+                f"{name!r} is a DR standby of {primary!r} (settings.dr.standby_of), which is not a selected "
+                f"stack of stage {stage(stacks[name])!r}: the standby reads its primary's state, so the "
+                "primary must deploy first"
+            )
+        if standby_of(stacks[primary]) is not None:
+            raise ValueError(f"{name!r} is a standby of {primary!r}, which is itself a standby: chains are not supported")
+
     def key(name):
         s = stage(stacks[name])
-        return (STAGE_ORDER.index(s) if s in STAGE_ORDER else len(STAGE_ORDER), name)
+        # A standby sorts with its primary, right after it, whatever the names.
+        primary = standby_of(stacks[name])
+        return (STAGE_ORDER.index(s) if s in STAGE_ORDER else len(STAGE_ORDER), primary or name, primary is not None, name)
 
     return sorted(names, key=key)
 

@@ -104,6 +104,11 @@ components:
         # fnx-ue2-prod's apigateway/main is the SECONDARY.
         route53_failover_type: PRIMARY
         route53_set_identifier: "{{ .settings.prefix }}"
+        # The health check's alarm lives in us-east-1 (Route 53's metrics are
+        # only there) and notifies monitoring/main's topic, by name: that
+        # component reads this one, so a !terraform.state here would be a cycle.
+        health_check_alarm_actions:
+          - "arn:aws:sns:us-east-1:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
 
         throttling_burst_limit: 5000
         throttling_rate_limit: 10000

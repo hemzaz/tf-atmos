@@ -52,6 +52,56 @@ class TodayTest(unittest.TestCase):
         )
 
 
+def standby(stage_name, primary):
+    """A describe-stacks entry of a DR standby (settings.dr.standby_of)."""
+    entry = stack(stage_name)
+    for spec in entry["components"]["terraform"].values():
+        spec["settings"]["dr"] = {"standby_of": primary}
+    return entry
+
+
+class DisasterRecoveryOrderTest(unittest.TestCase):
+    """fnx-ue2-prod reads fnx-ue1-prod's state: CD must deploy it after, by flag, not by name."""
+
+    def test_the_standby_deploys_right_after_its_primary(self):
+        stacks = dict(TODAY, **{"fnx-ue2-prod": standby("prod", "fnx-ue1-prod")})
+        self.assertEqual(
+            ci_stacks.ci_stacks(stacks), ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod", "fnx-ue2-prod"]
+        )
+
+    def test_the_order_does_not_depend_on_the_names(self):
+        # A standby whose name sorts first still follows its primary.
+        stacks = {
+            "b-prod": stack("prod"),
+            "a-prod": standby("prod", "b-prod"),
+            "c-prod": stack("prod"),
+        }
+        self.assertEqual(ci_stacks.ci_stacks(stacks), ["b-prod", "a-prod", "c-prod"])
+
+    def test_plan_sweep_keeps_the_same_order(self):
+        stacks = dict(TODAY, **{"fnx-ue2-prod": standby("prod", "fnx-ue1-prod")})
+        self.assertEqual(ci_stacks.plan_sweep_stacks(stacks)[:4],
+                         ["fnx-ue1-dev", "fnx-ue1-staging", "fnx-ue1-prod", "fnx-ue2-prod"])
+
+    def test_a_standby_of_an_unknown_stack_fails(self):
+        stacks = dict(TODAY, **{"fnx-ue2-prod": standby("prod", "fnx-ue9-prod")})
+        with self.assertRaisesRegex(ValueError, r"'fnx-ue2-prod' is a DR standby of 'fnx-ue9-prod'"):
+            ci_stacks.ci_stacks(stacks)
+
+    def test_a_standby_in_another_stage_fails(self):
+        stacks = dict(TODAY, **{"fnx-ue2-prod": standby("prod", "fnx-ue1-staging")})
+        with self.assertRaisesRegex(ValueError, r"not a selected stack of stage 'prod'"):
+            ci_stacks.ci_stacks(stacks)
+
+    def test_a_chain_of_standbys_fails(self):
+        stacks = dict(TODAY, **{
+            "fnx-ue2-prod": standby("prod", "fnx-ue1-prod"),
+            "fnx-uw2-prod": standby("prod", "fnx-ue2-prod"),
+        })
+        with self.assertRaisesRegex(ValueError, r"itself a standby"):
+            ci_stacks.ci_stacks(stacks)
+
+
 class NewStackTest(unittest.TestCase):
     def test_a_new_stack_flows_in_without_edits(self):
         stacks = dict(TODAY, **{"fnx-ew1-prod": stack("prod"), "fnx-ue2-dev": stack("dev")})

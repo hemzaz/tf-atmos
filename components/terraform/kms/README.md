@@ -39,4 +39,9 @@ use through their own IAM policies.
   `aws-kms` has no replicas (one key per region stack): `aws_kms_replica_key` is this library's
   deviation, chosen so data copied to the DR region (backups, replicas) decrypts with the same key
   material.
+- A replica's policy is generated from the same `allow_*` set as the primary, scoped to the
+  replica's region; there is no per-region override, by choice. The DR region runs the same
+  services as the primary (it is the failover target), and the policy otherwise delegates to the
+  account root, IAM deciding who uses the key, as in Cloud Posse's `aws-kms`. A replica that needs
+  a different service set is a reason to give that region its own key instead.
 - `rotation_period_in_days` 90-2560, `deletion_window_in_days` 7-30 (validated).
