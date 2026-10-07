@@ -32,4 +32,11 @@ use through their own IAM policies.
 - The CI apply role gets key use via `iam`'s `ci_apply_kms_key_aliases` (by alias, because
   `iam/ci` applies in the layer before `kms/main`).
 - Replicas get their own region-scoped policy; the `key_policy` output is the primary's.
+- Prod's `kms/main` is multi-region with a replica in the DR region (`replica_regions:
+  [us-east-2]`) and `replica_alias_names` gives it the DR stack's alias (`ue2-main`), so
+  `fnx-ue2-prod` names it the way every stack names its own key. `replica_keys` maps each region
+  to the replica's `key_arn` and alias; `backup/main` and `fnx-ue2-prod` read it. Cloud Posse's
+  `aws-kms` has no replicas (one key per region stack): `aws_kms_replica_key` is this library's
+  deviation, chosen so data copied to the DR region (backups, replicas) decrypts with the same key
+  material.
 - `rotation_period_in_days` 90-2560, `deletion_window_in_days` 7-30 (validated).

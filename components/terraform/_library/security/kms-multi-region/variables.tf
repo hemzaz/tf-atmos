@@ -236,6 +236,22 @@ variable "replica_regions" {
   }
 }
 
+variable "replica_alias_names" {
+  type        = map(string)
+  description = "Alias (without the alias/ prefix) to create for the replica key in each region, keyed by region. A region left out gets no alias. Lets a stack in the replica region reach its key by alias, as it reaches its own primary key"
+  default     = {}
+
+  validation {
+    condition     = alltrue([for region in keys(var.replica_alias_names) : contains(var.replica_regions, region)])
+    error_message = "Every replica_alias_names key must be one of replica_regions."
+  }
+
+  validation {
+    condition     = alltrue([for name in values(var.replica_alias_names) : can(regex("^[a-zA-Z0-9/_-]+$", name)) && !startswith(name, "aws/") && !startswith(name, "alias/")])
+    error_message = "replica_alias_names values are alias names without the alias/ prefix: letters, digits, /, _ and - only, never starting with aws/."
+  }
+}
+
 variable "replica_deletion_window_in_days" {
   type        = number
   description = "Deletion window for replica keys"

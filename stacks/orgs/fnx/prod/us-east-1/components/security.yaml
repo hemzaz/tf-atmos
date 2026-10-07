@@ -145,6 +145,20 @@ components:
         description: Production main encryption key (EKS secrets, EC2/EBS, RDS)
         alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
         deletion_window_in_days: 30  # prod keeps the full window
+        # DR (owner decision Q5: warm standby in us-east-2). A multi-region key
+        # with its replica in the DR region: ciphertext from either region
+        # decrypts under the other's key, so backup copies (backup/main's
+        # replica vault) and fnx-ue2-prod's resources use the replica, which
+        # gets its own region-scoped policy (#186). The replica's alias is
+        # fnx-ue2-prod's settings.prefix + "-main", the name its iam/ci
+        # ci_apply_kms_key_aliases expects. Cloud Posse's aws-kms has no
+        # replicas (one key per region stack); this library's
+        # aws_kms_replica_key is the deviation (components/terraform/kms/README.md).
+        is_multi_region: true
+        replica_regions:
+          - us-east-2
+        replica_alias_names:
+          us-east-2: ue2-main
         # No named key_administrators/key_users: KMS validates every principal
         # named in a key policy at CreateKey/PutKeyPolicy time, and this repo's
         # IaC creates neither a "role/Admin" nor a "production-eks-node-role" /
@@ -376,8 +390,10 @@ components:
     # rds/data (Backup=true in their own services.yaml vars.tags) and any
     # EC2/EBS resource tagged the same way. Retention matches the account's
     # pci-sox-gdpr compliance tag (globals.yaml): 7-year monthly retention for
-    # SOX. Vault lock and cross-region replication stay off until an owner
-    # explicitly configures a replica region/key.
+    # SOX. Every recovery point is also copied to the DR region (owner
+    # decision Q5): vault <Environment>-backup-replica in us-east-2, on
+    # kms/main's replica key, kept as long as the source point (Cloud Posse
+    # aws-backup's copy_action destination_vault_arn). Vault lock stays off.
     # ==========================================================================
     backup/main:
       metadata:
@@ -394,6 +410,9 @@ components:
         # staging's shorter monthly retention (30/90 days) don't inherit a
         # cold-storage floor they can't satisfy (round-5 review HIGH fix).
         monthly_cold_storage_days: 90
+        enable_cross_region_backup: true
+        replica_region: us-east-2
+        replica_kms_key_arn: !terraform.state kms/main '.replica_keys["us-east-2"].key_arn'
         notification_emails:
           - "{{ index .settings.environment.monitoring.critical_alerts 0 }}"
           - "{{ index .settings.environment.monitoring.critical_alerts 1 }}"

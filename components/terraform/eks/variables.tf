@@ -185,7 +185,7 @@ variable "cluster_encryption_config_kms_key_id" {
   nullable    = false
 
   validation {
-    condition     = var.cluster_encryption_config_kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.cluster_encryption_config_kms_key_id))
+    condition     = var.cluster_encryption_config_kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[a-f0-9-]+$", var.cluster_encryption_config_kms_key_id))
     error_message = "KMS key ARN must be in a valid format (e.g., arn:aws:kms:region:account-id:key/key-id)."
   }
 }
@@ -201,7 +201,7 @@ variable "node_group_ebs_kms_key_id" {
   nullable    = false
 
   validation {
-    condition     = var.node_group_ebs_kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]+$", var.node_group_ebs_kms_key_id))
+    condition     = var.node_group_ebs_kms_key_id == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/(mrk-)?[a-f0-9-]+$", var.node_group_ebs_kms_key_id))
     error_message = "node_group_ebs_kms_key_id must be a valid KMS key ARN (e.g., arn:aws:kms:region:account-id:key/key-id)."
   }
 }
