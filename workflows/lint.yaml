@@ -257,14 +257,16 @@ workflows:
       # runners (settings.github.runner: in-vpc, with a pool its clusters
       # admit) or set settings.github.actions_enabled: false
       # (docs/OPERATIONS.md, "In-cluster components"); a master-only stack's
-      # runner pool must set allowed_refs; and each eks cluster admin role there
+      # runner pool must set allowed_refs; each pool must be in its stack's
+      # iam/ci ci_runner_pool_names; each provider exec command needs its
+      # tool in dependencies.tools; and each eks cluster admin role there
       # (map_additional_iam_roles) must be trusted by its stage's state write
       # role; a cluster with none only warns. Also run by validate-all.
       - name: check-cluster-api-ci
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py
+          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py workflows/scripts/common/test_ci_in_vpc.py workflows/scripts/common/test_runner_scripts.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"

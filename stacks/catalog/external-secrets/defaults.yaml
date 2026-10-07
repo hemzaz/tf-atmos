@@ -22,6 +22,10 @@ components:
       dependencies:
         components:
           - component: kms/main
+        # The helm provider's exec plugin runs `aws eks get-token`; the atmos
+        # image has no aws CLI (check-cluster-api-ci.py checks the tools).
+        tools:
+          aws/aws-cli: "2.36.49"
       vars:
         enabled: true
 

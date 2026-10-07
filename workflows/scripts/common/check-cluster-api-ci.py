@@ -23,7 +23,14 @@ allowed_security_group_ids): an ERROR otherwise. A pool in another vpc is
 checked for peering and NACLs like a bastion (below). A pool in a stack that is
 planned from master only (settings.github.pull_request_plans_enabled: false,
 production) must set allowed_refs, so its runners refuse a pull request's job
-that asks for its label: an ERROR otherwise.
+that asks for its label: an ERROR otherwise. Each deployable runner pool's
+Auto Scaling group (<tags.Environment>-<vars.name>) must be in its stack's
+iam/ci ci_runner_pool_names, or CI cannot start its runners: an ERROR.
+
+A provider exec plugin (`exec { command = "aws" }`) runs a binary the atmos
+image may lack: every deployable instance of a component whose providers exec
+a command must list that command's tool in dependencies.tools (aws ->
+aws/aws-cli), and an unknown command is an ERROR.
 
 That operator is an eks map_additional_iam_roles role with system:masters (a
 cluster-scoped AmazonEKSClusterAdminPolicy access entry, set in each stack's
@@ -59,6 +66,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import fixtures  # noqa: E402
 
 CLUSTER_PROVIDER = re.compile(r'^\s*provider\s+"(kubernetes|helm|kubectl)"', re.MULTILINE)
+EXEC_COMMAND = re.compile(r'\bexec\s*=?\s*\{[^}]*?\bcommand\s*=\s*"([^"]+)"', re.DOTALL)
+# The Atmos toolchain tool that provides each provider exec command.
+EXEC_TOOLS = {"aws": "aws/aws-cli"}
+RUNNER_POOL_DEFAULT_NAME = "github-runners"
 RUNNER_COMPONENT = "github-runners"
 RUNNER_MODES = ("hosted", "in-vpc")
 # Instances whose security group may be an operator or CI path into a cluster.
@@ -161,6 +172,58 @@ def check_runner_paths(stacks: dict, cluster: set[str]) -> list[str]:
                         f"{dep['component']} does not admit them (add `!terraform.state {pools[0]} "
                         ".security_group_id` to its allowed_security_group_ids)"
                     )
+    return errors
+
+
+def exec_commands(components_dir: pathlib.Path) -> dict[str, set[str]]:
+    """Component directory -> the commands its .tf files' provider exec plugins run."""
+    commands: dict[str, set[str]] = {}
+    for tf in components_dir.glob("*/*.tf"):
+        found = set(EXEC_COMMAND.findall(tf.read_text(encoding="utf-8")))
+        if found:
+            commands.setdefault(tf.parent.name, set()).update(found)
+    return commands
+
+
+def check_exec_tools(stacks: dict, commands: dict[str, set[str]]) -> list[str]:
+    """Instances whose provider exec commands have no tool in dependencies.tools."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(deployable_instances(stack).items()):
+            tools = ((instance.get("dependencies") or {}).get("tools")) or {}
+            for command in sorted(commands.get(instance.get("component"), ())):
+                tool = EXEC_TOOLS.get(command)
+                if tool is None:
+                    errors.append(f"{stack_name}: {name} runs provider exec command {command!r}, which no tool maps to")
+                elif tool not in tools:
+                    errors.append(
+                        f"{stack_name}: {name} runs provider exec command {command!r} but dependencies.tools "
+                        f"lacks {tool} (the atmos image has no {command})"
+                    )
+    return errors
+
+
+def pool_group_name(instance: dict) -> str:
+    """A github-runners instance's Auto Scaling group: <tags.Environment>-<vars.name>."""
+    variables = instance.get("vars") or {}
+    return f"{(variables.get('tags') or {}).get('Environment')}-{variables.get('name') or RUNNER_POOL_DEFAULT_NAME}"
+
+
+def check_pool_start_grants(stacks: dict) -> list[str]:
+    """Runner pools missing from their stack's iam/ci ci_runner_pool_names."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        instances = deployable_instances(stack)
+        granted = set(((instances.get("iam/ci") or {}).get("vars") or {}).get("ci_runner_pool_names") or [])
+        for name, instance in sorted(instances.items()):
+            if instance.get("component") != RUNNER_COMPONENT:
+                continue
+            group = pool_group_name(instance)
+            if group not in granted:
+                errors.append(
+                    f"{stack_name}: {name} ({group}) is not in iam/ci ci_runner_pool_names, so CI cannot start "
+                    "its runners"
+                )
     return errors
 
 
@@ -339,7 +402,8 @@ def main() -> int:
     operator_errors, warnings = check_operators(stacks, cluster)
     operator_errors = fixtures.fatal(operator_errors, "check-cluster-api-ci")
     network_errors = fixtures.fatal(
-        check_network_paths(stacks, cluster) + check_runner_paths(stacks, cluster) + check_protected_pools(stacks),
+        check_network_paths(stacks, cluster) + check_runner_paths(stacks, cluster) + check_protected_pools(stacks)
+        + check_pool_start_grants(stacks) + check_exec_tools(stacks, exec_commands(pathlib.Path(sys.argv[1]))),
         "check-cluster-api-ci",
     )
     for warning in warnings:
@@ -358,7 +422,8 @@ def main() -> int:
         f"every instance of {', '.join(sorted(cluster))} in a stack with a private EKS endpoint "
         "runs on in-vpc runners or sets settings.github.actions_enabled: false, every cluster admin "
         "role there can write its stack's state, and every private cluster they use admits an "
-        "operator path and the in-vpc runners its instances run on"
+        "operator path and the in-vpc runners its instances run on; every runner pool is startable by "
+        "its stack's CI roles (and master-only where its stack is); every provider exec command has its tool"
     )
     return 0
 

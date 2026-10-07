@@ -228,22 +228,28 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
 - `.github/workflows/in-vpc.yml` is called once per (stack, runner label) for PR plans
   (`terraform-ci.yml`), CD and dispatch (`terraform-cd.yml`, after the stack's hosted instances;
   `deployed/<stack>` moves only when both parts succeeded) and drift detection.
-- Its first job raises the label's runner pool by one (`atmos workflow start-runner -f
-  ci-runners`; the CI roles may resize runner pools only). Its second job runs on the ephemeral
+- Its first job starts one runner in the label's pool by executing the pool's +1 start policy
+  (`atmos workflow start-runner -f ci-runners`; the CI roles may execute their stack's pools'
+  policies only, `iam/ci` `ci_runner_pool_names`). Its second job runs on the ephemeral
   runner that starts, with the same OIDC CI roles (which hold EKS access entries).
 - The label is the stack's full id (its name, `{{ .atmos_stack }}`), or
   `settings.github.runner_label`. The `microservices-platform` template runs its own pool in its
   own VPC.
-- The repository is public, so these jobs run only for push, `workflow_dispatch`, `merge_group`,
-  schedule and pull requests from this repository: a fork's pull request is skipped. Keep
-  "Require approval for all outside collaborators" on (First-deploy inputs, GitHub App).
+- The repository is public. The workflow skips these jobs for a fork's pull request, but a
+  pull request controls workflow files, so the guard is on the runner: every pool's job-started
+  hook fails, before its first step, any job that is not this repository's push,
+  `workflow_dispatch`, schedule, `merge_group` or same-repository pull request (github-runners
+  README, "Public repository"). Keep "Require approval for all outside collaborators" on
+  (First-deploy inputs, GitHub App).
 - Production is reached from master only. Its CI roles trust only master's OIDC subject, so a
   pull request cannot start a prod runner, and its pool sets `allowed_refs: [refs/heads/master]`:
   the runner's job-started hook fails any other ref's job before its first step, even one that
   asks for the prod label while a master job started the runner. `check-cluster-api-ci.py` fails
   a pool of a master-only stack (`pull_request_plans_enabled: false`) without `allowed_refs`.
 - `check-cluster-api-ci.py` (lint, validate-all) fails an in-vpc instance whose label has no runner
-  pool, or whose clusters do not admit the pool's security group. An instance with
+  pool, or whose clusters do not admit the pool's security group; a pool missing from its
+  stack's `iam/ci` `ci_runner_pool_names`; and an instance whose providers exec a command
+  (`aws eks get-token`) without its tool in `dependencies.tools` (the atmos image has no aws CLI). An instance with
   `settings.github.actions_enabled: false` instead is left to an operator.
 
 Break-glass, or before the runners exist: an operator applies them through the VPC with their own

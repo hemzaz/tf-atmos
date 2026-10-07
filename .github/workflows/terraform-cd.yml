@@ -272,6 +272,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix: ${{ fromJson(needs.affected-stacks.outputs.in_vpc) }}
+    # No `secrets: inherit`: in-vpc.yml uses only github.token.
     uses: ./.github/workflows/in-vpc.yml
     with:
       stack: ${{ matrix.stack }}
@@ -280,7 +281,6 @@ jobs:
       mode: deploy
       role: apply
       base: ${{ matrix.base }}
-    secrets: inherit
 
   # The only job with contents: write. For each stack whose deploy succeeded
   # (it uploaded a marker artifact, and so did each of its in-VPC deploys),
@@ -315,12 +315,8 @@ jobs:
             sha="$(cat "$dir/sha")"
             [[ "$stack" =~ ^[A-Za-z0-9._-]+$ && "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad marker $dir"; exit 1; }
             # Every in-VPC deploy this stack needed must have succeeded too.
-            missing="$(STACK="$stack" python3 -c '
-          import json, os, pathlib
-          stack = os.environ["STACK"]
-          need = [e["label"] for e in json.loads(os.environ["IN_VPC"] or "{}").get("include", []) if e["stack"] == stack]
-          print(" ".join(l for l in need if not pathlib.Path(f"in-vpc-markers/in-vpc-{stack}--{l}/sha").is_file()))
-          ')"
+            # (ci-in-vpc.py missing, tested in test_ci_in_vpc.py).
+            missing="$(python3 workflows/scripts/common/ci-in-vpc.py missing "$stack" --markers in-vpc-markers)"
             if [ -n "$missing" ]; then
               echo "::warning::$stack: in-VPC deploys did not finish ($missing); leaving deployed/$stack"
               continue
@@ -421,6 +417,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix: ${{ fromJson(needs.dispatch.outputs.in_vpc) }}
+    # No `secrets: inherit`: in-vpc.yml uses only github.token.
     uses: ./.github/workflows/in-vpc.yml
     with:
       stack: ${{ inputs.stack }}
@@ -429,4 +426,3 @@ jobs:
       mode: ${{ inputs.action }}
       role: apply
       components: ${{ inputs.component }}
-    secrets: inherit

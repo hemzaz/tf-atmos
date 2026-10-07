@@ -114,8 +114,10 @@ class RunnerRoutingTest(unittest.TestCase):
     def test_pools_name_each_needed_label_its_pool_and_group(self):
         run, _ = ci_components.select(self.instances, STACK, runner="in-vpc")
         self.assertEqual(ci_components.pools(self.instances, STACK, run), [
-            {"label": "fnx-ue1-dev", "pool": "github-runners/main", "asg": "ue1-github-runners"},
-            {"label": "ms-label", "pool": "github-runners/ms", "asg": "ue1-microservices-runners"},
+            {"label": "fnx-ue1-dev", "pool": "github-runners/main", "asg": "ue1-github-runners",
+             "instances": ["eks-addons/main"]},
+            {"label": "ms-label", "pool": "github-runners/ms", "asg": "ue1-microservices-runners",
+             "instances": ["eks-addons/ms"]},
         ])
 
     def test_affected_in_vpc_subset_needs_only_its_pool(self):
@@ -139,7 +141,7 @@ class RunnerRoutingTest(unittest.TestCase):
     def test_main_pools_for_one_dispatched_component(self):
         code, out = self.run_main("--pools", "--only", "eks-addons/ms")
         self.assertEqual(code, 0)
-        self.assertEqual(out.splitlines(), ['{"asg": "ue1-microservices-runners", "label": "ms-label", "pool": "github-runners/ms"}'])
+        self.assertEqual(out.splitlines(), ['{"asg": "ue1-microservices-runners", "instances": ["eks-addons/ms"], "label": "ms-label", "pool": "github-runners/ms"}'])
 
     def test_main_pools_for_a_hosted_component_is_empty(self):
         self.assertEqual(self.run_main("--pools", "--only", "vpc/main"), (0, ""))

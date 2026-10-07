@@ -21,6 +21,12 @@ components:
       settings:
         github:
           runner: in-vpc
+      # The kubernetes/helm providers' exec plugin runs `aws eks get-token`;
+      # the atmos image has no aws CLI (check-cluster-api-ci.py checks the
+      # tools cover every provider exec command).
+      dependencies:
+        tools:
+          aws/aws-cli: "2.36.49"
       # Only variables the component declares. The add-on switches
       # (enable_aws_load_balancer_controller, enable_cluster_autoscaler,
       # enable_metrics_server, enable_external_dns, enable_cert_manager) and

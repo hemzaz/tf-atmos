@@ -4,7 +4,7 @@
 #   ASG=<pool group> atmos workflow start-runner -f ci-runners
 workflows:
   start-runner:
-    description: Start one ephemeral in-VPC runner (raise the pool's desired capacity by one, up to max_size)
+    description: Start one ephemeral in-VPC runner (execute the pool's +1 start policy, capped at max_size)
     dependencies:
       tools:
         aws/aws-cli: "2.36.49"

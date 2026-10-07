@@ -2,24 +2,30 @@
 # a reusable workflow that terraform-cd.yml, drift-detection.yml and
 # terraform-ci.yml call once per (stack, runner label).
 #
-#   start  (GitHub-hosted) raises the label's runner pool by one
-#          (atmos workflow start-runner -f ci-runners; the CI role may resize
-#          runner pools only, iam/ci ci-runner-pools.tf);
-#   run    (self-hosted, runs-on the label) the ephemeral runner that pool
-#          starts takes this job, assumes the stack's CI role through GitHub
-#          OIDC like the hosted jobs, and plans or deploys the stack's in-vpc
+#   start  (GitHub-hosted) starts one runner in the label's pool: it executes
+#          the pool's +1 start policy (atmos workflow start-runner -f
+#          ci-runners; the CI roles may execute this stack's pools' policies
+#          only, iam/ci ci-runner-pools.tf);
+#   run    (self-hosted, runs-on the label) an ephemeral runner of that pool
+#          takes this job, assumes the stack's CI role through GitHub OIDC
+#          like the hosted jobs, and plans or deploys the stack's in-vpc
 #          instances for that label (ci-components.py --runner in-vpc
 #          --label), in dependency order.
 #
 # Public repository: self-hosted runners must never run fork code. Both jobs
 # run only for push, workflow_dispatch, merge_group, schedule and pull
-# requests from this repository (a fork's pull request is skipped); fork pull
-# requests get no OIDC token anyway. The owner keeps "Require approval for all
-# outside collaborators" on (docs/OPERATIONS.md, First-deploy inputs). The
-# workflow file itself is PR-controlled, so the hard limits are outside it:
-# production's CI roles trust master only (no prod runner starts for a pull
-# request), and its pool's allowed_refs make the runner itself fail any job
-# not on refs/heads/master (github-runners).
+# requests from this repository (a fork's pull request is skipped), and the
+# owner keeps "Require approval for all outside collaborators" on
+# (docs/OPERATIONS.md, First-deploy inputs). This file is PR-controlled, so
+# that `if:` is a convenience; the guard is on the runner: every pool's
+# job-started hook (github-runners files/job-started.sh) fails, before the
+# first step, any job that is not this repository's push, dispatch, schedule,
+# merge queue or same-repository pull request, and production's pool
+# (allowed_refs) any job not on refs/heads/master.
+#
+# A same-repository writer can still queue jobs for a label and take runners
+# that a master job started (the hook then fails those jobs): a delay, not
+# access; re-run the master job.
 name: In-VPC run
 
 on:
@@ -68,6 +74,7 @@ jobs:
       contains(fromJSON('["push", "workflow_dispatch", "merge_group", "schedule"]'), github.event_name) ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     permissions:
@@ -87,7 +94,7 @@ jobs:
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
-      - name: Raise the runner pool by one
+      - name: Start one runner (the pool's +1 start policy)
         env:
           ASG: ${{ inputs.asg }}
         run: atmos workflow start-runner -f ci-runners
@@ -99,6 +106,10 @@ jobs:
       contains(fromJSON('["push", "workflow_dispatch", "merge_group", "schedule"]'), github.event_name) ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, linux, x64, "${{ inputs.label }}"]
+    # A hung plan or apply must not hold the runner, the stack's run and its
+    # state lock for GitHub's six hours (the clock starts once a runner has
+    # taken the job, not while it is queued).
+    timeout-minutes: 120
     container:
       image: ghcr.io/cloudposse/atmos:1.229.0@sha256:9777fffcaf0ac3f0ef96ef584b9d7a4f8b9ac3640950149d525d30c9874a556d
     # No `environment:`: it would change the OIDC sub (see terraform-cd.yml).
@@ -107,7 +118,7 @@ jobs:
       id-token: write
       statuses: write
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
       STACK: ${{ inputs.stack }}
       LABEL: ${{ inputs.label }}
       MODE: ${{ inputs.mode }}

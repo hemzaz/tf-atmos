@@ -177,6 +177,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.stacks.outputs.in_vpc) }}
+    # No `secrets: inherit`: in-vpc.yml uses only github.token.
     uses: ./.github/workflows/in-vpc.yml
     with:
       stack: ${{ matrix.stack }}
@@ -184,4 +185,3 @@ jobs:
       asg: ${{ matrix.asg }}
       mode: drift
       role: plan
-    secrets: inherit

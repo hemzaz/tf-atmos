@@ -534,31 +534,13 @@ jobs:
           # The in-cluster components (settings.github.runner: in-vpc) are
           # planned on their stack's self-hosted runners in the VPC
           # (in-vpc.yml), grouped per (stack, runner label); the rest here.
+          # (ci-in-vpc.py split, tested in test_ci_in_vpc.py).
           def split_in_vpc(include):
-              hosted, groups = [], {}
-              in_vpc_pairs = {}
-              for item in include:
-                  stack = item.get("stack")
-                  if stack not in in_vpc_pairs:
-                      out = subprocess.check_output(
-                          ["python3", "workflows/scripts/common/ci-components.py", "--stack", stack, "--pools"], text=True)
-                      in_vpc_pairs[stack] = {}
-                      for line in out.splitlines():
-                          pool = json.loads(line)
-                          names = subprocess.check_output(
-                              ["python3", "workflows/scripts/common/ci-components.py", "--stack", stack,
-                               "--runner", "in-vpc", "--label", pool["label"]], text=True).split()
-                          for name in names:
-                              in_vpc_pairs[stack][name] = pool
-                  pool = in_vpc_pairs[stack].get(item.get("component"))
-                  if pool is None:
-                      hosted.append(item)
-                  else:
-                      key = (stack, pool["label"])
-                      groups.setdefault(key, {"stack": stack, "label": pool["label"], "asg": pool["asg"], "components": []})
-                      groups[key]["components"].append(item["component"])
-              in_vpc = [dict(g, components=" ".join(sorted(g["components"]))) for _, g in sorted(groups.items())]
-              return hosted, in_vpc
+              out = subprocess.run(
+                  ["python3", "workflows/scripts/common/ci-in-vpc.py", "split"],
+                  input=json.dumps({"include": include}), capture_output=True, text=True, check=True).stdout
+              split = json.loads(out)
+              return split["hosted"]["include"], split["in_vpc"]["include"]
 
           def disabled_pairs(stack_components):
               disabled = set()
@@ -727,6 +709,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.affected.outputs.in_vpc) }}
+    # No `secrets: inherit`: in-vpc.yml uses only github.token.
     uses: ./.github/workflows/in-vpc.yml
     with:
       stack: ${{ matrix.stack }}
@@ -735,7 +718,6 @@ jobs:
       mode: plan
       role: plan
       components: ${{ matrix.components }}
-    secrets: inherit
 
   # The LocalEmu lane (emulator.yml, a reusable workflow) runs from here rather
   # than on its own pull_request trigger so the gate below can `need` it: it is

@@ -23,9 +23,10 @@ An in-vpc instance runs on the runners labelled settings.github.runner_label,
 by default the stack's full id, its name (as check-cluster-api-ci.py resolves
 it, and as the github-runners catalog registers it from {{ .atmos_stack }}). --pools prints, instead of instances,
 one JSON object per line for each label the selected in-vpc instances need:
-{"label", "pool", "asg"}, the github-runners instance registering that label
-and its Auto Scaling group (<tags.Environment>-<vars.name>), which CI raises
-by one per job (start-runner.sh).
+{"label", "pool", "asg", "instances"}, the github-runners instance registering
+that label, its Auto Scaling group (<tags.Environment>-<vars.name>), whose
+start policy CI executes once per job (start-runner.sh), and the selected
+instances of that label, in order.
 
 Skipped instances are reported as a ::notice:: and errors as ::error:: on stderr
 (callers capture stdout). Exits 1 on an unknown stack, a dependency cycle, or
@@ -114,7 +115,7 @@ def select(
 
 
 def pools(instances: dict, stack: str, selected: list[str]) -> list[dict]:
-    """{"label", "pool", "asg"} for each label the selected in-vpc instances need, by label."""
+    """{"label", "pool", "asg", "instances"} for each label the selected in-vpc instances need, by label."""
     needed = sorted({runner_label(stack, instances[name]) for name in selected if runner_of(instances[name]) == "in-vpc"})
     result = []
     for label in needed:
@@ -132,6 +133,10 @@ def pools(instances: dict, stack: str, selected: list[str]) -> list[dict]:
             "label": label,
             "pool": pool,
             "asg": f"{environment}-{variables.get('name') or RUNNER_POOL_DEFAULT_NAME}",
+            "instances": [
+                name for name in selected
+                if runner_of(instances[name]) == "in-vpc" and runner_label(stack, instances[name]) == label
+            ],
         })
     return result
 
