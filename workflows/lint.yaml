@@ -46,6 +46,9 @@ workflows:
         terraform: "1.16.3"
         tflint: "v0.64.0"
         wasilibs/go-yamllint: "1.38.0"
+        # scripts/check-stack-samples.sh (stack-samples) edits a scratch
+        # manifest with it; the atmos image ships no yq.
+        mikefarah/yq: "v4.53.6"
     steps:
       - name: validate-config
         # shell, not type: atmos: a workflow run with -s appends -s to every atmos

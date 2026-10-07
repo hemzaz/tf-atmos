@@ -13,7 +13,8 @@
 #   - ci-apply-role-arn.py --kind plan/apply for each sample stack, as
 #     terraform-ci.yml and terraform-cd.yml resolve its CI roles (a sample with
 #     no iam/ci fails here, as it would in CI);
-#   - the one manual step a deployed lane needs, done in the scratch copy:
+#   - the one manual step a deployed lane needs, done in the scratch copy with
+#     yq (mikefarah v4):
 #     its plan/apply role ARNs added to backend/main's access roles for its
 #     stage (read/write; prod_read/prod_write for stage prod). No state pattern
 #     pair: the stage stack's "*/<stack>-*" pattern already covers a lane;
@@ -84,32 +85,38 @@ for stack in "${stacks[@]}"; do
         printf '%s\t%s\t%s\n' "$stack" "$kind" "${arn##*: }" >> roles.tsv
     done
 done
-# The manual step: the roles on backend/main's access roles for each lane's stage.
-python3 - stacks.json roles.tsv <<'ROLES'
-import json, pathlib, sys
+# The manual step: the roles on backend/main's access roles for each lane's
+# stage. Python picks the instance, its manifest and the role for each ARN
+# from the resolved stacks; yq (mikefarah v4) appends the ARN in that
+# manifest, so nothing depends on its layout or indentation.
+python3 - stacks.json roles.tsv > additions.tsv <<'ROLES'
+import json, sys
 
 stacks = json.load(open(sys.argv[1]))
-backend = next(
-    (i["atmos_stack_file"] for s in stacks.values()
-     for i in (s.get("components") or {}).get("terraform", {}).values()
-     if i.get("component") == "backend" and (i.get("metadata") or {}).get("type") != "abstract"),
-    None,
-)
-if backend is None:
-    sys.exit("ERROR no deployable backend instance to add the sample lanes' CI roles to")
-path = pathlib.Path("stacks") / f"{backend}.yaml"
-lines = path.read_text().splitlines()
+backends = [
+    (name, i["atmos_stack_file"]) for s in stacks.values()
+    for name, i in (s.get("components") or {}).get("terraform", {}).items()
+    if i.get("component") == "backend" and (i.get("metadata") or {}).get("type") != "abstract"
+]
+if len(backends) != 1:
+    sys.exit(f"ERROR expected one deployable backend instance, found {backends}")
+instance, manifest = backends[0]
 for row in open(sys.argv[2]):
     stack, kind, arn = row.rstrip("\n").split("\t")
     stage = next(i["settings"]["context"]["stage"] for i in stacks[stack]["components"]["terraform"].values()
                  if ((i.get("settings") or {}).get("context") or {}).get("stage"))
     role = ("prod_" if stage == "prod" else "") + ("read" if kind == "plan" else "write")
-    start = lines.index(f"          {role}:")
-    at = next(n for n in range(start, len(lines)) if lines[n].strip() == "allowed_principal_arns:")
-    lines.insert(at + 1, f'              - "{arn}"')
-    print(f"{stack}: {kind} role {arn} -> backend/main access_roles.{role}")
-path.write_text("\n".join(lines) + "\n")
+    print(f"stacks/{manifest}.yaml\t{instance}\t{role}\t{arn}\t{stack}\t{kind}")
 ROLES
+while IFS=$'\t' read -r manifest instance role arn stack kind; do
+    path='.components.terraform[strenv(INSTANCE)].vars.access_roles[strenv(ROLE)].allowed_principal_arns'
+    if [[ "$(INSTANCE="$instance" ROLE="$role" yq "$path | tag" "$manifest")" != "!!seq" ]]; then
+        echo "ERROR $manifest sets no $instance access_roles.$role.allowed_principal_arns list" >&2
+        exit 1
+    fi
+    INSTANCE="$instance" ROLE="$role" ARN="$arn" yq -i "$path += [strenv(ARN)]" "$manifest"
+    echo "$stack: $kind role $arn -> $instance access_roles.$role ($manifest)"
+done < additions.tsv
 atmos describe stacks --process-functions=false --format json > stacks.json
 
 python3 workflows/scripts/common/check-dependencies.py components/terraform < stacks.json

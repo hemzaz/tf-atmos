@@ -19,7 +19,6 @@ import:
   - mixins/region/us-east-1
   - catalog/_base/defaults
   - catalog/vpc/defaults
-  - catalog/securitygroup/defaults
   - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/github-runners/defaults
@@ -74,34 +73,12 @@ components:
         nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
-    # Additional security group for the worker nodes
-    securitygroup/eks-nodes:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
-          eks-nodes:
-            description: "EKS worker nodes"
-            ingress_rules:
-              - description: "All TCP between nodes"
-                from_port: 0
-                to_port: 65535
-                protocol: "tcp"
-                self: true
-              - description: "Istio sidecar telemetry"
-                from_port: 15090
-                to_port: 15090
-                protocol: "tcp"
-                self: true
-
     # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
     # entries read them, and CI deploys this lane with them. The GitHub OIDC
     # provider is an account singleton that fnx-ue1-dev's iam/ci creates,
     # so this instance trusts it by ARN instead of creating a second one.
     # Deploying the lane needs one manual step: these roles' ARNs on
-    # backend/main's access roles for its stage (stacks/orgs/fnx/core/us-east-1.yaml).
+    # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
     # A state pattern pair of its own is optional: the stage stack's
     # "*/<stage stack>-*" pattern already covers the lane's state keys.
     iam/ci:
@@ -132,7 +109,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-core
+            stack: fnx-ue1-root
           - component: iam/ci
             stack: fnx-ue1-dev
 
@@ -184,8 +161,6 @@ components:
         # The in-VPC CI runners (above) reach the private endpoint on 443.
         allowed_security_group_ids:
           - !terraform.state github-runners/main .security_group_id
-        associated_security_group_ids:
-          - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
         node_groups:
           general:
             instance_types: ["m6i.large"]
@@ -209,7 +184,6 @@ components:
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/eks-nodes
           - component: kms/main
           - component: iam/ci
           - component: github-runners/main

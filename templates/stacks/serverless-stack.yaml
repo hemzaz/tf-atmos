@@ -61,7 +61,7 @@ components:
     # creates, so this instance trusts it by ARN instead of creating a second
     # one.
     # Deploying the lane needs one manual step: these roles' ARNs on
-    # backend/main's access roles for its stage (stacks/orgs/fnx/core/us-east-1.yaml).
+    # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
     # A state pattern pair of its own is optional: the stage stack's
     # "*/<stage stack>-*" pattern already covers the lane's state keys.
     iam/ci:
@@ -92,7 +92,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-core
+            stack: fnx-ue1-root
           - component: iam/ci
             stack: fnx-ue1-dev
 

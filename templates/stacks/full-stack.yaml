@@ -1,7 +1,7 @@
 ---
 # Full Stack Template
-# Production-ready infrastructure: VPC, tiered security groups, EKS with
-# add-ons, PostgreSQL on RDS, application secrets and monitoring.
+# Production-ready infrastructure: VPC, EKS with add-ons, PostgreSQL on RDS
+# (reachable from the cluster's nodes only), application secrets and monitoring.
 #
 # Usage: copy in as a lane beside a stage's own stack (settings.context.name;
 # the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
@@ -23,7 +23,6 @@ import:
   - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/vpc/defaults
-  - catalog/securitygroup/defaults
   - catalog/github-runners/defaults
   - catalog/eks/defaults
   - catalog/eks-addons/defaults
@@ -85,50 +84,12 @@ components:
         vpc_flow_logs_enabled: true
         flow_logs_retention_days: 90
 
-    # The platform's tiers, one securitygroup instance: each group admits the
-    # one above it by key (source_security_group_id), so no tier reads
-    # another's state before it exists (deploy-full-stack plans a layer before
-    # applying it). No load-balancer group: nothing in this sample creates a
-    # load balancer (eks-addons' AWS Load Balancer Controller manages the
-    # groups of the ones Kubernetes asks for), and none admits 0.0.0.0/0.
-    securitygroup/platform:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
-          # Additional group for the EKS worker nodes (EKS creates the cluster
-          # security group itself)
-          eks-nodes:
-            description: "EKS node group security group"
-            ingress_rules:
-              - key: "node-to-node"
-                description: "Node to node communication"
-                from_port: 0
-                to_port: 65535
-                protocol: "tcp"
-                self: true
-          # Database tier: PostgreSQL only from the EKS nodes
-          rds:
-            description: "RDS security group"
-            ingress_rules:
-              - key: "postgres-from-nodes"
-                description: "PostgreSQL from EKS nodes"
-                from_port: 5432
-                to_port: 5432
-                protocol: "tcp"
-                source_security_group_id: "eks-nodes"
-      dependencies:
-        components:
-          - component: vpc/main
-
     # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
     # entries read them, and CI deploys this lane with them. The GitHub OIDC
     # provider is an account singleton that fnx-ue1-prod's iam/ci creates,
     # so this instance trusts it by ARN instead of creating a second one.
     # Deploying the lane needs one manual step: these roles' ARNs on
-    # backend/main's access roles for its stage (stacks/orgs/fnx/core/us-east-1.yaml).
+    # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
     # A state pattern pair of its own is optional: the stage stack's
     # "*/<stage stack>-*" pattern already covers the lane's state keys.
     iam/ci:
@@ -165,7 +126,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-core
+            stack: fnx-ue1-root
           - component: iam/ci
             stack: fnx-ue1-prod
 
@@ -200,8 +161,6 @@ components:
         # The in-VPC CI runners (above) reach the private endpoint on 443.
         allowed_security_group_ids:
           - !terraform.state github-runners/main .security_group_id
-        associated_security_group_ids:
-          - !terraform.state securitygroup/platform .security_group_ids.eks-nodes
         node_groups:
           general:
             instance_types: ["m6i.large", "m6i.xlarge"]
@@ -212,7 +171,6 @@ components:
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/platform
           - component: kms/main
           - component: iam/ci
           - component: github-runners/main
@@ -275,8 +233,11 @@ components:
         db_name: "app"
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .database_subnet_ids
-        allowed_security_groups:
-          - !terraform.state securitygroup/platform .security_group_ids.rds
+        # The nodes carry only the EKS-managed cluster security group (the eks
+        # component puts associated_security_group_ids on the control-plane
+        # ENIs, not the nodes), so that group is what the database admits, as
+        # fnx-ue1-prod's rds/main does.
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
         kms_key_id: !terraform.state kms/main .key_arn
         performance_insights_kms_key_id: !terraform.state kms/main .key_arn
         master_user_secret_kms_key_id: !terraform.state kms/main .key_arn
@@ -290,7 +251,7 @@ components:
         components:
           - component: vpc/main
           - component: kms/main
-          - component: securitygroup/platform
+          - component: eks/main
 
     # The lane's own customer-managed key (EKS secrets, node EBS volumes,
     # Container Insights log groups). Its key policy names the Auto Scaling
