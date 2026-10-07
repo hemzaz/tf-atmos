@@ -19,6 +19,14 @@ the component's variables.tf) must be safe:
                 2 nodes (num_cache_nodes) unless cluster_mode_enabled, and
                 snapshot_retention_limit >= 7
 
+And every deployable iam instance in a stack of stage prod that creates the
+GitHub OIDC CI roles (github_oidc_enabled) must set ci_plan_role_subjects
+explicitly, to exactly repo:<github_oidc_repository>:ref:refs/heads/<github_oidc_default_branch>
+(both resolved as the component does, var or default), nothing else: no
+pull_request, environment, other branch or wildcard subject. The plan role reads
+every prod state object through backend/main's prod_read role, and the
+component's default trusts repo:<repo>:pull_request, i.e. code from any PR.
+
 Exits 1 on any unsafe value.
 """
 import json
@@ -112,11 +120,47 @@ def check(stacks: dict, components_dir: pathlib.Path) -> list[str]:
     return errors
 
 
+def check_ci_plan_trust(stacks: dict, components_dir: pathlib.Path) -> list[str]:
+    """Prod CI plan roles trusting anything but their repository's default-branch ref."""
+    errors = []
+    for stack_name, stack in sorted(stacks.items()):
+        for name, instance in sorted(((stack.get("components") or {}).get("terraform") or {}).items()):
+            stage = ((instance.get("settings") or {}).get("context") or {}).get("stage")
+            variables = instance.get("vars") or {}
+            if (instance.get("component") != "iam" or stage != PROD_STAGE or not is_deployable(instance)
+                    or normalize(variables.get("github_oidc_enabled")) is not True):
+                continue
+
+            def effective(var: str) -> Any:
+                value = variables.get(var)
+                return value if value is not None else variable_default(components_dir, "iam", var)
+
+            repository, branch = effective("github_oidc_repository"), effective("github_oidc_default_branch")
+            allowed = f"repo:{repository}:ref:refs/heads/{branch}"
+            subjects = variables.get("ci_plan_role_subjects")
+            if not repository:
+                errors.append(f"{stack_name}: {name} (iam) sets no github_oidc_repository")
+            elif not subjects:
+                errors.append(
+                    f"{stack_name}: {name} (iam) leaves ci_plan_role_subjects unset, so its prod plan role "
+                    f"trusts repo:{repository}:pull_request (the default): list {allowed!r} only"
+                )
+            else:
+                for subject in subjects:
+                    if subject != allowed:
+                        errors.append(
+                            f"{stack_name}: {name} (iam) ci_plan_role_subjects trusts {subject!r}: a prod plan "
+                            f"role trusts its default branch's ref only, {allowed!r}"
+                        )
+    return errors
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__.splitlines()[2], file=sys.stderr)
         return 2
-    errors = check(json.load(sys.stdin), pathlib.Path(sys.argv[1]))
+    described = json.load(sys.stdin)
+    errors = check(described, pathlib.Path(sys.argv[1])) + check_ci_plan_trust(described, pathlib.Path(sys.argv[1]))
     for error in errors:
         print(f"ERROR {error}")
     if errors:
@@ -125,7 +169,8 @@ def main() -> int:
     print(
         "every prod rds instance is environment prod, Multi-AZ, deletion-protected, keeps a final "
         f"snapshot and {MIN_RETENTION_DAYS}+ days of backups; every prod elasticache instance fails over "
-        f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots"
+        f"across AZs and keeps {MIN_RETENTION_DAYS}+ days of snapshots; every prod CI plan role trusts its "
+        "repository's default-branch ref only"
     )
     return 0
 

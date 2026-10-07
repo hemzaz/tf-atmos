@@ -1,7 +1,7 @@
 ---
 # Full Stack Template
-# Production-ready infrastructure: VPC, tiered security groups, EKS with
-# add-ons, PostgreSQL on RDS, application secrets and monitoring.
+# Production-ready infrastructure: VPC, EKS with add-ons, PostgreSQL on RDS
+# (reachable from the cluster's nodes only), application secrets and monitoring.
 #
 # Usage: copy in as a lane beside a stage's own stack (settings.context.name;
 # the stack name is <tenant>-<region code>-<stage>-<name>). Its names carry the
@@ -20,9 +20,10 @@ import:
   - orgs/fnx/prod/_defaults
   - mixins/region/us-east-1
   - catalog/_base/defaults
+  - catalog/iam/defaults
   - catalog/kms/defaults
   - catalog/vpc/defaults
-  - catalog/securitygroup/defaults
+  - catalog/github-runners/defaults
   - catalog/eks/defaults
   - catalog/eks-addons/defaults
   - catalog/secretsmanager/defaults
@@ -83,77 +84,68 @@ components:
         vpc_flow_logs_enabled: true
         flow_logs_retention_days: 90
 
-    # Application Load Balancer tier
-    securitygroup/alb:
+    # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
+    # entries read them, and CI deploys this lane with them. The GitHub OIDC
+    # provider is an account singleton that fnx-ue1-prod's iam/ci creates,
+    # so this instance trusts it by ARN instead of creating a second one.
+    # Deploying the lane needs one manual step: these roles' ARNs on
+    # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
+    # A state pattern pair of its own is optional: the stage stack's
+    # "*/<stage stack>-*" pattern already covers the lane's state keys.
+    iam/ci:
       metadata:
-        component: securitygroup
+        component: iam
         inherits:
-          - securitygroup
+          - iam
       vars:
-        security_groups:
-          alb:
-            description: "Application Load Balancer"
-            ingress_rules:
-              - description: "HTTP from internet (redirected to HTTPS)"
-                from_port: 80
-                to_port: 80
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-              - description: "HTTPS from internet"
-                from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-
-    # Additional security group for EKS worker nodes (the cluster security
-    # group itself is created by EKS)
-    securitygroup/eks-nodes:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
-          eks-nodes:
-            description: "EKS node group security group"
-            ingress_rules:
-              - description: "Node to node communication"
-                from_port: 0
-                to_port: 65535
-                protocol: "tcp"
-                self: true
-              - description: "Traffic from the load balancers"
-                from_port: 1025
-                to_port: 65535
-                protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/alb .security_group_ids.alb
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        # Prod plan role: the master ref only, never pull_request (owner
+        # decision D3, as fnx-ue1-prod's iam/ci): it reads every prod state
+        # object through backend/main's prod_read role, so PR code must never
+        # assume it. check-prod-protection.py fails a prod iam/ci without this.
+        ci_plan_role_subjects:
+          - "repo:hemzaz/tf-atmos:ref:refs/heads/master"
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-prod-role"
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+        lambda_uploader_trusted_github_repos: []
+        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
       dependencies:
         components:
-          - component: vpc/main
-          - component: securitygroup/alb
+          - component: backend/main
+            stack: fnx-ue1-root
+          - component: iam/ci
+            stack: fnx-ue1-prod
 
-    # Database tier: PostgreSQL only from the EKS nodes
-    securitygroup/rds:
+    # The lane's own in-VPC CI runners (catalog/github-runners/defaults:
+    # labelled with the full id, which eks-addons/main's CI jobs ask for):
+    # the private cluster API is reachable only from inside this VPC, and
+    # eks/main admits them on 443.
+    github-runners/main:
       metadata:
-        component: securitygroup
+        component: github-runners
         inherits:
-          - securitygroup
+          - github-runners/defaults
       vars:
-        security_groups:
-          rds:
-            description: "RDS security group"
-            ingress_rules:
-              - description: "PostgreSQL from EKS nodes"
-                from_port: 5432
-                to_port: 5432
-                protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
       dependencies:
         components:
+          - component: kms/main
           - component: vpc/main
-          - component: securitygroup/eks-nodes
 
     # EKS cluster (private endpoint; subnet_ids come from eks/defaults)
     eks/main:
@@ -166,8 +158,9 @@ components:
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
-        associated_security_group_ids:
-          - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+        # The in-VPC CI runners (above) reach the private endpoint on 443.
+        allowed_security_group_ids:
+          - !terraform.state github-runners/main .security_group_id
         node_groups:
           general:
             instance_types: ["m6i.large", "m6i.xlarge"]
@@ -178,7 +171,9 @@ components:
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/eks-nodes
+          - component: kms/main
+          - component: iam/ci
+          - component: github-runners/main
 
     # EKS add-ons, wired to the cluster outputs
     eks-addons/main:
@@ -225,7 +220,10 @@ components:
         inherits:
           - rds/prod
       vars:
-        identifier: "{{ .atmos_stack }}-db"
+        # The tier the component's prod guards compare to; the name is
+        # <Environment>-<identifier> (ue1-platform-main-db).
+        environment: "{{ .settings.context.stage }}"
+        identifier: "main-db"
         engine: "{{ .settings.environment.rds_engine }}"
         engine_version: "{{ .settings.environment.rds_engine_version }}"
         family: "{{ .settings.environment.rds_family }}"
@@ -234,10 +232,15 @@ components:
         port: 5432
         db_name: "app"
         vpc_id: !terraform.state vpc/main .vpc_id
-        vpc_cidr: !terraform.state vpc/main .vpc_cidr
-        subnet_ids: !terraform.state vpc/main .private_subnet_ids
-        allowed_security_groups:
-          - !terraform.state securitygroup/rds .security_group_ids.rds
+        subnet_ids: !terraform.state vpc/main .database_subnet_ids
+        # The nodes carry only the EKS-managed cluster security group (the eks
+        # component puts associated_security_group_ids on the control-plane
+        # ENIs, not the nodes), so that group is what the database admits, as
+        # fnx-ue1-prod's rds/main does.
+        allowed_security_groups: !terraform.state eks/main .eks_cluster_managed_security_group_id | [.]
+        kms_key_id: !terraform.state kms/main .key_arn
+        performance_insights_kms_key_id: !terraform.state kms/main .key_arn
+        master_user_secret_kms_key_id: !terraform.state kms/main .key_arn
         allocated_storage: 100
         max_allocated_storage: 1000
         skip_final_snapshot: false
@@ -247,17 +250,26 @@ components:
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/rds
+          - component: kms/main
+          - component: eks/main
 
-    # The stack's customer-managed key (Container Insights log groups)
+    # The lane's own customer-managed key (EKS secrets, node EBS volumes,
+    # Container Insights log groups). Its key policy names the Auto Scaling
+    # service-linked role, an account singleton that fnx-ue1-prod's iam/main
+    # provisions.
     kms/main:
       metadata:
         component: kms
         inherits:
           - kms/defaults
       vars:
-        description: Platform main encryption key (CloudWatch Logs)
+        description: Platform lane encryption key (EKS secrets, EBS, CloudWatch Logs)
         alias_name: "{{ .settings.prefix }}-main"
+        deletion_window_in_days: 30  # prod keeps the full window
+      dependencies:
+        components:
+          - component: iam/main
+            stack: fnx-ue1-prod
 
     # Application secrets (random values generated by Terraform)
     secretsmanager/app:

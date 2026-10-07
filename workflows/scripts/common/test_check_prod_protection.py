@@ -93,5 +93,56 @@ class CheckProdProtectionTest(unittest.TestCase):
             check_prod_protection.variable_default(COMPONENTS, "rds", "no_such_variable")
 
 
+
+class CiPlanTrustTest(unittest.TestCase):
+    MASTER = ["repo:hemzaz/tf-atmos:ref:refs/heads/master"]
+    REPO = {"github_oidc_repository": "hemzaz/tf-atmos", "github_oidc_default_branch": "master"}
+
+    def found(self, **variables):
+        return check_prod_protection.check_ci_plan_trust(stacks(**{"iam/ci": instance(
+            "iam", github_oidc_enabled=True, **{**self.REPO, **variables})}), COMPONENTS)
+
+    def test_default_branch_ref_only_passes(self):
+        self.assertEqual(self.found(ci_plan_role_subjects=self.MASTER), [])
+
+    def test_default_trusting_pull_requests_fails(self):
+        found = self.found()
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("leaves ci_plan_role_subjects unset", found[0])
+
+    def test_pull_request_subject_fails(self):
+        found = self.found(ci_plan_role_subjects=self.MASTER + ["repo:hemzaz/tf-atmos:pull_request"])
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("trusts 'repo:hemzaz/tf-atmos:pull_request'", found[0])
+
+    def test_other_branch_ref_fails(self):
+        found = self.found(ci_plan_role_subjects=["repo:hemzaz/tf-atmos:ref:refs/heads/feature-x"])
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("refs/heads/feature-x", found[0])
+
+    def test_environment_subject_fails(self):
+        found = self.found(ci_plan_role_subjects=["repo:hemzaz/tf-atmos:environment:x"])
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("environment:x", found[0])
+
+    def test_wildcard_and_other_repository_fail(self):
+        self.assertEqual(len(self.found(ci_plan_role_subjects=["repo:hemzaz/tf-atmos:*"])), 1)
+        self.assertEqual(len(self.found(ci_plan_role_subjects=["repo:other/repo:ref:refs/heads/master"])), 1)
+
+    def test_branch_default_is_resolved_from_variables_tf(self):
+        # github_oidc_default_branch's default is "main": master no longer matches.
+        found = check_prod_protection.check_ci_plan_trust(stacks(**{"iam/ci": instance(
+            "iam", github_oidc_enabled=True, github_oidc_repository="hemzaz/tf-atmos",
+            ci_plan_role_subjects=self.MASTER)}), COMPONENTS)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("'repo:hemzaz/tf-atmos:ref:refs/heads/main'", found[0])
+
+    def test_non_prod_and_roleless_iam_are_skipped(self):
+        dev = {"fnx-ue1-dev": {"components": {"terraform": {"iam/ci": instance(
+            "iam", stage="dev", github_oidc_enabled=True)}}}}
+        self.assertEqual(check_prod_protection.check_ci_plan_trust(dev, COMPONENTS), [])
+        self.assertEqual(check_prod_protection.check_ci_plan_trust(
+            stacks(**{"iam/main": instance("iam")}), COMPONENTS), [])
+
 if __name__ == "__main__":
     unittest.main()

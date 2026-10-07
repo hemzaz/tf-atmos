@@ -16,6 +16,7 @@ import:
   - orgs/fnx/dev/_defaults
   - mixins/region/us-east-1
   - catalog/_base/defaults
+  - catalog/iam/defaults
   - catalog/vpc/defaults
   - catalog/securitygroup/defaults
   # Optional environment profile from templates/configs (import it last):
@@ -34,6 +35,47 @@ settings:
 
 components:
   terraform:
+    # The lane's own CI roles (<full id>-ci-plan/-apply): CI plans and deploys
+    # this lane with them (terraform-ci.yml resolves them per stack). The
+    # GitHub OIDC provider is an account singleton that fnx-ue1-dev's iam/ci
+    # creates, so this instance trusts it by ARN instead of creating a second
+    # one.
+    # Deploying the lane needs one manual step: these roles' ARNs on
+    # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
+    # A state pattern pair of its own is optional: the stage stack's
+    # "*/<stage stack>-*" pattern already covers the lane's state keys.
+    iam/ci:
+      metadata:
+        component: iam
+        inherits:
+          - iam
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+        lambda_uploader_trusted_github_repos: []
+        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: fnx-ue1-root
+          - component: iam/ci
+            stack: fnx-ue1-dev
+
     # Core networking. Other components read its outputs through
     # `!terraform.state vpc/main .<output>`; AZs come from vpc/defaults.
     vpc/main:
@@ -59,8 +101,14 @@ components:
         nat_gateway_enabled: true
         nat_gateway_strategy: "single"
 
-    # Web tier: public HTTP(S) into the load balancers
-    securitygroup/web:
+    # The three tiers, one securitygroup instance: each group admits the one
+    # above it by key (source_security_group_id), so no tier reads another's
+    # state before it exists (deploy-full-stack plans a layer before applying
+    # it). Web is the group for the load balancers a stack adds on top: it has
+    # no ingress, and none may admit 0.0.0.0/0 - public traffic should arrive
+    # through CloudFront, as an alb component instance (catalog/alb/defaults)
+    # does by admitting only CloudFront's origin-facing prefix list on 443.
+    securitygroup/tiers:
       metadata:
         component: securitygroup
         inherits:
@@ -68,59 +116,25 @@ components:
       vars:
         security_groups:
           web:
-            description: "Web tier security group"
-            ingress_rules:
-              - description: "HTTP from anywhere"
-                from_port: 80
-                to_port: 80
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-              - description: "HTTPS from anywhere"
-                from_port: 443
-                to_port: 443
-                protocol: "tcp"
-                cidr_blocks: ["0.0.0.0/0"]
-
-    # Application tier: only reachable from the web tier
-    securitygroup/app:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
+            description: "Web tier: attached to the load balancers; the app tier admits it"
           app:
-            description: "Application tier security group"
+            description: "Application tier: only reachable from the web tier"
             ingress_rules:
-              - description: "App port from web tier"
+              - key: "app-from-web"
+                description: "App port from web tier"
                 from_port: 8080
                 to_port: 8080
                 protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/web .security_group_ids.web
-      dependencies:
-        components:
-          - component: vpc/main
-          - component: securitygroup/web
-
-    # Database tier: only reachable from the application tier
-    securitygroup/db:
-      metadata:
-        component: securitygroup
-        inherits:
-          - securitygroup
-      vars:
-        security_groups:
+                source_security_group_id: "web"
           db:
-            description: "Database tier security group"
+            description: "Database tier: only reachable from the application tier"
             ingress_rules:
-              - description: "PostgreSQL from app tier"
+              - key: "postgres-from-app"
+                description: "PostgreSQL from app tier"
                 from_port: 5432
                 to_port: 5432
                 protocol: "tcp"
-                security_groups:
-                  - !terraform.state securitygroup/app .security_group_ids.app
+                source_security_group_id: "app"
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/app

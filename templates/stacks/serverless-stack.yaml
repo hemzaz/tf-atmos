@@ -24,6 +24,7 @@ import:
   - orgs/fnx/dev/_defaults
   - mixins/region/us-east-1
   - catalog/_base/defaults
+  - catalog/iam/defaults
   - catalog/apigateway/defaults
   - catalog/monitoring/defaults
   - catalog/kms/defaults
@@ -54,6 +55,47 @@ settings:
 
 components:
   terraform:
+    # The lane's own CI roles (<full id>-ci-plan/-apply): CI plans and deploys
+    # this lane with them (terraform-ci.yml resolves them per stack). The
+    # GitHub OIDC provider is an account singleton that fnx-ue1-dev's iam/ci
+    # creates, so this instance trusts it by ARN instead of creating a second
+    # one.
+    # Deploying the lane needs one manual step: these roles' ARNs on
+    # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
+    # A state pattern pair of its own is optional: the stage stack's
+    # "*/<stage stack>-*" pattern already covers the lane's state keys.
+    iam/ci:
+      metadata:
+        component: iam
+        inherits:
+          - iam
+      vars:
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+        lambda_uploader_trusted_github_repos: []
+        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: fnx-ue1-root
+          - component: iam/ci
+            stack: fnx-ue1-dev
+
     # Customer managed key for the serverless components below (dynamodb, sns,
     # sqs, eventbridge, stepfunctions) and their log groups. This is a
     # top-level stack of its own (not nested under an existing environment's
@@ -68,6 +110,9 @@ components:
       vars:
         description: "{{ .settings.prefix }} serverless components key (DynamoDB, SNS, SQS, EventBridge, Step Functions)"
         alias_name: "{{ .settings.prefix }}-main" # without the alias/ prefix
+        # No EKS or Auto Scaling here, and no iam instance provisioning the
+        # Auto Scaling service-linked role this grant names (as the sandbox lane).
+        allow_autoscaling_ebs: false
         deletion_window_in_days: 7
 
     # Shared Lambda settings; each function below inherits them
@@ -139,6 +184,18 @@ components:
           expose_headers: []
           max_age: 86400
           allow_credentials: false
+        # The API reads its handler, not the reverse: lambda (compute layer)
+        # deploys before apigateway (services), and this component grants the
+        # invoke permission itself (aws_lambda_permission.http_route_invoke).
+        http_routes:
+          "ANY /users/{proxy+}":
+            integration_type: "AWS_PROXY"
+            integration_uri: !terraform.state lambda/users-api .function_invoke_arn
+            lambda_function_name: !terraform.state lambda/users-api .function_name
+            authorization_type: "JWT"
+      dependencies:
+        components:
+          - component: lambda/users-api
 
     # API handler, invoked by the HTTP API
     lambda/users-api:
@@ -150,12 +207,6 @@ components:
         function_name: "users-api" # deployed as <environment>-users-api
         handler: "handlers.users.handler"
         s3_key: "users-api.zip"
-        api_gateway_source_arn: !terraform.state 'apigateway/main .http_api_execution_arn + "/*/*"'
-      dependencies:
-        components:
-          # Replaces lambda/defaults' list (list_merge_strategy: replace).
-          - component: s3/lambda-artifacts
-          - component: apigateway/main
 
     # Background processor, triggered by EventBridge "Order Created" events
     lambda/order-processor:

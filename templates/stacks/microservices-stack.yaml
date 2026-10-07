@@ -19,7 +19,9 @@ import:
   - mixins/region/us-east-1
   - catalog/_base/defaults
   - catalog/vpc/defaults
-  - catalog/securitygroup/defaults
+  - catalog/iam/defaults
+  - catalog/kms/defaults
+  - catalog/github-runners/defaults
   - catalog/eks/defaults
   - catalog/eks-addons/defaults
   - catalog/apigateway/defaults
@@ -71,27 +73,79 @@ components:
         nat_gateway_enabled: true
         nat_gateway_strategy: "one_per_az"
 
-    # Additional security group for the worker nodes
-    securitygroup/eks-nodes:
+    # The lane's own CI roles (<full id>-ci-plan/-apply): eks/main's access
+    # entries read them, and CI deploys this lane with them. The GitHub OIDC
+    # provider is an account singleton that fnx-ue1-dev's iam/ci creates,
+    # so this instance trusts it by ARN instead of creating a second one.
+    # Deploying the lane needs one manual step: these roles' ARNs on
+    # backend/main's access roles for its stage (stacks/orgs/fnx/root/us-east-1.yaml).
+    # A state pattern pair of its own is optional: the stage stack's
+    # "*/<stage stack>-*" pattern already covers the lane's state keys.
+    iam/ci:
       metadata:
-        component: securitygroup
+        component: iam
         inherits:
-          - securitygroup
+          - iam
       vars:
-        security_groups:
-          eks-nodes:
-            description: "EKS worker nodes"
-            ingress_rules:
-              - description: "All TCP between nodes"
-                from_port: 0
-                to_port: 65535
-                protocol: "tcp"
-                self: true
-              - description: "Istio sidecar telemetry"
-                from_port: 15090
-                to_port: 15090
-                protocol: "tcp"
-                self: true
+        create_cross_account_role: false
+        github_oidc_enabled: true
+        github_oidc_repository: "hemzaz/tf-atmos"
+        github_oidc_default_branch: "master"
+        github_oidc_create_provider: false
+        github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
+        ci_role_name_prefix: "{{ .atmos_stack }}-ci"
+        ci_apply_role_enabled: true
+        ci_apply_role_trusted_github_repos:
+          - "hemzaz/tf-atmos:master"
+        ci_apply_policy_arns:
+          - "arn:aws:iam::aws:policy/AdministratorAccess"
+        ci_backend_read_role_arns:
+          - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
+        ci_backend_write_role_arn: "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-role"
+        ci_apply_kms_key_aliases:
+          - "alias/{{ .settings.prefix }}-main"
+        lambda_uploader_trusted_github_repos: []
+        lambda_uploader_kms_key_alias: "alias/{{ .settings.prefix }}-main"
+      dependencies:
+        components:
+          - component: backend/main
+            stack: fnx-ue1-root
+          - component: iam/ci
+            stack: fnx-ue1-dev
+
+    # The lane's own customer-managed key (EKS secrets, node EBS volumes). Its
+    # key policy names the Auto Scaling service-linked role, an account
+    # singleton that fnx-ue1-dev's iam/dev provisions.
+    kms/main:
+      metadata:
+        component: kms
+        inherits:
+          - kms/defaults
+      vars:
+        description: Microservices lane encryption key (EKS secrets, EBS)
+        alias_name: "{{ .settings.prefix }}-main"  # without the alias/ prefix
+        deletion_window_in_days: 7
+      dependencies:
+        components:
+          - component: iam/dev
+            stack: fnx-ue1-dev
+
+    # The lane's own in-VPC CI runners (catalog/github-runners/defaults:
+    # labelled with the full id, which eks-addons/main's CI jobs ask for):
+    # the private cluster API is reachable only from inside this VPC, and
+    # eks/main admits them on 443.
+    github-runners/main:
+      metadata:
+        component: github-runners
+        inherits:
+          - github-runners/defaults
+      vars:
+        vpc_id: !terraform.state vpc/main .vpc_id
+        subnet_ids: !terraform.state vpc/main .private_subnet_ids
+      dependencies:
+        components:
+          - component: kms/main
+          - component: vpc/main
 
     # EKS cluster with general and compute-optimized node groups
     eks/main:
@@ -104,8 +158,9 @@ components:
         cluster_kubernetes_version: "{{ .settings.environment.eks_kubernetes_version }}"
         cluster_endpoint_private_access: true
         cluster_endpoint_public_access: "{{ .settings.environment.eks_public_access }}"
-        associated_security_group_ids:
-          - !terraform.state securitygroup/eks-nodes .security_group_ids.eks-nodes
+        # The in-VPC CI runners (above) reach the private endpoint on 443.
+        allowed_security_group_ids:
+          - !terraform.state github-runners/main .security_group_id
         node_groups:
           general:
             instance_types: ["m6i.large"]
@@ -129,7 +184,9 @@ components:
       dependencies:
         components:
           - component: vpc/main
-          - component: securitygroup/eks-nodes
+          - component: kms/main
+          - component: iam/ci
+          - component: github-runners/main
 
     # Service mesh, autoscaling and ingress add-ons
     eks-addons/main:
