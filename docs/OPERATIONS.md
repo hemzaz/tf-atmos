@@ -225,13 +225,19 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
 `settings.github.runner: in-vpc`, so CI runs them on the stack's self-hosted runners in the VPC
 (`components/terraform/github-runners`):
 
-- `.github/workflows/in-vpc.yml` is called once per (stack, runner label) for PR plans
-  (`terraform-ci.yml`), CD and dispatch (`terraform-cd.yml`, after the stack's hosted instances;
-  `deployed/<stack>` moves only when both parts succeeded) and drift detection.
+- `.github/workflows/in-vpc.yml` is called once per (stack, runner label) for the plan on push to
+  master (`terraform-ci.yml`), CD and dispatch (`terraform-cd.yml`, after the stack's hosted
+  instances; `deployed/<stack>` moves only when both parts succeeded) and drift detection.
+- **Master only, apply role only** (owner decision): these plans refresh Helm releases, whose
+  state is in cluster Secrets, and the plan role (AmazonEKSViewPolicy, no Secrets) trusts pull
+  requests. So every in-VPC job runs on the default branch with the stack's CI apply role, which
+  trusts only master and is the cluster admin. A pull request that changes an in-cluster
+  component gets a `::notice::` (no in-VPC plan). On master they are planned by the push plan
+  (prod, like every prod plan), deployed by CD (whose log shows the plan it applies), and checked
+  by drift detection; `workflow_dispatch` plans any stack's.
 - Its first job starts one runner in the label's pool by executing the pool's +1 start policy
-  (`atmos workflow start-runner -f ci-runners`; the CI roles may execute their stack's pools'
-  policies only, `iam/ci` `ci_runner_pool_names`). Its second job runs on the ephemeral
-  runner that starts, with the same OIDC CI roles (which hold EKS access entries).
+  (`atmos workflow start-runner -f ci-runners`; only the apply role may, on its stack's pools,
+  `iam/ci` `ci_runner_pool_names`). Its second job runs on the ephemeral runner that starts.
 - The label is the stack's full id (its name, `{{ .atmos_stack }}`), or
   `settings.github.runner_label`. The `microservices-platform` template runs its own pool in its
   own VPC.

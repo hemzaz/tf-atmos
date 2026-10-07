@@ -620,9 +620,10 @@ run "lambda_uploader_requires_github_oidc" {
   expect_failures = [var.lambda_uploader_trusted_github_repos]
 }
 
-# Both CI roles may start in-VPC runners: ExecutePolicy on this stack's named
-# runner pools only (never SetDesiredCapacity, never another group).
-run "ci_roles_may_only_execute_their_runner_pools_policies" {
+# Only the apply role starts in-VPC runners: ExecutePolicy on this stack's
+# named runner pools only (never SetDesiredCapacity, never another group); the
+# plan role, which trusts pull requests, gets nothing.
+run "apply_role_may_only_execute_its_runner_pools_policies" {
   command = plan
 
   variables {
@@ -637,13 +638,13 @@ run "ci_roles_may_only_execute_their_runner_pools_policies" {
   }
 
   assert {
-    condition     = toset(keys(aws_iam_role_policy.ci_runner_pools)) == toset(["plan", "apply"])
-    error_message = "Both the plan and the apply role get the runner-pool policy."
+    condition     = length(aws_iam_role_policy.ci_runner_pools) == 1 && aws_iam_role_policy.ci_runner_pools[0].role == "test-ci-apply"
+    error_message = "Only the apply role gets the runner-pool policy."
   }
 
   assert {
     condition = alltrue([
-      for s in jsondecode(aws_iam_role_policy.ci_runner_pools["plan"].policy).Statement :
+      for s in jsondecode(aws_iam_role_policy.ci_runner_pools[0].policy).Statement :
       s.Action == "autoscaling:ExecutePolicy" && length(s.Resource) == 1
       && endswith(s.Resource[0], ":autoScalingGroupName/ue1-github-runners")
     ])

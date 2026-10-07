@@ -495,6 +495,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           import json, os, subprocess
 
@@ -533,13 +534,20 @@ jobs:
           # drops that one instance from the matrix, not the entire stack.
           # The in-cluster components (settings.github.runner: in-vpc) are
           # planned on their stack's self-hosted runners in the VPC
-          # (in-vpc.yml), grouped per (stack, runner label); the rest here.
+          # (in-vpc.yml), grouped per (stack, runner label), and only on a push
+          # to master, with the stack's master-only apply role (owner decision:
+          # the plan role trusts pull requests and never reads cluster
+          # Secrets): a pull request gets a ::notice:: instead. The rest here.
           # (ci-in-vpc.py split, tested in test_ci_in_vpc.py).
           def split_in_vpc(include):
               out = subprocess.run(
-                  ["python3", "workflows/scripts/common/ci-in-vpc.py", "split"],
+                  ["python3", "workflows/scripts/common/ci-in-vpc.py", "split",
+                   "--event", os.environ["GITHUB_EVENT_NAME"], "--ref", os.environ["GITHUB_REF"],
+                   "--default-branch", os.environ["DEFAULT_BRANCH"]],
                   input=json.dumps({"include": include}), capture_output=True, text=True, check=True).stdout
               split = json.loads(out)
+              if split["notice"]:
+                  print(f"::notice title=In-VPC plans::{split['notice']}")
               return split["hosted"]["include"], split["in_vpc"]["include"]
 
           def disabled_pairs(stack_components):
@@ -695,13 +703,15 @@ jobs:
               call("POST", comments_url, {"body": body})
 
   # The in-cluster components' plans, on their stack's self-hosted runners in
-  # the VPC: same events and role as `plan` (merge_group excluded, see there).
-  # in-vpc.yml skips a fork's pull request: self-hosted runners never run
-  # fork code. The plan output is in the job log and summary (no PR comment).
+  # the VPC: on a push to master only, with the stack's master-only apply
+  # role (owner decision: the plan role trusts pull requests and never reads
+  # the cluster's Helm release Secrets). A pull request gets a ::notice::
+  # from `affected` and this job is skipped, which the CI gate accepts. The
+  # plan output is in the job log and summary (no PR comment).
   plan-in-vpc:
     name: Plan in-VPC ${{ matrix.stack }} (${{ matrix.label }})
     needs: affected
-    if: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master')) && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.in_vpc != '' && fromJson(needs.affected.outputs.in_vpc).include[0] != null }}
+    if: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && vars.AWS_PLAN_ROLE_ARN != '' && needs.affected.outputs.in_vpc != '' && fromJson(needs.affected.outputs.in_vpc).include[0] != null }}
     permissions:
       contents: read
       id-token: write
@@ -716,7 +726,6 @@ jobs:
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
       mode: plan
-      role: plan
       components: ${{ matrix.components }}
 
   # The LocalEmu lane (emulator.yml, a reusable workflow) runs from here rather

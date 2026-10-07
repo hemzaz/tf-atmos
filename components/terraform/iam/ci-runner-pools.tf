@@ -3,23 +3,17 @@
 # CI starts an ephemeral in-VPC runner for each in-cluster job by executing
 # its pool's start policy (<group>-start, a SimpleScaling +1 that Auto Scaling
 # caps at max_size; workflows/scripts/common/start-runner.sh); the runner
-# leaves its group when done. Both CI roles start runners: the plan role for
-# pull-request plans and drift detection, the apply role for deploys.
+# leaves its group when done. Only the apply role starts runners: every
+# in-VPC job (plan, drift, deploy) runs on the default branch with it (owner
+# decision), so the plan role, which trusts pull requests, has no write here.
 # ExecutePolicy only, on this stack's own pools by name: CI cannot set a
 # capacity (no SetDesiredCapacity: not 0 mid-apply, not max), nor touch any
-# other group. The policy is the only write the plan role has.
-locals {
-  ci_runner_pool_roles = merge(
-    var.github_oidc_enabled ? { plan = aws_iam_role.ci_plan[0].id } : {},
-    local.create_ci_apply_role ? { apply = aws_iam_role.ci_apply[0].id } : {},
-  )
-}
-
+# other group.
 resource "aws_iam_role_policy" "ci_runner_pools" {
-  for_each = length(var.ci_runner_pool_names) == 0 ? {} : local.ci_runner_pool_roles
+  count = local.create_ci_apply_role && length(var.ci_runner_pool_names) > 0 ? 1 : 0
 
   name = "start-ci-runners"
-  role = each.value
+  role = aws_iam_role.ci_apply[0].name
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [

@@ -7,21 +7,26 @@
 #          ci-runners; the CI roles may execute this stack's pools' policies
 #          only, iam/ci ci-runner-pools.tf);
 #   run    (self-hosted, runs-on the label) an ephemeral runner of that pool
-#          takes this job, assumes the stack's CI role through GitHub OIDC
-#          like the hosted jobs, and plans or deploys the stack's in-vpc
-#          instances for that label (ci-components.py --runner in-vpc
+#          takes this job and plans, drift-checks or deploys the stack's
+#          in-vpc instances for that label (ci-components.py --runner in-vpc
 #          --label), in dependency order.
 #
-# Public repository: self-hosted runners must never run fork code. Both jobs
-# run only for push, workflow_dispatch, merge_group, schedule and pull
-# requests from this repository (a fork's pull request is skipped), and the
-# owner keeps "Require approval for all outside collaborators" on
-# (docs/OPERATIONS.md, First-deploy inputs). This file is PR-controlled, so
-# that `if:` is a convenience; the guard is on the runner: every pool's
-# job-started hook (github-runners files/job-started.sh) fails, before the
-# first step, any job that is not this repository's push, dispatch, schedule,
-# merge queue or same-repository pull request, and production's pool
-# (allowed_refs) any job not on refs/heads/master.
+# Master only, apply role only (owner decision): both jobs run for a push,
+# workflow_dispatch or schedule on the default branch, never for a pull
+# request or the merge queue, and assume the stack's CI APPLY role, which
+# trusts only the default branch's OIDC subject and is the cluster admin.
+# The plan role trusts pull requests, so it never reads the cluster's Helm
+# release Secrets that these plans refresh; a pull request gets a ::notice::
+# from terraform-ci.yml instead of an in-VPC plan.
+#
+# Public repository: self-hosted runners must never run fork code. This file
+# is pull-request controlled, so the `if:` is a convenience; the guard is on
+# the runner: every pool's job-started hook (github-runners
+# files/job-started.sh) fails, before the first step, any job that is not
+# this repository's push, dispatch, schedule, merge queue or same-repository
+# pull request, and production's pool (allowed_refs) any job not on
+# refs/heads/master. The owner keeps "Require approval for all outside
+# collaborators" on (docs/OPERATIONS.md, First-deploy inputs).
 #
 # A same-repository writer can still queue jobs for a label and take runners
 # that a master job started (the hook then fails those jobs): a delay, not
@@ -47,10 +52,6 @@ on:
         description: "plan, deploy, or drift (plan with a detailed exit code that fails on changes)"
         required: true
         type: string
-      role:
-        description: CI role kind (plan or apply)
-        required: true
-        type: string
       base:
         description: Only the instances affected since this commit (terraform-cd.yml); deploy then also requires the stack's hosted deploy marker
         required: false
@@ -71,8 +72,8 @@ jobs:
   start:
     name: Start a runner (${{ inputs.label }})
     if: >-
-      contains(fromJSON('["push", "workflow_dispatch", "merge_group", "schedule"]'), github.event_name) ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      contains(fromJSON('["push", "workflow_dispatch", "schedule"]'), github.event_name) &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
@@ -82,14 +83,13 @@ jobs:
       id-token: write
     env:
       STACK: ${{ inputs.stack }}
-      ROLE_KIND: ${{ inputs.role }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: role
-        name: Resolve the stack's CI role
-        run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind "$ROLE_KIND"
+        name: Resolve the stack's CI apply role
+        run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind apply
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
@@ -103,8 +103,8 @@ jobs:
     name: ${{ inputs.mode }} ${{ inputs.stack }} (${{ inputs.label }})
     needs: start
     if: >-
-      contains(fromJSON('["push", "workflow_dispatch", "merge_group", "schedule"]'), github.event_name) ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      contains(fromJSON('["push", "workflow_dispatch", "schedule"]'), github.event_name) &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: [self-hosted, linux, x64, "${{ inputs.label }}"]
     # A hung plan or apply must not hold the runner, the stack's run and its
     # state lock for GitHub's six hours (the clock starts once a runner has
@@ -122,7 +122,6 @@ jobs:
       STACK: ${{ inputs.stack }}
       LABEL: ${{ inputs.label }}
       MODE: ${{ inputs.mode }}
-      ROLE_KIND: ${{ inputs.role }}
       BASE_SHA: ${{ inputs.base }}
       COMPONENTS: ${{ inputs.components }}
       TF_CLI_ARGS_apply: -lock-timeout=10m
@@ -142,8 +141,8 @@ jobs:
           name: deployed-${{ inputs.stack }}
           path: hosted-marker
       - id: role
-        name: Resolve the stack's CI role
-        run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind "$ROLE_KIND"
+        name: Resolve the stack's CI apply role
+        run: python3 workflows/scripts/common/ci-apply-role-arn.py --kind apply
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
@@ -175,10 +174,8 @@ jobs:
               mkdir -p in-vpc-marker && echo "$GITHUB_SHA" > in-vpc-marker/sha
               ;;
             plan|drift)
-              # The plan role reads state through a READ-only state role, hence
-              # -lock=false (as the hosted plans); a dispatched plan uses the
-              # apply role and its write state role, and still takes no lock.
-              if [ "$ROLE_KIND" = plan ]; then export TFSTATE_ACCESS=read; fi
+              # Read-only by intent: no state lock (as the hosted plans), though
+              # the apply role's state role could take one.
               drifted=() failed=()
               while IFS= read -r component; do
                 [ -n "$component" ] || continue

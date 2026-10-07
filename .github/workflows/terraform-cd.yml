@@ -279,7 +279,6 @@ jobs:
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
       mode: deploy
-      role: apply
       base: ${{ matrix.base }}
 
   # The only job with contents: write. For each stack whose deploy succeeded
@@ -424,5 +423,4 @@ jobs:
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
       mode: ${{ inputs.action }}
-      role: apply
       components: ${{ inputs.component }}

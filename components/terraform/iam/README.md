@@ -23,10 +23,11 @@ package uploader role for an application repo's CI.
   from `ci_apply_role_trusted_github_repos` (Cloud Posse's `trusted_github_repos` shape). There is
   no GitHub Environment approval: every merge to master applies, prod included. Branch
   protection is the gate.
-- Both CI roles may `autoscaling:ExecutePolicy` on the groups named in `ci_runner_pool_names` (this
-  stack's github-runners pools) and nothing else: CI starts an ephemeral in-VPC runner per
-  in-cluster job through the pool's `+1` start policy (`ci-runner-pools.tf`). They cannot set a
-  capacity. That is the plan role's only write.
+- The CI apply role may `autoscaling:ExecutePolicy` on the groups named in `ci_runner_pool_names`
+  (this stack's github-runners pools) and nothing else: CI starts an ephemeral in-VPC runner per
+  in-cluster job through the pool's `+1` start policy (`ci-runner-pools.tf`) and cannot set a
+  capacity. Every in-VPC job runs on the default branch with the apply role, so the plan role
+  (which trusts pull requests) gets no write.
 - State access is only `sts:AssumeRole` on the backend's stage access roles
   (`ci_backend_read_role_arns`, `ci_backend_write_role_arn`); no direct bucket grant, so CI plans
   run with `-lock=false`.

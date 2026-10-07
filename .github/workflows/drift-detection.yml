@@ -184,4 +184,3 @@ jobs:
       label: ${{ matrix.label }}
       asg: ${{ matrix.asg }}
       mode: drift
-      role: plan

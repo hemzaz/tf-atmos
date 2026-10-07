@@ -266,7 +266,7 @@ workflows:
         type: shell
         command: |
           set -eu
-          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py workflows/scripts/common/test_ci_in_vpc.py workflows/scripts/common/test_runner_scripts.py
+          python3 -m unittest workflows/scripts/common/test_check_cluster_api_ci.py workflows/scripts/common/test_ci_components.py workflows/scripts/common/test_ci_in_vpc.py workflows/scripts/common/test_runner_scripts.py workflows/scripts/common/test_in_vpc_workflows.py
           stacks_json="$(mktemp)"
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
