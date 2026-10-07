@@ -43,6 +43,11 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   operator (`&&`, `||`, ...) and skips the file: write `x == false` or `(!x)`. The lint step
   `hcl-unary-newline` (`scripts/check-hcl-unary-newline.py`) catches it.
 - CI runs in the `ghcr.io/cloudposse/atmos` Linux container; shell that works on macOS may not.
+- `schemas.atmos.manifest` must stay a repo file (`schemas/atmos/atmos-manifest.json`), never a URL:
+  Atmos caches a URL at `$TMPDIR/atmos-manifest.json`, and a cache left with trailing bytes fails
+  every `describe`/`validate` with `jsonschema: invalid json ... after top-level value`. After an
+  Atmos image bump, re-pin with `atmos stack schema schemas/atmos/atmos-manifest.json` (lint step
+  `manifest-schema`).
 - No scanner baselines: fix a checkov/trivy finding or suppress it inline with a reason
   (`#checkov:skip=<ID>:<reason>` inside the block, `#trivy:ignore:<ID> <reason>` on the line above);
   a risk the owner has not accepted starts with `TODO(owner):` and is tracked in
