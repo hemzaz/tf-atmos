@@ -1,7 +1,8 @@
 # backend
 
 The Terraform state backend: the `fnx-terraform-state` S3 bucket (versioned, SSE-KMS with its own
-key, TLS-only), log buckets, and the state access roles. Locking is S3-native `use_lockfile`; there
+key, TLS-only), log buckets, the state access roles, and, with `s3_replication_enabled`, a
+cross-region replica of the state bucket. Locking is S3-native `use_lockfile`; there
 is no DynamoDB table. Modelled on Cloud Posse `aws-tfstate-backend`'s `access_roles` (account-root
 trust narrowed by exact `aws:PrincipalArn`, so not-yet-created roles can be trusted; the applying
 caller is always trusted).
@@ -51,7 +52,21 @@ instances), listed on its stage's roles in `stacks/orgs/fnx/root/us-east-1.yaml`
   (`main`) would share its state keys (`vpc/fnx-ue1-dev-main/...`), and `check-state-keys.py` fails that.
 - Every `allowed_principal_arns` entry must name the account its role lives in; the committed ARNs
   use placeholder account IDs (see [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#first-deploy-inputs)).
-- All three buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.
+- All the buckets are `prevent_destroy`. Destroying the backend destroys every stack's state.
+- Replication (`s3_replication_enabled`, `replica_region`; Cloud Posse tfstate-backend's
+  `s3_replication_enabled`): every object, `.tflock` files and delete markers included, goes to
+  `<bucket_name>-replica` in `replica_region`, encrypted with a replica of the state key (the key
+  is multi-region, always: switching that on later would replace the key the state is encrypted
+  with). Cloud Posse replicates into a bucket a second tfstate-backend instance creates; here the
+  one instance creates it through the provider's per-resource `region`, since a second instance
+  would collide on the access roles' names. The replication role is least privilege (source
+  versions read, replicas written, each key through S3 in its region). Every access role may read
+  the replica and none may write it; the replica's bucket policy also denies object writes, tags
+  and deletes to every principal but the replication role (replication writes with
+  `s3:Replicate*` only). A run against it (`TFSTATE_SOURCE=replica`,
+  [docs/OPERATIONS.md](../../../docs/OPERATIONS.md#state-during-a-us-east-1-outage)) can only
+  plan with `-lock=false`. The replica has no server access logs (they need a target bucket in its
+  region).
 
 ## Bootstrap
 

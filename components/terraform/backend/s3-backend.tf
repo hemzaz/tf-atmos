@@ -9,6 +9,7 @@
  *   - terraform_state_logs:        auxiliary log bucket (versioned, SSE-KMS, TLS-only)
  *   - terraform_state_access_logs: S3 server access logs for the two buckets above (versioned)
  *                                  (SSE-S3: log delivery does not support SSE-KMS targets)
+ *   - terraform_state_replica:     the state bucket's cross-region replica (replication.tf)
  */
 
 locals {
@@ -36,7 +37,6 @@ locals {
 #trivy:ignore:AWS-0093 False positive: aws_s3_bucket_public_access_block.this covers every bucket via for_each
 #trivy:ignore:AWS-0132 False positive: aws_s3_bucket_server_side_encryption_configuration.kms applies the state CMK via for_each
 resource "aws_s3_bucket" "terraform_state" {
-  #checkov:skip=CKV_AWS_144:TODO(owner): replicate state to the DR region (us-east-2)? Off as in Cloud Posse's tfstate-backend (s3_replication_enabled = false); adds a replica bucket, a role and cost
   #checkov:skip=CKV2_AWS_62:Nothing consumes object-created notifications; Terraform reads and locks state directly
   bucket = var.bucket_name
 
@@ -86,6 +86,11 @@ resource "aws_kms_key" "terraform_state_key" {
   description             = "KMS key for Terraform state encryption"
   deletion_window_in_days = 30
   enable_key_rotation     = true
+
+  # Multi-region, replicated beside the state bucket's replica
+  # (replication.tf). Always on, not tied to s3_replication_enabled:
+  # multi_region forces a new key, and the state is encrypted with this one.
+  multi_region = true
 
   # A key policy cannot reference its own ARN; "*" means "this key"
   policy = jsonencode({

@@ -50,6 +50,38 @@ mock_provider "aws" {
     }
   }
 
+  override_data {
+    target          = data.aws_iam_policy_document.terraform_state_replica
+    override_during = plan
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  override_data {
+    target          = data.aws_iam_policy_document.replication_assume
+    override_during = plan
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  override_data {
+    target          = data.aws_iam_policy_document.terraform_state_replica_writes
+    override_during = plan
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  override_data {
+    target          = data.aws_iam_policy_document.replication
+    override_during = plan
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
   # Known at plan, so the object ARNs the read roles are scoped to can be
   # matched against real state keys below.
   mock_resource "aws_s3_bucket" {
@@ -571,4 +603,180 @@ run "rejects_empty_object_key_patterns" {
   }
 
   expect_failures = [var.access_roles]
+}
+
+# --- Cross-region replication of the state bucket (replication.tf) ---
+
+run "replication_is_off_by_default" {
+  command = plan
+
+  assert {
+    condition = (
+      length(aws_s3_bucket.terraform_state_replica) == 0
+      && length(aws_s3_bucket_replication_configuration.terraform_state) == 0
+      && length(aws_iam_role.replication) == 0
+      && !contains(flatten([for s in data.aws_iam_policy_document.access_role["read"].statement : [s.sid]]), "ReadStateReplica")
+    )
+    error_message = "Without s3_replication_enabled there is no replica, no replication and no replica grant."
+  }
+
+  assert {
+    condition     = aws_kms_key.terraform_state_key.multi_region == true
+    error_message = "The state key is always multi-region: turning that on later would replace the key the state is encrypted with."
+  }
+}
+
+run "replication_creates_the_replica_in_the_replica_region" {
+  command = plan
+
+  variables {
+    s3_replication_enabled = true
+    replica_region         = "us-east-2"
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket.terraform_state_replica[0].bucket == "fnx-terraform-state-replica"
+      && aws_s3_bucket.terraform_state_replica[0].region == "us-east-2"
+      && aws_kms_replica_key.terraform_state[0].region == "us-east-2"
+      && aws_s3_bucket_versioning.terraform_state_replica[0].versioning_configuration[0].status == "Enabled"
+    )
+    error_message = "The replica bucket and its key must be in replica_region, versioned."
+  }
+
+  assert {
+    condition = (
+      one(aws_s3_bucket_server_side_encryption_configuration.terraform_state_replica[0].rule).apply_server_side_encryption_by_default[0].sse_algorithm == "aws:kms"
+      && aws_s3_bucket_public_access_block.terraform_state_replica[0].restrict_public_buckets == true
+    )
+    error_message = "The replica must be SSE-KMS and private, as the source."
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_replication_configuration.terraform_state[0].rule[0].status == "Enabled"
+      && aws_s3_bucket_replication_configuration.terraform_state[0].rule[0].delete_marker_replication[0].status == "Enabled"
+      && aws_s3_bucket_replication_configuration.terraform_state[0].rule[0].source_selection_criteria[0].sse_kms_encrypted_objects[0].status == "Enabled"
+    )
+    error_message = "Every SSE-KMS state and lock object must replicate, deletes included."
+  }
+
+  assert {
+    condition     = aws_iam_role.replication[0].name == "fnx-terraform-state-replication"
+    error_message = "The replication role is named after the bucket."
+  }
+}
+
+run "replication_role_is_least_privilege" {
+  command = plan
+
+  variables {
+    s3_replication_enabled = true
+    replica_region         = "us-east-2"
+  }
+
+  assert {
+    condition = toset(flatten([for s in data.aws_iam_policy_document.replication[0].statement : tolist(s.actions)])) == toset([
+      "s3:GetReplicationConfiguration", "s3:ListBucket",
+      "s3:GetObjectVersionForReplication", "s3:GetObjectVersionAcl", "s3:GetObjectVersionTagging",
+      "s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags",
+      "kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey",
+    ])
+    error_message = "The replication role gets the replication actions only, as Cloud Posse's tfstate-backend."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.replication[0].statement :
+      contains([for c in s.condition : c.variable], "kms:ViaService")
+      if anytrue([for a in s.actions : startswith(a, "kms:")])
+    ])
+    error_message = "Key use must be limited to S3 (kms:ViaService)."
+  }
+}
+
+run "every_role_reads_the_replica_and_none_writes_it" {
+  command = plan
+
+  variables {
+    s3_replication_enabled = true
+    replica_region         = "us-east-2"
+  }
+
+  assert {
+    condition = alltrue([
+      for key in ["read", "prod_read", "write", "prod_write", "root_write"] : alltrue([
+        for s in data.aws_iam_policy_document.access_role[key].statement :
+        toset(s.actions) == toset(["s3:GetObject"])
+        if s.sid == "ReadStateReplica"
+      ]) && contains([for s in data.aws_iam_policy_document.access_role[key].statement : s.sid], "ReadStateReplica")
+    ])
+    error_message = "Every role, write roles included, may only GetObject in the replica."
+  }
+
+  assert {
+    condition = alltrue([
+      for key in ["write", "prod_write"] : alltrue([
+        for s in data.aws_iam_policy_document.access_role[key].statement :
+        toset(s.actions) == toset(["kms:Decrypt", "kms:DescribeKey"])
+        if s.sid == "UseStateReplicaKey"
+      ]) && contains([for s in data.aws_iam_policy_document.access_role[key].statement : s.sid], "UseStateReplicaKey")
+    ])
+    error_message = "The replica key is for decrypting only: a run against the replica cannot write."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.access_role["prod_read"].statement :
+      toset(s.resources) == toset(["arn:aws:s3:::fnx-terraform-state/*/fnx-ue1-prod/*", "arn:aws:s3:::fnx-terraform-state/*/fnx-ue1-prod-*"])
+      if s.sid == "ReadStateReplica"
+    ])
+    error_message = "Replica reads keep each role's object_key_patterns (the mock gives every bucket the same ARN)."
+  }
+}
+
+run "replication_without_a_region_is_rejected" {
+  command = plan
+
+  variables {
+    s3_replication_enabled = true
+  }
+
+  expect_failures = [var.replica_region]
+}
+
+run "replica_in_the_bucket_region_is_rejected" {
+  command = plan
+
+  variables {
+    s3_replication_enabled = true
+    replica_region         = "us-east-1"
+  }
+
+  expect_failures = [var.replica_region]
+}
+
+run "replica_bucket_policy_denies_writes_to_all_but_replication" {
+  command = plan
+
+  variables {
+    s3_replication_enabled = true
+    replica_region         = "us-east-2"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.terraform_state_replica_writes[0].statement :
+      s.effect == "Deny"
+      && length(setintersection(toset(s.actions), toset(["s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:PutObjectTagging"]))) == 4
+      && anytrue([for c in s.condition : c.test == "StringNotEquals" && c.variable == "aws:PrincipalArn"])
+      && anytrue([for p in s.principals : contains(tolist(p.identifiers), "*")])
+    ])
+    error_message = "The replica's bucket policy must deny object writes, tags and deletes to every principal but the replication role."
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.terraform_state_replica_writes[0].source_policy_documents) == 1
+    error_message = "The write deny is added to the TLS-only policy, not instead of it."
+  }
 }
