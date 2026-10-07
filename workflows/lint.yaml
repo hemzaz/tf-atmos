@@ -168,7 +168,7 @@ workflows:
           echo "tflint: all component directories clean"
       # The state backend's roles are split by stage with S3 key patterns, a
       # "*/<stack>/*" and "*/<stack>-*" pair per stack
-      # (stacks/orgs/fnx/core/us-east-1.yaml); this evaluates them against
+      # (stacks/orgs/fnx/root/us-east-1.yaml); this evaluates them against
       # every s3-backend state key and fails one not matched by exactly its
       # stage's roles. Also run by validate-all (validate-enhanced.yaml).
       - name: check-state-keys

@@ -67,7 +67,7 @@ jobs:
           # The CI stacks, from ci-stacks.py (the one source terraform-cd.yml
           # and disaster-recovery.yml use too): every stack except those whose
           # terraform instances ALL set settings.github.actions_enabled: false
-          # (fnx-ue1-core, the emulator-only fnx-ue1-local-*, the fnx-ue1-fixtures-*
+          # (fnx-ue1-root, the emulator-only fnx-ue1-local-*, the fnx-ue1-fixtures-*
           # templates; emulator.yml covers the local ones). The same key Cloud
           # Posse's atmos-terraform-plan/-apply actions read. A stack with only
           # some opted-out instances stays; the plan step skips just those.

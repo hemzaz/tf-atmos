@@ -19,8 +19,8 @@
  * assumed-role session ARN into its role ARN, path included (upstream uses
  * awsutils' eks_role_arn, which drops the path). A root-user caller is never
  * added. An entry with no allowed_principal_arns (upstream's default) is
- * therefore trusted by the caller alone: that is the core_write role, the
- * only one that can write the backend's own (fnx-ue1-core) state.
+ * therefore trusted by the caller alone: that is the root_write role, the
+ * only one that can write the backend's own (fnx-ue1-root) state.
  *
  * KMS: the state key's policy delegates to IAM (account root only), so the
  * roles' own policies grant key use. Read: Decrypt. Write: also Encrypt and
@@ -78,7 +78,7 @@ resource "aws_iam_role" "access" {
   assume_role_policy = data.aws_iam_policy_document.access_role_assume[each.key].json
 
   lifecycle {
-    # An empty allowed_principal_arns trusts only the caller (the core_write
+    # An empty allowed_principal_arns trusts only the caller (the root_write
     # role), and a root-user caller is never added: that would leave a trust
     # policy with no principal at all.
     precondition {
@@ -117,7 +117,7 @@ data "aws_iam_policy_document" "access_role" {
   }
 
   # Object access is limited to object_key_patterns: every role is split by
-  # stage (non-prod / prod / core) within the one bucket. ListBucket above is not
+  # stage (non-prod / prod / root) within the one bucket. ListBucket above is not
   # prefix-scoped: Terraform's S3 backend lists "<workspace_key_prefix>/" (the
   # component, shared by every stack's workspaces) to find workspaces, so a
   # role can see key NAMES across stacks, never object contents.

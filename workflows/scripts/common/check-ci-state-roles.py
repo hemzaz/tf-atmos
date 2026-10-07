@@ -5,7 +5,7 @@ Reads `atmos describe stacks --process-functions=false --format json` on stdin.
 Each deployable iam/ci instance creates <ci_role_name_prefix>-plan (github_oidc_enabled)
 and <ci_role_name_prefix>-apply (also ci_apply_role_enabled) in its stack's account;
 ci-apply-role-arn.py derives the ARNs CI assumes the same way. backend/main's
-access_roles trust them as literal ARNs (stacks/orgs/fnx/core/us-east-1.yaml,
+access_roles trust them as literal ARNs (stacks/orgs/fnx/root/us-east-1.yaml,
 an aws:PrincipalArn condition), so nothing else ties the two together: the plan
 role must be in its stage's read role's allowed_principal_arns (read for
 dev/staging, prod_read for prod) and the apply role in its write role's (write /

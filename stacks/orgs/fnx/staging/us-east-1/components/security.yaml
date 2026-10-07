@@ -46,7 +46,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-core
+            stack: fnx-ue1-root
     # GitHub Actions OIDC roles. CI plans, drift and DR checks for this stack
     # assume its plan role, and CD its apply role, each derived from this
     # instance (workflows/scripts/common/ci-apply-role-arn.py). Every AWS job
@@ -88,11 +88,11 @@ components:
           - "arn:aws:iam::aws:policy/AdministratorAccess"
         # State access: sts:AssumeRole on the single state backend's NON-PROD
         # access roles only (backend/main in the management account's
-        # fnx-ue1-core; the dev and staging stacks' objects) - plan ->
+        # fnx-ue1-root; the dev and staging stacks' objects) - plan ->
         # the read-only role, apply -> the read/write role. Named by the same
         # convention as this stack's own backend (stacks/orgs/fnx/_defaults.yaml),
-        # not read from backend/main's state: CI roles never read fnx-ue1-core
-        # state (core_write, the only role that can, trusts the administrator
+        # not read from backend/main's state: CI roles never read fnx-ue1-root
+        # state (root_write, the only role that can, trusts the administrator
         # alone). The backend/main dependency below orders the deploys.
         ci_backend_read_role_arns:
           - "arn:aws:iam::{{ .settings.environment.management_account_id }}:role/{{ .settings.context.tenant }}-terraform-backend-read-role"
@@ -120,7 +120,7 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-core
+            stack: fnx-ue1-root
 
     # ==========================================================================
     # KMS - customer-managed key for Secrets Manager and other encrypted services

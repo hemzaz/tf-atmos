@@ -25,7 +25,7 @@ def stack(stage, *actions_enabled):
 
 # The shape of today's stacks (atmos describe stacks --sections settings).
 TODAY = {
-    "fnx-ue1-core": stack("core", False, False),
+    "fnx-ue1-root": stack("root", False, False),
     "fnx-ue1-dev": stack("dev", None, False),
     "fnx-ue1-fixtures-batch": stack("fixtures", False),
     "fnx-ue1-fixtures-webapp": stack("fixtures", False),
@@ -88,7 +88,7 @@ class CheckTest(unittest.TestCase):
         self.assertIn("Unknown stack", ci_stacks.check(TODAY, "fnx-ue1-dev\nfnx-ue1-prod"))
 
     def test_ci_disabled_stacks_fail(self):
-        for name in ("fnx-ue1-core", "fnx-ue1-local-sandbox", "fnx-ue1-fixtures-batch"):
+        for name in ("fnx-ue1-root", "fnx-ue1-local-sandbox", "fnx-ue1-fixtures-batch"):
             with self.subTest(name=name):
                 self.assertIn("actions_enabled: false", ci_stacks.check(TODAY, name))
 

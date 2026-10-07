@@ -1,14 +1,14 @@
 # The single Terraform state backend (S3 bucket, KMS key, read-only and
 # read/write access roles): the `backend` component's only instance,
-# backend/main in the management account's stack fnx-ue1-core. Native S3
+# backend/main in the management account's stack fnx-ue1-root. Native S3
 # lockfiles replace the DynamoDB lock table. First creation is a cold start:
 # `atmos workflow backend-cold-start -f bootstrap`.
 #
 # Usage: atmos workflow apply -f apply-backend
 workflows:
   apply:
-    description: Deploy the Terraform state backend component (backend/main in fnx-ue1-core)
-    stack: fnx-ue1-core
+    description: Deploy the Terraform state backend component (backend/main in fnx-ue1-root)
+    stack: fnx-ue1-root
     steps:
       - name: plan
         type: atmos

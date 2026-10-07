@@ -497,15 +497,15 @@ prod: ## Switch to production environment
 # =============================================================================
 # State lives in ONE S3 bucket, <tenant>-terraform-state (native lockfile
 # locking, no DynamoDB), created and managed by backend/main in the management
-# account's stack fnx-ue1-core. First creation: make setup-aws-backend-cold-start.
+# account's stack fnx-ue1-root. First creation: make setup-aws-backend-cold-start.
 
-BACKEND_STACK := fnx-ue1-core
+BACKEND_STACK := fnx-ue1-root
 
 setup-aws-backend-cold-start: ## Create the single state backend (once, management-account admin credentials)
 	@echo "$(BLUE)Creating the state backend in $(BACKEND_STACK)...$(NC)"
 	@atmos workflow backend-cold-start -f bootstrap
 
-setup-aws-backend: ## Plan and apply the single state backend (backend/main in fnx-ue1-core)
+setup-aws-backend: ## Plan and apply the single state backend (backend/main in fnx-ue1-root)
 	@echo "$(BLUE)Updating the state backend in $(BACKEND_STACK)...$(NC)"
 	@atmos workflow backend-only -f bootstrap
 
@@ -538,7 +538,7 @@ cleanup-aws-backend: ## Destroy the backend/main component (DANGEROUS; the workf
 	@atmos workflow destroy -f destroy-backend
 
 # Quick bootstrap per environment. There is no per-environment backend: all
-# stacks share the one in fnx-ue1-core (make setup-aws-backend-cold-start).
+# stacks share the one in fnx-ue1-root (make setup-aws-backend-cold-start).
 setup-aws-dev: ## Quick bootstrap (IAM + VPCs) for development
 	@$(MAKE) bootstrap-environment STACK=fnx-ue1-dev
 

@@ -42,7 +42,7 @@ each real stack, `<stage>/<region>.yaml`, imports its `<stage>/<region>/componen
 | `fnx-ue1-dev` | `dev/us-east-1.yaml` | dev |
 | `fnx-ue1-staging` | `staging/us-east-1.yaml` | staging |
 | `fnx-ue1-prod` | `prod/us-east-1.yaml` | production |
-| `fnx-ue1-core` | `core/us-east-1.yaml` | management account: the state backend (`backend/main`); not run by CI |
+| `fnx-ue1-root` | `root/us-east-1.yaml` | management account: the state backend (`backend/main`); not run by CI |
 | `fnx-ue1-local-sandbox` | `local/us-east-1/sandbox.yaml` | Floci emulator lane, no AWS account needed |
 | `fnx-ue1-local-localemu` | `local/us-east-1/localemu.yaml` | LocalEmu lane, for what Floci cannot provision (e.g. `rds`) |
 | `fnx-ue1-fixtures-<name>` | `fixtures/us-east-1/<name>.yaml` | one per `stacks/catalog/templates/` file, checked by CI, never deployed ([details](./docs/OPERATIONS.md#template-fixtures)) |

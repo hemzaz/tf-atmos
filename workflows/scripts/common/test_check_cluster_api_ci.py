@@ -45,7 +45,7 @@ def addon(component, cluster):
 def with_backend(stacks, **allowed):
     backend = instance("backend")
     backend["vars"]["access_roles"] = {key: {"allowed_principal_arns": arns} for key, arns in allowed.items()}
-    return {**stacks, "fnx-ue1-core": {"components": {"terraform": {"backend/main": backend}}}}
+    return {**stacks, "fnx-ue1-root": {"components": {"terraform": {"backend/main": backend}}}}
 
 
 class CheckClusterApiCiTest(unittest.TestCase):
@@ -145,7 +145,7 @@ class CheckClusterApiCiTest(unittest.TestCase):
         self.assertIn("no deployable backend/main", errors[0])
         # A disabled backend/main counts as missing.
         off = with_backend(stacks, write=[ADMIN])
-        off["fnx-ue1-core"]["components"]["terraform"]["backend/main"]["metadata"] = {"enabled": False}
+        off["fnx-ue1-root"]["components"]["terraform"]["backend/main"]["metadata"] = {"enabled": False}
         errors, _ = check_cluster_api_ci.check_operators(off, CLUSTER)
         self.assertEqual(len(errors), 1, errors)
 

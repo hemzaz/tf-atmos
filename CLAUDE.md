@@ -33,7 +33,7 @@ Nothing has been applied to AWS yet, so refactors need no state migration.
   `{{ .atmos_stack }}`. `check-lane-names.py` fails a lane that shares a name with its stage stack.
 - `metadata.component` decides the module: `network/main` is a `dns` instance.
 - Each stack's state is an exact `object_key_patterns` pair on its stage's backend roles
-  (`stacks/orgs/fnx/core/us-east-1.yaml`): a new stack needs its pair (`check-state-keys.py`).
+  (`stacks/orgs/fnx/root/us-east-1.yaml`): a new stack needs its pair (`check-state-keys.py`).
 - Stage `fixtures` (`fnx-ue1-fixtures-<name>`) puts each catalog template under the checks and is
   never deployed; `KNOWN_BROKEN_FIXTURES` (`workflows/scripts/common/fixtures.py`) relaxes a
   template until its port PR removes the entry.

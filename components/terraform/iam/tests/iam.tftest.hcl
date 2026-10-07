@@ -268,7 +268,7 @@ run "no_ci_apply_kms_policy_without_the_key_aliases" {
 }
 
 # State access: the CI roles reach the single state backend (backend/main in
-# fnx-ue1-core) only through its stage-split access roles -- prod's plan role
+# fnx-ue1-root) only through its stage-split access roles -- prod's plan role
 # may assume only the prod READ-only role, prod's apply role only the prod
 # WRITE role -- and hold no S3/KMS grant on the state bucket themselves (so no
 # lock-object writes from plans either). The values are prod's security.yaml.
@@ -302,7 +302,7 @@ run "ci_state_access_is_sts_assume_role_on_the_stage_backend_roles_only" {
       && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Action == "sts:AssumeRole"
       && jsondecode(aws_iam_role_policy.ci_apply_state[0].policy).Statement[0].Resource == "arn:aws:iam::111111111111:role/fnx-terraform-backend-prod-role"
     )
-    error_message = "The prod apply role's only state grant is sts:AssumeRole on the prod write role (never the non-prod or core one)."
+    error_message = "The prod apply role's only state grant is sts:AssumeRole on the prod write role (never the non-prod or root one)."
   }
 }
 

@@ -6,7 +6,7 @@ code as environment (fnx-ue1-dev, fnx-ue1-fixtures-batch; atmos.yaml
 name_template), in stacks/orgs/<tenant>/<stage>/<region>.yaml. The old names put
 the stage second and an instance name last (fnx-dev-testenv-01,
 fnx-prod-production, fnx-fixtures-batch) and lived in
-<stage>/<region>/<instance>.yaml. An old name left in a script, workflow, test or
+<stage>/<region>/<instance>.yaml; the management stage was core, now root. An old name left in a script, workflow, test or
 doc points at a stack that no longer exists, so this fails on any of them.
 
 This file and its test quote the old names and are skipped; any other line
@@ -45,6 +45,10 @@ OLD_NAMES = (
         "old stack path (<stage>/<region>/<instance>)",
     ),
     (re.compile(r"fixtures/us-east-1/idpplatform\b"), "old fixture path"),
+    # The management stage was core until Q4 PR6; it is root (Cloud Posse's
+    # core-gbl-root): fnx-ue1-root, stacks/orgs/fnx/root/.
+    (re.compile(r"\bfnx-[a-z]{2}\d-core\b"), "old management stack name (core is root)"),
+    (re.compile(r"orgs/fnx/core\b"), "old management stack path (core is root)"),
 )
 
 

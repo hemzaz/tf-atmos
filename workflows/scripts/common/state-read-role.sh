@@ -20,7 +20,7 @@ export STATE_READ_ROLE_ARN
 
 if ! _state_creds="$(aws sts assume-role --role-arn "${STATE_READ_ROLE_ARN}" --role-session-name "dr-${STACK}" \
   --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text)"; then
-  echo "Cannot assume ${STATE_READ_ROLE_ARN}: the caller must be a principal that role trusts (backend/main access_roles in fnx-ue1-core)." >&2
+  echo "Cannot assume ${STATE_READ_ROLE_ARN}: the caller must be a principal that role trusts (backend/main access_roles in fnx-ue1-root)." >&2
   exit 1
 fi
 read -r _STATE_KEY _STATE_SECRET _STATE_TOKEN <<<"${_state_creds}"
