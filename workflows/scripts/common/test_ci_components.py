@@ -34,7 +34,7 @@ class DependencyOrderTest(unittest.TestCase):
 
     def test_cross_stack_missing_and_non_deployable_edges_are_ignored(self):
         instances = {
-            "iam/ci": instance({"component": "backend/main", "stack": "fnx-ue1-core"}, "gone/main", "base"),
+            "iam/ci": instance({"component": "backend/main", "stack": "fnx-ue1-root"}, "gone/main", "base"),
             "base": instance(type="abstract"),
             "off": instance(enabled=False),
         }

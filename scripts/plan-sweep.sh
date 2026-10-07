@@ -130,7 +130,7 @@ fi
 
 # The default is every stack from `atmos describe stacks` except the stages
 # workflows/scripts/common/ci-stacks.py names in PLAN_SWEEP_EXCLUDED_STAGES
-# (core: the backend only; local: the emulator lanes), real stacks first in
+# (root: the backend only; local: the emulator lanes), real stacks first in
 # promotion order, then the template fixtures (stacks/orgs/fnx/fixtures). A new
 # stack is swept with no edit here. A listing that fails, or one without the
 # fixtures, is this script's failure, not a sweep that silently drops stacks.

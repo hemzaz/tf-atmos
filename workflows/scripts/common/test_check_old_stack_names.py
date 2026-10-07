@@ -35,6 +35,9 @@ class HitsTest(unittest.TestCase):
             "stacks/orgs/fnx/prod/us-east-1/production.yaml",
             "stacks/orgs/fnx/core/us-east-1/root.yaml",
             "stacks/orgs/fnx/fixtures/us-east-1/idpplatform.yaml",
+            "atmos terraform plan backend/main -s fnx-ue1-core",
+            "fnx-ew1-core",
+            "stacks/orgs/fnx/core/us-east-1.yaml",
         ):
             with self.subTest(line=line):
                 self.assertEqual(len(labels(line)), 1, line)
@@ -42,7 +45,8 @@ class HitsTest(unittest.TestCase):
     def test_current_names_pass(self):
         for line in (
             "atmos terraform plan vpc/main -s fnx-ue1-dev",
-            "fnx-ue1-prod fnx-ue2-prod fnx-ew1-prod fnx-ue1-core",
+            "fnx-ue1-prod fnx-ue2-prod fnx-ew1-prod fnx-ue1-root",
+            "stacks/orgs/fnx/root/us-east-1.yaml NetworkTier: core aws_eks_addon.core",
             "fnx-ue1-fixtures-batch fnx-ue1-local-sandbox fnx-ue1-dev-perf",
             "stacks/orgs/fnx/dev/us-east-1.yaml stacks/orgs/fnx/dev/us-east-1/components/globals.yaml",
             "stacks/orgs/fnx/fixtures/us-east-1/idp.yaml",

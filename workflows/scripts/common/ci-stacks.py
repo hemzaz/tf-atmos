@@ -8,7 +8,7 @@ stacks the same way):
 
   (default)        stacks a hosted runner deploys, plans and checks: every stack
                    except those whose terraform instances ALL set
-                   settings.github.actions_enabled: false (fnx-ue1-core,
+                   settings.github.actions_enabled: false (fnx-ue1-root,
                    fnx-ue1-local-*, fnx-ue1-fixtures-*). terraform-cd.yml and
                    drift-detection.yml. Every selected stack's stage must be
                    in STAGE_ORDER, or CD could not place it in the promotion.
@@ -36,7 +36,7 @@ STAGE_ORDER = ("dev", "staging", "prod")
 # Stages plan-sweep deliberately skips (everything else, the template
 # fixtures included, is swept):
 PLAN_SWEEP_EXCLUDED_STAGES = {
-    "core": "fnx-ue1-core holds only the state backend, bootstrapped by an operator",
+    "root": "fnx-ue1-root holds only the state backend, bootstrapped by an operator",
     "local": "emulator-only stacks; the sandbox/LocalEmu lanes apply them for real",
 }
 

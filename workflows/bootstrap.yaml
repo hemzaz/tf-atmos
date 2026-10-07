@@ -1,7 +1,7 @@
 # Bootstrap. There is ONE Terraform state backend (bucket fnx-terraform-state,
 # its KMS key and its stage-split read-only / read-write access roles), the
 # `backend` component's single instance backend/main in the management account's stack
-# fnx-ue1-core. Every stack's S3 backend assumes one of its access roles
+# fnx-ue1-root. Every stack's S3 backend assumes one of its access roles
 # (stacks/orgs/fnx/_defaults.yaml), so it is bootstrapped once, first, with
 # management-account administrator credentials; then each workload stack.
 #
@@ -14,7 +14,7 @@ workflows:
   backend-cold-start:
     description: Create the state backend with local state (Cloud Posse cold start), then migrate its state into the new bucket
     # The backend-* workflows pin their stack: the backend exists only here.
-    stack: fnx-ue1-core
+    stack: fnx-ue1-root
     dependencies:
       tools:
         aws/aws-cli: "2.36.49"
@@ -36,7 +36,7 @@ workflows:
         command: case '{{ .steps.stages.value }}' in *fixtures*) echo "Refusing a template fixture stack (stage fixtures), which is never deployed."; exit 1 ;; esac
       # First-deploy preflight, before anything touches AWS: fails while the
       # stack about to be deployed (or the management account and the backend's
-      # access_roles, for fnx-ue1-core) still holds a placeholder account ID,
+      # access_roles, for fnx-ue1-root) still holds a placeholder account ID,
       # organization ID, example domain or alert address, an empty EKS admin
       # role or an unset prod RDS alarm target, or breaks the account model
       # (workload account = management account; two stages in one account).
@@ -86,8 +86,8 @@ workflows:
         command: rm -f components/terraform/backend/backend.tf.json
       # Local state: nothing to assume yet. The caller (this administrator) is
       # added to every access role's trust, as in Cloud Posse's tfstate-backend,
-      # and is the ONLY principal of the core role (fnx-terraform-backend-core-role),
-      # the one fnx-ue1-core's own backend assumes.
+      # and is the ONLY principal of the root role (fnx-terraform-backend-root-role),
+      # the one fnx-ue1-root's own backend assumes.
       - name: apply-local-state
         type: atmos
         command: terraform deploy backend/main --auto-generate-backend-file=false
@@ -96,10 +96,10 @@ workflows:
       # fail migrate-state below. Probe the role the migration will assume -
       # the one this stack's backend configuration names - with backoff, up
       # to ~60s.
-      - name: wait-for-core-role
+      - name: wait-for-root-role
         type: shell
         command: |
-          role="$(atmos describe component backend/main -s fnx-ue1-core --process-functions=false --provenance=false --format json | jq -er '.backend.assume_role.role_arn')" || { echo "Cannot resolve backend/main's backend role_arn"; exit 1; }
+          role="$(atmos describe component backend/main -s fnx-ue1-root --process-functions=false --provenance=false --format json | jq -er '.backend.assume_role.role_arn')" || { echo "Cannot resolve backend/main's backend role_arn"; exit 1; }
           delay=2
           waited=0
           until aws sts assume-role --role-arn "$role" --role-session-name backend-cold-start-probe --duration-seconds 900 >/dev/null 2>&1; do
@@ -114,7 +114,7 @@ workflows:
             [ "$delay" -gt 16 ] && delay=16
           done
           echo "$role is assumable."
-      # Generates the S3 backend (the core role, which now trusts the caller) and
+      # Generates the S3 backend (the root role, which now trusts the caller) and
       # copies the local state into the bucket. -reconfigure would discard the
       # local state instead of migrating it, hence --init-reconfigure=never.
       - name: migrate-state
@@ -127,8 +127,8 @@ workflows:
           Next: `atmos workflow full -f bootstrap -s <stack>` for each workload stack.
 
   backend-only:
-    description: Plan and apply the state backend (backend/main in fnx-ue1-core) after its cold start
-    stack: fnx-ue1-core
+    description: Plan and apply the state backend (backend/main in fnx-ue1-root) after its cold start
+    stack: fnx-ue1-root
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -164,7 +164,7 @@ workflows:
         command: atmos validate stacks
       # Every workload stack's state lives in the backend, reached through its
       # stage's access role, so backend-cold-start must have run. iam/ci names
-      # those roles by convention (it does not read fnx-ue1-core's state).
+      # those roles by convention (it does not read fnx-ue1-root's state).
       - name: plan-foundation
         type: atmos
         command: terraform plan --log-order grouped --query '.metadata.component == "iam" or .metadata.component == "vpc"'
@@ -189,7 +189,7 @@ workflows:
 
   verify:
     description: Verify the state backend exists and is configured as expected
-    stack: fnx-ue1-core
+    stack: fnx-ue1-root
     steps:
       - name: describe-backend
         type: atmos

@@ -43,7 +43,7 @@ def stack(stage, account, extra_env=None, **instances):
 def clean():
     """Real-looking, distinct accounts: no errors."""
     return {
-        "fnx-ue1-core": stack("core", None, backend_main={"component": "backend",
+        "fnx-ue1-root": stack("root", None, backend_main={"component": "backend",
                                                              "account_id": MGMT}),
         "fnx-ue1-dev": stack("dev", "222222222222"),
         "fnx-ue1-staging": stack("staging", "333333333333"),
@@ -87,9 +87,9 @@ class PlaceholderTest(unittest.TestCase):
 
     def test_placeholder_account_inside_an_arn(self):
         stacks = clean()
-        stacks["fnx-ue1-core"] = stack("core", None, backend_main={"component": "backend", "access_roles": {
+        stacks["fnx-ue1-root"] = stack("root", None, backend_main={"component": "backend", "access_roles": {
             "read": {"allowed_principal_arns": ["arn:aws:iam::123456789012:role/fnx-ue1-dev-ci-plan"]}}})
-        self.assert_one(stacks, "fnx-ue1-core", "access_roles.read.allowed_principal_arns[0]", "Account IDs")
+        self.assert_one(stacks, "fnx-ue1-root", "access_roles.read.allowed_principal_arns[0]", "Account IDs")
 
     def test_a_longer_number_is_not_a_placeholder(self):
         stacks = clean()
@@ -223,7 +223,7 @@ class AccountModelTest(unittest.TestCase):
 
     def test_management_stage_may_use_the_management_account(self):
         stacks = clean()
-        stacks["fnx-ue1-core"] = stack("core", MGMT)
+        stacks["fnx-ue1-root"] = stack("root", MGMT)
         self.assertEqual(errors(stacks), [])
 
     def test_two_stages_sharing_an_account(self):

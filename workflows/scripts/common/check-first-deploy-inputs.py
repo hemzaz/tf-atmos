@@ -41,7 +41,7 @@ DOCS = "docs/OPERATIONS.md#first-deploy-inputs"
 # Never deployed to a real account: the emulator lanes and the template fixtures.
 EXEMPT_STAGES = {"local", "fixtures"}
 # The management account's own stage: its account IS management_account_id.
-MANAGEMENT_STAGES = {"core"}
+MANAGEMENT_STAGES = {"root"}
 
 PLACEHOLDER_ACCOUNTS = ("123456789012", "000000000000")
 # A 12-digit run that is not part of a longer hex token (a digest) and not a

@@ -104,7 +104,7 @@ resource "aws_iam_role_policy_attachment" "ci_plan_managed" {
 }
 
 # Terraform state lives in the management account's single backend
-# (components/terraform/backend, instance backend/main in stack fnx-ue1-core).
+# (components/terraform/backend, instance backend/main in stack fnx-ue1-root).
 # CI reaches it only by assuming that backend's access roles, each split by
 # stage: the plan role its stage's READ-only one (CI plans run with
 # -lock=false, so they write no .tflock), the apply role its stage's WRITE

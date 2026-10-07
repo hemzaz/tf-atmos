@@ -10,7 +10,7 @@ package uploader role for an application repo's CI.
 
 - Instances: `iam/ci` in the three AWS stacks (OIDC roles only, `create_cross_account_role:
   false`); `iam/dev` in dev; `iam/main` in staging, prod and `fnx-ue1-local-localemu`. The AWS-stack
-  instances depend on `backend/main` in `fnx-ue1-core` for ordering only (localemu's does not).
+  instances depend on `backend/main` in `fnx-ue1-root` for ordering only (localemu's does not).
 - Used by: `eks` (`iam/ci .ci_plan_role_arn` / `.ci_apply_role_arn` as access entries), `kms/main`
   (dependency on the instance that creates the Auto Scaling service-linked role). The backend
   trusts the CI roles by name (`<ci_role_name_prefix>-plan` / `-apply`), not by reading state.

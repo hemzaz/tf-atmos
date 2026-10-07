@@ -43,4 +43,4 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-core
+            stack: fnx-ue1-root

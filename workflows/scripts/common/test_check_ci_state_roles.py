@@ -23,7 +23,7 @@ def access_roles(**overrides):
         "write": [arn("dev", "apply"), arn("staging", "apply")],
         "prod_read": [arn("prod", "plan")],
         "prod_write": [arn("prod", "apply")],
-        "core_write": [],
+        "root_write": [],
     }
     roles.update(overrides)
     return {key: {"role_name": ROLE_NAMES[key], "allowed_principal_arns": principals}
@@ -34,7 +34,7 @@ def access_roles(**overrides):
 ROLE_NAMES = {
     "read": "fnx-terraform-backend-read-role", "write": "fnx-terraform-backend-role",
     "prod_read": "fnx-terraform-backend-prod-read-role", "prod_write": "fnx-terraform-backend-prod-role",
-    "core_write": "fnx-terraform-backend-core-role",
+    "root_write": "fnx-terraform-backend-root-role",
 }
 ASSUMED = {"dev": "write", "staging": "write", "prod": "prod_write"}
 
@@ -52,7 +52,7 @@ def ci(stage, prefix=None, apply=True, oidc=True, assumes=None, **metadata):
 
 
 def stacks(roles=None, **cis):
-    result = {"fnx-ue1-core": {"components": {"terraform": {
+    result = {"fnx-ue1-root": {"components": {"terraform": {
         "backend/main": {"component": "backend", "vars": {"access_roles": roles or access_roles()}},
     }}}}
     for stack, instance in cis.items():
@@ -168,7 +168,7 @@ class CheckCiStateRolesTest(unittest.TestCase):
 
     def test_missing_backend_fails(self):
         described = stacks(**today())
-        del described["fnx-ue1-core"]
+        del described["fnx-ue1-root"]
         self.assert_errors(described, "expected exactly one deployable 'backend' instance, found 0")
 
     def test_unresolvable_arn_fails(self):

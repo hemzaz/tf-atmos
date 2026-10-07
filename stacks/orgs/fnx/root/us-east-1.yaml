@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# fnx-ue1-core - the management account's stack
+# fnx-ue1-root - the management account's stack
 # =============================================================================
 # Owns the ONE Terraform state backend every stack uses: bucket
 # fnx-terraform-state, its KMS key, and the stage-split read-only / read-write
@@ -17,7 +17,7 @@ import:
   - catalog/_base/defaults
   # The region code (ue1) of the state bucket's region, settings.tfstate.region
   - mixins/region/us-east-1
-  - orgs/fnx/core/_defaults
+  - orgs/fnx/root/_defaults
   - catalog/backend/defaults
 
 vars:
@@ -26,7 +26,7 @@ vars:
 settings:
   context:
     tenant: fnx
-    stage: core
+    stage: root
 
 components:
   terraform:
@@ -44,7 +44,7 @@ components:
         # account, its settings.account_map entry (stacks/orgs/fnx/_defaults.yaml)
         # - strings, not !terraform.state:
         # iam/ci deploys after this instance, and CI roles never read the
-        # core state. The trust is an aws:PrincipalArn condition, so the roles do
+        # root state. The trust is an aws:PrincipalArn condition, so the roles do
         # not have to exist yet (see components/terraform/backend/iam.tf).
         # Add a stack's roles here when adding a stack. The administrator who
         # applies this instance is always trusted as well (Cloud Posse's
@@ -97,7 +97,7 @@ components:
               - "arn:aws:iam::{{ .settings.account_map.full_account_map.prod }}:role/fnx-ue1-prod-ci-apply"
           # This stack's own state (backend/main). No principals listed: the
           # applying administrator only (stacks/catalog/backend/defaults.yaml).
-          core_write:
+          root_write:
             object_key_patterns:
-              - "*/fnx-ue1-core/*"
-              - "*/fnx-ue1-core-*"
+              - "*/fnx-ue1-root/*"
+              - "*/fnx-ue1-root-*"

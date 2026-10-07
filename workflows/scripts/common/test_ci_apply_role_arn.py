@@ -25,7 +25,7 @@ def ci(account="123456789012", prefix="fnx-ue1-prod-ci", **overrides):
 
 class ApplyRoleArnTest(unittest.TestCase):
     def test_arn_is_the_iam_ci_apply_role(self):
-        # The name the backend's prod_write role trusts (stacks/orgs/fnx/core/us-east-1.yaml)
+        # The name the backend's prod_write role trusts (stacks/orgs/fnx/root/us-east-1.yaml)
         self.assertEqual(
             ci_apply_role_arn.role_arn(ci()),
             "arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-apply",
@@ -74,7 +74,7 @@ class PlanRoleArnTest(unittest.TestCase):
 class MainTest(unittest.TestCase):
     def run_main(self, check_output, *argv):
         out = io.StringIO()
-        with mock.patch.dict(os.environ, {"STACK": "fnx-ue1-core"}, clear=False), \
+        with mock.patch.dict(os.environ, {"STACK": "fnx-ue1-root"}, clear=False), \
                 mock.patch.object(sys, "argv", ["ci-apply-role-arn.py", *argv]), \
                 mock.patch.object(ci_apply_role_arn.subprocess, "check_output", check_output), \
                 contextlib.redirect_stdout(out):
@@ -89,12 +89,12 @@ class MainTest(unittest.TestCase):
             with self.subTest(argv=argv):
                 rc, out = self.run_main(describe_fails, *argv)
                 self.assertEqual(rc, 1)
-                self.assertEqual(out, "::error::fnx-ue1-core: no iam/ci instance (atmos describe failed)\n")
+                self.assertEqual(out, "::error::fnx-ue1-root: no iam/ci instance (atmos describe failed)\n")
 
     def test_resolved_role_is_printed(self):
         rc, out = self.run_main(lambda cmd: json.dumps(ci(ci_apply_role_enabled=False)), "--kind", "plan")
         self.assertEqual(rc, 0)
-        self.assertEqual(out, "fnx-ue1-core: arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan\n")
+        self.assertEqual(out, "fnx-ue1-root: arn:aws:iam::123456789012:role/fnx-ue1-prod-ci-plan\n")
 
 
 if __name__ == "__main__":

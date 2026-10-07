@@ -10,17 +10,17 @@ check_state_keys = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_state_keys)
 
 # The role each stage's backend assumes (stacks/orgs/fnx/_defaults.yaml, TFSTATE_ACCESS unset).
-STAGE_ROLES = {"core": "fnx-terraform-backend-core-role", "prod": "fnx-terraform-backend-prod-role"}
+STAGE_ROLES = {"root": "fnx-terraform-backend-root-role", "prod": "fnx-terraform-backend-prod-role"}
 NON_PROD_ROLE = "fnx-terraform-backend-role"
 
 
 def pair(stack):
-    """The exact pattern pair of one stack (stacks/orgs/fnx/core/us-east-1.yaml)."""
+    """The exact pattern pair of one stack (stacks/orgs/fnx/root/us-east-1.yaml)."""
     return [f"*/{stack}/*", f"*/{stack}-*"]
 
 
 def access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging"), prod=("fnx-ue1-prod",),
-                 core=("fnx-ue1-core",), **patterns):
+                 core=("fnx-ue1-root",), **patterns):
     """backend/main's access_roles as the catalog renders them; patterns overrides one role's list."""
     non_prod_keys = [p for stack in non_prod for p in pair(stack)]
     prod_keys = [p for stack in prod for p in pair(stack)]
@@ -29,7 +29,7 @@ def access_roles(non_prod=("fnx-ue1-dev", "fnx-ue1-staging"), prod=("fnx-ue1-pro
         "prod_read": ("fnx-terraform-backend-prod-read-role", prod_keys),
         "write": (NON_PROD_ROLE, non_prod_keys),
         "prod_write": (STAGE_ROLES["prod"], prod_keys),
-        "core_write": (STAGE_ROLES["core"], [p for stack in core for p in pair(stack)]),
+        "root_write": (STAGE_ROLES["root"], [p for stack in core for p in pair(stack)]),
     }
     return {
         name: {"role_name": role_name, "object_key_patterns": patterns.get(name, keys)}
@@ -53,8 +53,8 @@ def instance(workspace, key_prefix="vpc", stage="prod", backend_type="s3", key="
     }
 
 
-def core_stack(region="us-east-1", roles=None, stack="fnx-ue1-core"):
-    backend = instance(stack, key_prefix="backend", stage="core", region=region, component="backend",
+def core_stack(region="us-east-1", roles=None, stack="fnx-ue1-root"):
+    backend = instance(stack, key_prefix="backend", stage="root", region=region, component="backend",
                        roles=access_roles() if roles is None else roles)
     return {"components": {"terraform": {"backend/main": backend}}}
 
@@ -64,9 +64,9 @@ def one(name, stage, region="us-east-1"):
 
 
 def stacks_with(roles=None, **components):
-    """The four stacks of today: core, dev and staging with one instance each, prod with components."""
+    """The four stacks of today: root, dev and staging with one instance each, prod with components."""
     return {
-        "fnx-ue1-core": core_stack(roles=roles),
+        "fnx-ue1-root": core_stack(roles=roles),
         "fnx-ue1-dev": one("fnx-ue1-dev", "dev"),
         "fnx-ue1-staging": one("fnx-ue1-staging", "staging"),
         "fnx-ue1-prod": {"components": {"terraform": components}},
@@ -108,9 +108,9 @@ class CheckStateKeysTest(unittest.TestCase):
 
     def test_question_mark_spanning_stages_fails(self):
         # "fnx-?ev-*"-style patterns are evaluated, not taken literally
-        roles = access_roles(read=pair("fnx-ue1-dev") + pair("fnx-ue1-staging") + ["*/fnx-ue1-?ore/*"])
+        roles = access_roles(read=pair("fnx-ue1-dev") + pair("fnx-ue1-staging") + ["*/fnx-ue1-?oot/*"])
         self.assert_has(stacks_with(roles=roles, **{"vpc/main": prod()}),
-                        "['read'] match state of stages 'core' and 'dev', which assume different roles")
+                        "['read'] match state of stages 'dev' and 'root', which assume different roles")
 
     # The stage split
 
@@ -153,7 +153,7 @@ class CheckStateKeysTest(unittest.TestCase):
         # "*/<tenant>-<stage>-*" only isolated while the stage followed the tenant.
         roles = access_roles(
             read=["*/fnx-ue1-dev-*"], write=["*/fnx-ue1-dev-*"], prod_read=["*/fnx-ue1-prod-*"], prod_write=["*/fnx-ue1-prod-*"],
-            core_write=["*/fnx-ue1-core-*"],
+            root_write=["*/fnx-ue1-root-*"],
         )
         stacks = {
             "fnx-ue1-root": core_stack(roles=roles, stack="fnx-ue1-root"),
@@ -183,7 +183,7 @@ class CheckStateKeysTest(unittest.TestCase):
     def test_pattern_spanning_stages_fails(self):
         roles = access_roles(read=["*/fnx-*"])
         self.assert_has(stacks_with(roles=roles, **{"vpc/main": prod()}),
-                        "['read'] match state of stages 'core' and 'dev', which assume different roles",
+                        "['read'] match state of stages 'dev' and 'root', which assume different roles",
                         "['read'] match state of stages 'dev' and 'prod', which assume different roles")
 
     def test_stage_role_missing_from_a_derived_instance_fails(self):
@@ -298,13 +298,13 @@ class CheckStateKeysTest(unittest.TestCase):
 
     def test_missing_backend_stack_fails(self):
         stacks = stacks_with(**{"vpc/main": prod()})
-        del stacks["fnx-ue1-core"]
+        del stacks["fnx-ue1-root"]
         self.assert_errors(stacks, "expected exactly one deployed 'backend' region")
 
     def test_bucket_region_is_the_backend_stacks_own(self):
         # backend/main moved to another region: stacks still pointing at us-east-1 now fail
         stacks = stacks_with(**{"vpc/main": prod()})
-        stacks["fnx-ue1-core"] = core_stack(region="eu-west-1")
+        stacks["fnx-ue1-root"] = core_stack(region="eu-west-1")
         errors = check_state_keys.check(stacks)
         self.assertEqual(len(errors), 3, errors)
         self.assertTrue(all("backend.region 'us-east-1' is not the state bucket's region 'eu-west-1'" in e
@@ -318,22 +318,22 @@ class CheckStateKeysTest(unittest.TestCase):
 
     def test_two_backend_regions_fail(self):
         stacks = stacks_with(**{"vpc/main": prod()})
-        other = instance("fnx-ew1-core", key_prefix="backend", stage="core", region="eu-west-1", component="backend")
-        stacks["fnx-ew1-core"] = {"components": {"terraform": {"backend/main": other}}}
+        other = instance("fnx-ew1-root", key_prefix="backend", stage="root", region="eu-west-1", component="backend")
+        stacks["fnx-ew1-root"] = {"components": {"terraform": {"backend/main": other}}}
         self.assert_errors(stacks, "expected exactly one deployed 'backend' region")
 
     def test_abstract_and_disabled_backend_do_not_count(self):
         stacks = stacks_with(**{"vpc/main": prod()})
         for name, flag in (("abstract", {"type": "abstract"}), ("off", {"enabled": False})):
-            other = instance("fnx-ue1-core-x", key_prefix="backend", stage="core", region="eu-west-1",
+            other = instance("fnx-ue1-root-x", key_prefix="backend", stage="root", region="eu-west-1",
                              component="backend", **flag)
-            stacks["fnx-ue1-core"]["components"]["terraform"][name] = other
+            stacks["fnx-ue1-root"]["components"]["terraform"][name] = other
         self.assert_errors(stacks)
 
     def test_unset_region_fails(self):
         # An unset settings.tfstate.region renders "<no value>" everywhere; equal strings must not pass
         stacks = {
-            "fnx-ue1-core": core_stack(region="<no value>"),
+            "fnx-ue1-root": core_stack(region="<no value>"),
             "fnx-ue1-dev": one("fnx-ue1-dev", "dev", region="<no value>"),
             "fnx-ue1-staging": one("fnx-ue1-staging", "staging", region="<no value>"),
             "fnx-ue1-prod": one("fnx-ue1-prod", "prod", region="<no value>"),

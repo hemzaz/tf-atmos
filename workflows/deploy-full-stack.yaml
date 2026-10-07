@@ -15,7 +15,7 @@
 # later layer than that instance: on the first deploy the state does not exist
 # yet. A dependency only declared in dependencies.components may share a layer
 # (Atmos applies a layer in dependency order). The backend layer has an instance
-# only in fnx-ue1-core (the single state backend), which is deployed before any
+# only in fnx-ue1-root (the single state backend), which is deployed before any
 # workload stack; iam/ci reads it cross-stack. Connectivity follows networking, security-monitoring
 # follows security (it reads guardduty, securityhub, inspector2 and cloudtrail state; awsconfig
 # shares the security layer with securityhub, which only lists it in
@@ -59,7 +59,7 @@
 # Every layer except backend and regional-waf (no workload stack has a waf
 # instance yet; an empty layer plans "No components matched") has at least one
 # enabled instance in every workload stack (eks-backend-services/main, the last
-# to gain instances, joined the compute layer in all 3 stacks); fnx-ue1-core
+# to gain instances, joined the compute layer in all 3 stacks); fnx-ue1-root
 # has only the backend layer.
 #
 # Every enabled, non-abstract instance of every stack must be selected by exactly
@@ -399,7 +399,7 @@ workflows:
         content: All layers deployed
 
   deploy-backend:
-    description: "Deploy the backend layer: the Terraform state backend (only fnx-ue1-core has one)"
+    description: "Deploy the backend layer: the Terraform state backend (only fnx-ue1-root has one)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures
@@ -418,7 +418,7 @@ workflows:
         command: terraform deploy --from-plan --query '.metadata.component == "backend"'
 
   deploy-iam:
-    description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main in fnx-ue1-core)"
+    description: "Deploy the iam layer: IAM roles and the CI OIDC roles (iam/ci reads backend/main in fnx-ue1-root)"
     steps:
       - *fixtures-stages
       - *refuse-fixtures

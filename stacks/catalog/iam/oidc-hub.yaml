@@ -120,7 +120,7 @@ components:
         # ci_apply_role_trusted_github_repos: ["<org>/<repo>:master"]
 
         # State access through the single backend's stage-split access roles
-        # (backend/main in the management account's fnx-ue1-core), named by
+        # (backend/main in the management account's fnx-ue1-root), named by
         # the stack backend's convention (stacks/orgs/fnx/_defaults.yaml): the
         # plan role may assume the non-prod read-only role, the apply role the
         # non-prod read/write role. Add this hub's <prefix>-plan /
@@ -134,4 +134,4 @@ components:
       dependencies:
         components:
           - component: backend/main
-            stack: fnx-ue1-core
+            stack: fnx-ue1-root

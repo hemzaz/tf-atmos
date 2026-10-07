@@ -1,16 +1,17 @@
 ---
 # =============================================================================
-# Management ("core") Account Defaults
+# Management ("root") Account Defaults
 # =============================================================================
 # The management account holds shared, organization-wide infrastructure that
 # no single workload stage owns. Today that is only the Terraform state
-# backend (stacks/orgs/fnx/core/us-east-1.yaml).
+# backend (stacks/orgs/fnx/root/us-east-1.yaml).
 #
 # Naming follows Cloud Posse's reference architecture, where the management
-# account is the "root" account of the "core" tenant (core-gbl-root). This
+# account is the "root" account (core-gbl-root, in its "core" tenant). This
 # repository's stack name template is tenant-environment-stage and its tenant
-# is fixed to fnx (the bucket and role names derive from it), so here "core"
-# is the stage and the region code the environment: fnx-ue1-core.
+# is fixed to fnx until Wave E (the bucket and role names derive from it), so
+# "root" is the stage and the account, and the region code the environment:
+# fnx-ue1-root.
 # =============================================================================
 
 import:
@@ -19,16 +20,14 @@ import:
 
 # This account IS the account map's root account, settings.environment.management_account_id
 # (orgs/fnx/_defaults.yaml). account_id says so too, for the provider account
-# guard (terraform.providers.aws.allowed_account_ids there). It looks up
-# root_account_account_name, not `account`: this stage's account is named
-# "core" (stage = account, in the name template), while the map names the
-# management account Cloud Posse's way, "root".
+# guard (terraform.providers.aws.allowed_account_ids there): the map's
+# root_account_account_name, "root", which is also this stage's account name.
 settings:
   environment:
-    account: core
+    account: root
     account_id: '{{ index .settings.account_map.full_account_map .settings.account_map.root_account_account_name }}'
   context:
-    stage: core
+    stage: root
   # Kept out of the CI plan/deploy/drift matrices (terraform-ci.yml,
   # terraform-cd.yml, drift-detection.yml), like the local emulator stacks:
   # the CI roles live in the workload accounts and are trusted only to use the
