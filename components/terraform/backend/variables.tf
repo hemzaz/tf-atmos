@@ -58,7 +58,7 @@ variable "access_roles" {
     Terraform is always added, as upstream, so an empty list (upstream's default) trusts only
     that caller. By convention the keys are `read`, `prod_read`, `write`, `prod_write` and
     `root_write`, which the backend_read_role_arn, backend_prod_read_role_arn, backend_role_arn,
-    backend_prod_role_arn and backend_core_role_arn outputs expose.
+    backend_prod_role_arn and backend_root_role_arn outputs expose.
   EOT
 
   validation {

@@ -101,7 +101,7 @@ SYNTH = [
     (r'^oidc_provider_arn$',          'arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B716D3041E'),
     # The backend's access role outputs (no stack reads them today: iam/ci
     # names the roles by convention; kept for any cross-stack consumer).
-    (r'^backend(_prod|_core)?(_read)?_role_arn$','arn:aws:iam::123456789012:role/example-terraform-backend-role'),
+    (r'^backend(_prod|_root)?(_read)?_role_arn$','arn:aws:iam::123456789012:role/example-terraform-backend-role'),
     # iam/ci's CI roles, read by eks/defaults' access_entries (principal_arn).
     (r'^ci_(plan|apply)_role_arn$',   'arn:aws:iam::123456789012:role/example-ci-role'),
     (r'route_table_ids$',             ['rtb-0123456789abcdef0']),

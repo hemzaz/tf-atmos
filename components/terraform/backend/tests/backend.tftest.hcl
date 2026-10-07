@@ -128,7 +128,7 @@ run "roles_are_named_as_the_stack_backend_expects" {
       && output.backend_read_role_name == "fnx-terraform-backend-read-role"
       && output.backend_prod_role_name == "fnx-terraform-backend-prod-role"
       && output.backend_prod_read_role_name == "fnx-terraform-backend-prod-read-role"
-      && output.backend_core_role_name == "fnx-terraform-backend-root-role"
+      && output.backend_root_role_name == "fnx-terraform-backend-root-role"
     )
     error_message = "Every conventional access_roles key has its output (names known at plan; the ARN outputs read the same keys)."
   }
@@ -461,7 +461,7 @@ run "prod_roles_reach_only_prod_objects" {
   }
 }
 
-run "core_role_reaches_only_core_objects" {
+run "root_role_reaches_only_root_objects" {
   command = plan
 
   assert {
