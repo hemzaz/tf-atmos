@@ -256,8 +256,8 @@ workflows:
       # endpoint is private: each such instance must run on the in-VPC
       # runners (settings.github.runner: in-vpc, with a pool its clusters
       # admit) or set settings.github.actions_enabled: false
-      # (docs/OPERATIONS.md, "In-cluster components"); a master-only stack's
-      # runner pool must set allowed_refs; each pool must be in its stack's
+      # (docs/OPERATIONS.md, "In-cluster components"); every runner pool
+      # must set allowed_refs; each pool must be in its stack's
       # iam/ci ci_runner_pool_names; each provider exec command needs its
       # tool in dependencies.tools; and each eks cluster admin role there
       # (map_additional_iam_roles) must be trusted by its stage's state write

@@ -422,11 +422,6 @@ components:
         # (stacks/orgs/fnx/_defaults.yaml).
         alarm_sns_topic_arns:
           - "arn:aws:sns:{{ .vars.region }}:{{ .settings.environment.account_id }}:{{ .settings.prefix }}-main-alarms"
-        # Production is deployed and planned from master only (owner decision
-        # D3): its runners fail any other ref's job before its first step, so a
-        # pull request's workflow cannot reach this VPC by asking for the label.
-        allowed_refs:
-          - refs/heads/master
       dependencies:
         components:
           - component: kms/main

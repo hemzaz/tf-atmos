@@ -318,22 +318,24 @@ class CheckClusterApiCiTest(unittest.TestCase):
         self.assertEqual(len(errors), 3, errors)
         self.assertIn("admits github-runners/main (in vpc/services), but no network instance peers", errors[0])
 
-    def master_only_pool(self, allowed_refs=None):
+    def pool_with(self, allowed_refs=None, pull_request_plans_enabled=None):
         pool = instance("github-runners")
-        pool["settings"] = {"github": {"pull_request_plans_enabled": False}}
+        if pull_request_plans_enabled is not None:
+            pool["settings"] = {"github": {"pull_request_plans_enabled": pull_request_plans_enabled}}
         if allowed_refs is not None:
             pool["vars"]["allowed_refs"] = allowed_refs
         return stacks_with(**{"github-runners/main": pool})
 
-    def test_master_only_pool_without_allowed_refs_fails(self):
+    def test_every_pool_without_allowed_refs_fails(self):
         for refs in (None, []):
-            errors = check_cluster_api_ci.check_protected_pools(self.master_only_pool(refs))
-            self.assertEqual(len(errors), 1, errors)
-            self.assertIn("github-runners/main serves a stack planned from master only", errors[0])
+            for pr_plans in (None, True, False):
+                errors = check_cluster_api_ci.check_protected_pools(self.pool_with(refs, pr_plans))
+                self.assertEqual(len(errors), 1, (refs, pr_plans, errors))
+                self.assertIn("github-runners/main sets no allowed_refs", errors[0])
 
-    def test_master_only_pool_with_allowed_refs_and_other_pools_pass(self):
-        self.assertEqual(check_cluster_api_ci.check_protected_pools(self.master_only_pool(["refs/heads/master"])), [])
-        self.assertEqual(check_cluster_api_ci.check_protected_pools(self.runner_stack()), [])
+    def test_pool_with_allowed_refs_passes_and_other_components_are_ignored(self):
+        self.assertEqual(check_cluster_api_ci.check_protected_pools(self.pool_with(["refs/heads/master"])), [])
+        self.assertEqual(check_cluster_api_ci.check_protected_pools(stacks_with(**{"vpc/main": instance("vpc")})), [])
 
     def pool_stack(self, granted, name=None):
         pool = instance("github-runners")

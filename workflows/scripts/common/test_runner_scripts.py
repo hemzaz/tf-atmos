@@ -109,40 +109,73 @@ class JobStartedHookTest(unittest.TestCase):
 
 
 class StartRunnerTest(unittest.TestCase):
-    def run_start(self, asg, aws_exit=0, aws_output=""):
+    def run_start(self, asg, *replies):
+        """Run start-runner.sh; each aws call takes the next (exit code, output) of replies (default success)."""
         bin_dir = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, bin_dir)
-        log = bin_dir / "calls"
+        for i, (code, output) in enumerate(replies):
+            (bin_dir / f"reply{i}").write_text(f"{code}\n{output}\n")
         aws = bin_dir / "aws"
-        aws.write_text(f"#!/bin/bash\necho \"$*\" >> {log}\necho '{aws_output}'\nexit {aws_exit}\n")
-        aws.chmod(aws.stat().st_mode | stat.S_IEXEC)
+        aws.write_text(
+            "#!/bin/bash\n"
+            f"dir={bin_dir}\n"
+            'n=$(ls "$dir"/call* 2>/dev/null | wc -l | tr -d " ")\n'
+            'echo "$*" > "$dir/call$n"\n'
+            '[ -f "$dir/reply$n" ] || exit 0\n'
+            '{ read -r code; read -r output; } < "$dir/reply$n"\n'
+            'echo "$output"\n'
+            'exit "$code"\n'
+        )
+        sleep = bin_dir / "sleep"
+        sleep.write_text(f'#!/bin/bash\necho "$1" >> {bin_dir}/sleeps\n')
+        for script in (aws, sleep):
+            script.chmod(script.stat().st_mode | stat.S_IEXEC)
         env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "ASG": asg}
         result = subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
-        calls = log.read_text().splitlines() if log.exists() else []
-        return result.returncode, result.stdout + result.stderr, calls
+        calls = [(bin_dir / f"call{i}").read_text().strip() for i in range(len(list(bin_dir.glob("call*"))))]
+        sleeps = (bin_dir / "sleeps").read_text().split() if (bin_dir / "sleeps").exists() else []
+        return result.returncode, result.stdout + result.stderr, calls, sleeps
+
+    EXECUTE = ("autoscaling execute-policy --auto-scaling-group-name ue1-github-runners "
+               "--policy-name ue1-github-runners-start --no-honor-cooldown")
 
     def test_executes_the_pool_start_policy_once(self):
-        code, _, calls = self.run_start("ue1-github-runners")
-        self.assertEqual(code, 0)
-        self.assertEqual(calls, [
-            "autoscaling execute-policy --auto-scaling-group-name ue1-github-runners "
-            "--policy-name ue1-github-runners-start --no-honor-cooldown"
-        ])
+        code, _, calls, sleeps = self.run_start("ue1-github-runners")
+        self.assertEqual((code, calls, sleeps), (0, [self.EXECUTE], []))
 
     def test_a_full_pool_is_not_a_failure(self):
-        code, out, _ = self.run_start("ue1-github-runners", 254, "New SetDesiredCapacity value 5 is above max value 4")
-        self.assertEqual(code, 0)
+        code, out, calls, _ = self.run_start(
+            "ue1-github-runners",
+            (254, "An error occurred (ValidationError) when calling the ExecutePolicy operation: "
+                  "New SetDesiredCapacity value 5 is above max value 4 for the AutoScalingGroup."))
+        self.assertEqual((code, len(calls)), (0, 1))
         self.assertIn("at max_size", out)
 
-    def test_other_errors_fail(self):
-        code, out, _ = self.run_start("ue1-github-runners", 254, "AccessDenied")
+    def test_max_in_another_error_is_not_a_full_pool(self):
+        code, out, _, _ = self.run_start("ue1-github-runners", (255, "Max attempts exceeded"))
         self.assertEqual(code, 1)
         self.assertIn("could not start a runner", out)
 
+    def test_transient_errors_are_retried_with_backoff(self):
+        code, _, calls, sleeps = self.run_start(
+            "ue1-github-runners",
+            (254, "An error occurred (ScalingActivityInProgress) when calling the ExecutePolicy operation"),
+            (254, "An error occurred (ResourceContention) when calling the ExecutePolicy operation"))
+        self.assertEqual((code, calls, sleeps), (0, [self.EXECUTE] * 3, ["5", "10"]))
+
+    def test_a_lasting_transient_error_fails_after_three_retries(self):
+        busy = (254, "An error occurred (ScalingActivityInProgress) when calling the ExecutePolicy operation")
+        code, out, calls, sleeps = self.run_start("ue1-github-runners", busy, busy, busy, busy)
+        self.assertEqual((code, len(calls), sleeps), (1, 4, ["5", "10", "20"]))
+        self.assertIn("could not start a runner", out)
+
+    def test_other_errors_fail_without_retry(self):
+        code, out, calls, sleeps = self.run_start("ue1-github-runners", (254, "AccessDenied"))
+        self.assertEqual((code, len(calls), sleeps), (1, 1, []))
+
     def test_a_bad_group_name_is_refused_before_any_call(self):
-        code, _, calls = self.run_start("ue1;rm -rf /")
-        self.assertEqual(code, 1)
-        self.assertEqual(calls, [])
+        code, _, calls, _ = self.run_start("ue1;rm -rf /")
+        self.assertEqual((code, calls), (1, []))
 
 
 if __name__ == "__main__":

@@ -247,11 +247,12 @@ the EKS API through the `kubernetes`/`helm` providers. Every cluster's endpoint 
   `workflow_dispatch`, schedule, `merge_group` or same-repository pull request (github-runners
   README, "Public repository"). Keep "Require approval for all outside collaborators" on
   (First-deploy inputs, GitHub App).
-- Production is reached from master only. Its CI roles trust only master's OIDC subject, so a
-  pull request cannot start a prod runner, and its pool sets `allowed_refs: [refs/heads/master]`:
-  the runner's job-started hook fails any other ref's job before its first step, even one that
-  asks for the prod label while a master job started the runner. `check-cluster-api-ci.py` fails
-  a pool of a master-only stack (`pull_request_plans_enabled: false`) without `allowed_refs`.
+- Every runner serves master only. Every in-VPC job runs on the default branch, the apply roles
+  that start runners trust only master's OIDC subject, and every pool sets
+  `allowed_refs: [refs/heads/master]` (`catalog/github-runners/defaults`): the runner's
+  job-started hook fails any other ref's job before its first step, even one that asks for a
+  pool's label while a master job started the runner. `check-cluster-api-ci.py` fails a pool
+  without `allowed_refs`.
 - A refused job does not cost a runner: the instance powers off without lowering desired
   capacity and the pool launches a replacement for the next queued job, so jobs queued for a
   label cannot starve the master job that started the runner. Runners have no Auto Scaling

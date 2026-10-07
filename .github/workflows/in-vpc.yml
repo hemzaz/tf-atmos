@@ -24,7 +24,7 @@
 # the runner: every pool's job-started hook (github-runners
 # files/job-started.sh) fails, before the first step, any job that is not
 # this repository's push, dispatch, schedule, merge queue or same-repository
-# pull request, and production's pool (allowed_refs) any job not on
+# pull request, and (every pool's allowed_refs) any job not on
 # refs/heads/master. The owner keeps "Require approval for all outside
 # collaborators" on (docs/OPERATIONS.md, First-deploy inputs).
 #

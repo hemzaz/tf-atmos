@@ -15,15 +15,25 @@ set -euo pipefail
 : "${ASG:?ASG is required: the Auto Scaling group of the runner pool}"
 [[ "${ASG}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::bad Auto Scaling group name '${ASG}'"; exit 1; }
 
-# A pool already at max_size may refuse the +1 instead of capping it: that is
-# a full pool, not a failure.
-if ! out="$(aws autoscaling execute-policy --auto-scaling-group-name "${ASG}" \
-    --policy-name "${ASG}-start" --no-honor-cooldown 2>&1)"; then
-  if grep -qi "max" <<<"${out}"; then
+# A pool already at max_size may refuse the +1 ("... is above max value ...")
+# instead of capping it: that is a full pool, not a failure. A scaling
+# activity in progress, contention or throttling is retried after 5, 10 and
+# 20 s; any other error fails.
+for delay in 5 10 20 ""; do
+  if out="$(aws autoscaling execute-policy --auto-scaling-group-name "${ASG}" \
+      --policy-name "${ASG}-start" --no-honor-cooldown 2>&1)"; then
+    echo "runner pool ${ASG}: started one runner"
+    exit 0
+  fi
+  if grep -q "is above max value" <<<"${out}"; then
     echo "::notice::runner pool ${ASG} is at max_size; the job waits for a free runner"
     exit 0
   fi
+  if [ -n "${delay}" ] && grep -Eq "ScalingActivityInProgress|ResourceContention|Throttling" <<<"${out}"; then
+    echo "runner pool ${ASG}: ${out}; retrying in ${delay} s"
+    sleep "${delay}"
+    continue
+  fi
   echo "::error::could not start a runner in ${ASG}: ${out}"
   exit 1
-fi
-echo "runner pool ${ASG}: started one runner"
+done

@@ -20,10 +20,10 @@ have a deployable github-runners instance whose runner_labels hold that label,
 and every eks instance the in-cluster instance depends on must admit that
 runner pool (`!terraform.state <pool> .security_group_id` in its
 allowed_security_group_ids): an ERROR otherwise. A pool in another vpc is
-checked for peering and NACLs like a bastion (below). A pool in a stack that is
-planned from master only (settings.github.pull_request_plans_enabled: false,
-production) must set allowed_refs, so its runners refuse a pull request's job
-that asks for its label: an ERROR otherwise. Each deployable runner pool's
+checked for peering and NACLs like a bastion (below). Every runner pool must
+set allowed_refs: every in-VPC job runs on the default branch (owner
+decision), so its runners refuse any other ref's job that asks for its
+label: an ERROR otherwise. Each deployable runner pool's
 Auto Scaling group (<tags.Environment>-<vars.name>) must be in its stack's
 iam/ci ci_runner_pool_names, or CI cannot start its runners: an ERROR.
 
@@ -228,16 +228,13 @@ def check_pool_start_grants(stacks: dict) -> list[str]:
 
 
 def check_protected_pools(stacks: dict) -> list[str]:
-    """Runner pools of master-only stacks (pull_request_plans_enabled: false) without allowed_refs."""
+    """Runner pools without allowed_refs (every in-VPC job runs on the default branch)."""
     return [
-        f"{stack_name}: {name} serves a stack planned from master only "
-        "(settings.github.pull_request_plans_enabled: false) but sets no allowed_refs: "
-        "a pull request's workflow could take its runners (set allowed_refs: [refs/heads/master])"
+        f"{stack_name}: {name} sets no allowed_refs: every in-VPC job runs on the default branch, so "
+        "its runners must refuse any other ref's job (catalog/github-runners/defaults sets [refs/heads/master])"
         for stack_name, stack in sorted(stacks.items())
         for name, instance in sorted(deployable_instances(stack).items())
-        if instance.get("component") == RUNNER_COMPONENT
-        and ((instance.get("settings") or {}).get("github") or {}).get("pull_request_plans_enabled") is False
-        and not (instance.get("vars") or {}).get("allowed_refs")
+        if instance.get("component") == RUNNER_COMPONENT and not (instance.get("vars") or {}).get("allowed_refs")
     ]
 
 

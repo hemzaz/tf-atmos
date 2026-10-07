@@ -106,7 +106,7 @@ components:
         github_oidc_provider_arn: "arn:aws:iam::{{ .settings.environment.account_id }}:oidc-provider/token.actions.githubusercontent.com"
         ci_role_name_prefix: "{{ .atmos_stack }}-ci"
         # This stack's runner pools (github-runners' <Environment>-<name>):
-        # both CI roles may execute their +1 start policies, nothing else
+        # only the apply role may execute their +1 start policies, nothing else
         # (iam ci-runner-pools.tf; check-cluster-api-ci.py checks the list).
         ci_runner_pool_names:
           - "{{ .settings.prefix }}-github-runners"
@@ -147,11 +147,6 @@ components:
       vars:
         vpc_id: !terraform.state vpc/main .vpc_id
         subnet_ids: !terraform.state vpc/main .private_subnet_ids
-        # A prod lane is deployed and planned from master only: its runners
-        # fail any other ref's job (check-cluster-api-ci.py requires this in a
-        # pull_request_plans_enabled: false stack).
-        allowed_refs:
-          - refs/heads/master
       dependencies:
         components:
           - component: kms/main
