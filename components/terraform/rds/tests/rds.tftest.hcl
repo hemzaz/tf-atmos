@@ -639,9 +639,17 @@ run "name_base_of_47_characters_passes" {
   command = plan
 
   variables {
-    identifier          = "orders-database-primary"
-    create_read_replica = true
-    tags                = { Environment = "ue1-xxxxxxxxxxxxxxxxxxx", Tenant = "fnx", ManagedBy = "Terraform" }
+    identifier              = "orders-database-primary"
+    create_read_replica     = true
+    enable_secrets_rotation = true
+    enable_rotation_events  = true
+    tags                    = { Environment = "ue1-xxxxxxxxxxxxxxxxxxx", Tenant = "fnx", ManagedBy = "Terraform" }
+  }
+
+  # The rotation-success rule is the longest 64-limited name: exactly 64 here.
+  assert {
+    condition     = aws_cloudwatch_event_rule.rotation_success[0].name == "ue1-xxxxxxxxxxxxxxxxxxx-orders-database-primary-rotation-success" && length(aws_cloudwatch_event_rule.rotation_success[0].name) == 64
+    error_message = "At the 47-character base the rotation-success rule name is exactly 64 characters."
   }
 
   assert {

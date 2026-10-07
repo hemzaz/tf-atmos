@@ -183,9 +183,9 @@ workflows:
           trap 'rm -f "$stacks_json"' EXIT
           atmos describe stacks --process-functions=false --format json > "$stacks_json"
           python3 workflows/scripts/common/check-state-keys.py < "$stacks_json"
-      # Stacks of one tenant, region and stage (a stage stack and its lanes,
-      # settings.context.name) share one account and region: none may reuse
-      # another's tags.Environment, built names or secret names.
+      # Stacks of one account and region (a stage stack and its lanes,
+      # settings.context.name) and the instances in them may not create the
+      # same name, tags.Environment, account singleton or secret.
       - name: check-lane-names
         type: shell
         command: |

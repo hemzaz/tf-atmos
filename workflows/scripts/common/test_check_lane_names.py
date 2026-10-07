@@ -11,17 +11,21 @@ check_lane_names = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(check_lane_names)
 
 
-def instance(tag, lane=None, component="kms", stage="dev", **variables):
-    """An instance whose tags.Environment is tag, in fnx-ue1-<stage>[-<lane>]."""
+def instance(tag, lane=None, component="kms", stage="dev", account=None, region="us-east-1", **variables):
+    """An instance whose tags.Environment is tag, in fnx-ue1-<stage>[-<lane>], in account <stage>."""
     ctx = {"tenant": "fnx", "environment": "ue1", "stage": stage, **({"name": lane} if lane else {})}
-    return {"component": component, "settings": {"context": ctx}, "vars": {"tags": {"Environment": tag}, **variables}}
+    return {
+        "component": component,
+        "settings": {"context": ctx, "environment": {"account": account or stage}},
+        "vars": {"region": region, "tags": {"Environment": tag}, **variables},
+    }
 
 
 def stack(**instances):
     return {"components": {"terraform": instances}}
 
 
-class CheckLaneNamesTest(unittest.TestCase):
+class GroupTest(unittest.TestCase):
     def errors(self, stacks):
         return check_lane_names.check(stacks)
 
@@ -32,30 +36,72 @@ class CheckLaneNamesTest(unittest.TestCase):
                 "ue1-perf", "perf", alias_name="ue1-perf-main", name_prefix="fnx-ue1-dev-perf")}),
         }), [])
 
-    def test_shared_environment_tag_fails(self):
+    def test_shared_environment_tag_fails_once_per_stack(self):
         errors = self.errors({
-            "fnx-ue1-dev": stack(**{"kms/main": instance("ue1")}),
-            "fnx-ue1-dev-perf": stack(**{"kms/main": instance("ue1", "perf")}),
+            "fnx-ue1-dev": stack(**{"kms/main": instance("ue1"), "x/main": instance("ue1", component="x")}),
+            "fnx-ue1-dev-perf": stack(**{"kms/main": instance("ue1", "perf"), "x/main": instance("ue1", "perf", component="x")}),
         })
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("both use tags.Environment 'ue1' in fnx-ue1-dev", errors[0])
+        self.assertIn("both use tags.Environment 'ue1' in account dev, us-east-1", errors[0])
 
-    def test_shared_built_name_fails(self):
+    def test_raw_name_fails_whatever_its_prefix(self):
+        # ecs uses cluster_name verbatim: "main-apps" twice is one ECS cluster name.
+        errors = self.errors({
+            "fnx-ue1-dev": stack(**{"ecs/main": instance("ue1", component="ecs", cluster_name="main-apps")}),
+            "fnx-ue1-dev-perf": stack(**{"ecs/main": instance("ue1-perf", "perf", component="ecs", cluster_name="main-apps")}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both create the ECS cluster 'main-apps' in account dev, us-east-1", errors[0])
+
+    def test_shared_kms_alias_fails(self):
         errors = self.errors({
             "fnx-ue1-dev": stack(**{"kms/main": instance("ue1", alias_name="ue1-main")}),
             "fnx-ue1-dev-perf": stack(**{"kms/main": instance("ue1-perf", "perf", alias_name="ue1-main")}),
         })
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("kms/main vars.alias_name and fnx-ue1-dev: kms/main vars.alias_name both use name 'ue1-main'",
-                      errors[0])
+        self.assertIn("both create the KMS alias 'ue1-main'", errors[0])
 
-    def test_shared_full_id_name_fails(self):
+    def test_reference_to_the_stage_resource_passes(self):
+        # A lane's eks-addons naming dev's cluster reads it; it creates nothing.
+        self.assertEqual(self.errors({
+            "fnx-ue1-dev": stack(**{"eks-addons/main": instance("ue1", component="eks-addons", cluster_name="ue1-main")}),
+            "fnx-ue1-dev-perf": stack(**{"eks-addons/main": instance(
+                "ue1-perf", "perf", component="eks-addons", cluster_name="ue1-main")}),
+        }), [])
+
+    def test_gated_name_counts_only_when_created(self):
+        # iam/ci sets policy_name from the catalog but creates no cross-account policy.
+        self.assertEqual(self.errors({"fnx-ue1-dev": stack(**{
+            "iam/dev": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy"),
+            "iam/ci": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy",
+                               create_cross_account_role=False, ci_role_name_prefix="fnx-ue1-dev-ci"),
+        })}), [])
+        errors = self.errors({"fnx-ue1-dev": stack(**{
+            "iam/dev": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy"),
+            "iam/other": instance("ue1", component="iam", policy_name="fnx-ue1-dev-CrossAccountPolicy",
+                                  resource_name_prefix="other"),
+        })})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("both create the IAM policy 'fnx-ue1-dev-CrossAccountPolicy'", errors[0])
+
+    def test_two_account_singletons_fail(self):
         errors = self.errors({
-            "fnx-ue1-dev": stack(**{"iam/ci": instance("ue1", ci_role_name_prefix="fnx-ue1-dev-ci")}),
-            "fnx-ue1-dev-perf": stack(**{"iam/ci": instance("ue1-perf", "perf", ci_role_name_prefix="fnx-ue1-dev-ci")}),
+            "fnx-ue1-dev": stack(**{"iam/ci": instance("ue1", component="iam", github_oidc_create_provider=True,
+                                                       create_cross_account_role=False)}),
+            "fnx-ue1-dev-perf": stack(**{"iam/ci": instance("ue1-perf", "perf", component="iam",
+                                                            github_oidc_create_provider=True,
+                                                            create_cross_account_role=False)}),
         })
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("name 'fnx-ue1-dev-ci'", errors[0])
+        self.assertIn("both create the GitHub OIDC provider", errors[0])
+
+    def test_fixture_singletons_are_exempt(self):
+        self.assertEqual(self.errors({
+            f"fnx-ue1-fixtures-{n}": stack(**{"iam/fixtures": instance(
+                f"ue1-{n}", n, component="iam", stage="fixtures", enable_autoscaling_service_linked_role=True,
+                create_cross_account_role=False)})
+            for n in ("a", "b")
+        }), [])
 
     def test_shared_secret_name_fails(self):
         secrets = {"db": {"name": "credentials", "path": "/database/"}}
@@ -66,23 +112,63 @@ class CheckLaneNamesTest(unittest.TestCase):
                 "ue1-perf", "perf", component="secretsmanager", context_name="app", environment="dev", secrets=secrets)}),
         })
         self.assertEqual(len(errors), 1, errors)
-        self.assertIn("secret 'app/dev/database/credentials'", errors[0])
+        self.assertIn("both create the secret 'app/dev/database/credentials'", errors[0])
 
-    def test_other_stage_or_region_is_another_account(self):
+    def test_another_account_or_region_is_another_group(self):
         self.assertEqual(self.errors({
             "fnx-ue1-dev": stack(**{"kms/main": instance("ue1", alias_name="ue1-main")}),
             "fnx-ue1-staging": stack(**{"kms/main": instance("ue1", stage="staging", alias_name="ue1-main")}),
+            "fnx-ue2-dev": stack(**{"kms/main": instance("ue1", region="us-east-2", alias_name="ue1-main")}),
         }), [])
 
-    def test_unprefixed_values_and_descriptions_are_not_names(self):
+    def test_stages_sharing_an_account_are_one_group(self):
+        errors = self.errors({
+            "fnx-ue1-dev": stack(**{"kms/main": instance("ue1", account="shared", alias_name="ue1-main")}),
+            "fnx-ue1-qa": stack(**{"kms/main": instance("ue1-qa", stage="qa", account="shared", alias_name="ue1-main")}),
+        })
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("in account shared, us-east-1", errors[0])
+
+    def test_abstract_and_disabled_instances_are_skipped(self):
+        abstract = instance("ue1")
+        abstract["metadata"] = {"type": "abstract"}
+        disabled = instance("ue1")
+        disabled["metadata"] = {"enabled": False}
+        off = instance("ue1", enabled=False)
         self.assertEqual(self.errors({
-            "fnx-ue1-dev": stack(**{"x/main": instance("ue1", component="x", region="us-east-1", description="ue1-x y")}),
-            "fnx-ue1-dev-perf": stack(**{"x/main": instance(
-                "ue1-perf", "perf", component="x", region="us-east-1", description="ue1-x y")}),
+            "fnx-ue1-dev": stack(**{"kms/main": instance("ue1")}),
+            "fnx-ue1-dev-perf": stack(**{"kms/defaults": abstract, "kms/off": disabled, "kms/x": off}),
         }), [])
+
+
+class InstanceTest(unittest.TestCase):
+    def errors(self, stacks):
+        return check_lane_names.check(stacks)
+
+    def test_instances_with_the_same_name_inputs_fail(self):
+        # vpc/main and vpc/services both naming their flow-logs role
+        # <Environment>-vpc-flow-logs-role.
+        errors = self.errors({"fnx-ue1-prod": stack(**{
+            "vpc/main": instance("ue1", component="vpc", stage="prod"),
+            "vpc/services": instance("ue1", component="vpc", stage="prod"),
+        })})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("fnx-ue1-prod: vpc/main, vpc/services (vpc) set the same name inputs (none)", errors[0])
+
+    def test_instances_with_their_own_names_pass(self):
+        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
+            "vpc/main": instance("ue1", component="vpc", stage="prod", name="main"),
+            "vpc/services": instance("ue1", component="vpc", stage="prod", name="services"),
+            "acm/main": instance("ue1", component="acm", stage="prod", dns_domains=["a.example.com"]),
+            "acm/services": instance("ue1", component="acm", stage="prod", dns_domains=["b.example.com"]),
+        })}), [])
+
+
+class GlobalTest(unittest.TestCase):
+    def errors(self, stacks):
+        return check_lane_names.check(stacks)
 
     def test_global_name_shared_across_accounts_fails(self):
-        # S3 bucket names are global: another stage's account does not help.
         errors = self.errors({
             "fnx-ue1-dev-perf": stack(**{"s3/assets": instance("ue1-perf", "perf", component="s3",
                                                                bucket_name="fnx-assets")}),
@@ -96,8 +182,10 @@ class CheckLaneNamesTest(unittest.TestCase):
         errors = self.errors({
             "fnx-ue1-dev": stack(**{"cognito/main": instance("ue1", component="cognito", domain_prefix="fnx-api"),
                                     "x/main": instance("ue1", component="x", logs={"bucket_name": "fnx-logs"})}),
-            "fnx-ue2-dev": stack(**{"cognito/main": instance("ue2", component="cognito", domain_prefix="fnx-api"),
-                                    "x/main": instance("ue2", component="x", logs={"bucket_name": "fnx-logs"})}),
+            "fnx-ue2-dev": stack(**{"cognito/main": instance("ue2", component="cognito", region="us-east-2",
+                                                             domain_prefix="fnx-api"),
+                                    "x/main": instance("ue2", component="x", region="us-east-2",
+                                                       logs={"bucket_name": "fnx-logs"})}),
         })
         self.assertEqual(len(errors), 2, errors)
 
@@ -106,40 +194,6 @@ class CheckLaneNamesTest(unittest.TestCase):
             "fnx-ue1-dev": stack(**{"s3/assets": instance("ue1", component="s3", bucket_name="fnx-ue1-dev-assets")}),
             "fnx-ue1-dev-perf": stack(**{"s3/assets": instance("ue1-perf", "perf", component="s3",
                                                                bucket_name="fnx-ue1-dev-perf-assets")}),
-        }), [])
-
-    def test_instances_with_the_same_name_inputs_fail(self):
-        # vpc/main and vpc/services both naming their flow-logs role
-        # <Environment>-vpc-flow-logs-role.
-        errors = self.errors({"fnx-ue1-prod": stack(**{
-            "vpc/main": instance("ue1", component="vpc", stage="prod", region="us-east-1"),
-            "vpc/services": instance("ue1", component="vpc", stage="prod", region="us-east-1"),
-        })})
-        self.assertEqual(len(errors), 1, errors)
-        self.assertIn("fnx-ue1-prod: vpc/main, vpc/services (vpc) set the same name inputs (none)", errors[0])
-
-    def test_instances_with_their_own_names_pass(self):
-        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
-            "vpc/main": instance("ue1", component="vpc", stage="prod", name="main"),
-            "vpc/services": instance("ue1", component="vpc", stage="prod", name="services"),
-            "acm/main": instance("ue1", component="acm", stage="prod", dns_domains=["a.example.com"]),
-            "acm/services": instance("ue1", component="acm", stage="prod", dns_domains=["b.example.com"]),
-        })}), [])
-
-    def test_disabled_instance_does_not_collide(self):
-        off = instance("ue1", component="vpc", stage="prod", enabled=False)
-        self.assertEqual(self.errors({"fnx-ue1-prod": stack(**{
-            "vpc/main": instance("ue1", component="vpc", stage="prod"), "vpc/old": off,
-        })}), [])
-
-    def test_abstract_and_disabled_instances_are_skipped(self):
-        abstract = instance("ue1")
-        abstract["metadata"] = {"type": "abstract"}
-        disabled = instance("ue1")
-        disabled["metadata"] = {"enabled": False}
-        self.assertEqual(self.errors({
-            "fnx-ue1-dev": stack(**{"kms/main": instance("ue1")}),
-            "fnx-ue1-dev-perf": stack(**{"kms/defaults": abstract, "kms/off": disabled}),
         }), [])
 
 
