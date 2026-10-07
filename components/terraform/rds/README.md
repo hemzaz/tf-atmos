@@ -36,6 +36,14 @@ notifications. `manage_master_user_password` is always on: RDS owns the master s
   `eks-backend-services` builds its DSNs that way (`database_ca_bundle_path`).
 - The read replica uses the primary's security group, parameter group, deletion protection,
   Performance Insights key and enhanced monitoring.
+- `replicate_source_db` (Cloud Posse `terraform-aws-rds`'s input) makes the instance a replica of
+  another: an identifier in the same region, an ARN (`instance_arn` output) across regions, with
+  `kms_key_id` a key in the replica's region. It takes engine version, master user and database
+  from the source, carries `Role=read-replica` (so `backup` skips it), and has no master user
+  secret (`password_secret_arn` is null) and no rotation. Setting it back to `null` promotes the
+  replica: RDS then creates the managed secret and rotation starts. A replica cannot use RDS Proxy.
+  Deleting an unpromoted replica needs `skip_final_snapshot: true` (RDS takes no final snapshot of a
+  replica); deletion protection blocks it either way.
 - The final snapshot is `final_snapshot_identifier`, else `<Environment>-<identifier>-final-snapshot`:
   stable across plans, so destroying, recreating and destroying again needs the old snapshot
   deleted or a new `final_snapshot_identifier`.

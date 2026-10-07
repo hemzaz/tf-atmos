@@ -44,6 +44,74 @@ run "default_has_no_custom_ingress_rules" {
   }
 }
 
+# --- B1 DR: a cross-region replica (Cloud Posse terraform-aws-rds replicate_source_db) ---
+
+run "cross_region_replica_takes_engine_user_and_db_from_its_source" {
+  command = plan
+
+  variables {
+    engine              = "postgres"
+    engine_version      = "14"
+    replicate_source_db = "arn:aws:rds:us-east-1:123456789012:db:ue1-prod-main-db"
+    kms_key_id          = "arn:aws:kms:us-east-2:123456789012:key/mrk-0123456789abcdef0123456789abcdef"
+  }
+
+  # engine_version, username and db_name are computed when unset, so a plan
+  # cannot assert they are null; unset they come from the source.
+  assert {
+    condition     = aws_db_instance.main.replicate_source_db == "arn:aws:rds:us-east-1:123456789012:db:ue1-prod-main-db"
+    error_message = "replicate_source_db must reach the instance."
+  }
+
+
+  assert {
+    condition     = aws_db_instance.main.tags["Role"] == "read-replica"
+    error_message = "A replica must carry Role=read-replica, which backup's tag selection excludes."
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret_rotation.db_password) == 0
+    error_message = "A replica has no master user secret, so no rotation until it is promoted."
+  }
+
+  # The parameter group still derives from engine/engine_version: it must
+  # match the source's family.
+  assert {
+    condition     = aws_db_parameter_group.main.family == "postgres14"
+    error_message = "A replica's parameter group must use the source engine's family."
+  }
+}
+
+run "promoted_replica_is_a_primary_with_a_managed_secret" {
+  command = plan
+
+  assert {
+    condition     = aws_db_instance.main.manage_master_user_password == true && aws_db_instance.main.tags["Role"] == "primary" && length(aws_secretsmanager_secret_rotation.db_password) == 1
+    error_message = "Without replicate_source_db the instance is a primary: managed secret, rotation, Role=primary."
+  }
+}
+
+run "replica_with_a_proxy_is_rejected" {
+  command = plan
+
+  variables {
+    replicate_source_db = "arn:aws:rds:us-east-1:123456789012:db:ue1-prod-main-db"
+    enable_rds_proxy    = true
+  }
+
+  expect_failures = [var.replicate_source_db]
+}
+
+run "replica_source_that_is_not_an_identifier_or_arn_is_rejected" {
+  command = plan
+
+  variables {
+    replicate_source_db = "arn:aws:rds:us-east-1:123456789012:cluster:aurora"
+  }
+
+  expect_failures = [var.replicate_source_db]
+}
+
 # Prod's kms/main is multi-region (B1 DR): its key ids start with mrk-.
 run "multi_region_kms_key_is_accepted" {
   command = plan

@@ -47,6 +47,31 @@ state or outputs.
 - With a rotation Lambda managing the token out of band (the `microservices-platform` template),
   turn off `store_auth_token_in_secrets_manager` and leave `auth_token_version` alone: the
   Lambda's first rotation SETs its own token, and a bump would ROTATE a Terraform one back in.
+- Global Datastore (cross-region): `global_replication_group_id_suffix` creates one with this cache
+  as its primary (`global_replication_group_id` output); another region's instance joins it as a
+  secondary with `global_replication_group_id` (Cloud Posse `aws-elasticache-redis`'s input, which
+  has no resource for the primary side). A secondary inherits engine, version, node type,
+  encryption and parameter group (those inputs are ignored, as in Cloud Posse), and keeps its own
+  subnets, security group, `kms_key_id` (a key in its region) and AUTH token and secret. It is
+  read-only until promoted: `aws elasticache failover-global-replication-group`.
+- Global Datastore members (extension of Cloud Posse's component, which has no primary side):
+  - The global group owns every member's engine version and node type. The primary is a separate
+    resource, `aws_elasticache_replication_group.global_primary`, that ignores `engine_version`,
+    `node_type` and `parameter_group_name` (the AWS provider's prescribed `ignore_changes`; a
+    lifecycle block cannot be conditional). The same `engine_version`/`node_type` inputs feed
+    `aws_elasticache_global_replication_group.main`, so a version or size change on the primary's
+    stack upgrades or resizes all members through the global group. Switching a cache into or out
+    of the primary role replaces it.
+  - A major version upgrade also needs the global group's parameter group, which AWS accepts only
+    with that upgrade: `aws elasticache modify-global-replication-group --apply-immediately
+    --global-replication-group-id <id> --engine-version <v> --cache-parameter-group-name <group>`,
+    then set `engine_version`/`family` to match.
+  - `auto_minor_version_upgrade` is always false on a member: AWS turns it off on association and
+    it cannot be turned back on.
+  - The primary role is operated by CLI (`aws elasticache failover-global-replication-group`), not
+    by Terraform: the global group ignores `primary_replication_group_id`, which forces a
+    replacement and which the provider reads back from the current primary, so a plan after a
+    failover leaves the Global Datastore alone.
 - `rotation_policy` is a ready-made IAM policy for such a Lambda's `custom_policy`.
 - `log_delivery_configuration` (slow-log, engine-log) differs from Cloud Posse's: each entry names
   only its log type and format, and the component creates the log group

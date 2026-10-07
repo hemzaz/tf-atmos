@@ -368,6 +368,27 @@ variable "create_read_replica" {
   default     = false
 }
 
+# Cloud Posse terraform-aws-rds's replicate_source_db (the aws-rds component's
+# input of the same name): this instance becomes a replica of that source. The
+# DR stack's rds/main uses the source's ARN, a cross-region read replica.
+variable "replicate_source_db" {
+  type        = string
+  description = "Make this instance a read replica of another: the source's identifier (same region) or ARN (cross-region; then kms_key_id must be a key in this region). The replica takes engine, engine version, master user and database name from the source, has no master user secret, and skips secrets rotation until promoted. Set it to null to promote the replica to a standalone instance (Terraform calls PromoteReadReplica)"
+  default     = null
+
+  validation {
+    condition     = var.replicate_source_db == null || can(regex("^(arn:aws[a-z-]*:rds:[a-z0-9-]+:[0-9]{12}:db:)?[a-z][a-z0-9-]{0,62}$", var.replicate_source_db))
+    error_message = "replicate_source_db must be an RDS instance identifier or an arn:aws:rds:<region>:<account>:db:<identifier> ARN."
+  }
+
+  # The proxy authenticates with the master user secret, which a replica does
+  # not have; a replica of a replica is not modelled.
+  validation {
+    condition     = var.replicate_source_db == null || (!var.enable_rds_proxy && !var.create_read_replica)
+    error_message = "A replica (replicate_source_db) cannot enable_rds_proxy or create_read_replica."
+  }
+}
+
 variable "read_replica_instance_class" {
   type        = string
   description = "Instance class for the read replica (defaults to main instance class)"
