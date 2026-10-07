@@ -87,6 +87,36 @@ variable "zone_id" {
   default     = null
 }
 
+# Multi-region failover of the custom domain (B1 DR): the prod stack's
+# instance is PRIMARY, the DR stack's SECONDARY, same domain_name and zone.
+variable "route53_failover_type" {
+  type        = string
+  description = "Make the custom domain's alias record one half of a Route 53 failover pair: PRIMARY or SECONDARY. This component then also creates the record's health check, HTTPS to this API's stage root on its execute-api endpoint. Null keeps a simple record"
+  default     = null
+
+  validation {
+    condition     = var.route53_failover_type == null || contains(["PRIMARY", "SECONDARY"], coalesce(var.route53_failover_type, "-"))
+    error_message = "route53_failover_type must be PRIMARY, SECONDARY or null."
+  }
+
+  # The health check probes a REST stage's root on the execute-api endpoint.
+  validation {
+    condition     = var.route53_failover_type == null || (var.api_type == "REST" && var.zone_id != null && var.domain_name != null && var.certificate_arn != null)
+    error_message = "route53_failover_type needs a REST API with a custom domain (domain_name, certificate_arn) and its zone_id."
+  }
+
+  validation {
+    condition     = var.route53_failover_type == null || try(length(var.route53_set_identifier) > 0, false)
+    error_message = "route53_failover_type needs route53_set_identifier, unique within the record's name (e.g. the region code)."
+  }
+}
+
+variable "route53_set_identifier" {
+  type        = string
+  description = "The failover record's set_identifier, unique per record name (e.g. the stack's region code)"
+  default     = null
+}
+
 variable "enable_logging" {
   type        = bool
   description = "Whether to enable CloudWatch logging for the API Gateway"

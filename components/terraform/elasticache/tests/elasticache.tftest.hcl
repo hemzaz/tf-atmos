@@ -29,6 +29,61 @@ run "default_is_one_primary_with_replicas" {
   }
 }
 
+# --- B1 DR: Global Datastore ---
+
+run "primary_creates_the_global_datastore" {
+  command = plan
+
+  variables {
+    global_replication_group_id_suffix = "prod-cache"
+  }
+
+  assert {
+    condition     = length(aws_elasticache_global_replication_group.main) == 1 && aws_elasticache_global_replication_group.main[0].global_replication_group_id_suffix == "prod-cache"
+    error_message = "global_replication_group_id_suffix must create the Global Datastore with this cache as its primary."
+  }
+
+  assert {
+    condition     = aws_elasticache_replication_group.main[0].transit_encryption_enabled == true && aws_elasticache_replication_group.main[0].engine == "redis"
+    error_message = "The primary keeps its own engine and encryption settings."
+  }
+}
+
+run "secondary_joins_the_global_datastore_and_inherits_its_settings" {
+  command = plan
+
+  variables {
+    global_replication_group_id = "ldgnf-prod-cache"
+    parameters                  = [{ name = "maxmemory-policy", value = "allkeys-lru" }]
+    family                      = "redis7"
+  }
+
+  assert {
+    condition = (
+      aws_elasticache_replication_group.main[0].global_replication_group_id == "ldgnf-prod-cache"
+      && length(aws_elasticache_global_replication_group.main) == 0
+      && length(aws_elasticache_parameter_group.main) == 0
+    )
+    error_message = "A secondary joins the named global group, creates none, and creates no parameter group (the global group's applies)."
+  }
+
+  assert {
+    condition     = output.global_replication_group_id == "ldgnf-prod-cache"
+    error_message = "global_replication_group_id must report the group a secondary joined."
+  }
+}
+
+run "primary_and_secondary_at_once_is_rejected" {
+  command = plan
+
+  variables {
+    global_replication_group_id_suffix = "prod-cache"
+    global_replication_group_id        = "ldgnf-prod-cache"
+  }
+
+  expect_failures = [var.global_replication_group_id]
+}
+
 run "cluster_mode_creates_a_cluster_enabled_group" {
   command = plan
 

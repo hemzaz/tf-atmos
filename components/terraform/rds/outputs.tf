@@ -39,6 +39,11 @@ output "parameter_group_id" {
 }
 
 output "password_secret_arn" {
-  value       = aws_db_instance.main.master_user_secret[0].secret_arn
-  description = "ARN of the RDS-managed Secrets Manager secret holding the master credentials"
+  value       = one(aws_db_instance.main.master_user_secret[*].secret_arn)
+  description = "ARN of the RDS-managed Secrets Manager secret holding the master credentials (null on a replica until it is promoted)"
+}
+
+output "instance_arn" {
+  value       = aws_db_instance.main.arn
+  description = "ARN of the RDS instance: what a cross-region replica's replicate_source_db names (the DR stack's rds/main)"
 }

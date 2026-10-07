@@ -10,7 +10,12 @@ locals {
 
   # A parameter group is created when there is something to put in it, or in
   # cluster mode (which needs cluster-enabled=yes), unless one is named.
-  create_parameter_group = local.enabled && var.parameter_group_name == null && (length(var.parameters) > 0 || var.cluster_mode_enabled)
+  # A Global Datastore secondary inherits engine, version, node type,
+  # encryption and parameter group from the global group (Cloud Posse
+  # terraform-aws-elasticache-redis nulls the same arguments).
+  is_global_secondary = var.global_replication_group_id != null
+
+  create_parameter_group = local.enabled && !local.is_global_secondary && var.parameter_group_name == null && (length(var.parameters) > 0 || var.cluster_mode_enabled)
 
   # cluster-enabled is rejected in var.parameters by validation, so this only
   # ever appends it; it never overrides a user-supplied value silently.
@@ -153,11 +158,13 @@ resource "aws_elasticache_replication_group" "main" {
   replication_group_id = local.name
   description          = "${var.cluster_id} cache"
 
-  engine               = var.engine
-  engine_version       = var.engine_version
-  node_type            = var.node_type
+  global_replication_group_id = var.global_replication_group_id
+
+  engine               = local.is_global_secondary ? null : var.engine
+  engine_version       = local.is_global_secondary ? null : var.engine_version
+  node_type            = local.is_global_secondary ? null : var.node_type
   port                 = var.port
-  parameter_group_name = local.create_parameter_group ? aws_elasticache_parameter_group.main[0].name : var.parameter_group_name
+  parameter_group_name = local.is_global_secondary ? null : (local.create_parameter_group ? aws_elasticache_parameter_group.main[0].name : var.parameter_group_name)
 
   # Cluster mode shards the keyspace; otherwise one primary plus replicas.
   # WARNING: toggling cluster_mode_enabled on an existing replication group is
@@ -176,8 +183,10 @@ resource "aws_elasticache_replication_group" "main" {
   # provider sends it when the cache is created (including a replacement)
   # and when auth_token_version changes; an apply that leaves the version
   # alone never re-sends it.
-  at_rest_encryption_enabled = var.at_rest_encryption_enabled
-  transit_encryption_enabled = var.transit_encryption_enabled
+  # A secondary inherits both from the global group, whose primary forces them
+  # on; it keeps its own AUTH token (AWS lets a secondary set one).
+  at_rest_encryption_enabled = local.is_global_secondary ? null : var.at_rest_encryption_enabled
+  transit_encryption_enabled = local.is_global_secondary ? null : var.transit_encryption_enabled
   auth_token_wo              = local.auth_token
   auth_token_wo_version      = var.auth_token_version
   auth_token_update_strategy = "ROTATE"
@@ -219,6 +228,16 @@ resource "aws_elasticache_replication_group" "main" {
       error_message = "The generated AUTH token breaks ElastiCache's rules (16-128 characters, punctuation only from !&#$^<>-); check local.auth_token_generator."
     }
   }
+}
+
+# Global Datastore with this cache as its primary (global_replication_group_id_suffix):
+# the DR region's instance joins it through global_replication_group_id.
+resource "aws_elasticache_global_replication_group" "main" {
+  count = local.enabled && var.global_replication_group_id_suffix != null ? 1 : 0
+
+  global_replication_group_id_suffix   = var.global_replication_group_id_suffix
+  global_replication_group_description = "${var.cluster_id} cache, replicated across regions"
+  primary_replication_group_id         = aws_elasticache_replication_group.main[0].id
 }
 
 # Log delivery (slow-log, engine-log). Cloud Posse's aws-elasticache-redis

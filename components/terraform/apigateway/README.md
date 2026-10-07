@@ -23,6 +23,15 @@ custom domain is configured on this component, as in Cloud Posse `aws-api-gatewa
   and the alias record unless `zone_id` is set. `check-domains.py` requires the domain to be
   inside the zone and covered by the `acm` certificate `certificate_arn` reads; a literal
   certificate ARN is only a warning.
+- `route53_failover_type` (`PRIMARY`/`SECONDARY`) with `route53_set_identifier` makes the alias
+  record one half of a Route 53 failover pair: each region's instance owns its half for the same
+  `domain_name` in the same zone, and gets a health check, HTTPS to its own stage root on the
+  execute-api endpoint (`<api id>.execute-api.<region>.amazonaws.com/<stage>/`), so the name moves
+  to the other region when this one's API Gateway stops answering. Cloud Posse's
+  `aws-api-gateway-rest-api` has no failover; this follows AWS's regional-API failover pattern.
+- A `MOCK` integration answers 200: without `request_templates` it gets one selecting
+  `statusCode: 200`, plus a 200 method and integration response (API Gateway answers 500 without
+  them). `/`, the liveness method the health check probes, is such a MOCK.
 - The REST custom domain is REGIONAL with `TLS_1_2`; a precondition rejects `EDGE`/`PRIVATE`
   endpoints with a domain.
 - `api_resources` hang off the API root unless `parent_id` names another resource; methods and

@@ -23,6 +23,40 @@ variable "enabled" {
   default     = true
 }
 
+# Global Datastore (cross-region replication), the DR pair: the primary
+# region's instance creates the global replication group
+# (global_replication_group_id_suffix) and the DR region's instance joins it
+# as a secondary (global_replication_group_id, Cloud Posse
+# aws-elasticache-redis's input of the same name).
+variable "global_replication_group_id_suffix" {
+  type        = string
+  description = "Create a Global Datastore with this cache as its primary; AWS prefixes the suffix to form the global replication group ID (the global_replication_group_id output). Cloud Posse's component has no resource for this; the secondary side is its global_replication_group_id"
+  default     = null
+
+  validation {
+    condition     = var.global_replication_group_id_suffix == null || can(regex("^[a-z][a-z0-9-]{0,38}[a-z0-9]$", var.global_replication_group_id_suffix))
+    error_message = "global_replication_group_id_suffix must be lowercase alphanumeric characters or hyphens, starting with a letter."
+  }
+}
+
+variable "global_replication_group_id" {
+  type        = string
+  description = "Join this Global Datastore as a secondary (Cloud Posse aws-elasticache-redis). The secondary inherits engine, engine version, node type, encryption settings and parameter group from the global group, so those inputs are ignored; it keeps its own subnet group, security group, KMS key (kms_key_id, a key in this region) and AUTH token. Promote it with aws elasticache failover-global-replication-group"
+  default     = null
+
+  validation {
+    condition     = var.global_replication_group_id == null || var.global_replication_group_id_suffix == null
+    error_message = "A cache is either a Global Datastore's primary (global_replication_group_id_suffix) or a secondary (global_replication_group_id), not both."
+  }
+
+  # A secondary cannot set num_node_groups (AWS); cluster mode is the global
+  # group's own setting.
+  validation {
+    condition     = var.global_replication_group_id == null || !var.cluster_mode_enabled
+    error_message = "A Global Datastore secondary (global_replication_group_id) takes its cluster mode from the global group: leave cluster_mode_enabled false."
+  }
+}
+
 variable "cluster_id" {
   type        = string
   description = "Name of the cache, used as the replication group ID suffix"

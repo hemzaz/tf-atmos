@@ -47,6 +47,13 @@ state or outputs.
 - With a rotation Lambda managing the token out of band (the `microservices-platform` template),
   turn off `store_auth_token_in_secrets_manager` and leave `auth_token_version` alone: the
   Lambda's first rotation SETs its own token, and a bump would ROTATE a Terraform one back in.
+- Global Datastore (cross-region): `global_replication_group_id_suffix` creates one with this cache
+  as its primary (`global_replication_group_id` output); another region's instance joins it as a
+  secondary with `global_replication_group_id` (Cloud Posse `aws-elasticache-redis`'s input, which
+  has no resource for the primary side). A secondary inherits engine, version, node type,
+  encryption and parameter group (those inputs are ignored, as in Cloud Posse), and keeps its own
+  subnets, security group, `kms_key_id` (a key in its region) and AUTH token and secret. It is
+  read-only until promoted: `aws elasticache failover-global-replication-group`.
 - `rotation_policy` is a ready-made IAM policy for such a Lambda's `custom_policy`.
 - `log_delivery_configuration` (slow-log, engine-log) differs from Cloud Posse's: each entry names
   only its log type and format, and the component creates the log group

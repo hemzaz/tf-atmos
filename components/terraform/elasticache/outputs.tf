@@ -3,6 +3,11 @@ output "replication_group_id" {
   description = "ID of the replication group"
 }
 
+output "global_replication_group_id" {
+  value       = try(aws_elasticache_global_replication_group.main[0].global_replication_group_id, var.global_replication_group_id)
+  description = "ID of the Global Datastore this cache belongs to (created here with global_replication_group_id_suffix, or joined with global_replication_group_id); null when it belongs to none. The DR region's secondary reads it"
+}
+
 output "replication_group_arn" {
   value       = local.enabled ? aws_elasticache_replication_group.main[0].arn : null
   description = "ARN of the replication group"

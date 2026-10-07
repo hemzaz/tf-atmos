@@ -7,6 +7,12 @@ data "aws_partition" "current" {}
 locals {
   name = "${var.tags["Environment"]}-${var.identifier}"
 
+  # A replica of another instance (replicate_source_db, the DR stack's rds/main):
+  # it takes its engine, master user and database from the source and has no
+  # master user secret until promoted, so rotation waits for promotion.
+  is_replica       = var.replicate_source_db != null
+  rotation_enabled = var.enable_secrets_rotation && !local.is_replica
+
   # Confused-deputy scope for the enhanced-monitoring trust and the rotation
   # topic policy.
   account_id = data.aws_caller_identity.current.account_id
@@ -417,8 +423,9 @@ resource "aws_db_instance" "main" {
   #checkov:skip=CKV_AWS_157:multi_az is a per-stage input (false by default, as in Cloud Posse's terraform-aws-rds); the multi_az validation and check-prod-protection require it in prod
   #checkov:skip=CKV_AWS_129:Log exports are an input (enabled_cloudwatch_logs_exports, [] by default as in Cloud Posse's terraform-aws-rds); prod and the web-application template set them
   identifier            = "${var.tags["Environment"]}-${var.identifier}"
-  engine                = var.engine
-  engine_version        = var.engine_version
+  replicate_source_db   = var.replicate_source_db
+  engine                = local.is_replica ? null : var.engine
+  engine_version        = local.is_replica ? null : var.engine_version
   instance_class        = var.instance_class
   allocated_storage     = var.allocated_storage
   max_allocated_storage = var.max_allocated_storage
@@ -426,12 +433,14 @@ resource "aws_db_instance" "main" {
   storage_type          = var.storage_type
   storage_encrypted     = var.storage_encrypted
   kms_key_id            = var.kms_key_id
-  username              = var.username
-  # RDS generates the password and stores it in a Secrets Manager secret it manages
-  manage_master_user_password           = true
-  master_user_secret_kms_key_id         = var.master_user_secret_kms_key_id
+  username              = local.is_replica ? null : var.username
+  # RDS generates the password and stores it in a Secrets Manager secret it
+  # manages. A replica has none (the source's credentials replicate); promoting
+  # it (replicate_source_db = null) turns this on and RDS creates the secret.
+  manage_master_user_password           = local.is_replica ? null : true
+  master_user_secret_kms_key_id         = local.is_replica ? null : var.master_user_secret_kms_key_id
   port                                  = local.port
-  db_name                               = var.db_name
+  db_name                               = local.is_replica ? null : var.db_name
   parameter_group_name                  = aws_db_parameter_group.main.name
   db_subnet_group_name                  = aws_db_subnet_group.main.name
   vpc_security_group_ids                = [aws_security_group.rds.id]
@@ -471,7 +480,9 @@ resource "aws_db_instance" "main" {
     var.tags,
     {
       Name = "${var.tags["Environment"]}-${var.identifier}"
-      Role = "primary"
+      # backup's tag selection excludes Role=read-replica: AWS Backup does not
+      # back up a replica; a promoted one is selected again.
+      Role = local.is_replica ? "read-replica" : "primary"
     }
   )
 }

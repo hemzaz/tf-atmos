@@ -151,6 +151,7 @@ resource "aws_api_gateway_deployment" "rest_deployment" {
   depends_on = [
     aws_api_gateway_method.method,
     aws_api_gateway_integration.integration,
+    aws_api_gateway_integration_response.mock,
     aws_api_gateway_gateway_response.this,
   ]
 }
@@ -531,7 +532,9 @@ resource "aws_api_gateway_integration" "integration" {
   timeout_milliseconds = each.value.timeout_milliseconds
 
   request_parameters = each.value.request_parameters
-  request_templates  = each.value.request_templates
+  # A MOCK answers with the statusCode its request template selects; without
+  # one it has no match and returns 500, so a liveness MOCK ("/") gets 200.
+  request_templates = length(each.value.request_templates) > 0 || each.value.type != "MOCK" ? each.value.request_templates : { "application/json" = jsonencode({ statusCode = 200 }) }
 
   # A cached method on an authorized route must key its cache on the caller's
   # identity, or one user's response is served to another (variables.tf
@@ -549,6 +552,36 @@ resource "aws_api_gateway_integration" "integration" {
   }
 
   depends_on = [aws_api_gateway_method.method]
+}
+
+# A MOCK integration's 200: the method response and the integration response
+# that maps the template's statusCode to it. Without them API Gateway has no
+# output mapping and every call to a MOCK ("/", the liveness endpoint that the
+# Route 53 failover health check probes) returns 500.
+locals {
+  mock_integrations = { for k, i in local.api_integrations : k => i if i.type == "MOCK" }
+}
+
+resource "aws_api_gateway_method_response" "mock" {
+  for_each = local.create_rest_api ? local.mock_integrations : {}
+
+  rest_api_id = aws_api_gateway_rest_api.rest_api[0].id
+  resource_id = local.api_resource_ids_by_path[each.value.resource_path]
+  http_method = each.value.http_method
+  status_code = "200"
+
+  depends_on = [aws_api_gateway_method.method]
+}
+
+resource "aws_api_gateway_integration_response" "mock" {
+  for_each = local.create_rest_api ? local.mock_integrations : {}
+
+  rest_api_id = aws_api_gateway_rest_api.rest_api[0].id
+  resource_id = local.api_resource_ids_by_path[each.value.resource_path]
+  http_method = each.value.http_method
+  status_code = aws_api_gateway_method_response.mock[each.key].status_code
+
+  depends_on = [aws_api_gateway_integration.integration]
 }
 
 # Resource policy letting this API invoke the Lambda behind each AWS_PROXY
@@ -597,6 +630,37 @@ resource "aws_route53_record" "api_domain" {
     zone_id                = local.create_rest_api ? aws_api_gateway_domain_name.rest_domain[0].regional_zone_id : aws_apigatewayv2_domain_name.http_domain[0].domain_name_configuration[0].hosted_zone_id
     evaluate_target_health = false
   }
+
+  # Multi-region failover (route53_failover_type): each region's instance owns
+  # its half of the pair, PRIMARY or SECONDARY under its own set_identifier,
+  # answered while its health check passes (AWS's regional API failover pattern).
+  set_identifier  = var.route53_failover_type != null ? var.route53_set_identifier : null
+  health_check_id = one(aws_route53_health_check.api[*].id)
+
+  dynamic "failover_routing_policy" {
+    for_each = var.route53_failover_type != null ? [var.route53_failover_type] : []
+    content {
+      type = failover_routing_policy.value
+    }
+  }
+}
+
+# The failover record's health check: HTTPS to this region's own stage on the
+# execute-api endpoint, not to the custom domain (whose name both regions
+# share). It requests "/" of the stage, the MOCK liveness method, so it fails
+# when this region's API Gateway does.
+resource "aws_route53_health_check" "api" {
+  count = local.create_rest_api && local.domain_enabled && var.zone_id != null && var.route53_failover_type != null ? 1 : 0
+
+  type              = "HTTPS"
+  fqdn              = "${aws_api_gateway_rest_api.rest_api[0].id}.execute-api.${var.region}.amazonaws.com"
+  port              = 443
+  resource_path     = "/${var.stage_name}/"
+  request_interval  = 30
+  failure_threshold = 3
+  measure_latency   = true
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-${lower(var.route53_failover_type)}" })
 }
 
 # WAF for API Gateway protection
