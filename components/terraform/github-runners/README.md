@@ -107,11 +107,18 @@ is useless, and no reusable registration credential exists anywhere.
   (`alarm_sns_topic_arns`). EventBridge's invoke is not retried (`maximum_retry_attempts` 0): a
   retry would mint a second configuration. A runner whose bootstrap fails before it knows its
   instance id can only power off, which the group replaces.
-- **The lease event is best effort.** EventBridge may drop or delay the deletion's event, or the
-  delete itself may fail. The runner therefore powers off 600 s after deleting its lease
-  (`instance_initiated_shutdown_behavior` terminate): the group then replaces it with a runner
-  that, finding no job, idles out after `idle_timeout_seconds` and leaves through its lease. A lost
-  event costs one idle runner, never a launch loop.
+- **The lease event is best effort.** EventBridge may drop or delay the deletion's event, the
+  delete itself may fail, or Auto Scaling may refuse the terminate. Three bounds, cheapest first:
+  - the function retries Throttling, ResourceContention and ScalingActivityInProgress after 5, 10
+    and 20 s (the InService check keeps it idempotent);
+  - every 15 minutes (`<name>-sweep`) the function ends, lowering capacity, each InService runner
+    of this group launched over 10 minutes ago that has no lease;
+  - the runner powers off 600 s after deleting its lease (`instance_initiated_shutdown_behavior`
+    terminate): the group replaces it with a runner that, finding no job, idles out after
+    `idle_timeout_seconds` and leaves through its lease.
+
+  The lease is written first at launch, before anything that can fail, so even a launch that
+  fails and continues boots with one: no instance can only power off into a replacement loop.
 - **A pinned runner release.** `runner_version` with `runner_sha256` (the release notes'
   linux-x64 SHA) replaces Cloud Posse's latest release. Bump both before GitHub stops accepting
   the release.
@@ -130,7 +137,8 @@ is useless, and no reusable registration credential exists anywhere.
     whose head repository (`.pull_request.head.repo.full_name` in the event payload) is that
     repository. `pull_request_target`, `workflow_run`, `issue_comment` and any other event are
     refused;
-  - with `allowed_refs` (production: `[refs/heads/master]`), `GITHUB_REF` is one of them.
+  - with `allowed_refs` (every pool in this repository: `[refs/heads/master]`, from the catalog),
+    `GITHUB_REF` is one of them.
 
   `GITHUB_*` and the payload come from GitHub; the hook and its policy are root-owned.
   `test_runner_scripts.py` runs the hook for fork, `pull_request_target` and same-repository
@@ -142,5 +150,6 @@ is useless, and no reusable registration credential exists anywhere.
   replacement that takes the next queued job. Queueing jobs for a label (say production's) cannot
   starve the master job the runner was started for. There is no loop: each replacement consumes
   one refused job, and an idle replacement leaves through its lease, lowering capacity. A job the
-  hook admitted can write the marker too, which only buys one extra idle runner.
+  hook admitted can write the marker too (it runs as the same `runner` user): that costs one idle
+  runner per such job, which the job queue bounds, and grants nothing.
 - The `jit` function's flow is tested with `node --test functions/jit/`.

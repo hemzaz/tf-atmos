@@ -215,6 +215,23 @@ run "a_deleted_lease_ends_its_runner" {
   }
 }
 
+run "a_sweep_bounds_lost_lease_events" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_rule.sweep[0].schedule_expression == "rate(15 minutes)"
+      && aws_cloudwatch_event_target.sweep[0].rule == "test-github-runners-sweep"
+      && aws_lambda_permission.sweep[0].statement_id == "AllowSweepSchedule"
+      && anytrue([
+        for st in local.jit_policy.Statement :
+        st.Action == "ssm:GetParameter" && st.Resource == "arn:aws:ssm:us-east-1:123456789012:parameter/github/runners/github-runners/jit/lease/*"
+      ])
+    )
+    error_message = "Every 15 minutes the jit function ends InService runners without a lease; it may read leases only."
+  }
+}
+
 run "a_refused_job_leaves_without_lowering_capacity" {
   command = plan
 

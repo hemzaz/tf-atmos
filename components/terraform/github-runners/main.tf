@@ -116,9 +116,22 @@ locals {
         Action   = ["autoscaling:CompleteLifecycleAction", "autoscaling:TerminateInstanceInAutoScalingGroup"]
         Resource = local.asg_arn_pattern
       },
-      # Whether a lease's instance is an InService runner of this group
-      # (no resource-level permissions).
-      { Sid = "DescribeRunners", Effect = "Allow", Action = "autoscaling:DescribeAutoScalingInstances", Resource = "*" },
+      # Whether a lease's instance is an InService runner of this group, and
+      # (the sweep) which runners are InService since when (no resource-level
+      # permissions for these).
+      {
+        Sid      = "DescribeRunners"
+        Effect   = "Allow"
+        Action   = ["autoscaling:DescribeAutoScalingInstances", "autoscaling:DescribeAutoScalingGroups", "ec2:DescribeInstances"]
+        Resource = "*"
+      },
+      # The sweep: whether a runner still has its lease (String, no KMS).
+      {
+        Sid      = "ReadLeases"
+        Effect   = "Allow"
+        Action   = "ssm:GetParameter"
+        Resource = local.enabled ? "arn:${local.partition}:ssm:${var.region}:${local.account_id}:parameter${local.jit_parameter_prefix}/lease/*" : null
+      },
       {
         Sid      = "Logs"
         Effect   = "Allow"
@@ -290,8 +303,9 @@ resource "aws_lambda_function" "jit" {
   filename         = data.archive_file.jit[0].output_path
   source_code_hash = data.archive_file.jit[0].output_base64sha256
   memory_size      = 128
-  timeout          = 60
-  kms_key_arn      = var.kms_key_arn
+  # A sweep may end up to max_size runners, each retried for up to 35 s.
+  timeout     = 180
+  kms_key_arn = var.kms_key_arn
 
   # No secret here: the App key stays in SSM.
   environment {
@@ -370,6 +384,35 @@ resource "aws_cloudwatch_event_rule" "lease" {
       name      = [{ prefix = "${local.jit_parameter_prefix}/lease/" }]
     }
   })
+}
+
+# The bound on a lease event lost anyway (EventBridge's delivery, or a
+# terminate that failed past its retries): every 15 minutes the jit function
+# ends, lowering capacity, each InService runner of this group launched over
+# 10 minutes ago that has no lease.
+resource "aws_cloudwatch_event_rule" "sweep" {
+  count = local.enabled ? 1 : 0
+
+  name                = "${local.name}-sweep"
+  description         = "${local.name} runners whose lease is gone but which are still InService"
+  schedule_expression = "rate(15 minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "sweep" {
+  count = local.enabled ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.sweep[0].name
+  arn  = aws_lambda_function.jit[0].arn
+}
+
+resource "aws_lambda_permission" "sweep" {
+  count = local.enabled ? 1 : 0
+
+  statement_id  = "AllowSweepSchedule"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.jit[0].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.sweep[0].arn
 }
 
 resource "aws_cloudwatch_event_target" "lease" {
